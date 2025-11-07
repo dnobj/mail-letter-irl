@@ -1,0 +1,138 @@
+import { JsonSchema } from "./contracts/types.js";
+
+export const addressSchema: JsonSchema = {
+  type: "object",
+  required: ["name", "addressLine1", "city", "state", "postalCode", "country"],
+  properties: {
+    name: { type: "string" },
+    addressLine1: { type: "string" },
+    addressLine2: { type: "string" },
+    city: { type: "string" },
+    state: { type: "string" },
+    postalCode: { type: "string" },
+    country: { type: "string" }
+  }
+};
+
+export const quoteAndPreviewInputSchema: JsonSchema = {
+  type: "object",
+  required: ["sender", "recipient", "bodyText", "signOff"],
+  properties: {
+    sender: addressSchema,
+    recipient: addressSchema,
+    bodyText: { type: "string" },
+    signOff: { type: "string", description: "Closing/signature block" }
+  }
+};
+
+export const quoteAndPreviewOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["previewHtml", "requiredCredits", "canSendNow"],
+  properties: {
+    previewHtml: { type: "string" },
+    requiredCredits: { type: "number" },
+    canSendNow: { type: "boolean" },
+    reasonCannotSend: { type: "string" },
+    deliveryClass: { type: "string" },
+    estimatedDeliveryDays: { type: "integer" }
+  }
+};
+
+export const sendLetterInputSchema: JsonSchema = {
+  type: "object",
+  required: ["sender", "recipient", "bodyText", "signOff", "requiredCredits", "confirm"],
+  properties: {
+    sender: addressSchema,
+    recipient: addressSchema,
+    bodyText: { type: "string" },
+    signOff: { type: "string" },
+    requiredCredits: { type: "number" },
+    confirm: { type: "boolean", description: "Must be true or request fails" }
+  }
+};
+
+export const sendLetterOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary", "creditsRemaining"],
+  properties: {
+    orderId: { type: "string" },
+    currentStatus: { type: "string", enum: ["queued_for_print", "printing", "mailed"] },
+    statusTimeline: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["timestampISO", "statusText"],
+        properties: {
+          timestampISO: { type: "string" },
+          statusText: { type: "string" }
+        }
+      }
+    },
+    recipientSummary: {
+      type: "object",
+      required: ["name", "city", "state"],
+      properties: {
+        name: { type: "string" },
+        city: { type: "string" },
+        state: { type: "string" }
+      }
+    },
+    creditsRemaining: { type: "number" },
+    previewFirstPageHtml: { type: "string" }
+  }
+};
+
+export const getOrderStatusInputSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    orderId: { type: "string" }
+  }
+};
+
+export const getOrderStatusOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary", "previewThumbnailHtml"],
+  properties: {
+    orderId: { type: "string" },
+    currentStatus: { type: "string" },
+    statusTimeline: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["timestampISO", "statusText"],
+        properties: {
+          timestampISO: { type: "string" },
+          statusText: { type: "string" }
+        }
+      }
+    },
+    recipientSummary: {
+      type: "object",
+      required: ["name", "city", "state"],
+      properties: {
+        name: { type: "string" },
+        city: { type: "string" },
+        state: { type: "string" }
+      }
+    },
+    previewThumbnailHtml: { type: "string" },
+    canSendFollowUp: { type: "boolean" },
+    followUpSuggestedPrompt: { type: "string" }
+  }
+};
+
+export const getAccountBalanceInputSchema: JsonSchema = {
+  type: "object",
+  properties: {}
+};
+
+export const getAccountBalanceOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["creditsRemaining", "canSendStandardLetter"],
+  properties: {
+    creditsRemaining: { type: "number" },
+    canSendStandardLetter: { type: "boolean" },
+    standardLetterCostCredits: { type: "number" },
+    message: { type: "string" }
+  }
+};

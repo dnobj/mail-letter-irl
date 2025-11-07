@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>LetterPreviewCard</title>
+    <style>
+      :root {
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #1f2933;
+        background: #f8fafc;
+      }
+
+      body {
+        margin: 0;
+        padding: 1.5rem;
+      }
+
+      .card {
+        max-width: 32rem;
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+        overflow: hidden;
+      }
+
+      .preview-pane {
+        max-height: 18rem;
+        overflow: auto;
+        padding: 1.5rem;
+        border-bottom: 1px solid #e2e8f0;
+      }
+
+      .preview-pane iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        background: #fff;
+      }
+
+      .meta {
+        padding: 1.5rem;
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      .cost {
+        font-weight: 600;
+        font-size: 1rem;
+      }
+
+      .actions button {
+        width: 100%;
+        padding: 0.85rem 1rem;
+        border: none;
+        border-radius: 10px;
+        font-weight: 600;
+        cursor: pointer;
+        background: #2563eb;
+        color: #ffffff;
+        transition: background 0.2s ease;
+      }
+
+      .actions button:disabled {
+        background: #cbd5f5;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="preview-pane">
+        <iframe id="preview-frame" title="Letter preview"></iframe>
+      </div>
+      <div class="meta">
+        <div class="cost" id="cost-text"></div>
+        <div id="credit-note"></div>
+        <div class="actions">
+          <button id="send-button">Send this letter</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      const state = window.renderContext?.data ?? {};
+      const {
+        previewHtml,
+        requiredCredits,
+        canSendNow,
+        reasonCannotSend,
+        originalRequest,
+        currentBalance
+      } = state;
+
+      const frame = document.getElementById("preview-frame");
+      const costText = document.getElementById("cost-text");
+      const creditNote = document.getElementById("credit-note");
+      const sendButton = document.getElementById("send-button");
+
+      if (frame?.contentWindow && previewHtml) {
+        frame.contentWindow.document.open();
+        frame.contentWindow.document.write(previewHtml);
+        frame.contentWindow.document.close();
+      }
+
+      costText.textContent = `Cost: ${requiredCredits} Letter IRL credit${requiredCredits === 1 ? "" : "s"}`;
+
+      if (typeof currentBalance === "number") {
+        creditNote.textContent = `You currently have ${currentBalance} credits.`;
+      } else {
+        creditNote.textContent = "Balance data unavailable in this preview.";
+      }
+
+      if (!canSendNow) {
+        sendButton.disabled = true;
+        sendButton.textContent = reasonCannotSend ?? "Not enough credits";
+      }
+
+      sendButton?.addEventListener("click", async () => {
+        if (!window.openai?.callTool) {
+          console.warn("window.openai bridge unavailable");
+          return;
+        }
+
+        const payload = {
+          ...originalRequest,
+          requiredCredits,
+          confirm: true
+        };
+
+        await window.openai.callTool("send_letter", payload);
+      });
+    </script>
+  </body>
+</html>

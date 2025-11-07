@@ -1,0 +1,92 @@
+{
+  "name": "Letter IRL",
+  "version": "0.1.0",
+  "description": "Draft, preview, and mail physical letters via the Letter IRL MCP server.",
+  "contactEmail": "support@letterirl.example",
+  "legalInfoUrl": "https://letterirl.example/legal",
+  "tools": [
+    {
+      "name": "quote_and_preview_letter",
+      "description": "Generate a printable preview and required Letter IRL credits (requires full sender & recipient addresses).",
+      "inputSchema": {
+        "$ref": "#/definitions/QuotePreviewInput"
+      }
+    },
+    {
+      "name": "send_letter",
+      "description": "Deduct credits and queue a letter for printing/mailing.",
+      "inputSchema": {
+        "$ref": "#/definitions/SendLetterInput"
+      }
+    },
+    {
+      "name": "get_order_status",
+      "description": "Retrieve the latest status timeline for a letter order.",
+      "inputSchema": {
+        "$ref": "#/definitions/GetOrderStatusInput"
+      }
+    },
+    {
+      "name": "get_account_balance",
+      "description": "Return the user's balance of Letter IRL credits.",
+      "inputSchema": {
+        "$ref": "#/definitions/GetAccountBalanceInput"
+      }
+    }
+  ],
+  "ui": {
+    "widgets": [
+      "LetterPreviewCard",
+      "LetterConfirmationCard",
+      "LetterStatusCard",
+      "BalanceCard"
+    ]
+  },
+  "definitions": {
+    "Address": {
+      "type": "object",
+      "required": ["name", "addressLine1", "city", "state", "postalCode", "country"],
+      "properties": {
+        "name": { "type": "string" },
+        "addressLine1": { "type": "string" },
+        "addressLine2": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "postalCode": { "type": "string" },
+        "country": { "type": "string" }
+      }
+    },
+    "QuotePreviewInput": {
+      "type": "object",
+      "required": ["sender", "recipient", "bodyText", "signOff"],
+      "properties": {
+        "sender": { "$ref": "#/definitions/Address" },
+        "recipient": { "$ref": "#/definitions/Address" },
+        "bodyText": { "type": "string" },
+        "signOff": { "type": "string" }
+      }
+    },
+    "SendLetterInput": {
+      "type": "object",
+      "required": ["sender", "recipient", "bodyText", "signOff", "requiredCredits", "confirm"],
+      "properties": {
+        "sender": { "$ref": "#/definitions/Address" },
+        "recipient": { "$ref": "#/definitions/Address" },
+        "bodyText": { "type": "string" },
+        "signOff": { "type": "string" },
+        "requiredCredits": { "type": "number" },
+        "confirm": { "type": "boolean" }
+      }
+    },
+    "GetOrderStatusInput": {
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string" }
+      }
+    },
+    "GetAccountBalanceInput": {
+      "type": "object",
+      "properties": {}
+    }
+  }
+}
