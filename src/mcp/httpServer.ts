@@ -30,6 +30,8 @@ const OPENID_CONFIG_ROUTE =
 const PROTECTED_RESOURCE_ROUTE =
   process.env.LETTER_IRL_PROTECTED_RESOURCE_ROUTE ??
   "/.well-known/oauth-protected-resource";
+const AUTHORIZATION_SERVER_ROUTE =
+  process.env.LETTER_IRL_AUTH_SERVER_ROUTE ?? "/.well-known/oauth-authorization-server";
 const FALLBACK_ORIGIN =
   process.env.LETTER_IRL_DEFAULT_ORIGIN ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const PUBLIC_BASE_URL =
@@ -68,6 +70,10 @@ function getAllowedOrigins(): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function matchesWellKnownRoute(pathname: string, baseRoute: string) {
+  return pathname === baseRoute || pathname === `${baseRoute}${MCP_PATH}`;
 }
 
 async function serveWidget(
@@ -134,7 +140,7 @@ export async function startHttpServer() {
       return;
     }
 
-    if (url.pathname === OPENID_CONFIG_ROUTE) {
+    if (matchesWellKnownRoute(url.pathname, OPENID_CONFIG_ROUTE)) {
       const payload = getOpenIdConfiguration(PUBLIC_BASE_URL);
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
@@ -142,8 +148,16 @@ export async function startHttpServer() {
       return;
     }
 
-    if (url.pathname === PROTECTED_RESOURCE_ROUTE) {
+    if (matchesWellKnownRoute(url.pathname, PROTECTED_RESOURCE_ROUTE)) {
       const payload = getProtectedResourceMetadata(PUBLIC_BASE_URL);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(payload));
+      return;
+    }
+
+    if (matchesWellKnownRoute(url.pathname, AUTHORIZATION_SERVER_ROUTE)) {
+      const payload = getOpenIdConfiguration(PUBLIC_BASE_URL);
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(payload));
