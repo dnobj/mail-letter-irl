@@ -58,6 +58,7 @@ Letter IRL reads the following environment variables at runtime:
 - `LETTER_IRL_PUBLIC_BASE_URL` — external HTTPS base URL (e.g., your ngrok domain) used in manifest and OAuth metadata.
 - `LETTER_IRL_REQUIRE_AUTH` — set to `false` to disable OAuth enforcement during local testing (default `true`).
 - `LETTER_IRL_OAUTH_ISSUER`, `LETTER_IRL_OAUTH_JWKS_URI`, `LETTER_IRL_OAUTH_AUTH_ENDPOINT`, `LETTER_IRL_OAUTH_TOKEN_ENDPOINT`, `LETTER_IRL_OAUTH_SCOPES`, `LETTER_IRL_OAUTH_AUDIENCE` — OAuth metadata used to verify Google Identity Platform tokens and publish `.well-known` documents for ChatGPT Apps. Scopes default to `openid email profile`.
+- `LETTER_IRL_OAUTH_CLIENT_ID`, `LETTER_IRL_OAUTH_CLIENT_SECRET` — static OAuth client credentials returned via the dynamic client registration stub (`/oauth/register`).
 - `LETTER_IRL_DEFAULT_USER_ID` — fallback user ID when auth is disabled.
 
 See `docs/oauth-plan.md` for the full Google Cloud + Firestore setup.

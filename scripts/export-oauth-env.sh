@@ -14,7 +14,9 @@ export LETTER_IRL_OAUTH_AUTH_ENDPOINT="https://accounts.google.com/o/oauth2/v2/a
 export LETTER_IRL_OAUTH_TOKEN_ENDPOINT="https://oauth2.googleapis.com/token"
 export LETTER_IRL_OAUTH_SCOPES="openid email profile"
 export LETTER_IRL_OAUTH_AUDIENCE="${CLIENT_ID}"
+export LETTER_IRL_OAUTH_CLIENT_ID="${CLIENT_ID}"
 export LETTER_IRL_PUBLIC_BASE_URL="${PUBLIC_BASE_URL}"
 # Optional client secret storage (do not export unless needed)
 # CLIENT_SECRET=${CLIENT_SECRET}
+export LETTER_IRL_OAUTH_CLIENT_SECRET="${CLIENT_SECRET}"
 ENVVARS

@@ -32,11 +32,15 @@ const PROTECTED_RESOURCE_ROUTE =
   "/.well-known/oauth-protected-resource";
 const AUTHORIZATION_SERVER_ROUTE =
   process.env.LETTER_IRL_AUTH_SERVER_ROUTE ?? "/.well-known/oauth-authorization-server";
+const OAUTH_REGISTRATION_ROUTE =
+  process.env.LETTER_IRL_OAUTH_REGISTRATION_ROUTE ?? "/oauth/register";
 const FALLBACK_ORIGIN =
   process.env.LETTER_IRL_DEFAULT_ORIGIN ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const PUBLIC_BASE_URL =
   process.env.LETTER_IRL_PUBLIC_BASE_URL ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const REQUIRE_AUTH = process.env.LETTER_IRL_REQUIRE_AUTH !== "false";
+const STATIC_CLIENT_ID = process.env.LETTER_IRL_OAUTH_CLIENT_ID;
+const STATIC_CLIENT_SECRET = process.env.LETTER_IRL_OAUTH_CLIENT_SECRET;
 
 function getAllowedHosts(): string[] {
   const raw = process.env.LETTER_IRL_ALLOWED_HOSTS;
@@ -74,6 +78,10 @@ function getAllowedOrigins(): string[] {
 
 function matchesWellKnownRoute(pathname: string, baseRoute: string) {
   return pathname === baseRoute || pathname === `${baseRoute}${MCP_PATH}`;
+}
+
+function matchesRegistrationRoute(pathname: string) {
+  return pathname === OAUTH_REGISTRATION_ROUTE || pathname === `${OAUTH_REGISTRATION_ROUTE}${MCP_PATH}`;
 }
 
 async function serveWidget(
@@ -161,6 +169,11 @@ export async function startHttpServer() {
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(payload));
+      return;
+    }
+
+    if (matchesRegistrationRoute(url.pathname)) {
+      await handleRegistrationRequest(req, res);
       return;
     }
 
@@ -271,4 +284,40 @@ async function authenticateRequest(
     res.end(JSON.stringify(body));
     return null;
   }
+}
+
+async function handleRegistrationRequest(
+  req: http.IncomingMessage,
+  res: http.ServerResponse
+) {
+  if (!STATIC_CLIENT_ID) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: "static_client_unavailable",
+        error_description: "LETTER_IRL_OAUTH_CLIENT_ID not configured"
+      })
+    );
+    return;
+  }
+
+  if (req.method !== "POST" && req.method !== "GET") {
+    res.writeHead(405, { Allow: "POST, GET" });
+    res.end();
+    return;
+  }
+
+  const body = {
+    client_id: STATIC_CLIENT_ID,
+    client_secret: STATIC_CLIENT_SECRET,
+    client_id_issued_at: Math.floor(Date.now() / 1000),
+    token_endpoint_auth_method: "client_secret_post",
+    grant_types: ["authorization_code"],
+    response_types: ["code"],
+    redirect_uris: ["https://chat.openai.com/aip/auth/callback"],
+    scope: process.env.LETTER_IRL_OAUTH_SCOPES ?? "openid email profile"
+  };
+
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body));
 }
