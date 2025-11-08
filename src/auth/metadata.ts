@@ -16,6 +16,7 @@ export function getOpenIdConfiguration(baseUrl: string) {
     authorization_endpoint: authorizationEndpoint,
     token_endpoint: tokenEndpoint,
     jwks_uri: jwksUri,
+    registration_endpoint: `${baseUrl}${process.env.LETTER_IRL_OAUTH_REGISTRATION_ROUTE ?? "/oauth/register"}`,
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code"],
     code_challenge_methods_supported: ["S256"],
