@@ -7,6 +7,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { LetterIrlServer } from "../server.js";
 import { registerLetterTools } from "./registerTools.js";
+import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
+import {
+  AuthenticatedUser,
+  validateAuthorizationHeader
+} from "../auth/tokenValidator.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,8 +25,16 @@ const MANIFEST_ROUTE = process.env.LETTER_IRL_MANIFEST_ROUTE ?? "/manifest.json"
 const MANIFEST_FILE_PATH =
   process.env.LETTER_IRL_MANIFEST_FILE ??
   path.resolve(__dirname, "..", "..", "manifest.json");
+const OPENID_CONFIG_ROUTE =
+  process.env.LETTER_IRL_OPENID_ROUTE ?? "/.well-known/openid-configuration";
+const PROTECTED_RESOURCE_ROUTE =
+  process.env.LETTER_IRL_PROTECTED_RESOURCE_ROUTE ??
+  "/.well-known/oauth-protected-resource";
 const FALLBACK_ORIGIN =
   process.env.LETTER_IRL_DEFAULT_ORIGIN ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
+const PUBLIC_BASE_URL =
+  process.env.LETTER_IRL_PUBLIC_BASE_URL ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
+const REQUIRE_AUTH = process.env.LETTER_IRL_REQUIRE_AUTH !== "false";
 
 function getAllowedHosts(): string[] {
   const raw = process.env.LETTER_IRL_ALLOWED_HOSTS;
@@ -121,6 +134,22 @@ export async function startHttpServer() {
       return;
     }
 
+    if (url.pathname === OPENID_CONFIG_ROUTE) {
+      const payload = getOpenIdConfiguration(PUBLIC_BASE_URL);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(payload));
+      return;
+    }
+
+    if (url.pathname === PROTECTED_RESOURCE_ROUTE) {
+      const payload = getProtectedResourceMetadata(PUBLIC_BASE_URL);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(payload));
+      return;
+    }
+
     if (url.pathname.startsWith(WIDGET_PATH)) {
       const widgetName = url.pathname.replace(`${WIDGET_PATH}/`, "");
       if (!widgetName) {
@@ -139,6 +168,14 @@ export async function startHttpServer() {
     if (url.pathname === MCP_PATH) {
       if (!req.headers.origin) {
         req.headers.origin = FALLBACK_ORIGIN;
+      }
+
+      const authInfo = await authenticateRequest(req, res);
+      if (authInfo === null) {
+        return;
+      }
+      if (authInfo) {
+        (req as any).auth = authInfo;
       }
 
       console.log(
@@ -183,4 +220,41 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error("Failed to start HTTP MCP server", error);
     process.exit(1);
   });
+}
+
+async function authenticateRequest(
+  req: http.IncomingMessage,
+  res: http.ServerResponse
+): Promise<AuthenticatedUser | null> {
+  if (!REQUIRE_AUTH) {
+    if (!req.headers.authorization) {
+      return null;
+    }
+    try {
+      return await validateAuthorizationHeader(req.headers.authorization);
+    } catch (error) {
+      console.warn("Optional auth validation failed", error);
+      return null;
+    }
+  }
+
+  try {
+    return await validateAuthorizationHeader(req.headers.authorization);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const body = {
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message
+      },
+      id: null
+    };
+    res.writeHead(401, {
+      "WWW-Authenticate": `Bearer realm="Letter IRL", error="invalid_token", error_description="${message}"`,
+      "Content-Type": "application/json"
+    });
+    res.end(JSON.stringify(body));
+    return null;
+  }
 }

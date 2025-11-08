@@ -14,6 +14,7 @@ Welcome to the Letter IRL build documentation. Each section below links to a foc
 - [MCP Debugging Notes](mcp-debugging.md) — Tunneling, transport, and initialization troubleshooting for Apps SDK integration.
 - [ChatGPT App Integration Learnings](app-integration-learnings.md) — Running log of integration quirks and fixes.
 - [App Instructions](app-instructions.md) — Manifest guidance for collecting addresses before calling tools.
+- [OAuth & Identity Plan](oauth-plan.md) — Step-by-step migration to Google OAuth + Firestore-backed per-user accounts.
 - [Engineering Plan and Modular Architecture](engineering-plan.md) — Module boundaries, logging roadmap, and testing strategy for scalable development.
 
 For implementation readiness, pair this documentation with a server skeleton that registers the specified tools, enforces credit logic, wires the associated widgets, and follows the modular plan for independent development.

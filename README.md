@@ -48,3 +48,16 @@ This repository contains the Letter IRL build documentation, an MCP server scaff
 - Expand structured logging sinks (e.g., pipe to Datadog) as needed; the shared logger module already centralizes redaction.
 - Connect the HTML widget prototypes to the Apps SDK loader of choice, ensuring `window.renderContext` and `window.openai` are correctly wired.
 - Validate requirements against updated OpenAI Apps SDK documentation (see `docs/openai-app-sdk-notes.md`).
+
+## Configuration
+Letter IRL reads the following environment variables at runtime:
+
+- `LETTER_IRL_HTTP_HOST` / `LETTER_IRL_HTTP_PORT` — bind address for the MCP HTTP server (default `127.0.0.1:8090`).
+- `LETTER_IRL_ALLOWED_HOSTS` / `LETTER_IRL_ALLOWED_ORIGINS` — comma-delimited allowlists for host and origin headers.
+- `LETTER_IRL_WIDGET_PATH`, `LETTER_IRL_MANIFEST_ROUTE`, `LETTER_IRL_OPENID_ROUTE`, `LETTER_IRL_PROTECTED_RESOURCE_ROUTE` — override default asset and metadata routes (`/widgets`, `/manifest.json`, `/.well-known/openid-configuration`, `/.well-known/oauth-protected-resource`).
+- `LETTER_IRL_PUBLIC_BASE_URL` — external HTTPS base URL (e.g., your ngrok domain) used in manifest and OAuth metadata.
+- `LETTER_IRL_REQUIRE_AUTH` — set to `false` to disable OAuth enforcement during local testing (default `true`).
+- `LETTER_IRL_OAUTH_ISSUER`, `LETTER_IRL_OAUTH_JWKS_URI`, `LETTER_IRL_OAUTH_AUTH_ENDPOINT`, `LETTER_IRL_OAUTH_TOKEN_ENDPOINT`, `LETTER_IRL_OAUTH_SCOPES`, `LETTER_IRL_OAUTH_AUDIENCE` — OAuth metadata used to verify Google Identity Platform tokens and publish `.well-known` documents for ChatGPT Apps. Scopes default to `openid email profile`.
+- `LETTER_IRL_DEFAULT_USER_ID` — fallback user ID when auth is disabled.
+
+See `docs/oauth-plan.md` for the full Google Cloud + Firestore setup.

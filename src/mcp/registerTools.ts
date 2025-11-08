@@ -8,6 +8,7 @@ import {
   getOrderStatusInputZ,
   getAccountBalanceInputZ
 } from "../zodSchemas.js";
+import { AuthenticatedUser } from "../auth/tokenValidator.js";
 
 type ToolName = keyof typeof toolInputSchemas;
 
@@ -36,14 +37,16 @@ export function registerLetterTools(
       continue;
     }
 
-    mcpServer.tool(tool.name, shape, async (args) => {
+    mcpServer.tool(tool.name, shape, async (args, extra) => {
       console.log(
         `Tool request ${tool.name} payload: ${JSON.stringify(args)}`
       );
+      const authInfo = (extra?.authInfo as AuthenticatedUser | undefined) ?? null;
+      const userId = authInfo?.userId ?? DEFAULT_USER_ID;
       const { result, meta } = await appServer.execute({
         toolName: tool.name,
         input: args,
-        userId: DEFAULT_USER_ID
+        userId
       });
 
       const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
