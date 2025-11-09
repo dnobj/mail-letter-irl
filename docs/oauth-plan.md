@@ -1,21 +1,23 @@
 # OAuth & Identity Plan (Google Cloud + Firestore)
 
-This plan outlines how to add per-user identity and credit tracking using Google Cloud’s OAuth stack. The goal is to let ChatGPT authenticate each end user, so Letter IRL can map tool calls to individual Firestore accounts.
+This plan outlines how to add per-user identity using Auth0 (for RFC 7591 support) while keeping Firestore and the rest of the stack on Google Cloud. The goal is to let ChatGPT authenticate each end user, so Letter IRL can map tool calls to individual Firestore accounts.
 
 ## 1. Google Cloud Setup
 1. Create (or reuse) a Google Cloud project.
 2. Enable **Firestore** (Native mode) for persistent storage of user accounts, credit balances, and letter jobs.
-3. Enable **Identity Platform** (Firebase Auth) to act as the OAuth 2.1 / OIDC provider.
+3. Enable **Identity Platform** only if you need Firebase Auth for other services (not used for ChatGPT OAuth anymore).
 4. Create a service account with Firestore access for backend workers (job queue, admin tools).
 
-## 2. Configure Identity Platform OAuth
-1. In Identity Platform, configure the sign-in methods you want (email/password, Google Sign-In, etc.).
-2. Set up an OAuth consent screen (External) and publish it after verification.
-3. Under **Authorized domains**, add the ChatGPT callback domain (`chat.openai.com`) and your ngrok/custom domain hosting the MCP server.
-4. Create an OAuth client of type “Web application.” Collect:
-   - Authorization endpoint (e.g., `https://<project-id>.firebaseapp.com/__/auth/handler`)
-   - Token endpoint (Identity Platform exposes this via Google’s OAuth token service)
-   - JWKS URI (Google’s certs endpoint), issuer, and supported scopes (at least `openid email profile`).
+## 2. Configure Auth0 Tenant, App, and API
+1. Create an Auth0 tenant (e.g., `dev-ky21dxn3qmi71hjl.us.auth0.com`). That domain exposes the required `.well-known` metadata and RFC 7591 registration endpoint out of the box.citeauth0.com/docs/get-started/auth0-mcp-server
+2. Applications → “Regular Web Application” → create “Mail Letter IRL” with callback URLs `https://chat.openai.com/aip/auth/callback` and `https://chatgpt.com/connector_platform_oauth_redirect`, plus allowed origins `https://chat.openai.com`, `https://chatgpt.com`.
+3. Applications → **APIs** → create “Letter IRL API” with identifier `https://letter-irl/api` and scopes (`openid`, `profile`, `email`, plus any custom ones such as `letters:send`). Auth0 automatically creates a test application that you can ignore.
+4. Note the tenant’s issuer, jwks, token, auth, and registration URLs:
+   - Issuer: `https://<tenant>.us.auth0.com/`
+   - Authorization endpoint: `https://<tenant>.us.auth0.com/authorize`
+   - Token endpoint: `https://<tenant>.us.auth0.com/oauth/token`
+   - JWKS: `https://<tenant>.us.auth0.com/.well-known/jwks.json`
+   - Registration endpoint: `https://<tenant>.us.auth0.com/oauth/register`
 
 ## 3. Expose MCP Auth Metadata
 ChatGPT expects your MCP server to host:
@@ -23,12 +25,17 @@ ChatGPT expects your MCP server to host:
 - `/.well-known/oauth-protected-resource` describing resource server metadata.
 
 Action items:
-1. Add a new `src/auth/metadata.ts` helper that serves those JSON docs, pointing to the Identity Platform endpoints.
-2. Update `src/mcp/httpServer.ts` to route requests for the `.well-known` paths to that helper.
-3. Document environment variables: `LETTER_IRL_OAUTH_ISSUER`, `LETTER_IRL_OAUTH_AUTH_ENDPOINT`, `LETTER_IRL_OAUTH_TOKEN_ENDPOINT`, `LETTER_IRL_OAUTH_JWKS_URI`, `LETTER_IRL_OAUTH_CLIENT_ID`, etc.
+1. `src/auth/metadata.ts` now serves Auth0 discovery info, including `registration_endpoint` so ChatGPT can auto-register clients.
+2. `src/mcp/httpServer.ts` routes `.well-known` and `/oauth/register` to Auth0’s issuer (no more Google stub once ChatGPT uses Auth0 directly).
+3. Required env vars:
+   - `LETTER_IRL_OAUTH_ISSUER`, `LETTER_IRL_OAUTH_JWKS_URI`, `LETTER_IRL_OAUTH_AUTH_ENDPOINT`, `LETTER_IRL_OAUTH_TOKEN_ENDPOINT`
+   - `LETTER_IRL_OAUTH_SCOPES` (`openid email profile`)
+   - `LETTER_IRL_OAUTH_AUDIENCE` (Auth0 API identifier, e.g., `https://letter-irl/api`)
+   - `LETTER_IRL_OAUTH_CLIENT_ID` (Mail Letter IRL application)
+   - `LETTER_IRL_OAUTH_CLIENT_SECRET` if you want to echo it in `/oauth/register`
 
 ## 4. Validate Tokens on Every Tool Call
-1. Install Google’s JWKS client (e.g., `jwks-rsa`) or use `google-auth-library` to verify ID tokens.
+1. Use `jose` (already in the repo) with Auth0’s JWKS to verify ID tokens.
 2. Extend `ToolContext` with an `auth` object containing `userId`, `email`, and scopes pulled from the JWT.
 3. When requests arrive:
    - If no `Authorization: Bearer` header is present, respond with an auth challenge per Apps SDK spec.
