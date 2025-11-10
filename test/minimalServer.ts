@@ -37,7 +37,18 @@ const manifest = JSON.stringify({
   name: "Minimal MCP",
   version: "0.0.1",
   description: "Test server to debug OAuth/discovery",
-  tools: []
+  tools: [
+    {
+      name: "ping",
+      description: "Dummy tool used to verify manifest shape",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" }
+        }
+      }
+    }
+  ]
 });
 
 const server = http.createServer((req, res) => {
