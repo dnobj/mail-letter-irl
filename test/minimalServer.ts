@@ -53,6 +53,13 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url === "/") {
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ status: "ok", version: "minimal" }));
+    return;
+  }
+
   if (url.startsWith("/.well-known/openid-configuration")) {
     respond(openidConfig);
     return;

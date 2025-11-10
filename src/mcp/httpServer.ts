@@ -141,6 +141,13 @@ export async function startHttpServer() {
       return;
     }
 
+    if (url.pathname === "/") {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ status: "ok", service: "letter-irl" }));
+      return;
+    }
+
     if (matchesWellKnownRoute(url.pathname, OPENID_CONFIG_ROUTE)) {
       const payload = getOpenIdConfiguration(PUBLIC_BASE_URL);
       res.statusCode = 200;
