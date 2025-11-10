@@ -60,6 +60,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url === "/favicon.ico" || url === "/favicon.png" || url === "/favicon.svg") {
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
+
   if (url.startsWith("/.well-known/openid-configuration")) {
     respond(openidConfig);
     return;

@@ -148,6 +148,12 @@ export async function startHttpServer() {
       return;
     }
 
+    if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.png" || url.pathname === "/favicon.svg") {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
     if (matchesWellKnownRoute(url.pathname, OPENID_CONFIG_ROUTE)) {
       const payload = getOpenIdConfiguration(PUBLIC_BASE_URL);
       res.statusCode = 200;
