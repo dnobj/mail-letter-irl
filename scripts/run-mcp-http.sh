@@ -6,4 +6,6 @@ export LETTER_IRL_ALLOWED_HOSTS="amitotically-gubernacular-elise.ngrok-free.dev,
 export LETTER_IRL_ALLOWED_ORIGINS="https://chat.openai.com,https://chatgpt.com,https://amitotically-gubernacular-elise.ngrok-free.dev"
 export LETTER_IRL_DEFAULT_ORIGIN="https://chat.openai.com"
 
+echo "Using OAuth issuer: ${LETTER_IRL_OAUTH_ISSUER:-unset}"
+
 npm run mcp:http | tee logs/mcp-http.log

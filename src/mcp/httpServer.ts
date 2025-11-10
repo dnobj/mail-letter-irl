@@ -32,15 +32,12 @@ const PROTECTED_RESOURCE_ROUTE =
   "/.well-known/oauth-protected-resource";
 const AUTHORIZATION_SERVER_ROUTE =
   process.env.LETTER_IRL_AUTH_SERVER_ROUTE ?? "/.well-known/oauth-authorization-server";
-const OAUTH_REGISTRATION_ROUTE =
-  process.env.LETTER_IRL_OAUTH_REGISTRATION_ROUTE ?? "/oauth/register";
 const FALLBACK_ORIGIN =
   process.env.LETTER_IRL_DEFAULT_ORIGIN ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const PUBLIC_BASE_URL =
   process.env.LETTER_IRL_PUBLIC_BASE_URL ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const REQUIRE_AUTH = process.env.LETTER_IRL_REQUIRE_AUTH !== "false";
-const STATIC_CLIENT_ID = process.env.LETTER_IRL_OAUTH_CLIENT_ID;
-const STATIC_CLIENT_SECRET = process.env.LETTER_IRL_OAUTH_CLIENT_SECRET;
+const AUTH0_REGISTRATION_ENDPOINT = process.env.LETTER_IRL_OAUTH_REGISTRATION_ENDPOINT;
 
 function getAllowedHosts(): string[] {
   const raw = process.env.LETTER_IRL_ALLOWED_HOSTS;
@@ -78,10 +75,6 @@ function getAllowedOrigins(): string[] {
 
 function matchesWellKnownRoute(pathname: string, baseRoute: string) {
   return pathname === baseRoute || pathname === `${baseRoute}${MCP_PATH}`;
-}
-
-function matchesRegistrationRoute(pathname: string) {
-  return pathname === OAUTH_REGISTRATION_ROUTE || pathname === `${OAUTH_REGISTRATION_ROUTE}${MCP_PATH}`;
 }
 
 async function serveWidget(
@@ -169,11 +162,6 @@ export async function startHttpServer() {
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(payload));
-      return;
-    }
-
-    if (matchesRegistrationRoute(url.pathname)) {
-      await handleRegistrationRequest(req, res);
       return;
     }
 
