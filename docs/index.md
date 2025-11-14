@@ -13,6 +13,7 @@ Welcome to the Letter IRL build documentation. Each section below links to a foc
 - [OpenAI App SDK Status Notes](openai-app-sdk-notes.md) — Current understanding of the Apps SDK as of 2025-10-29, with verification action items.
 - [MCP Debugging Notes](mcp-debugging.md) — Tunneling, transport, and initialization troubleshooting for Apps SDK integration.
 - [ChatGPT App Integration Learnings](app-integration-learnings.md) — Running log of integration quirks and fixes.
+- [HTTP SSE Transport Plan](mcp-sse-plan.md) — Step-by-step plan to mirror the sample SSE transport and advertise it via the manifest `servers` array.
 - [App Instructions](app-instructions.md) — Manifest guidance for collecting addresses before calling tools.
 - [OAuth & Identity Plan](oauth-plan.md) — Step-by-step migration to Google OAuth + Firestore-backed per-user accounts.
 - [Engineering Plan and Modular Architecture](engineering-plan.md) — Module boundaries, logging roadmap, and testing strategy for scalable development.

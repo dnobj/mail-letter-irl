@@ -1,10 +1,11 @@
+import "dotenv/config";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promises as fs } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { LetterIrlServer } from "../server.js";
 import { registerLetterTools } from "./registerTools.js";
 import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
@@ -20,6 +21,9 @@ const DEFAULT_WIDGET_DIR = path.resolve(__dirname, "..", "..", "widgets");
 const DEFAULT_HOST = process.env.LETTER_IRL_HTTP_HOST ?? "127.0.0.1";
 const DEFAULT_PORT = Number(process.env.LETTER_IRL_HTTP_PORT ?? "8090");
 const MCP_PATH = process.env.LETTER_IRL_MCP_PATH ?? "/mcp";
+const SSE_PATH = process.env.LETTER_IRL_SSE_PATH ?? "/mcp/sse";
+const SSE_MESSAGES_PATH =
+  process.env.LETTER_IRL_SSE_MESSAGES_PATH ?? "/mcp/sse/messages";
 const WIDGET_PATH = process.env.LETTER_IRL_WIDGET_PATH ?? "/widgets";
 const MANIFEST_ROUTE = process.env.LETTER_IRL_MANIFEST_ROUTE ?? "/manifest.json";
 const MANIFEST_FILE_PATH =
@@ -37,7 +41,14 @@ const FALLBACK_ORIGIN =
 const PUBLIC_BASE_URL =
   process.env.LETTER_IRL_PUBLIC_BASE_URL ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const REQUIRE_AUTH = process.env.LETTER_IRL_REQUIRE_AUTH !== "false";
-const AUTH0_REGISTRATION_ENDPOINT = process.env.LETTER_IRL_OAUTH_REGISTRATION_ENDPOINT;
+const AUTH0_REGISTRATION_ENDPOINT =
+  process.env.LETTER_IRL_OAUTH_REGISTRATION_ENDPOINT;
+
+type SseSession = {
+  server: McpServer;
+  transport: SSEServerTransport;
+  authInfo: AuthenticatedUser | null;
+};
 
 function getAllowedHosts(): string[] {
   const raw = process.env.LETTER_IRL_ALLOWED_HOSTS;
@@ -99,24 +110,153 @@ async function serveWidget(
   }
 }
 
-export async function startHttpServer() {
-  const letterServer = new LetterIrlServer();
+function createMcpServer(letterServer: LetterIrlServer, authInfo: AuthenticatedUser | null) {
   const mcpServer = new McpServer({
     name: "letter-irl",
     version: "0.1.0"
   });
+  registerLetterTools(mcpServer, letterServer, authInfo);
+  return mcpServer;
+}
 
-  registerLetterTools(mcpServer, letterServer);
+export async function startHttpServer() {
+  const letterServer = new LetterIrlServer();
+  const sseSessions = new Map<string, SseSession>();
+  const allowedHosts = getAllowedHosts();
+  const allowedOrigins = getAllowedOrigins();
 
-  const transport = new StreamableHTTPServerTransport({
-    endpointPath: MCP_PATH,
-    allowedHosts: getAllowedHosts(),
-    allowedOrigins: getAllowedOrigins(),
-    enableDnsRebindingProtection: true,
-    enableJsonResponse: true
-  });
+  const resolveCorsOrigin = (incoming?: string | string[]) => {
+    if (Array.isArray(incoming)) {
+      incoming = incoming[0];
+    }
+    if (!incoming) {
+      return FALLBACK_ORIGIN;
+    }
+    return allowedOrigins.includes(incoming) ? incoming : FALLBACK_ORIGIN;
+  };
 
-  await mcpServer.connect(transport);
+  const respondToCorsPreflight = (
+    res: http.ServerResponse,
+    origin: string
+  ) => {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "authorization, content-type, mcp-session-id"
+    });
+    res.end();
+  };
+
+  const handleSseStreamRequest = async (
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ) => {
+    const origin = resolveCorsOrigin(req.headers.origin);
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
+
+    const acceptHeader = req.headers.accept ?? "";
+    if (!acceptHeader.includes("text/event-stream")) {
+      res.writeHead(406, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: "Not Acceptable: Client must accept text/event-stream"
+        })
+      );
+      return;
+    }
+
+    const authInfo = await authenticateRequest(req, res);
+    if (authInfo === null) {
+      return;
+    }
+
+    const sessionServer = createMcpServer(letterServer, authInfo);
+
+    const sseTransport = new SSEServerTransport(SSE_MESSAGES_PATH, res, {
+      allowedHosts,
+      allowedOrigins,
+      enableDnsRebindingProtection: true
+    });
+
+    const validationError = sseTransport.validateRequestHeaders(req);
+    if (validationError) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: validationError
+        })
+      );
+      return;
+    }
+
+    sseTransport.onclose = async () => {
+      sseSessions.delete(sseTransport.sessionId);
+      await sessionServer.close();
+    };
+    sseTransport.onerror = (error) => {
+      console.error("SSE transport error", error);
+    };
+
+    try {
+      await sessionServer.connect(sseTransport);
+      sseSessions.set(sseTransport.sessionId, {
+        server: sessionServer,
+        transport: sseTransport,
+        authInfo
+      });
+      console.log(
+        `SSE session established id=${sseTransport.sessionId} user=${authInfo?.userId ?? "anonymous"}`
+      );
+    } catch (error) {
+      console.error("Failed to start SSE session", error);
+      try {
+        await sessionServer.close();
+      } catch (closeError) {
+        console.warn("Failed to close SSE session server", closeError);
+      }
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Failed to establish SSE connection" }));
+      }
+    }
+  };
+
+  const handleSsePostRequest = async (
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ) => {
+    const origin = resolveCorsOrigin(req.headers.origin);
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "authorization, content-type, mcp-session-id"
+    );
+
+    const sessionId = url.searchParams.get("sessionId");
+    if (!sessionId) {
+      res.writeHead(400).end("Missing sessionId query parameter");
+      return;
+    }
+
+    const session = sseSessions.get(sessionId);
+    if (!session) {
+      res.writeHead(404).end("Unknown session");
+      return;
+    }
+
+    (req as any).auth = session.authInfo ?? undefined;
+
+    try {
+      await session.transport.handlePostMessage(req, res);
+    } catch (error) {
+      console.error("Failed to process SSE message", error);
+      if (!res.headersSent) {
+        res.writeHead(500).end("Failed to process message");
+      }
+    }
+  };
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? `${DEFAULT_HOST}:${DEFAULT_PORT}`}`);
@@ -124,6 +264,29 @@ export async function startHttpServer() {
     if (url.pathname === "/healthz") {
       res.statusCode = 200;
       res.end("ok");
+      return;
+    }
+
+    if (
+      req.method === "OPTIONS" &&
+      (url.pathname === SSE_PATH || url.pathname === SSE_MESSAGES_PATH)
+    ) {
+      respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === SSE_PATH) {
+      await handleSseStreamRequest(req, res);
+      return;
+    }
+
+    if (url.pathname === SSE_MESSAGES_PATH) {
+      if (req.method === "POST") {
+        await handleSsePostRequest(req, res, url);
+        return;
+      }
+      res.writeHead(405, { Allow: "POST, OPTIONS" });
+      res.end();
       return;
     }
 
@@ -202,18 +365,47 @@ export async function startHttpServer() {
       if (authInfo === null) {
         return;
       }
-      if (authInfo) {
-        (req as any).auth = authInfo;
-      }
 
       console.log(
-        `MCP request ${new Date().toISOString()} method=${req.method} host=${req.headers.host} origin=${req.headers.origin}`
+        `MCP request ${new Date().toISOString()} method=${req.method} host=${req.headers.host} origin=${req.headers.origin} user=${authInfo?.userId ?? "anonymous"}`
       );
 
+      // Create transport first (passes res directly to constructor)
+      const sessionTransport = new StreamableHTTPServerTransport(res, {
+        allowedHosts,
+        allowedOrigins,
+        enableDnsRebindingProtection: true
+      });
+
+      // Create per-session MCP server with auth context
+      const sessionServer = createMcpServer(letterServer, authInfo);
+
+      // Clean up when response closes
+      res.on('close', async () => {
+        console.log(`Streamable HTTP connection closed, session=${sessionTransport.sessionId}`);
+        await sessionServer.close();
+      });
+
       try {
-        await transport.handleRequest(req, res);
+        // Connect the MCP server to the transport
+        console.log('Connecting MCP server to Streamable HTTP transport...');
+        await sessionServer.connect(sessionTransport);
+        console.log(`MCP server connected, session=${sessionTransport.sessionId}`);
+
+        // For Streamable HTTP POST, parse body and handle request
+        let body = '';
+        req.on('data', chunk => { body += chunk.toString(); });
+        await new Promise<void>(resolve => req.on('end', () => resolve()));
+
+        console.log(`Received POST body: ${body.substring(0, 200)}`);
+        const parsedBody = body ? JSON.parse(body) : undefined;
+        console.log(`Parsed request: method=${parsedBody?.method || 'unknown'}`);
+
+        await sessionTransport.handleRequest(req, res, parsedBody);
+        console.log(`Request handled successfully`);
       } catch (error) {
         console.error("MCP request failed", error);
+        console.error("Error stack:", error instanceof Error ? error.stack : 'no stack');
         if (!res.headersSent) {
           res.statusCode = 500;
           res.end("Internal Server Error");
@@ -230,6 +422,10 @@ export async function startHttpServer() {
     server.listen(DEFAULT_PORT, DEFAULT_HOST, () => {
       console.log(`Letter IRL MCP HTTP server listening on http://${DEFAULT_HOST}:${DEFAULT_PORT}`);
       console.log(`  MCP endpoint: http://${DEFAULT_HOST}:${DEFAULT_PORT}${MCP_PATH}`);
+      console.log(`  SSE stream: http://${DEFAULT_HOST}:${DEFAULT_PORT}${SSE_PATH}`);
+      console.log(
+        `  SSE messages: http://${DEFAULT_HOST}:${DEFAULT_PORT}${SSE_MESSAGES_PATH}?sessionId=...`
+      );
       console.log(`  Widget assets: http://${DEFAULT_HOST}:${DEFAULT_PORT}${WIDGET_PATH}/<name>.html`);
       resolve();
     });

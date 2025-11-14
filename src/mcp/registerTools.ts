@@ -28,8 +28,12 @@ function getZodShape(name: string) {
 
 export function registerLetterTools(
   mcpServer: McpServer,
-  appServer: LetterIrlServer
+  appServer: LetterIrlServer,
+  authInfo: AuthenticatedUser | null = null
 ) {
+  const userId = authInfo?.userId ?? DEFAULT_USER_ID;
+  console.log(`Registering Letter IRL tools for user: ${userId}`);
+
   const toolDefs = appServer.listTools();
   for (const tool of toolDefs) {
     const shape = getZodShape(tool.name);
@@ -39,10 +43,8 @@ export function registerLetterTools(
 
     mcpServer.tool(tool.name, shape, async (args, extra) => {
       console.log(
-        `Tool request ${tool.name} payload: ${JSON.stringify(args)}`
+        `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId}`
       );
-      const authInfo = (extra?.authInfo as AuthenticatedUser | undefined) ?? null;
-      const userId = authInfo?.userId ?? DEFAULT_USER_ID;
       const { result, meta } = await appServer.execute({
         toolName: tool.name,
         input: args,

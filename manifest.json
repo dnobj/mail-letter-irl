@@ -42,6 +42,22 @@
       "BalanceCard"
     ]
   },
+  "servers": [
+    {
+      "type": "mcp",
+      "name": "letter-irl",
+      "url": "https://amitotically-gubernacular-elise.ngrok-free.dev/mcp",
+      "healthUrl": "https://amitotically-gubernacular-elise.ngrok-free.dev/healthz",
+      "transport": {
+        "type": "sse"
+      },
+      "auth": {
+        "type": "oauth",
+        "scopes": ["openid", "email", "profile"],
+        "authorizationServer": "https://amitotically-gubernacular-elise.ngrok-free.dev/.well-known/oauth-authorization-server"
+      }
+    }
+  ],
   "definitions": {
     "Address": {
       "type": "object",
