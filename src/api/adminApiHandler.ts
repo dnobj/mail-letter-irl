@@ -63,6 +63,8 @@ export async function handleAdminApiRequest(
 
   // Route handlers
   try {
+    console.log(`🔍 Admin API: ${req.method} ${pathname}`);
+
     // POST /api/admin/credits/adjust
     if (pathname === '/api/admin/credits/adjust' && req.method === 'POST') {
       await handleAdjustCredits(req, res, adminInfo);
@@ -72,8 +74,12 @@ export async function handleAdminApiRequest(
     // GET /api/admin/users/:userId
     if (pathname.startsWith('/api/admin/users/') && req.method === 'GET') {
       const userId = pathname.split('/').pop();
+      console.log(`🔍 Extracted userId from pathname: "${userId}"`);
       if (userId) {
-        await handleGetUser(res, userId);
+        // Decode the userId (pathname is not auto-decoded in our setup)
+        const decodedUserId = decodeURIComponent(userId);
+        console.log(`🔍 Decoded userId: "${decodedUserId}"`);
+        await handleGetUser(res, decodedUserId);
         return true;
       }
     }
@@ -102,7 +108,7 @@ export async function handleAdminApiRequest(
     if (pathname.startsWith('/api/admin/jobs/') && req.method === 'GET' && !pathname.includes('/user/')) {
       const jobId = pathname.split('/').pop();
       if (jobId) {
-        await handleGetJobById(res, jobId);
+        await handleGetJobById(res, decodeURIComponent(jobId));
         return true;
       }
     }
@@ -112,7 +118,7 @@ export async function handleAdminApiRequest(
       const userId = pathname.split('/').pop();
       const url = new URL(req.url!, `http://${req.headers.host}`);
       if (userId) {
-        await handleGetJobsByUser(res, userId, url.searchParams);
+        await handleGetJobsByUser(res, decodeURIComponent(userId), url.searchParams);
         return true;
       }
     }
