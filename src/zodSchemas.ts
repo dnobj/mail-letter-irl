@@ -31,3 +31,5 @@ export const getOrderStatusInputZ = z.object({
 });
 
 export const getAccountBalanceInputZ = z.object({});
+
+export const switchAccountInputZ = z.object({});

@@ -4,7 +4,8 @@ import {
   quoteAndPreviewLetterTool,
   sendLetterTool,
   getOrderStatusTool,
-  getAccountBalanceTool
+  getAccountBalanceTool,
+  switchAccountTool
 } from "./tools/index.js";
 import {
   McpToolDefinition,
@@ -18,7 +19,8 @@ const tools: McpToolDefinition<unknown, unknown>[] = [
   quoteAndPreviewLetterTool,
   sendLetterTool,
   getOrderStatusTool,
-  getAccountBalanceTool
+  getAccountBalanceTool,
+  switchAccountTool
 ];
 
 export interface ServerRequest<Input> {

@@ -6,9 +6,11 @@ import {
   quoteAndPreviewInputZ,
   sendLetterInputZ,
   getOrderStatusInputZ,
-  getAccountBalanceInputZ
+  getAccountBalanceInputZ,
+  switchAccountInputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
+import { getOrCreateUser } from "../services/userService.js";
 
 type ToolName = keyof typeof toolInputSchemas;
 
@@ -18,7 +20,8 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   quote_and_preview_letter: quoteAndPreviewInputZ,
   send_letter: sendLetterInputZ,
   get_order_status: getOrderStatusInputZ,
-  get_account_balance: getAccountBalanceInputZ
+  get_account_balance: getAccountBalanceInputZ,
+  switch_account: switchAccountInputZ
 };
 
 function getZodShape(name: string) {
@@ -26,13 +29,56 @@ function getZodShape(name: string) {
   return schema?.shape;
 }
 
-export function registerLetterTools(
+export async function registerLetterTools(
   mcpServer: McpServer,
   appServer: LetterIrlServer,
   authInfo: AuthenticatedUser | null = null
 ) {
   const userId = authInfo?.userId ?? DEFAULT_USER_ID;
   console.log(`Registering Letter IRL tools for user: ${userId}`);
+
+  // Auto-create user if they don't exist (with email from Auth0 userinfo endpoint)
+  if (authInfo) {
+    let email = (authInfo.claims.email as string) || null;
+
+    // If email not in JWT claims, fetch it from Auth0 userinfo endpoint
+    if (!email) {
+      try {
+        const issuer = process.env.LETTER_IRL_OAUTH_ISSUER;
+        if (issuer) {
+          const userinfoUrl = `${issuer}userinfo`;
+          console.log(`🔍 Fetching user info from: ${userinfoUrl}`);
+
+          const response = await fetch(userinfoUrl, {
+            headers: {
+              'Authorization': `Bearer ${authInfo.token}`
+            }
+          });
+
+          if (response.ok) {
+            const userInfo = await response.json();
+            email = userInfo.email || userInfo.sub || 'unknown@example.com';
+            console.log(`✅ Retrieved email from userinfo: ${email}`);
+          } else {
+            console.warn(`⚠️  Failed to fetch userinfo: ${response.status} ${response.statusText}`);
+            email = 'unknown@example.com';
+          }
+        } else {
+          email = 'unknown@example.com';
+        }
+      } catch (error) {
+        console.error(`⚠️  Error fetching userinfo:`, error);
+        email = 'unknown@example.com';
+      }
+    }
+
+    try {
+      await getOrCreateUser(userId, email);
+      console.log(`✅ User ready: ${userId} (${email})`);
+    } catch (error) {
+      console.error(`⚠️  Failed to create user ${userId}:`, error);
+    }
+  }
 
   const toolDefs = appServer.listTools();
   for (const tool of toolDefs) {
@@ -76,9 +122,8 @@ function summarizeToolResult(
 ): string {
   switch (toolName) {
     case "get_account_balance": {
-      const credits = result.creditsRemaining ?? "unknown";
-      const cost = result.standardLetterCostCredits ?? 1;
-      return `Balance: ${credits} credits (standard letter costs ${cost}).`;
+      const message = result.message as string;
+      return message || `Balance: ${result.creditsRemaining ?? "unknown"} credits`;
     }
     case "quote_and_preview_letter": {
       const required = result.requiredCredits ?? "?";
@@ -93,6 +138,10 @@ function summarizeToolResult(
     case "get_order_status": {
       const status = result.currentStatus ?? "unknown";
       return `Latest order status: ${status}.`;
+    }
+    case "switch_account": {
+      const instructions = result.instructions as string;
+      return instructions || "Account switch instructions ready.";
     }
     default:
       return JSON.stringify(result);

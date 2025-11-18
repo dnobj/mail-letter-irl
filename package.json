@@ -10,16 +10,23 @@
     "lint": "eslint .",
     "flow": "tsx src/cli/flowHarness.ts",
     "mcp:stdio": "tsx src/mcp/stdioServer.ts",
-    "mcp:http": "tsx src/mcp/httpServer.ts"
+    "mcp:http": "tsx src/mcp/httpServer.ts",
+    "db:test": "tsx scripts/test-db.ts",
+    "db:migrate": "tsx db/migrate.ts",
+    "db:migrate:rollback": "tsx db/migrate.ts rollback",
+    "test:postgrid": "tsx scripts/test-postgrid.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.5",
     "dotenv": "^17.2.3",
     "jose": "^6.1.0",
+    "pg": "^8.11.3",
+    "pg-boss": "^10.3.3",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
+    "@types/pg": "^8.11.0",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-import": "^2.29.0",

@@ -36,6 +36,13 @@ export async function validateAuthorizationHeader(
   }
 
   const token = match[1];
+
+  // TEMPORARY: Log JWT for admin API testing
+  console.log('\n🔐 ========================================');
+  console.log('🔐 JWT TOKEN (for admin API testing):');
+  console.log('🔐', token);
+  console.log('🔐 ========================================\n');
+
   const options: JWTVerifyOptions = {
     issuer
   };

@@ -13,6 +13,10 @@ import {
   AuthenticatedUser,
   validateAuthorizationHeader
 } from "../auth/tokenValidator.js";
+import { handleCreditApiRequest } from "../api/creditApiHandler.js";
+import { handleAdminApiRequest } from "../api/adminApiHandler.js";
+import { initializeJobQueue, stopJobQueue } from "../services/jobQueue.js";
+import { startLetterWorker } from "../workers/letterWorker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -110,12 +114,12 @@ async function serveWidget(
   }
 }
 
-function createMcpServer(letterServer: LetterIrlServer, authInfo: AuthenticatedUser | null) {
+async function createMcpServer(letterServer: LetterIrlServer, authInfo: AuthenticatedUser | null) {
   const mcpServer = new McpServer({
     name: "letter-irl",
     version: "0.1.0"
   });
-  registerLetterTools(mcpServer, letterServer, authInfo);
+  await registerLetterTools(mcpServer, letterServer, authInfo);
   return mcpServer;
 }
 
@@ -131,6 +135,10 @@ export async function startHttpServer() {
     }
     if (!incoming) {
       return FALLBACK_ORIGIN;
+    }
+    // Allow "null" origin for file:// protocol (admin panel opened as local file)
+    if (incoming === "null") {
+      return "*";
     }
     return allowedOrigins.includes(incoming) ? incoming : FALLBACK_ORIGIN;
   };
@@ -171,7 +179,7 @@ export async function startHttpServer() {
       return;
     }
 
-    const sessionServer = createMcpServer(letterServer, authInfo);
+    const sessionServer = await createMcpServer(letterServer, authInfo);
 
     const sseTransport = new SSEServerTransport(SSE_MESSAGES_PATH, res, {
       allowedHosts,
@@ -311,6 +319,40 @@ export async function startHttpServer() {
       return;
     }
 
+    // Serve admin panel
+    if (url.pathname === "/admin" || url.pathname === "/admin.html") {
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const filePath = path.join(process.cwd(), "admin-panel.html");
+      try {
+        const content = await fs.readFile(filePath, "utf-8");
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/html");
+        res.end(content);
+      } catch (err: any) {
+        res.statusCode = 404;
+        res.end("Admin panel not found");
+      }
+      return;
+    }
+
+    // Serve admin token file
+    if (url.pathname === "/admin-token.js") {
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const filePath = path.join(process.cwd(), "admin-token.js");
+      try {
+        const content = await fs.readFile(filePath, "utf-8");
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "application/javascript");
+        res.end(content);
+      } catch (err: any) {
+        res.statusCode = 404;
+        res.end("// Token file not found");
+      }
+      return;
+    }
+
     if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.png" || url.pathname === "/favicon.svg") {
       res.statusCode = 204;
       res.end();
@@ -356,6 +398,18 @@ export async function startHttpServer() {
       return;
     }
 
+    // Admin API routes (check first - more specific path)
+    const adminApiHandled = await handleAdminApiRequest(req, res, url.pathname);
+    if (adminApiHandled) {
+      return;
+    }
+
+    // Credit API routes
+    const creditApiHandled = await handleCreditApiRequest(req, res, url.pathname);
+    if (creditApiHandled) {
+      return;
+    }
+
     if (url.pathname === MCP_PATH) {
       if (!req.headers.origin) {
         req.headers.origin = FALLBACK_ORIGIN;
@@ -378,7 +432,7 @@ export async function startHttpServer() {
       });
 
       // Create per-session MCP server with auth context
-      const sessionServer = createMcpServer(letterServer, authInfo);
+      const sessionServer = await createMcpServer(letterServer, authInfo);
 
       // Clean up when response closes
       res.on('close', async () => {
@@ -431,7 +485,24 @@ export async function startHttpServer() {
     });
   });
 
-  const close = () => {
+  // Initialize job queue and start workers
+  try {
+    console.log('');
+    await initializeJobQueue();
+    await startLetterWorker();
+    console.log('');
+  } catch (error) {
+    console.error('❌ Failed to initialize job queue:', error);
+    console.error('⚠️  Server will continue without background job processing');
+  }
+
+  const close = async () => {
+    console.log('\n🛑 Shutting down gracefully...');
+    try {
+      await stopJobQueue();
+    } catch (error) {
+      console.error('Error stopping job queue:', error);
+    }
     server.close(() => process.exit(0));
   };
 

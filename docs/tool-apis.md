@@ -1,6 +1,6 @@
 # MCP Tool API Specifications
 
-The Letter IRL MCP server exposes four tools to the OpenAI Apps SDK. Each tool returns metadata tailored for ChatGPT widgets and respects read-only hints where applicable.
+The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool returns metadata tailored for ChatGPT widgets and respects read-only hints where applicable.
 
 ## quote_and_preview_letter (Read-Only)
 - **Purpose:** Provide a printable preview and required credit estimate without creating an order.
@@ -191,7 +191,7 @@ The Letter IRL MCP server exposes four tools to the OpenAI Apps SDK. Each tool r
   - `_meta.openai/toolInvocation/invoked = "Latest status"`
 
 ## get_account_balance (Read-Only)
-- **Purpose:** Provide the user's remaining credits and standard letter affordability.
+- **Purpose:** Provide the user's remaining credits, standard letter affordability, and account identity information.
 - **Input schema:**
   ```json
   {
@@ -199,7 +199,7 @@ The Letter IRL MCP server exposes four tools to the OpenAI Apps SDK. Each tool r
     "properties": {}
   }
   ```
-- **Behavior:** Return current balance, whether a standard letter is affordable, and a user-friendly message.
+- **Behavior:** Return current balance, whether a standard letter is affordable, user email, authentication provider, and a user-friendly message with tip about switching accounts.
 - **Output schema:**
   ```json
   {
@@ -209,12 +209,69 @@ The Letter IRL MCP server exposes four tools to the OpenAI Apps SDK. Each tool r
       "creditsRemaining": { "type": "number" },
       "canSendStandardLetter": { "type": "boolean" },
       "standardLetterCostCredits": { "type": "number" },
-      "message": { "type": "string" }
+      "message": { "type": "string" },
+      "userEmail": { "type": "string" },
+      "authProvider": { "type": "string", "enum": ["Google", "Microsoft", "Apple", "GitHub", "Email/Password"] }
     }
   }
+  ```
+- **Example Response:**
+  ```
+  Account: user@example.com (Google)
+  Balance: 195 credits — That's enough for 97 letters.
+
+  Tip: Use the switch_account tool to log in with a different account.
   ```
 - **Metadata:**
   - `_meta.readOnlyHint = true`
   - `_meta.openai/outputTemplate = "BalanceCard"`
   - `_meta.openai/toolInvocation/invoking = "Checking credits…"`
   - `_meta.openai/toolInvocation/invoked = "Balance updated"`
+
+## switch_account (Read-Only)
+- **Purpose:** Enable users to log out and switch to a different account or authentication method.
+- **Input schema:**
+  ```json
+  {
+    "type": "object",
+    "properties": {}
+  }
+  ```
+- **Behavior:** Return Auth0 logout URL with return-to parameter, clear instructions for switching accounts, and list of available authentication methods.
+- **Output schema:**
+  ```json
+  {
+    "type": "object",
+    "required": ["logoutUrl", "instructions", "availableAuthMethods"],
+    "properties": {
+      "logoutUrl": { "type": "string" },
+      "instructions": { "type": "string" },
+      "availableAuthMethods": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  }
+  ```
+- **Example Response:**
+  ```
+  To switch to a different account:
+
+  1. Click the logout link below to end your current session
+  2. Reconnect to Letter IRL in ChatGPT
+  3. Choose your preferred authentication method from the options
+
+  Logout URL: https://dev-ky21dxn3qmi71hjl.us.auth0.com/v2/logout?returnTo=...
+
+  Available methods:
+  • Google
+  • Microsoft
+  • Apple
+  • GitHub
+  • Email/Password
+  ```
+- **Metadata:**
+  - `_meta.readOnlyHint = true`
+  - `_meta.openai/outputTemplate = "text"`
+  - `_meta.openai/toolInvocation/invoking = "Preparing account switch…"`
+  - `_meta.openai/toolInvocation/invoked = "Switch account instructions ready"`

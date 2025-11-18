@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Letter IRL - Admin Panel</title>
+    <script src="admin-token.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .auth-section {
+            background: #f7f9fc;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .auth-section input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .auth-section button {
+            margin-top: 10px;
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .auth-section button:hover {
+            background: #5568d3;
+        }
+
+        .status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        button {
+            padding: 10px 15px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .result {
+            margin-top: 15px;
+            padding: 10px;
+            background: #f7f9fc;
+            border-radius: 5px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .result pre {
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 10px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .stat {
+            background: #f7f9fc;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        table th, table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+            font-size: 12px;
+        }
+
+        table th {
+            background: #667eea;
+            color: white;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge-pending { background: #ffc107; color: #000; }
+        .badge-processing { background: #17a2b8; color: white; }
+        .badge-completed { background: #28a745; color: white; }
+        .badge-failed { background: #dc3545; color: white; }
+        .badge-retry { background: #ff9800; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Letter IRL - Admin Panel</h1>
+            <p>Monitor system stats, users, credits, and job queue</p>
+
+            <div class="auth-section">
+                <label><strong>JWT Token:</strong></label>
+                <input type="password" id="jwt-token" placeholder="Paste your JWT token here (from server logs or ChatGPT session)">
+                <button onclick="saveToken()">Save Token</button>
+                <div id="auth-status"></div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- System Stats -->
+            <div class="card">
+                <h2>📈 System Stats</h2>
+                <button onclick="fetchStats()" id="btn-stats">Load Stats</button>
+                <div id="stats-result" class="result"></div>
+            </div>
+
+            <!-- Users -->
+            <div class="card">
+                <h2>👥 Users</h2>
+                <button onclick="fetchUsers()" id="btn-users">Load Users</button>
+                <div id="users-result" class="result"></div>
+            </div>
+
+            <!-- User Lookup -->
+            <div class="card">
+                <h2>🔍 User Lookup</h2>
+                <div style="margin-bottom: 10px;">
+                    <label>User ID:</label>
+                    <input type="text" id="lookup-user-id" placeholder="auth0|..." style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ddd; border-radius: 5px;">
+                </div>
+                <button onclick="lookupUser()" id="btn-lookup-user">Look Up User</button>
+                <div id="lookup-user-result" class="result"></div>
+            </div>
+
+            <!-- Jobs -->
+            <div class="card">
+                <h2>⚙️ Job Queue</h2>
+                <button onclick="fetchJobs()" id="btn-jobs">Load Jobs</button>
+                <button onclick="fetchPgBossJobs()" id="btn-pgboss">Load pg-boss Jobs</button>
+                <div id="jobs-result" class="result"></div>
+            </div>
+
+            <!-- Job Lookup -->
+            <div class="card">
+                <h2>🔍 Job Lookup</h2>
+                <div style="margin-bottom: 10px;">
+                    <label>Job ID:</label>
+                    <input type="text" id="lookup-job-id" placeholder="job-uuid..." style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ddd; border-radius: 5px;">
+                </div>
+                <button onclick="lookupJob()" id="btn-lookup-job">Look Up Job</button>
+                <div id="lookup-job-result" class="result"></div>
+            </div>
+
+            <!-- User Jobs Lookup -->
+            <div class="card">
+                <h2>📋 User Jobs</h2>
+                <div style="margin-bottom: 10px;">
+                    <label>User ID:</label>
+                    <input type="text" id="user-jobs-user-id" placeholder="auth0|..." style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ddd; border-radius: 5px;">
+                </div>
+                <button onclick="lookupUserJobs()" id="btn-user-jobs">Load User Jobs</button>
+                <div id="user-jobs-result" class="result"></div>
+            </div>
+
+            <!-- Credit Adjustment -->
+            <div class="card">
+                <h2>💰 Adjust Credits</h2>
+                <div style="margin-bottom: 10px;">
+                    <label>User ID:</label>
+                    <input type="text" id="adjust-user-id" placeholder="auth0|..." style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ddd; border-radius: 5px;">
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <label>Amount (+ or -):</label>
+                    <input type="number" id="adjust-amount" placeholder="25" style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ddd; border-radius: 5px;">
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <label>Reason:</label>
+                    <input type="text" id="adjust-reason" placeholder="Customer service credit" style="width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ddd; border-radius: 5px;">
+                </div>
+                <button onclick="adjustCredits()" id="btn-adjust">Adjust Credits</button>
+                <div id="adjust-result" class="result"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8788';
+        let JWT_TOKEN = localStorage.getItem('admin_jwt_token') || '';
+
+        // Load token on page load
+        window.onload = function() {
+            // First, try to load from admin-token.js file
+            if (typeof ADMIN_JWT_TOKEN !== 'undefined' && ADMIN_JWT_TOKEN) {
+                JWT_TOKEN = ADMIN_JWT_TOKEN;
+                localStorage.setItem('admin_jwt_token', JWT_TOKEN);
+                document.getElementById('jwt-token').value = JWT_TOKEN;
+                showStatus('auth-status', 'Token auto-loaded from admin-token.js file ✓', 'success');
+            } else if (JWT_TOKEN) {
+                document.getElementById('jwt-token').value = JWT_TOKEN;
+                showStatus('auth-status', 'Token loaded from storage', 'success');
+            } else {
+                showStatus('auth-status', 'No token found. Please paste your JWT token or create admin-token.js', 'error');
+            }
+        };
+
+        function saveToken() {
+            JWT_TOKEN = document.getElementById('jwt-token').value.trim();
+            if (JWT_TOKEN) {
+                localStorage.setItem('admin_jwt_token', JWT_TOKEN);
+                showStatus('auth-status', 'Token saved! You can now use the API endpoints.', 'success');
+            } else {
+                showStatus('auth-status', 'Please enter a valid token', 'error');
+            }
+        }
+
+        function showStatus(elementId, message, type) {
+            const el = document.getElementById(elementId);
+            el.className = `status ${type}`;
+            el.textContent = message;
+            setTimeout(() => el.textContent = '', 5000);
+        }
+
+        function showLoading(elementId) {
+            document.getElementById(elementId).innerHTML = '<div class="loading"><div class="spinner"></div>Loading...</div>';
+        }
+
+        function showResult(elementId, data) {
+            document.getElementById(elementId).innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        }
+
+        function showError(elementId, error) {
+            document.getElementById(elementId).innerHTML = '<div style="color: red;">Error: ' + error + '</div>';
+        }
+
+        async function apiCall(endpoint, method = 'GET', body = null) {
+            if (!JWT_TOKEN) {
+                throw new Error('Please set your JWT token first');
+            }
+
+            const options = {
+                method,
+                headers: {
+                    'Authorization': `Bearer ${JWT_TOKEN}`,
+                    'Content-Type': 'application/json'
+                }
+            };
+
+            if (body) {
+                options.body = JSON.stringify(body);
+            }
+
+            const response = await fetch(`${API_BASE}${endpoint}`, options);
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || `HTTP ${response.status}`);
+            }
+            return response.json();
+        }
+
+        async function fetchStats() {
+            showLoading('stats-result');
+            try {
+                const data = await apiCall('/api/admin/stats');
+
+                // Format stats nicely
+                const html = `
+                    <div class="stats-grid">
+                        <div class="stat">
+                            <div class="stat-value">${data.users.total}</div>
+                            <div class="stat-label">Total Users</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${data.users.totalCreditsHeld}</div>
+                            <div class="stat-label">Credits Held</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${data.transactions.totalCreditsPurchased}</div>
+                            <div class="stat-label">Purchased</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${data.transactions.totalCreditsUsed}</div>
+                            <div class="stat-label">Used</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${data.letters.total}</div>
+                            <div class="stat-label">Total Letters</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${data.letters.sent}</div>
+                            <div class="stat-label">Sent</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${data.orders.total}</div>
+                            <div class="stat-label">Orders</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">$${(data.orders.totalRevenueCents / 100).toFixed(2)}</div>
+                            <div class="stat-label">Revenue</div>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('stats-result').innerHTML = html;
+            } catch (error) {
+                showError('stats-result', error.message);
+            }
+        }
+
+        async function fetchUsers() {
+            showLoading('users-result');
+            try {
+                const data = await apiCall('/api/admin/users?limit=10');
+
+                if (data.users.length === 0) {
+                    document.getElementById('users-result').innerHTML = '<p>No users found</p>';
+                    return;
+                }
+
+                const html = `
+                    <table>
+                        <tr>
+                            <th>User ID</th>
+                            <th>Email</th>
+                            <th>Credits</th>
+                            <th>Purchased</th>
+                            <th>Used</th>
+                        </tr>
+                        ${data.users.map(u => `
+                            <tr>
+                                <td style="font-family: monospace; font-size: 10px;" title="${u.userId}">${u.userId.substring(0, 20)}...</td>
+                                <td>${u.email}</td>
+                                <td>${u.credits}</td>
+                                <td>${u.creditsPurchased}</td>
+                                <td>${u.creditsUsed}</td>
+                            </tr>
+                        `).join('')}
+                    </table>
+                    <p style="margin-top: 10px; font-size: 12px; color: #666;">
+                        Showing ${data.users.length} of ${data.total} users
+                    </p>
+                `;
+                document.getElementById('users-result').innerHTML = html;
+            } catch (error) {
+                showError('users-result', error.message);
+            }
+        }
+
+        async function fetchJobs() {
+            showLoading('jobs-result');
+            try {
+                const data = await apiCall('/api/admin/jobs?limit=20');
+
+                if (data.jobs.length === 0) {
+                    document.getElementById('jobs-result').innerHTML = '<p>No jobs found</p>';
+                    return;
+                }
+
+                const html = `
+                    <table>
+                        <tr>
+                            <th>Letter ID</th>
+                            <th>Status</th>
+                            <th>Attempts</th>
+                            <th>Created</th>
+                        </tr>
+                        ${data.jobs.map(j => `
+                            <tr>
+                                <td style="font-family: monospace; font-size: 10px;">${j.letterId.substring(0, 8)}...</td>
+                                <td><span class="badge badge-${j.status}">${j.status}</span></td>
+                                <td>${j.attempts}/${j.maxAttempts}</td>
+                                <td>${new Date(j.createdAt).toLocaleString()}</td>
+                            </tr>
+                        `).join('')}
+                    </table>
+                    <p style="margin-top: 10px; font-size: 12px; color: #666;">
+                        Showing ${data.jobs.length} of ${data.total} jobs
+                    </p>
+                `;
+                document.getElementById('jobs-result').innerHTML = html;
+            } catch (error) {
+                showError('jobs-result', error.message);
+            }
+        }
+
+        async function fetchPgBossJobs() {
+            showLoading('jobs-result');
+            try {
+                const data = await apiCall('/api/admin/pgboss/jobs');
+
+                if (data.jobs.length === 0) {
+                    document.getElementById('jobs-result').innerHTML = '<p>No pg-boss jobs found</p>';
+                    return;
+                }
+
+                const html = `
+                    <table>
+                        <tr>
+                            <th>Queue</th>
+                            <th>State</th>
+                            <th>Retries</th>
+                            <th>Created</th>
+                        </tr>
+                        ${data.jobs.map(j => `
+                            <tr>
+                                <td>${j.name}</td>
+                                <td><span class="badge badge-${j.state}">${j.state}</span></td>
+                                <td>${j.retry_count}/${j.retry_limit}</td>
+                                <td>${new Date(j.created_on).toLocaleString()}</td>
+                            </tr>
+                        `).join('')}
+                    </table>
+                    <p style="margin-top: 10px; font-size: 12px; color: #666;">
+                        Showing ${data.jobs.length} of ${data.total} jobs
+                    </p>
+                `;
+                document.getElementById('jobs-result').innerHTML = html;
+            } catch (error) {
+                showError('jobs-result', error.message);
+            }
+        }
+
+        async function adjustCredits() {
+            const userId = document.getElementById('adjust-user-id').value.trim();
+            const amount = parseInt(document.getElementById('adjust-amount').value);
+            const reason = document.getElementById('adjust-reason').value.trim();
+
+            if (!userId || isNaN(amount) || !reason) {
+                showError('adjust-result', 'Please fill in all fields');
+                return;
+            }
+
+            showLoading('adjust-result');
+            try {
+                const data = await apiCall('/api/admin/credits/adjust', 'POST', {
+                    userId,
+                    amount,
+                    reason
+                });
+
+                const html = `
+                    <div style="color: green; font-weight: bold;">✅ Credits Adjusted</div>
+                    <p style="margin-top: 10px;">
+                        Amount: ${amount}<br>
+                        New Balance: ${data.newBalance}<br>
+                        Transaction ID: ${data.transaction.transactionId}
+                    </p>
+                `;
+                document.getElementById('adjust-result').innerHTML = html;
+            } catch (error) {
+                showError('adjust-result', error.message);
+            }
+        }
+
+        async function lookupUser() {
+            const userId = document.getElementById('lookup-user-id').value.trim();
+
+            if (!userId) {
+                showError('lookup-user-result', 'Please enter a user ID');
+                return;
+            }
+
+            showLoading('lookup-user-result');
+            try {
+                const data = await apiCall(`/api/admin/users/${encodeURIComponent(userId)}`);
+
+                const html = `
+                    <h3 style="margin-bottom: 10px; color: #667eea;">${data.user.email}</h3>
+                    <div class="stats-grid">
+                        <div class="stat">
+                            <div class="stat-value">${data.user.credits}</div>
+                            <div class="stat-label">Credits</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${data.user.creditsPurchased}</div>
+                            <div class="stat-label">Purchased</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${data.user.creditsUsed}</div>
+                            <div class="stat-label">Used</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${data.stats.totalLetters}</div>
+                            <div class="stat-label">Letters</div>
+                        </div>
+                    </div>
+                    <h4 style="margin-top: 15px; margin-bottom: 10px;">Recent Transactions</h4>
+                    ${data.stats.recentTransactions.length === 0 ? '<p>No transactions</p>' : `
+                        <table>
+                            <tr>
+                                <th>Amount</th>
+                                <th>Type</th>
+                                <th>Balance After</th>
+                                <th>Date</th>
+                            </tr>
+                            ${data.stats.recentTransactions.map(tx => `
+                                <tr>
+                                    <td style="color: ${tx.amount > 0 ? 'green' : 'red'}; font-weight: bold;">${tx.amount > 0 ? '+' : ''}${tx.amount}</td>
+                                    <td>${tx.transaction_type}</td>
+                                    <td>${tx.balance_after}</td>
+                                    <td>${new Date(tx.created_at).toLocaleString()}</td>
+                                </tr>
+                            `).join('')}
+                        </table>
+                    `}
+                    <p style="margin-top: 10px; font-size: 11px; color: #666;">
+                        User ID: ${data.user.userId}<br>
+                        Created: ${new Date(data.user.createdAt).toLocaleString()}<br>
+                        Updated: ${new Date(data.user.updatedAt).toLocaleString()}
+                    </p>
+                `;
+                document.getElementById('lookup-user-result').innerHTML = html;
+            } catch (error) {
+                showError('lookup-user-result', error.message);
+            }
+        }
+
+        async function lookupJob() {
+            const jobId = document.getElementById('lookup-job-id').value.trim();
+
+            if (!jobId) {
+                showError('lookup-job-result', 'Please enter a job ID');
+                return;
+            }
+
+            showLoading('lookup-job-result');
+            try {
+                const data = await apiCall(`/api/admin/jobs/${encodeURIComponent(jobId)}`);
+
+                const html = `
+                    <h3 style="margin-bottom: 10px; color: #667eea;">Job Details</h3>
+                    <table>
+                        <tr>
+                            <th>Field</th>
+                            <th>Value</th>
+                        </tr>
+                        <tr>
+                            <td>Status</td>
+                            <td><span class="badge badge-${data.job.status}">${data.job.status}</span></td>
+                        </tr>
+                        <tr>
+                            <td>Attempts</td>
+                            <td>${data.job.attempts} / ${data.job.maxAttempts}</td>
+                        </tr>
+                        <tr>
+                            <td>Letter ID</td>
+                            <td style="font-family: monospace; font-size: 10px;">${data.job.letterId}</td>
+                        </tr>
+                        <tr>
+                            <td>Created</td>
+                            <td>${new Date(data.job.createdAt).toLocaleString()}</td>
+                        </tr>
+                        ${data.job.startedAt ? `
+                        <tr>
+                            <td>Started</td>
+                            <td>${new Date(data.job.startedAt).toLocaleString()}</td>
+                        </tr>
+                        ` : ''}
+                        ${data.job.completedAt ? `
+                        <tr>
+                            <td>Completed</td>
+                            <td>${new Date(data.job.completedAt).toLocaleString()}</td>
+                        </tr>
+                        ` : ''}
+                        ${data.job.errorMessage ? `
+                        <tr>
+                            <td>Error</td>
+                            <td style="color: red;">${data.job.errorMessage}</td>
+                        </tr>
+                        ` : ''}
+                    </table>
+                    ${data.letter ? `
+                        <h4 style="margin-top: 15px; margin-bottom: 10px;">Associated Letter</h4>
+                        <table>
+                            <tr>
+                                <th>Field</th>
+                                <th>Value</th>
+                            </tr>
+                            <tr>
+                                <td>Status</td>
+                                <td>${data.letter.status}</td>
+                            </tr>
+                            <tr>
+                                <td>From Name</td>
+                                <td>${data.letter.from_name}</td>
+                            </tr>
+                            <tr>
+                                <td>To Name</td>
+                                <td>${data.letter.to_name}</td>
+                            </tr>
+                            <tr>
+                                <td>To Address</td>
+                                <td>${data.letter.to_address_line1}, ${data.letter.to_city}, ${data.letter.to_state} ${data.letter.to_postal_code}</td>
+                            </tr>
+                            <tr>
+                                <td>Message Preview</td>
+                                <td>${data.letter.message.substring(0, 100)}${data.letter.message.length > 100 ? '...' : ''}</td>
+                            </tr>
+                        </table>
+                    ` : '<p>No associated letter found</p>'}
+                `;
+                document.getElementById('lookup-job-result').innerHTML = html;
+            } catch (error) {
+                showError('lookup-job-result', error.message);
+            }
+        }
+
+        async function lookupUserJobs() {
+            const userId = document.getElementById('user-jobs-user-id').value.trim();
+
+            if (!userId) {
+                showError('user-jobs-result', 'Please enter a user ID');
+                return;
+            }
+
+            showLoading('user-jobs-result');
+            try {
+                const data = await apiCall(`/api/admin/jobs/user/${encodeURIComponent(userId)}?limit=20`);
+
+                if (data.jobs.length === 0) {
+                    document.getElementById('user-jobs-result').innerHTML = '<p>No jobs found for this user</p>';
+                    return;
+                }
+
+                const html = `
+                    <table>
+                        <tr>
+                            <th>Letter ID</th>
+                            <th>Status</th>
+                            <th>Attempts</th>
+                            <th>Created</th>
+                        </tr>
+                        ${data.jobs.map(j => `
+                            <tr>
+                                <td style="font-family: monospace; font-size: 10px;">${j.letterId.substring(0, 8)}...</td>
+                                <td><span class="badge badge-${j.status}">${j.status}</span></td>
+                                <td>${j.attempts}/${j.maxAttempts}</td>
+                                <td>${new Date(j.createdAt).toLocaleString()}</td>
+                            </tr>
+                        `).join('')}
+                    </table>
+                    <p style="margin-top: 10px; font-size: 12px; color: #666;">
+                        Showing ${data.jobs.length} of ${data.total} jobs for user
+                    </p>
+                `;
+                document.getElementById('user-jobs-result').innerHTML = html;
+            } catch (error) {
+                showError('user-jobs-result', error.message);
+            }
+        }
+    </script>
+</body>
+</html>
