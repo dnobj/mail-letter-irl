@@ -110,9 +110,11 @@ open http://localhost:8788/admin-panel.html
 - User metadata (created/updated dates)
 
 **Usage:**
-1. Enter user ID (e.g., `auth0|123456...`)
+1. Enter full user ID (e.g., `google-oauth2|100183416573162262799`)
 2. Click "Look Up User"
 3. View detailed user information
+
+**Note:** User IDs are displayed in full (no truncation) for accurate copy/paste
 
 **Use Cases:**
 - Customer support inquiries
@@ -208,11 +210,11 @@ open http://localhost:8788/admin-panel.html
 
 **Examples:**
 ```
-User ID: auth0|12345...
+User ID: google-oauth2|100183416573162262799
 Amount: +25
 Reason: Customer service credit for delayed delivery
 
-User ID: auth0|67890...
+User ID: auth0|507f1f77bcf86cd799439011
 Amount: -5
 Reason: Correction for duplicate charge
 ```
