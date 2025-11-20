@@ -32,4 +32,6 @@ export const getOrderStatusInputZ = z.object({
 
 export const getAccountBalanceInputZ = z.object({});
 
-export const switchAccountInputZ = z.object({});
+export const listOrdersInputZ = z.object({
+  limit: z.number().optional()
+});

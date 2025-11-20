@@ -92,7 +92,7 @@ export const getOrderStatusTool: McpToolDefinition<
   GetOrderStatusOutput
 > = {
   name: "get_order_status",
-  description: "Retrieve the latest status timeline for a letter order.",
+  description: "Retrieve the latest status timeline for a letter order. If no orderId is provided, returns the most recent order.",
   readOnly: true,
   inputSchema: getOrderStatusInputSchema,
   outputSchema: getOrderStatusOutputSchema,

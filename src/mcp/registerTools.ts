@@ -7,7 +7,7 @@ import {
   sendLetterInputZ,
   getOrderStatusInputZ,
   getAccountBalanceInputZ,
-  switchAccountInputZ
+  listOrdersInputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
@@ -21,7 +21,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   send_letter: sendLetterInputZ,
   get_order_status: getOrderStatusInputZ,
   get_account_balance: getAccountBalanceInputZ,
-  switch_account: switchAccountInputZ
+  list_orders: listOrdersInputZ
 };
 
 function getZodShape(name: string) {
@@ -139,9 +139,10 @@ function summarizeToolResult(
       const status = result.currentStatus ?? "unknown";
       return `Latest order status: ${status}.`;
     }
-    case "switch_account": {
-      const instructions = result.instructions as string;
-      return instructions || "Account switch instructions ready.";
+    case "list_orders": {
+      const orders = result.orders as any[];
+      const total = result.total ?? 0;
+      return `Found ${orders?.length ?? 0} recent orders (${total} total).`;
     }
     default:
       return JSON.stringify(result);

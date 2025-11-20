@@ -136,3 +136,39 @@ export const getAccountBalanceOutputSchema: JsonSchema = {
     message: { type: "string" }
   }
 };
+
+export const listOrdersInputSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    limit: { type: "number", description: "Maximum number of orders to return (default: 10)" }
+  }
+};
+
+export const listOrdersOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["orders", "total"],
+  properties: {
+    orders: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["orderId", "recipient", "status", "sentAt"],
+        properties: {
+          orderId: { type: "string" },
+          recipient: {
+            type: "object",
+            required: ["name", "city", "state"],
+            properties: {
+              name: { type: "string" },
+              city: { type: "string" },
+              state: { type: "string" }
+            }
+          },
+          status: { type: "string" },
+          sentAt: { type: "string" }
+        }
+      }
+    },
+    total: { type: "number", description: "Total number of orders for this user" }
+  }
+};

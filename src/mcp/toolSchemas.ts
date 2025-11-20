@@ -29,7 +29,9 @@ export const toolInputSchemas = {
     orderId: z.string().optional()
   }),
   get_account_balance: z.object({}).strict(),
-  switch_account: z.object({}).strict()
+  list_orders: z.object({
+    limit: z.number().optional()
+  })
 };
 
 export type ToolInputSchemaName = keyof typeof toolInputSchemas;
