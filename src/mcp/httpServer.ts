@@ -15,6 +15,10 @@ import {
 } from "../auth/tokenValidator.js";
 import { handleCreditApiRequest } from "../api/creditApiHandler.js";
 import { handleAdminApiRequest } from "../api/adminApiHandler.js";
+import {
+  handleCreateCheckoutSession,
+  handleStripeWebhook
+} from "../api/dashboardApiHandler.js";
 import { initializeJobQueue, stopJobQueue } from "../services/jobQueue.js";
 import { startLetterWorker } from "../workers/letterWorker.js";
 
@@ -22,6 +26,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DEFAULT_WIDGET_DIR = path.resolve(__dirname, "..", "..", "widgets");
+const DASHBOARD_DIR = path.resolve(__dirname, "..", "..", "public", "dashboard");
 const DEFAULT_HOST = process.env.LETTER_IRL_HTTP_HOST ?? "127.0.0.1";
 const DEFAULT_PORT = Number(process.env.LETTER_IRL_HTTP_PORT ?? "8090");
 const MCP_PATH = process.env.LETTER_IRL_MCP_PATH ?? "/mcp";
@@ -110,6 +115,60 @@ async function serveWidget(
     }
     res.statusCode = 500;
     res.end("Internal Server Error");
+    return true;
+  }
+}
+
+/**
+ * Serve dashboard static files
+ */
+async function serveDashboardFile(
+  requestPath: string,
+  res: http.ServerResponse
+): Promise<boolean> {
+  try {
+    // Remove /dashboard prefix
+    const relativePath = requestPath.replace(/^\/dashboard\/?/, '');
+
+    // Default to index.html for /dashboard and /dashboard/
+    const filePath = relativePath === ''
+      ? path.join(DASHBOARD_DIR, 'index.html')
+      : path.join(DASHBOARD_DIR, relativePath);
+
+    // Security check: ensure file is within DASHBOARD_DIR
+    const resolvedPath = path.resolve(filePath);
+    if (!resolvedPath.startsWith(DASHBOARD_DIR)) {
+      res.statusCode = 403;
+      res.end('Forbidden');
+      return true;
+    }
+
+    const file = await fs.readFile(resolvedPath);
+
+    // Determine content type
+    const ext = path.extname(resolvedPath).toLowerCase();
+    const contentTypes: Record<string, string> = {
+      '.html': 'text/html; charset=utf-8',
+      '.js': 'application/javascript; charset=utf-8',
+      '.css': 'text/css; charset=utf-8',
+      '.json': 'application/json; charset=utf-8',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.svg': 'image/svg+xml'
+    };
+
+    res.statusCode = 200;
+    res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
+    res.end(file);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    console.error('Error serving dashboard file:', error);
+    res.statusCode = 500;
+    res.end('Internal Server Error');
     return true;
   }
 }
@@ -319,8 +378,26 @@ export async function startHttpServer() {
       return;
     }
 
-    // Serve admin panel
-    if (url.pathname === "/admin" || url.pathname === "/admin.html") {
+    // Serve admin panel (localhost only)
+    if (url.pathname === "/admin" || url.pathname === "/admin.html" || url.pathname === "/admin-panel.html") {
+      // Restrict to localhost only - block ngrok and other proxies
+      const remoteAddress = req.socket.remoteAddress;
+      const isLocalhost = remoteAddress === '127.0.0.1' ||
+                          remoteAddress === '::1' ||
+                          remoteAddress === '::ffff:127.0.0.1';
+
+      // Also block if coming through ngrok or other proxies
+      const isProxied = req.headers['x-forwarded-for'] ||
+                        req.headers['x-real-ip'] ||
+                        req.headers['ngrok-agent-ips'];
+
+      if (!isLocalhost || isProxied) {
+        res.statusCode = 403;
+        res.setHeader("Content-Type", "text/plain");
+        res.end("Admin panel is only accessible from localhost. Use SSH tunnel: ssh -L 8788:localhost:8788 your-server");
+        return;
+      }
+
       const fs = await import("fs/promises");
       const path = await import("path");
       const filePath = path.join(process.cwd(), "admin-panel.html");
@@ -336,20 +413,25 @@ export async function startHttpServer() {
       return;
     }
 
-    // Serve admin token file
-    if (url.pathname === "/admin-token.js") {
-      const fs = await import("fs/promises");
-      const path = await import("path");
-      const filePath = path.join(process.cwd(), "admin-token.js");
-      try {
-        const content = await fs.readFile(filePath, "utf-8");
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/javascript");
-        res.end(content);
-      } catch (err: any) {
+    // Dashboard routes
+    if (url.pathname.startsWith("/dashboard")) {
+      const served = await serveDashboardFile(url.pathname, res);
+      if (!served) {
         res.statusCode = 404;
-        res.end("// Token file not found");
+        res.end("Dashboard file not found");
       }
+      return;
+    }
+
+    // Stripe Checkout API
+    if (url.pathname === "/api/stripe/create-checkout-session" && req.method === "POST") {
+      await handleCreateCheckoutSession(req as any, res as any);
+      return;
+    }
+
+    // Stripe webhook
+    if (url.pathname === "/webhooks/stripe" && req.method === "POST") {
+      await handleStripeWebhook(req as any, res as any);
       return;
     }
 

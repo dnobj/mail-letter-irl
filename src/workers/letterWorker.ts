@@ -13,9 +13,24 @@ import { getLetterProvider, type LetterParams } from '../services/providers/inde
 const LETTER_QUEUE = 'send-letter';
 
 /**
- * Process a letter job
+ * Normalize country codes to US (2-letter ISO code)
+ * Accept: US, USA, United States, us, usa, etc.
  */
-async function processLetterJob(job: any): Promise<void> {
+function normalizeCountryToUS(country?: string): string {
+  if (!country) return 'US';
+  const normalized = country.toUpperCase().trim();
+  if (normalized === 'US' || normalized === 'USA' || normalized === 'UNITED STATES' || normalized === 'U.S.' || normalized === 'U.S.A.') {
+    return 'US';
+  }
+  return normalized;
+}
+
+/**
+ * Process a letter job
+ * NOTE: pg-boss v10 passes jobs as an array for potential batch processing
+ */
+async function processLetterJob(jobs: any[]): Promise<void> {
+  const [job] = jobs; // Destructure the array to get the single job
   const payload: LetterJobPayload = job.data;
   const { letterId, userId, content, recipient, creditsCost } = payload;
 
@@ -41,23 +56,28 @@ async function processLetterJob(job: any): Promise<void> {
     // Get the letter provider (DummyProvider or real provider)
     const provider = getLetterProvider();
 
-    // Parse address from recipient data
-    const addressParts = (recipient.address || '').split(',').map((s: string) => s.trim());
-    const [line1, city, stateZip] = addressParts;
-    const [state, postalCode] = (stateZip || '').split(' ');
-
     // Build provider-specific parameters
+    // Recipient data is already structured with addressLine1, city, state, etc.
     const letterParams: LetterParams = {
       recipientName: recipient.name,
       recipientAddress: {
-        line1: line1 || '',
-        city: city || '',
-        state: state || '',
-        postalCode: postalCode || '',
-        country: 'US'
+        line1: recipient.addressLine1 || '',
+        line2: recipient.addressLine2,
+        city: recipient.city || '',
+        state: recipient.state || '',
+        postalCode: recipient.postalCode || '',
+        country: normalizeCountryToUS(recipient.country)
       },
-      senderName: content.from || 'Letter IRL',
-      message: content.message,
+      senderName: content.sender?.name || 'Letter IRL',
+      senderAddress: content.sender ? {
+        line1: content.sender.addressLine1 || '',
+        line2: content.sender.addressLine2,
+        city: content.sender.city || '',
+        state: content.sender.state || '',
+        postalCode: content.sender.postalCode || '',
+        country: normalizeCountryToUS(content.sender.country)
+      } : undefined,
+      message: `${content.bodyText}\n\n${content.signOff || ''}`.trim(),
       color: false,
       doubleSided: false,
       metadata: {

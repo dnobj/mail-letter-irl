@@ -50,6 +50,41 @@ async function handler(
     throw new Error("send_letter requires confirm: true");
   }
 
+  // Normalize country codes to US (2-letter ISO code)
+  // Accept: US, USA, United States, us, usa, etc.
+  const normalizeCountryToUS = (country?: string): string => {
+    if (!country) return 'US';
+    const normalized = country.toUpperCase().trim();
+    if (normalized === 'US' || normalized === 'USA' || normalized === 'UNITED STATES' || normalized === 'U.S.' || normalized === 'U.S.A.') {
+      return 'US';
+    }
+    return normalized;
+  };
+
+  input.sender.country = normalizeCountryToUS(input.sender.country);
+  input.recipient.country = normalizeCountryToUS(input.recipient.country);
+
+  // Validate one-page constraint (~1,800 characters maximum)
+  const MAX_CHARS_PER_PAGE = 1800;
+  const totalChars = `${input.bodyText}\n\n${input.signOff}`.length;
+
+  if (totalChars > MAX_CHARS_PER_PAGE) {
+    context.logger.warn(
+      {
+        correlationId: context.correlationId,
+        event: "send.letter.exceeds_page_limit",
+        totalChars,
+        maxChars: MAX_CHARS_PER_PAGE
+      },
+      "Letter exceeds one-page limit"
+    );
+    throw new Error(
+      `Letter exceeds one-page limit (${totalChars}/${MAX_CHARS_PER_PAGE} characters). ` +
+      `Please shorten your message to fit on one page. ` +
+      `All letters are currently limited to one page maximum.`
+    );
+  }
+
   // Use database-backed credit deduction (handles balance check atomically)
   const userId = context.user.userId;
   const now = context.now().toISOString();

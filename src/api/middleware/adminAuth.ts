@@ -43,7 +43,27 @@ export async function authenticateAdmin(
   req: IncomingMessage,
   res: ServerResponse
 ): Promise<AdminAuthInfo | null> {
-  // Check for Authorization header
+  // Allow localhost requests without authentication (admin panel is localhost-only)
+  const remoteAddress = req.socket.remoteAddress;
+  const isLocalhost = remoteAddress === '127.0.0.1' ||
+                      remoteAddress === '::1' ||
+                      remoteAddress === '::ffff:127.0.0.1';
+
+  // Block if coming through proxy (ngrok, etc.)
+  const isProxied = req.headers['x-forwarded-for'] ||
+                    req.headers['x-real-ip'] ||
+                    req.headers['ngrok-agent-ips'];
+
+  if (isLocalhost && !isProxied) {
+    console.log('✅ Admin API: Localhost access (no auth required)');
+    return {
+      userId: 'localhost-admin',
+      email: 'localhost@admin',
+      isAdmin: true
+    };
+  }
+
+  // For remote access, require Authorization header
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {

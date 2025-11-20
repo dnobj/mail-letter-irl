@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Letter IRL - Admin Panel</title>
-    <script src="admin-token.js"></script>
     <style>
         * {
             margin: 0;
@@ -228,13 +227,7 @@
         <div class="header">
             <h1>📊 Letter IRL - Admin Panel</h1>
             <p>Monitor system stats, users, credits, and job queue</p>
-
-            <div class="auth-section">
-                <label><strong>JWT Token:</strong></label>
-                <input type="password" id="jwt-token" placeholder="Paste your JWT token here (from server logs or ChatGPT session)">
-                <button onclick="saveToken()">Save Token</button>
-                <div id="auth-status"></div>
-            </div>
+            <p style="margin-top: 10px; color: #666; font-size: 13px;">🔒 Localhost-only access</p>
         </div>
 
         <div class="grid">
@@ -315,37 +308,11 @@
     </div>
 
     <script>
-        const API_BASE = 'http://localhost:8788';
-        let JWT_TOKEN = localStorage.getItem('admin_jwt_token') || '';
-
-        // Load token on page load
-        window.onload = function() {
-            // First, try to load from admin-token.js file
-            if (typeof ADMIN_JWT_TOKEN !== 'undefined' && ADMIN_JWT_TOKEN) {
-                JWT_TOKEN = ADMIN_JWT_TOKEN;
-                localStorage.setItem('admin_jwt_token', JWT_TOKEN);
-                document.getElementById('jwt-token').value = JWT_TOKEN;
-                showStatus('auth-status', 'Token auto-loaded from admin-token.js file ✓', 'success');
-            } else if (JWT_TOKEN) {
-                document.getElementById('jwt-token').value = JWT_TOKEN;
-                showStatus('auth-status', 'Token loaded from storage', 'success');
-            } else {
-                showStatus('auth-status', 'No token found. Please paste your JWT token or create admin-token.js', 'error');
-            }
-        };
-
-        function saveToken() {
-            JWT_TOKEN = document.getElementById('jwt-token').value.trim();
-            if (JWT_TOKEN) {
-                localStorage.setItem('admin_jwt_token', JWT_TOKEN);
-                showStatus('auth-status', 'Token saved! You can now use the API endpoints.', 'success');
-            } else {
-                showStatus('auth-status', 'Please enter a valid token', 'error');
-            }
-        }
+        const API_BASE = window.location.origin;
 
         function showStatus(elementId, message, type) {
             const el = document.getElementById(elementId);
+            if (!el) return;
             el.className = `status ${type}`;
             el.textContent = message;
             setTimeout(() => el.textContent = '', 5000);
@@ -364,14 +331,9 @@
         }
 
         async function apiCall(endpoint, method = 'GET', body = null) {
-            if (!JWT_TOKEN) {
-                throw new Error('Please set your JWT token first');
-            }
-
             const options = {
                 method,
                 headers: {
-                    'Authorization': `Bearer ${JWT_TOKEN}`,
                     'Content-Type': 'application/json'
                 }
             };
@@ -381,8 +343,9 @@
             }
 
             const response = await fetch(`${API_BASE}${endpoint}`, options);
+
             if (!response.ok) {
-                const error = await response.json();
+                const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
                 throw new Error(error.message || `HTTP ${response.status}`);
             }
             return response.json();
