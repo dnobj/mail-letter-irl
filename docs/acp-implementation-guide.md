@@ -46,9 +46,9 @@ Product feeds can be TSV, CSV, or JSON. For Letter IRL, we'll use JSON for maxim
 
 | Field | Type | Description | Example |
 |-------|------|-------------|---------|
-| `product_id` | string | Unique identifier | `"credit-pack-5"` |
-| `name` | string | Display name | `"5 Credit Package"` |
-| `price` | string | Price with currency | `"USD 2.99"` |
+| `product_id` | string | Unique identifier | `"credit-pack-4"` |
+| `name` | string | Display name | `"4 Credit Package"` |
+| `price` | string | Price with currency | `"USD 5.00"` |
 | `description` | string | Product description | `"Perfect for sending 1-2 letters"` |
 | `category` | string | Product category | `"credit-packages"` |
 | `image_url` | string | Product image (HTTPS) | `"https://..."` |
@@ -60,48 +60,51 @@ Product feeds can be TSV, CSV, or JSON. For Letter IRL, we'll use JSON for maxim
 {
   "products": [
     {
-      "product_id": "credit-pack-5",
-      "name": "Starter Pack - 5 Credits",
-      "price": "USD 2.99",
-      "description": "Perfect for sending 1-2 letters. Each letter costs 2-3 credits depending on page count.",
+      "product_id": "credit-pack-4",
+      "name": "Starter Pack - 4 Credits",
+      "price": "USD 5.00",
+      "description": "Perfect for trying out Letter IRL. Send 2 physical letters. Each letter costs 2 credits (one page).",
       "category": "credit-packages",
-      "image_url": "https://your-domain.com/images/credit-pack-5.png",
+      "image_url": "https://your-domain.com/images/credit-pack-4.png",
       "availability": "in stock",
       "metadata": {
-        "credits": 5,
+        "credits": 4,
         "best_for": "trying_out",
-        "value_per_credit": 0.598
+        "value_per_credit": 1.25,
+        "credits_per_dollar": 0.8
       }
     },
     {
-      "product_id": "credit-pack-20",
-      "name": "Regular Pack - 20 Credits",
-      "price": "USD 9.99",
-      "description": "Great for regular letter senders. Send 6-10 letters with this package.",
+      "product_id": "credit-pack-10",
+      "name": "Regular Pack - 10 Credits",
+      "price": "USD 10.00",
+      "description": "Most popular choice! Great for regular letter senders. Send 5 physical letters. Simple $1 per credit pricing.",
       "category": "credit-packages",
-      "image_url": "https://your-domain.com/images/credit-pack-20.png",
+      "image_url": "https://your-domain.com/images/credit-pack-10.png",
       "availability": "in stock",
       "metadata": {
-        "credits": 20,
+        "credits": 10,
         "best_for": "regular_use",
-        "value_per_credit": 0.4995,
-        "savings_percent": 16
+        "value_per_credit": 1.00,
+        "credits_per_dollar": 1.00,
+        "badge": "POPULAR"
       }
     },
     {
       "product_id": "credit-pack-100",
       "name": "Power Pack - 100 Credits",
-      "price": "USD 39.99",
-      "description": "Best value for frequent senders. Send 30-50 letters. Save 33% vs Starter Pack!",
+      "price": "USD 90.00",
+      "description": "Best value for frequent senders! Send 50 physical letters with 10% savings per letter. Perfect for businesses and power users.",
       "category": "credit-packages",
       "image_url": "https://your-domain.com/images/credit-pack-100.png",
       "availability": "in stock",
       "metadata": {
         "credits": 100,
         "best_for": "power_users",
-        "value_per_credit": 0.3999,
-        "savings_percent": 33,
-        "popular": true
+        "value_per_credit": 0.90,
+        "credits_per_dollar": 1.11,
+        "savings_percent": 10,
+        "badge": "BEST VALUE"
       }
     }
   ]

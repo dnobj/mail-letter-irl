@@ -209,6 +209,64 @@ export interface LetterFulfillmentProvider {
    * @returns Whether provider is ready to use
    */
   validateConnection(): Promise<boolean>;
+
+  /**
+   * Validate an address (if supported by provider)
+   * @param address Address to validate
+   * @returns Validation result with corrected address if available
+   */
+  validateAddress?(address: AddressValidationInput): Promise<AddressValidationResult>;
+}
+
+/**
+ * Address validation input
+ */
+export interface AddressValidationInput {
+  line1: string;
+  line2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+}
+
+/**
+ * Address validation result
+ */
+export interface AddressValidationResult {
+  /** Validation status */
+  status: 'verified' | 'corrected' | 'failed';
+
+  /** Whether the address is deliverable */
+  isValid: boolean;
+
+  /** Original address (as provided) */
+  originalAddress: AddressValidationInput;
+
+  /** Corrected/verified address (if status is 'verified' or 'corrected') */
+  verifiedAddress?: {
+    line1: string;
+    line2?: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: string;
+  };
+
+  /** Specific errors or issues found */
+  errors?: Array<{
+    field: string;
+    message: string;
+  }>;
+
+  /** Additional details (county, congressional district, etc.) */
+  details?: Record<string, any>;
+
+  /** Geographic coordinates (if available) */
+  geocode?: {
+    latitude: number;
+    longitude: number;
+  };
 }
 
 /**

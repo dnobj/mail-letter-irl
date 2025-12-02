@@ -18,10 +18,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.5",
+    "@types/cookie-parser": "^1.4.10",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",
     "jose": "^6.1.0",
     "pg": "^8.11.3",
     "pg-boss": "^10.3.3",
+    "stripe": "^20.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

@@ -117,7 +117,7 @@ export interface Letter {
   credits_cost: number;
   status: LetterStatus;
   preview_html?: string;
-  tracking_number?: string;
+  tracking_id?: string;
   created_at: Date;
   sent_at?: Date;
 }

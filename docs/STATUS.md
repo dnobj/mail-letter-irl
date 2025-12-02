@@ -1,6 +1,6 @@
 # Letter IRL - Project Status
 
-**Last Updated:** November 18, 2025
+**Last Updated:** November 19, 2025
 **Current Phase:** Phase 6 - ACP Integration (Next) 📋
 **Overall Progress:** 71% (5 of 7 phases complete)
 
@@ -295,7 +295,7 @@ POST /api/admin/credits/adjust     - Manually adjust user credits
 1. **Product Feed** (30 min)
    - Create JSON product catalog
    - Serve at `/api/acp/v1/products.json`
-   - 3 credit packages (5, 20, 100 credits)
+   - 3 credit packages (4, 10, 100 credits)
 
 2. **Cart & Checkout API** (2-3 days)
    - `POST /cart/create`

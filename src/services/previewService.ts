@@ -14,10 +14,9 @@ export function estimateRequiredCredits(
   signOff: string,
   charsPerPage = DEFAULT_CHARS_PER_PAGE
 ): number {
-  const totalCharacters = `${bodyText}\n\n${signOff}`.length;
-  const pages = Math.ceil(totalCharacters / charsPerPage) || 1;
-  const credits = Math.max(1, pages);
-  return Math.ceil(credits * 2) / 2; // round up to nearest 0.5
+  // Flat rate: All letters cost 2 credits (one page maximum)
+  // Character counting is kept for validation in sendLetter/quoteAndPreview tools
+  return 2;
 }
 
 export function renderPreviewHtml(input: PreviewInput): string {

@@ -22,7 +22,7 @@ Cost: 2 credits
 Current balance: 0 credits
 
 You don't have enough credits. Would you like to purchase some?
-I have packages available: 5, 20, or 100 credits.
+I have packages available: 4, 10, or 100 credits.
 ```
 
 ### 2. Browse Products (ChatGPT retrieves product feed)
@@ -35,18 +35,18 @@ I have packages available: 5, 20, or 100 credits.
 ```
 Here are the available credit packages:
 
-📦 Starter Pack - 5 Credits - $2.99
+📦 Starter Pack - 4 Credits - $5.00
    Perfect for trying out Letter IRL
-   Send 1-2 letters
+   Send 2 letters
 
-📦 Regular Pack - 20 Credits - $9.99 ⭐ POPULAR
-   Save 16% vs Starter Pack
-   Send 6-10 letters
+📦 Regular Pack - 10 Credits - $10.00 ⭐ POPULAR
+   Simple $1 per credit pricing
+   Send 5 letters
    Most popular choice
 
-📦 Power Pack - 100 Credits - $39.99 💎 BEST VALUE
-   Save 33% vs Starter Pack
-   Send 30-50 letters
+📦 Power Pack - 100 Credits - $90.00 💎 BEST VALUE
+   Save 10% vs Regular Pack
+   Send 50 letters
    Best for businesses
 
 Which package would you like to purchase?
@@ -76,11 +76,11 @@ Which package would you like to purchase?
   "cart_id": "cart_abc123xyz",
   "items": [
     {
-      "product_id": "credit-pack-20",
-      "name": "Regular Pack - 20 Credits",
+      "product_id": "credit-pack-10",
+      "name": "Regular Pack - 10 Credits",
       "quantity": 1,
-      "unit_price": "USD 9.99",
-      "total_price": "USD 9.99"
+      "unit_price": "USD 10.00",
+      "total_price": "USD 10.00"
     }
   ]
 }
@@ -88,7 +88,7 @@ Which package would you like to purchase?
 
 **ChatGPT to User:**
 ```
-Added Regular Pack (20 credits) to your cart for $9.99.
+Added Regular Pack (10 credits) to your cart for $10.00.
 Ready to checkout?
 ```
 
@@ -104,16 +104,16 @@ Ready to checkout?
   "cart_id": "cart_abc123xyz",
   "items": [
     {
-      "product_id": "credit-pack-20",
-      "name": "Regular Pack - 20 Credits",
+      "product_id": "credit-pack-10",
+      "name": "Regular Pack - 10 Credits",
       "quantity": 1,
-      "unit_price": "USD 9.99",
-      "total_price": "USD 9.99"
+      "unit_price": "USD 10.00",
+      "total_price": "USD 10.00"
     }
   ],
-  "subtotal": "USD 9.99",
+  "subtotal": "USD 10.00",
   "tax": "USD 0.00",
-  "total": "USD 9.99"
+  "total": "USD 10.00"
 }
 ```
 
@@ -138,9 +138,9 @@ Ready to checkout?
 {
   "quote_id": "quote_xyz789",
   "cart_id": "cart_abc123xyz",
-  "subtotal": "USD 9.99",
+  "subtotal": "USD 10.00",
   "tax": "USD 0.00",
-  "total": "USD 9.99",
+  "total": "USD 10.00",
   "currency": "USD",
   "expires_at": "2025-01-14T12:20:00Z"
 }
@@ -148,7 +148,7 @@ Ready to checkout?
 
 **ChatGPT to User:**
 ```
-Your total is $9.99 (no tax for digital credits).
+Your total is $10.00 (no tax for digital credits).
 Ready to complete your purchase?
 ```
 
@@ -206,11 +206,11 @@ Idempotency-Key: chatgpt_20250114_120500_abc123
 {
   "order_id": "order_abc123",
   "status": "completed",
-  "total": "USD 9.99",
+  "total": "USD 10.00",
   "currency": "USD",
   "created_at": "2025-01-14T12:15:00Z",
-  "credits_added": 20,
-  "new_balance": 20,
+  "credits_added": 10,
+  "new_balance": 10,
   "receipt_url": "https://amitotically-gubernacular-elise.ngrok-free.dev/receipts/order_abc123"
 }
 ```
@@ -219,8 +219,8 @@ Idempotency-Key: chatgpt_20250114_120500_abc123
 ```
 ✅ Purchase complete!
 
-You've successfully purchased 20 credits for $9.99.
-New balance: 20 credits
+You've successfully purchased 10 credits for $10.00.
+New balance: 10 credits
 
 Receipt: [link to receipt]
 
@@ -247,7 +247,7 @@ To: Grandma Smith
    Springfield, IL 62701
 
 Credits used: 2
-Remaining balance: 18 credits
+Remaining balance: 8 credits
 
 Expected delivery: January 18, 2025
 
@@ -283,7 +283,7 @@ Tracking: [tracking link]
      │                            │  {cart_id: "cart_123"}     │                            │
      │                            │                            │                            │
      │                            │  POST /cart/items          │                            │
-     │                            │  {product_id: "pack-20"}   │                            │
+     │                            │  {product_id: "credit-pack-10"}│                        │
      │                            ├───────────────────────────>│                            │
      │                            │<───────────────────────────┤                            │
      │                            │  {items: [...]}            │                            │
@@ -318,7 +318,7 @@ Tracking: [tracking link]
      │                            │                            │<────────┘                  │
      │                            │                            │                            │
      │                            │<───────────────────────────┤                            │
-     │                            │  {order_id, credits: 20}   │                            │
+     │                            │  {order_id, credits: 10}   │                            │
      │                            │                            │                            │
      │ "Purchase complete!"       │                            │                            │
      │<───────────────────────────┤                            │                            │

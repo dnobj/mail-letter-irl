@@ -8,17 +8,23 @@
 - Development mode can stub a single user, but the data model must support multi-user tenancy.
 
 ## Credits Semantics
-- Each Letter IRL credit covers one standard, single-page First Class mailing.
-- Pricing for longer letters is calculated server-side and returned as `requiredCredits` in preview responses.
+- Each letter costs 2 Letter IRL credits (current flat rate).
+- All letters are limited to one page maximum (~1,800 characters).
 - Credits are decremented only when `send_letter` succeeds; previews are read-only.
-- Credit purchase flows are intentionally excluded from v1 but should be easy to bolt on later.
+- Credit purchase flows available through Stripe checkout and OpenAI Agentic Commerce.
 
 ## Validation Rules
-- `quote_and_preview_letter` computes `requiredCredits` and determines `canSendNow` by comparing against the authenticated user’s balance.
-- `send_letter` re-validates balance before deduction to prevent race conditions.
+- `quote_and_preview_letter` returns `requiredCredits: 2` (flat rate) and determines `canSendNow` by comparing against the authenticated user's balance.
+- `send_letter` validates:
+  - User has at least 2 credits
+  - Letter content does not exceed one page (~1,800 characters)
+  - Re-validates balance before deduction to prevent race conditions
 - Insufficient credit attempts return errors with `insufficientCredits: true` and current balance details for UI messaging.
+- Over-length letters return errors prompting user to shorten content.
 
 ## Standard Cost Heuristics
-- Default cost: 1.0 Letter IRL credit for content that fits on a single page.
-- Multi-page detection can rely on simple character-count thresholds in v1; convert to smarter pagination once print pipeline is integrated.
-- Costs should round up in 0.5-credit increments to preserve future pricing flexibility.
+- **Current Model:** Flat 2 credits per letter (one page maximum).
+- **Future Plans:** May introduce tiered pricing:
+  - Basic letters: 1 credit (plain text, standard delivery)
+  - Premium letters: 2 credits (current offering)
+  - Super premium: 3+ credits (multi-page, color, expedited)

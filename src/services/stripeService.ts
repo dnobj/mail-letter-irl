@@ -1,0 +1,193 @@
+/**
+ * Stripe Payment Service
+ *
+ * Handles Stripe Checkout sessions and webhook processing for credit purchases
+ */
+
+import Stripe from 'stripe';
+
+// Initialize Stripe with secret key
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+  apiVersion: '2024-11-20.acacia'
+});
+
+export interface CheckoutSessionParams {
+  userId: string;
+  userEmail: string;
+  productId: 'credit-pack-4' | 'credit-pack-10' | 'credit-pack-100';
+  successUrl: string;
+  cancelUrl: string;
+}
+
+export interface CheckoutSessionResult {
+  success: boolean;
+  sessionId?: string;
+  sessionUrl?: string;
+  error?: string;
+}
+
+/**
+ * Product configurations matching our pricing model
+ */
+const PRODUCTS = {
+  'credit-pack-4': {
+    credits: 4,
+    priceUSD: 5.00,
+    name: 'Starter Pack - 4 Credits',
+    description: 'Perfect for trying out Letter IRL'
+  },
+  'credit-pack-10': {
+    credits: 10,
+    priceUSD: 10.00,
+    name: 'Regular Pack - 10 Credits',
+    description: 'Most popular choice for regular letter senders'
+  },
+  'credit-pack-100': {
+    credits: 100,
+    priceUSD: 90.00,
+    name: 'Power Pack - 100 Credits',
+    description: 'Best value - 10% savings for power users'
+  }
+};
+
+/**
+ * Create a Stripe Checkout session for purchasing credits
+ */
+export async function createCheckoutSession(
+  params: CheckoutSessionParams
+): Promise<CheckoutSessionResult> {
+  try {
+    const product = PRODUCTS[params.productId];
+
+    if (!product) {
+      return {
+        success: false,
+        error: `Invalid product ID: ${params.productId}`
+      };
+    }
+
+    // Create Checkout Session
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      mode: 'payment',
+      customer_email: params.userEmail,
+      client_reference_id: params.userId,
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: product.name,
+              description: product.description,
+              metadata: {
+                credits: product.credits.toString(),
+                product_id: params.productId
+              }
+            },
+            unit_amount: Math.round(product.priceUSD * 100) // Convert to cents
+          },
+          quantity: 1
+        }
+      ],
+      metadata: {
+        userId: params.userId,
+        productId: params.productId,
+        credits: product.credits.toString()
+      },
+      success_url: params.successUrl,
+      cancel_url: params.cancelUrl
+    });
+
+    return {
+      success: true,
+      sessionId: session.id,
+      sessionUrl: session.url || undefined
+    };
+  } catch (error: any) {
+    console.error('Failed to create Stripe Checkout session:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to create checkout session'
+    };
+  }
+}
+
+/**
+ * Verify Stripe webhook signature
+ */
+export function verifyWebhookSignature(
+  payload: string | Buffer,
+  signature: string
+): Stripe.Event | null {
+  try {
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
+
+    if (!webhookSecret) {
+      console.error('STRIPE_WEBHOOK_SECRET not configured');
+      return null;
+    }
+
+    const event = stripe.webhooks.constructEvent(
+      payload,
+      signature,
+      webhookSecret
+    );
+
+    return event;
+  } catch (error: any) {
+    console.error('Webhook signature verification failed:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Process a successful checkout event
+ */
+export interface CheckoutCompletedData {
+  userId: string;
+  credits: number;
+  productId: string;
+  sessionId: string;
+  amountPaid: number;
+  customerEmail: string;
+}
+
+export async function extractCheckoutData(
+  session: Stripe.Checkout.Session
+): Promise<CheckoutCompletedData | null> {
+  try {
+    const userId = session.client_reference_id || session.metadata?.userId;
+    const credits = parseInt(session.metadata?.credits || '0');
+    const productId = session.metadata?.productId || '';
+    const amountPaid = (session.amount_total || 0) / 100; // Convert from cents
+    const customerEmail = session.customer_email || session.customer_details?.email || '';
+
+    if (!userId || !credits || !productId) {
+      console.error('Missing required metadata in checkout session:', {
+        userId,
+        credits,
+        productId
+      });
+      return null;
+    }
+
+    return {
+      userId,
+      credits,
+      productId,
+      sessionId: session.id,
+      amountPaid,
+      customerEmail
+    };
+  } catch (error: any) {
+    console.error('Failed to extract checkout data:', error);
+    return null;
+  }
+}
+
+/**
+ * Get Stripe instance for advanced operations
+ */
+export function getStripeClient(): Stripe {
+  return stripe;
+}

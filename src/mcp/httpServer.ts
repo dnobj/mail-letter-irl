@@ -15,6 +15,7 @@ import {
 } from "../auth/tokenValidator.js";
 import { handleCreditApiRequest } from "../api/creditApiHandler.js";
 import { handleAdminApiRequest } from "../api/adminApiHandler.js";
+import { handleLetterApiRequest } from "../api/letterApiHandler.js";
 import {
   handleCreateCheckoutSession,
   handleStripeWebhook
@@ -489,6 +490,12 @@ export async function startHttpServer() {
     // Credit API routes
     const creditApiHandled = await handleCreditApiRequest(req, res, url.pathname);
     if (creditApiHandled) {
+      return;
+    }
+
+    // Letter API routes
+    const letterApiHandled = await handleLetterApiRequest(req, res, url.pathname);
+    if (letterApiHandled) {
       return;
     }
 

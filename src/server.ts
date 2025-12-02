@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { randomUUID, createHash } from "node:crypto";
 import { FileAccountStore } from "./store/fileAccountStore.js";
 import {

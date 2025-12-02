@@ -19,7 +19,9 @@ import type {
   LetterResult,
   LetterStatus,
   CostEstimate,
-  ProviderConfig
+  ProviderConfig,
+  AddressValidationInput,
+  AddressValidationResult
 } from './types.js';
 
 export interface PostGridProviderOptions {
@@ -80,6 +82,39 @@ interface PostGridError {
     message: string;
     code?: string;
     details?: any;
+  };
+}
+
+interface PostGridAddressVerificationRequest {
+  line1: string;
+  line2?: string;
+  city?: string;
+  provinceOrState?: string;
+  postalOrZip?: string;
+  country?: string;
+}
+
+interface PostGridAddressVerificationResponse {
+  status: string;
+  message: string;
+  data: {
+    status: 'verified' | 'corrected' | 'failed';
+    line1?: string;
+    line2?: string;
+    city?: string;
+    provinceOrState?: string;
+    postalOrZip?: string;
+    country?: string;
+    errors?: Record<string, string[]>;
+    details?: {
+      county?: string;
+      congressional_district?: string;
+      [key: string]: any;
+    };
+    geocode?: {
+      latitude: number;
+      longitude: number;
+    };
   };
 }
 
@@ -304,11 +339,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       font-family: 'Times New Roman', serif;
       font-size: 12pt;
       line-height: 1.6;
-      margin: 1in;
+      /* Larger top margin to avoid address window overlap */
+      margin: 3.5in 1in 1in 1in;
       color: #000;
     }
     .letter-body {
-      margin-top: 0.5in;
       white-space: pre-wrap;
       word-wrap: break-word;
     }
@@ -424,6 +459,150 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     }
 
     return baseCost;
+  }
+
+  /**
+   * Validate an address using PostGrid's Address Verification API
+   */
+  async validateAddress(address: AddressValidationInput): Promise<AddressValidationResult> {
+    if (this.options.verbose) {
+      console.log(`🔍 [PostGrid] Validating address: ${address.line1}, ${address.city}, ${address.state}`);
+    }
+
+    try {
+      // Determine if this is an international address (non-US/Canada)
+      const isInternational = address.country &&
+        address.country !== 'US' &&
+        address.country !== 'USA' &&
+        address.country !== 'CA' &&
+        address.country !== 'CAN';
+
+      // Choose the appropriate API endpoint
+      const baseUrl = isInternational
+        ? 'https://api.postgrid.com/v1/intl_addver'
+        : 'https://api.postgrid.com/v1/addver';
+
+      // Build request payload
+      const addressPayload: PostGridAddressVerificationRequest = {
+        line1: address.line1,
+        line2: address.line2,
+        city: address.city,
+        provinceOrState: address.state,
+        postalOrZip: address.postalCode,
+        country: address.country || 'US'
+      };
+
+      // PostGrid expects the address wrapped in an "address" field
+      const request = {
+        address: addressPayload
+      };
+
+      // Make API request with query params for enhanced data
+      const response = await this.apiRequestAddressVerification<PostGridAddressVerificationResponse>(
+        'POST',
+        `${baseUrl}/verifications?includeDetails=true&properCase=true&geocode=true`,
+        request
+      );
+
+      // Extract the actual address data from the response
+      const addressData = response.data;
+
+      if (this.options.verbose) {
+        console.log(`✅ [PostGrid] Address validation status: ${addressData.status}`);
+      }
+
+      // Build result
+      const result: AddressValidationResult = {
+        status: addressData.status,
+        isValid: addressData.status === 'verified' || addressData.status === 'corrected',
+        originalAddress: address
+      };
+
+      // Add verified/corrected address if available
+      if (result.isValid && addressData.line1) {
+        result.verifiedAddress = {
+          line1: addressData.line1,
+          line2: addressData.line2,
+          city: addressData.city || address.city || '',
+          state: addressData.provinceOrState || address.state || '',
+          postalCode: addressData.postalOrZip || address.postalCode || '',
+          country: addressData.country || address.country || 'US'
+        };
+      }
+
+      // Add errors if present
+      if (addressData.errors) {
+        result.errors = Object.entries(addressData.errors).flatMap(([field, messages]) =>
+          messages.map(message => ({ field, message }))
+        );
+      }
+
+      // Add details if present
+      if (addressData.details) {
+        result.details = addressData.details;
+      }
+
+      // Add geocoding if present
+      if (addressData.geocode) {
+        result.geocode = addressData.geocode;
+      }
+
+      return result;
+    } catch (error) {
+      const errorMessage = this.extractErrorMessage(error);
+
+      if (this.options.verbose) {
+        console.log(`❌ [PostGrid] Address validation failed: ${errorMessage}`);
+      }
+
+      // Return failed validation result
+      return {
+        status: 'failed',
+        isValid: false,
+        originalAddress: address,
+        errors: [{
+          field: 'address',
+          message: errorMessage
+        }]
+      };
+    }
+  }
+
+  /**
+   * Make API request to PostGrid Address Verification endpoint
+   * (separate from main API request to handle different base URL)
+   */
+  private async apiRequestAddressVerification<T>(
+    method: 'POST',
+    url: string,
+    body?: any
+  ): Promise<T> {
+    // Use separate Address Verification API key if available, otherwise fall back to Print & Mail key
+    const apiKey = process.env.POSTGRID_ADDRESS_VERIFICATION_API_KEY || this.options.apiKey;
+
+    const headers: Record<string, string> = {
+      'x-api-key': apiKey,
+      'Content-Type': 'application/json'
+    };
+
+    const requestOptions: RequestInit = {
+      method,
+      headers,
+      ...(body && { body: JSON.stringify(body) })
+    };
+
+    if (this.options.verbose) {
+      console.log(`🌐 [PostGrid] ${method} ${url.split('?')[0]}`);
+    }
+
+    const response = await fetch(url, requestOptions);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: { message: response.statusText } })) as PostGridError;
+      throw new Error(errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json() as Promise<T>;
   }
 
   /**
