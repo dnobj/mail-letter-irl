@@ -1,0 +1,15 @@
+# Railway/Nixpacks Configuration
+# Skip TypeScript compilation since we use tsx at runtime
+
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+# Skip build phase - tsx runs TypeScript directly
+[phases.build]
+cmds = []
+
+[start]
+cmd = "npm start"
