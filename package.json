@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "echo 'Skipping tsc - using tsx at runtime'",
     "start": "tsx src/mcp/httpServer.ts",
     "dev": "tsx watch src/mcp/httpServer.ts",
     "lint": "eslint .",

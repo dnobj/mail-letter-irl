@@ -29,8 +29,9 @@ const __dirname = path.dirname(__filename);
 
 const DEFAULT_WIDGET_DIR = path.resolve(__dirname, "..", "..", "widgets");
 const DASHBOARD_DIR = path.resolve(__dirname, "..", "..", "public", "dashboard");
-const DEFAULT_HOST = process.env.LETTER_IRL_HTTP_HOST ?? "127.0.0.1";
-const DEFAULT_PORT = Number(process.env.LETTER_IRL_HTTP_PORT ?? "8090");
+const DEFAULT_HOST = process.env.LETTER_IRL_HTTP_HOST ?? "0.0.0.0";
+// Railway sets PORT env var; fall back to LETTER_IRL_HTTP_PORT for local dev
+const DEFAULT_PORT = Number(process.env.PORT ?? process.env.LETTER_IRL_HTTP_PORT ?? "8090");
 const MCP_PATH = process.env.LETTER_IRL_MCP_PATH ?? "/mcp";
 const SSE_PATH = process.env.LETTER_IRL_SSE_PATH ?? "/mcp/sse";
 const SSE_MESSAGES_PATH =
