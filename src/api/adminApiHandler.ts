@@ -13,6 +13,14 @@ import { adjustCredits } from '../services/creditService.js';
 import { getUser, getAllUsers } from '../services/userService.js';
 import { getAllJobs, getJobById, getJobsByUserId } from '../services/letterJobService.js';
 import { query } from '../db/index.js';
+import {
+  createCampaign,
+  getCampaignById,
+  listCampaigns,
+  updateCampaignStatus,
+  getCampaignRedemptions,
+} from '../services/promoService.js';
+import type { PromoCampaignStatus } from '../services/types.js';
 
 /**
  * Send JSON response
@@ -127,6 +135,53 @@ export async function handleAdminApiRequest(
     if (pathname === '/api/admin/pgboss/jobs' && req.method === 'GET') {
       await handleGetPgBossJobs(res);
       return true;
+    }
+
+    // =========================================================================
+    // Promo Campaign Routes
+    // =========================================================================
+
+    // POST /api/admin/promo/campaigns - Create new promo campaign
+    if (pathname === '/api/admin/promo/campaigns' && req.method === 'POST') {
+      await handleCreateCampaign(req, res, adminInfo);
+      return true;
+    }
+
+    // GET /api/admin/promo/campaigns - List all campaigns
+    if (pathname === '/api/admin/promo/campaigns' && req.method === 'GET') {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      await handleListCampaigns(res, url.searchParams);
+      return true;
+    }
+
+    // GET /api/admin/promo/campaigns/:campaignId - Get campaign details
+    if (pathname.match(/^\/api\/admin\/promo\/campaigns\/[^/]+$/) && req.method === 'GET') {
+      const campaignId = pathname.split('/').pop();
+      if (campaignId) {
+        await handleGetCampaign(res, decodeURIComponent(campaignId));
+        return true;
+      }
+    }
+
+    // PATCH /api/admin/promo/campaigns/:campaignId/status - Update campaign status
+    if (pathname.match(/^\/api\/admin\/promo\/campaigns\/[^/]+\/status$/) && req.method === 'PATCH') {
+      const parts = pathname.split('/');
+      const campaignId = parts[parts.length - 2];
+      if (campaignId) {
+        await handleUpdateCampaignStatus(req, res, decodeURIComponent(campaignId));
+        return true;
+      }
+    }
+
+    // GET /api/admin/promo/campaigns/:campaignId/redemptions - Get campaign redemptions
+    if (pathname.match(/^\/api\/admin\/promo\/campaigns\/[^/]+\/redemptions$/) && req.method === 'GET') {
+      const parts = pathname.split('/');
+      const campaignId = parts[parts.length - 2];
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      if (campaignId) {
+        await handleGetCampaignRedemptions(res, decodeURIComponent(campaignId), url.searchParams);
+        return true;
+      }
     }
 
     // Route not found
@@ -465,5 +520,239 @@ async function handleGetPgBossJobs(res: ServerResponse) {
   sendJson(res, 200, {
     jobs: result.rows,
     total: parseInt(countResult.rows[0].count)
+  });
+}
+
+// =========================================================================
+// Promo Campaign Handlers
+// =========================================================================
+
+/**
+ * POST /api/admin/promo/campaigns
+ * Create a new promo campaign
+ */
+async function handleCreateCampaign(
+  req: IncomingMessage,
+  res: ServerResponse,
+  adminInfo: { userId: string; email?: string }
+) {
+  const body = await parseBody(req);
+
+  // Validate required fields
+  if (!body.code) {
+    sendJson(res, 400, { error: 'Missing required field: code' });
+    return;
+  }
+  if (!body.name) {
+    sendJson(res, 400, { error: 'Missing required field: name' });
+    return;
+  }
+  if (!body.creditsAmount || typeof body.creditsAmount !== 'number' || body.creditsAmount <= 0) {
+    sendJson(res, 400, { error: 'creditsAmount must be a positive number' });
+    return;
+  }
+
+  try {
+    const campaign = await createCampaign({
+      code: body.code,
+      name: body.name,
+      description: body.description,
+      creditsAmount: body.creditsAmount,
+      expirationPolicy: body.expirationPolicy,
+      expirationDays: body.expirationDays,
+      fixedExpirationDate: body.fixedExpirationDate ? new Date(body.fixedExpirationDate) : undefined,
+      maxTotalRedemptions: body.maxTotalRedemptions,
+      maxPerUser: body.maxPerUser,
+      startsAt: body.startsAt ? new Date(body.startsAt) : undefined,
+      endsAt: body.endsAt ? new Date(body.endsAt) : undefined,
+      requiresNewUser: body.requiresNewUser,
+      createdBy: adminInfo.email || adminInfo.userId,
+    });
+
+    console.log(`📢 Admin ${adminInfo.userId} created promo campaign: ${campaign.code}`);
+
+    sendJson(res, 201, {
+      success: true,
+      campaign: {
+        campaignId: campaign.campaign_id,
+        code: campaign.code,
+        name: campaign.name,
+        description: campaign.description,
+        creditsAmount: campaign.credits_amount,
+        expirationPolicy: campaign.expiration_policy,
+        expirationDays: campaign.expiration_days,
+        fixedExpirationDate: campaign.fixed_expiration_date,
+        maxTotalRedemptions: campaign.max_total_redemptions,
+        maxPerUser: campaign.max_per_user,
+        currentRedemptions: campaign.current_redemptions,
+        startsAt: campaign.starts_at,
+        endsAt: campaign.ends_at,
+        requiresNewUser: campaign.requires_new_user,
+        status: campaign.status,
+        createdBy: campaign.created_by,
+        createdAt: campaign.created_at,
+      },
+    });
+  } catch (error: any) {
+    if (error.message.includes('duplicate key') || error.message.includes('unique constraint')) {
+      sendJson(res, 409, { error: 'A campaign with this code already exists' });
+    } else {
+      throw error;
+    }
+  }
+}
+
+/**
+ * GET /api/admin/promo/campaigns
+ * List all campaigns with pagination
+ */
+async function handleListCampaigns(res: ServerResponse, queryParams: URLSearchParams) {
+  const limit = parseInt(queryParams.get('limit') || '50');
+  const offset = parseInt(queryParams.get('offset') || '0');
+  const statusParam = queryParams.get('status');
+
+  const status = statusParam
+    ? (statusParam.split(',') as PromoCampaignStatus[])
+    : undefined;
+
+  const result = await listCampaigns({ status, limit, offset });
+
+  sendJson(res, 200, {
+    campaigns: result.campaigns.map((c) => ({
+      campaignId: c.campaign_id,
+      code: c.code,
+      name: c.name,
+      creditsAmount: c.credits_amount,
+      expirationPolicy: c.expiration_policy,
+      expirationDays: c.expiration_days,
+      maxTotalRedemptions: c.max_total_redemptions,
+      currentRedemptions: c.current_redemptions,
+      startsAt: c.starts_at,
+      endsAt: c.ends_at,
+      requiresNewUser: c.requires_new_user,
+      status: c.status,
+      createdAt: c.created_at,
+    })),
+    total: result.total,
+    limit,
+    offset,
+  });
+}
+
+/**
+ * GET /api/admin/promo/campaigns/:campaignId
+ * Get detailed campaign information
+ */
+async function handleGetCampaign(res: ServerResponse, campaignId: string) {
+  const campaign = await getCampaignById(campaignId);
+
+  if (!campaign) {
+    sendJson(res, 404, { error: 'Campaign not found', campaignId });
+    return;
+  }
+
+  sendJson(res, 200, {
+    campaign: {
+      campaignId: campaign.campaign_id,
+      code: campaign.code,
+      name: campaign.name,
+      description: campaign.description,
+      creditsAmount: campaign.credits_amount,
+      expirationPolicy: campaign.expiration_policy,
+      expirationDays: campaign.expiration_days,
+      fixedExpirationDate: campaign.fixed_expiration_date,
+      maxTotalRedemptions: campaign.max_total_redemptions,
+      maxPerUser: campaign.max_per_user,
+      currentRedemptions: campaign.current_redemptions,
+      startsAt: campaign.starts_at,
+      endsAt: campaign.ends_at,
+      requiresNewUser: campaign.requires_new_user,
+      status: campaign.status,
+      createdBy: campaign.created_by,
+      createdAt: campaign.created_at,
+      updatedAt: campaign.updated_at,
+    },
+  });
+}
+
+/**
+ * PATCH /api/admin/promo/campaigns/:campaignId/status
+ * Update campaign status (draft, active, paused, ended)
+ */
+async function handleUpdateCampaignStatus(
+  req: IncomingMessage,
+  res: ServerResponse,
+  campaignId: string
+) {
+  const body = await parseBody(req);
+
+  if (!body.status) {
+    sendJson(res, 400, { error: 'Missing required field: status' });
+    return;
+  }
+
+  const validStatuses: PromoCampaignStatus[] = ['draft', 'active', 'paused', 'ended', 'expired'];
+  if (!validStatuses.includes(body.status)) {
+    sendJson(res, 400, {
+      error: 'Invalid status',
+      message: `Status must be one of: ${validStatuses.join(', ')}`,
+    });
+    return;
+  }
+
+  try {
+    const campaign = await updateCampaignStatus(campaignId, body.status);
+
+    sendJson(res, 200, {
+      success: true,
+      campaign: {
+        campaignId: campaign.campaign_id,
+        code: campaign.code,
+        status: campaign.status,
+        updatedAt: campaign.updated_at,
+      },
+    });
+  } catch (error: any) {
+    if (error.message.includes('Campaign not found')) {
+      sendJson(res, 404, { error: 'Campaign not found', campaignId });
+    } else {
+      throw error;
+    }
+  }
+}
+
+/**
+ * GET /api/admin/promo/campaigns/:campaignId/redemptions
+ * Get redemptions for a campaign
+ */
+async function handleGetCampaignRedemptions(
+  res: ServerResponse,
+  campaignId: string,
+  queryParams: URLSearchParams
+) {
+  const limit = parseInt(queryParams.get('limit') || '50');
+  const offset = parseInt(queryParams.get('offset') || '0');
+
+  // Verify campaign exists
+  const campaign = await getCampaignById(campaignId);
+  if (!campaign) {
+    sendJson(res, 404, { error: 'Campaign not found', campaignId });
+    return;
+  }
+
+  const result = await getCampaignRedemptions(campaignId, limit, offset);
+
+  sendJson(res, 200, {
+    campaignId,
+    campaignCode: campaign.code,
+    redemptions: result.redemptions.map((r) => ({
+      redemptionId: r.redemption_id,
+      userId: r.user_id,
+      ledgerId: r.ledger_id,
+      redeemedAt: r.redeemed_at,
+    })),
+    total: result.total,
+    limit,
+    offset,
   });
 }

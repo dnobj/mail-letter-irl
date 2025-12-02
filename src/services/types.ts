@@ -183,3 +183,207 @@ export interface UserResponse {
   creditsUsed: number;
   createdAt: Date;
 }
+
+// ============================================================================
+// Credit Ledger Types
+// ============================================================================
+
+export type CreditSourceType =
+  | 'purchase'       // Stripe/payment purchases
+  | 'signup_bonus'   // New user welcome credits
+  | 'promo'          // Promotional campaign credits
+  | 'adjustment'     // Manual admin adjustments
+  | 'refund'         // Refunds from cancelled orders/letters
+  | 'legacy';        // Migrated from old system
+
+export type CreditLedgerStatus = 'active' | 'depleted' | 'expired' | 'revoked';
+
+export type ExpirationPolicy = 'fixed_date' | 'days_from_activation' | 'never';
+
+export interface CreditLedgerEntry {
+  ledger_id: string;
+  user_id: string;
+  initial_amount: number;
+  remaining_amount: number;
+  source_type: CreditSourceType;
+  source_reference_id?: string;
+  source_metadata?: Record<string, unknown>;
+  activated_at: Date;
+  expires_at?: Date;
+  expiration_policy?: ExpirationPolicy;
+  expiration_days?: number;
+  status: CreditLedgerStatus;
+  description?: string;
+  related_ledger_id?: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface CreditConsumption {
+  consumption_id: string;
+  transaction_id: number;
+  ledger_id: string;
+  amount: number;
+  ledger_remaining_after: number;
+  created_at: Date;
+}
+
+// ============================================================================
+// Credit Ledger Operation Parameters
+// ============================================================================
+
+export interface AddCreditsToLedgerParams {
+  userId: string;
+  email?: string;  // For user creation if needed
+  credits: number;
+  sourceType: CreditSourceType;
+  sourceReferenceId?: string;
+  sourceMetadata?: Record<string, unknown>;
+  expirationPolicy?: ExpirationPolicy;
+  expiresAt?: Date;           // For fixed_date policy
+  expirationDays?: number;    // For days_from_activation policy
+  description?: string;
+}
+
+export interface DeductCreditsFromLedgerParams {
+  userId: string;
+  credits: number;
+  letterId: string;
+  description?: string;
+}
+
+export interface RefundCreditsToLedgerParams {
+  userId: string;
+  originalLedgerId?: string;  // Optional: link to original entry
+  credits: number;
+  orderId?: string;
+  reason?: string;
+  inheritExpiration?: boolean;  // Use same expiration as original
+  newExpirationDays?: number;   // Or set new expiration
+}
+
+export interface GetLedgerEntriesParams {
+  userId: string;
+  status?: CreditLedgerStatus[];
+  includeExpired?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+// ============================================================================
+// Credit Balance Types (Enhanced)
+// ============================================================================
+
+export interface ExpiringBucket {
+  expiresAt: Date | null;  // null = never expires
+  credits: number;
+  ledgerIds: string[];
+}
+
+export interface SourceBreakdown {
+  sourceType: CreditSourceType;
+  available: number;
+  total: number;
+}
+
+export interface CreditBalanceDetailed {
+  totalAvailable: number;           // Sum of active, non-expired remaining
+  expiringSoon: number;             // Expiring in next 30 days
+  expiringDates: ExpiringBucket[];  // Breakdown by expiration
+  neverExpiring: number;            // Credits that never expire
+  bySource: SourceBreakdown[];      // Breakdown by source type
+}
+
+export interface CreditLedgerOperationResult {
+  user: User;
+  transaction: CreditTransaction;
+  ledgerEntry?: CreditLedgerEntry;
+  consumedFrom?: CreditConsumption[];
+}
+
+export interface LedgerEntriesResult {
+  entries: CreditLedgerEntry[];
+  total: number;
+}
+
+// ============================================================================
+// Promo Campaign Types
+// ============================================================================
+
+export type PromoCampaignStatus = 'draft' | 'active' | 'paused' | 'ended' | 'expired';
+
+export interface PromoCampaign {
+  campaign_id: string;
+  code: string;
+  name: string;
+  description?: string;
+  credits_amount: number;
+  expiration_policy: ExpirationPolicy;
+  expiration_days?: number;
+  fixed_expiration_date?: Date;
+  max_total_redemptions?: number;
+  max_per_user: number;
+  current_redemptions: number;
+  starts_at: Date;
+  ends_at?: Date;
+  requires_new_user: boolean;
+  status: PromoCampaignStatus;
+  created_by?: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface PromoRedemption {
+  redemption_id: string;
+  campaign_id: string;
+  user_id: string;
+  ledger_id: string;
+  redeemed_at: Date;
+}
+
+export interface CreatePromoCampaignParams {
+  code: string;
+  name: string;
+  description?: string;
+  creditsAmount: number;
+  expirationPolicy?: ExpirationPolicy;
+  expirationDays?: number;
+  fixedExpirationDate?: Date;
+  maxTotalRedemptions?: number;
+  maxPerUser?: number;
+  startsAt?: Date;
+  endsAt?: Date;
+  requiresNewUser?: boolean;
+  createdBy?: string;
+}
+
+export interface RedeemPromoParams {
+  userId: string;
+  email?: string;
+  promoCode: string;
+}
+
+export interface RedeemPromoResult {
+  success: boolean;
+  credits?: number;
+  expiresAt?: Date;
+  ledgerId?: string;
+  error?: string;
+}
+
+export interface ValidatePromoResult {
+  valid: boolean;
+  reason?: string;
+  campaign?: PromoCampaign;
+}
+
+export interface ListPromoCampaignsParams {
+  status?: PromoCampaignStatus[];
+  limit?: number;
+  offset?: number;
+}
+
+export interface PromoCampaignsResult {
+  campaigns: PromoCampaign[];
+  total: number;
+}

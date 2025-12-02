@@ -22,6 +22,7 @@ import {
 } from "../api/dashboardApiHandler.js";
 import { initializeJobQueue, stopJobQueue } from "../services/jobQueue.js";
 import { startLetterWorker } from "../workers/letterWorker.js";
+import { startCreditExpirationWorker } from "../workers/creditExpirationWorker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -426,12 +427,22 @@ export async function startHttpServer() {
 
     // Stripe Checkout API
     if (url.pathname === "/api/stripe/create-checkout-session" && req.method === "POST") {
+      // Parse JSON body
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      await new Promise<void>(resolve => req.on('end', () => resolve()));
+      (req as any).body = body ? JSON.parse(body) : {};
       await handleCreateCheckoutSession(req as any, res as any);
       return;
     }
 
     // Stripe webhook
     if (url.pathname === "/webhooks/stripe" && req.method === "POST") {
+      // Keep raw body for signature verification
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      await new Promise<void>(resolve => req.on('end', () => resolve()));
+      (req as any).body = body; // Raw string for Stripe signature verification
       await handleStripeWebhook(req as any, res as any);
       return;
     }
@@ -579,6 +590,7 @@ export async function startHttpServer() {
     console.log('');
     await initializeJobQueue();
     await startLetterWorker();
+    await startCreditExpirationWorker();
     console.log('');
   } catch (error) {
     console.error('❌ Failed to initialize job queue:', error);

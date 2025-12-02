@@ -6,8 +6,10 @@
 
 import type { IncomingMessage, ServerResponse } from 'http';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
-import { getBalance, getTransactions } from '../services/creditService.js';
+import { getBalance, getTransactions, getDetailedBalance } from '../services/creditService.js';
 import { getUser } from '../services/userService.js';
+import { validatePromoCode, redeemPromoCode, getUserRedemptions } from '../services/promoService.js';
+import { getLedgerEntries } from '../services/creditLedgerService.js';
 
 // Create JWKS client for Auth0
 const JWKS = createRemoteJWKSet(
@@ -66,7 +68,7 @@ export async function handleCreditApiRequest(
   pathname: string
 ): Promise<boolean> {
   // Check if this is a credit API route
-  if (!pathname.startsWith('/api/credits') && !pathname.startsWith('/api/users/me')) {
+  if (!pathname.startsWith('/api/credits') && !pathname.startsWith('/api/users/me') && !pathname.startsWith('/api/promo')) {
     return false; // Not a credit API route, continue to next handler
   }
 
@@ -98,6 +100,40 @@ export async function handleCreditApiRequest(
     // GET /api/users/me
     if (pathname === '/api/users/me' && req.method === 'GET') {
       await handleGetUser(res, authInfo);
+      return true;
+    }
+
+    // GET /api/credits/balance/detailed
+    if (pathname === '/api/credits/balance/detailed' && req.method === 'GET') {
+      await handleGetDetailedBalance(res, authInfo);
+      return true;
+    }
+
+    // GET /api/credits/ledger
+    if (pathname === '/api/credits/ledger' && req.method === 'GET') {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      await handleGetLedgerEntries(res, authInfo, url.searchParams);
+      return true;
+    }
+
+    // POST /api/promo/redeem
+    if (pathname === '/api/promo/redeem' && req.method === 'POST') {
+      await handleRedeemPromo(req, res, authInfo);
+      return true;
+    }
+
+    // GET /api/promo/validate/:code
+    if (pathname.startsWith('/api/promo/validate/') && req.method === 'GET') {
+      const code = pathname.split('/').pop();
+      if (code) {
+        await handleValidatePromo(res, authInfo, decodeURIComponent(code));
+        return true;
+      }
+    }
+
+    // GET /api/promo/redemptions
+    if (pathname === '/api/promo/redemptions' && req.method === 'GET') {
+      await handleGetUserRedemptions(res, authInfo);
       return true;
     }
 
@@ -200,7 +236,7 @@ async function handleGetUser(res: ServerResponse, authInfo: AuthInfo) {
       creditsUsed: user.credits_used,
       createdAt: user.created_at
     });
-  } catch (error) {
+  } catch (error: any) {
     if (error.message.includes('User not found')) {
       sendJson(res, 404, {
         error: 'User not found',
@@ -210,4 +246,173 @@ async function handleGetUser(res: ServerResponse, authInfo: AuthInfo) {
       throw error;
     }
   }
+}
+
+/**
+ * GET /api/credits/balance/detailed
+ */
+async function handleGetDetailedBalance(res: ServerResponse, authInfo: AuthInfo) {
+  try {
+    const balance = await getDetailedBalance(authInfo.userId);
+
+    sendJson(res, 200, {
+      userId: authInfo.userId,
+      totalAvailable: balance.totalAvailable,
+      expiringSoon: balance.expiringSoon,
+      neverExpiring: balance.neverExpiring,
+      expiringDates: balance.expiringDates.map(b => ({
+        expiresAt: b.expiresAt,
+        credits: b.credits
+      })),
+      bySource: balance.bySource
+    });
+  } catch (error: any) {
+    // Return empty balance for new users
+    sendJson(res, 200, {
+      userId: authInfo.userId,
+      totalAvailable: 0,
+      expiringSoon: 0,
+      neverExpiring: 0,
+      expiringDates: [],
+      bySource: []
+    });
+  }
+}
+
+/**
+ * GET /api/credits/ledger
+ */
+async function handleGetLedgerEntries(
+  res: ServerResponse,
+  authInfo: AuthInfo,
+  queryParams: URLSearchParams
+) {
+  const limit = Math.min(parseInt(queryParams.get('limit') || '50'), 100);
+  const offset = Math.max(parseInt(queryParams.get('offset') || '0'), 0);
+  const includeExpired = queryParams.get('includeExpired') === 'true';
+
+  const result = await getLedgerEntries({
+    userId: authInfo.userId,
+    includeExpired,
+    limit,
+    offset
+  });
+
+  sendJson(res, 200, {
+    entries: result.entries.map(e => ({
+      ledgerId: e.ledger_id,
+      initialAmount: e.initial_amount,
+      remainingAmount: e.remaining_amount,
+      sourceType: e.source_type,
+      sourceReferenceId: e.source_reference_id,
+      activatedAt: e.activated_at,
+      expiresAt: e.expires_at,
+      status: e.status,
+      description: e.description,
+      createdAt: e.created_at
+    })),
+    total: result.total,
+    limit,
+    offset
+  });
+}
+
+/**
+ * Parse JSON body from request
+ */
+async function parseBody(req: IncomingMessage): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+    req.on('end', () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (error) {
+        reject(new Error('Invalid JSON'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+/**
+ * POST /api/promo/redeem
+ */
+async function handleRedeemPromo(
+  req: IncomingMessage,
+  res: ServerResponse,
+  authInfo: AuthInfo
+) {
+  const body = await parseBody(req);
+
+  if (!body.code) {
+    sendJson(res, 400, {
+      error: 'Missing required field: code'
+    });
+    return;
+  }
+
+  const result = await redeemPromoCode({
+    userId: authInfo.userId,
+    email: authInfo.email,
+    promoCode: body.code
+  });
+
+  if (result.success) {
+    sendJson(res, 200, {
+      success: true,
+      credits: result.credits,
+      expiresAt: result.expiresAt,
+      message: `Successfully redeemed ${result.credits} credits!`
+    });
+  } else {
+    sendJson(res, 400, {
+      success: false,
+      error: result.error
+    });
+  }
+}
+
+/**
+ * GET /api/promo/validate/:code
+ */
+async function handleValidatePromo(
+  res: ServerResponse,
+  authInfo: AuthInfo,
+  code: string
+) {
+  const result = await validatePromoCode(code, authInfo.userId);
+
+  if (result.valid && result.campaign) {
+    sendJson(res, 200, {
+      valid: true,
+      code: result.campaign.code,
+      name: result.campaign.name,
+      credits: result.campaign.credits_amount,
+      expirationDays: result.campaign.expiration_days,
+      message: `This code gives you ${result.campaign.credits_amount} credits!`
+    });
+  } else {
+    sendJson(res, 200, {
+      valid: false,
+      reason: result.reason
+    });
+  }
+}
+
+/**
+ * GET /api/promo/redemptions
+ */
+async function handleGetUserRedemptions(res: ServerResponse, authInfo: AuthInfo) {
+  const redemptions = await getUserRedemptions(authInfo.userId);
+
+  sendJson(res, 200, {
+    redemptions: redemptions.map(r => ({
+      redemptionId: r.redemption.redemption_id,
+      campaignCode: r.campaign.code,
+      campaignName: r.campaign.name,
+      credits: r.campaign.credits_amount,
+      redeemedAt: r.redemption.redeemed_at
+    }))
+  });
 }

@@ -13,9 +13,13 @@ import {
   verifyWebhookSignature,
   extractCheckoutData
 } from '../services/stripeService.js';
-import { addCredits } from '../services/creditService.js';
+import { addCreditsWithOptions } from '../services/creditService.js';
 import { authenticateHttpRequest } from './middleware/auth.js';
 import { parseCookies, serializeCookie } from '../utils/cookies.js';
+import { query } from '../db/index.js';
+
+// Default expiration for purchased credits (2 years)
+const DEFAULT_PURCHASE_EXPIRATION_DAYS = 730;
 import Stripe from 'stripe';
 
 // Extended request/response types with cookie support
@@ -102,10 +106,22 @@ export async function handleCreateCheckoutSession(
       return;
     }
 
+    // Get user email - from JWT or look up in database
+    let userEmail = authInfo.email;
+    if (!userEmail) {
+      const userResult = await query<{ email: string }>(
+        'SELECT email FROM users WHERE user_id = $1',
+        [authInfo.userId]
+      );
+      if (userResult.rows.length > 0) {
+        userEmail = userResult.rows[0].email;
+      }
+    }
+
     // Create checkout session
     const result = await createCheckoutSession({
       userId: authInfo.userId,
-      userEmail: authInfo.email || authInfo.userId,
+      userEmail: userEmail || '',
       productId: productId as any,
       successUrl,
       cancelUrl
@@ -216,13 +232,16 @@ async function handleCheckoutSessionCompleted(
 
     console.log(`💳 Adding ${checkoutData.credits} credits to user ${checkoutData.userId}`);
 
-    // Add credits to user account
-    await addCredits({
+    // Add credits to user account with expiration tracking
+    await addCreditsWithOptions({
       userId: checkoutData.userId,
+      email: checkoutData.customerEmail,
       credits: checkoutData.credits,
-      orderId: checkoutData.sessionId,
+      sourceType: 'purchase',
+      sourceReferenceId: checkoutData.sessionId,
+      expirationDays: DEFAULT_PURCHASE_EXPIRATION_DAYS,
       description: `Purchased ${checkoutData.productId} via Stripe Checkout`,
-      metadata: {
+      sourceMetadata: {
         stripe_session_id: checkoutData.sessionId,
         product_id: checkoutData.productId,
         amount_paid: checkoutData.amountPaid,

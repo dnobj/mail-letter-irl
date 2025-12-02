@@ -3,8 +3,14 @@ import {
   getAccountBalanceInputSchema,
   getAccountBalanceOutputSchema
 } from "../schemas.js";
-import { getBalance } from "../services/creditService.js";
+import { getBalance, getDetailedBalance } from "../services/creditService.js";
 import { findUser } from "../services/userService.js";
+
+interface ExpiringCreditsInfo {
+  amount: number;
+  expiresAt: string;
+  daysUntilExpiry: number;
+}
 
 interface GetAccountBalanceOutput {
   creditsRemaining: number;
@@ -13,6 +19,8 @@ interface GetAccountBalanceOutput {
   message?: string;
   userEmail?: string;
   authProvider?: string;
+  creditsExpiringSoon?: number;
+  expiringCreditsDetails?: ExpiringCreditsInfo[];
 }
 
 const OUTPUT_TEMPLATE = "BalanceCard";
@@ -42,15 +50,43 @@ async function handler(
   const authProvider = providerMap[providerPart] || providerPart;
 
   let creditsRemaining: number;
+  let creditsExpiringSoon = 0;
+  let expiringCreditsDetails: ExpiringCreditsInfo[] = [];
+
   try {
-    const balance = await getBalance(userId);
-    creditsRemaining = balance.credits;
+    // Get detailed balance with expiration info
+    const detailedBalance = await getDetailedBalance(userId);
+    creditsRemaining = detailedBalance.totalAvailable;
+    creditsExpiringSoon = detailedBalance.expiringSoon;
+
+    // Build expiring credits details (only include buckets that expire)
+    const now = new Date();
+    expiringCreditsDetails = detailedBalance.expiringDates
+      .filter(bucket => bucket.expiresAt !== null)
+      .map(bucket => {
+        const expiresAt = bucket.expiresAt as Date;
+        const daysUntilExpiry = Math.ceil(
+          (expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+        );
+        return {
+          amount: bucket.credits,
+          expiresAt: expiresAt.toISOString(),
+          daysUntilExpiry
+        };
+      })
+      .filter(info => info.daysUntilExpiry > 0); // Only future expirations
   } catch (error) {
-    // User doesn't exist yet, return 0 balance
-    if (error.message && error.message.includes('User not found')) {
+    // User doesn't exist yet or no ledger entries
+    if (error instanceof Error && error.message.includes('User not found')) {
       creditsRemaining = 0;
     } else {
-      throw error;
+      // Try simple balance as fallback
+      try {
+        const balance = await getBalance(userId);
+        creditsRemaining = balance.credits;
+      } catch {
+        creditsRemaining = 0;
+      }
     }
   }
 
@@ -59,18 +95,32 @@ async function handler(
 
   // Enhanced message with identity information
   const identityLine = `Account: ${email} (${authProvider})`;
-  const balanceLine = creditsRemaining === 0
-    ? "You don't have any credits yet. Purchase credits to send letters!"
-    : `Balance: ${creditsRemaining} credits — That's enough for ${lettersRemaining} ${lettersRemaining === 1 ? 'letter' : 'letters'}.`;
+  let balanceLine: string;
+  if (creditsRemaining === 0) {
+    balanceLine = "You don't have any credits yet. Purchase credits to send letters!";
+  } else {
+    balanceLine = `Balance: ${creditsRemaining} credits — That's enough for ${lettersRemaining} ${lettersRemaining === 1 ? 'letter' : 'letters'}.`;
+  }
+
+  // Add expiration warning if credits are expiring soon
+  let expirationWarning = '';
+  if (creditsExpiringSoon > 0) {
+    const earliestExpiry = expiringCreditsDetails[0];
+    if (earliestExpiry) {
+      expirationWarning = `\n⚠️ ${creditsExpiringSoon} credits expiring in ${earliestExpiry.daysUntilExpiry} days. Use them before they expire!`;
+    }
+  }
+
   const switchTip = "\n\nTip: Use the switch_account tool to log in with a different account.";
 
-  const message = `${identityLine}\n${balanceLine}${switchTip}`;
+  const message = `${identityLine}\n${balanceLine}${expirationWarning}${switchTip}`;
 
   context.logger.info(
     {
       correlationId: context.correlationId,
       event: "balance.lookup",
       creditsRemaining,
+      creditsExpiringSoon,
       canSendStandardLetter,
       userId,
       email,
@@ -85,7 +135,9 @@ async function handler(
     standardLetterCostCredits: standardCost,
     message,
     userEmail: email,
-    authProvider
+    authProvider,
+    creditsExpiringSoon: creditsExpiringSoon > 0 ? creditsExpiringSoon : undefined,
+    expiringCreditsDetails: expiringCreditsDetails.length > 0 ? expiringCreditsDetails : undefined
   };
 }
 

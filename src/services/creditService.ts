@@ -8,7 +8,11 @@
  * - Transaction history
  * - Refunds
  *
- * All operations use database transactions for atomicity
+ * All operations use database transactions for atomicity.
+ *
+ * This service now uses the credit ledger for tracking individual credit
+ * batches with expiration. The users.credits field is maintained as a
+ * cache for quick balance checks.
  */
 
 import { transaction, query } from '../db/index.js';
@@ -21,14 +25,29 @@ import {
   GetTransactionsParams,
   CreditBalance,
   CreditOperationResult,
-  TransactionHistoryResult
+  TransactionHistoryResult,
+  CreditBalanceDetailed,
+  CreditLedgerOperationResult,
+  AddCreditsToLedgerParams,
 } from './types.js';
+import {
+  addCreditsToLedger,
+  deductCreditsFromLedger,
+  refundCreditsToLedger,
+  getDetailedBalance as getLedgerDetailedBalance,
+  getAvailableCredits,
+  hasSufficientCredits as ledgerHasSufficientCredits,
+} from './creditLedgerService.js';
+
+// Default expiration for purchased credits (2 years)
+const DEFAULT_PURCHASE_EXPIRATION_DAYS = 730;
 
 /**
  * Add credits to user account (from purchase)
  *
  * - Creates user if doesn't exist
  * - Adds credits to balance
+ * - Creates ledger entry with expiration
  * - Increments lifetime credits_purchased
  * - Records transaction in audit trail
  * - All operations are atomic (uses transaction)
@@ -38,56 +57,45 @@ import {
 export async function addCredits(params: AddCreditsParams): Promise<CreditOperationResult> {
   const { userId, email, credits, orderId, description } = params;
 
-  if (credits <= 0) {
-    throw new Error('Credits must be positive');
-  }
-
-  return await transaction(async (client) => {
-    // Insert or update user (UPSERT)
-    const userResult = await client.query<User>(
-      `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
-       VALUES ($1, $2, $3, $3, 0)
-       ON CONFLICT (user_id) DO UPDATE
-       SET credits = users.credits + $3,
-           credits_purchased = users.credits_purchased + $3,
-           updated_at = NOW()
-       RETURNING *`,
-      [userId, email, credits]
-    );
-
-    const user = userResult.rows[0];
-
-    // Record transaction
-    const txResult = await client.query<CreditTransaction>(
-      `INSERT INTO credit_transactions (
-        user_id, amount, balance_after, type, reference_type, reference_id, description
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *`,
-      [
-        userId,
-        credits,
-        user.credits,
-        'purchase',
-        'order',
-        orderId,
-        description || `Purchased ${credits} credits`
-      ]
-    );
-
-    const txn = txResult.rows[0];
-
-    console.log(`💳 Added ${credits} credits to ${userId} (order: ${orderId}), new balance: ${user.credits}`);
-
-    return { user, transaction: txn };
+  // Use ledger service with purchase defaults
+  const result = await addCreditsToLedger({
+    userId,
+    email,
+    credits,
+    sourceType: 'purchase',
+    sourceReferenceId: orderId,
+    expirationDays: DEFAULT_PURCHASE_EXPIRATION_DAYS,
+    description: description || `Purchased ${credits} credits`,
   });
+
+  return {
+    user: result.user,
+    transaction: result.transaction,
+  };
+}
+
+/**
+ * Add credits with full ledger options
+ *
+ * Use this when you need control over expiration policy, source type, etc.
+ */
+export async function addCreditsWithOptions(
+  params: AddCreditsToLedgerParams
+): Promise<CreditLedgerOperationResult> {
+  return await addCreditsToLedger(params);
 }
 
 /**
  * Deduct credits from user account (for sending letter)
  *
+ * Uses FIFO with expiration priority:
+ * 1. Credits expiring soonest first
+ * 2. Within same expiration, oldest first
+ * 3. Never-expiring credits last
+ *
  * - Checks balance is sufficient (throws if not)
  * - Locks user row to prevent race conditions
- * - Deducts credits from balance
+ * - Deducts credits from balance and ledger
  * - Increments lifetime credits_used
  * - Records transaction in audit trail
  * - All operations are atomic (uses transaction)
@@ -99,71 +107,40 @@ export async function addCredits(params: AddCreditsParams): Promise<CreditOperat
 export async function deductCredits(params: DeductCreditsParams): Promise<CreditOperationResult> {
   const { userId, credits, letterId, description } = params;
 
-  if (credits <= 0) {
-    throw new Error('Credits must be positive');
-  }
+  // Use ledger service for FIFO consumption
+  const result = await deductCreditsFromLedger({
+    userId,
+    credits,
+    letterId,
+    description,
+  });
 
-  return await transaction(async (client) => {
-    // Lock user row and get current balance
-    const userResult = await client.query<User>(
-      'SELECT * FROM users WHERE user_id = $1 FOR UPDATE',
-      [userId]
-    );
+  return {
+    user: result.user,
+    transaction: result.transaction,
+  };
+}
 
-    if (userResult.rows.length === 0) {
-      throw new Error(`User not found: ${userId}`);
-    }
-
-    const user = userResult.rows[0];
-
-    // Check sufficient balance
-    if (user.credits < credits) {
-      throw new Error(
-        `Insufficient credits. Required: ${credits}, Available: ${user.credits}`
-      );
-    }
-
-    // Deduct credits
-    const updateResult = await client.query<User>(
-      `UPDATE users
-       SET credits = credits - $1,
-           credits_used = credits_used + $1,
-           updated_at = NOW()
-       WHERE user_id = $2
-       RETURNING *`,
-      [credits, userId]
-    );
-
-    const updatedUser = updateResult.rows[0];
-
-    // Record transaction (negative amount for deduction)
-    const txResult = await client.query<CreditTransaction>(
-      `INSERT INTO credit_transactions (
-        user_id, amount, balance_after, type, reference_type, reference_id, description
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *`,
-      [
-        userId,
-        -credits, // Negative for deduction
-        updatedUser.credits,
-        'deduction',
-        'letter',
-        letterId,
-        description || `Sent letter (${credits} credits)`
-      ]
-    );
-
-    const txn = txResult.rows[0];
-
-    console.log(`📤 Deducted ${credits} credits from ${userId} (letter: ${letterId}), new balance: ${updatedUser.credits}`);
-
-    return { user: updatedUser, transaction: txn };
+/**
+ * Deduct credits with consumption details
+ *
+ * Returns information about which ledger entries were consumed.
+ */
+export async function deductCreditsWithDetails(
+  params: DeductCreditsParams
+): Promise<CreditLedgerOperationResult> {
+  return await deductCreditsFromLedger({
+    userId: params.userId,
+    credits: params.credits,
+    letterId: params.letterId,
+    description: params.description,
   });
 }
 
 /**
  * Refund credits to user (from cancelled order)
  *
+ * - Creates new ledger entry for refunded credits
  * - Adds credits back to balance
  * - Decrements lifetime credits_purchased
  * - Records refund transaction
@@ -175,55 +152,27 @@ export async function deductCredits(params: DeductCreditsParams): Promise<Credit
 export async function refundCredits(params: RefundCreditsParams): Promise<CreditOperationResult> {
   const { userId, credits, orderId, reason } = params;
 
-  if (credits <= 0) {
-    throw new Error('Credits must be positive');
-  }
-
-  return await transaction(async (client) => {
-    // Add credits back
-    const userResult = await client.query<User>(
-      `UPDATE users
-       SET credits = credits + $1,
-           credits_purchased = credits_purchased - $1,
-           updated_at = NOW()
-       WHERE user_id = $2
-       RETURNING *`,
-      [credits, userId]
-    );
-
-    if (userResult.rows.length === 0) {
-      throw new Error(`User not found: ${userId}`);
-    }
-
-    const user = userResult.rows[0];
-
-    // Record refund transaction
-    const txResult = await client.query<CreditTransaction>(
-      `INSERT INTO credit_transactions (
-        user_id, amount, balance_after, type, reference_type, reference_id, description
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *`,
-      [
-        userId,
-        credits,
-        user.credits,
-        'refund',
-        'order',
-        orderId,
-        reason || `Refunded ${credits} credits`
-      ]
-    );
-
-    const txn = txResult.rows[0];
-
-    console.log(`💸 Refunded ${credits} credits to ${userId} (order: ${orderId}), new balance: ${user.credits}`);
-
-    return { user, transaction: txn };
+  // Use ledger service for refund
+  const result = await refundCreditsToLedger({
+    userId,
+    credits,
+    orderId,
+    reason,
+    // Refunded credits don't expire by default
+    newExpirationDays: undefined,
   });
+
+  return {
+    user: result.user,
+    transaction: result.transaction,
+  };
 }
 
 /**
  * Get current credit balance for user
+ *
+ * Returns the cached balance from users table.
+ * For detailed breakdown with expiration info, use getDetailedBalance().
  *
  * @throws Error if user not found
  */
@@ -247,6 +196,19 @@ export async function getBalance(userId: string): Promise<CreditBalance> {
 }
 
 /**
+ * Get detailed credit balance with expiration breakdown
+ *
+ * Includes:
+ * - Total available credits
+ * - Credits expiring in next 30 days
+ * - Breakdown by expiration date
+ * - Breakdown by source type
+ */
+export async function getDetailedBalance(userId: string): Promise<CreditBalanceDetailed> {
+  return await getLedgerDetailedBalance(userId);
+}
+
+/**
  * Get transaction history for user
  *
  * - Returns paginated results
@@ -258,7 +220,7 @@ export async function getTransactions(params: GetTransactionsParams): Promise<Tr
 
   // Build WHERE clause
   let whereClause = 'WHERE user_id = $1';
-  const queryParams: any[] = [userId];
+  const queryParams: (string | number)[] = [userId];
 
   if (type) {
     whereClause += ' AND type = $2';
@@ -290,16 +252,11 @@ export async function getTransactions(params: GetTransactionsParams): Promise<Tr
 /**
  * Check if user has sufficient credits
  *
- * Returns true if user exists and has enough credits, false otherwise
+ * Checks the ledger for non-expired credits.
+ * Returns true if user exists and has enough credits, false otherwise.
  */
 export async function hasSufficientCredits(userId: string, creditsRequired: number): Promise<boolean> {
-  try {
-    const balance = await getBalance(userId);
-    return balance.credits >= creditsRequired;
-  } catch (error) {
-    // User not found
-    return false;
-  }
+  return await ledgerHasSufficientCredits(userId, creditsRequired);
 }
 
 /**
@@ -308,6 +265,7 @@ export async function hasSufficientCredits(userId: string, creditsRequired: numb
  * - Can add or remove credits
  * - Records as 'adjustment' type transaction
  * - Use positive amount to add, negative to remove
+ * - For positive adjustments, creates a ledger entry (never expires by default)
  *
  * @throws Error if user not found
  */
@@ -320,49 +278,108 @@ export async function adjustCredits(
     throw new Error('Adjustment amount cannot be zero');
   }
 
-  return await transaction(async (client) => {
-    // Update balance
-    const userResult = await client.query<User>(
-      `UPDATE users
-       SET credits = credits + $1,
-           updated_at = NOW()
-       WHERE user_id = $2
-       RETURNING *`,
-      [amount, userId]
-    );
+  if (amount > 0) {
+    // Positive adjustment: add credits via ledger
+    const result = await addCreditsToLedger({
+      userId,
+      credits: amount,
+      sourceType: 'adjustment',
+      description: reason,
+      // Adjustments don't expire by default
+      expirationPolicy: 'never',
+    });
 
-    if (userResult.rows.length === 0) {
-      throw new Error(`User not found: ${userId}`);
-    }
+    return {
+      user: result.user,
+      transaction: result.transaction,
+    };
+  } else {
+    // Negative adjustment: deduct credits
+    // Note: This uses the legacy method since we're removing credits
+    // and don't have a specific letter to reference
+    return await transaction(async (client) => {
+      // Update balance
+      const userResult = await client.query<User>(
+        `UPDATE users
+         SET credits = credits + $1,
+             updated_at = NOW()
+         WHERE user_id = $2
+         RETURNING *`,
+        [amount, userId]
+      );
 
-    const user = userResult.rows[0];
+      if (userResult.rows.length === 0) {
+        throw new Error(`User not found: ${userId}`);
+      }
 
-    // Ensure balance doesn't go negative
-    if (user.credits < 0) {
-      throw new Error(`Cannot adjust credits: would result in negative balance`);
-    }
+      const user = userResult.rows[0];
 
-    // Record transaction
-    const txResult = await client.query<CreditTransaction>(
-      `INSERT INTO credit_transactions (
-        user_id, amount, balance_after, type, reference_type, reference_id, description
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *`,
-      [
-        userId,
-        amount,
-        user.credits,
-        'adjustment',
-        'manual',
-        null,
-        reason
-      ]
-    );
+      // Ensure balance doesn't go negative
+      if (user.credits < 0) {
+        throw new Error(`Cannot adjust credits: would result in negative balance`);
+      }
 
-    const txn = txResult.rows[0];
+      // For negative adjustments, we need to update the ledger entries too
+      // Consume from ledger in FIFO order
+      let remainingToDeduct = Math.abs(amount);
 
-    console.log(`🔧 Adjusted ${amount} credits for ${userId}: ${reason}, new balance: ${user.credits}`);
+      const ledgerResult = await client.query<{ ledger_id: string; remaining_amount: number }>(
+        `SELECT ledger_id, remaining_amount FROM credit_ledger
+         WHERE user_id = $1
+           AND status = 'active'
+           AND remaining_amount > 0
+           AND (expires_at IS NULL OR expires_at > NOW())
+         ORDER BY expires_at NULLS LAST, created_at ASC
+         FOR UPDATE`,
+        [userId]
+      );
 
-    return { user, transaction: txn };
-  });
+      for (const entry of ledgerResult.rows) {
+        if (remainingToDeduct <= 0) break;
+
+        const amountToTake = Math.min(remainingToDeduct, entry.remaining_amount);
+        const newRemaining = entry.remaining_amount - amountToTake;
+
+        await client.query(
+          `UPDATE credit_ledger
+           SET remaining_amount = $1,
+               status = CASE WHEN $1 = 0 THEN 'depleted'::credit_ledger_status ELSE status END,
+               updated_at = NOW()
+           WHERE ledger_id = $2`,
+          [newRemaining, entry.ledger_id]
+        );
+
+        remainingToDeduct -= amountToTake;
+      }
+
+      // Record transaction
+      const txResult = await client.query<CreditTransaction>(
+        `INSERT INTO credit_transactions (
+          user_id, amount, balance_after, type, reference_type, reference_id, description
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING *`,
+        [
+          userId,
+          amount,
+          user.credits,
+          'adjustment',
+          'manual',
+          null,
+          reason
+        ]
+      );
+
+      const txn = txResult.rows[0];
+
+      console.log(`🔧 Adjusted ${amount} credits for ${userId}: ${reason}, new balance: ${user.credits}`);
+
+      return { user, transaction: txn };
+    });
+  }
 }
+
+// Re-export ledger functions for direct access when needed
+export {
+  getAvailableCredits,
+  getDetailedBalance as getBalanceFromLedger,
+} from './creditLedgerService.js';

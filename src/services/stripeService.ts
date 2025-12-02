@@ -67,10 +67,12 @@ export async function createCheckoutSession(
     }
 
     // Create Checkout Session
+    // Only include customer_email if it's a valid email address
+    const isValidEmail = params.userEmail && params.userEmail.includes('@');
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'payment',
-      customer_email: params.userEmail,
+      ...(isValidEmail && { customer_email: params.userEmail }),
       client_reference_id: params.userId,
       line_items: [
         {
