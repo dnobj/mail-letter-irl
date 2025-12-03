@@ -13,6 +13,11 @@ import {
   reconcileBalances,
   getUsersWithExpiringCredits,
 } from '../services/creditLedgerService.js';
+import {
+  markExpiredDrafts,
+  cleanupOldDrafts,
+  getDraftStats,
+} from '../services/draftService.js';
 
 const CREDIT_EXPIRATION_QUEUE = 'credit-expiration';
 const CREDIT_EXPIRATION_SCHEDULE = 'credit-expiration-daily';
@@ -57,6 +62,24 @@ async function processCreditExpiration(jobs: any[]): Promise<void> {
       if (expiringUsers.length > 10) {
         console.log(`     ... and ${expiringUsers.length - 10} more`);
       }
+    }
+
+    // 4. Mark expired letter drafts
+    console.log('   Step 4: Marking expired letter drafts...');
+    const expiredDrafts = await markExpiredDrafts();
+    console.log(`   ✓ Marked ${expiredDrafts} drafts as expired`);
+
+    // 5. Cleanup old drafts (older than 7 days)
+    console.log('   Step 5: Cleaning up old consumed/expired drafts...');
+    const cleanedDrafts = await cleanupOldDrafts(7);
+    console.log(`   ✓ Cleaned up ${cleanedDrafts} old drafts`);
+
+    // 6. Log draft statistics
+    console.log('   Step 6: Getting draft statistics...');
+    const draftStats = await getDraftStats();
+    console.log(`   ✓ Draft stats: ${draftStats.pending} pending, ${draftStats.consumed} consumed, ${draftStats.expired} expired, ${draftStats.cancelled} cancelled`);
+    if (draftStats.expiringSoon > 0) {
+      console.log(`   ⚠️  ${draftStats.expiringSoon} drafts expiring within 1 hour`);
     }
 
     console.log(`✅ Credit expiration job ${jobId} completed`);

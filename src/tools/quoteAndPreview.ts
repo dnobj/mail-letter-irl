@@ -9,6 +9,7 @@ import {
 } from "../services/previewService.js";
 import { getLetterProvider } from "../services/providers/index.js";
 import type { AddressValidationInput, AddressValidationResult } from "../services/providers/types.js";
+import { createDraft } from "../services/draftService.js";
 
 interface QuoteAndPreviewInput {
   sender: Address;
@@ -24,6 +25,9 @@ interface QuoteAndPreviewOutput {
   reasonCannotSend?: string;
   deliveryClass?: string;
   estimatedDeliveryDays?: number;
+  // Draft for idempotent send
+  draftId: string;
+  draftExpiresAt: string;  // ISO timestamp
   // Address validation results
   senderAddressValidation?: {
     status: 'verified' | 'corrected' | 'failed';
@@ -268,14 +272,42 @@ async function handler(
     "Computed preview requirements"
   );
 
+  // Generate preview HTML
+  const previewHtml = renderPreviewHtml(input);
+
+  // Create draft for idempotent send
+  const draftResult = await createDraft({
+    userId: context.user.userId,
+    sender: input.sender as unknown as Record<string, unknown>,
+    recipient: input.recipient as unknown as Record<string, unknown>,
+    bodyText: input.bodyText,
+    signOff: input.signOff,
+    requiredCredits,
+    previewHtml,
+    senderValidation: senderValidation ? { status: senderValidation.status } : undefined,
+    recipientValidation: recipientValidation ? { status: recipientValidation.status } : undefined,
+  });
+
+  context.logger.info(
+    {
+      correlationId: context.correlationId,
+      event: "quote.preview.draft_created",
+      draftId: draftResult.draftId,
+      expiresAt: draftResult.expiresAt.toISOString()
+    },
+    "Draft created for idempotent send"
+  );
+
   // Build response
   const output: QuoteAndPreviewOutput = {
-    previewHtml: renderPreviewHtml(input),
+    previewHtml,
     requiredCredits,
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Insufficient Letter IRL credits.",
     deliveryClass: "First Class Letter",
-    estimatedDeliveryDays: 5
+    estimatedDeliveryDays: 5,
+    draftId: draftResult.draftId,
+    draftExpiresAt: draftResult.expiresAt.toISOString(),
   };
 
   // Add address validation results if available
@@ -328,15 +360,19 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter",
   description:
-    "Generate a preview and cost estimate for a letter. Validates addresses and only returns preview if addresses are verified.\n\n" +
-    "IMPORTANT - Address Validation Workflow:\n" +
+    "Generate a preview and cost estimate for a letter. Validates addresses and creates a draft for sending.\n\n" +
+    "IMPORTANT - Draft Workflow:\n" +
+    "1. This tool validates addresses and creates a DRAFT with a unique draftId.\n" +
+    "2. The draftId is REQUIRED when calling send_letter - you cannot send without it.\n" +
+    "3. Each draft expires after 24 hours if not sent.\n" +
+    "4. Using the draftId ensures idempotent sends - retrying send_letter with the same draftId will not charge twice.\n\n" +
+    "Address Validation Workflow:\n" +
     "1. This tool automatically validates all addresses for deliverability (US only).\n" +
     "2. If validation returns an error with 'AUTO-CORRECTED' addresses, YOU MUST:\n" +
     "   - Show the user BOTH the original and corrected addresses\n" +
     "   - Ask the user to confirm they want to use the corrected addresses\n" +
     "   - If user confirms, call this tool AGAIN with the EXACT corrected addresses shown\n" +
-    "3. Only when addresses are verified as exact matches will you receive a preview with canSendNow: true.\n" +
-    "4. Do NOT proceed to send_letter without getting a successful preview first.\n\n" +
+    "3. Only when addresses are verified as exact matches will you receive a preview with canSendNow: true.\n\n" +
     "Service Restrictions:\n" +
     "- US addresses only (both sender and recipient must be in USA)\n" +
     "- Maximum 1 page (~1,800 characters total for body + sign-off)",

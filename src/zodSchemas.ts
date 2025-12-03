@@ -18,11 +18,7 @@ export const quoteAndPreviewInputZ = z.object({
 });
 
 export const sendLetterInputZ = z.object({
-  sender: addressZ,
-  recipient: addressZ,
-  bodyText: z.string(),
-  signOff: z.string(),
-  requiredCredits: z.number(),
+  draftId: z.string(),
   confirm: z.boolean()
 });
 

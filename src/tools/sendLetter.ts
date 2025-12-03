@@ -3,16 +3,20 @@ import {
   McpToolDefinition,
   ToolContext,
   LetterSnapshot,
-  OrderRecord
+  OrderRecord,
+  Address
 } from "../contracts/types.js";
 import { sendLetterInputSchema, sendLetterOutputSchema } from "../schemas.js";
 import { deductCredits as deductCreditsFromDatabase } from "../services/creditService.js";
 import { createOrderRecord } from "../services/orderService.js";
 import { createLetterJob } from "../services/letterJobService.js";
 import { query } from "../db/index.js";
-import type { Letter } from "../services/types.js";
+import { consumeDraft, getDraft } from "../services/draftService.js";
+import type { Letter, LetterDraft } from "../services/types.js";
 
-interface SendLetterInput extends LetterSnapshot {
+// New simplified input: just draftId and confirm
+interface SendLetterInput {
+  draftId: string;
   confirm: boolean;
 }
 
@@ -23,6 +27,7 @@ interface SendLetterOutput {
   recipientSummary: { name: string; city: string; state: string };
   creditsRemaining: number;
   previewFirstPageHtml?: string;
+  isRetry?: boolean;  // true if this was an idempotent retry (draft already consumed)
 }
 
 const OUTPUT_TEMPLATE = "LetterConfirmationCard";
@@ -35,10 +40,12 @@ async function handler(
     {
       correlationId: context.correlationId,
       event: "send.letter.start",
-      requiredCredits: input.requiredCredits
+      draftId: input.draftId
     },
     "Processing send_letter"
   );
+
+  // Validate confirm flag
   if (!input.confirm) {
     context.logger.warn(
       {
@@ -50,61 +57,121 @@ async function handler(
     throw new Error("send_letter requires confirm: true");
   }
 
-  // Normalize country codes to US (2-letter ISO code)
-  // Accept: US, USA, United States, us, usa, etc.
-  const normalizeCountryToUS = (country?: string): string => {
-    if (!country) return 'US';
-    const normalized = country.toUpperCase().trim();
-    if (normalized === 'US' || normalized === 'USA' || normalized === 'UNITED STATES' || normalized === 'U.S.' || normalized === 'U.S.A.') {
-      return 'US';
-    }
-    return normalized;
-  };
-
-  input.sender.country = normalizeCountryToUS(input.sender.country);
-  input.recipient.country = normalizeCountryToUS(input.recipient.country);
-
-  // Validate one-page constraint (~1,800 characters maximum)
-  const MAX_CHARS_PER_PAGE = 1800;
-  const totalChars = `${input.bodyText}\n\n${input.signOff}`.length;
-
-  if (totalChars > MAX_CHARS_PER_PAGE) {
-    context.logger.warn(
-      {
-        correlationId: context.correlationId,
-        event: "send.letter.exceeds_page_limit",
-        totalChars,
-        maxChars: MAX_CHARS_PER_PAGE
-      },
-      "Letter exceeds one-page limit"
-    );
+  // Validate draftId is provided
+  if (!input.draftId) {
     throw new Error(
-      `Letter exceeds one-page limit (${totalChars}/${MAX_CHARS_PER_PAGE} characters). ` +
-      `Please shorten your message to fit on one page. ` +
-      `All letters are currently limited to one page maximum.`
+      "send_letter requires a draftId from quote_and_preview_letter. " +
+      "Please call quote_and_preview_letter first to get a draftId."
     );
   }
 
-  // Use database-backed credit deduction (handles balance check atomically)
   const userId = context.user.userId;
   const now = context.now().toISOString();
   const orderId = randomUUID();
-  const snapshot: LetterSnapshot = {
-    sender: input.sender,
-    recipient: input.recipient,
-    bodyText: input.bodyText,
-    signOff: input.signOff,
-    requiredCredits: input.requiredCredits
-  };
 
+  // Try to consume the draft (idempotent operation)
+  let consumeResult;
+  try {
+    consumeResult = await consumeDraft({
+      draftId: input.draftId,
+      userId,
+      letterId: orderId
+    });
+  } catch (error: any) {
+    // Handle specific draft errors with user-friendly messages
+    if (error.code === 'DRAFT_NOT_FOUND') {
+      throw new Error(
+        `Draft not found: ${input.draftId}. ` +
+        "Please call quote_and_preview_letter to create a new draft."
+      );
+    }
+    if (error.code === 'DRAFT_NOT_OWNED') {
+      throw new Error(
+        `This draft does not belong to your account. ` +
+        "Please call quote_and_preview_letter to create a new draft."
+      );
+    }
+    if (error.code === 'DRAFT_EXPIRED') {
+      throw new Error(
+        `Draft has expired (drafts are valid for 24 hours). ` +
+        "Please call quote_and_preview_letter to create a new draft."
+      );
+    }
+    if (error.code === 'DRAFT_CANCELLED') {
+      throw new Error(
+        `This draft was cancelled. ` +
+        "Please call quote_and_preview_letter to create a new draft."
+      );
+    }
+    throw error;
+  }
+
+  const { draft, alreadyConsumed, existingLetterId } = consumeResult;
+
+  // If draft was already consumed, return the existing order (idempotent retry)
+  if (alreadyConsumed && existingLetterId) {
+    context.logger.info(
+      {
+        correlationId: context.correlationId,
+        event: "send.letter.idempotent_retry",
+        draftId: input.draftId,
+        existingLetterId
+      },
+      "Idempotent retry - draft already consumed, returning existing order"
+    );
+
+    // Fetch the existing letter to return its details
+    const existingLetterResult = await query<Letter>(
+      `SELECT * FROM letters WHERE letter_id = $1`,
+      [existingLetterId]
+    );
+
+    if (existingLetterResult.rows.length > 0) {
+      const existingLetter = existingLetterResult.rows[0];
+      const recipient = existingLetter.recipient as Address;
+
+      return {
+        orderId: existingLetterId,
+        currentStatus: "queued_for_print" as const,
+        statusTimeline: [
+          { timestampISO: now, statusText: "Letter already sent (duplicate request)" }
+        ],
+        recipientSummary: {
+          name: recipient.name,
+          city: recipient.city,
+          state: recipient.state
+        },
+        creditsRemaining: context.user.creditsRemaining,
+        isRetry: true
+      };
+    }
+  }
+
+  // Extract letter content from the draft
+  const sender = draft.sender as unknown as Address;
+  const recipient = draft.recipient as unknown as Address;
+  const bodyText = draft.body_text;
+  const signOff = draft.sign_off;
+  const requiredCredits = draft.required_credits;
+
+  context.logger.info(
+    {
+      correlationId: context.correlationId,
+      event: "send.letter.draft_consumed",
+      draftId: input.draftId,
+      requiredCredits
+    },
+    "Draft consumed, proceeding with send"
+  );
+
+  // Deduct credits from database
   let creditsRemaining: number;
   try {
-    // Deduct credits from database (throws if insufficient)
     const result = await deductCreditsFromDatabase({
       userId,
-      credits: input.requiredCredits,
+      credits: requiredCredits,
       letterId: orderId,
-      description: `Letter to ${input.recipient.name} in ${input.recipient.city}, ${input.recipient.state}`
+      description: `Letter to ${recipient.name} in ${recipient.city}, ${recipient.state}`
     });
 
     creditsRemaining = result.user.credits;
@@ -113,17 +180,17 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "send.letter.credits_deducted",
-        creditsDeducted: input.requiredCredits,
+        creditsDeducted: requiredCredits,
         creditsRemaining
       },
       "Credits deducted from database"
     );
-  } catch (error) {
+  } catch (error: any) {
     context.logger.warn(
       {
         correlationId: context.correlationId,
         event: "send.letter.insufficient_credits",
-        requiredCredits: input.requiredCredits,
+        requiredCredits,
         error: error.message
       },
       "Insufficient credits for send_letter"
@@ -132,19 +199,20 @@ async function handler(
   }
 
   // Create letter in database
-  const letterId = orderId; // Use same ID for letter and order
+  const letterId = orderId;
   const letterResult = await query<Letter>(
     `INSERT INTO letters (
-      letter_id, user_id, content, recipient, credits_cost, status
-    ) VALUES ($1, $2, $3, $4, $5, $6)
+      letter_id, user_id, content, recipient, credits_cost, status, preview_html
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *`,
     [
       letterId,
       userId,
-      JSON.stringify({ bodyText: input.bodyText, signOff: input.signOff, sender: input.sender }),
-      JSON.stringify(input.recipient),
-      input.requiredCredits,
-      'draft'
+      JSON.stringify({ bodyText, signOff, sender }),
+      JSON.stringify(recipient),
+      requiredCredits,
+      'draft',
+      draft.preview_html
     ]
   );
 
@@ -174,6 +242,15 @@ async function handler(
     "Letter queued for processing"
   );
 
+  // Create snapshot for order record (backward compatibility)
+  const snapshot: LetterSnapshot = {
+    sender,
+    recipient,
+    bodyText,
+    signOff,
+    requiredCredits
+  };
+
   // Create order record for tracking (still using old system for backward compatibility)
   const orderRecord: OrderRecord = createOrderRecord({
     orderId,
@@ -193,6 +270,7 @@ async function handler(
       orderId,
       letterId,
       jobId: letterJob.job_id,
+      draftId: input.draftId,
       creditsRemaining: context.user.creditsRemaining
     },
     "Letter queued for print and mail"
@@ -208,13 +286,23 @@ async function handler(
     ],
     recipientSummary: orderRecord.recipientSummary,
     creditsRemaining: context.user.creditsRemaining,
-    previewFirstPageHtml: orderRecord.previewFirstPageHtml
+    previewFirstPageHtml: orderRecord.previewFirstPageHtml,
+    isRetry: false
   };
 }
 
 export const sendLetterTool: McpToolDefinition<SendLetterInput, SendLetterOutput> = {
   name: "send_letter",
-  description: "Deduct credits and queue a letter for printing/mailing.",
+  description:
+    "Send a letter using a draft from quote_and_preview_letter.\n\n" +
+    "IMPORTANT - Draft Requirement:\n" +
+    "1. You MUST call quote_and_preview_letter first to get a draftId.\n" +
+    "2. Pass the draftId to this tool along with confirm: true.\n" +
+    "3. The draft contains all letter details (sender, recipient, content) - you don't need to pass them again.\n\n" +
+    "Idempotency:\n" +
+    "- If you call this tool twice with the same draftId, the second call will return the existing order without charging again.\n" +
+    "- This protects against duplicate charges if the network request is retried.\n" +
+    "- If isRetry: true in the response, it means the letter was already sent previously.",
   readOnly: false,
   inputSchema: sendLetterInputSchema,
   outputSchema: sendLetterOutputSchema,

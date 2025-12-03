@@ -27,26 +27,40 @@ export const quoteAndPreviewInputSchema: JsonSchema = {
 
 export const quoteAndPreviewOutputSchema: JsonSchema = {
   type: "object",
-  required: ["previewHtml", "requiredCredits", "canSendNow"],
+  required: ["previewHtml", "requiredCredits", "canSendNow", "draftId", "draftExpiresAt"],
   properties: {
     previewHtml: { type: "string" },
     requiredCredits: { type: "number" },
     canSendNow: { type: "boolean" },
     reasonCannotSend: { type: "string" },
     deliveryClass: { type: "string" },
-    estimatedDeliveryDays: { type: "integer" }
+    estimatedDeliveryDays: { type: "integer" },
+    draftId: { type: "string", description: "Unique draft ID required for send_letter" },
+    draftExpiresAt: { type: "string", description: "ISO timestamp when draft expires (24h)" },
+    senderAddressValidation: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["verified", "corrected", "failed"] },
+        errors: { type: "array", items: { type: "string" } },
+        suggestions: { type: "string" }
+      }
+    },
+    recipientAddressValidation: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["verified", "corrected", "failed"] },
+        errors: { type: "array", items: { type: "string" } },
+        suggestions: { type: "string" }
+      }
+    }
   }
 };
 
 export const sendLetterInputSchema: JsonSchema = {
   type: "object",
-  required: ["sender", "recipient", "bodyText", "signOff", "requiredCredits", "confirm"],
+  required: ["draftId", "confirm"],
   properties: {
-    sender: addressSchema,
-    recipient: addressSchema,
-    bodyText: { type: "string" },
-    signOff: { type: "string" },
-    requiredCredits: { type: "number" },
+    draftId: { type: "string", description: "Draft ID from quote_and_preview_letter" },
     confirm: { type: "boolean", description: "Must be true or request fails" }
   }
 };
@@ -78,7 +92,8 @@ export const sendLetterOutputSchema: JsonSchema = {
       }
     },
     creditsRemaining: { type: "number" },
-    previewFirstPageHtml: { type: "string" }
+    previewFirstPageHtml: { type: "string" },
+    isRetry: { type: "boolean", description: "True if this was an idempotent retry (draft already consumed)" }
   }
 };
 

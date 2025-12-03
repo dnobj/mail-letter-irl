@@ -387,3 +387,75 @@ export interface PromoCampaignsResult {
   campaigns: PromoCampaign[];
   total: number;
 }
+
+// ============================================================================
+// Letter Draft Types (for idempotent send operations)
+// ============================================================================
+
+export type DraftStatus = 'pending' | 'consumed' | 'expired' | 'cancelled';
+
+export interface LetterDraft {
+  draft_id: string;
+  user_id: string;
+  sender: Record<string, unknown>;       // Address JSON
+  recipient: Record<string, unknown>;    // Address JSON
+  body_text: string;
+  sign_off: string;
+  required_credits: number;
+  preview_html?: string;
+  sender_validation?: Record<string, unknown>;
+  recipient_validation?: Record<string, unknown>;
+  status: DraftStatus;
+  expires_at: Date;
+  consumed_at?: Date;
+  consumed_letter_id?: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface CreateDraftParams {
+  userId: string;
+  sender: Record<string, unknown>;
+  recipient: Record<string, unknown>;
+  bodyText: string;
+  signOff: string;
+  requiredCredits: number;
+  previewHtml?: string;
+  senderValidation?: Record<string, unknown>;
+  recipientValidation?: Record<string, unknown>;
+  expiresInHours?: number;  // Default: 24
+}
+
+export interface CreateDraftResult {
+  draftId: string;
+  expiresAt: Date;
+}
+
+export interface ConsumeDraftParams {
+  draftId: string;
+  userId: string;
+  letterId: string;
+}
+
+export interface ConsumeDraftResult {
+  draft: LetterDraft;
+  alreadyConsumed: boolean;
+  existingLetterId?: string;  // Set if alreadyConsumed is true
+}
+
+export interface DraftNotFoundError extends Error {
+  code: 'DRAFT_NOT_FOUND';
+  draftId: string;
+}
+
+export interface DraftExpiredError extends Error {
+  code: 'DRAFT_EXPIRED';
+  draftId: string;
+  expiredAt: Date;
+}
+
+export interface DraftNotOwnedError extends Error {
+  code: 'DRAFT_NOT_OWNED';
+  draftId: string;
+  userId: string;
+}
