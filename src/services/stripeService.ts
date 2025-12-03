@@ -28,23 +28,24 @@ export interface CheckoutSessionResult {
 
 /**
  * Product configurations matching our pricing model
+ * Price IDs are from Stripe Dashboard (live mode)
  */
 const PRODUCTS = {
   'credit-pack-4': {
     credits: 4,
-    priceUSD: 5.00,
+    priceId: process.env.STRIPE_PRICE_STARTER || '',
     name: 'Starter Pack - 4 Credits',
     description: 'Perfect for trying out Letter IRL'
   },
   'credit-pack-10': {
     credits: 10,
-    priceUSD: 10.00,
+    priceId: process.env.STRIPE_PRICE_REGULAR || '',
     name: 'Regular Pack - 10 Credits',
     description: 'Most popular choice for regular letter senders'
   },
   'credit-pack-100': {
     credits: 100,
-    priceUSD: 90.00,
+    priceId: process.env.STRIPE_PRICE_POWER || '',
     name: 'Power Pack - 100 Credits',
     description: 'Best value - 10% savings for power users'
   }
@@ -66,7 +67,15 @@ export async function createCheckoutSession(
       };
     }
 
-    // Create Checkout Session
+    // Validate that we have a price ID configured
+    if (!product.priceId) {
+      return {
+        success: false,
+        error: `Price ID not configured for product: ${params.productId}. Set STRIPE_PRICE_* environment variables.`
+      };
+    }
+
+    // Create Checkout Session using pre-created Stripe Price ID
     // Only include customer_email if it's a valid email address
     const isValidEmail = params.userEmail && params.userEmail.includes('@');
     const session = await stripe.checkout.sessions.create({
@@ -76,18 +85,7 @@ export async function createCheckoutSession(
       client_reference_id: params.userId,
       line_items: [
         {
-          price_data: {
-            currency: 'usd',
-            product_data: {
-              name: product.name,
-              description: product.description,
-              metadata: {
-                credits: product.credits.toString(),
-                product_id: params.productId
-              }
-            },
-            unit_amount: Math.round(product.priceUSD * 100) // Convert to cents
-          },
+          price: product.priceId,
           quantity: 1
         }
       ],
