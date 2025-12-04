@@ -29,6 +29,10 @@ import { rateLimitMiddlewareWithTier } from "../api/middleware/rateLimit.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// OAuth client credentials for registration endpoint
+const STATIC_CLIENT_ID = process.env.LETTER_IRL_OAUTH_CLIENT_ID || '';
+const STATIC_CLIENT_SECRET = process.env.LETTER_IRL_OAUTH_CLIENT_SECRET || '';
+
 const DEFAULT_WIDGET_DIR = path.resolve(__dirname, "..", "..", "widgets");
 const DASHBOARD_DIR = path.resolve(__dirname, "..", "..", "public", "dashboard");
 const DEFAULT_HOST = process.env.LETTER_IRL_HTTP_HOST ?? "0.0.0.0";
@@ -58,11 +62,66 @@ const REQUIRE_AUTH = process.env.LETTER_IRL_REQUIRE_AUTH !== "false";
 const AUTH0_REGISTRATION_ENDPOINT =
   process.env.LETTER_IRL_OAUTH_REGISTRATION_ENDPOINT;
 
+// Environment variable validation
+const REQUIRED_ENV_VARS = [
+  'DATABASE_URL',
+  'LETTER_IRL_OAUTH_JWKS_URI',
+  'LETTER_IRL_OAUTH_ISSUER',
+  'LETTER_IRL_OAUTH_AUDIENCE',
+];
+
+// Only require these in production (not for local admin mode)
+const PRODUCTION_ENV_VARS = [
+  'STRIPE_SECRET_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+];
+
+function validateEnvironment() {
+  const missing: string[] = [];
+
+  for (const envVar of REQUIRED_ENV_VARS) {
+    if (!process.env[envVar]) {
+      missing.push(envVar);
+    }
+  }
+
+  // Check production vars unless ADMIN_ENABLED is true (local admin mode)
+  if (process.env.ADMIN_ENABLED !== 'true') {
+    for (const envVar of PRODUCTION_ENV_VARS) {
+      if (!process.env[envVar]) {
+        missing.push(envVar);
+      }
+    }
+  }
+
+  if (missing.length > 0) {
+    console.error('❌ Missing required environment variables:');
+    missing.forEach(v => console.error(`   - ${v}`));
+    process.exit(1);
+  }
+}
+
 type SseSession = {
   server: McpServer;
   transport: SSEServerTransport;
   authInfo: AuthenticatedUser | null;
 };
+
+/**
+ * Parse request body with timeout and error handling
+ */
+function parseRequestBody(req: http.IncomingMessage, timeoutMs = 30000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    const timeout = setTimeout(() => {
+      reject(new Error('Request body timeout'));
+    }, timeoutMs);
+
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => { clearTimeout(timeout); resolve(body); });
+    req.on('error', (err) => { clearTimeout(timeout); reject(err); });
+  });
+}
 
 function getAllowedHosts(): string[] {
   const raw = process.env.LETTER_IRL_ALLOWED_HOSTS;
@@ -188,6 +247,9 @@ async function createMcpServer(letterServer: LetterIrlServer, authInfo: Authenti
 }
 
 export async function startHttpServer() {
+  // Validate environment variables before starting server
+  validateEnvironment();
+
   const letterServer = new LetterIrlServer();
   const sseSessions = new Map<string, SseSession>();
   const allowedHosts = getAllowedHosts();
@@ -444,23 +506,31 @@ export async function startHttpServer() {
       if (await rateLimitMiddlewareWithTier(req, res, 'checkout')) {
         return; // Rate limited
       }
-      // Parse JSON body
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      await new Promise<void>(resolve => req.on('end', () => resolve()));
-      (req as any).body = body ? JSON.parse(body) : {};
-      await handleCreateCheckoutSession(req as any, res as any);
+      // Parse JSON body with timeout
+      try {
+        const body = await parseRequestBody(req);
+        (req as any).body = body ? JSON.parse(body) : {};
+        await handleCreateCheckoutSession(req as any, res as any);
+      } catch (error) {
+        console.error('Error parsing checkout request body:', error);
+        res.statusCode = 408;
+        res.end('Request timeout or error');
+      }
       return;
     }
 
     // Stripe webhook
     if (url.pathname === "/webhooks/stripe" && req.method === "POST") {
-      // Keep raw body for signature verification
-      let body = '';
-      req.on('data', chunk => { body += chunk.toString(); });
-      await new Promise<void>(resolve => req.on('end', () => resolve()));
-      (req as any).body = body; // Raw string for Stripe signature verification
-      await handleStripeWebhook(req as any, res as any);
+      // Keep raw body for signature verification with timeout
+      try {
+        const body = await parseRequestBody(req);
+        (req as any).body = body; // Raw string for Stripe signature verification
+        await handleStripeWebhook(req as any, res as any);
+      } catch (error) {
+        console.error('Error parsing Stripe webhook body:', error);
+        res.statusCode = 408;
+        res.end('Request timeout or error');
+      }
       return;
     }
 
@@ -583,10 +653,8 @@ export async function startHttpServer() {
         await sessionServer.connect(sessionTransport);
         console.log(`MCP server connected, session=${sessionTransport.sessionId}`);
 
-        // For Streamable HTTP POST, parse body and handle request
-        let body = '';
-        req.on('data', chunk => { body += chunk.toString(); });
-        await new Promise<void>(resolve => req.on('end', () => resolve()));
+        // For Streamable HTTP POST, parse body and handle request with timeout
+        const body = await parseRequestBody(req);
 
         console.log(`Received POST body: ${body.substring(0, 200)}`);
         const parsedBody = body ? JSON.parse(body) : undefined;
