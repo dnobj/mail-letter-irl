@@ -1,369 +1,300 @@
 # Letter IRL - Admin Panel Guide
 
-**Last Updated:** November 15, 2025
+**Last Updated:** December 4, 2025
 
 ## Overview
 
-The Admin Panel is a web-based interface for monitoring and managing the Letter IRL system. It provides real-time access to system statistics, user management, job queue monitoring, and credit adjustments.
+The Admin Panel is a web-based interface for monitoring and managing the Letter IRL system. It provides real-time access to system statistics, user management, job queue monitoring, credit adjustments, and promo campaign management.
 
-**Location:** `/admin-panel.html`
+**Location:** `/admin-panel.html` or `http://localhost:8090/admin`
 
-**Server:** `http://localhost:8788`
+**Security Model:** Local-only access (no authentication required from localhost)
 
 ---
 
 ## Getting Started
 
-### 1. Start the MCP Server
+### 1. Start the MCP Server Locally
 
 ```bash
 cd /mnt/c/letter-irl
-npm run mcp:http
+npm run dev
 ```
 
-The server will start on `http://localhost:8788`
+The server will start on `http://localhost:8090`
 
-### 2. Get Your JWT Token
+### 2. Configure Environment
 
-**Option A: From Server Logs**
-When you authenticate via ChatGPT, the server logs will show your JWT token:
+For local admin access with production database:
+
+```bash
+# .env (local)
+ADMIN_ENABLED=true
+ADMIN_LOCAL_ONLY=true
+DATABASE_URL=postgres://...neon.tech/letterirl  # Production Neon DB
+DISABLE_WORKERS=true  # Optional: skip job processing
 ```
-🔓 OAuth flow complete for user: auth0|...
-JWT: eyJhbGc...
-```
-
-**Option B: Extract from ChatGPT Session**
-Use your browser's developer tools to inspect the Authorization header in ChatGPT's MCP requests.
 
 ### 3. Open the Admin Panel
 
-Open `admin-panel.html` in your browser:
 ```bash
-# Option 1: Direct file
+# Option 1: Direct URL (recommended)
+open http://localhost:8090/admin
+
+# Option 2: Open file directly
 open /mnt/c/letter-irl/admin-panel.html
-
-# Option 2: Via HTTP server (if serving)
-open http://localhost:8788/admin-panel.html
 ```
 
-### 4. Configure Authentication
-
-1. Paste your JWT token into the "JWT Token" field
-2. Click "Save Token"
-3. The token is stored in localStorage for future sessions
-
-**Note:** You must be an admin user (listed in `LETTER_IRL_ADMIN_USER_IDS` environment variable)
+**Note:** No JWT token or login required when accessing from localhost.
 
 ---
 
-## Features
+## Sections
 
-### 1. System Stats 📈
+### 1. Dashboard
 
-**Endpoint:** `GET /api/admin/stats`
+The main dashboard shows at-a-glance system health and alerts.
 
-**What it shows:**
-- Total users and credits held
-- Credits purchased vs. credits used
-- Total letters sent
-- Order count and revenue
-- Success rate
+**Metrics displayed:**
+- Total users / New users (today, 7d, 30d)
+- Credits held / purchased / used
+- Letters sent (today, 7d, 30d, total)
+- Revenue (today, 7d, 30d, total)
+- Jobs pending / processing / completed / failed
 
-**Usage:**
-1. Click "Load Stats"
-2. View real-time system metrics
-
----
-
-### 2. Users List 👥
-
-**Endpoint:** `GET /api/admin/users`
-
-**What it shows:**
-- All users (paginated, limit 10)
-- Email address
-- Current credit balance
-- Total credits purchased
-- Total credits used
-
-**Usage:**
-1. Click "Load Users"
-2. Browse user list
-3. Copy user IDs for detailed lookup
-
-**Features:**
-- Pagination (default: 10 users)
-- Sortable columns
-- Quick overview of user activity
+**Alerts:**
+- Failed jobs requiring attention
+- Credits expiring soon
+- Stuck jobs (processing > 10 minutes)
+- Open chargebacks (if any)
 
 ---
 
-### 3. User Lookup 🔍
+### 2. Users
 
-**Endpoint:** `GET /api/admin/users/:userId`
+**Search Users:**
+- Search by email or user ID (partial match supported)
+- View user details, credits, tier
 
-**What it shows:**
-- Complete user profile
-- Credit statistics (balance, purchased, used)
-- Total letters sent
-- Recent transaction history (last 10)
-- User metadata (created/updated dates)
-
-**Usage:**
-1. Enter full user ID (e.g., `google-oauth2|100183416573162262799`)
-2. Click "Look Up User"
-3. View detailed user information
-
-**Note:** User IDs are displayed in full (no truncation) for accurate copy/paste
-
-**Use Cases:**
-- Customer support inquiries
-- Investigating credit discrepancies
-- Auditing user activity
-- Verifying transaction history
+**Recent Users:**
+- List of most recent users
+- Quick view of credits and tier
 
 ---
 
-### 4. Job Queue ⚙️
+### 3. Letters
 
-**Endpoint:** `GET /api/admin/jobs`
+**Search Letters:**
+- Search by letter ID, user ID, or recipient name
 
-**What it shows:**
-- All letter processing jobs
-- Job status (pending, processing, completed, failed)
-- Attempt count (current/max)
-- Created timestamp
-
-**Usage:**
-1. Click "Load Jobs" - Shows jobs from our `letter_jobs` table
-2. Click "Load pg-boss Jobs" - Shows raw pg-boss queue state
-
-**Job Statuses:**
-- `pending` - Waiting to be processed
-- `processing` - Currently being processed
-- `completed` - Successfully completed
-- `failed` - Failed after max retries
-- `retry` - Scheduled for retry
+**Recent Letters:**
+- List of most recent letters
+- Status, recipient, creation date
 
 ---
 
-### 5. Job Lookup 🔍
+### 4. Jobs
 
-**Endpoint:** `GET /api/admin/jobs/:jobId`
+**Job Queue:**
+- View all letter processing jobs
+- Status, attempts, retry button for failed jobs
 
-**What it shows:**
-- Complete job details
-- Status and attempt count
-- Timestamps (created, started, completed)
-- Error messages (if failed)
-- Associated letter details (recipient, message preview)
-
-**Usage:**
-1. Enter job ID (UUID)
-2. Click "Look Up Job"
-3. View job and letter details
-
-**Use Cases:**
-- Debugging failed jobs
-- Tracking letter delivery status
-- Investigating delays
-- Customer support
+**Job Lookup:**
+- Look up specific job by ID
+- View error messages, retry options
 
 ---
 
-### 6. User Jobs Lookup 📋
+### 5. Credits
 
-**Endpoint:** `GET /api/admin/jobs/user/:userId`
+**Adjust Credits:**
+- Manually add or remove credits from user
+- Requires reason for audit trail
+- Records transaction in database
 
-**What it shows:**
-- All jobs for a specific user
-- Job status and attempts
-- Letter IDs
-- Created timestamps
-
-**Usage:**
-1. Enter user ID (e.g., `auth0|123456...`)
-2. Click "Load User Jobs"
-3. View all jobs for that user
-
-**Use Cases:**
-- Tracking user's letter sending history
-- Investigating delivery issues
-- Customer support
+**User Credit Details:**
+- Look up user's credit balance
+- View recent transactions
+- See purchase and usage history
 
 ---
 
-### 7. Credit Adjustment 💰
+### 6. Promos
 
-**Endpoint:** `POST /api/admin/credits/adjust`
+**Active Campaigns:**
+- View all promo campaigns
+- Status dropdown to change: Draft, Active, Paused, Ended
+- Delete button (only for campaigns with 0 redemptions)
+- Redemption counts (current / max total, max per user)
 
-**What it does:**
-- Manually add or remove credits
-- Records transaction in audit trail
-- Updates user balance atomically
+**Create Campaign:**
+- Code (case-insensitive, stored as uppercase)
+- Name
+- Credits Amount (0 for preview-only access)
+- Max per User (default: 1)
+- Max Total Redemptions (optional, leave empty for unlimited)
 
-**Usage:**
-1. Enter user ID
-2. Enter amount (positive to add, negative to remove)
-3. Enter reason (required for audit trail)
-4. Click "Adjust Credits"
-
-**Examples:**
-```
-User ID: google-oauth2|100183416573162262799
-Amount: +25
-Reason: Customer service credit for delayed delivery
-
-User ID: auth0|507f1f77bcf86cd799439011
-Amount: -5
-Reason: Correction for duplicate charge
-```
-
-**Audit Trail:**
-- All adjustments are logged in `credit_transactions` table
-- Reason includes admin user ID
-- Complete before/after balance tracking
+**Status States:**
+- **Draft:** Not yet active, cannot be redeemed
+- **Active:** Users can redeem the code
+- **Paused:** Temporarily disabled
+- **Ended:** Permanently closed
 
 ---
 
 ## API Endpoints Summary
 
+### Dashboard & Alerts
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/admin/stats` | GET | System-wide statistics |
+| `/api/admin/dashboard` | GET | Comprehensive dashboard metrics |
+| `/api/admin/alerts` | GET | Active alerts (failed jobs, expiring credits) |
+| `/api/admin/stats` | GET | System-wide statistics (legacy) |
+
+### Users
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/api/admin/users` | GET | List all users (paginated) |
+| `/api/admin/users/search?q=` | GET | Search users by email/ID |
 | `/api/admin/users/:userId` | GET | Get user details |
+
+### Letters
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/letters` | GET | List letters with filters |
+| `/api/admin/letters/search?q=` | GET | Search letters |
+| `/api/admin/letters/:letterId` | GET | Get letter details with job history |
+
+### Jobs
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/api/admin/jobs` | GET | List all jobs (paginated) |
 | `/api/admin/jobs/:jobId` | GET | Get job details |
+| `/api/admin/jobs/:jobId/retry` | POST | Retry a failed job |
 | `/api/admin/jobs/user/:userId` | GET | Get jobs for user |
 | `/api/admin/pgboss/jobs` | GET | View pg-boss queue state |
+
+### Credits
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/api/admin/credits/adjust` | POST | Adjust user credits |
+
+### Promo Campaigns
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/promo/campaigns` | GET | List all campaigns |
+| `/api/admin/promo/campaigns` | POST | Create new campaign |
+| `/api/admin/promo/campaigns/:id` | GET | Get campaign details |
+| `/api/admin/promo/campaigns/:id` | DELETE | Delete campaign (if no redemptions) |
+| `/api/admin/promo/campaigns/:id/status` | PATCH | Update campaign status |
+| `/api/admin/promo/campaigns/:id/redemptions` | GET | Get campaign redemptions |
+
+### Stripe Reconciliation
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/stripe/reconcile` | GET | Run Stripe reconciliation |
+| `/api/admin/stripe/reconcile/fix` | POST | Auto-fix missing credits |
 
 ---
 
 ## Security
 
-### Authentication
+### Local-Only Access Model
 
-- **JWT Required:** All endpoints require valid JWT token
-- **Admin Authorization:** User must be in admin whitelist
-- **Token Storage:** Stored in browser localStorage (client-side only)
+The admin panel uses a **local-only security model**:
 
-### Admin Whitelist
+1. **Railway (production):** `ADMIN_ENABLED=false` - all admin routes return 404
+2. **Local development:** `ADMIN_ENABLED=true` - full admin access from localhost
 
-Configured via environment variable:
+**Why this works:**
+- The real security is the Neon DATABASE_URL
+- Without production credentials, attackers only see an empty database
+- `ADMIN_ENABLED` is defense-in-depth (disabled by default on Railway)
+- No admin attack surface exposed on production
+
+### Environment Variables
+
 ```bash
-LETTER_IRL_ADMIN_USER_IDS=auth0|abc123,auth0|def456
+# Production (Railway) - admin disabled
+ADMIN_ENABLED=false
+
+# Local admin access
+ADMIN_ENABLED=true
+ADMIN_LOCAL_ONLY=true
 ```
 
-**To add an admin:**
-1. Get user's Auth0 user ID
-2. Add to `LETTER_IRL_ADMIN_USER_IDS` in `.env`
-3. Restart server
+### Proxy Protection
 
-### CORS
-
-- Server has CORS enabled for localhost
-- Allows: `GET`, `POST`, `OPTIONS`
-- Required headers: `Authorization`, `Content-Type`
+Admin routes block requests coming through proxies (ngrok, etc.):
+- Checks `x-forwarded-for` header
+- Checks `x-real-ip` header
+- Checks `ngrok-agent-ips` header
 
 ---
 
 ## Troubleshooting
 
-### "Please set your JWT token first"
+### Admin panel shows "Not found"
 
-**Problem:** No JWT token configured
-
-**Solution:**
-1. Get JWT from server logs or ChatGPT session
-2. Paste into token field
-3. Click "Save Token"
-
-### "Unauthorized" or "Forbidden"
-
-**Problem:** User is not in admin whitelist
+**Problem:** Admin routes are disabled
 
 **Solution:**
-1. Verify user ID is correct
-2. Check `LETTER_IRL_ADMIN_USER_IDS` in `.env`
-3. Restart server after adding user
+1. Check `ADMIN_ENABLED=true` in `.env`
+2. Restart the server
+3. Access from localhost only (not through ngrok)
 
-### "Error: User not found"
+### CORS errors on DELETE/PATCH
 
-**Problem:** User ID doesn't exist in database
+**Problem:** Browser blocking admin requests
 
-**Solution:**
-1. Verify user ID is correct (case-sensitive)
-2. Check if user has authenticated at least once
-3. Use "Users List" to find correct user ID
+**Solution:** This was fixed in the codebase. Make sure you have the latest code and restart the server.
 
-### CORS Errors
+### "Error updating status" or "Error deleting campaign"
 
-**Problem:** Browser blocking requests
+**Problem:** API request failed
 
 **Solution:**
-1. Ensure server is running on `http://localhost:8788`
-2. Check browser console for specific error
-3. Verify CORS headers in server logs
+1. Check server console for error details
+2. Verify campaign exists
+3. For delete: campaign must have 0 redemptions
 
-### Token Expired
+### Cannot delete campaign
 
-**Problem:** JWT token has expired (24 hours)
+**Problem:** Campaign has existing redemptions
 
-**Solution:**
-1. Get fresh JWT from new ChatGPT session
-2. Update token in admin panel
-3. Click "Save Token"
+**Solution:** Set status to "Ended" instead. Campaigns with redemptions cannot be deleted to preserve audit trail.
 
 ---
 
 ## Best Practices
 
-### 1. Credit Adjustments
+### Promo Campaigns
 
-- **Always provide detailed reason** - Required for audit trail
-- **Verify user first** - Use User Lookup to confirm identity
-- **Document externally** - Keep separate records for large adjustments
-- **Communicate with user** - Inform users of manual adjustments
+- Use **descriptive codes** (e.g., `EARLYBIRD`, `WELCOME5`)
+- Set **max total redemptions** for limited offers
+- Use **0 credits** for preview-only access codes
+- **Pause** campaigns instead of deleting if unsure
+- **End** campaigns when promotion is complete
 
-### 2. Job Monitoring
+### Credit Adjustments
 
-- **Check pg-boss queue regularly** - Identify stuck jobs
-- **Monitor failed jobs** - Investigate and retry if needed
-- **Track completion rates** - Identify systemic issues
-- **Review error messages** - Pattern analysis for bugs
+- Always provide a **detailed reason** for audit trail
+- **Verify user first** using User Lookup
+- **Document externally** for large adjustments
+- **Communicate with user** about manual adjustments
 
-### 3. User Support
+### Job Monitoring
 
-- **Look up user first** - Get complete context before adjusting
-- **Check transaction history** - Verify reported issues
-- **Review job status** - Confirm delivery status
-- **Document actions** - Keep support ticket trail
-
-### 4. Security
-
-- **Protect JWT tokens** - Don't share or commit to repos
-- **Rotate admin access** - Review whitelist regularly
-- **Monitor admin actions** - All actions are logged
-- **Use secure connections** - HTTPS in production
-
----
-
-## Future Enhancements
-
-Potential features for future versions:
-
-- [ ] Auto-refresh for real-time monitoring
-- [ ] Export data to CSV
-- [ ] Advanced filtering and search
-- [ ] Job retry/cancel buttons
-- [ ] User creation/deletion
-- [ ] Bulk credit operations
-- [ ] Analytics dashboard with charts
-- [ ] Email notifications for failed jobs
-- [ ] Activity logs viewer
-- [ ] Multi-admin audit trail
+- Check **failed jobs** regularly
+- **Retry** jobs that failed due to transient errors
+- Review **error messages** for patterns
 
 ---
 
@@ -372,22 +303,15 @@ Potential features for future versions:
 ### Technology Stack
 
 - **Frontend:** Vanilla JavaScript, HTML5, CSS3
-- **Styling:** Custom CSS with gradient theme
-- **Storage:** localStorage for token persistence
+- **Styling:** Dark theme with accent color
+- **Storage:** No localStorage needed (local-only access)
 - **API:** RESTful HTTP endpoints
-- **Auth:** JWT Bearer tokens
 
 ### File Location
 
 ```
 /mnt/c/letter-irl/admin-panel.html
 ```
-
-### Dependencies
-
-- None (self-contained HTML file)
-- Requires running MCP HTTP server
-- Modern browser with localStorage support
 
 ### Browser Compatibility
 
@@ -398,50 +322,5 @@ Potential features for future versions:
 
 ---
 
-## Support
-
-For issues or questions:
-
-1. Check server logs for errors
-2. Review `docs/STATUS.md` for system status
-3. Consult `src/api/adminApiHandler.ts` for API details
-4. Check browser console for client-side errors
-
----
-
-## Quick Reference
-
-### Common User IDs Format
-```
-auth0|1234567890abcdef
-```
-
-### Common Job IDs Format
-```
-550e8400-e29b-41d4-a716-446655440000 (UUID)
-```
-
-### Sample API Calls (curl)
-
-```bash
-# Get stats
-curl -H "Authorization: Bearer YOUR_JWT" \
-  http://localhost:8788/api/admin/stats
-
-# Get user
-curl -H "Authorization: Bearer YOUR_JWT" \
-  http://localhost:8788/api/admin/users/auth0|123456
-
-# Adjust credits
-curl -X POST \
-  -H "Authorization: Bearer YOUR_JWT" \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"auth0|123456","amount":25,"reason":"Test"}' \
-  http://localhost:8788/api/admin/credits/adjust
-```
-
----
-
-**Admin Panel Version:** 1.0
-**Last Updated:** November 15, 2025
-**Maintained By:** Letter IRL Team
+**Admin Panel Version:** 2.0
+**Last Updated:** December 4, 2025
