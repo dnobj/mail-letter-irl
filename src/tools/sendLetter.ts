@@ -11,7 +11,7 @@ import { deductCredits as deductCreditsFromDatabase } from "../services/creditSe
 import { createOrderRecord } from "../services/orderService.js";
 import { createLetterJob } from "../services/letterJobService.js";
 import { query } from "../db/index.js";
-import { consumeDraft, getDraft } from "../services/draftService.js";
+import { consumeDraft, getDraft, linkDraftToLetter } from "../services/draftService.js";
 import type { Letter, LetterDraft } from "../services/types.js";
 
 // New simplified input: just draftId and confirm
@@ -74,8 +74,7 @@ async function handler(
   try {
     consumeResult = await consumeDraft({
       draftId: input.draftId,
-      userId,
-      letterId: orderId
+      userId
     });
   } catch (error: any) {
     // Handle specific draft errors with user-friendly messages
@@ -217,6 +216,9 @@ async function handler(
   );
 
   const letter = letterResult.rows[0];
+
+  // Link the draft to the letter now that the letter exists (satisfies FK constraint)
+  await linkDraftToLetter(input.draftId, letterId);
 
   context.logger.info(
     {

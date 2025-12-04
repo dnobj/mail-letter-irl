@@ -70,9 +70,12 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
  * This is the core idempotency mechanism.
  *
  * - Uses SELECT FOR UPDATE to prevent race conditions
- * - If draft is pending: marks as consumed, links to letterId
+ * - If draft is pending: marks as consumed (letter ID set later via linkDraftToLetter)
  * - If draft is already consumed: returns existing letter_id (idempotent retry)
  * - If draft is expired/not found: throws descriptive error
+ *
+ * Note: consumed_letter_id is NOT set here due to FK constraint - the letter
+ * must be created first. Call linkDraftToLetter() after creating the letter.
  */
 export async function consumeDraft(params: ConsumeDraftParams): Promise<ConsumeDraftResult> {
   return await transaction(async (client: pg.PoolClient) => {
@@ -129,26 +132,40 @@ export async function consumeDraft(params: ConsumeDraftParams): Promise<ConsumeD
       throw error;
     }
 
-    // Consume the draft
+    // Consume the draft (without setting letter ID - that happens after letter is created)
     const updateResult = await client.query<LetterDraft>(
       `UPDATE letter_drafts
        SET status = 'consumed',
            consumed_at = NOW(),
-           consumed_letter_id = $2,
            updated_at = NOW()
        WHERE draft_id = $1
        RETURNING *`,
-      [params.draftId, params.letterId]
+      [params.draftId]
     );
 
     const consumedDraft = updateResult.rows[0];
-    console.log(`📝 Draft consumed: ${params.draftId} -> letter ${params.letterId}`);
+    console.log(`📝 Draft consumed: ${params.draftId} (letter ID will be linked after creation)`);
 
     return {
       draft: consumedDraft,
       alreadyConsumed: false,
     };
   });
+}
+
+/**
+ * Link a consumed draft to the created letter.
+ * Called after the letter is created in the database to satisfy the FK constraint.
+ */
+export async function linkDraftToLetter(draftId: string, letterId: string): Promise<void> {
+  await query(
+    `UPDATE letter_drafts
+     SET consumed_letter_id = $2,
+         updated_at = NOW()
+     WHERE draft_id = $1 AND status = 'consumed'`,
+    [draftId, letterId]
+  );
+  console.log(`📝 Draft linked to letter: ${draftId} -> ${letterId}`);
 }
 
 // ============================================================================

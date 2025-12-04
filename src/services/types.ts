@@ -441,7 +441,6 @@ export interface CreateDraftResult {
 export interface ConsumeDraftParams {
   draftId: string;
   userId: string;
-  letterId: string;
 }
 
 export interface ConsumeDraftResult {
