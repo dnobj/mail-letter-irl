@@ -564,8 +564,12 @@
                         <input type="number" id="promo-credits" placeholder="5">
                     </div>
                     <div class="form-group">
-                        <label>Max Redemptions (per user)</label>
+                        <label>Max per User</label>
                         <input type="number" id="promo-max-per-user" placeholder="1" value="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Max Total Redemptions (leave empty for unlimited)</label>
+                        <input type="number" id="promo-max-total" placeholder="Unlimited">
                     </div>
                     <button class="btn" onclick="createPromo()">Create Campaign</button>
                     <div id="promo-result"></div>
@@ -911,20 +915,26 @@
         async function loadPromos() {
             showLoading('promos-list');
             try {
-                const data = await api('/api/admin/promo/campaigns?limit=20');
+                const data = await api('/api/admin/promo/campaigns?limit=50');
                 if (data.campaigns.length === 0) {
                     document.getElementById('promos-list').innerHTML = '<p style="color: #888;">No campaigns</p>';
                     return;
                 }
                 const html = `
                     <table>
-                        <tr><th>Code</th><th>Credits</th><th>Redemptions</th><th>Status</th></tr>
+                        <tr><th>Code</th><th>Name</th><th>Credits</th><th>Redemptions</th><th>Status</th><th>Actions</th></tr>
                         ${data.campaigns.map(c => `
                             <tr>
                                 <td><strong>${c.code}</strong></td>
+                                <td>${c.name}</td>
                                 <td>${c.creditsAmount}</td>
-                                <td>${c.currentRedemptions}${c.maxTotalRedemptions ? '/' + c.maxTotalRedemptions : ''}</td>
+                                <td>${c.currentRedemptions}${c.maxTotalRedemptions ? '/' + c.maxTotalRedemptions : ''} (max ${c.maxPerUser}/user)</td>
                                 <td><span class="badge badge-${c.status === 'active' ? 'completed' : 'draft'}">${c.status}</span></td>
+                                <td>
+                                    ${c.currentRedemptions === 0
+                                        ? `<button class="btn btn-sm" style="background:#dc3545;padding:4px 8px;font-size:12px;" onclick="deletePromo('${c.campaignId}', '${c.code}')">Delete</button>`
+                                        : `<button class="btn btn-sm" style="background:#6c757d;padding:4px 8px;font-size:12px;" disabled title="Cannot delete - has redemptions">Delete</button>`}
+                                </td>
                             </tr>
                         `).join('')}
                     </table>
@@ -935,21 +945,44 @@
             }
         }
 
+        async function deletePromo(campaignId, code) {
+            if (!confirm(`Are you sure you want to delete the promo campaign "${code}"?`)) {
+                return;
+            }
+            try {
+                await api(`/api/admin/promo/campaigns/${campaignId}`, 'DELETE');
+                loadPromos();
+            } catch (e) {
+                alert('Error deleting campaign: ' + e.message);
+            }
+        }
+
         async function createPromo() {
             const code = document.getElementById('promo-code').value.trim();
             const name = document.getElementById('promo-name').value.trim();
             const creditsAmount = parseInt(document.getElementById('promo-credits').value);
             const maxPerUser = parseInt(document.getElementById('promo-max-per-user').value) || 1;
+            const maxTotalInput = document.getElementById('promo-max-total').value.trim();
+            const maxTotalRedemptions = maxTotalInput ? parseInt(maxTotalInput) : null;
+
             if (!code || !name || isNaN(creditsAmount)) {
-                showError('promo-result', 'Please fill all fields');
+                showError('promo-result', 'Please fill code, name, and credits amount');
                 return;
             }
             showLoading('promo-result');
             try {
-                await api('/api/admin/promo/campaigns', 'POST', {
-                    code, name, creditsAmount, maxPerUser, expirationPolicy: 'never'
-                });
+                const payload = { code, name, creditsAmount, maxPerUser, expirationPolicy: 'never' };
+                if (maxTotalRedemptions !== null) {
+                    payload.maxTotalRedemptions = maxTotalRedemptions;
+                }
+                await api('/api/admin/promo/campaigns', 'POST', payload);
                 document.getElementById('promo-result').innerHTML = `<div class="success-msg">Campaign created!</div>`;
+                // Clear form
+                document.getElementById('promo-code').value = '';
+                document.getElementById('promo-name').value = '';
+                document.getElementById('promo-credits').value = '';
+                document.getElementById('promo-max-per-user').value = '1';
+                document.getElementById('promo-max-total').value = '';
                 loadPromos();
             } catch (e) {
                 showError('promo-result', e.message);

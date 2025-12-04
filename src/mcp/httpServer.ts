@@ -21,6 +21,7 @@ import {
   handleCreateCheckoutSession,
   handleStripeWebhook
 } from "../api/dashboardApiHandler.js";
+import { validatePromoCodePublic } from "../services/promoService.js";
 import { initializeJobQueue, stopJobQueue } from "../services/jobQueue.js";
 import { startLetterWorker } from "../workers/letterWorker.js";
 import { startCreditExpirationWorker } from "../workers/creditExpirationWorker.js";
@@ -525,6 +526,43 @@ export async function startHttpServer() {
         res.statusCode = 408;
         res.end('Request timeout or error');
       }
+      return;
+    }
+
+    // Public promo validation endpoint (no auth required - for preview access)
+    if (url.pathname.startsWith('/api/public/promo/validate/') && req.method === 'GET') {
+      const origin = resolveCorsOrigin(req.headers.origin);
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Content-Type', 'application/json');
+
+      const code = url.pathname.replace('/api/public/promo/validate/', '');
+      if (!code) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ valid: false, reason: 'No promo code provided' }));
+        return;
+      }
+
+      try {
+        const result = await validatePromoCodePublic(decodeURIComponent(code));
+        res.statusCode = 200;
+        // Don't expose full campaign details publicly - just validity and credits amount
+        res.end(JSON.stringify({
+          valid: result.valid,
+          reason: result.reason,
+          creditsAmount: result.campaign?.credits_amount,
+          campaignName: result.campaign?.name,
+        }));
+      } catch (error) {
+        console.error('Error validating promo code:', error);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ valid: false, reason: 'Internal error' }));
+      }
+      return;
+    }
+
+    // Handle CORS preflight for public promo endpoint
+    if (url.pathname.startsWith('/api/public/promo/') && req.method === 'OPTIONS') {
+      respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
       return;
     }
 

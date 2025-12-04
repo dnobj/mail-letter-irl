@@ -165,6 +165,48 @@ export async function updateCampaignStatus(
 }
 
 /**
+ * Validate if a promo code exists and is active (public - no auth required)
+ * Used for preview access validation before user is authenticated
+ */
+export async function validatePromoCodePublic(
+  promoCode: string
+): Promise<ValidatePromoResult> {
+  const normalizedCode = promoCode.toUpperCase().trim();
+
+  // Get campaign
+  const campaign = await getCampaignByCode(normalizedCode);
+
+  if (!campaign) {
+    return { valid: false, reason: 'Promo code not found' };
+  }
+
+  // Check campaign status
+  if (campaign.status !== 'active') {
+    return { valid: false, reason: 'Promo code is not active', campaign };
+  }
+
+  // Check campaign validity window
+  const now = new Date();
+  if (campaign.starts_at > now) {
+    return { valid: false, reason: 'Promo code is not yet active', campaign };
+  }
+  if (campaign.ends_at && campaign.ends_at < now) {
+    return { valid: false, reason: 'Promo code has expired', campaign };
+  }
+
+  // Check max total redemptions (global limit)
+  if (
+    campaign.max_total_redemptions &&
+    campaign.current_redemptions >= campaign.max_total_redemptions
+  ) {
+    return { valid: false, reason: 'Promo code redemption limit reached', campaign };
+  }
+
+  // Code is valid for preview access
+  return { valid: true, campaign };
+}
+
+/**
  * Validate if a promo code can be redeemed by a user
  */
 export async function validatePromoCode(
@@ -405,4 +447,31 @@ export async function getUserRedemptions(
       updated_at: row.updated_at,
     },
   }));
+}
+
+/**
+ * Delete a promo campaign
+ * Only allows deletion if there are no redemptions
+ */
+export async function deleteCampaign(campaignId: string): Promise<{ success: boolean; error?: string }> {
+  // Check if campaign exists
+  const campaign = await getCampaignById(campaignId);
+  if (!campaign) {
+    return { success: false, error: 'Campaign not found' };
+  }
+
+  // Check for existing redemptions
+  if (campaign.current_redemptions > 0) {
+    return {
+      success: false,
+      error: `Cannot delete campaign with ${campaign.current_redemptions} existing redemption(s). Set status to 'ended' instead.`,
+    };
+  }
+
+  // Delete the campaign
+  await query('DELETE FROM promo_campaigns WHERE campaign_id = $1', [campaignId]);
+
+  console.log(`🗑️ Deleted promo campaign: ${campaign.code} (${campaignId})`);
+
+  return { success: true };
 }

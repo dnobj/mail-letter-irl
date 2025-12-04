@@ -19,6 +19,7 @@ import {
   listCampaigns,
   updateCampaignStatus,
   getCampaignRedemptions,
+  deleteCampaign,
 } from '../services/promoService.js';
 import type { PromoCampaignStatus } from '../services/types.js';
 import {
@@ -215,6 +216,15 @@ export async function handleAdminApiRequest(
       const campaignId = pathname.split('/').pop();
       if (campaignId) {
         await handleGetCampaign(res, decodeURIComponent(campaignId));
+        return true;
+      }
+    }
+
+    // DELETE /api/admin/promo/campaigns/:campaignId - Delete a campaign
+    if (pathname.match(/^\/api\/admin\/promo\/campaigns\/[^/]+$/) && req.method === 'DELETE') {
+      const campaignId = pathname.split('/').pop();
+      if (campaignId) {
+        await handleDeleteCampaign(res, decodeURIComponent(campaignId));
         return true;
       }
     }
@@ -621,8 +631,8 @@ async function handleCreateCampaign(
     sendJson(res, 400, { error: 'Missing required field: name' });
     return;
   }
-  if (!body.creditsAmount || typeof body.creditsAmount !== 'number' || body.creditsAmount <= 0) {
-    sendJson(res, 400, { error: 'creditsAmount must be a positive number' });
+  if (body.creditsAmount === undefined || typeof body.creditsAmount !== 'number' || body.creditsAmount < 0) {
+    sendJson(res, 400, { error: 'creditsAmount must be a non-negative number' });
     return;
   }
 
@@ -747,6 +757,21 @@ async function handleGetCampaign(res: ServerResponse, campaignId: string) {
       updatedAt: campaign.updated_at,
     },
   });
+}
+
+/**
+ * DELETE /api/admin/promo/campaigns/:campaignId
+ * Delete a promo campaign (only if no redemptions)
+ */
+async function handleDeleteCampaign(res: ServerResponse, campaignId: string) {
+  const result = await deleteCampaign(campaignId);
+
+  if (!result.success) {
+    sendJson(res, 400, { error: result.error });
+    return;
+  }
+
+  sendJson(res, 200, { success: true, message: 'Campaign deleted' });
 }
 
 /**
