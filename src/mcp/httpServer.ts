@@ -15,6 +15,7 @@ import {
 } from "../auth/tokenValidator.js";
 import { handleCreditApiRequest } from "../api/creditApiHandler.js";
 import { handleAdminApiRequest } from "../api/adminApiHandler.js";
+import { isAdminEnabled } from "../api/middleware/adminAuth.js";
 import { handleLetterApiRequest } from "../api/letterApiHandler.js";
 import {
   handleCreateCheckoutSession,
@@ -386,8 +387,15 @@ export async function startHttpServer() {
       return;
     }
 
-    // Serve admin panel (localhost only)
+    // Serve admin panel (requires ADMIN_ENABLED=true, localhost only)
     if (url.pathname === "/admin" || url.pathname === "/admin.html" || url.pathname === "/admin-panel.html") {
+      // Check if admin is enabled (disabled by default)
+      if (!isAdminEnabled()) {
+        res.statusCode = 404;
+        res.end("Not found");
+        return;
+      }
+
       // Restrict to localhost only - block ngrok and other proxies
       const remoteAddress = req.socket.remoteAddress;
       const isLocalhost = remoteAddress === '127.0.0.1' ||
@@ -400,9 +408,8 @@ export async function startHttpServer() {
                         req.headers['ngrok-agent-ips'];
 
       if (!isLocalhost || isProxied) {
-        res.statusCode = 403;
-        res.setHeader("Content-Type", "text/plain");
-        res.end("Admin panel is only accessible from localhost. Use SSH tunnel: ssh -L 8788:localhost:8788 your-server");
+        res.statusCode = 404;
+        res.end("Not found");
         return;
       }
 
@@ -615,16 +622,23 @@ export async function startHttpServer() {
     });
   });
 
-  // Initialize job queue and start workers
-  try {
+  // Initialize job queue and start workers (unless DISABLE_WORKERS is set)
+  if (process.env.DISABLE_WORKERS === 'true') {
     console.log('');
-    await initializeJobQueue();
-    await startLetterWorker();
-    await startCreditExpirationWorker();
+    console.log('⚠️  Workers disabled (DISABLE_WORKERS=true)');
+    console.log('   Admin-only mode - no job processing');
     console.log('');
-  } catch (error) {
-    console.error('❌ Failed to initialize job queue:', error);
-    console.error('⚠️  Server will continue without background job processing');
+  } else {
+    try {
+      console.log('');
+      await initializeJobQueue();
+      await startLetterWorker();
+      await startCreditExpirationWorker();
+      console.log('');
+    } catch (error) {
+      console.error('❌ Failed to initialize job queue:', error);
+      console.error('⚠️  Server will continue without background job processing');
+    }
   }
 
   const close = async () => {

@@ -14,7 +14,8 @@
     "db:test": "tsx scripts/test-db.ts",
     "db:migrate": "tsx db/migrate.ts",
     "db:migrate:rollback": "tsx db/migrate.ts rollback",
-    "test:postgrid": "tsx scripts/test-postgrid.ts"
+    "test:postgrid": "tsx scripts/test-postgrid.ts",
+    "admin": "env $(grep -v '^#' .env.admin | xargs) tsx src/mcp/httpServer.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.5",

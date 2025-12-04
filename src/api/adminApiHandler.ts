@@ -102,6 +102,25 @@ export async function handleAdminApiRequest(
       return true;
     }
 
+    // GET /api/admin/dashboard - Comprehensive dashboard data
+    if (pathname === '/api/admin/dashboard' && req.method === 'GET') {
+      await handleGetDashboard(res);
+      return true;
+    }
+
+    // GET /api/admin/alerts - Active alerts (failed jobs, expiring credits, etc.)
+    if (pathname === '/api/admin/alerts' && req.method === 'GET') {
+      await handleGetAlerts(res);
+      return true;
+    }
+
+    // GET /api/admin/users/search - Search users by email or ID
+    if (pathname === '/api/admin/users/search' && req.method === 'GET') {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      await handleSearchUsers(res, url.searchParams);
+      return true;
+    }
+
     // GET /api/admin/users (list all users)
     if (pathname === '/api/admin/users' && req.method === 'GET') {
       const url = new URL(req.url!, `http://${req.headers.host}`);
@@ -139,6 +158,39 @@ export async function handleAdminApiRequest(
     if (pathname === '/api/admin/pgboss/jobs' && req.method === 'GET') {
       await handleGetPgBossJobs(res);
       return true;
+    }
+
+    // GET /api/admin/letters - List letters with filters
+    if (pathname === '/api/admin/letters' && req.method === 'GET') {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      await handleGetLetters(res, url.searchParams);
+      return true;
+    }
+
+    // GET /api/admin/letters/search - Search letters
+    if (pathname === '/api/admin/letters/search' && req.method === 'GET') {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      await handleSearchLetters(res, url.searchParams);
+      return true;
+    }
+
+    // GET /api/admin/letters/:letterId - Get letter details with job history
+    if (pathname.match(/^\/api\/admin\/letters\/[^/]+$/) && req.method === 'GET' && !pathname.includes('/search')) {
+      const letterId = pathname.split('/').pop();
+      if (letterId) {
+        await handleGetLetterById(res, decodeURIComponent(letterId));
+        return true;
+      }
+    }
+
+    // POST /api/admin/jobs/:jobId/retry - Retry a failed job
+    if (pathname.match(/^\/api\/admin\/jobs\/[^/]+\/retry$/) && req.method === 'POST') {
+      const parts = pathname.split('/');
+      const jobId = parts[parts.length - 2];
+      if (jobId) {
+        await handleRetryJob(res, decodeURIComponent(jobId), adminInfo);
+        return true;
+      }
     }
 
     // =========================================================================
@@ -871,4 +923,485 @@ async function handleStripeReconcileFix(
       message: error.message,
     });
   }
+}
+
+// =========================================================================
+// Dashboard & Alerts Handlers
+// =========================================================================
+
+/**
+ * GET /api/admin/dashboard
+ * Comprehensive dashboard data - all metrics in one call
+ */
+async function handleGetDashboard(res: ServerResponse) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  // Run all queries in parallel for performance
+  const [
+    totalUsers,
+    newUsersToday,
+    newUsers7d,
+    newUsers30d,
+    creditStats,
+    letterStats,
+    lettersToday,
+    letters7d,
+    letters30d,
+    revenueStats,
+    revenueToday,
+    revenue7d,
+    revenue30d,
+    jobStats,
+  ] = await Promise.all([
+    // Total users
+    query<{ count: string }>('SELECT COUNT(*) as count FROM users'),
+    // New users today
+    query<{ count: string }>('SELECT COUNT(*) as count FROM users WHERE created_at >= $1', [today]),
+    // New users 7d
+    query<{ count: string }>('SELECT COUNT(*) as count FROM users WHERE created_at >= $1', [sevenDaysAgo]),
+    // New users 30d
+    query<{ count: string }>('SELECT COUNT(*) as count FROM users WHERE created_at >= $1', [thirtyDaysAgo]),
+    // Credit stats
+    query<{ total_held: string; total_purchased: string; total_used: string }>(
+      `SELECT
+        COALESCE(SUM(credits), 0) as total_held,
+        COALESCE(SUM(credits_purchased), 0) as total_purchased,
+        COALESCE(SUM(credits_used), 0) as total_used
+      FROM users`
+    ),
+    // Letter stats (total and sent)
+    query<{ total: string; sent: string }>(
+      `SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent
+      FROM letters`
+    ),
+    // Letters today
+    query<{ count: string }>('SELECT COUNT(*) as count FROM letters WHERE created_at >= $1', [today]),
+    // Letters 7d
+    query<{ count: string }>('SELECT COUNT(*) as count FROM letters WHERE created_at >= $1', [sevenDaysAgo]),
+    // Letters 30d
+    query<{ count: string }>('SELECT COUNT(*) as count FROM letters WHERE created_at >= $1', [thirtyDaysAgo]),
+    // Revenue stats (total)
+    query<{ total_cents: string; total_orders: string }>(
+      `SELECT
+        COALESCE(SUM(amount_cents), 0) as total_cents,
+        COUNT(*) as total_orders
+      FROM orders WHERE status = 'completed'`
+    ),
+    // Revenue today
+    query<{ total_cents: string }>('SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE status = $1 AND completed_at >= $2', ['completed', today]),
+    // Revenue 7d
+    query<{ total_cents: string }>('SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE status = $1 AND completed_at >= $2', ['completed', sevenDaysAgo]),
+    // Revenue 30d
+    query<{ total_cents: string }>('SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE status = $1 AND completed_at >= $2', ['completed', thirtyDaysAgo]),
+    // Job stats
+    query<{ status: string; count: string }>(
+      `SELECT status, COUNT(*) as count FROM letter_jobs GROUP BY status`
+    ),
+  ]);
+
+  // Parse job stats
+  const jobStatsByStatus: Record<string, number> = {};
+  for (const row of jobStats.rows) {
+    jobStatsByStatus[row.status] = parseInt(row.count);
+  }
+
+  sendJson(res, 200, {
+    generatedAt: now.toISOString(),
+    users: {
+      total: parseInt(totalUsers.rows[0].count),
+      newToday: parseInt(newUsersToday.rows[0].count),
+      new7d: parseInt(newUsers7d.rows[0].count),
+      new30d: parseInt(newUsers30d.rows[0].count),
+    },
+    credits: {
+      totalHeld: parseInt(creditStats.rows[0].total_held || '0'),
+      totalPurchased: parseInt(creditStats.rows[0].total_purchased || '0'),
+      totalUsed: parseInt(creditStats.rows[0].total_used || '0'),
+    },
+    letters: {
+      total: parseInt(letterStats.rows[0].total || '0'),
+      sent: parseInt(letterStats.rows[0].sent || '0'),
+      today: parseInt(lettersToday.rows[0].count),
+      last7d: parseInt(letters7d.rows[0].count),
+      last30d: parseInt(letters30d.rows[0].count),
+    },
+    revenue: {
+      totalCents: parseInt(revenueStats.rows[0].total_cents || '0'),
+      totalOrders: parseInt(revenueStats.rows[0].total_orders || '0'),
+      todayCents: parseInt(revenueToday.rows[0].total_cents || '0'),
+      last7dCents: parseInt(revenue7d.rows[0].total_cents || '0'),
+      last30dCents: parseInt(revenue30d.rows[0].total_cents || '0'),
+    },
+    jobs: {
+      pending: jobStatsByStatus['pending'] || 0,
+      processing: jobStatsByStatus['processing'] || 0,
+      completed: jobStatsByStatus['completed'] || 0,
+      failed: jobStatsByStatus['failed'] || 0,
+      cancelled: jobStatsByStatus['cancelled'] || 0,
+    },
+  });
+}
+
+/**
+ * GET /api/admin/alerts
+ * Active alerts requiring attention
+ */
+async function handleGetAlerts(res: ServerResponse) {
+  const alerts: Array<{
+    type: string;
+    severity: 'critical' | 'warning' | 'info';
+    title: string;
+    message: string;
+    data?: any;
+  }> = [];
+
+  // Failed jobs
+  const failedJobs = await query<{ job_id: string; letter_id: string; error_message: string; attempts: number }>(
+    `SELECT job_id, letter_id, error_message, attempts
+     FROM letter_jobs
+     WHERE status = 'failed'
+     ORDER BY created_at DESC
+     LIMIT 10`
+  );
+
+  if (failedJobs.rows.length > 0) {
+    alerts.push({
+      type: 'failed_jobs',
+      severity: 'critical',
+      title: 'Failed Letter Jobs',
+      message: `${failedJobs.rows.length} letter job(s) have failed and need attention.`,
+      data: failedJobs.rows,
+    });
+  }
+
+  // Expiring credits (next 7 days)
+  const expiringCredits = await query<{ user_id: string; total_expiring: string; earliest_expiry: Date }>(
+    `SELECT
+      user_id,
+      SUM(remaining_amount) as total_expiring,
+      MIN(expires_at) as earliest_expiry
+     FROM credit_ledger
+     WHERE status = 'active'
+       AND expires_at IS NOT NULL
+       AND expires_at < NOW() + INTERVAL '7 days'
+       AND remaining_amount > 0
+     GROUP BY user_id
+     ORDER BY earliest_expiry ASC
+     LIMIT 10`
+  );
+
+  if (expiringCredits.rows.length > 0) {
+    alerts.push({
+      type: 'expiring_credits',
+      severity: 'warning',
+      title: 'Credits Expiring Soon',
+      message: `${expiringCredits.rows.length} user(s) have credits expiring in the next 7 days.`,
+      data: expiringCredits.rows,
+    });
+  }
+
+  // Stuck jobs (processing for > 10 minutes)
+  const stuckJobs = await query<{ job_id: string; letter_id: string; started_at: Date }>(
+    `SELECT job_id, letter_id, started_at
+     FROM letter_jobs
+     WHERE status = 'processing'
+       AND started_at < NOW() - INTERVAL '10 minutes'
+     ORDER BY started_at ASC
+     LIMIT 10`
+  );
+
+  if (stuckJobs.rows.length > 0) {
+    alerts.push({
+      type: 'stuck_jobs',
+      severity: 'warning',
+      title: 'Stuck Jobs',
+      message: `${stuckJobs.rows.length} job(s) have been processing for over 10 minutes.`,
+      data: stuckJobs.rows,
+    });
+  }
+
+  // Check for Stripe disputes table (if it exists)
+  try {
+    const disputes = await query<{ dispute_id: string; amount_cents: number; reason: string }>(
+      `SELECT dispute_id, amount_cents, reason
+       FROM stripe_disputes
+       WHERE status = 'open'
+       ORDER BY created_at DESC
+       LIMIT 10`
+    );
+
+    if (disputes.rows.length > 0) {
+      alerts.push({
+        type: 'chargebacks',
+        severity: 'critical',
+        title: 'Open Chargebacks',
+        message: `${disputes.rows.length} open chargeback(s) require immediate attention.`,
+        data: disputes.rows,
+      });
+    }
+  } catch (error) {
+    // Table doesn't exist yet, ignore
+  }
+
+  sendJson(res, 200, {
+    generatedAt: new Date().toISOString(),
+    alertCount: alerts.length,
+    alerts,
+  });
+}
+
+/**
+ * GET /api/admin/users/search
+ * Search users by email or ID
+ */
+async function handleSearchUsers(res: ServerResponse, queryParams: URLSearchParams) {
+  const q = queryParams.get('q') || '';
+  const limit = Math.min(parseInt(queryParams.get('limit') || '20'), 100);
+
+  if (!q || q.length < 2) {
+    sendJson(res, 400, { error: 'Search query must be at least 2 characters' });
+    return;
+  }
+
+  const result = await query<{
+    user_id: string;
+    email: string;
+    credits: number;
+    credits_purchased: number;
+    credits_used: number;
+    tier: string;
+    created_at: Date;
+  }>(
+    `SELECT user_id, email, credits, credits_purchased, credits_used, tier, created_at
+     FROM users
+     WHERE user_id ILIKE $1 OR email ILIKE $1
+     ORDER BY created_at DESC
+     LIMIT $2`,
+    [`%${q}%`, limit]
+  );
+
+  sendJson(res, 200, {
+    query: q,
+    count: result.rows.length,
+    users: result.rows.map(u => ({
+      userId: u.user_id,
+      email: u.email,
+      credits: u.credits,
+      creditsPurchased: u.credits_purchased,
+      creditsUsed: u.credits_used,
+      tier: u.tier,
+      createdAt: u.created_at,
+    })),
+  });
+}
+
+/**
+ * GET /api/admin/letters
+ * List letters with filters
+ */
+async function handleGetLetters(res: ServerResponse, queryParams: URLSearchParams) {
+  const limit = Math.min(parseInt(queryParams.get('limit') || '50'), 100);
+  const offset = parseInt(queryParams.get('offset') || '0');
+  const status = queryParams.get('status');
+  const userId = queryParams.get('userId');
+
+  let whereClause = 'WHERE 1=1';
+  const params: any[] = [];
+  let paramIndex = 1;
+
+  if (status) {
+    whereClause += ` AND status = $${paramIndex}`;
+    params.push(status);
+    paramIndex++;
+  }
+
+  if (userId) {
+    whereClause += ` AND user_id = $${paramIndex}`;
+    params.push(userId);
+    paramIndex++;
+  }
+
+  const [lettersResult, countResult] = await Promise.all([
+    query(
+      `SELECT letter_id, user_id, recipient, credits_cost, status, tracking_id, created_at, sent_at
+       FROM letters
+       ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      [...params, limit, offset]
+    ),
+    query<{ count: string }>(
+      `SELECT COUNT(*) as count FROM letters ${whereClause}`,
+      params
+    ),
+  ]);
+
+  sendJson(res, 200, {
+    letters: lettersResult.rows.map((l: any) => ({
+      letterId: l.letter_id,
+      userId: l.user_id,
+      recipient: l.recipient,
+      creditsCost: l.credits_cost,
+      status: l.status,
+      trackingId: l.tracking_id,
+      createdAt: l.created_at,
+      sentAt: l.sent_at,
+    })),
+    total: parseInt(countResult.rows[0].count),
+    limit,
+    offset,
+  });
+}
+
+/**
+ * GET /api/admin/letters/search
+ * Search letters by ID or recipient
+ */
+async function handleSearchLetters(res: ServerResponse, queryParams: URLSearchParams) {
+  const q = queryParams.get('q') || '';
+  const limit = Math.min(parseInt(queryParams.get('limit') || '20'), 100);
+
+  if (!q || q.length < 2) {
+    sendJson(res, 400, { error: 'Search query must be at least 2 characters' });
+    return;
+  }
+
+  const result = await query(
+    `SELECT letter_id, user_id, recipient, credits_cost, status, tracking_id, created_at, sent_at
+     FROM letters
+     WHERE letter_id ILIKE $1
+       OR user_id ILIKE $1
+       OR recipient::text ILIKE $1
+     ORDER BY created_at DESC
+     LIMIT $2`,
+    [`%${q}%`, limit]
+  );
+
+  sendJson(res, 200, {
+    query: q,
+    count: result.rows.length,
+    letters: result.rows.map((l: any) => ({
+      letterId: l.letter_id,
+      userId: l.user_id,
+      recipient: l.recipient,
+      creditsCost: l.credits_cost,
+      status: l.status,
+      trackingId: l.tracking_id,
+      createdAt: l.created_at,
+      sentAt: l.sent_at,
+    })),
+  });
+}
+
+/**
+ * GET /api/admin/letters/:letterId
+ * Get letter details with job history
+ */
+async function handleGetLetterById(res: ServerResponse, letterId: string) {
+  const [letterResult, jobsResult] = await Promise.all([
+    query(
+      `SELECT * FROM letters WHERE letter_id = $1`,
+      [letterId]
+    ),
+    query(
+      `SELECT * FROM letter_jobs WHERE letter_id = $1 ORDER BY created_at DESC`,
+      [letterId]
+    ),
+  ]);
+
+  if (letterResult.rows.length === 0) {
+    sendJson(res, 404, { error: 'Letter not found', letterId });
+    return;
+  }
+
+  const letter = letterResult.rows[0] as any;
+
+  sendJson(res, 200, {
+    letter: {
+      letterId: letter.letter_id,
+      userId: letter.user_id,
+      content: letter.content,
+      recipient: letter.recipient,
+      creditsCost: letter.credits_cost,
+      status: letter.status,
+      previewHtml: letter.preview_html,
+      trackingId: letter.tracking_id,
+      createdAt: letter.created_at,
+      sentAt: letter.sent_at,
+    },
+    jobs: jobsResult.rows.map((j: any) => ({
+      jobId: j.job_id,
+      status: j.status,
+      attempts: j.attempts,
+      maxAttempts: j.max_attempts,
+      errorMessage: j.error_message,
+      scheduledAt: j.scheduled_at,
+      startedAt: j.started_at,
+      completedAt: j.completed_at,
+      createdAt: j.created_at,
+      metadata: j.metadata,
+    })),
+  });
+}
+
+/**
+ * POST /api/admin/jobs/:jobId/retry
+ * Retry a failed job
+ */
+async function handleRetryJob(
+  res: ServerResponse,
+  jobId: string,
+  adminInfo: { userId: string; email?: string }
+) {
+  // Get the job
+  const jobResult = await query(
+    `SELECT * FROM letter_jobs WHERE job_id = $1`,
+    [jobId]
+  );
+
+  if (jobResult.rows.length === 0) {
+    sendJson(res, 404, { error: 'Job not found', jobId });
+    return;
+  }
+
+  const job = jobResult.rows[0] as any;
+
+  if (job.status !== 'failed') {
+    sendJson(res, 400, {
+      error: 'Can only retry failed jobs',
+      currentStatus: job.status,
+    });
+    return;
+  }
+
+  // Reset the job to pending
+  await query(
+    `UPDATE letter_jobs
+     SET status = 'pending',
+         attempts = 0,
+         error_message = NULL,
+         scheduled_at = NOW(),
+         started_at = NULL,
+         completed_at = NULL,
+         metadata = jsonb_set(
+           COALESCE(metadata, '{}'::jsonb),
+           '{retried_by}',
+           $2::jsonb
+         )
+     WHERE job_id = $1`,
+    [jobId, JSON.stringify({ admin: adminInfo.email || adminInfo.userId, at: new Date().toISOString() })]
+  );
+
+  console.log(`🔄 Admin ${adminInfo.userId} retried job ${jobId}`);
+
+  sendJson(res, 200, {
+    success: true,
+    message: 'Job has been reset to pending and will be processed soon.',
+    jobId,
+  });
 }
