@@ -130,18 +130,43 @@ This is the main flow for composing and sending a letter.
 
 ## Flow E - Redeem Promo Code
 
-1. User mentions having a promo code
-2. ChatGPT can call promo redemption endpoint (or user visits website)
-3. Server validates:
+Promo codes can be redeemed in two ways:
+
+### Option 1: Preview Gate (Pre-Auth)
+Used for beta access codes that unlock the website.
+
+1. User visits website and sees preview gate
+2. User enters promo code
+3. Server validates (public endpoint - no auth required):
    - Code exists and is active
-   - User hasn't already redeemed
    - Campaign within validity window
-4. Server creates `credit_ledger` entry:
+   - Total redemption limit not reached
+4. If valid: Cookie set, user gains preview access
+5. User signs up/logs in
+6. Credits (if any) added to account on first authenticated action
+
+### Option 2: Settings Page (Authenticated)
+Used for credit-granting promo codes by existing users.
+
+1. User goes to Dashboard → Settings → Promo Code
+2. User clicks "Enter a code →" to expand the form
+3. User enters promo code
+4. Server validates:
+   - Code exists and is active
+   - User hasn't exceeded per-user limit
+   - Campaign within validity window
+   - Total redemption limit not reached
+5. Server creates `credit_ledger` entry:
    - Source: `promo`
    - Linked to campaign
-   - Expiration per campaign policy (usually 90 days)
-5. Server records in `promo_redemptions`
-6. User sees updated credit balance
+   - Expiration per campaign policy (default: 90 days, or "never")
+6. Server records in `promo_redemptions`
+7. User sees success message with credits added
+
+### Promo Code Types
+- **Preview-only codes** (0 credits): Unlock website access during beta
+- **Credit codes** (X credits): Grant bonus credits with optional expiration
+- **Welcome codes**: May be restricted to new users only
 
 ---
 

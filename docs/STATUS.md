@@ -78,13 +78,14 @@ Letter IRL is a **physical letter mailing service** integrated with ChatGPT via 
 | stripe_disputes | Chargeback tracking |
 | migrations | Migration tracking |
 
-**6 Migrations:**
+**7 Migrations:**
 1. `001_initial_schema.sql` - Core tables
 2. `002_add_provider_fields.sql` - PostGrid fields
 3. `003_credit_ledger.sql` - Credit ledger, promos
 4. `004_letter_drafts.sql` - Draft-based idempotency
 5. `005_user_tiers.sql` - Tier system for rate limits
 6. `006_stripe_disputes.sql` - Chargeback tracking
+7. `007_seed_preview_promos.sql` - Preview access promo codes
 
 See [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) for full schema details.
 
@@ -106,7 +107,7 @@ See [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) for the complete send flow.
 
 ## API Endpoints
 
-### Public API
+### Public API (Authenticated)
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /api/credits/balance` | Current credit balance |
@@ -114,6 +115,12 @@ See [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) for the complete send flow.
 | `GET /api/users/me` | User profile |
 | `POST /api/checkout/create-session` | Create Stripe checkout |
 | `POST /api/promo/redeem` | Redeem promo code |
+| `GET /api/promo/validate/:code` | Validate promo code for user |
+
+### Public API (No Auth)
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/public/promo/validate/:code` | Validate promo code (preview gate) |
 
 ### Dashboard API (Stripe Webhooks)
 | Endpoint | Purpose |
