@@ -13,6 +13,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 - [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) - Complete database schema (12 tables)
 - [USER-STORIES.md](USER-STORIES.md) - User stories for test coverage and acceptance criteria
 - [PERSONAS.md](PERSONAS.md) - User personas for product design and testing
+- [TESTING.md](TESTING.md) - Testing strategy and guide
 
 ---
 

@@ -15,7 +15,12 @@
     "db:migrate": "tsx db/migrate.ts",
     "db:migrate:rollback": "tsx db/migrate.ts rollback",
     "test:postgrid": "tsx scripts/test-postgrid.ts",
-    "admin": "env $(grep -v '^#' .env.admin | xargs) tsx src/mcp/httpServer.ts"
+    "admin": "env $(grep -v '^#' .env.admin | xargs) tsx src/mcp/httpServer.ts",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.5",
@@ -32,11 +37,13 @@
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@types/pg": "^8.11.0",
+    "@vitest/coverage-v8": "^4.0.15",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-import": "^2.29.0",
     "eslint-plugin-prettier": "^5.1.3",
     "prettier": "^3.2.5",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vitest": "^4.0.15"
   }
 }
