@@ -6,12 +6,19 @@
 // User Types
 // ============================================================================
 
+// User tiers for rate limit differentiation
+export const USER_TIERS = ['standard', 'trusted'] as const;
+export type UserTier = typeof USER_TIERS[number];
+
 export interface User {
   user_id: string;
   email: string;
   credits: number;
   credits_purchased: number;
   credits_used: number;
+  tier: UserTier;
+  tier_override: UserTier | null;
+  tier_calculated_at: Date;
   created_at: Date;
   updated_at: Date;
 }
@@ -458,4 +465,43 @@ export interface DraftNotOwnedError extends Error {
   code: 'DRAFT_NOT_OWNED';
   draftId: string;
   userId: string;
+}
+
+// ============================================================================
+// User Tier Types
+// ============================================================================
+
+/**
+ * Criteria for automatic tier promotion
+ */
+export interface TierPromotionCriteria {
+  minNonRefundedPurchases: number;
+  minDaysSinceQualifyingPurchase: number; // Chargeback window protection
+}
+
+/**
+ * Tier calculation result with diagnostic info
+ */
+export interface TierCalculationResult {
+  tier: UserTier;
+  purchaseCount: number;
+  daysSinceQualifyingPurchase: number | null; // null if < required purchases
+  meetsPurchaseCriteria: boolean;
+  meetsAgeCriteria: boolean;
+}
+
+/**
+ * Result from batch tier update operation
+ */
+export interface TierUpdateBatchResult {
+  checked: number;
+  upgraded: number;
+  downgraded: number;
+  unchanged: number;
+  skippedOverride: number;
+  details: Array<{
+    userId: string;
+    oldTier: UserTier;
+    newTier: UserTier;
+  }>;
 }

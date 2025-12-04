@@ -18,6 +18,8 @@ import {
   cleanupOldDrafts,
   getDraftStats,
 } from '../services/draftService.js';
+import { reconcileStripePayments } from '../services/stripeReconciliationService.js';
+import { updateAllUserTiers, clearTierCache } from '../services/tierService.js';
 
 const CREDIT_EXPIRATION_QUEUE = 'credit-expiration';
 const CREDIT_EXPIRATION_SCHEDULE = 'credit-expiration-daily';
@@ -80,6 +82,50 @@ async function processCreditExpiration(jobs: any[]): Promise<void> {
     console.log(`   ✓ Draft stats: ${draftStats.pending} pending, ${draftStats.consumed} consumed, ${draftStats.expired} expired, ${draftStats.cancelled} cancelled`);
     if (draftStats.expiringSoon > 0) {
       console.log(`   ⚠️  ${draftStats.expiringSoon} drafts expiring within 1 hour`);
+    }
+
+    // 7. Reconcile Stripe payments with credit ledger (last 7 days)
+    console.log('   Step 7: Reconciling Stripe payments...');
+    try {
+      const reconciliation = await reconcileStripePayments(7);
+      console.log(`   ✓ Stripe reconciliation: ${reconciliation.summary.matched} matched, ${reconciliation.summary.missingInOurSystem} missing credits`);
+
+      if (reconciliation.summary.missingInOurSystem > 0) {
+        console.log(`   ⚠️  ALERT: ${reconciliation.summary.missingInOurSystem} Stripe payments have no corresponding credits!`);
+        for (const d of reconciliation.discrepancies.filter(d => d.type === 'missing_credit')) {
+          console.log(`      - ${d.stripeSessionId}: ${d.expectedCredits} credits for user ${d.userId}`);
+        }
+      }
+
+      if (reconciliation.summary.unprocessedRefunds > 0) {
+        console.log(`   ⚠️  ALERT: ${reconciliation.summary.unprocessedRefunds} Stripe refunds were not processed!`);
+      }
+    } catch (reconcileError) {
+      // Don't fail the whole job if Stripe reconciliation fails
+      console.error('   ⚠️  Stripe reconciliation failed (non-fatal):', reconcileError);
+    }
+
+    // 8. Recalculate user tiers based on purchase history
+    console.log('   Step 8: Recalculating user tiers...');
+    try {
+      const tierResult = await updateAllUserTiers();
+      console.log(`   ✓ Tier recalculation: checked ${tierResult.checked}, upgraded ${tierResult.upgraded}, downgraded ${tierResult.downgraded}, skipped ${tierResult.skippedOverride} (overridden)`);
+
+      if (tierResult.details.length > 0) {
+        console.log('   Tier changes:');
+        for (const change of tierResult.details.slice(0, 10)) {
+          console.log(`     - ${change.userId}: ${change.oldTier} -> ${change.newTier}`);
+        }
+        if (tierResult.details.length > 10) {
+          console.log(`     ... and ${tierResult.details.length - 10} more changes`);
+        }
+      }
+
+      // Clear tier cache after batch update
+      clearTierCache();
+    } catch (tierError) {
+      // Don't fail the whole job if tier recalculation fails
+      console.error('   ⚠️  Tier recalculation failed (non-fatal):', tierError);
     }
 
     console.log(`✅ Credit expiration job ${jobId} completed`);

@@ -23,6 +23,7 @@ import {
 import { initializeJobQueue, stopJobQueue } from "../services/jobQueue.js";
 import { startLetterWorker } from "../workers/letterWorker.js";
 import { startCreditExpirationWorker } from "../workers/creditExpirationWorker.js";
+import { rateLimitMiddlewareWithTier } from "../api/middleware/rateLimit.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -346,6 +347,10 @@ export async function startHttpServer() {
     }
 
     if (req.method === "GET" && url.pathname === SSE_PATH) {
+      // Rate limit SSE connection attempts
+      if (await rateLimitMiddlewareWithTier(req, res, 'mcp')) {
+        return; // Rate limited
+      }
       await handleSseStreamRequest(req, res);
       return;
     }
@@ -428,6 +433,10 @@ export async function startHttpServer() {
 
     // Stripe Checkout API
     if (url.pathname === "/api/stripe/create-checkout-session" && req.method === "POST") {
+      // Rate limit checkout attempts
+      if (await rateLimitMiddlewareWithTier(req, res, 'checkout')) {
+        return; // Rate limited
+      }
       // Parse JSON body
       let body = '';
       req.on('data', chunk => { body += chunk.toString(); });
@@ -494,24 +503,44 @@ export async function startHttpServer() {
     }
 
     // Admin API routes (check first - more specific path)
+    if (url.pathname.startsWith('/api/admin')) {
+      if (await rateLimitMiddlewareWithTier(req, res, 'admin')) {
+        return; // Rate limited
+      }
+    }
     const adminApiHandled = await handleAdminApiRequest(req, res, url.pathname);
     if (adminApiHandled) {
       return;
     }
 
     // Credit API routes
+    if (url.pathname.startsWith('/api/credits')) {
+      if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
+        return; // Rate limited
+      }
+    }
     const creditApiHandled = await handleCreditApiRequest(req, res, url.pathname);
     if (creditApiHandled) {
       return;
     }
 
     // Letter API routes
+    if (url.pathname.startsWith('/api/letters')) {
+      if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
+        return; // Rate limited
+      }
+    }
     const letterApiHandled = await handleLetterApiRequest(req, res, url.pathname);
     if (letterApiHandled) {
       return;
     }
 
     if (url.pathname === MCP_PATH) {
+      // Rate limit MCP tool calls
+      if (await rateLimitMiddlewareWithTier(req, res, 'mcp')) {
+        return; // Rate limited
+      }
+
       if (!req.headers.origin) {
         req.headers.origin = FALLBACK_ORIGIN;
       }

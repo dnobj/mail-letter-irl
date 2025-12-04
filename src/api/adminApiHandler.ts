@@ -21,6 +21,10 @@ import {
   getCampaignRedemptions,
 } from '../services/promoService.js';
 import type { PromoCampaignStatus } from '../services/types.js';
+import {
+  reconcileStripePayments,
+  autoFixMissingCredits,
+} from '../services/stripeReconciliationService.js';
 
 /**
  * Send JSON response
@@ -182,6 +186,24 @@ export async function handleAdminApiRequest(
         await handleGetCampaignRedemptions(res, decodeURIComponent(campaignId), url.searchParams);
         return true;
       }
+    }
+
+    // =========================================================================
+    // Stripe Reconciliation Routes
+    // =========================================================================
+
+    // GET /api/admin/stripe/reconcile - Run Stripe reconciliation
+    if (pathname === '/api/admin/stripe/reconcile' && req.method === 'GET') {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      await handleStripeReconcile(res, url.searchParams);
+      return true;
+    }
+
+    // POST /api/admin/stripe/reconcile/fix - Auto-fix missing credits
+    if (pathname === '/api/admin/stripe/reconcile/fix' && req.method === 'POST') {
+      const body = await parseBody(req);
+      await handleStripeReconcileFix(res, body, adminInfo);
+      return true;
     }
 
     // Route not found
@@ -755,4 +777,98 @@ async function handleGetCampaignRedemptions(
     limit,
     offset,
   });
+}
+
+// =========================================================================
+// Stripe Reconciliation Handlers
+// =========================================================================
+
+/**
+ * GET /api/admin/stripe/reconcile
+ * Run Stripe reconciliation to find discrepancies
+ *
+ * Query params:
+ * - days: Number of days to look back (default 30, max 90)
+ */
+async function handleStripeReconcile(
+  res: ServerResponse,
+  queryParams: URLSearchParams
+) {
+  const days = Math.min(parseInt(queryParams.get('days') || '30'), 90);
+
+  console.log(`📊 Running Stripe reconciliation for last ${days} days...`);
+
+  try {
+    const result = await reconcileStripePayments(days);
+
+    sendJson(res, 200, {
+      period: {
+        start: result.period.start.toISOString(),
+        end: result.period.end.toISOString(),
+        days,
+      },
+      summary: result.summary,
+      discrepancies: result.discrepancies.map(d => ({
+        type: d.type,
+        severity: d.severity,
+        stripeSessionId: d.stripeSessionId,
+        userId: d.userId,
+        stripeAmount: d.stripeAmount,
+        expectedCredits: d.expectedCredits,
+        actualCredits: d.actualCredits,
+        message: d.message,
+        suggestedAction: d.suggestedAction,
+      })),
+      recommendations: result.recommendations,
+    });
+  } catch (error: any) {
+    console.error('Stripe reconciliation error:', error);
+    sendJson(res, 500, {
+      error: 'Reconciliation failed',
+      message: error.message,
+    });
+  }
+}
+
+/**
+ * POST /api/admin/stripe/reconcile/fix
+ * Auto-fix missing credits from Stripe payments
+ *
+ * Body params:
+ * - dryRun: If true (default), only report what would be fixed
+ */
+async function handleStripeReconcileFix(
+  res: ServerResponse,
+  body: { dryRun?: boolean },
+  adminInfo: { userId: string; email?: string }
+) {
+  const dryRun = body.dryRun !== false; // Default to dry run for safety
+
+  console.log(`🔧 Admin ${adminInfo.userId} triggered Stripe reconciliation fix (dryRun=${dryRun})`);
+
+  try {
+    const result = await autoFixMissingCredits(dryRun);
+
+    if (dryRun) {
+      sendJson(res, 200, {
+        mode: 'dry_run',
+        message: `Would fix ${result.wouldFix} missing credit entries. Re-run with dryRun: false to apply.`,
+        wouldFix: result.wouldFix,
+      });
+    } else {
+      sendJson(res, 200, {
+        mode: 'applied',
+        message: `Fixed ${result.fixed} of ${result.wouldFix} missing credit entries.`,
+        fixed: result.fixed,
+        wouldFix: result.wouldFix,
+        errors: result.errors,
+      });
+    }
+  } catch (error: any) {
+    console.error('Stripe reconciliation fix error:', error);
+    sendJson(res, 500, {
+      error: 'Fix failed',
+      message: error.message,
+    });
+  }
 }
