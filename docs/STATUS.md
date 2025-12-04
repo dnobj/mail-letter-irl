@@ -1,573 +1,324 @@
 # Letter IRL - Project Status
 
-**Last Updated:** November 19, 2025
-**Current Phase:** Phase 6 - ACP Integration (Next) 📋
-**Overall Progress:** 71% (5 of 7 phases complete)
+**Last Updated:** December 4, 2025
+**Current Phase:** Production (MVP Complete)
+**Overall Progress:** 95%
 
 ---
 
-## 🎯 Project Goal
+## Project Overview
 
-Build Letter IRL as a **"hero app"** for ChatGPT Apps SDK with:
-- Full Agentic Commerce Protocol (ACP) for seamless credit purchases
-- Conversational letter sending via ChatGPT
-- Physical mail delivery through print/mail API
-- Complete OAuth authentication with Auth0
+Letter IRL is a **physical letter mailing service** integrated with ChatGPT via MCP (Model Context Protocol). Users compose letters through conversation and the system prints and mails them via PostGrid.
 
----
-
-## ✅ Completed Phases
-
-### Phase 1: Foundation (Week 1) ✅ COMPLETE
-
-**MCP Server with Auth0 OAuth**
-
-- ✅ MCP HTTP server (Streamable HTTP + SSE fallback)
-- ✅ Auth0 OAuth 2.1 + PKCE integration
-- ✅ 5 identity providers (Email, Google, Microsoft, Apple, GitHub)
-- ✅ 5 MCP tools: `quote_and_preview_letter`, `send_letter`, `get_order_status`, `get_account_balance`, `switch_account`
-- ✅ Per-user JWT authentication
-- ✅ Account switching capability (logout and re-authenticate)
-- ✅ User identity display (email + auth provider)
-- ✅ Ngrok tunnel for external access
-- ✅ ChatGPT integration working
-
-**Key Files:**
-- `src/mcp/httpServer.ts` - Main HTTP server
-- `src/mcp/registerTools.ts` - Tool registration
-- `manifest.json` - ChatGPT MCP manifest
-- `.env` - Auth0 configuration
-
-**Documentation:**
-- `SETUP.md` - Complete setup guide
-- `docs/auth0-tenant-configuration.md` - Auth0 reference
+**Key Features:**
+- Conversational letter composition via ChatGPT
+- Credit-based billing with Stripe integration
+- PostGrid for physical mail fulfillment
+- Draft-based idempotency to prevent duplicate sends
+- User tier system with rate limiting
+- Admin dashboard for monitoring
 
 ---
 
-### Phase 2: Database Setup (Week 2) ✅ COMPLETE
-
-**Neon PostgreSQL Database**
-
-- ✅ Neon project created: `letter-irl`
-- ✅ PostgreSQL 17.5 (serverless, pooled connection)
-- ✅ Connection string configured
-- ✅ Migration system implemented
-- ✅ 6 database tables created and verified
-
-**Database Schema:**
-
-| Table | Purpose | Columns |
-|-------|---------|---------|
-| `users` | User accounts & credit balances | 7 |
-| `credit_transactions` | Complete audit trail | 9 |
-| `orders` | Purchase history from ACP | 9 |
-| `letters` | Letter content & delivery status | 10 |
-| `letter_jobs` | Background job queue | 11 |
-| `migrations` | Migration tracking | 3 |
-
-**Key Files:**
-- `db/migrations/001_initial_schema.sql` - Database schema
-- `db/migrate.ts` - Migration runner
-- `src/db/index.ts` - Database connection utilities
-
-**NPM Scripts:**
-- `npm run db:test` - Test database connection
-- `npm run db:migrate` - Run pending migrations
-
-**Documentation:**
-- `docs/database-setup.md` - Complete setup guide
-
----
-
-### Phase 3: Credit API (Week 2-3) ✅ COMPLETE
-
-**Database-Backed Credit Management System**
-
-- ✅ TypeScript type definitions
-- ✅ User service (CRUD operations)
-- ✅ Credit service (add/deduct/balance/history/refund)
-- ✅ JWT authentication middleware
-- ✅ HTTP API routes
-- ✅ MCP tools integration
-- ✅ Comprehensive testing
-
-**API Endpoints:**
+## Architecture
 
 ```
-GET  /api/credits/balance        - Get current balance
-GET  /api/credits/transactions   - Get transaction history
-GET  /api/users/me              - Get user info
+┌─────────────────────────────────────────────────────────────────┐
+│                        PRODUCTION                                │
+├─────────────────────────────────────────────────────────────────┤
+│  Railway (api.letterirl.com)                                     │
+│  ├── MCP HTTP Server                                             │
+│  ├── REST API (/api/*)                                           │
+│  ├── Stripe Webhooks                                             │
+│  └── pg-boss Workers (job processing)                            │
+├─────────────────────────────────────────────────────────────────┤
+│  Neon PostgreSQL                                                 │
+│  └── All tables (users, letters, credits, jobs, etc.)            │
+├─────────────────────────────────────────────────────────────────┤
+│  External Services                                               │
+│  ├── Auth0 (OAuth 2.1 + PKCE, 5 identity providers)              │
+│  ├── Stripe (payments, webhooks)                                 │
+│  └── PostGrid (letter printing/mailing)                          │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-**Credit Service Functions:**
+---
 
-- `addCredits()` - Add credits from purchase (atomic transaction)
-- `deductCredits()` - Deduct credits for letter (with balance check)
-- `getBalance()` - Get current balance
-- `getTransactions()` - Get transaction history (paginated)
-- `refundCredits()` - Refund cancelled orders
-- `adjustCredits()` - Manual admin adjustments
+## Technology Stack
 
-**MCP Tools Updated:**
-
-- `get_account_balance` - Now queries PostgreSQL database
-- `send_letter` - Now deducts credits atomically from database
-
-**Key Files:**
-- `src/services/types.ts` - TypeScript type definitions
-- `src/services/userService.ts` - User CRUD operations
-- `src/services/creditService.ts` - Credit management logic
-- `src/api/middleware/auth.ts` - JWT authentication
-- `src/api/creditApiHandler.ts` - HTTP request handler
-- `src/tools/getAccountBalance.ts` - Updated MCP tool
-- `src/tools/sendLetter.ts` - Updated MCP tool
-
-**Testing:**
-- ✅ Unit tests passing (120 purchased - 5 used = 115 ✓)
-- ✅ Transaction audit trail verified
-- ✅ Atomic operations confirmed
-- ✅ Balance checks working
-
-**Documentation:**
-- `docs/credit-api-implementation.md` - Complete implementation guide
+| Component | Technology |
+|-----------|------------|
+| Runtime | Node.js 20+ with TypeScript |
+| Server | Custom HTTP (MCP SDK) |
+| Database | PostgreSQL 17 (Neon serverless) |
+| Job Queue | pg-boss (PostgreSQL-backed) |
+| Auth | Auth0 OAuth 2.1 + PKCE |
+| Payments | Stripe (Checkout, Webhooks) |
+| Mail Provider | PostGrid (production), Dummy (testing) |
+| Hosting | Railway |
 
 ---
 
-### Phase 5: Admin API (Week 4-5) ✅ COMPLETE
+## Database Schema
 
-**Monitoring and Management APIs**
+**12 Tables:**
 
-- ✅ Admin authentication middleware (whitelist-based)
-- ✅ System stats endpoint (`GET /api/admin/stats`)
-- ✅ User management endpoints (`GET /api/admin/users`, `GET /api/admin/users/:userId`)
-- ✅ Credit adjustment endpoint (`POST /api/admin/credits/adjust`)
-- ✅ Complete integration with HTTP server
-- ✅ Comprehensive testing script
+| Table | Purpose |
+|-------|---------|
+| users | User accounts with credits and tier |
+| credit_ledger | Credit entries with expiration (FIFO) |
+| credit_transactions | Audit trail for all credit changes |
+| credit_consumption | Links credit usage to ledger entries |
+| letter_drafts | Temporary drafts for idempotent sends |
+| letters | Sent letters with tracking |
+| letter_jobs | Background job processing |
+| orders | Stripe purchase records |
+| promo_campaigns | Promo code campaigns |
+| promo_redemptions | User promo code redemptions |
+| stripe_disputes | Chargeback tracking |
+| migrations | Migration tracking |
 
-**API Endpoints:**
+**6 Migrations:**
+1. `001_initial_schema.sql` - Core tables
+2. `002_add_provider_fields.sql` - PostGrid fields
+3. `003_credit_ledger.sql` - Credit ledger, promos
+4. `004_letter_drafts.sql` - Draft-based idempotency
+5. `005_user_tiers.sql` - Tier system for rate limits
+6. `006_stripe_disputes.sql` - Chargeback tracking
+
+See [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) for full schema details.
+
+---
+
+## MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `quote_and_preview_letter` | Creates draft, returns preview and cost |
+| `send_letter` | Consumes draft, deducts credits, queues job |
+| `get_order_status` | Check letter delivery status |
+| `get_account_balance` | View credit balance |
+| `switch_account` | Logout and re-authenticate |
+
+See [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) for the complete send flow.
+
+---
+
+## API Endpoints
+
+### Public API
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/credits/balance` | Current credit balance |
+| `GET /api/credits/transactions` | Transaction history |
+| `GET /api/users/me` | User profile |
+| `POST /api/checkout/create-session` | Create Stripe checkout |
+| `POST /api/promo/redeem` | Redeem promo code |
+
+### Dashboard API (Stripe Webhooks)
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /webhooks/stripe` | Stripe event handler |
+
+### Admin API (Local Only)
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/admin/dashboard` | System stats |
+| `GET /api/admin/alerts` | Active alerts |
+| `GET /api/admin/users/search` | Search users |
+| `GET /api/admin/letters` | List letters |
+| `POST /api/admin/jobs/:id/retry` | Retry failed job |
+| `POST /api/admin/credits/adjust` | Adjust user credits |
+| `POST /api/admin/promo/create` | Create promo campaign |
+
+---
+
+## Security Model
+
+### Admin Access
+- **Railway (production):** `ADMIN_ENABLED=false` - Admin routes return 404
+- **Local:** `ADMIN_ENABLED=true` + `ADMIN_LOCAL_ONLY=true` - Full access
+- Real security: Neon DATABASE_URL credentials
+
+### Rate Limiting
+- Per-user, in-memory (IP-based fallback)
+- Tier-based limits: standard vs trusted
+- Trusted tier: 3+ purchases, oldest 120+ days ago
+
+### User Tiers
+| Tier | Criteria | Rate Limit |
+|------|----------|------------|
+| standard | Default | Lower limits |
+| trusted | 3+ purchases, 120+ days history | Higher limits |
+
+---
+
+## Credit System
+
+### Sources
+- **purchase** - Stripe payments
+- **promo** - Promo code redemption
+- **signup_bonus** - New user welcome credits
+- **adjustment** - Admin manual changes
+- **refund** - Cancelled letter refunds
+
+### Expiration
+- Credits expire based on policy (90 days default for promos)
+- FIFO consumption: Soonest-expiring credits used first
+- Expiration tracked in `credit_ledger.expires_at`
+
+### Flow
+1. User buys credits via Stripe checkout
+2. Webhook creates `credit_ledger` entry
+3. On letter send, credits deducted from oldest entries first
+4. Consumption tracked in `credit_consumption` table
+
+---
+
+## Letter Send Flow
 
 ```
-GET  /api/admin/stats              - System-wide statistics
-GET  /api/admin/users              - List all users (paginated)
-GET  /api/admin/users/:userId      - Get user details + recent transactions
-POST /api/admin/credits/adjust     - Manually adjust user credits
+quote_and_preview_letter → Creates draft (24h expiry)
+         ↓
+send_letter(draftId) → Consumes draft atomically
+         ↓
+         ├── Deducts credits (FIFO from ledger)
+         ├── Creates letter record
+         └── Queues job (pg-boss)
+         ↓
+letterWorker → Sends to PostGrid
+         ↓
+Letter printed and mailed
 ```
 
-**Admin Features:**
-
-- **System Stats**: Total users, credits held, purchases, usage, revenue, letters sent
-- **User Details**: Full user profile with transaction history and letter count
-- **Credit Management**: Add/remove credits with audit trail and reason tracking
-- **Authorization**: Whitelist-based admin access via `LETTER_IRL_ADMIN_USER_IDS` env var
-
-**Key Files:**
-- `src/api/adminApiHandler.ts` - Admin API request handler
-- `src/api/middleware/adminAuth.ts` - Admin authorization middleware
-- `scripts/test-admin-api.ts` - Test script
-
-**Testing:**
-- ✅ Service functions tested (add/remove credits, stats, user lookup)
-- ✅ HTTP endpoints integrated and tested
-- ✅ Admin authorization working correctly
-- ✅ Audit trail recording all admin actions
-
-**Configuration:**
-- Admin user IDs configured in `.env`
-- JWT authentication via Auth0
+See [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) for details.
 
 ---
 
-### Phase 4: Job Queue (Week 3-4) ✅ COMPLETE
+## Environment Variables
 
-**Background Job Processing with pg-boss**
+### Required
+| Variable | Purpose |
+|----------|---------|
+| DATABASE_URL | Neon PostgreSQL connection |
+| LETTER_IRL_OAUTH_JWKS_URI | Auth0 JWKS endpoint |
+| LETTER_IRL_OAUTH_ISSUER | Auth0 issuer |
+| LETTER_IRL_OAUTH_AUDIENCE | Auth0 API audience |
+| STRIPE_SECRET_KEY | Stripe API key |
+| STRIPE_WEBHOOK_SECRET | Webhook signing secret |
+| POSTGRID_API_KEY | PostGrid API key |
 
-- ✅ pg-boss installed and configured (v10.3.3)
-- ✅ Job queue initialization with PostgreSQL backend
-- ✅ Letter job creation service
-- ✅ Background worker process for letter processing
-- ✅ Queue creation fix for pg-boss v10+ (createQueue required)
-- ✅ Job status tracking in database
-- ✅ Integration with send_letter tool
-- ✅ Admin API job monitoring endpoints
-
-**Job Queue Features:**
-
-- **Reliable Processing**: PostgreSQL-backed queue with persistence
-- **Retry Logic**: Automatic retries with exponential backoff (3 attempts)
-- **Job Tracking**: Complete audit trail in letter_jobs table
-- **Worker Pool**: Concurrent job processing (5 workers)
-- **Status Updates**: Real-time job and letter status tracking
-
-**Service Provider System:** ✅ **NEW!**
-- ✅ Provider interface architecture
-- ✅ DummyProvider implementation for testing
-- ✅ Provider factory and registry
-- ✅ Worker integration with providers
-- ✅ Configuration via environment variables
-- 📋 Real providers (Lob, PostGrid) planned for production
-
-**Provider Features:**
-- **Pluggable Architecture**: Easy to add/switch providers
-- **DummyProvider**: Free testing without API costs
-- **Configurable**: Delay, failure rate, cost simulation
-- **Status Tracking**: Realistic delivery status progression
-- **Cost Estimation**: Provider-specific pricing
-
-**Key Files:**
-- `src/services/jobQueue.ts` - pg-boss initialization and management
-- `src/services/letterJobService.ts` - Job creation and tracking
-- `src/workers/letterWorker.ts` - Background job processor with provider integration
-- `src/services/providers/types.ts` - Provider interface definitions
-- `src/services/providers/DummyProvider.ts` - Test provider implementation
-- `src/services/providers/index.ts` - Provider factory and registry
-- `scripts/test-job-queue.ts` - Job queue test script
-- `docs/job-queue-implementation.md` - Job queue guide
-- `docs/service-providers.md` - Provider system guide
-
-**Admin Monitoring (Added to Phase 5):**
-- `GET /api/admin/jobs` - List all jobs with filtering
-- `GET /api/admin/jobs/:jobId` - Get specific job details
-- `GET /api/admin/jobs/user/:userId` - Get user's jobs
-- `GET /api/admin/pgboss/jobs` - View pg-boss internal state
-
-**Testing:**
-- ✅ Job creation working (jobs get valid IDs)
-- ✅ Worker picks up and processes jobs
-- ✅ Queue persistence verified
-- ✅ Admin monitoring endpoints functional
-- ✅ DummyProvider integration complete and tested
-- ✅ Job processing logic 100% complete with provider system
-
-**Configuration:**
-- Queue name: `send-letter`
-- Retry limit: 3 attempts
-- Retry delay: 60 seconds with exponential backoff
-- Archive after: 1 hour
-- Delete after: 7 days
-
-**Key Discovery:**
-- pg-boss v10+ requires `createQueue()` before `send()` will work
-- This was a breaking change from earlier versions
-- Research and debugging led to successful implementation
+### Optional
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| ADMIN_ENABLED | false | Enable admin routes |
+| ADMIN_LOCAL_ONLY | false | Restrict admin to localhost |
+| DISABLE_WORKERS | false | Disable job workers |
+| ACTIVE_LETTER_PROVIDER | postgrid | Letter provider |
 
 ---
 
-## 🚧 Current Status
+## Running Locally
 
-**Server Running:**
-```
-✅ MCP HTTP Server: http://localhost:8788
-✅ Database: Neon PostgreSQL (connected)
-✅ Credit API: Available at /api/credits/*
-✅ Admin API: Available at /api/admin/*
-✅ Job Queue: pg-boss running with background workers
-✅ MCP Tools: Using database-backed credits
+### Development Server
+```bash
+npm run dev    # Watch mode
+npm run start  # Production mode
 ```
 
-**Ready for Testing:**
-- MCP server accessible via ChatGPT
-- Credit API endpoints functional
-- Admin API endpoints functional (including job monitoring)
-- Job queue processing letter jobs in background
-- Database operations tested and verified
-- Audit trail recording all transactions
-- Admin access configured
-- Background workers processing jobs
+### Admin Server (connects to production DB)
+```bash
+# 1. Copy and configure
+cp .env.admin.example .env.admin
+# Edit .env.admin with production DATABASE_URL
 
-**Known Issues:**
-- Job processing has 95% success rate (minor debugging needed for edge cases)
+# 2. Run admin server
+npm run admin
 
----
-
-## 📋 Next Steps
-
-**Phase 4 (Job Queue) and Phase 5 (Admin API) are now COMPLETE!** 🎉
-
----
-
-### Phase 6: ACP Integration (Week 5-7)
-
-**Goal:** Full Agentic Commerce Protocol implementation
-
-**Status:** Documentation complete, awaiting Merchants Program approval
-
-**Tasks:**
-1. **Product Feed** (30 min)
-   - Create JSON product catalog
-   - Serve at `/api/acp/v1/products.json`
-   - 3 credit packages (4, 10, 100 credits)
-
-2. **Cart & Checkout API** (2-3 days)
-   - `POST /cart/create`
-   - `POST /cart/items`
-   - `GET /cart/:cartId`
-   - `POST /checkout/quote`
-   - `POST /checkout/complete`
-
-3. **Stripe Integration** (1-2 days)
-   - Set up Stripe account
-   - Enable Shared Payment Token (SPT)
-   - Implement SPT charging
-   - Configure webhooks
-
-4. **Idempotency** (1 day)
-   - Implement key storage
-   - Prevent duplicate charges
-
-**Blockers:**
-- ⏳ ChatGPT Merchants Program application pending
-- ⏳ Stripe SPT feature access (apply when ready)
-
-**Documentation:**
-- ✅ `docs/acp-implementation-guide.md`
-- ✅ `docs/acp-stripe-integration.md`
-- ✅ `docs/credit-packages-spec.md`
-- ✅ `docs/credit-purchase-flow.md`
-- ✅ `docs/acp-quickstart.md`
-
----
-
-### Phase 7: Testing & Launch (Week 7-8)
-
-**Goal:** Production deployment and certification
-
-**Tasks:**
-1. End-to-end testing
-2. Load testing
-3. Security audit
-4. Production deployment
-5. OpenAI certification
-6. Public launch
-
-**Estimated Time:** 1 week
-
----
-
-## 📊 Metrics & Progress
-
-### Development Progress
-
-```
-Phase 1: Foundation          ████████████████████ 100% ✅
-Phase 2: Database            ████████████████████ 100% ✅
-Phase 3: Credit API          ████████████████████ 100% ✅
-Phase 4: Job Queue           ████████████████████ 100% ✅
-Phase 5: Admin API           ████████████████████ 100% ✅
-Phase 6: ACP Integration     ░░░░░░░░░░░░░░░░░░░░   0% ← NEXT
-Phase 7: Testing & Launch    ░░░░░░░░░░░░░░░░░░░░   0%
-
-Overall: 71% Complete (5 of 7 phases)
+# 3. Visit http://localhost:8788/admin
 ```
 
-### Files Created/Modified
-
-- **Total Files:** 66+
-- **Lines of Code:** ~10,700
-- **Documentation:** 13 files
-- **Tests:** 5 test scripts
-- **MCP Tools:** 5 (quote, send, status, balance, switch_account)
-- **API Endpoints:** 12 total (3 credit, 8 admin, 1 user)
-- **Background Workers:** 1 (letter processing)
-
-### Database Statistics
-
-- **Tables:** 6
-- **Migrations:** 1 (initial schema)
-- **Test Users:** 1
-- **Test Transactions:** 4
+### Database Migrations
+```bash
+npm run db:migrate          # Run pending migrations
+npm run db:migrate:rollback # View rollback info
+```
 
 ---
 
-## 🛠️ Technology Stack
+## Deployment
 
-### Backend
-- Node.js 20+ with TypeScript
-- Express.js patterns (custom HTTP routing)
-- @modelcontextprotocol/sdk v1.17.5
+### Railway
+- Auto-deploys from GitHub master branch
+- Uses Nixpacks for build
+- Environment variables configured in Railway dashboard
+- Admin routes disabled in production
 
-### Database
-- PostgreSQL 17.5 (Neon serverless)
-- pg v8.11.3
-- Connection pooling enabled
-
-### Authentication
-- Auth0 OAuth 2.1 + PKCE
-- jose v6.1.0 (JWT validation)
-- 5 identity providers
-
-### Payment (Planned)
-- Stripe Shared Payment Token (SPT)
-- ACP integration
-
-### Job Queue (Planned)
-- pg-boss (PostgreSQL-backed)
-
-### Deployment
-- Development: WSL + Ngrok
-- Production: TBD
+### Key Files
+- `railway.json` - Railway configuration
+- `nixpacks.toml` - Build configuration
 
 ---
 
-## 📁 File Structure
+## What's Complete
+
+- [x] MCP HTTP server with OAuth
+- [x] Auth0 integration (5 providers)
+- [x] Neon PostgreSQL database
+- [x] Credit system with ledger and expiration
+- [x] Stripe checkout and webhooks
+- [x] Draft-based idempotency
+- [x] pg-boss job queue
+- [x] PostGrid integration
+- [x] User tier system
+- [x] Rate limiting
+- [x] Admin dashboard (local only)
+- [x] Promo code system
+- [x] Chargeback tracking
+- [x] Railway deployment
+
+---
+
+## Known Issues / Future Work
+
+### Critical to Fix
+1. Undefined `STATIC_CLIENT_ID`/`STATIC_CLIENT_SECRET` in OAuth registration
+2. Missing request body timeout in webhook handling
+3. Missing env var validation at startup
+
+### Improvements
+- Redis-based rate limiting for multi-instance scaling
+- More comprehensive address validation
+- Webhook retry logic enhancement
+- Email notifications for letter status
+
+---
+
+## File Structure
 
 ```
 /mnt/c/letter-irl/
 ├── src/
-│   ├── mcp/
-│   │   ├── httpServer.ts          ✅ MCP HTTP server
-│   │   ├── registerTools.ts       ✅ Tool registration
-│   │   └── stdioServer.ts         ✅ MCP stdio server
-│   ├── services/
-│   │   ├── types.ts               ✅ TypeScript types
-│   │   ├── userService.ts         ✅ User CRUD
-│   │   ├── creditService.ts       ✅ Credit management
-│   │   └── LetterIrlServer.ts     ✅ Core server logic
-│   ├── api/
-│   │   ├── creditApiHandler.ts    ✅ Credit API routes
-│   │   ├── adminApiHandler.ts     ✅ Admin API routes
-│   │   └── middleware/
-│   │       ├── auth.ts            ✅ JWT middleware
-│   │       └── adminAuth.ts       ✅ Admin authorization
-│   ├── tools/
-│   │   ├── getAccountBalance.ts   ✅ Updated for DB + identity display
-│   │   ├── sendLetter.ts          ✅ Updated for DB
-│   │   ├── quoteAndPreview.ts     ✅ Working
-│   │   ├── getOrderStatus.ts      ✅ Working
-│   │   └── switchAccount.ts       ✅ NEW: Account switching
-│   ├── db/
-│   │   └── index.ts               ✅ Database utilities
-│   └── acp/                       📋 Planned
-│       ├── productFeed.ts
-│       ├── cartService.ts
-│       ├── checkoutService.ts
-│       └── stripeService.ts
+│   ├── mcp/              # MCP server (httpServer.ts, stdioServer.ts)
+│   ├── api/              # REST API handlers
+│   ├── services/         # Business logic
+│   ├── workers/          # Background jobs (letterWorker.ts)
+│   ├── tools/            # MCP tools (sendLetter.ts, etc.)
+│   └── db/               # Database utilities
 ├── db/
-│   ├── migrate.ts                 ✅ Migration runner
-│   └── migrations/
-│       └── 001_initial_schema.sql ✅ Database schema
-├── scripts/
-│   ├── test-db.ts                 ✅ DB connection test
-│   ├── test-credit-api.ts         ✅ Credit API test
-│   ├── test-admin-api.ts          ✅ Admin API test
-│   └── verify-tables.ts           ✅ Table verification
-├── docs/
-│   ├── STATUS.md                  ✅ This file
-│   ├── IMPLEMENTATION-ROADMAP.md  ✅ Master plan
-│   ├── database-setup.md          ✅ Database guide
-│   ├── credit-api-implementation.md ✅ Credit API guide
-│   ├── acp-*.md                   ✅ ACP documentation (5 files)
-│   └── auth0-tenant-configuration.md ✅ Auth0 guide
-├── .env                           ✅ Configuration
-├── package.json                   ✅ Dependencies
-└── manifest.json                  ✅ ChatGPT manifest
+│   ├── migrations/       # SQL migrations (001-006)
+│   └── migrate.ts        # Migration runner
+├── docs/                 # Documentation
+├── scripts/              # Test and utility scripts
+└── .env.admin.example    # Admin environment template
 ```
 
 ---
 
-## 🎯 Success Criteria
+## Documentation Index
 
-### MVP Launch Criteria
-
-- ✅ Auth0 OAuth working with 5 providers
-- ✅ Database connected and migrated
-- ✅ Credit API functional and tested
-- ✅ MCP tools using database
-- ✅ Admin can monitor system
-- ✅ Letters queue for background processing
-- ✅ Job queue processes letters asynchronously
-- 📋 Users can purchase credits via ACP
-
-### "Hero App" Criteria
-
-- ✅ Well-documented codebase
-- ✅ Production-ready database
-- ✅ Complete audit trail
-- ✅ Complete observability (admin API + job monitoring)
-- ✅ Reliable delivery (job queue with retries)
-- 📋 Full ACP implementation
-- 📋 Seamless UX (never leave ChatGPT)
-
----
-
-## 🔗 Quick Links
-
-### Documentation
-- [Implementation Roadmap](IMPLEMENTATION-ROADMAP.md) - Master plan
-- [Database Setup](database-setup.md) - PostgreSQL guide
-- [Credit API](credit-api-implementation.md) - Credit system guide
-- [ACP Quickstart](acp-quickstart.md) - 8-week ACP plan
-
-### Testing
-- `npm run db:test` - Test database connection
-- `npm run db:migrate` - Run migrations
-- `npx tsx scripts/test-credit-api.ts` - Test credit operations
-
-### Server Management
-- `npm run mcp:http` - Start MCP server
-- `lsof -ti:8788 | xargs kill -9` - Stop server
-- `curl http://localhost:8788/` - Health check
-
----
-
-## 💡 Notes
-
-**Recent Achievements:**
-- Successfully migrated from file-based to database-backed credit system
-- All credit operations now use atomic database transactions
-- Complete audit trail for all credit changes
-- MCP tools seamlessly integrated with PostgreSQL
-- Admin API fully implemented with authentication and authorization
-- System monitoring and user management capabilities ready
-- **Job queue system implemented with pg-boss**
-- **Background worker processing letters asynchronously**
-- **Job monitoring added to Admin API**
-- **Solved pg-boss v10+ createQueue() requirement through research**
-- **✨ NEW: Account switching tool for multi-account support**
-- **✨ NEW: User identity display in balance check (email + auth provider)**
-
-**Technical Decisions:**
-- Using Neon for serverless PostgreSQL (cost-effective, scalable)
-- Atomic transactions prevent race conditions
-- Complete audit trail for compliance
-- Per-user authentication via Auth0 JWT
-- Whitelist-based admin authorization (secure, simple to manage)
-
-**Lessons Learned:**
-- Database transactions critical for credit operations
-- MCP Streamable HTTP requires passing `res` to constructor
-- ES modules need `import.meta.url` for `__dirname`
-- Idempotency keys prevent duplicate charges
-- **pg-boss v10+ requires createQueue() before send() - breaking change**
-- **Researching documentation saves hours of debugging**
-- **Admin API monitoring essential for troubleshooting background jobs**
-- **PostgreSQL-backed queues provide better reliability than Redis**
-
----
-
-## 🚀 Ready to Continue?
-
-**Phases 1-5 Complete!** 🎉
-
-**Immediate Next Action:** Begin Phase 6 - ACP Integration (Agentic Commerce Protocol)
-
-**Prerequisites:**
-- ✅ All infrastructure complete
-- ✅ Database, APIs, and job queue working
-- ⏳ ChatGPT Merchants Program approval (pending)
-
-**When Ready to Begin Phase 6:**
-1. Review `docs/acp-quickstart.md` for 8-week ACP implementation plan
-2. Review `docs/acp-implementation-guide.md` for technical details
-3. Review `docs/acp-stripe-integration.md` for payment setup
-4. Apply for Stripe SPT (Shared Payment Token) access
-5. Implement product feed at `/api/acp/v1/products.json`
-
-**Questions? Check:**
-- [Implementation Roadmap](IMPLEMENTATION-ROADMAP.md) for detailed plan
-- [Job Queue Guide](job-queue-implementation.md) for background processing
-- [Credit API Guide](credit-api-implementation.md) for credit system details
-- [ACP Quickstart](acp-quickstart.md) for commerce protocol info
-
----
-
-**Status:** ✅ 71% Complete - Ready for Phase 6 - ACP Integration
+- [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) - Complete letter flow with drafts
+- [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) - Full database schema
+- [user-flows.md](user-flows.md) - User interaction flows
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Deployment guide
+- [INFRASTRUCTURE.md](INFRASTRUCTURE.md) - Infrastructure overview
