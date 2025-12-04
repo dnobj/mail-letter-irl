@@ -29,10 +29,6 @@ import { rateLimitMiddlewareWithTier } from "../api/middleware/rateLimit.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// OAuth client credentials for registration endpoint
-const STATIC_CLIENT_ID = process.env.LETTER_IRL_OAUTH_CLIENT_ID || '';
-const STATIC_CLIENT_SECRET = process.env.LETTER_IRL_OAUTH_CLIENT_SECRET || '';
-
 const DEFAULT_WIDGET_DIR = path.resolve(__dirname, "..", "..", "widgets");
 const DASHBOARD_DIR = path.resolve(__dirname, "..", "..", "public", "dashboard");
 const DEFAULT_HOST = process.env.LETTER_IRL_HTTP_HOST ?? "0.0.0.0";
@@ -59,8 +55,6 @@ const FALLBACK_ORIGIN =
 const PUBLIC_BASE_URL =
   process.env.LETTER_IRL_PUBLIC_BASE_URL ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const REQUIRE_AUTH = process.env.LETTER_IRL_REQUIRE_AUTH !== "false";
-const AUTH0_REGISTRATION_ENDPOINT =
-  process.env.LETTER_IRL_OAUTH_REGISTRATION_ENDPOINT;
 
 // Environment variable validation
 const REQUIRED_ENV_VARS = [
@@ -765,40 +759,4 @@ async function authenticateRequest(
     res.end(JSON.stringify(body));
     return null;
   }
-}
-
-async function handleRegistrationRequest(
-  req: http.IncomingMessage,
-  res: http.ServerResponse
-) {
-  if (!STATIC_CLIENT_ID) {
-    res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        error: "static_client_unavailable",
-        error_description: "LETTER_IRL_OAUTH_CLIENT_ID not configured"
-      })
-    );
-    return;
-  }
-
-  if (req.method !== "POST" && req.method !== "GET") {
-    res.writeHead(405, { Allow: "POST, GET" });
-    res.end();
-    return;
-  }
-
-  const body = {
-    client_id: STATIC_CLIENT_ID,
-    client_secret: STATIC_CLIENT_SECRET,
-    client_id_issued_at: Math.floor(Date.now() / 1000),
-    token_endpoint_auth_method: "client_secret_post",
-    grant_types: ["authorization_code"],
-    response_types: ["code"],
-    redirect_uris: ["https://chat.openai.com/aip/auth/callback"],
-    scope: process.env.LETTER_IRL_OAUTH_SCOPES ?? "openid email profile"
-  };
-
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(body));
 }
