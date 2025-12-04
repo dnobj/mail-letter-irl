@@ -44,7 +44,7 @@ This document provides a central reference for all services and infrastructure u
 | **Auth0** | Authentication | Free: 7,500 MAU | [manage.auth0.com](https://manage.auth0.com) |
 | **PostGrid** | Physical mail API | Pay per letter (~$1.50) | [dashboard.postgrid.com](https://dashboard.postgrid.com) |
 | **Stripe** | Payment processing | 2.9% + $0.30/txn | [dashboard.stripe.com](https://dashboard.stripe.com) |
-| **Vercel** | Website hosting | Free (Hobby) / $20/mo (Pro) | [vercel.com](https://vercel.com) |
+| **Railway** | Backend + Website hosting | $5/mo + usage | [railway.app](https://railway.app) |
 
 ## Detailed Service Information
 
@@ -147,25 +147,30 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 
 ---
 
-### Vercel
+### Railway
 
-**Purpose**: Host the customer-facing website.
+**Purpose**: Host both the MCP backend (api.letterirl.com) and website (letterirl.com).
 
-**Current Plan**: Not yet deployed (will use Hobby initially)
+**Current Plan**: Hobby ($5/month + usage)
 
 **Pricing**:
 | Plan | Price | Use Case |
 |------|-------|----------|
-| Hobby | Free | Development, testing (non-commercial) |
-| Pro | $20/user/month | Commercial use |
+| Hobby | $5/mo + usage | Small projects, development |
+| Pro | $20/mo + usage | Production workloads |
+
+**Services Deployed**:
+| Service | Domain | Repository |
+|---------|--------|------------|
+| Backend (MCP Server) | api.letterirl.com | mail-letter-irl |
+| Website (Next.js) | letterirl.com | mail-letter-irl-website |
 
 **Key Features**:
-- Automatic SSL certificates (Let's Encrypt)
-- Git-based deployments
-- Edge functions
-- Analytics
-
-**Important**: Hobby tier is for non-commercial use only. Switch to Pro before commercializing.
+- Automatic SSL certificates
+- Git-based deployments (auto-deploy on push)
+- Environment variable management
+- Logging and metrics
+- Nixpacks for automatic build detection
 
 ---
 
@@ -280,8 +285,8 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 | Auth0 | $0 (free tier) |
 | PostGrid | ~$0 (test mode) |
 | Stripe | $0 (no transactions) |
-| Vercel | $0 (Hobby) |
-| **Total** | **$0** |
+| Railway | $5 (Hobby plan) |
+| **Total** | **~$5/month** |
 
 ### Production (Estimated)
 | Service | Cost |
@@ -290,8 +295,8 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 | Auth0 | $0 (under 7,500 MAU) |
 | PostGrid | Variable (~$1.50/letter) |
 | Stripe | 2.9% + $0.30 per transaction |
-| Vercel | $20 (Pro required for commercial) |
-| **Fixed costs** | **~$20-40/month** |
+| Railway | $5-20 + usage |
+| **Fixed costs** | **~$5-40/month** |
 
 ## Quick Links
 
@@ -301,6 +306,6 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 | Auth0 Dashboard | https://manage.auth0.com |
 | PostGrid Dashboard | https://dashboard.postgrid.com |
 | Stripe Dashboard | https://dashboard.stripe.com |
-| Vercel Dashboard | https://vercel.com |
+| Railway Dashboard | https://railway.app |
 | GitHub (Backend) | https://github.com/dnobj/mail-letter-irl |
 | GitHub (Website) | https://github.com/dnobj/mail-letter-irl-website |

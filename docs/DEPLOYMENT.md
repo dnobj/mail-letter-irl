@@ -1,16 +1,16 @@
 # Deployment Guide
 
-This guide covers deploying Letter IRL to production.
+This guide covers deploying Letter IRL to production using Railway.
 
 ## Architecture Overview
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │   Website       │     │   MCP Server    │     │   Admin Panel   │
-│   (Vercel)      │────▶│   (Your host)   │◀────│   (Static)      │
-│   letterirl.com │     │   ngrok/cloud   │     │   admin.html    │
+│   (Railway)     │────▶│   (Railway)     │◀────│   (Local only)  │
+│   letterirl.com │     │ api.letterirl   │     │   admin.html    │
 └─────────────────┘     └────────┬────────┘     └─────────────────┘
-                                 │
+                                │
         ┌────────────────────────┼────────────────────────┐
         ▼                        ▼                        ▼
 ┌───────────────┐      ┌─────────────────┐      ┌─────────────────┐
@@ -29,12 +29,12 @@ This guide covers deploying Letter IRL to production.
 
 ### 1. Domain Setup
 - [ ] Domain registered (letterirl.com)
-- [ ] DNS configured to point to Vercel
-- [ ] SSL certificate (Vercel provides automatically)
+- [ ] DNS configured to point to Railway
+- [ ] SSL certificate (Railway provides automatically)
 
 ### 2. Database (Neon)
 - [ ] Production database created
-- [ ] Migrations run (`001_initial_schema.sql`, `002_add_provider_fields.sql`)
+- [ ] Migrations run (`npm run db:migrate`)
 - [ ] Connection pooling enabled (recommended)
 - [ ] Backup schedule configured
 
@@ -55,135 +55,104 @@ This guide covers deploying Letter IRL to production.
 - [ ] Verify address validation works
 - [ ] Test letter sending (costs real money!)
 
-## Website Deployment (Vercel)
+## Railway Deployment
 
-### 1. Connect Repository
+### 1. Create Railway Project
+
+1. Go to [railway.app](https://railway.app)
+2. Create new project
+3. Connect GitHub repository
+
+### 2. Deploy Backend (MCP Server)
 
 ```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Link project
-cd /mnt/c/letter-irl-website
-vercel link
+# Repository: mail-letter-irl
 ```
 
-Or connect via Vercel Dashboard → Import Git Repository.
+**Environment Variables** (Railway Dashboard → Variables):
 
-### 2. Configure Environment Variables
+```env
+# Database
+DATABASE_URL=postgres://...@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
 
-In Vercel Dashboard → Settings → Environment Variables:
+# Auth0
+LETTER_IRL_OAUTH_JWKS_URI=https://your-tenant.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_ISSUER=https://your-tenant.us.auth0.com/
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+
+# PostGrid
+POSTGRID_API_KEY=live_sk_...
+
+# Stripe
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+
+# Server Config
+LETTER_IRL_PUBLIC_BASE_URL=https://api.letterirl.com
+LETTER_IRL_ALLOWED_ORIGINS=https://letterirl.com,https://chatgpt.com,https://chat.openai.com
+```
+
+**Custom Domain**: api.letterirl.com
+
+### 3. Deploy Website (Next.js)
+
+```bash
+# Repository: mail-letter-irl-website
+```
+
+**Environment Variables**:
 
 ```env
 # Auth0
-AUTH0_SECRET=<generate-new-production-secret>
-AUTH0_DOMAIN=your-tenant.us.auth0.com
-AUTH0_CLIENT_ID=<production-client-id>
-AUTH0_CLIENT_SECRET=<production-client-secret>
-APP_BASE_URL=https://letterirl.com
+AUTH0_SECRET=<generate-with-openssl-rand-hex-32>
+AUTH0_BASE_URL=https://letterirl.com
+AUTH0_ISSUER_BASE_URL=https://your-tenant.us.auth0.com
+AUTH0_CLIENT_ID=<website-client-id>
+AUTH0_CLIENT_SECRET=<website-client-secret>
 AUTH0_AUDIENCE=https://letter-irl/api
 
 # Backend API
-LETTER_IRL_API_URL=https://your-mcp-server-url.com
+NEXT_PUBLIC_LETTER_IRL_API_URL=https://api.letterirl.com
 
 # Stripe
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_...
 ```
 
-### 3. Deploy
+**Custom Domain**: letterirl.com
 
-```bash
-vercel --prod
-```
-
-Or push to `main` branch for automatic deployment.
-
-### 4. Custom Domain
-
-1. Vercel Dashboard → Domains → Add Domain
-2. Enter `letterirl.com`
-3. Update DNS records as instructed
-4. Wait for SSL certificate provisioning (automatic)
-
-### 5. Update Auth0 URLs
+### 4. Update Auth0 URLs
 
 Add production URLs to Auth0 Application:
 - Callback: `https://letterirl.com/auth/callback`
 - Logout: `https://letterirl.com`
 - Web Origins: `https://letterirl.com`
 
-## Backend Deployment (MCP Server)
-
-The MCP server can be hosted on various platforms. Options:
-
-### Option A: Persistent Server (Recommended for Production)
-
-Deploy to a cloud VM (AWS EC2, DigitalOcean, etc.):
-
-```bash
-# Clone and setup
-git clone https://github.com/dnobj/mail-letter-irl.git
-cd mail-letter-irl
-npm install
-npm run build
-
-# Configure environment
-cp .env.example .env
-# Edit .env with production values
-
-# Run with PM2
-npm install -g pm2
-pm2 start npm --name "letter-irl" -- start
-pm2 save
-pm2 startup
-```
-
-### Option B: Cloudflare Workers
-
-The project was designed for Workers compatibility:
-
-```bash
-npx wrangler deploy
-```
-
-Configure secrets in Cloudflare Dashboard.
-
-### Option C: Continue with ngrok (Development Only)
-
-Not recommended for production, but works for testing:
-
-```bash
-ngrok http 8788 --domain=your-domain.ngrok.io
-```
-
 ## Environment Variables Reference
-
-### Website (.env.local → Vercel)
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `AUTH0_SECRET` | Random 32+ char string | `openssl rand -hex 32` |
-| `AUTH0_DOMAIN` | Auth0 tenant domain | `your-tenant.us.auth0.com` |
-| `AUTH0_CLIENT_ID` | Website app client ID | `abc123...` |
-| `AUTH0_CLIENT_SECRET` | Website app secret | `xyz789...` |
-| `APP_BASE_URL` | Website URL | `https://letterirl.com` |
-| `AUTH0_AUDIENCE` | API audience | `https://letter-irl/api` |
-| `LETTER_IRL_API_URL` | Backend API URL | `https://api.letterirl.com` |
-| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Stripe public key | `pk_live_...` |
 
 ### Backend (.env)
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `DATABASE_URL` | Neon connection string | `postgres://...@ep-xxx.us-east-2.aws.neon.tech/neondb` |
-| `AUTH0_DOMAIN` | Auth0 tenant domain | `your-tenant.us.auth0.com` |
-| `AUTH0_AUDIENCE` | API audience | `https://letter-irl/api` |
-| `AUTH0_CLIENT_ID` | MCP app client ID | `def456...` |
-| `AUTH0_CLIENT_SECRET` | MCP app secret | `uvw123...` |
+| `LETTER_IRL_OAUTH_JWKS_URI` | Auth0 JWKS endpoint | `https://tenant.us.auth0.com/.well-known/jwks.json` |
+| `LETTER_IRL_OAUTH_ISSUER` | Auth0 issuer URL | `https://tenant.us.auth0.com/` |
+| `LETTER_IRL_OAUTH_AUDIENCE` | API audience | `https://letter-irl/api` |
 | `POSTGRID_API_KEY` | PostGrid API key | `live_sk_...` |
 | `STRIPE_SECRET_KEY` | Stripe secret key | `sk_live_...` |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook secret | `whsec_...` |
-| `ADMIN_JWT_SECRET` | Admin panel JWT secret | `<random-string>` |
+
+### Website (.env)
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `AUTH0_SECRET` | Random 32+ char string | `openssl rand -hex 32` |
+| `AUTH0_BASE_URL` | Website URL | `https://letterirl.com` |
+| `AUTH0_ISSUER_BASE_URL` | Auth0 tenant URL | `https://tenant.us.auth0.com` |
+| `AUTH0_CLIENT_ID` | Website app client ID | `abc123...` |
+| `AUTH0_CLIENT_SECRET` | Website app secret | `xyz789...` |
+| `AUTH0_AUDIENCE` | API audience | `https://letter-irl/api` |
+| `NEXT_PUBLIC_LETTER_IRL_API_URL` | Backend API URL | `https://api.letterirl.com` |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Stripe public key | `pk_live_...` |
 
 ## Post-Deployment Verification
 
@@ -197,7 +166,7 @@ ngrok http 8788 --domain=your-domain.ngrok.io
 
 ### 2. Backend Health Check
 
-- [ ] `/health` endpoint returns 200
+- [ ] `/healthz` endpoint returns 200
 - [ ] MCP tools respond in ChatGPT
 - [ ] Database queries work
 
@@ -217,9 +186,15 @@ ngrok http 8788 --domain=your-domain.ngrok.io
 
 ## Monitoring
 
-### Recommended Tools
+### Railway Dashboard
 
-1. **Vercel Analytics** - Built-in for website
+- View logs in real-time
+- Monitor resource usage
+- Set up alerts
+
+### Other Tools
+
+1. **Railway Metrics** - Built-in CPU/memory monitoring
 2. **Sentry** - Error tracking (add to both projects)
 3. **Neon Dashboard** - Database metrics
 4. **PostGrid Dashboard** - Mail tracking
@@ -234,27 +209,16 @@ ngrok http 8788 --domain=your-domain.ngrok.io
 
 ## Rollback Procedure
 
-### Website (Vercel)
+### Railway
+
+1. Go to Railway Dashboard → Deployments
+2. Click on previous successful deployment
+3. Click "Rollback to this deployment"
+
+Or via CLI:
 
 ```bash
-# List deployments
-vercel ls
-
-# Rollback to previous
-vercel rollback <deployment-url>
-```
-
-Or use Vercel Dashboard → Deployments → Promote previous deployment.
-
-### Backend
-
-```bash
-# If using PM2
-pm2 stop letter-irl
-git checkout <previous-commit>
-npm install
-npm run build
-pm2 start letter-irl
+railway rollback
 ```
 
 ## Security Checklist
@@ -264,5 +228,5 @@ pm2 start letter-irl
 - [ ] CORS configured for allowed origins only
 - [ ] Rate limiting enabled
 - [ ] Database credentials rotated from development
-- [ ] Admin JWT secret is unique
 - [ ] Stripe webhook signature verification enabled
+- [ ] Admin panel only accessible locally (ADMIN_ENABLED=false on Railway)
