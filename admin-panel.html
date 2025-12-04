@@ -929,7 +929,14 @@
                                 <td>${c.name}</td>
                                 <td>${c.creditsAmount}</td>
                                 <td>${c.currentRedemptions}${c.maxTotalRedemptions ? '/' + c.maxTotalRedemptions : ''} (max ${c.maxPerUser}/user)</td>
-                                <td><span class="badge badge-${c.status === 'active' ? 'completed' : 'draft'}">${c.status}</span></td>
+                                <td>
+                                    <select onchange="updatePromoStatus('${c.campaignId}', this.value)" style="background:#0f3460;color:#fff;border:1px solid #0f3460;padding:4px;border-radius:3px;">
+                                        <option value="draft" ${c.status === 'draft' ? 'selected' : ''}>Draft</option>
+                                        <option value="active" ${c.status === 'active' ? 'selected' : ''}>Active</option>
+                                        <option value="paused" ${c.status === 'paused' ? 'selected' : ''}>Paused</option>
+                                        <option value="ended" ${c.status === 'ended' ? 'selected' : ''}>Ended</option>
+                                    </select>
+                                </td>
                                 <td>
                                     ${c.currentRedemptions === 0
                                         ? `<button class="btn btn-sm" style="background:#dc3545;padding:4px 8px;font-size:12px;" onclick="deletePromo('${c.campaignId}', '${c.code}')">Delete</button>`
@@ -954,6 +961,16 @@
                 loadPromos();
             } catch (e) {
                 alert('Error deleting campaign: ' + e.message);
+            }
+        }
+
+        async function updatePromoStatus(campaignId, status) {
+            try {
+                await api(`/api/admin/promo/campaigns/${campaignId}/status`, 'PATCH', { status });
+                loadPromos();
+            } catch (e) {
+                alert('Error updating status: ' + e.message);
+                loadPromos(); // Reload to reset the dropdown
             }
         }
 
