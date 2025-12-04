@@ -68,6 +68,17 @@ export async function handleAdminApiRequest(
     return false; // Not an admin route, continue to next handler
   }
 
+  // Set CORS headers for admin API (supports file:// protocol and localhost)
+  const origin = req.headers.origin;
+  if (origin === 'null') {
+    // file:// protocol sends "null" as origin
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+
   // Authenticate and verify admin status
   const adminInfo = await authenticateAdmin(req, res);
   if (!adminInfo) {

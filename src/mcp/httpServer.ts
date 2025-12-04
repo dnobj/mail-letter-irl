@@ -270,7 +270,7 @@ export async function startHttpServer() {
   ) => {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": origin,
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, DELETE, PATCH, OPTIONS",
       "Access-Control-Allow-Headers": "authorization, content-type, mcp-session-id"
     });
     res.end();
@@ -562,6 +562,12 @@ export async function startHttpServer() {
 
     // Handle CORS preflight for public promo endpoint
     if (url.pathname.startsWith('/api/public/promo/') && req.method === 'OPTIONS') {
+      respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
+      return;
+    }
+
+    // Handle CORS preflight for admin API routes
+    if (url.pathname.startsWith('/api/admin/') && req.method === 'OPTIONS') {
       respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
       return;
     }
