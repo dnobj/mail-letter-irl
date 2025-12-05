@@ -38,6 +38,7 @@ import { getLetterProvider } from '../../../src/services/providers/index.js';
 import {
   syncLetterStatuses,
   getStuckLetters,
+  getLetterStatusHistory,
 } from '../../../src/services/statusSyncService.js';
 
 describe('statusSyncService', () => {
@@ -258,6 +259,137 @@ describe('statusSyncService', () => {
       vi.mocked(db.query).mockResolvedValueOnce({ rows: [] } as any);
 
       const result = await getStuckLetters(14);
+
+      expect(result).toHaveLength(0);
+    });
+  });
+
+  // ==========================================================================
+  // Status History Tests
+  // ==========================================================================
+  describe('status history', () => {
+    it('should insert history record when status changes', async () => {
+      const testLetters = [createLetterRowForSync({
+        letterId: 'letter-history',
+        trackingId: 'track-history',
+        status: 'processing',
+      })];
+
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: testLetters } as any)
+        .mockResolvedValue({ rows: [], rowCount: 1 } as any);
+
+      mockProvider.getStatus.mockResolvedValueOnce({
+        status: 'delivered',
+        statusMessage: 'Delivered to recipient',
+      });
+
+      await syncLetterStatuses(false, 30);
+
+      // Verify INSERT into letter_status_history was called
+      const insertCalls = vi.mocked(db.query).mock.calls.filter(
+        call => (call[0] as string).includes('INSERT INTO letter_status_history')
+      );
+      expect(insertCalls).toHaveLength(1);
+
+      // Check the parameters passed to the INSERT
+      const insertParams = insertCalls[0][1] as any[];
+      expect(insertParams[0]).toBe('letter-history'); // letter_id
+      expect(insertParams[1]).toBe('processing'); // old_status
+      expect(insertParams[2]).toBe('delivered'); // new_status
+      expect(insertParams[3]).toBe('Delivered to recipient'); // provider_raw_status
+    });
+
+    it('should not insert history record when status unchanged', async () => {
+      const testLetters = [createLetterRowForSync({
+        letterId: 'letter-no-change',
+        trackingId: 'track-no-change',
+        status: 'processing',
+      })];
+
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: testLetters } as any);
+
+      mockProvider.getStatus.mockResolvedValueOnce({
+        status: 'processing', // Same status
+        statusMessage: 'Still processing',
+      });
+
+      await syncLetterStatuses(false, 30);
+
+      // Verify no INSERT was called
+      const insertCalls = vi.mocked(db.query).mock.calls.filter(
+        call => (call[0] as string).includes('INSERT INTO letter_status_history')
+      );
+      expect(insertCalls).toHaveLength(0);
+    });
+
+    it('should not insert history record in dry run mode', async () => {
+      const testLetters = [createLetterRowForSync({
+        letterId: 'letter-dry-history',
+        trackingId: 'track-dry-history',
+        status: 'processing',
+      })];
+
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: testLetters } as any);
+
+      mockProvider.getStatus.mockResolvedValueOnce({
+        status: 'delivered',
+        statusMessage: 'Delivered',
+      });
+
+      await syncLetterStatuses(true, 30); // dryRun = true
+
+      // Verify no INSERT was called
+      const insertCalls = vi.mocked(db.query).mock.calls.filter(
+        call => (call[0] as string).includes('INSERT INTO letter_status_history')
+      );
+      expect(insertCalls).toHaveLength(0);
+    });
+  });
+
+  // ==========================================================================
+  // getLetterStatusHistory Tests
+  // ==========================================================================
+  describe('getLetterStatusHistory', () => {
+    it('should return history entries for a letter', async () => {
+      const historyEntries = [
+        {
+          old_status: null,
+          new_status: 'queued',
+          provider_raw_status: null,
+          source: 'send',
+          changed_at: new Date('2025-12-01T10:00:00Z'),
+        },
+        {
+          old_status: 'queued',
+          new_status: 'processing',
+          provider_raw_status: 'Being printed',
+          source: 'sync',
+          changed_at: new Date('2025-12-02T14:00:00Z'),
+        },
+        {
+          old_status: 'processing',
+          new_status: 'delivered',
+          provider_raw_status: 'Delivered to mailbox',
+          source: 'sync',
+          changed_at: new Date('2025-12-05T09:00:00Z'),
+        },
+      ];
+
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: historyEntries } as any);
+
+      const result = await getLetterStatusHistory('test-letter-123');
+
+      expect(result).toHaveLength(3);
+      expect(result[0].new_status).toBe('queued');
+      expect(result[1].new_status).toBe('processing');
+      expect(result[2].new_status).toBe('delivered');
+    });
+
+    it('should return empty array for letter with no history', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [] } as any);
+
+      const result = await getLetterStatusHistory('nonexistent-letter');
 
       expect(result).toHaveLength(0);
     });

@@ -95,6 +95,7 @@ export async function syncLetterStatuses(
         console.log(`   📝 Letter ${letter.letter_id}: ${letter.status} → ${providerStatus.status}`);
 
         if (!dryRun) {
+          // Update current status
           await query(
             `UPDATE letters
              SET status = $1,
@@ -103,6 +104,14 @@ export async function syncLetterStatuses(
                  updated_at = NOW()
              WHERE letter_id = $3`,
             [providerStatus.status, providerStatus.statusMessage, letter.letter_id]
+          );
+
+          // Record status change in history
+          await query(
+            `INSERT INTO letter_status_history
+             (letter_id, old_status, new_status, provider_raw_status, source)
+             VALUES ($1, $2, $3, $4, 'sync')`,
+            [letter.letter_id, letter.status, providerStatus.status, providerStatus.statusMessage]
           );
         }
 
@@ -128,6 +137,34 @@ export async function syncLetterStatuses(
   console.log(`✅ Status sync complete: checked=${result.checked}, updated=${result.updated}, errors=${result.errors}`);
 
   return result;
+}
+
+/**
+ * Get status history for a specific letter
+ */
+export async function getLetterStatusHistory(
+  letterId: string
+): Promise<Array<{
+  old_status: string | null;
+  new_status: string;
+  provider_raw_status: string | null;
+  source: string;
+  changed_at: Date;
+}>> {
+  const result = await query<{
+    old_status: string | null;
+    new_status: string;
+    provider_raw_status: string | null;
+    source: string;
+    changed_at: Date;
+  }>(`
+    SELECT old_status, new_status, provider_raw_status, source, changed_at
+    FROM letter_status_history
+    WHERE letter_id = $1
+    ORDER BY changed_at ASC
+  `, [letterId]);
+
+  return result.rows;
 }
 
 /**
