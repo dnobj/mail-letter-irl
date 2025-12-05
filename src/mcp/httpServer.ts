@@ -25,6 +25,7 @@ import { validatePromoCodePublic } from "../services/promoService.js";
 import { initializeJobQueue, stopJobQueue } from "../services/jobQueue.js";
 import { startLetterWorker } from "../workers/letterWorker.js";
 import { startCreditExpirationWorker } from "../workers/creditExpirationWorker.js";
+import { startStatusSyncWorker, stopStatusSyncWorker } from "../workers/statusSyncWorker.js";
 import { rateLimitMiddlewareWithTier } from "../api/middleware/rateLimit.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -740,6 +741,7 @@ export async function startHttpServer() {
       await initializeJobQueue();
       await startLetterWorker();
       await startCreditExpirationWorker();
+      await startStatusSyncWorker();
       console.log('');
     } catch (error) {
       console.error('❌ Failed to initialize job queue:', error);
@@ -750,9 +752,10 @@ export async function startHttpServer() {
   const close = async () => {
     console.log('\n🛑 Shutting down gracefully...');
     try {
+      stopStatusSyncWorker();
       await stopJobQueue();
     } catch (error) {
-      console.error('Error stopping job queue:', error);
+      console.error('Error stopping workers:', error);
     }
     server.close(() => process.exit(0));
   };

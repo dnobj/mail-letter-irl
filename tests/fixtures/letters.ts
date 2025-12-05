@@ -254,11 +254,13 @@ export interface TestLetter {
   recipient: string;
   body_text: string;
   sign_off: string;
-  status: 'queued' | 'processing' | 'sent' | 'failed' | 'cancelled';
+  status: 'queued' | 'processing' | 'in_transit' | 'delivered' | 'returned' | 'sent' | 'failed' | 'cancelled';
   tracking_id: string | null;
   expected_delivery: Date | null;
   provider: string;
   provider_letter_id: string | null;
+  status_updated_at: Date | null;
+  provider_raw_status: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -268,9 +270,13 @@ export function createTestLetter(
   options: {
     status?: TestLetter['status'];
     trackingId?: string;
+    createdDaysAgo?: number;
+    providerRawStatus?: string;
   } = {}
 ): TestLetter {
-  const { status = 'queued', trackingId } = options;
+  const { status = 'queued', trackingId, createdDaysAgo = 0, providerRawStatus } = options;
+
+  const createdAt = new Date(Date.now() - createdDaysAgo * 24 * 60 * 60 * 1000);
 
   return {
     letter_id: generateLetterId(),
@@ -281,10 +287,87 @@ export function createTestLetter(
     sign_off: testLetterContent.shortLetter.signOff,
     status,
     tracking_id: trackingId ?? null,
-    expected_delivery: status === 'sent' ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null,
+    expected_delivery: status === 'sent' || status === 'in_transit' || status === 'delivered'
+      ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) : null,
     provider: 'postgrid',
-    provider_letter_id: status === 'sent' ? `pg_letter_${Date.now()}` : null,
-    created_at: new Date(),
+    provider_letter_id: trackingId ? `pg_letter_${Date.now()}` : null,
+    status_updated_at: providerRawStatus ? new Date() : null,
+    provider_raw_status: providerRawStatus ?? null,
+    created_at: createdAt,
     updated_at: new Date(),
   };
+}
+
+// =============================================================================
+// Status Sync Test Fixtures
+// =============================================================================
+
+/**
+ * Create a letter row as returned from database for status sync
+ */
+export function createLetterRowForSync(
+  options: {
+    letterId?: string;
+    userId?: string;
+    trackingId?: string;
+    status?: TestLetter['status'];
+    createdDaysAgo?: number;
+  } = {}
+): {
+  letter_id: string;
+  tracking_id: string;
+  status: string;
+  provider: string;
+  created_at: Date;
+} {
+  const {
+    letterId = generateLetterId(),
+    userId = testUsers.sarah.user_id,
+    trackingId = `pg_track_${Date.now()}`,
+    status = 'processing',
+    createdDaysAgo = 5,
+  } = options;
+
+  return {
+    letter_id: letterId,
+    tracking_id: trackingId,
+    status,
+    provider: 'postgrid',
+    created_at: new Date(Date.now() - createdDaysAgo * 24 * 60 * 60 * 1000),
+  };
+}
+
+/**
+ * Create multiple letters for status sync testing
+ */
+export function createStatusSyncTestLetters(): Array<{
+  letter_id: string;
+  tracking_id: string;
+  status: string;
+  provider: string;
+  created_at: Date;
+}> {
+  return [
+    // Letter in processing status (should be checked)
+    createLetterRowForSync({
+      letterId: 'letter-sync-1',
+      trackingId: 'track-1',
+      status: 'processing',
+      createdDaysAgo: 5,
+    }),
+    // Letter in in_transit status (should be checked)
+    createLetterRowForSync({
+      letterId: 'letter-sync-2',
+      trackingId: 'track-2',
+      status: 'in_transit',
+      createdDaysAgo: 10,
+    }),
+    // Letter in queued status (should be checked)
+    createLetterRowForSync({
+      letterId: 'letter-sync-3',
+      trackingId: 'track-3',
+      status: 'queued',
+      createdDaysAgo: 2,
+    }),
+  ];
 }

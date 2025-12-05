@@ -19,15 +19,28 @@ export class FileAccountStore {
 
   /**
    * Convert database letter status to OrderRecord status
+   *
+   * Database statuses: queued, processing, in_transit, delivered, returned, failed, cancelled
+   * MCP statuses: queued_for_print, printing, mailed
    */
   private mapStatus(dbStatus: string): LetterStatus {
     switch (dbStatus) {
-      case 'sent':
+      // Post-send statuses all map to "mailed"
+      case 'sent':        // Legacy status
+      case 'in_transit':  // Letter is in postal system
+      case 'delivered':   // Letter was delivered
+      case 'returned':    // Letter was returned (bad address, etc.)
         return 'mailed';
+
+      // Processing status
       case 'processing':
         return 'printing';
+
+      // Pre-send and error statuses
       case 'queued':
       case 'draft':
+      case 'failed':
+      case 'cancelled':
       default:
         return 'queued_for_print';
     }

@@ -1,6 +1,6 @@
 # Personas
 
-**Last Updated:** December 4, 2025
+**Last Updated:** December 5, 2025
 **Purpose:** Define user archetypes for product design, user stories, and test scenarios
 
 ---
@@ -279,6 +279,7 @@ Letter IRL serves users who want to send physical letters through conversational
 
 **Responsibilities:**
 - Letter job processing (PostGrid integration)
+- **Letter status sync from fulfillment providers (every 6 hours)**
 - Credit expiration marking
 - Draft cleanup
 - Balance reconciliation
@@ -287,6 +288,7 @@ Letter IRL serves users who want to send physical letters through conversational
 
 **Key User Stories:**
 - US-1.6 (Background processing)
+- US-1.7 (Status sync from providers)
 - US-2.3 (Credit expiration)
 - US-2.6 (Refund handling)
 - US-6.1 (Draft expiration)
@@ -300,6 +302,8 @@ Letter IRL serves users who want to send physical letters through conversational
 - Webhook duplicate handling
 - Race condition prevention
 - Reconciliation detection and fix
+- Status sync from fulfillment providers
+- Provider status → database status mapping
 
 ---
 

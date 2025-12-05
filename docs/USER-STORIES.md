@@ -1,6 +1,6 @@
 # User Stories
 
-**Last Updated:** December 4, 2025
+**Last Updated:** December 5, 2025
 **Purpose:** Test coverage and acceptance criteria for Letter IRL
 
 ---
@@ -91,11 +91,31 @@ Each story includes acceptance criteria that can be converted to test cases.
 **Acceptance Criteria:**
 - [ ] Can query by specific `orderId`
 - [ ] If no `orderId` provided, returns most recent letter
-- [ ] Returns current status: queued, processing, sent, failed
+- [ ] Returns current status from fulfillment lifecycle (see below)
 - [ ] Returns status timeline with timestamps
 - [ ] Returns recipient summary (name, city, state)
 - [ ] Returns preview thumbnail
 - [ ] If sent, includes tracking ID and expected delivery
+
+**Status Lifecycle (Database):**
+- `queued` - Letter is waiting to be processed
+- `processing` - Letter is being rendered/printed by provider
+- `in_transit` - Letter has been mailed and is in postal system
+- `delivered` - Letter has been delivered
+- `returned` - Letter was returned to sender (bad address, etc.)
+- `failed` - Processing failed after max retries
+- `cancelled` - Letter was cancelled before sending
+
+**MCP Status Mapping (Simplified for Users):**
+| Database Status | MCP Status | User-Friendly Meaning |
+|-----------------|------------|----------------------|
+| queued | queued_for_print | Waiting to print |
+| processing | printing | Being printed |
+| in_transit | mailed | In the mail |
+| delivered | mailed | Delivered |
+| returned | mailed | Returned (see details) |
+| failed | queued_for_print | Failed (see error) |
+| cancelled | queued_for_print | Cancelled |
 
 ---
 
@@ -126,6 +146,53 @@ Each story includes acceptance criteria that can be converted to test cases.
 - [ ] On success: job marked completed
 - [ ] On failure: retries up to 3 times with exponential backoff
 - [ ] After max retries: job marked failed, letter marked failed
+
+---
+
+### US-1.7: Letter Status Sync from Providers
+**As the** system
+**I want to** periodically sync letter statuses from fulfillment providers
+**So that** users see accurate, up-to-date delivery information
+
+**Acceptance Criteria:**
+- [ ] Scheduled job runs every 6 hours
+- [ ] Queries all non-terminal letters (not delivered, returned, failed, cancelled)
+- [ ] Only checks letters from last 30 days (avoid stale queries)
+- [ ] Calls provider API to get current status (e.g., PostGrid)
+- [ ] Updates database status if changed
+- [ ] Records `status_updated_at` timestamp
+- [ ] Stores `provider_raw_status` for debugging
+- [ ] Handles API rate limits gracefully
+
+**Provider Interface:**
+```typescript
+interface LetterProvider {
+  getStatus(providerLetterId: string): Promise<ProviderStatus>;
+}
+
+interface ProviderStatus {
+  normalized: string;  // Our internal status
+  raw: string;         // Provider's raw status
+  timestamp?: Date;    // Provider's status timestamp
+}
+```
+
+**PostGrid Status Mapping:**
+| PostGrid Status | Database Status |
+|-----------------|-----------------|
+| ready | queued |
+| rendered | processing |
+| processed | processing |
+| printed | processing |
+| mailed | in_transit |
+| in_transit | in_transit |
+| delivered | delivered |
+| returned | returned |
+| canceled | failed |
+
+**Admin Trigger:**
+- [ ] Manual sync available via `/api/admin/sync-statuses`
+- [ ] Returns count of letters checked and updated
 
 ---
 
@@ -735,7 +802,7 @@ Each story includes acceptance criteria that can be converted to test cases.
 | P0 - Critical | Core Flow | US-1.1, US-1.2, US-1.3 | Sarah, Marcus, Eleanor |
 | P0 - Critical | Credits | US-2.1, US-2.2, US-2.7 | All users |
 | P0 - Critical | Security | US-7.1, US-7.2 | System |
-| P1 - High | Core Flow | US-1.4, US-1.5, US-1.6 | Marcus, David |
+| P1 - High | Core Flow | US-1.4, US-1.5, US-1.6, US-1.7 | Marcus, David, System |
 | P1 - High | Credits | US-2.3, US-2.6, US-2.9 | System |
 | P1 - High | Edge Cases | US-6.1, US-6.3, US-6.4 | Eleanor, System |
 | P1 - High | Account | US-4.0 | Sarah, Eleanor (new users) |
@@ -753,7 +820,7 @@ Each story includes acceptance criteria that can be converted to test cases.
 
 | Category | Count |
 |----------|-------|
-| Core Flow (US-1.x) | 6 |
+| Core Flow (US-1.x) | 7 |
 | Credits (US-2.x) | 9 |
 | Promo Codes (US-3.x) | 3 |
 | Account (US-4.x) | 4 |
@@ -761,7 +828,7 @@ Each story includes acceptance criteria that can be converted to test cases.
 | Edge Cases (US-6.x) | 7 |
 | Security (US-7.x) | 6 |
 | Data Integrity (US-8.x) | 3 |
-| **Total** | **46** |
+| **Total** | **47** |
 
 ---
 

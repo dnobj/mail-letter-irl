@@ -26,6 +26,10 @@ import {
   reconcileStripePayments,
   autoFixMissingCredits,
 } from '../services/stripeReconciliationService.js';
+import {
+  syncLetterStatuses,
+  getStuckLetters,
+} from '../services/statusSyncService.js';
 
 /**
  * Send JSON response
@@ -276,6 +280,30 @@ export async function handleAdminApiRequest(
     if (pathname === '/api/admin/stripe/reconcile/fix' && req.method === 'POST') {
       const body = await parseBody(req);
       await handleStripeReconcileFix(res, body, adminInfo);
+      return true;
+    }
+
+    // =========================================================================
+    // Status Sync Routes
+    // =========================================================================
+
+    // GET /api/admin/sync/statuses - Run status sync (dry run by default)
+    if (pathname === '/api/admin/sync/statuses' && req.method === 'GET') {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      await handleStatusSyncDryRun(res, url.searchParams);
+      return true;
+    }
+
+    // POST /api/admin/sync/statuses - Run actual status sync
+    if (pathname === '/api/admin/sync/statuses' && req.method === 'POST') {
+      await handleStatusSync(res);
+      return true;
+    }
+
+    // GET /api/admin/sync/stuck - Get stuck letters
+    if (pathname === '/api/admin/sync/stuck' && req.method === 'GET') {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      await handleGetStuckLetters(res, url.searchParams);
       return true;
     }
 
@@ -1440,4 +1468,100 @@ async function handleRetryJob(
     message: 'Job has been reset to pending and will be processed soon.',
     jobId,
   });
+}
+
+// =========================================================================
+// Status Sync Handlers
+// =========================================================================
+
+/**
+ * GET /api/admin/sync/statuses
+ * Run status sync in dry run mode (show what would be updated)
+ */
+async function handleStatusSyncDryRun(
+  res: ServerResponse,
+  queryParams: URLSearchParams
+) {
+  const maxAge = parseInt(queryParams.get('maxAge') || '30');
+
+  console.log(`📊 Running status sync dry run (maxAge: ${maxAge} days)...`);
+
+  try {
+    const result = await syncLetterStatuses(true, maxAge);
+
+    sendJson(res, 200, {
+      mode: 'dry_run',
+      message: `Would update ${result.updated} of ${result.checked} letters. Use POST to apply changes.`,
+      checked: result.checked,
+      wouldUpdate: result.updated,
+      errors: result.errors,
+      details: result.details,
+    });
+  } catch (error: any) {
+    console.error('Status sync dry run error:', error);
+    sendJson(res, 500, {
+      error: 'Sync dry run failed',
+      message: error.message,
+    });
+  }
+}
+
+/**
+ * POST /api/admin/sync/statuses
+ * Run actual status sync
+ */
+async function handleStatusSync(res: ServerResponse) {
+  console.log(`📊 Running status sync...`);
+
+  try {
+    const result = await syncLetterStatuses(false, 30);
+
+    sendJson(res, 200, {
+      mode: 'applied',
+      message: `Updated ${result.updated} of ${result.checked} letters.`,
+      checked: result.checked,
+      updated: result.updated,
+      errors: result.errors,
+      details: result.details,
+    });
+  } catch (error: any) {
+    console.error('Status sync error:', error);
+    sendJson(res, 500, {
+      error: 'Sync failed',
+      message: error.message,
+    });
+  }
+}
+
+/**
+ * GET /api/admin/sync/stuck
+ * Get letters stuck in non-terminal status
+ */
+async function handleGetStuckLetters(
+  res: ServerResponse,
+  queryParams: URLSearchParams
+) {
+  const maxDays = parseInt(queryParams.get('maxDays') || '14');
+
+  try {
+    const stuckLetters = await getStuckLetters(maxDays);
+
+    sendJson(res, 200, {
+      maxDaysInNonTerminal: maxDays,
+      count: stuckLetters.length,
+      letters: stuckLetters.map(l => ({
+        letterId: l.letter_id,
+        trackingId: l.tracking_id,
+        status: l.status,
+        createdAt: l.created_at,
+        daysInStatus: l.days_in_status,
+      })),
+    });
+  } catch (error: any) {
+    console.error('Get stuck letters error:', error);
+    sendJson(res, 500, {
+      error: 'Failed to get stuck letters',
+      message: error.message,
+    });
+  }
 }

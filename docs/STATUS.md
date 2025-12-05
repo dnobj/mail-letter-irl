@@ -30,7 +30,8 @@ Letter IRL is a **physical letter mailing service** integrated with ChatGPT via 
 │  ├── MCP HTTP Server                                             │
 │  ├── REST API (/api/*)                                           │
 │  ├── Stripe Webhooks                                             │
-│  └── pg-boss Workers (job processing)                            │
+│  ├── pg-boss Workers (job processing)                            │
+│  └── Status Sync Worker (6h interval)                            │
 ├─────────────────────────────────────────────────────────────────┤
 │  Neon PostgreSQL                                                 │
 │  └── All tables (users, letters, credits, jobs, etc.)            │
@@ -78,7 +79,7 @@ Letter IRL is a **physical letter mailing service** integrated with ChatGPT via 
 | stripe_disputes | Chargeback tracking |
 | migrations | Migration tracking |
 
-**7 Migrations:**
+**8 Migrations:**
 1. `001_initial_schema.sql` - Core tables
 2. `002_add_provider_fields.sql` - PostGrid fields
 3. `003_credit_ledger.sql` - Credit ledger, promos
@@ -86,6 +87,7 @@ Letter IRL is a **physical letter mailing service** integrated with ChatGPT via 
 5. `005_user_tiers.sql` - Tier system for rate limits
 6. `006_stripe_disputes.sql` - Chargeback tracking
 7. `007_seed_preview_promos.sql` - Preview access promo codes
+8. `008_status_sync.sql` - Status sync tracking columns
 
 See [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) for full schema details.
 
@@ -137,6 +139,9 @@ See [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) for the complete send flow.
 | `POST /api/admin/jobs/:id/retry` | Retry failed job |
 | `POST /api/admin/credits/adjust` | Adjust user credits |
 | `POST /api/admin/promo/create` | Create promo campaign |
+| `GET /api/admin/sync/statuses` | Dry-run status sync |
+| `POST /api/admin/sync/statuses` | Execute status sync |
+| `GET /api/admin/sync/stuck` | List stuck letters |
 
 ---
 
@@ -199,6 +204,47 @@ Letter printed and mailed
 ```
 
 See [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) for details.
+
+---
+
+## Letter Status Lifecycle
+
+### Database Statuses
+Letters transition through these statuses in the database:
+```
+queued → processing → in_transit → delivered
+                                 → returned (bad address)
+                                 → failed (provider error)
+                                 → cancelled
+```
+
+### PostGrid Status Mapping
+| PostGrid Status | Database Status |
+|-----------------|-----------------|
+| `ready` | `queued` |
+| `rendered` | `processing` |
+| `processed` | `processing` |
+| `printed` | `processing` |
+| `mailed` | `in_transit` |
+| `in_transit` | `in_transit` |
+| `delivered` | `delivered` |
+| `returned` | `returned` |
+| `canceled` | `cancelled` |
+
+### MCP Status Mapping (Simplified)
+| Database Status | MCP Status |
+|-----------------|------------|
+| `queued`, `draft` | `queued_for_print` |
+| `processing` | `printing` |
+| `in_transit`, `delivered`, `returned`, `sent` | `mailed` |
+| `failed`, `cancelled` | `queued_for_print` |
+
+### Status Sync Worker
+- Runs every 6 hours
+- Checks letters in non-terminal status (`queued`, `processing`, `in_transit`)
+- Only checks letters with `tracking_id` (successfully sent to provider)
+- Only checks letters created within last 30 days
+- Updates `status`, `status_updated_at`, and `provider_raw_status` columns
 
 ---
 
@@ -283,6 +329,7 @@ npm run db:migrate:rollback # View rollback info
 - [x] Promo code system
 - [x] Chargeback tracking
 - [x] Railway deployment
+- [x] Letter status sync from PostGrid (6h worker)
 
 ---
 
@@ -309,11 +356,11 @@ npm run db:migrate:rollback # View rollback info
 │   ├── mcp/              # MCP server (httpServer.ts, stdioServer.ts)
 │   ├── api/              # REST API handlers
 │   ├── services/         # Business logic
-│   ├── workers/          # Background jobs (letterWorker.ts)
+│   ├── workers/          # Background jobs (letterWorker.ts, statusSyncWorker.ts)
 │   ├── tools/            # MCP tools (sendLetter.ts, etc.)
 │   └── db/               # Database utilities
 ├── db/
-│   ├── migrations/       # SQL migrations (001-006)
+│   ├── migrations/       # SQL migrations (001-008)
 │   └── migrate.ts        # Migration runner
 ├── docs/                 # Documentation
 ├── scripts/              # Test and utility scripts
