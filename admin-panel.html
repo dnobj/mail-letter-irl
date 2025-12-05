@@ -401,6 +401,229 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: flex-start;
+            z-index: 1000;
+            padding: 40px 20px;
+            overflow-y: auto;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: #16213e;
+            border-radius: 10px;
+            border: 1px solid #0f3460;
+            max-width: 800px;
+            width: 100%;
+            max-height: calc(100vh - 80px);
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid #0f3460;
+            position: sticky;
+            top: 0;
+            background: #16213e;
+            z-index: 1;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #fff;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            color: #e94560;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .modal-section {
+            margin-bottom: 25px;
+        }
+
+        .modal-section h4 {
+            color: #e94560;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #0f3460;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 140px 1fr;
+            gap: 10px;
+        }
+
+        .detail-label {
+            color: #888;
+            font-size: 12px;
+        }
+
+        .detail-value {
+            color: #fff;
+            font-size: 13px;
+            word-break: break-all;
+        }
+
+        .detail-value.monospace {
+            font-family: monospace;
+            font-size: 11px;
+        }
+
+        /* Timeline for status history */
+        .timeline {
+            position: relative;
+            padding-left: 30px;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 8px;
+            top: 5px;
+            bottom: 5px;
+            width: 2px;
+            background: #0f3460;
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-bottom: 20px;
+        }
+
+        .timeline-item:last-child {
+            padding-bottom: 0;
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -22px;
+            top: 5px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #e94560;
+            border: 2px solid #16213e;
+        }
+
+        .timeline-item.source-sync::before {
+            background: #17a2b8;
+        }
+
+        .timeline-item.source-send::before {
+            background: #28a745;
+        }
+
+        .timeline-item.source-webhook::before {
+            background: #ffc107;
+        }
+
+        .timeline-item.source-backfill::before {
+            background: #6c757d;
+        }
+
+        .timeline-date {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .timeline-content {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .timeline-arrow {
+            color: #666;
+        }
+
+        .timeline-source {
+            font-size: 10px;
+            color: #888;
+            background: #0f3460;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .timeline-raw {
+            font-size: 11px;
+            color: #666;
+            margin-top: 5px;
+            font-style: italic;
+        }
+
+        .address-block {
+            background: #0f3460;
+            padding: 12px;
+            border-radius: 5px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .letter-content-preview {
+            background: #0f3460;
+            padding: 15px;
+            border-radius: 5px;
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .clickable-row {
+            cursor: pointer;
+        }
+
+        .clickable-row:hover {
+            background: rgba(233, 69, 96, 0.15) !important;
+        }
+
+        .no-history {
+            color: #666;
+            font-style: italic;
+            padding: 10px 0;
+        }
+
+        .badge-in_transit { background: #17a2b8; color: white; }
+        .badge-delivered { background: #28a745; color: white; }
+        .badge-returned { background: #dc3545; color: white; }
+        .badge-cancelled { background: #6c757d; color: white; }
     </style>
 </head>
 <body>
@@ -1008,6 +1231,237 @@
 
         // Init
         loadDashboard();
+    </script>
+
+    <!-- Letter Detail Modal -->
+    <div id="letter-modal" class="modal-overlay" onclick="closeLetterModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>Letter Details</h3>
+                <button class="modal-close" onclick="closeLetterModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="letter-modal-content">
+                <div class="loading"><div class="spinner"></div>Loading letter details...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Letter Modal Functions
+        function openLetterModal(letterId) {
+            document.getElementById('letter-modal').classList.add('active');
+            document.getElementById('letter-modal-content').innerHTML = '<div class="loading"><div class="spinner"></div>Loading letter details...</div>';
+            loadLetterDetails(letterId);
+        }
+
+        function closeLetterModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('letter-modal').classList.remove('active');
+        }
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeLetterModal();
+        });
+
+        async function loadLetterDetails(letterId) {
+            try {
+                const data = await api(`/api/admin/letters/${encodeURIComponent(letterId)}`);
+                renderLetterModal(data);
+            } catch (e) {
+                document.getElementById('letter-modal-content').innerHTML = `<div class="error-msg">Error loading letter: ${e.message}</div>`;
+            }
+        }
+
+        function formatAddress(addrJson) {
+            if (!addrJson) return 'N/A';
+            const addr = typeof addrJson === 'string' ? JSON.parse(addrJson) : addrJson;
+            let lines = [];
+            if (addr.name) lines.push(`<strong>${addr.name}</strong>`);
+            if (addr.line1) lines.push(addr.line1);
+            if (addr.line2) lines.push(addr.line2);
+            let cityLine = '';
+            if (addr.city) cityLine += addr.city;
+            if (addr.state) cityLine += (cityLine ? ', ' : '') + addr.state;
+            if (addr.postalCode) cityLine += ' ' + addr.postalCode;
+            if (cityLine) lines.push(cityLine);
+            if (addr.country && addr.country !== 'US') lines.push(addr.country);
+            return lines.join('<br>');
+        }
+
+        function renderLetterModal(data) {
+            const letter = data.letter;
+            const jobs = data.jobs || [];
+            const history = data.statusHistory || [];
+
+            const html = `
+                <!-- Letter Info Section -->
+                <div class="modal-section">
+                    <h4>Letter Information</h4>
+                    <div class="detail-grid">
+                        <div class="detail-label">Letter ID</div>
+                        <div class="detail-value monospace">${letter.letterId}</div>
+
+                        <div class="detail-label">User ID</div>
+                        <div class="detail-value monospace">${letter.userId}</div>
+
+                        <div class="detail-label">Status</div>
+                        <div class="detail-value">
+                            <span class="badge badge-${letter.status}">${letter.status}</span>
+                            ${letter.providerRawStatus ? `<span style="color:#888;font-size:11px;margin-left:10px;">(${letter.providerRawStatus})</span>` : ''}
+                        </div>
+
+                        <div class="detail-label">Tracking ID</div>
+                        <div class="detail-value monospace">${letter.trackingId || 'N/A'}</div>
+
+                        <div class="detail-label">Provider</div>
+                        <div class="detail-value">${letter.provider || 'N/A'}</div>
+
+                        <div class="detail-label">Credits Cost</div>
+                        <div class="detail-value">${letter.creditsCost || 0}</div>
+
+                        <div class="detail-label">Created</div>
+                        <div class="detail-value">${formatDate(letter.createdAt)}</div>
+
+                        <div class="detail-label">Sent</div>
+                        <div class="detail-value">${letter.sentAt ? formatDate(letter.sentAt) : 'Not sent yet'}</div>
+
+                        ${letter.expectedDelivery ? `
+                            <div class="detail-label">Expected Delivery</div>
+                            <div class="detail-value">${formatDate(letter.expectedDelivery)}</div>
+                        ` : ''}
+                    </div>
+                </div>
+
+                <!-- Addresses Section -->
+                <div class="modal-section">
+                    <h4>Addresses</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div>
+                            <div class="detail-label" style="margin-bottom: 8px;">Sender</div>
+                            <div class="address-block">${formatAddress(letter.sender)}</div>
+                        </div>
+                        <div>
+                            <div class="detail-label" style="margin-bottom: 8px;">Recipient</div>
+                            <div class="address-block">${formatAddress(letter.recipient)}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Letter Content Section -->
+                <div class="modal-section">
+                    <h4>Letter Content</h4>
+                    <div class="letter-content-preview">${escapeHtml(letter.bodyText || 'No content')}\n\n${escapeHtml(letter.signOff || '')}</div>
+                </div>
+
+                <!-- Status History Section -->
+                <div class="modal-section">
+                    <h4>Status History</h4>
+                    ${history.length === 0 ? '<p class="no-history">No status history recorded</p>' : `
+                        <div class="timeline">
+                            ${history.map(h => `
+                                <div class="timeline-item source-${h.source || 'unknown'}">
+                                    <div class="timeline-date">${formatDate(h.changedAt)}</div>
+                                    <div class="timeline-content">
+                                        ${h.oldStatus ? `<span class="badge badge-${h.oldStatus}">${h.oldStatus}</span>` : '<span style="color:#666">created</span>'}
+                                        <span class="timeline-arrow">→</span>
+                                        <span class="badge badge-${h.newStatus}">${h.newStatus}</span>
+                                        <span class="timeline-source">${h.source || 'unknown'}</span>
+                                    </div>
+                                    ${h.providerRawStatus ? `<div class="timeline-raw">${escapeHtml(h.providerRawStatus)}</div>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    `}
+                </div>
+
+                <!-- Jobs Section -->
+                <div class="modal-section">
+                    <h4>Job History</h4>
+                    ${jobs.length === 0 ? '<p class="no-history">No jobs recorded</p>' : `
+                        <table>
+                            <tr><th>Job ID</th><th>Status</th><th>Attempts</th><th>Created</th><th>Error</th></tr>
+                            ${jobs.map(j => `
+                                <tr>
+                                    <td style="font-family: monospace; font-size: 10px;">${j.jobId.substring(0, 8)}...</td>
+                                    <td><span class="badge badge-${j.status}">${j.status}</span></td>
+                                    <td>${j.attempts}/${j.maxAttempts}</td>
+                                    <td style="font-size: 11px;">${formatDate(j.createdAt)}</td>
+                                    <td style="color: #dc3545; font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${j.errorMessage || '-'}</td>
+                                </tr>
+                            `).join('')}
+                        </table>
+                    `}
+                </div>
+            `;
+
+            document.getElementById('letter-modal-content').innerHTML = html;
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Override loadLetters to make rows clickable
+        const originalLoadLetters = loadLetters;
+        loadLetters = async function() {
+            showLoading('letters-list');
+            try {
+                const data = await api('/api/admin/letters?limit=20');
+                const html = `
+                    <table>
+                        <tr><th>Letter ID</th><th>Recipient</th><th>Status</th><th>Created</th></tr>
+                        ${data.letters.map(l => `
+                            <tr class="clickable-row" onclick="openLetterModal('${l.letterId}')">
+                                <td style="font-family: monospace; font-size: 11px;">${l.letterId.substring(0, 8)}...</td>
+                                <td>${l.recipient?.name || 'N/A'}</td>
+                                <td><span class="badge badge-${l.status}">${l.status}</span></td>
+                                <td>${formatDate(l.createdAt)}</td>
+                            </tr>
+                        `).join('')}
+                    </table>
+                    <p style="margin-top: 10px; color: #666; font-size: 12px;">Showing ${data.letters.length} of ${data.total} - Click a row to view details</p>
+                `;
+                document.getElementById('letters-list').innerHTML = html;
+            } catch (e) {
+                showError('letters-list', e.message);
+            }
+        };
+
+        // Override searchLetters to make rows clickable
+        const originalSearchLetters = searchLetters;
+        searchLetters = async function() {
+            const q = document.getElementById('letter-search').value.trim();
+            if (!q) return;
+            showLoading('letters-search-result');
+            try {
+                const data = await api(`/api/admin/letters/search?q=${encodeURIComponent(q)}`);
+                if (data.letters.length === 0) {
+                    document.getElementById('letters-search-result').innerHTML = '<p style="color: #888;">No letters found</p>';
+                    return;
+                }
+                const html = `
+                    <table>
+                        <tr><th>Letter ID</th><th>User</th><th>Recipient</th><th>Status</th></tr>
+                        ${data.letters.map(l => `
+                            <tr class="clickable-row" onclick="openLetterModal('${l.letterId}')">
+                                <td style="font-family: monospace; font-size: 11px;">${l.letterId.substring(0, 8)}...</td>
+                                <td style="font-family: monospace; font-size: 11px;">${l.userId?.substring(0, 15)}...</td>
+                                <td>${l.recipient?.name || 'N/A'}</td>
+                                <td><span class="badge badge-${l.status}">${l.status}</span></td>
+                            </tr>
+                        `).join('')}
+                    </table>
+                    <p style="margin-top: 10px; color: #666; font-size: 12px;">Click a row to view details</p>
+                `;
+                document.getElementById('letters-search-result').innerHTML = html;
+            } catch (e) {
+                showError('letters-search-result', e.message);
+            }
+        };
     </script>
 </body>
 </html>

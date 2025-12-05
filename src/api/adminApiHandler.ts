@@ -1364,16 +1364,23 @@ async function handleSearchLetters(res: ServerResponse, queryParams: URLSearchPa
 
 /**
  * GET /api/admin/letters/:letterId
- * Get letter details with job history
+ * Get letter details with job history and status history
  */
 async function handleGetLetterById(res: ServerResponse, letterId: string) {
-  const [letterResult, jobsResult] = await Promise.all([
+  const [letterResult, jobsResult, statusHistoryResult] = await Promise.all([
     query(
       `SELECT * FROM letters WHERE letter_id = $1`,
       [letterId]
     ),
     query(
       `SELECT * FROM letter_jobs WHERE letter_id = $1 ORDER BY created_at DESC`,
+      [letterId]
+    ),
+    query(
+      `SELECT old_status, new_status, provider_raw_status, source, changed_at
+       FROM letter_status_history
+       WHERE letter_id = $1
+       ORDER BY changed_at ASC`,
       [letterId]
     ),
   ]);
@@ -1389,14 +1396,22 @@ async function handleGetLetterById(res: ServerResponse, letterId: string) {
     letter: {
       letterId: letter.letter_id,
       userId: letter.user_id,
-      content: letter.content,
+      sender: letter.sender,
       recipient: letter.recipient,
+      bodyText: letter.body_text,
+      signOff: letter.sign_off,
       creditsCost: letter.credits_cost,
       status: letter.status,
+      statusUpdatedAt: letter.status_updated_at,
+      providerRawStatus: letter.provider_raw_status,
       previewHtml: letter.preview_html,
       trackingId: letter.tracking_id,
+      provider: letter.provider,
+      providerLetterId: letter.provider_letter_id,
+      expectedDelivery: letter.expected_delivery,
       createdAt: letter.created_at,
       sentAt: letter.sent_at,
+      updatedAt: letter.updated_at,
     },
     jobs: jobsResult.rows.map((j: any) => ({
       jobId: j.job_id,
@@ -1409,6 +1424,13 @@ async function handleGetLetterById(res: ServerResponse, letterId: string) {
       completedAt: j.completed_at,
       createdAt: j.created_at,
       metadata: j.metadata,
+    })),
+    statusHistory: statusHistoryResult.rows.map((h: any) => ({
+      oldStatus: h.old_status,
+      newStatus: h.new_status,
+      providerRawStatus: h.provider_raw_status,
+      source: h.source,
+      changedAt: h.changed_at,
     })),
   });
 }
