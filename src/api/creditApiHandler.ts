@@ -144,11 +144,16 @@ export async function handleCreditApiRequest(
     });
     return true;
 
-  } catch (error) {
-    console.error('Credit API error:', error);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('Credit API error:', errorMessage);
+    if (errorStack) {
+      console.error('Stack trace:', errorStack);
+    }
     sendJson(res, 500, {
       error: 'Internal server error',
-      message: error.message
+      message: errorMessage
     });
     return true;
   }
@@ -167,8 +172,9 @@ async function handleGetBalance(res: ServerResponse, authInfo: AuthInfo) {
       creditsPurchased: balance.credits_purchased,
       creditsUsed: balance.credits_used
     });
-  } catch (error) {
-    if (error.message.includes('User not found')) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes('User not found')) {
       sendJson(res, 404, {
         error: 'User not found',
         message: 'No account found for this user. Credits will be created on first purchase.'
@@ -236,8 +242,9 @@ async function handleGetUser(res: ServerResponse, authInfo: AuthInfo) {
       creditsUsed: user.credits_used,
       createdAt: user.created_at
     });
-  } catch (error: any) {
-    if (error.message.includes('User not found')) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes('User not found')) {
       sendJson(res, 404, {
         error: 'User not found',
         message: 'No account found. Account will be created on first purchase.'
@@ -266,7 +273,7 @@ async function handleGetDetailedBalance(res: ServerResponse, authInfo: AuthInfo)
       })),
       bySource: balance.bySource
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Return empty balance for new users
     sendJson(res, 200, {
       userId: authInfo.userId,
