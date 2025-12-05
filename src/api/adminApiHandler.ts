@@ -749,6 +749,7 @@ async function handleListCampaigns(res: ServerResponse, queryParams: URLSearchPa
       expirationPolicy: c.expiration_policy,
       expirationDays: c.expiration_days,
       maxTotalRedemptions: c.max_total_redemptions,
+      maxPerUser: c.max_per_user,
       currentRedemptions: c.current_redemptions,
       startsAt: c.starts_at,
       endsAt: c.ends_at,

@@ -794,6 +794,15 @@
                         <label>Max Total Redemptions (leave empty for unlimited)</label>
                         <input type="number" id="promo-max-total" placeholder="Unlimited">
                     </div>
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="promo-new-users-only" style="width: auto;">
+                            New Users Only
+                        </label>
+                        <small style="color: #888; display: block; margin-top: 4px;">
+                            If checked, only users with zero credit transactions can redeem this code.
+                        </small>
+                    </div>
                     <button class="btn" onclick="createPromo()">Create Campaign</button>
                     <div id="promo-result"></div>
                 </div>
@@ -1148,7 +1157,7 @@
                         <tr><th>Code</th><th>Name</th><th>Credits</th><th>Redemptions</th><th>Status</th><th>Actions</th></tr>
                         ${data.campaigns.map(c => `
                             <tr>
-                                <td><strong>${c.code}</strong></td>
+                                <td><strong>${c.code}</strong>${c.requiresNewUser ? '<br><span style="font-size:10px;color:#17a2b8;font-weight:normal;">New Users Only</span>' : ''}</td>
                                 <td>${c.name}</td>
                                 <td>${c.creditsAmount}</td>
                                 <td>${c.currentRedemptions}${c.maxTotalRedemptions ? '/' + c.maxTotalRedemptions : ''} (max ${c.maxPerUser}/user)</td>
@@ -1204,6 +1213,7 @@
             const maxPerUser = parseInt(document.getElementById('promo-max-per-user').value) || 1;
             const maxTotalInput = document.getElementById('promo-max-total').value.trim();
             const maxTotalRedemptions = maxTotalInput ? parseInt(maxTotalInput) : null;
+            const requiresNewUser = document.getElementById('promo-new-users-only').checked;
 
             if (!code || !name || isNaN(creditsAmount)) {
                 showError('promo-result', 'Please fill code, name, and credits amount');
@@ -1211,7 +1221,7 @@
             }
             showLoading('promo-result');
             try {
-                const payload = { code, name, creditsAmount, maxPerUser, expirationPolicy: 'never' };
+                const payload = { code, name, creditsAmount, maxPerUser, expirationPolicy: 'never', requiresNewUser };
                 if (maxTotalRedemptions !== null) {
                     payload.maxTotalRedemptions = maxTotalRedemptions;
                 }
@@ -1223,6 +1233,7 @@
                 document.getElementById('promo-credits').value = '';
                 document.getElementById('promo-max-per-user').value = '1';
                 document.getElementById('promo-max-total').value = '';
+                document.getElementById('promo-new-users-only').checked = false;
                 loadPromos();
             } catch (e) {
                 showError('promo-result', e.message);
