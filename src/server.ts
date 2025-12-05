@@ -6,7 +6,10 @@ import {
   sendLetterTool,
   getOrderStatusTool,
   getAccountBalanceTool,
-  listOrdersTool
+  listOrdersTool,
+  setReturnAddressTool,
+  getReturnAddressTool,
+  clearReturnAddressTool
 } from "./tools/index.js";
 import {
   McpToolDefinition,
@@ -21,7 +24,10 @@ const tools: McpToolDefinition<unknown, unknown>[] = [
   sendLetterTool,
   getOrderStatusTool,
   getAccountBalanceTool,
-  listOrdersTool
+  listOrdersTool,
+  setReturnAddressTool,
+  getReturnAddressTool,
+  clearReturnAddressTool
 ];
 
 export interface ServerRequest<Input> {

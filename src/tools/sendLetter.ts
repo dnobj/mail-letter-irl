@@ -13,6 +13,7 @@ import { createLetterJob } from "../services/letterJobService.js";
 import { query } from "../db/index.js";
 import { consumeDraft, getDraft, linkDraftToLetter } from "../services/draftService.js";
 import type { Letter, LetterDraft } from "../services/types.js";
+import { hasReturnAddress } from "../services/returnAddressService.js";
 
 // New simplified input: just draftId and confirm
 interface SendLetterInput {
@@ -28,6 +29,9 @@ interface SendLetterOutput {
   creditsRemaining: number;
   previewFirstPageHtml?: string;
   isRetry?: boolean;  // true if this was an idempotent retry (draft already consumed)
+  // Suggestion to save return address (only shown if user has no saved address)
+  suggestSaveReturnAddress?: boolean;
+  saveReturnAddressNote?: string;
 }
 
 const OUTPUT_TEMPLATE = "LetterConfirmationCard";
@@ -278,6 +282,28 @@ async function handler(
     "Letter queued for print and mail"
   );
 
+  // Check if user has a saved return address - if not, suggest saving the one they just used
+  let suggestSaveReturnAddress: boolean | undefined;
+  let saveReturnAddressNote: string | undefined;
+
+  const userHasReturnAddress = await hasReturnAddress(userId);
+  if (!userHasReturnAddress) {
+    suggestSaveReturnAddress = true;
+    saveReturnAddressNote =
+      `Tip: You don't have a saved return address. Would you like to save "${sender.name}, ${sender.addressLine1}, ${sender.city}, ${sender.state}" ` +
+      `as your default return address? Use the set_return_address tool to save it for future letters.`;
+
+    context.logger.info(
+      {
+        correlationId: context.correlationId,
+        event: "send.letter.suggest_save_return_address",
+        senderCity: sender.city,
+        senderState: sender.state
+      },
+      "Suggesting user save return address"
+    );
+  }
+
   return {
     orderId,
     currentStatus: "queued_for_print" as const,
@@ -289,7 +315,9 @@ async function handler(
     recipientSummary: orderRecord.recipientSummary,
     creditsRemaining: context.user.creditsRemaining,
     previewFirstPageHtml: orderRecord.previewFirstPageHtml,
-    isRetry: false
+    isRetry: false,
+    suggestSaveReturnAddress,
+    saveReturnAddressNote
   };
 }
 
@@ -301,6 +329,9 @@ export const sendLetterTool: McpToolDefinition<SendLetterInput, SendLetterOutput
     "1. You MUST call quote_and_preview_letter first to get a draftId.\n" +
     "2. Pass the draftId to this tool along with confirm: true.\n" +
     "3. The draft contains all letter details (sender, recipient, content) - you don't need to pass them again.\n\n" +
+    "Return Address Suggestion:\n" +
+    "- If the user doesn't have a saved return address, the response will suggest saving the sender address used in this letter.\n" +
+    "- Check suggestSaveReturnAddress in the response to see if you should prompt the user to save their return address.\n\n" +
     "Idempotency:\n" +
     "- If you call this tool twice with the same draftId, the second call will return the existing order without charging again.\n" +
     "- This protects against duplicate charges if the network request is retried.\n" +

@@ -7,7 +7,10 @@ import {
   sendLetterInputZ,
   getOrderStatusInputZ,
   getAccountBalanceInputZ,
-  listOrdersInputZ
+  listOrdersInputZ,
+  setReturnAddressInputZ,
+  getReturnAddressInputZ,
+  clearReturnAddressInputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
@@ -21,7 +24,10 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   send_letter: sendLetterInputZ,
   get_order_status: getOrderStatusInputZ,
   get_account_balance: getAccountBalanceInputZ,
-  list_orders: listOrdersInputZ
+  list_orders: listOrdersInputZ,
+  set_return_address: setReturnAddressInputZ,
+  get_return_address: getReturnAddressInputZ,
+  clear_return_address: clearReturnAddressInputZ
 };
 
 function getZodShape(name: string) {
@@ -128,12 +134,22 @@ function summarizeToolResult(
     case "quote_and_preview_letter": {
       const required = result.requiredCredits ?? "?";
       const canSend = result.canSendNow ? "can send now" : "cannot send";
-      return `Preview ready: requires ${required} credits (${canSend}).`;
+      const usedSaved = result.usedSavedReturnAddress as boolean | undefined;
+      let summary = `Preview ready: requires ${required} credits (${canSend}).`;
+      if (usedSaved) {
+        summary += " Using your saved return address.";
+      }
+      return summary;
     }
     case "send_letter": {
       const status = result.currentStatus ?? "unknown";
       const order = result.orderId ?? "(no id)";
-      return `Letter ${order} queued with status ${status}.`;
+      const note = result.saveReturnAddressNote as string | undefined;
+      let summary = `Letter ${order} queued with status ${status}.`;
+      if (note) {
+        summary += ` ${note}`;
+      }
+      return summary;
     }
     case "get_order_status": {
       const status = result.currentStatus ?? "unknown";
@@ -143,6 +159,18 @@ function summarizeToolResult(
       const orders = result.orders as any[];
       const total = result.total ?? 0;
       return `Found ${orders?.length ?? 0} recent orders (${total} total).`;
+    }
+    case "set_return_address": {
+      const message = result.message as string;
+      return message || (result.success ? "Return address saved." : "Failed to save return address.");
+    }
+    case "get_return_address": {
+      const message = result.message as string;
+      return message || (result.hasAddress ? "Return address retrieved." : "No return address saved.");
+    }
+    case "clear_return_address": {
+      const message = result.message as string;
+      return message || "Return address cleared.";
     }
     default:
       return JSON.stringify(result);

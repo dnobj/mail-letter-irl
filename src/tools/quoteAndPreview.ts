@@ -10,9 +10,10 @@ import {
 import { getLetterProvider } from "../services/providers/index.js";
 import type { AddressValidationInput, AddressValidationResult } from "../services/providers/types.js";
 import { createDraft } from "../services/draftService.js";
+import { getReturnAddress } from "../services/returnAddressService.js";
 
 interface QuoteAndPreviewInput {
-  sender: Address;
+  sender?: Address;  // Optional - will use saved return address if not provided
   recipient: Address;
   bodyText: string;
   signOff: string;
@@ -28,6 +29,9 @@ interface QuoteAndPreviewOutput {
   // Draft for idempotent send
   draftId: string;
   draftExpiresAt: string;  // ISO timestamp
+  // Saved return address used (when sender not provided)
+  usedSavedReturnAddress?: boolean;
+  savedReturnAddressNote?: string;
   // Address validation results
   senderAddressValidation?: {
     status: 'verified' | 'corrected' | 'failed';
@@ -51,7 +55,59 @@ async function handler(
   input: QuoteAndPreviewInput,
   context: ToolContext
 ): Promise<QuoteAndPreviewOutput> {
-  const missingFields = collectMissingAddressFields(input);
+  // Track if we used the saved return address
+  let usedSavedReturnAddress = false;
+  let savedReturnAddressNote: string | undefined;
+
+  // If sender not provided, try to use saved return address
+  if (!input.sender) {
+    context.logger.info(
+      {
+        correlationId: context.correlationId,
+        event: "quote.preview.sender_not_provided"
+      },
+      "Sender not provided, checking for saved return address"
+    );
+
+    const savedAddress = await getReturnAddress(context.user.userId);
+
+    if (savedAddress) {
+      // Use the saved return address
+      input.sender = savedAddress;
+      usedSavedReturnAddress = true;
+      savedReturnAddressNote = `Using your saved return address: ${savedAddress.name}, ${savedAddress.addressLine1}, ${savedAddress.city}, ${savedAddress.state} ${savedAddress.postalCode}`;
+
+      context.logger.info(
+        {
+          correlationId: context.correlationId,
+          event: "quote.preview.using_saved_address",
+          savedAddressCity: savedAddress.city,
+          savedAddressState: savedAddress.state
+        },
+        "Using saved return address for sender"
+      );
+    } else {
+      // No saved address and no sender provided - throw helpful error
+      context.logger.warn(
+        {
+          correlationId: context.correlationId,
+          event: "quote.preview.no_sender_address"
+        },
+        "No sender address provided and no saved return address"
+      );
+      throw new Error(
+        "No return address provided. Please either:\n" +
+        "1. Include a sender address in your request, or\n" +
+        "2. Save a return address using the set_return_address tool first.\n\n" +
+        "You can set a return address once and it will be used automatically for all future letters."
+      );
+    }
+  }
+
+  // At this point, sender is guaranteed to exist (either provided or from saved address)
+  const sender = input.sender as Address;
+
+  const missingFields = collectMissingAddressFields({ sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff });
   if (missingFields.length > 0) {
     const message = `Missing required address fields: ${missingFields.join(", ")}`;
     context.logger.warn(
@@ -78,13 +134,13 @@ async function handler(
     return normalized;
   };
 
-  input.sender.country = normalizeCountryToUS(input.sender.country);
+  sender.country = normalizeCountryToUS(sender.country);
   input.recipient.country = normalizeCountryToUS(input.recipient.country);
 
   // Validate US-only service
   const nonUSAddresses: string[] = [];
-  if (input.sender.country !== 'US') {
-    nonUSAddresses.push(`sender address is in ${input.sender.country}`);
+  if (sender.country !== 'US') {
+    nonUSAddresses.push(`sender address is in ${sender.country}`);
   }
   if (input.recipient.country !== 'US') {
     nonUSAddresses.push(`recipient address is in ${input.recipient.country}`);
@@ -96,7 +152,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "quote.preview.non_us_address",
-        senderCountry: input.sender.country,
+        senderCountry: sender.country,
         recipientCountry: input.recipient.country
       },
       message
@@ -149,12 +205,12 @@ async function handler(
 
     // Validate sender address
     const senderAddressInput: AddressValidationInput = {
-      line1: input.sender.addressLine1,
-      line2: input.sender.addressLine2,
-      city: input.sender.city,
-      state: input.sender.state,
-      postalCode: input.sender.postalCode,
-      country: input.sender.country
+      line1: sender.addressLine1,
+      line2: sender.addressLine2,
+      city: sender.city,
+      state: sender.state,
+      postalCode: sender.postalCode,
+      country: sender.country
     };
 
     senderValidation = await provider.validateAddress(senderAddressInput);
@@ -203,7 +259,7 @@ async function handler(
         }
       } else if (senderValidation.status === 'corrected') {
         errorParts.push(`⚠️  Sender address was AUTO-CORRECTED for deliverability:`);
-        errorParts.push(`   Original: ${input.sender.addressLine1}, ${input.sender.city}, ${input.sender.state} ${input.sender.postalCode}`);
+        errorParts.push(`   Original: ${sender.addressLine1}, ${sender.city}, ${sender.state} ${sender.postalCode}`);
         if (senderValidation.verifiedAddress) {
           errorParts.push(
             `   Corrected: ${senderValidation.verifiedAddress.line1}, ` +
@@ -273,12 +329,12 @@ async function handler(
   );
 
   // Generate preview HTML
-  const previewHtml = renderPreviewHtml(input);
+  const previewHtml = renderPreviewHtml({ sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff });
 
   // Create draft for idempotent send
   const draftResult = await createDraft({
     userId: context.user.userId,
-    sender: input.sender as unknown as Record<string, unknown>,
+    sender: sender as unknown as Record<string, unknown>,
     recipient: input.recipient as unknown as Record<string, unknown>,
     bodyText: input.bodyText,
     signOff: input.signOff,
@@ -308,15 +364,18 @@ async function handler(
     estimatedDeliveryDays: 5,
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
+    // Include saved return address info if used
+    usedSavedReturnAddress: usedSavedReturnAddress || undefined,
+    savedReturnAddressNote: savedReturnAddressNote,
   };
 
   // Add address validation results if available
   if (senderValidation) {
     output.senderAddressValidation = {
       status: senderValidation.status,
-      originalAddress: input.sender,
+      originalAddress: sender,
       verifiedAddress: senderValidation.verifiedAddress ? {
-        name: input.sender.name,
+        name: sender.name,
         addressLine1: senderValidation.verifiedAddress.line1,
         addressLine2: senderValidation.verifiedAddress.line2,
         city: senderValidation.verifiedAddress.city,
@@ -361,6 +420,10 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
   name: "quote_and_preview_letter",
   description:
     "Generate a preview and cost estimate for a letter. Validates addresses and creates a draft for sending.\n\n" +
+    "IMPORTANT - Sender Address:\n" +
+    "- If you don't provide a sender address, your saved return address will be used automatically.\n" +
+    "- If you have no saved return address and don't provide one, you'll be prompted to set one.\n" +
+    "- Use set_return_address to save a return address that will be used for all future letters.\n\n" +
     "IMPORTANT - Draft Workflow:\n" +
     "1. This tool validates addresses and creates a DRAFT with a unique draftId.\n" +
     "2. The draftId is REQUIRED when calling send_letter - you cannot send without it.\n" +
@@ -397,7 +460,14 @@ const REQUIRED_ADDRESS_PROPS = [
   "country"
 ];
 
-function collectMissingAddressFields(input: QuoteAndPreviewInput): string[] {
+interface ResolvedInput {
+  sender: Address;
+  recipient: Address;
+  bodyText: string;
+  signOff: string;
+}
+
+function collectMissingAddressFields(input: ResolvedInput): string[] {
   const missing: string[] = [];
   for (const [label, block] of [
     ["sender", input.sender],

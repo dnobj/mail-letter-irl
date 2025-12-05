@@ -17,6 +17,7 @@ import { handleCreditApiRequest } from "../api/creditApiHandler.js";
 import { handleAdminApiRequest } from "../api/adminApiHandler.js";
 import { isAdminEnabled } from "../api/middleware/adminAuth.js";
 import { handleLetterApiRequest } from "../api/letterApiHandler.js";
+import { handleReturnAddressApiRequest } from "../api/returnAddressApiHandler.js";
 import {
   handleCreateCheckoutSession,
   handleStripeWebhook
@@ -648,6 +649,17 @@ export async function startHttpServer() {
     }
     const letterApiHandled = await handleLetterApiRequest(req, res, url.pathname);
     if (letterApiHandled) {
+      return;
+    }
+
+    // Return Address API routes
+    if (url.pathname.startsWith('/api/return-address')) {
+      if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
+        return; // Rate limited
+      }
+    }
+    const returnAddressApiHandled = await handleReturnAddressApiRequest(req, res, url.pathname);
+    if (returnAddressApiHandled) {
       return;
     }
 
