@@ -1,87 +1,145 @@
-import { promises as fs } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { UserAccount } from "../contracts/types.js";
+import { UserAccount, OrderRecord, LetterStatus } from "../contracts/types.js";
+import { query } from "../db/index.js";
+import { getBalance } from "../services/creditService.js";
 
 interface FileStoreOptions {
-  filePath?: string;
   initialCredits?: number;
 }
 
+/**
+ * Database-backed account store for MCP tools
+ * Fetches user credits and orders from PostgreSQL
+ */
 export class FileAccountStore {
-  private accounts = new Map<string, UserAccount>();
-  private readonly filePath: string;
   private readonly initialCredits: number;
-  private writeInFlight: Promise<void> | null = null;
 
   constructor(options: FileStoreOptions = {}) {
-    this.filePath = resolve(process.cwd(), options.filePath ?? "data/accounts.json");
     this.initialCredits = options.initialCredits ?? 5;
   }
 
-  private async ensureLoaded(): Promise<void> {
-    if (this.accounts.size > 0 || this.writeInFlight !== null) {
-      return;
+  /**
+   * Convert database letter status to OrderRecord status
+   */
+  private mapStatus(dbStatus: string): LetterStatus {
+    switch (dbStatus) {
+      case 'sent':
+        return 'mailed';
+      case 'processing':
+        return 'printing';
+      case 'queued':
+      case 'draft':
+      default:
+        return 'queued_for_print';
     }
+  }
 
+  /**
+   * Fetch orders from the letters table
+   */
+  private async fetchOrders(userId: string): Promise<OrderRecord[]> {
     try {
-      const contents = await fs.readFile(this.filePath, "utf-8");
-      const parsed = JSON.parse(contents) as Record<string, UserAccount>;
-      for (const [userId, account] of Object.entries(parsed)) {
-        this.accounts.set(userId, account);
-      }
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        await this.persistAll();
-        return;
-      }
-      throw error;
-    }
-  }
+      const result = await query(`
+        SELECT
+          letter_id,
+          content,
+          recipient,
+          credits_cost,
+          status,
+          preview_html,
+          created_at,
+          sent_at
+        FROM letters
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        LIMIT 50
+      `, [userId]);
 
-  private async persistAll(): Promise<void> {
-    const payload: Record<string, UserAccount> = {};
-    for (const [userId, account] of this.accounts) {
-      payload[userId] = account;
-    }
+      return result.rows.map((row: any) => {
+        const content = row.content || {};
+        const recipient = row.recipient || {};
 
-    await fs.mkdir(dirname(this.filePath), { recursive: true });
-    const json = JSON.stringify(payload, null, 2);
-    await fs.writeFile(this.filePath, json, "utf-8");
-  }
+        // Build timeline from dates
+        const timeline: { timestampISO: string; statusText: string }[] = [];
 
-  private schedulePersist(): Promise<void> {
-    if (!this.writeInFlight) {
-      this.writeInFlight = (async () => {
-        try {
-          await this.persistAll();
-        } finally {
-          this.writeInFlight = null;
+        if (row.created_at) {
+          timeline.push({
+            timestampISO: row.created_at.toISOString(),
+            statusText: 'Order created'
+          });
         }
-      })();
+
+        if (row.sent_at) {
+          timeline.push({
+            timestampISO: row.sent_at.toISOString(),
+            statusText: 'Letter sent'
+          });
+        }
+
+        return {
+          orderId: row.letter_id,
+          snapshot: {
+            sender: content.sender || {
+              name: '',
+              addressLine1: '',
+              city: '',
+              state: '',
+              postalCode: '',
+              country: 'US'
+            },
+            recipient: {
+              name: recipient.name || '',
+              addressLine1: recipient.addressLine1 || recipient.address1 || '',
+              addressLine2: recipient.addressLine2 || recipient.address2 || '',
+              city: recipient.city || '',
+              state: recipient.state || '',
+              postalCode: recipient.postalCode || recipient.zip || '',
+              country: recipient.country || 'US'
+            },
+            bodyText: content.bodyText || '',
+            signOff: content.signOff || '',
+            requiredCredits: row.credits_cost || 1
+          },
+          statusTimeline: timeline,
+          currentStatus: this.mapStatus(row.status),
+          creditsDeducted: row.credits_cost || 1,
+          recipientSummary: {
+            name: recipient.name || '',
+            city: recipient.city || '',
+            state: recipient.state || ''
+          },
+          previewFirstPageHtml: row.preview_html || undefined
+        } as OrderRecord;
+      });
+    } catch (error) {
+      console.error('Error fetching orders from database:', error);
+      return [];
     }
-    return this.writeInFlight;
   }
 
   async getOrCreate(userId: string): Promise<UserAccount> {
-    await this.ensureLoaded();
-    const existing = this.accounts.get(userId);
-    if (existing) {
-      return existing;
+    // Fetch credits from database
+    let creditsRemaining = this.initialCredits;
+    try {
+      const balance = await getBalance(userId);
+      creditsRemaining = balance.credits;
+    } catch (error) {
+      // User not found or other error - use default
+      console.warn(`Could not fetch credits for ${userId}, using default:`, error);
     }
 
-    const account: UserAccount = {
-      userId,
-      creditsRemaining: this.initialCredits,
-      orders: []
-    };
+    // Fetch orders from database
+    const orders = await this.fetchOrders(userId);
 
-    this.accounts.set(userId, account);
-    await this.schedulePersist();
-    return account;
+    return {
+      userId,
+      creditsRemaining,
+      orders
+    };
   }
 
   async persist(account: UserAccount): Promise<void> {
-    this.accounts.set(account.userId, account);
-    await this.schedulePersist();
+    // No-op for database-backed store
+    // Orders are persisted by sendLetter tool directly to the database
+    console.log(`FileAccountStore.persist called for ${account.userId} (no-op for DB store)`);
   }
 }
