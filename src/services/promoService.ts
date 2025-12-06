@@ -339,11 +339,12 @@ export async function redeemPromoCode(
     await client.query(
       `INSERT INTO credit_transactions (
         user_id, amount, balance_after, type, reference_type, reference_id, description
-      ) VALUES ($1, $2, (SELECT credits FROM users WHERE user_id = $1), 'adjustment', 'manual', $3, $4)`,
+      ) VALUES ($1, $2, (SELECT credits FROM users WHERE user_id = $3), 'adjustment', 'manual', $4, $5)`,
       [
         userId,
         campaign.credits_amount,
-        ledgerEntry.ledger_id,
+        userId,  // Separate param for subquery to avoid type inference issues
+        String(ledgerEntry.ledger_id),  // Cast UUID to string for VARCHAR column
         `Promo: ${campaign.name} (${promoCode})`,
       ]
     );
