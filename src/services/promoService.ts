@@ -303,6 +303,16 @@ export async function redeemPromoCode(
   // 'never' policy means no expiration
 
   return await transaction(async (client) => {
+    // Upsert user FIRST (credit_ledger has FK constraint on users)
+    await client.query(
+      `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
+       VALUES ($1, $2, $3, 0, 0)
+       ON CONFLICT (user_id) DO UPDATE
+       SET credits = users.credits + $3,
+           updated_at = NOW()`,
+      [userId, email || `${userId}@unknown.com`, campaign.credits_amount]
+    );
+
     // Add credits via ledger
     const ledgerResult = await client.query<CreditLedgerEntry>(
       `INSERT INTO credit_ledger (
@@ -324,16 +334,6 @@ export async function redeemPromoCode(
     );
 
     const ledgerEntry = ledgerResult.rows[0];
-
-    // Upsert user and update credits cache
-    await client.query(
-      `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
-       VALUES ($1, $2, $3, 0, 0)
-       ON CONFLICT (user_id) DO UPDATE
-       SET credits = users.credits + $3,
-           updated_at = NOW()`,
-      [userId, email || `${userId}@unknown.com`, campaign.credits_amount]
-    );
 
     // Record transaction
     await client.query(
