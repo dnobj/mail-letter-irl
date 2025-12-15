@@ -7,24 +7,27 @@
 
 ## Overview
 
-User stories are organized into categories:
-- **Core Flow** - Primary letter sending journey
-- **Credits** - Balance, purchases, expiration
-- **Promo Codes** - Campaign redemption
-- **Account** - Authentication, profile
-- **Admin** - Dashboard, investigation, management
-- **Edge Cases** - Error handling, idempotency
-- **Security** - Authorization, data protection
-- **Data Integrity** - Consistency and audit
-- **MCP Access** - Token-based auth for non-ChatGPT clients
+User stories are organized by feature area using semantic prefixes:
+
+| Prefix | Area | Description |
+|--------|------|-------------|
+| `US-LETTER` | Letter Sending | Core letter flow (preview, send, status) |
+| `US-CREDIT` | Credits | Balance, purchases, expiration |
+| `US-PROMO` | Promo Codes | Campaign redemption |
+| `US-ACCT` | Account | Authentication, profile |
+| `US-ADMIN` | Admin | Dashboard, investigation, management |
+| `US-EDGE` | Edge Cases | Error handling, idempotency |
+| `US-SEC` | Security | Authorization, data protection |
+| `US-DATA` | Data Integrity | Consistency and audit |
+| `US-MCP` | MCP Access | Token-based auth for non-ChatGPT clients |
 
 Each story includes acceptance criteria that can be converted to test cases.
 
 ---
 
-## 1. Core Flow - Letter Sending
+## Letter Sending (LETTER)
 
-### US-1.1: Preview a Letter
+### US-LETTER-01: Preview a Letter
 **As a** user
 **I want to** preview my letter before sending
 **So that** I can verify the content and cost before committing
@@ -47,7 +50,7 @@ Each story includes acceptance criteria that can be converted to test cases.
 
 ---
 
-### US-1.2: Send a Letter
+### US-LETTER-02: Send a Letter
 **As a** user
 **I want to** send my previewed letter
 **So that** it gets printed and mailed to the recipient
@@ -71,7 +74,7 @@ Each story includes acceptance criteria that can be converted to test cases.
 
 ---
 
-### US-1.3: Idempotent Send (Retry Safety)
+### US-LETTER-03: Idempotent Send (Retry Safety)
 **As a** user
 **I want** duplicate send requests to be safe
 **So that** network issues don't cause double charges
@@ -85,7 +88,7 @@ Each story includes acceptance criteria that can be converted to test cases.
 
 ---
 
-### US-1.4: Check Letter Status
+### US-LETTER-04: Check Letter Status
 **As a** user
 **I want to** check the status of my letter
 **So that** I know if it was sent successfully
@@ -121,7 +124,7 @@ Each story includes acceptance criteria that can be converted to test cases.
 
 ---
 
-### US-1.5: List My Letters
+### US-LETTER-05: List My Letters
 **As a** user
 **I want to** see all my sent letters
 **So that** I can review my mailing history
@@ -135,7 +138,7 @@ Each story includes acceptance criteria that can be converted to test cases.
 
 ---
 
-### US-1.6: Letter Background Processing
+### US-LETTER-06: Letter Background Processing
 **As the** system
 **I want to** process queued letters via background jobs
 **So that** letters are sent to PostGrid reliably
@@ -151,7 +154,7 @@ Each story includes acceptance criteria that can be converted to test cases.
 
 ---
 
-### US-1.7: Letter Status Sync from Providers
+### US-LETTER-07: Letter Status Sync from Providers
 **As the** system
 **I want to** periodically sync letter statuses from fulfillment providers
 **So that** users see accurate, up-to-date delivery information
@@ -198,9 +201,9 @@ interface ProviderStatus {
 
 ---
 
-## 2. Credits
+## Credits (CREDIT)
 
-### US-2.1: Check Credit Balance
+### US-CREDIT-01: Check Credit Balance
 **As a** user
 **I want to** see my credit balance
 **So that** I know if I can send letters
@@ -215,7 +218,7 @@ interface ProviderStatus {
 
 ---
 
-### US-2.2: Purchase Credits
+### US-CREDIT-02: Purchase Credits
 **As a** user
 **I want to** buy more credits
 **So that** I can send letters
@@ -236,7 +239,7 @@ interface ProviderStatus {
 
 ---
 
-### US-2.3: Credit Expiration
+### US-CREDIT-03: Credit Expiration
 **As a** user
 **I want** my credits to be used before they expire
 **So that** I don't lose purchased value
@@ -257,7 +260,7 @@ interface ProviderStatus {
 
 ---
 
-### US-2.4: View Transaction History
+### US-CREDIT-04: View Transaction History
 **As a** user
 **I want to** see my credit transaction history
 **So that** I can understand my usage
@@ -271,7 +274,7 @@ interface ProviderStatus {
 
 ---
 
-### US-2.5: View Detailed Ledger
+### US-CREDIT-05: View Detailed Ledger
 **As a** user
 **I want to** see my credit ledger entries
 **So that** I understand expiration dates
@@ -284,7 +287,7 @@ interface ProviderStatus {
 
 ---
 
-### US-2.6: Refund Handling
+### US-CREDIT-06: Refund Handling
 **As the** system
 **I want to** handle Stripe refunds correctly
 **So that** credit balances reflect actual payments
@@ -299,7 +302,7 @@ interface ProviderStatus {
 
 ---
 
-### US-2.7: Insufficient Credits Flow
+### US-CREDIT-07: Insufficient Credits Flow
 **As a** user (Sarah, Eleanor)
 **I want** clear guidance when I don't have enough credits
 **So that** I know how to proceed with sending my letter
@@ -319,7 +322,7 @@ interface ProviderStatus {
 
 ---
 
-### US-2.8: Low Balance Warning
+### US-CREDIT-08: Low Balance Warning
 **As a** user (Eleanor, Sarah)
 **I want** to be warned when my balance is getting low
 **So that** I can purchase more credits before running out
@@ -332,7 +335,7 @@ interface ProviderStatus {
 
 ---
 
-### US-2.9: Chargeback Handling
+### US-CREDIT-09: Chargeback Handling
 **As the** system
 **I want to** handle Stripe chargebacks appropriately
 **So that** fraud is tracked and accounts are flagged
@@ -352,9 +355,9 @@ interface ProviderStatus {
 
 ---
 
-## 3. Promo Codes
+## Promo Codes (PROMO)
 
-### US-3.1: Validate Promo Code
+### US-PROMO-01: Validate Promo Code
 **As a** user
 **I want to** check if a promo code is valid
 **So that** I know what I'll receive before redeeming
@@ -367,7 +370,7 @@ interface ProviderStatus {
 
 ---
 
-### US-3.2: Redeem Promo Code
+### US-PROMO-02: Redeem Promo Code
 **As a** user
 **I want to** redeem a promo code
 **So that** I receive free credits
@@ -387,7 +390,7 @@ interface ProviderStatus {
 
 ---
 
-### US-3.3: View My Redemptions
+### US-PROMO-03: View My Redemptions
 **As a** user
 **I want to** see which promo codes I've redeemed
 **So that** I have a record of bonuses received
@@ -398,9 +401,9 @@ interface ProviderStatus {
 
 ---
 
-## 4. Account
+## Account (ACCT)
 
-### US-4.0: First-Time User Onboarding
+### US-ACCT-00: First-Time User Onboarding
 **As a** new user (Sarah, Eleanor)
 **I want** my account created automatically when I first use the service
 **So that** I can start sending letters without a separate signup process
@@ -420,7 +423,7 @@ interface ProviderStatus {
 
 ---
 
-### US-4.1: Authentication
+### US-ACCT-01: Authentication
 **As a** user
 **I want to** authenticate via OAuth
 **So that** I can access my account securely
@@ -433,7 +436,7 @@ interface ProviderStatus {
 
 ---
 
-### US-4.2: Switch Account
+### US-ACCT-02: Switch Account
 **As a** user
 **I want to** switch to a different account
 **So that** I can use a different authentication method
@@ -445,7 +448,7 @@ interface ProviderStatus {
 
 ---
 
-### US-4.3: View Profile
+### US-ACCT-03: View Profile
 **As a** user
 **I want to** see my account information
 **So that** I know my account status
@@ -459,9 +462,9 @@ interface ProviderStatus {
 
 ---
 
-## 5. Admin
+## Admin (ADMIN)
 
-### US-5.1: View Dashboard
+### US-ADMIN-01: View Dashboard
 **As an** admin
 **I want to** see system-wide metrics
 **So that** I can monitor platform health
@@ -475,7 +478,7 @@ interface ProviderStatus {
 
 ---
 
-### US-5.2: View Alerts
+### US-ADMIN-02: View Alerts
 **As an** admin
 **I want to** see active alerts
 **So that** I can address issues promptly
@@ -488,7 +491,7 @@ interface ProviderStatus {
 
 ---
 
-### US-5.3: Search Users
+### US-ADMIN-03: Search Users
 **As an** admin
 **I want to** search for users
 **So that** I can investigate issues
@@ -501,7 +504,7 @@ interface ProviderStatus {
 
 ---
 
-### US-5.4: Investigate User
+### US-ADMIN-04: Investigate User
 **As an** admin
 **I want to** view a user's full history
 **So that** I can understand their account
@@ -515,7 +518,7 @@ interface ProviderStatus {
 
 ---
 
-### US-5.5: Adjust Credits
+### US-ADMIN-05: Adjust Credits
 **As an** admin
 **I want to** manually adjust a user's credits
 **So that** I can handle customer service issues
@@ -530,7 +533,7 @@ interface ProviderStatus {
 
 ---
 
-### US-5.6: Retry Failed Job
+### US-ADMIN-06: Retry Failed Job
 **As an** admin
 **I want to** retry a failed letter job
 **So that** customers receive their letters
@@ -543,7 +546,7 @@ interface ProviderStatus {
 
 ---
 
-### US-5.7: Manage Promo Campaigns
+### US-ADMIN-07: Manage Promo Campaigns
 **As an** admin
 **I want to** create and manage promo campaigns
 **So that** I can run marketing promotions
@@ -557,7 +560,7 @@ interface ProviderStatus {
 
 ---
 
-### US-5.8: Stripe Reconciliation
+### US-ADMIN-08: Stripe Reconciliation
 **As an** admin
 **I want to** reconcile Stripe payments
 **So that** all payments result in credits
@@ -570,9 +573,9 @@ interface ProviderStatus {
 
 ---
 
-## 6. Edge Cases
+## Edge Cases (EDGE)
 
-### US-6.1: Draft Expiration
+### US-EDGE-01: Draft Expiration
 **As the** system
 **I want to** expire unused drafts
 **So that** stale quotes don't cause issues
@@ -586,7 +589,7 @@ interface ProviderStatus {
 
 ---
 
-### US-6.2: Address Correction Workflow
+### US-EDGE-02: Address Correction Workflow
 **As a** user
 **I want to** correct invalid addresses
 **So that** my letters arrive successfully
@@ -599,7 +602,7 @@ interface ProviderStatus {
 
 ---
 
-### US-6.3: Concurrent Request Handling
+### US-EDGE-03: Concurrent Request Handling
 **As the** system
 **I want to** handle concurrent operations safely
 **So that** data remains consistent
@@ -612,7 +615,7 @@ interface ProviderStatus {
 
 ---
 
-### US-6.4: Webhook Idempotency
+### US-EDGE-04: Webhook Idempotency
 **As the** system
 **I want to** handle webhook retries safely
 **So that** credits aren't duplicated
@@ -624,7 +627,7 @@ interface ProviderStatus {
 
 ---
 
-### US-6.5: Character Limit Enforcement
+### US-EDGE-05: Character Limit Enforcement
 **As the** system
 **I want to** enforce single-page letters
 **So that** pricing is predictable
@@ -636,7 +639,7 @@ interface ProviderStatus {
 
 ---
 
-### US-6.6: Failed Letter User Notification
+### US-EDGE-06: Failed Letter User Notification
 **As a** user (Eleanor, Marcus)
 **I want to** know if my letter failed to send
 **So that** I can take action (retry or get refund)
@@ -657,7 +660,7 @@ interface ProviderStatus {
 
 ---
 
-### US-6.7: Expired Draft Recovery
+### US-EDGE-07: Expired Draft Recovery
 **As a** user (Eleanor)
 **I want** clear guidance when my draft has expired
 **So that** I can re-create and send my letter
@@ -670,22 +673,22 @@ interface ProviderStatus {
 
 ---
 
-## 7. Security
+## Security (SEC)
 
-### US-7.1: Authentication Required
+### US-SEC-01: Authentication Required
 **As the** system
 **I want to** require authentication for all operations
 **So that** user data is protected
 
 **Acceptance Criteria:**
-- [ ] All MCP tools require valid JWT
-- [ ] All API endpoints require valid JWT
+- [ ] All MCP tools require valid JWT or PAT
+- [ ] All API endpoints require valid JWT or PAT
 - [ ] Invalid/missing token → 401 Unauthorized
-- [ ] Token validated against Auth0 JWKS
+- [ ] Token validated against Auth0 JWKS (JWT) or database (PAT)
 
 ---
 
-### US-7.2: User Data Isolation
+### US-SEC-02: User Data Isolation
 **As a** user
 **I want** my data to be private
 **So that** other users can't access it
@@ -699,7 +702,7 @@ interface ProviderStatus {
 
 ---
 
-### US-7.3: Admin Access Control
+### US-SEC-03: Admin Access Control
 **As the** system
 **I want** admin functions to be restricted
 **So that** only authorized users can perform them
@@ -712,7 +715,7 @@ interface ProviderStatus {
 
 ---
 
-### US-7.4: Stripe Webhook Security
+### US-SEC-04: Stripe Webhook Security
 **As the** system
 **I want to** verify webhook authenticity
 **So that** attackers can't fake payments
@@ -725,7 +728,7 @@ interface ProviderStatus {
 
 ---
 
-### US-7.5: Rate Limiting
+### US-SEC-05: Rate Limiting
 **As the** system
 **I want to** limit request rates
 **So that** abuse is prevented
@@ -738,7 +741,7 @@ interface ProviderStatus {
 
 ---
 
-### US-7.6: Promo Code Abuse Prevention
+### US-SEC-06: Promo Code Abuse Prevention
 **As the** system
 **I want to** prevent promo code abuse
 **So that** promotional budgets are protected
@@ -757,9 +760,9 @@ interface ProviderStatus {
 
 ---
 
-## 8. Data Integrity
+## Data Integrity (DATA)
 
-### US-8.1: Balance-Ledger Consistency
+### US-DATA-01: Balance-Ledger Consistency
 **As the** system
 **I want** user balances to match ledger sums
 **So that** credits are accurate
@@ -772,7 +775,7 @@ interface ProviderStatus {
 
 ---
 
-### US-8.2: Audit Trail
+### US-DATA-02: Audit Trail
 **As the** system
 **I want** complete transaction history
 **So that** all changes are traceable
@@ -785,7 +788,7 @@ interface ProviderStatus {
 
 ---
 
-### US-8.3: Draft-Letter Linkage
+### US-DATA-03: Draft-Letter Linkage
 **As the** system
 **I want** consumed drafts linked to letters
 **So that** idempotency works correctly
@@ -797,9 +800,9 @@ interface ProviderStatus {
 
 ---
 
-## 9. MCP Access - Token Authentication
+## MCP Access (MCP)
 
-### US-9.1: Generate Personal Access Token
+### US-MCP-01: Generate Personal Access Token
 **As a** user (Morgan, Jordan)
 **I want to** generate a Personal Access Token from the dashboard
 **So that** I can authenticate my MCP client without OAuth flows
@@ -821,7 +824,7 @@ interface ProviderStatus {
 
 ---
 
-### US-9.2: Revoke Personal Access Token
+### US-MCP-02: Revoke Personal Access Token
 **As a** user (Morgan, Jordan)
 **I want to** revoke a token I've created
 **So that** I can remove access if compromised or no longer needed
@@ -835,7 +838,7 @@ interface ProviderStatus {
 
 ---
 
-### US-9.3: Authenticate via Personal Access Token
+### US-MCP-03: Authenticate via Personal Access Token
 **As a** system
 **I want to** accept PAT authentication for MCP requests
 **So that** non-ChatGPT clients can use Letter IRL
@@ -857,7 +860,7 @@ interface ProviderStatus {
 
 ---
 
-### US-9.4: MCP Client Setup Information
+### US-MCP-04: MCP Client Setup Information
 **As a** user (Morgan)
 **I want to** see clear setup instructions for my MCP client
 **So that** I can configure Letter IRL quickly
@@ -886,7 +889,7 @@ interface ProviderStatus {
 
 ---
 
-### US-9.5: Token Usage Analytics
+### US-MCP-05: Token Usage Analytics
 **As an** admin
 **I want to** see PAT usage statistics
 **So that** I can understand non-ChatGPT adoption
@@ -903,40 +906,40 @@ interface ProviderStatus {
 
 | Priority | Category | Stories | Key Personas |
 |----------|----------|---------|--------------|
-| P0 - Critical | Core Flow | US-1.1, US-1.2, US-1.3 | Sarah, Marcus, Eleanor |
-| P0 - Critical | Credits | US-2.1, US-2.2, US-2.7 | All users |
-| P0 - Critical | Security | US-7.1, US-7.2 | System |
-| P1 - High | Core Flow | US-1.4, US-1.5, US-1.6, US-1.7 | Marcus, David, System |
-| P1 - High | Credits | US-2.3, US-2.6, US-2.9 | System |
-| P1 - High | Edge Cases | US-6.1, US-6.3, US-6.4 | Eleanor, System |
-| P1 - High | Account | US-4.0 | Sarah, Eleanor (new users) |
-| P1 - High | MCP Access | US-9.1, US-9.3 | Morgan, Jordan |
-| P2 - Medium | Promo | US-3.1, US-3.2, US-3.3 | Alex |
-| P2 - Medium | Account | US-4.1, US-4.2, US-4.3 | All users |
-| P2 - Medium | Admin | US-5.1, US-5.2, US-5.5 | Admin Amy |
-| P2 - Medium | Credits | US-2.8 | Eleanor, Sarah |
-| P2 - Medium | Security | US-7.6 | Alex, Frank |
-| P2 - Medium | MCP Access | US-9.2, US-9.4 | Morgan, Jordan |
-| P3 - Low | Admin | US-5.3 - US-5.8 | Admin Amy |
-| P3 - Low | Edge Cases | US-6.2, US-6.5, US-6.6, US-6.7 | Eleanor |
-| P3 - Low | MCP Access | US-9.5 | Admin Amy |
+| P0 - Critical | Letter Sending | US-LETTER-01, US-LETTER-02, US-LETTER-03 | Sarah, Marcus, Eleanor |
+| P0 - Critical | Credits | US-CREDIT-01, US-CREDIT-02, US-CREDIT-07 | All users |
+| P0 - Critical | Security | US-SEC-01, US-SEC-02 | System |
+| P1 - High | Letter Sending | US-LETTER-04, US-LETTER-05, US-LETTER-06, US-LETTER-07 | Marcus, David, System |
+| P1 - High | Credits | US-CREDIT-03, US-CREDIT-06, US-CREDIT-09 | System |
+| P1 - High | Edge Cases | US-EDGE-01, US-EDGE-03, US-EDGE-04 | Eleanor, System |
+| P1 - High | Account | US-ACCT-00 | Sarah, Eleanor (new users) |
+| P1 - High | MCP Access | US-MCP-01, US-MCP-03 | Morgan, Jordan |
+| P2 - Medium | Promo | US-PROMO-01, US-PROMO-02, US-PROMO-03 | Alex |
+| P2 - Medium | Account | US-ACCT-01, US-ACCT-02, US-ACCT-03 | All users |
+| P2 - Medium | Admin | US-ADMIN-01, US-ADMIN-02, US-ADMIN-05 | Amy |
+| P2 - Medium | Credits | US-CREDIT-08 | Eleanor, Sarah |
+| P2 - Medium | Security | US-SEC-06 | Alex, Frank |
+| P2 - Medium | MCP Access | US-MCP-02, US-MCP-04 | Morgan, Jordan |
+| P3 - Low | Admin | US-ADMIN-03 - US-ADMIN-08 | Amy |
+| P3 - Low | Edge Cases | US-EDGE-02, US-EDGE-05, US-EDGE-06, US-EDGE-07 | Eleanor |
+| P3 - Low | MCP Access | US-MCP-05 | Amy |
 
 ---
 
 ## Story Count Summary
 
-| Category | Count |
-|----------|-------|
-| Core Flow (US-1.x) | 7 |
-| Credits (US-2.x) | 9 |
-| Promo Codes (US-3.x) | 3 |
-| Account (US-4.x) | 4 |
-| Admin (US-5.x) | 8 |
-| Edge Cases (US-6.x) | 7 |
-| Security (US-7.x) | 6 |
-| Data Integrity (US-8.x) | 3 |
-| MCP Access (US-9.x) | 5 |
-| **Total** | **52** |
+| Category | Prefix | Count |
+|----------|--------|-------|
+| Letter Sending | US-LETTER | 7 |
+| Credits | US-CREDIT | 9 |
+| Promo Codes | US-PROMO | 3 |
+| Account | US-ACCT | 4 |
+| Admin | US-ADMIN | 8 |
+| Edge Cases | US-EDGE | 7 |
+| Security | US-SEC | 6 |
+| Data Integrity | US-DATA | 3 |
+| MCP Access | US-MCP | 5 |
+| **Total** | | **52** |
 
 ---
 

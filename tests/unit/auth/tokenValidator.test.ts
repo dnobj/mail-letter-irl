@@ -6,8 +6,8 @@
  * - Personal Access Tokens (PAT) for MCP clients
  *
  * User Stories Covered:
- * - US-7.1: Authentication Required
- * - US-9.3: Authenticate via Personal Access Token
+ * - US-SEC-01: Authentication Required
+ * - US-MCP-03: Authenticate via Personal Access Token
  *
  * Personas Covered:
  * - Sarah, Marcus, etc. (JWT via ChatGPT)
@@ -135,7 +135,7 @@ describe('tokenValidator with PAT support', () => {
   });
 
   // ==========================================================================
-  // PAT Authentication (New Behavior - US-9.3)
+  // PAT Authentication (New Behavior - US-MCP-03)
   // ==========================================================================
   describe('PAT authentication (MCP users)', () => {
     it('should detect PAT by prefix and validate', async () => {

@@ -9,11 +9,21 @@
 
 Letter IRL serves users who want to send physical letters through conversational AI. These personas represent distinct user types with different needs, behaviors, and pain points.
 
+**Categories:**
+| Tag | Description |
+|-----|-------------|
+| CONSUMER | End users sending personal letters |
+| BUSINESS | Business/professional users |
+| DEV | Developers and technical users |
+| INTERNAL | Platform operators and systems |
+| ANTI | Users we explicitly don't serve |
+
 ---
 
 ## Primary Personas
 
-### 1. Sarah - The Occasional Sender
+### Sarah - The Occasional Sender
+`CONSUMER`
 
 **Demographics:**
 - Age: 35-55
@@ -39,10 +49,10 @@ Letter IRL serves users who want to send physical letters through conversational
 - Concerned about address accuracy
 
 **Key User Stories:**
-- US-1.1 (Preview letter)
-- US-1.2 (Send letter)
-- US-2.1 (Check balance)
-- US-6.2 (Address correction)
+- US-LETTER-01 (Preview letter)
+- US-LETTER-02 (Send letter)
+- US-CREDIT-01 (Check balance)
+- US-EDGE-02 (Address correction)
 
 **Test Scenarios:**
 - First-time user flow
@@ -52,7 +62,8 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ---
 
-### 2. Marcus - The Regular Correspondent
+### Marcus - The Regular Correspondent
+`CONSUMER`
 
 **Demographics:**
 - Age: 28-45
@@ -78,11 +89,11 @@ Letter IRL serves users who want to send physical letters through conversational
 - Wants bulk pricing for higher volume
 
 **Key User Stories:**
-- US-1.3 (Idempotent send - network reliability)
-- US-1.4 (Check status)
-- US-1.5 (List letters)
-- US-3.2 (Redeem promo)
-- US-2.4 (Transaction history)
+- US-LETTER-03 (Idempotent send - network reliability)
+- US-LETTER-04 (Check status)
+- US-LETTER-05 (List letters)
+- US-PROMO-02 (Redeem promo)
+- US-CREDIT-04 (Transaction history)
 
 **Test Scenarios:**
 - Multiple letters in quick succession
@@ -93,7 +104,8 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ---
 
-### 3. Eleanor - The Legacy Connector
+### Eleanor - The Legacy Connector
+`CONSUMER`
 
 **Demographics:**
 - Age: 65+
@@ -119,10 +131,10 @@ Letter IRL serves users who want to send physical letters through conversational
 - May accidentally trigger duplicate sends
 
 **Key User Stories:**
-- US-1.1 (Clear preview with cost)
-- US-1.3 (Idempotency protection)
-- US-1.4 (Status confirmation)
-- US-2.1 (Simple balance check)
+- US-LETTER-01 (Clear preview with cost)
+- US-LETTER-03 (Idempotency protection)
+- US-LETTER-04 (Status confirmation)
+- US-CREDIT-01 (Simple balance check)
 
 **Test Scenarios:**
 - Accidental double-click protection
@@ -132,7 +144,8 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ---
 
-### 4. David - The Business User
+### David - The Business User
+`BUSINESS`
 
 **Demographics:**
 - Age: 30-50
@@ -159,10 +172,10 @@ Letter IRL serves users who want to send physical letters through conversational
 - Concerned about professional appearance
 
 **Key User Stories:**
-- US-2.2 (Purchase credits - power pack)
-- US-2.4 (Transaction history for expenses)
-- US-1.5 (List all letters)
-- US-2.5 (Detailed ledger)
+- US-CREDIT-02 (Purchase credits - power pack)
+- US-CREDIT-04 (Transaction history for expenses)
+- US-LETTER-05 (List all letters)
+- US-CREDIT-05 (Detailed ledger)
 
 **Test Scenarios:**
 - High-volume credit purchase
@@ -173,7 +186,8 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ---
 
-### 5. Morgan - The MCP Power User
+### Morgan - The MCP Power User
+`DEV`
 
 **Demographics:**
 - Age: 25-45
@@ -200,10 +214,10 @@ Letter IRL serves users who want to send physical letters through conversational
 - Needs clear setup instructions
 
 **Key User Stories:**
-- US-9.1 (Generate Personal Access Token)
-- US-9.2 (Revoke token)
-- US-9.3 (MCP client setup)
-- US-1.1, US-1.2 (Same letter flow as ChatGPT users)
+- US-MCP-01 (Generate Personal Access Token)
+- US-MCP-02 (Revoke token)
+- US-MCP-04 (MCP client setup)
+- US-LETTER-01, US-LETTER-02 (Same letter flow as ChatGPT users)
 
 **Test Scenarios:**
 - PAT generation from dashboard
@@ -213,7 +227,8 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ---
 
-### 6. Jordan - The AI Agent Builder
+### Jordan - The AI Agent Builder
+`DEV`
 
 **Demographics:**
 - Age: 28-40
@@ -239,10 +254,10 @@ Letter IRL serves users who want to send physical letters through conversational
 - Future: may want webhooks for status updates
 
 **Key User Stories:**
-- US-9.1, US-9.2 (Token management)
-- US-1.3 (Idempotent send - critical for agents)
-- US-1.4, US-1.5 (Status checking and listing)
-- US-6.3 (Concurrent request handling)
+- US-MCP-01, US-MCP-02 (Token management)
+- US-LETTER-03 (Idempotent send - critical for agents)
+- US-LETTER-04, US-LETTER-05 (Status checking and listing)
+- US-EDGE-03 (Concurrent request handling)
 
 **Test Scenarios:**
 - Agent sends multiple letters in sequence
@@ -252,7 +267,8 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ---
 
-### 7. Alex - The Promo Hunter
+### Alex - The Promo Hunter
+`CONSUMER`
 
 **Demographics:**
 - Age: 22-35
@@ -277,10 +293,10 @@ Letter IRL serves users who want to send physical letters through conversational
 - Frustrated by promo code restrictions
 
 **Key User Stories:**
-- US-3.1 (Validate promo)
-- US-3.2 (Redeem promo)
-- US-3.3 (View redemptions)
-- US-2.3 (Credit expiration - promo credits expire faster)
+- US-PROMO-01 (Validate promo)
+- US-PROMO-02 (Redeem promo)
+- US-PROMO-03 (View redemptions)
+- US-CREDIT-03 (Credit expiration - promo credits expire faster)
 
 **Test Scenarios:**
 - Promo code validation (valid/invalid/expired)
@@ -293,7 +309,8 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ## Secondary Personas
 
-### 8. Admin Amy - The Platform Operator
+### Amy - The Platform Operator
+`INTERNAL`
 
 **Demographics:**
 - Role: Platform administrator (you)
@@ -319,14 +336,14 @@ Letter IRL serves users who want to send physical letters through conversational
 - Needs tools to fix issues without database access
 
 **Key User Stories:**
-- US-5.1 (Dashboard)
-- US-5.2 (Alerts)
-- US-5.3 (Search users)
-- US-5.4 (Investigate user)
-- US-5.5 (Adjust credits)
-- US-5.6 (Retry jobs)
-- US-5.7 (Manage promos)
-- US-5.8 (Stripe reconciliation)
+- US-ADMIN-01 (Dashboard)
+- US-ADMIN-02 (Alerts)
+- US-ADMIN-03 (Search users)
+- US-ADMIN-04 (Investigate user)
+- US-ADMIN-05 (Adjust credits)
+- US-ADMIN-06 (Retry jobs)
+- US-ADMIN-07 (Manage promos)
+- US-ADMIN-08 (Stripe reconciliation)
 
 **Test Scenarios:**
 - Dashboard metrics accuracy
@@ -338,7 +355,8 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ---
 
-### 9. System - The Background Processor
+### System - The Background Processor
+`INTERNAL`
 
 **Demographics:**
 - Role: Automated system processes
@@ -366,13 +384,13 @@ Letter IRL serves users who want to send physical letters through conversational
 - Stripe webhook handling
 
 **Key User Stories:**
-- US-1.6 (Background processing)
-- US-1.7 (Status sync from providers)
-- US-2.3 (Credit expiration)
-- US-2.6 (Refund handling)
-- US-6.1 (Draft expiration)
-- US-6.4 (Webhook idempotency)
-- US-8.1 (Balance consistency)
+- US-LETTER-06 (Background processing)
+- US-LETTER-07 (Status sync from providers)
+- US-CREDIT-03 (Credit expiration)
+- US-CREDIT-06 (Refund handling)
+- US-EDGE-01 (Draft expiration)
+- US-EDGE-04 (Webhook idempotency)
+- US-DATA-01 (Balance consistency)
 
 **Test Scenarios:**
 - Job retry with exponential backoff
@@ -388,7 +406,8 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ## Anti-Personas (Who We Don't Serve)
 
-### 10. Spammy Sam - The Bulk Mailer
+### Sam - The Bulk Mailer
+`ANTI`
 
 **Characteristics:**
 - Wants to send thousands of marketing letters
@@ -410,7 +429,8 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ---
 
-### 11. Fraudulent Frank - The Scammer
+### Frank - The Scammer
+`ANTI`
 
 **Characteristics:**
 - Uses stolen credit cards
@@ -425,7 +445,7 @@ Letter IRL serves users who want to send physical letters through conversational
 - Auth0 identity verification
 
 **Security Considerations:**
-- US-7.4 (Stripe webhook security)
+- US-SEC-04 (Stripe webhook security)
 - Chargeback alerts in admin dashboard
 - Credit revocation on refund
 - Account investigation tools
@@ -434,17 +454,17 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ## Persona-Story Matrix
 
-| Persona | P0 Stories | P1 Stories | P2 Stories |
-|---------|------------|------------|------------|
-| Sarah (Occasional) | US-1.1, US-1.2, US-2.1 | US-1.4, US-6.2 | US-4.3 |
-| Marcus (Regular) | US-1.1, US-1.2, US-1.3 | US-1.4, US-1.5, US-2.3 | US-3.2, US-2.4 |
-| Eleanor (Legacy) | US-1.1, US-1.2, US-1.3 | US-1.4 | US-4.2 |
-| David (Business) | US-1.2, US-2.2 | US-1.5, US-2.4 | US-2.5 |
-| Morgan (MCP User) | US-9.1, US-1.1, US-1.2 | US-9.2, US-9.3 | US-1.4, US-1.5 |
-| Jordan (Agent Builder) | US-9.1, US-1.3 | US-9.2, US-6.3 | US-1.4, US-1.5 |
-| Alex (Promo) | US-2.1 | US-2.3 | US-3.1, US-3.2, US-3.3 |
-| Admin Amy | - | - | US-5.1 - US-5.8 |
-| System | US-7.1 | US-1.6, US-6.4 | US-8.1 - US-8.3 |
+| Persona | Category | P0 Stories | P1 Stories | P2 Stories |
+|---------|----------|------------|------------|------------|
+| Sarah | CONSUMER | US-LETTER-01, US-LETTER-02, US-CREDIT-01 | US-LETTER-04, US-EDGE-02 | US-ACCT-03 |
+| Marcus | CONSUMER | US-LETTER-01, US-LETTER-02, US-LETTER-03 | US-LETTER-04, US-LETTER-05, US-CREDIT-03 | US-PROMO-02, US-CREDIT-04 |
+| Eleanor | CONSUMER | US-LETTER-01, US-LETTER-02, US-LETTER-03 | US-LETTER-04 | US-ACCT-02 |
+| David | BUSINESS | US-LETTER-02, US-CREDIT-02 | US-LETTER-05, US-CREDIT-04 | US-CREDIT-05 |
+| Morgan | DEV | US-MCP-01, US-LETTER-01, US-LETTER-02 | US-MCP-02, US-MCP-03 | US-LETTER-04, US-LETTER-05 |
+| Jordan | DEV | US-MCP-01, US-LETTER-03 | US-MCP-02, US-EDGE-03 | US-LETTER-04, US-LETTER-05 |
+| Alex | CONSUMER | US-CREDIT-01 | US-CREDIT-03 | US-PROMO-01, US-PROMO-02, US-PROMO-03 |
+| Amy | INTERNAL | - | - | US-ADMIN-01 - US-ADMIN-08 |
+| System | INTERNAL | US-SEC-01 | US-LETTER-06, US-EDGE-04 | US-DATA-01 - US-DATA-03 |
 
 ---
 
@@ -455,8 +475,8 @@ When writing test cases, consider:
 1. **Happy Path Tests:** Use Sarah or Marcus scenarios
 2. **Edge Case Tests:** Use Eleanor (accidental actions) or Alex (boundary testing)
 3. **Load/Scale Tests:** Use David scenarios
-4. **Security Tests:** Use Fraudulent Frank scenarios
-5. **Admin Tests:** Use Admin Amy scenarios
+4. **Security Tests:** Use Frank scenarios
+5. **Admin Tests:** Use Amy scenarios
 6. **Integration Tests:** Use System scenarios
 7. **MCP/API Tests:** Use Morgan or Jordan scenarios
 8. **Token Auth Tests:** Use Morgan (PAT generation, revocation)

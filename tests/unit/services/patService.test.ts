@@ -9,9 +9,9 @@
  * - Token listing
  *
  * User Stories Covered:
- * - US-9.1: Generate Personal Access Token
- * - US-9.2: Revoke Personal Access Token
- * - US-9.3: Authenticate via Personal Access Token
+ * - US-MCP-01: Generate Personal Access Token
+ * - US-MCP-02: Revoke Personal Access Token
+ * - US-MCP-03: Authenticate via Personal Access Token
  *
  * Personas Covered:
  * - Morgan - The MCP Power User
@@ -88,9 +88,9 @@ describe('patService', () => {
   });
 
   // ==========================================================================
-  // US-9.1: Generate Personal Access Token
+  // US-MCP-01: Generate Personal Access Token
   // ==========================================================================
-  describe('createToken (US-9.1)', () => {
+  describe('createToken (US-MCP-01)', () => {
     it('should generate a token with correct prefix and format', async () => {
       const mockTokenRow = createTokenRow(1, testUsers.morgan.user_id, 'Claude Desktop');
 
@@ -212,9 +212,9 @@ describe('patService', () => {
   });
 
   // ==========================================================================
-  // US-9.2: Revoke Personal Access Token
+  // US-MCP-02: Revoke Personal Access Token
   // ==========================================================================
-  describe('revokeToken (US-9.2)', () => {
+  describe('revokeToken (US-MCP-02)', () => {
     it('should revoke an active token', async () => {
       const mockTokenRow = createTokenRow(1, testUsers.morgan.user_id, 'Claude Desktop', {
         status: 'revoked',
@@ -266,7 +266,7 @@ describe('patService', () => {
   });
 
   // ==========================================================================
-  // List Tokens (Supporting US-9.2)
+  // List Tokens (Supporting US-MCP-02)
   // ==========================================================================
   describe('listTokens', () => {
     it('should list all tokens for a user', async () => {
@@ -348,9 +348,9 @@ describe('patService', () => {
   });
 
   // ==========================================================================
-  // US-9.3: Validate Token (Authentication)
+  // US-MCP-03: Validate Token (Authentication)
   // ==========================================================================
-  describe('validateToken (US-9.3)', () => {
+  describe('validateToken (US-MCP-03)', () => {
     it('should validate a correct token and return user', async () => {
       const mockToken = createTokenRow(1, testUsers.morgan.user_id, 'Claude Desktop');
 
@@ -430,7 +430,7 @@ describe('patService', () => {
   });
 
   // ==========================================================================
-  // Update Last Used (Supporting US-9.3)
+  // Update Last Used (Supporting US-MCP-03)
   // ==========================================================================
   describe('updateLastUsed', () => {
     it('should update last_used_at timestamp on validation', async () => {
