@@ -1,6 +1,6 @@
 # Personas
 
-**Last Updated:** December 5, 2025
+**Last Updated:** December 15, 2025
 **Purpose:** Define user archetypes for product design, user stories, and test scenarios
 
 ---
@@ -173,7 +173,86 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ---
 
-### 5. Alex - The Promo Hunter
+### 5. Morgan - The MCP Power User
+
+**Demographics:**
+- Age: 25-45
+- Occupation: Developer, technical enthusiast, or power user
+- Tech comfort: High (configures MCP servers, uses multiple AI clients)
+
+**Goals:**
+- Send letters from preferred AI client (not ChatGPT)
+- Integrate letter-sending into custom AI workflows
+- Avoid platform lock-in
+- Use open standards and protocols
+
+**Behaviors:**
+- Uses Claude Desktop, custom agents, or other MCP-compatible clients
+- Comfortable editing JSON config files
+- May build automations using Letter IRL as a tool
+- Values documentation and predictable APIs
+- Contributes feedback on developer experience
+
+**Pain Points:**
+- Many services only support ChatGPT
+- OAuth flows may not work in all MCP clients
+- Wants simple token-based authentication
+- Needs clear setup instructions
+
+**Key User Stories:**
+- US-9.1 (Generate Personal Access Token)
+- US-9.2 (Revoke token)
+- US-9.3 (MCP client setup)
+- US-1.1, US-1.2 (Same letter flow as ChatGPT users)
+
+**Test Scenarios:**
+- PAT generation from dashboard
+- MCP client connection with PAT
+- Token revocation and re-generation
+- Full letter flow via non-ChatGPT client
+
+---
+
+### 6. Jordan - The AI Agent Builder
+
+**Demographics:**
+- Age: 28-40
+- Occupation: Developer building AI-powered products
+- Tech comfort: Very high
+
+**Goals:**
+- Add physical mail capabilities to autonomous agents
+- Programmatic access with reliable error handling
+- Integrate Letter IRL into larger workflows
+
+**Behaviors:**
+- Building agents for clients or internal tools
+- Needs predictable, documented behavior
+- Values idempotency and error codes
+- May run agents in production environments
+- Evaluates services on API quality
+
+**Pain Points:**
+- Needs headless authentication (no browser redirects)
+- Wants structured error responses
+- Needs audit trail for agent actions
+- Future: may want webhooks for status updates
+
+**Key User Stories:**
+- US-9.1, US-9.2 (Token management)
+- US-1.3 (Idempotent send - critical for agents)
+- US-1.4, US-1.5 (Status checking and listing)
+- US-6.3 (Concurrent request handling)
+
+**Test Scenarios:**
+- Agent sends multiple letters in sequence
+- Agent handles insufficient credits gracefully
+- Agent retries on transient errors
+- Token scoping (future)
+
+---
+
+### 7. Alex - The Promo Hunter
 
 **Demographics:**
 - Age: 22-35
@@ -214,7 +293,7 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ## Secondary Personas
 
-### 6. Admin Amy - The Platform Operator
+### 8. Admin Amy - The Platform Operator
 
 **Demographics:**
 - Role: Platform administrator (you)
@@ -259,7 +338,7 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ---
 
-### 7. System - The Background Processor
+### 9. System - The Background Processor
 
 **Demographics:**
 - Role: Automated system processes
@@ -309,7 +388,7 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ## Anti-Personas (Who We Don't Serve)
 
-### 8. Spammy Sam - The Bulk Mailer
+### 10. Spammy Sam - The Bulk Mailer
 
 **Characteristics:**
 - Wants to send thousands of marketing letters
@@ -331,7 +410,7 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ---
 
-### 9. Fraudulent Frank - The Scammer
+### 11. Fraudulent Frank - The Scammer
 
 **Characteristics:**
 - Uses stolen credit cards
@@ -361,6 +440,8 @@ Letter IRL serves users who want to send physical letters through conversational
 | Marcus (Regular) | US-1.1, US-1.2, US-1.3 | US-1.4, US-1.5, US-2.3 | US-3.2, US-2.4 |
 | Eleanor (Legacy) | US-1.1, US-1.2, US-1.3 | US-1.4 | US-4.2 |
 | David (Business) | US-1.2, US-2.2 | US-1.5, US-2.4 | US-2.5 |
+| Morgan (MCP User) | US-9.1, US-1.1, US-1.2 | US-9.2, US-9.3 | US-1.4, US-1.5 |
+| Jordan (Agent Builder) | US-9.1, US-1.3 | US-9.2, US-6.3 | US-1.4, US-1.5 |
 | Alex (Promo) | US-2.1 | US-2.3 | US-3.1, US-3.2, US-3.3 |
 | Admin Amy | - | - | US-5.1 - US-5.8 |
 | System | US-7.1 | US-1.6, US-6.4 | US-8.1 - US-8.3 |
@@ -377,6 +458,8 @@ When writing test cases, consider:
 4. **Security Tests:** Use Fraudulent Frank scenarios
 5. **Admin Tests:** Use Admin Amy scenarios
 6. **Integration Tests:** Use System scenarios
+7. **MCP/API Tests:** Use Morgan or Jordan scenarios
+8. **Token Auth Tests:** Use Morgan (PAT generation, revocation)
 
 ---
 

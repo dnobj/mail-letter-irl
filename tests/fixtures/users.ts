@@ -74,6 +74,26 @@ export const testUsers = {
     credits_used: 0,
     tier: 'standard' as const,
   },
+
+  // Morgan - The MCP Power User
+  morgan: {
+    user_id: 'auth0|morgan-test-008',
+    email: 'morgan@test.letterirl.com',
+    credits: 10,
+    credits_purchased: 10,
+    credits_used: 0,
+    tier: 'standard' as const,
+  },
+
+  // Jordan - The AI Agent Builder
+  jordan: {
+    user_id: 'auth0|jordan-test-009',
+    email: 'jordan@test.letterirl.com',
+    credits: 50,
+    credits_purchased: 100,
+    credits_used: 50,
+    tier: 'trusted' as const,
+  },
 };
 
 // Helper to create a user with custom properties

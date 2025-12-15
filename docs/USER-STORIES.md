@@ -1,6 +1,6 @@
 # User Stories
 
-**Last Updated:** December 5, 2025
+**Last Updated:** December 15, 2025
 **Purpose:** Test coverage and acceptance criteria for Letter IRL
 
 ---
@@ -15,6 +15,8 @@ User stories are organized into categories:
 - **Admin** - Dashboard, investigation, management
 - **Edge Cases** - Error handling, idempotency
 - **Security** - Authorization, data protection
+- **Data Integrity** - Consistency and audit
+- **MCP Access** - Token-based auth for non-ChatGPT clients
 
 Each story includes acceptance criteria that can be converted to test cases.
 
@@ -795,6 +797,108 @@ interface ProviderStatus {
 
 ---
 
+## 9. MCP Access - Token Authentication
+
+### US-9.1: Generate Personal Access Token
+**As a** user (Morgan, Jordan)
+**I want to** generate a Personal Access Token from the dashboard
+**So that** I can authenticate my MCP client without OAuth flows
+
+**Acceptance Criteria:**
+- [ ] Accessible from dashboard after OAuth login
+- [ ] Generates cryptographically secure token
+- [ ] Token shown once at creation (not retrievable later)
+- [ ] User can name/label the token for identification
+- [ ] Token stored as bcrypt hash in database
+- [ ] Token associated with user account
+- [ ] Token has optional expiration (default: no expiration)
+- [ ] Returns token in format: `lirl_pat_xxxxxxxxxxxx`
+
+**Token Format:**
+- Prefix: `lirl_pat_` (identifies as Letter IRL PAT)
+- Body: 32 random alphanumeric characters
+- Total: ~40 characters
+
+---
+
+### US-9.2: Revoke Personal Access Token
+**As a** user (Morgan, Jordan)
+**I want to** revoke a token I've created
+**So that** I can remove access if compromised or no longer needed
+
+**Acceptance Criteria:**
+- [ ] Can view list of active tokens (name, created date, last used)
+- [ ] Can revoke individual tokens
+- [ ] Revocation is immediate
+- [ ] Revoked tokens return 401 on next use
+- [ ] Revocation logged for audit
+
+---
+
+### US-9.3: Authenticate via Personal Access Token
+**As a** system
+**I want to** accept PAT authentication for MCP requests
+**So that** non-ChatGPT clients can use Letter IRL
+
+**Acceptance Criteria:**
+- [ ] Accepts `Authorization: Bearer lirl_pat_xxx` header
+- [ ] Validates token against stored hashes
+- [ ] Looks up user from token
+- [ ] All MCP tools work with PAT auth
+- [ ] Updates `last_used_at` on token record
+- [ ] Invalid/revoked token returns 401
+- [ ] PAT auth logged separately from OAuth (for analytics)
+
+**Auth Flow:**
+1. MCP client sends request with `Authorization: Bearer lirl_pat_xxx`
+2. Server extracts token, looks up hash match
+3. If valid, request proceeds as that user
+4. If invalid, returns 401 Unauthorized
+
+---
+
+### US-9.4: MCP Client Setup Information
+**As a** user (Morgan)
+**I want to** see clear setup instructions for my MCP client
+**So that** I can configure Letter IRL quickly
+
+**Acceptance Criteria:**
+- [ ] Website page at `/mcp-setup` with instructions
+- [ ] Shows server URL: `https://api.letterirl.com`
+- [ ] Shows example config for common clients (Claude Desktop, etc.)
+- [ ] Explains PAT generation process
+- [ ] Links to dashboard for token generation
+- [ ] Troubleshooting section for common issues
+
+**Example Config (Claude Desktop):**
+```json
+{
+  "mcpServers": {
+    "letter-irl": {
+      "url": "https://api.letterirl.com/sse",
+      "headers": {
+        "Authorization": "Bearer lirl_pat_your_token_here"
+      }
+    }
+  }
+}
+```
+
+---
+
+### US-9.5: Token Usage Analytics
+**As an** admin
+**I want to** see PAT usage statistics
+**So that** I can understand non-ChatGPT adoption
+
+**Acceptance Criteria:**
+- [ ] Dashboard shows: total PATs created, active PATs, PAT vs OAuth requests
+- [ ] Can see per-user token count
+- [ ] Can see last-used dates for tokens
+- [ ] Alerts for suspicious patterns (many tokens, rapid creation)
+
+---
+
 ## Priority Matrix
 
 | Priority | Category | Stories | Key Personas |
@@ -806,13 +910,16 @@ interface ProviderStatus {
 | P1 - High | Credits | US-2.3, US-2.6, US-2.9 | System |
 | P1 - High | Edge Cases | US-6.1, US-6.3, US-6.4 | Eleanor, System |
 | P1 - High | Account | US-4.0 | Sarah, Eleanor (new users) |
+| P1 - High | MCP Access | US-9.1, US-9.3 | Morgan, Jordan |
 | P2 - Medium | Promo | US-3.1, US-3.2, US-3.3 | Alex |
 | P2 - Medium | Account | US-4.1, US-4.2, US-4.3 | All users |
 | P2 - Medium | Admin | US-5.1, US-5.2, US-5.5 | Admin Amy |
 | P2 - Medium | Credits | US-2.8 | Eleanor, Sarah |
 | P2 - Medium | Security | US-7.6 | Alex, Frank |
+| P2 - Medium | MCP Access | US-9.2, US-9.4 | Morgan, Jordan |
 | P3 - Low | Admin | US-5.3 - US-5.8 | Admin Amy |
 | P3 - Low | Edge Cases | US-6.2, US-6.5, US-6.6, US-6.7 | Eleanor |
+| P3 - Low | MCP Access | US-9.5 | Admin Amy |
 
 ---
 
@@ -828,7 +935,8 @@ interface ProviderStatus {
 | Edge Cases (US-6.x) | 7 |
 | Security (US-7.x) | 6 |
 | Data Integrity (US-8.x) | 3 |
-| **Total** | **47** |
+| MCP Access (US-9.x) | 5 |
+| **Total** | **52** |
 
 ---
 
