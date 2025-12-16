@@ -1,6 +1,6 @@
 # Personas
 
-**Last Updated:** December 15, 2025
+**Last Updated:** December 16, 2025
 **Purpose:** Define user archetypes for product design, user stories, and test scenarios
 
 ---
@@ -209,21 +209,27 @@ Letter IRL serves users who want to send physical letters through conversational
 
 **Pain Points:**
 - Many services only support ChatGPT
-- OAuth flows may not work in all MCP clients
-- Wants simple token-based authentication
-- Needs clear setup instructions
+- Different MCP clients have different auth capabilities
+- Needs clear, platform-specific setup instructions
+- Windows has quirks with paths and command execution
+
+**Authentication Options:**
+- **Claude Desktop:** OAuth via `mcp-remote` (recommended) - authenticates via browser
+- **Other MCP clients:** Personal Access Token (PAT) for clients without OAuth support
 
 **Key User Stories:**
-- US-MCP-01 (Generate Personal Access Token)
+- US-MCP-01 (Generate Personal Access Token - for non-OAuth clients)
 - US-MCP-02 (Revoke token)
-- US-MCP-04 (MCP client setup)
+- US-MCP-04 (MCP client setup - OAuth + PAT options)
 - US-LETTER-01, US-LETTER-02 (Same letter flow as ChatGPT users)
 
 **Test Scenarios:**
-- PAT generation from dashboard
+- Claude Desktop OAuth flow (browser authentication)
+- PAT generation from dashboard (for other clients)
 - MCP client connection with PAT
 - Token revocation and re-generation
 - Full letter flow via non-ChatGPT client
+- Windows-specific config (`npx.cmd` vs `npx`)
 
 ---
 

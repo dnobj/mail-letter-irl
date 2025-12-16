@@ -186,7 +186,7 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 ├── db/migrations/           # SQL migrations
 ├── docs/                    # Documentation
 ├── scripts/                 # Utility scripts
-└── public/dashboard/        # Admin panel (static)
+└── public/                  # Static files (mcp-setup.html)
 
 /mnt/c/letter-irl-website/   # Website (Next.js)
 ├── app/                     # Next.js app router

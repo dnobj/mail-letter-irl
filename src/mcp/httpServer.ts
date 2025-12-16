@@ -1,4 +1,6 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+// Load .env but don't override existing env vars (allows .env.local via dotenv-cli)
+dotenv.config({ override: false });
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +16,7 @@ import {
   validateAuthorizationHeader
 } from "../auth/tokenValidator.js";
 import { handleCreditApiRequest } from "../api/creditApiHandler.js";
+import { handlePATApiRequest } from "../api/patApiHandler.js";
 import { handleAdminApiRequest } from "../api/adminApiHandler.js";
 import { isAdminEnabled } from "../api/middleware/adminAuth.js";
 import { handleLetterApiRequest } from "../api/letterApiHandler.js";
@@ -33,7 +36,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DEFAULT_WIDGET_DIR = path.resolve(__dirname, "..", "..", "widgets");
-const DASHBOARD_DIR = path.resolve(__dirname, "..", "..", "public", "dashboard");
 const DEFAULT_HOST = process.env.LETTER_IRL_HTTP_HOST ?? "0.0.0.0";
 // Railway sets PORT env var; fall back to LETTER_IRL_HTTP_PORT for local dev
 const DEFAULT_PORT = Number(process.env.PORT ?? process.env.LETTER_IRL_HTTP_PORT ?? "8090");
@@ -176,60 +178,6 @@ async function serveWidget(
     }
     res.statusCode = 500;
     res.end("Internal Server Error");
-    return true;
-  }
-}
-
-/**
- * Serve dashboard static files
- */
-async function serveDashboardFile(
-  requestPath: string,
-  res: http.ServerResponse
-): Promise<boolean> {
-  try {
-    // Remove /dashboard prefix
-    const relativePath = requestPath.replace(/^\/dashboard\/?/, '');
-
-    // Default to index.html for /dashboard and /dashboard/
-    const filePath = relativePath === ''
-      ? path.join(DASHBOARD_DIR, 'index.html')
-      : path.join(DASHBOARD_DIR, relativePath);
-
-    // Security check: ensure file is within DASHBOARD_DIR
-    const resolvedPath = path.resolve(filePath);
-    if (!resolvedPath.startsWith(DASHBOARD_DIR)) {
-      res.statusCode = 403;
-      res.end('Forbidden');
-      return true;
-    }
-
-    const file = await fs.readFile(resolvedPath);
-
-    // Determine content type
-    const ext = path.extname(resolvedPath).toLowerCase();
-    const contentTypes: Record<string, string> = {
-      '.html': 'text/html; charset=utf-8',
-      '.js': 'application/javascript; charset=utf-8',
-      '.css': 'text/css; charset=utf-8',
-      '.json': 'application/json; charset=utf-8',
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.svg': 'image/svg+xml'
-    };
-
-    res.statusCode = 200;
-    res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
-    res.end(file);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return false;
-    }
-    console.error('Error serving dashboard file:', error);
-    res.statusCode = 500;
-    res.end('Internal Server Error');
     return true;
   }
 }
@@ -487,16 +435,6 @@ export async function startHttpServer() {
       return;
     }
 
-    // Dashboard routes
-    if (url.pathname.startsWith("/dashboard")) {
-      const served = await serveDashboardFile(url.pathname, res);
-      if (!served) {
-        res.statusCode = 404;
-        res.end("Dashboard file not found");
-      }
-      return;
-    }
-
     // Stripe Checkout API
     if (url.pathname === "/api/stripe/create-checkout-session" && req.method === "POST") {
       // Rate limit checkout attempts
@@ -638,6 +576,17 @@ export async function startHttpServer() {
     }
     const creditApiHandled = await handleCreditApiRequest(req, res, url.pathname);
     if (creditApiHandled) {
+      return;
+    }
+
+    // PAT (Personal Access Token) API routes
+    if (url.pathname.startsWith('/api/tokens')) {
+      if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
+        return; // Rate limited
+      }
+    }
+    const patApiHandled = await handlePATApiRequest(req, res, url.pathname);
+    if (patApiHandled) {
       return;
     }
 

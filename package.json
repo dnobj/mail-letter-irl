@@ -20,11 +20,14 @@
     "test:run": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "dev:local": "env $(cat .env.local | grep -v '^#' | grep -v '^$' | xargs) tsx watch src/mcp/httpServer.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.5",
+    "@types/bcrypt": "^6.0.0",
     "@types/cookie-parser": "^1.4.10",
+    "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",
     "jose": "^6.1.0",
@@ -38,6 +41,7 @@
     "@types/node": "^20.11.30",
     "@types/pg": "^8.11.0",
     "@vitest/coverage-v8": "^4.0.15",
+    "dotenv-cli": "^11.0.0",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-import": "^2.29.0",

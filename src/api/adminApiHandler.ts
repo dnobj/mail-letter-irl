@@ -30,6 +30,7 @@ import {
   syncLetterStatuses,
   getStuckLetters,
 } from '../services/statusSyncService.js';
+import { getTokenStats } from '../services/patService.js';
 
 /**
  * Send JSON response
@@ -304,6 +305,16 @@ export async function handleAdminApiRequest(
     if (pathname === '/api/admin/sync/stuck' && req.method === 'GET') {
       const url = new URL(req.url!, `http://${req.headers.host}`);
       await handleGetStuckLetters(res, url.searchParams);
+      return true;
+    }
+
+    // =========================================================================
+    // Personal Access Token (PAT) Stats Routes
+    // =========================================================================
+
+    // GET /api/admin/tokens/stats - Get PAT usage statistics
+    if (pathname === '/api/admin/tokens/stats' && req.method === 'GET') {
+      await handleGetTokenStats(res);
       return true;
     }
 
@@ -1584,6 +1595,39 @@ async function handleGetStuckLetters(
     console.error('Get stuck letters error:', error);
     sendJson(res, 500, {
       error: 'Failed to get stuck letters',
+      message: error.message,
+    });
+  }
+}
+
+// =========================================================================
+// PAT Stats Handlers
+// =========================================================================
+
+/**
+ * GET /api/admin/tokens/stats
+ * Get Personal Access Token usage statistics
+ */
+async function handleGetTokenStats(res: ServerResponse) {
+  try {
+    const stats = await getTokenStats();
+
+    sendJson(res, 200, {
+      generatedAt: new Date().toISOString(),
+      tokens: {
+        total: stats.total,
+        active: stats.active,
+        revoked: stats.revoked,
+      },
+      usage: {
+        usedToday: stats.usedToday,
+        usedLast7Days: stats.usedLast7Days,
+      },
+    });
+  } catch (error: any) {
+    console.error('Get token stats error:', error);
+    sendJson(res, 500, {
+      error: 'Failed to get token stats',
       message: error.message,
     });
   }
