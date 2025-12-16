@@ -24,7 +24,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.5",
+    "@types/bcrypt": "^6.0.0",
     "@types/cookie-parser": "^1.4.10",
+    "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",
     "jose": "^6.1.0",

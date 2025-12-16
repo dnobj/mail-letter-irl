@@ -803,6 +803,13 @@
                             If checked, only users with zero credit transactions can redeem this code.
                         </small>
                     </div>
+                    <div class="form-group">
+                        <label>Expiration Days (leave empty for no expiration)</label>
+                        <input type="number" id="promo-expiration-days" placeholder="e.g. 90 days">
+                        <small style="color: #888; display: block; margin-top: 4px;">
+                            Credits will expire this many days after redemption.
+                        </small>
+                    </div>
                     <button class="btn" onclick="createPromo()">Create Campaign</button>
                     <div id="promo-result"></div>
                 </div>
@@ -1154,12 +1161,13 @@
                 }
                 const html = `
                     <table>
-                        <tr><th>Code</th><th>Name</th><th>Credits</th><th>Redemptions</th><th>Status</th><th>Actions</th></tr>
+                        <tr><th>Code</th><th>Name</th><th>Credits</th><th>Expiration</th><th>Redemptions</th><th>Status</th><th>Actions</th></tr>
                         ${data.campaigns.map(c => `
                             <tr>
                                 <td><strong>${c.code}</strong>${c.requiresNewUser ? '<br><span style="font-size:10px;color:#17a2b8;font-weight:normal;">New Users Only</span>' : ''}</td>
                                 <td>${c.name}</td>
                                 <td>${c.creditsAmount}</td>
+                                <td style="font-size:12px;color:#888;">${c.expirationDays ? c.expirationDays + ' days' : 'Never'}</td>
                                 <td>${c.currentRedemptions}${c.maxTotalRedemptions ? '/' + c.maxTotalRedemptions : ''} (max ${c.maxPerUser}/user)</td>
                                 <td>
                                     <select onchange="updatePromoStatus('${c.campaignId}', this.value)" style="background:#0f3460;color:#fff;border:1px solid #0f3460;padding:4px;border-radius:3px;">
@@ -1214,6 +1222,8 @@
             const maxTotalInput = document.getElementById('promo-max-total').value.trim();
             const maxTotalRedemptions = maxTotalInput ? parseInt(maxTotalInput) : null;
             const requiresNewUser = document.getElementById('promo-new-users-only').checked;
+            const expirationDaysInput = document.getElementById('promo-expiration-days').value.trim();
+            const expirationDays = expirationDaysInput ? parseInt(expirationDaysInput) : null;
 
             if (!code || !name || isNaN(creditsAmount)) {
                 showError('promo-result', 'Please fill code, name, and credits amount');
@@ -1221,9 +1231,19 @@
             }
             showLoading('promo-result');
             try {
-                const payload = { code, name, creditsAmount, maxPerUser, expirationPolicy: 'never', requiresNewUser };
+                const payload = {
+                    code,
+                    name,
+                    creditsAmount,
+                    maxPerUser,
+                    expirationPolicy: expirationDays ? 'days_from_activation' : 'never',
+                    requiresNewUser
+                };
                 if (maxTotalRedemptions !== null) {
                     payload.maxTotalRedemptions = maxTotalRedemptions;
+                }
+                if (expirationDays !== null) {
+                    payload.expirationDays = expirationDays;
                 }
                 await api('/api/admin/promo/campaigns', 'POST', payload);
                 document.getElementById('promo-result').innerHTML = `<div class="success-msg">Campaign created!</div>`;
@@ -1234,6 +1254,7 @@
                 document.getElementById('promo-max-per-user').value = '1';
                 document.getElementById('promo-max-total').value = '';
                 document.getElementById('promo-new-users-only').checked = false;
+                document.getElementById('promo-expiration-days').value = '';
                 loadPromos();
             } catch (e) {
                 showError('promo-result', e.message);

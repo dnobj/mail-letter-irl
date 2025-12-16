@@ -14,6 +14,7 @@ import {
   validateAuthorizationHeader
 } from "../auth/tokenValidator.js";
 import { handleCreditApiRequest } from "../api/creditApiHandler.js";
+import { handlePATApiRequest } from "../api/patApiHandler.js";
 import { handleAdminApiRequest } from "../api/adminApiHandler.js";
 import { isAdminEnabled } from "../api/middleware/adminAuth.js";
 import { handleLetterApiRequest } from "../api/letterApiHandler.js";
@@ -497,6 +498,21 @@ export async function startHttpServer() {
       return;
     }
 
+    // MCP setup page (public, no auth required)
+    if (url.pathname === "/mcp-setup" || url.pathname === "/mcp-setup.html") {
+      try {
+        const setupPath = path.resolve(__dirname, "..", "..", "public", "mcp-setup.html");
+        const content = await fs.readFile(setupPath, "utf-8");
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.end(content);
+      } catch (error) {
+        res.statusCode = 404;
+        res.end("MCP setup page not found");
+      }
+      return;
+    }
+
     // Stripe Checkout API
     if (url.pathname === "/api/stripe/create-checkout-session" && req.method === "POST") {
       // Rate limit checkout attempts
@@ -638,6 +654,17 @@ export async function startHttpServer() {
     }
     const creditApiHandled = await handleCreditApiRequest(req, res, url.pathname);
     if (creditApiHandled) {
+      return;
+    }
+
+    // PAT (Personal Access Token) API routes
+    if (url.pathname.startsWith('/api/tokens')) {
+      if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
+        return; // Rate limited
+      }
+    }
+    const patApiHandled = await handlePATApiRequest(req, res, url.pathname);
+    if (patApiHandled) {
       return;
     }
 

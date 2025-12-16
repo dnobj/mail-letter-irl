@@ -85,6 +85,37 @@
         <div class="spinner"></div>
       </div>
     </div>
+
+    <!-- API Tokens Section -->
+    <div class="tokens-section">
+      <h2>API Tokens</h2>
+      <p class="section-description">
+        Create personal access tokens to use Letter IRL with MCP clients like Claude Desktop.
+        <a href="/mcp-setup.html" target="_blank">View setup instructions</a>
+      </p>
+
+      <!-- Create Token Form -->
+      <div class="token-form">
+        <input type="text" id="token-name" placeholder="Token name (e.g., Claude Desktop)" maxlength="100" class="token-input">
+        <button class="btn btn-primary" onclick="createToken()">Generate Token</button>
+      </div>
+
+      <!-- New Token Display (shown once after creation) -->
+      <div id="new-token-display" class="new-token-display" style="display: none;">
+        <div class="new-token-warning">
+          Save this token now - you won't be able to see it again!
+        </div>
+        <div class="new-token-value">
+          <code id="new-token-value"></code>
+          <button class="btn btn-secondary btn-small" onclick="copyToken()">Copy</button>
+        </div>
+      </div>
+
+      <!-- Token List -->
+      <div id="tokens-content">
+        <div class="spinner"></div>
+      </div>
+    </div>
   </div>
 
   <script src="/dashboard/js/app.js"></script>

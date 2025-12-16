@@ -504,3 +504,76 @@ export interface TierUpdateBatchResult {
     newTier: UserTier;
   }>;
 }
+
+// ============================================================================
+// Personal Access Token Types (US-MCP-01, US-MCP-02, US-MCP-03)
+// ============================================================================
+
+export type PATStatus = 'active' | 'revoked';
+
+/**
+ * Database row representation of a Personal Access Token
+ */
+export interface PersonalAccessToken {
+  token_id: number;
+  user_id: string;
+  name: string;
+  token_hash: string;
+  token_prefix: string;
+  status: PATStatus;
+  expires_at: Date | null;
+  last_used_at: Date | null;
+  created_at: Date;
+  revoked_at: Date | null;
+}
+
+/**
+ * Result returned when creating a new token
+ * Note: `token` is the raw token shown ONCE to the user
+ */
+export interface CreateTokenResult {
+  token: string;           // Raw token - only shown once!
+  tokenId: number;
+  name: string;
+  expiresAt: Date | null;
+}
+
+/**
+ * Token info for listing (without sensitive data)
+ */
+export interface TokenInfo {
+  tokenId: number;
+  name: string;
+  tokenPrefix: string;     // Last 4 chars for display (e.g., "o345")
+  status: PATStatus;
+  expiresAt: Date | null;
+  lastUsedAt: Date | null;
+  createdAt: Date;
+}
+
+/**
+ * Result of token validation
+ */
+export interface ValidateTokenResult {
+  valid: boolean;
+  userId?: string;
+  tokenId?: number;
+  error?: string;
+}
+
+/**
+ * Parameters for creating a token
+ */
+export interface CreateTokenParams {
+  userId: string;
+  name: string;
+  expiresAt?: Date;
+}
+
+/**
+ * Result of token revocation
+ */
+export interface RevokeTokenResult {
+  success: boolean;
+  alreadyRevoked?: boolean;
+}
