@@ -1,6 +1,6 @@
 # User Stories
 
-**Last Updated:** December 15, 2025
+**Last Updated:** December 16, 2025
 **Purpose:** Test coverage and acceptance criteria for Letter IRL
 
 ---
@@ -866,26 +866,59 @@ interface ProviderStatus {
 **So that** I can configure Letter IRL quickly
 
 **Acceptance Criteria:**
-- [ ] Website page at `/mcp-setup` with instructions
-- [ ] Shows server URL: `https://api.letterirl.com`
-- [ ] Shows example config for common clients (Claude Desktop, etc.)
-- [ ] Explains PAT generation process
-- [ ] Links to dashboard for token generation
+- [ ] Website page at `/mcp` with instructions
+- [ ] Shows server URL: `https://api.letterirl.com/mcp`
+- [ ] Shows platform-specific configs (Windows vs macOS/Linux)
+- [ ] Explains OAuth flow for Claude Desktop (preferred)
+- [ ] Explains PAT generation for clients without OAuth support
+- [ ] Links to dashboard for token generation (if needed)
 - [ ] Troubleshooting section for common issues
 
-**Example Config (Claude Desktop):**
+**Example Config (Claude Desktop - OAuth, Recommended):**
+
+Windows:
 ```json
 {
   "mcpServers": {
     "letter-irl": {
-      "url": "https://api.letterirl.com/sse",
-      "headers": {
-        "Authorization": "Bearer lirl_pat_your_token_here"
+      "command": "npx.cmd",
+      "args": ["-y", "mcp-remote", "https://api.letterirl.com/mcp"]
+    }
+  }
+}
+```
+
+macOS/Linux:
+```json
+{
+  "mcpServers": {
+    "letter-irl": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://api.letterirl.com/mcp"]
+    }
+  }
+}
+```
+
+**Example Config (PAT - for clients without OAuth):**
+```json
+{
+  "mcpServers": {
+    "letter-irl": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote", "https://api.letterirl.com/mcp",
+        "--header", "Authorization:${AUTH_HEADER}"
+      ],
+      "env": {
+        "AUTH_HEADER": "Bearer lirl_pat_your_token_here"
       }
     }
   }
 }
 ```
+
+**Note:** Claude Desktop supports OAuth natively via `mcp-remote`. Users authenticate via browser on first connection. PAT is only needed for MCP clients that don't support OAuth.
 
 ---
 
