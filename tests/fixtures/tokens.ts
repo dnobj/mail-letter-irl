@@ -1,8 +1,8 @@
 /**
  * Test fixtures for Personal Access Tokens
  *
- * Based on user stories US-9.1, US-9.2, US-9.3 from docs/USER-STORIES.md
- * Used by personas Morgan and Jordan from docs/PERSONAS.md
+ * Based on user stories US-9.1, US-9.2, US-9.3 from docs/user-stories.md
+ * Used by personas Morgan and Jordan from docs/personas.md
  */
 
 import { testUsers } from './users.js';

@@ -67,7 +67,7 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 - Automatic backups
 - Branch databases (for development)
 
-**Relevant Docs**: `docs/DATABASE-SCHEMA.md`, `docs/database-setup.md`
+**Relevant Docs**: `docs/database-schema.md`, `docs/database-setup.md`
 
 ---
 
@@ -119,7 +119,7 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 - Delivery tracking
 - Webhooks (for status updates)
 
-**Relevant Docs**: `docs/postgrid-api-research.md`, `docs/TESTING-POSTGRID.md`, `docs/ADDRESS-VALIDATION.md`
+**Relevant Docs**: `docs/postgrid-api-research.md`, `docs/testing-postgrid.md`, `docs/address-validation.md`
 
 ---
 

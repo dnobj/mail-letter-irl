@@ -290,5 +290,5 @@ Response: { success: true }
 
 ## Related Documentation
 
-- [USER-STORIES.md](USER-STORIES.md) - US-MCP-01 through US-MCP-05
-- [PERSONAS.md](PERSONAS.md) - Morgan (MCP Power User)
+- [user-stories.md](user-stories.md) - US-MCP-01 through US-MCP-05
+- [personas.md](personas.md) - Morgan (MCP Power User)

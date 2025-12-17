@@ -161,11 +161,11 @@ letter-irl/
 
 | Document | Purpose |
 |----------|---------|
-| [PERSONAS.md](PERSONAS.md) | User archetypes (Sarah, Marcus, Morgan, etc.) |
-| [USER-STORIES.md](USER-STORIES.md) | Feature specs with acceptance criteria |
-| [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) | Database structure |
-| [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) | Letter sending implementation |
-| [STATUS.md](STATUS.md) | Project status overview |
+| [personas.md](personas.md) | User archetypes (Sarah, Marcus, Morgan, etc.) |
+| [user-stories.md](user-stories.md) | Feature specs with acceptance criteria |
+| [database-schema.md](database-schema.md) | Database structure |
+| [letter-send-flow.md](letter-send-flow.md) | Letter sending implementation |
+| [status.md](status.md) | Project status overview |
 
 ---
 
@@ -232,7 +232,7 @@ npm run db:migrate:rollback
 1. Create file: `db/migrations/007_description.sql`
 2. Write SQL (include both up and rollback sections)
 3. Run migration
-4. Update `DATABASE-SCHEMA.md` if needed
+4. Update `database-schema.md` if needed
 
 ---
 
@@ -277,7 +277,7 @@ Same as local, but with production values. Secrets managed in Railway dashboard.
 
 1. Create migration in `db/migrations/`
 2. Run `npm run db:migrate`
-3. Update `DATABASE-SCHEMA.md`
+3. Update `database-schema.md`
 4. Add queries in `src/db/`
 
 ---

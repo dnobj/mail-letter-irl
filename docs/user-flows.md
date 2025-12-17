@@ -226,6 +226,6 @@ Used for credit-granting promo codes by existing users.
 
 ## See Also
 
-- [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) - Technical implementation details
-- [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) - Database structure
-- [STATUS.md](STATUS.md) - Project overview
+- [letter-send-flow.md](letter-send-flow.md) - Technical implementation details
+- [database-schema.md](database-schema.md) - Database structure
+- [status.md](status.md) - Project overview

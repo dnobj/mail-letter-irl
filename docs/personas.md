@@ -491,6 +491,6 @@ When writing test cases, consider:
 
 ## See Also
 
-- [USER-STORIES.md](USER-STORIES.md) - Detailed user stories with acceptance criteria
-- [STATUS.md](STATUS.md) - Project overview
+- [user-stories.md](user-stories.md) - Detailed user stories with acceptance criteria
+- [status.md](status.md) - Project overview
 - [user-flows.md](user-flows.md) - Step-by-step user flows

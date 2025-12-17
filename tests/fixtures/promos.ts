@@ -1,7 +1,7 @@
 /**
  * Test fixtures for promo campaigns
  *
- * Based on personas from docs/PERSONAS.md (Alex - The Promo Hunter)
+ * Based on personas from docs/personas.md (Alex - The Promo Hunter)
  */
 
 import type { PromoCampaign, PromoRedemption } from '../../src/services/types.js';
