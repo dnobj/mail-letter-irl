@@ -22,8 +22,19 @@ interface RateLimitConfig {
 }
 
 // In-memory store for rate limit tracking
-// Key format: `${identifier}:${endpoint}`
+// Key format: `${identifier}:${endpoint}` or `global:${endpoint}` for global limits
 const rateLimitStore = new Map<string, RateLimitEntry>();
+
+// Track blocked request counts for monitoring
+const blockedRequestCounts = new Map<string, number>();
+
+// Global rate limit configuration (system-wide, not per-IP)
+const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
+  'promo_public': {
+    windowMs: 60 * 1000,      // 1 minute
+    maxRequests: 100,         // 100 total per minute (protects against distributed attacks)
+  },
+};
 
 // Cleanup interval to prevent memory leaks (run every 5 minutes)
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -60,13 +71,18 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 60,          // 60 tool calls per minute
   },
+  // Public promo code validation - prevent brute force enumeration
+  'promo_public': {
+    windowMs: 60 * 1000,      // 1 minute
+    maxRequests: 10,          // 10 per minute per IP (generous for legitimate use)
+  },
 };
 
 /**
  * Get client identifier from request
  * Uses X-Forwarded-For for proxied requests, falls back to socket address
  */
-function getClientIdentifier(req: IncomingMessage): string {
+export function getClientIdentifier(req: IncomingMessage): string {
   // Check for forwarded IP (from reverse proxy)
   const forwardedFor = req.headers['x-forwarded-for'];
   if (forwardedFor) {
@@ -344,4 +360,157 @@ export async function rateLimitMiddlewareWithTier(
   }
 
   return false;
+}
+
+// ============================================================================
+// Global Rate Limiting (System-Wide)
+// ============================================================================
+
+/**
+ * Check global rate limit for an endpoint type.
+ * This is system-wide, not per-IP.
+ */
+export function checkGlobalRateLimit(
+  endpointType: string
+): {
+  allowed: boolean;
+  limit: number;
+  remaining: number;
+  resetMs: number;
+} {
+  const config = GLOBAL_RATE_LIMITS[endpointType];
+  if (!config) {
+    // No global limit configured for this endpoint
+    return { allowed: true, limit: 0, remaining: 0, resetMs: 0 };
+  }
+
+  const now = Date.now();
+  const key = `global:${endpointType}`;
+
+  let entry = rateLimitStore.get(key);
+
+  if (!entry || now - entry.windowStart >= config.windowMs) {
+    entry = { count: 1, windowStart: now };
+    rateLimitStore.set(key, entry);
+    return {
+      allowed: true,
+      limit: config.maxRequests,
+      remaining: config.maxRequests - 1,
+      resetMs: config.windowMs,
+    };
+  }
+
+  if (entry.count >= config.maxRequests) {
+    return {
+      allowed: false,
+      limit: config.maxRequests,
+      remaining: 0,
+      resetMs: config.windowMs - (now - entry.windowStart),
+    };
+  }
+
+  entry.count++;
+  return {
+    allowed: true,
+    limit: config.maxRequests,
+    remaining: config.maxRequests - entry.count,
+    resetMs: config.windowMs - (now - entry.windowStart),
+  };
+}
+
+/**
+ * Increment blocked request counter for monitoring
+ */
+function incrementBlockedCount(endpointType: string, reason: 'ip' | 'global'): void {
+  const key = `${endpointType}:${reason}`;
+  const current = blockedRequestCounts.get(key) || 0;
+  blockedRequestCounts.set(key, current + 1);
+}
+
+/**
+ * Rate limit middleware with both per-IP and global limits.
+ * Use this for public endpoints that need protection against distributed attacks.
+ *
+ * @returns true if request was blocked (response already sent), false otherwise
+ */
+export function rateLimitMiddlewareWithGlobal(
+  req: IncomingMessage,
+  res: ServerResponse,
+  endpointType: keyof typeof RATE_LIMITS
+): boolean {
+  // Check per-IP first (fast rejection of individual abusers)
+  const ipResult = checkRateLimit(req, endpointType);
+
+  if (!ipResult.allowed) {
+    const clientIp = getClientIdentifier(req);
+    console.warn(`⚠️ Rate limit hit (IP): ${clientIp} on ${endpointType}`);
+    incrementBlockedCount(endpointType, 'ip');
+
+    res.setHeader('X-RateLimit-Limit', ipResult.limit);
+    res.setHeader('X-RateLimit-Remaining', 0);
+    res.setHeader('X-RateLimit-Reset', Math.ceil(ipResult.resetMs / 1000));
+    res.statusCode = 429;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Retry-After', Math.ceil(ipResult.resetMs / 1000));
+    res.end(JSON.stringify({
+      error: 'Too Many Requests',
+      message: `Rate limit exceeded. Please wait ${Math.ceil(ipResult.resetMs / 1000)} seconds before retrying.`,
+      retryAfter: Math.ceil(ipResult.resetMs / 1000),
+    }));
+    return true;
+  }
+
+  // Check global limit (protects against distributed attacks)
+  const globalResult = checkGlobalRateLimit(endpointType);
+
+  if (!globalResult.allowed) {
+    console.warn(`⚠️ Rate limit hit (global): ${endpointType} - system-wide limit reached`);
+    incrementBlockedCount(endpointType, 'global');
+
+    res.setHeader('X-RateLimit-Limit', globalResult.limit);
+    res.setHeader('X-RateLimit-Remaining', 0);
+    res.setHeader('X-RateLimit-Reset', Math.ceil(globalResult.resetMs / 1000));
+    res.statusCode = 429;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Retry-After', Math.ceil(globalResult.resetMs / 1000));
+    res.end(JSON.stringify({
+      error: 'Too Many Requests',
+      message: `Rate limit exceeded. Please wait ${Math.ceil(globalResult.resetMs / 1000)} seconds before retrying.`,
+      retryAfter: Math.ceil(globalResult.resetMs / 1000),
+    }));
+    return true;
+  }
+
+  // Both checks passed - set headers based on per-IP limit (more relevant to user)
+  res.setHeader('X-RateLimit-Limit', ipResult.limit);
+  res.setHeader('X-RateLimit-Remaining', ipResult.remaining);
+  res.setHeader('X-RateLimit-Reset', Math.ceil(ipResult.resetMs / 1000));
+
+  return false;
+}
+
+/**
+ * Get blocked request counts for monitoring
+ */
+export function getBlockedRequestCounts(): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const [key, count] of blockedRequestCounts.entries()) {
+    result[key] = count;
+  }
+  return result;
+}
+
+/**
+ * Reset blocked request counts (useful for testing)
+ */
+export function resetBlockedRequestCounts(): void {
+  blockedRequestCounts.clear();
+}
+
+/**
+ * Clear all rate limit state (useful for testing)
+ */
+export function clearRateLimitState(): void {
+  rateLimitStore.clear();
+  blockedRequestCounts.clear();
 }
