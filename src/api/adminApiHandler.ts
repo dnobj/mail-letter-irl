@@ -5,6 +5,7 @@
  * - POST /api/admin/credits/adjust - Manually adjust user credits
  * - GET /api/admin/users/:userId - Get user details
  * - GET /api/admin/stats - Get system statistics
+ * - GET /api/admin/ratelimit/stats - Get rate limiting statistics
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
@@ -31,6 +32,7 @@ import {
   getStuckLetters,
 } from '../services/statusSyncService.js';
 import { getTokenStats } from '../services/patService.js';
+import { getRateLimitStats, getBlockedRequestCounts, RATE_LIMITS } from './middleware/rateLimit.js';
 
 /**
  * Send JSON response
@@ -315,6 +317,16 @@ export async function handleAdminApiRequest(
     // GET /api/admin/tokens/stats - Get PAT usage statistics
     if (pathname === '/api/admin/tokens/stats' && req.method === 'GET') {
       await handleGetTokenStats(res);
+      return true;
+    }
+
+    // =========================================================================
+    // Rate Limiting Stats Routes
+    // =========================================================================
+
+    // GET /api/admin/ratelimit/stats - Get rate limiting statistics
+    if (pathname === '/api/admin/ratelimit/stats' && req.method === 'GET') {
+      await handleGetRateLimitStats(res);
       return true;
     }
 
@@ -1628,6 +1640,46 @@ async function handleGetTokenStats(res: ServerResponse) {
     console.error('Get token stats error:', error);
     sendJson(res, 500, {
       error: 'Failed to get token stats',
+      message: error.message,
+    });
+  }
+}
+
+// =========================================================================
+// Rate Limiting Stats Handlers
+// =========================================================================
+
+/**
+ * GET /api/admin/ratelimit/stats
+ * Get rate limiting statistics including current counters and blocked request counts
+ */
+async function handleGetRateLimitStats(res: ServerResponse) {
+  try {
+    const stats = getRateLimitStats();
+    const blockedCounts = getBlockedRequestCounts();
+
+    // Get configured limits for reference
+    const configuredLimits: Record<string, { windowMs: number; maxRequests: number }> = {};
+    for (const [key, config] of Object.entries(RATE_LIMITS)) {
+      configuredLimits[key] = {
+        windowMs: config.windowMs,
+        maxRequests: config.maxRequests,
+      };
+    }
+
+    sendJson(res, 200, {
+      generatedAt: new Date().toISOString(),
+      currentState: {
+        totalActiveEntries: stats.totalEntries,
+        entriesByEndpoint: stats.entriesByType,
+      },
+      blockedRequests: blockedCounts,
+      configuredLimits,
+    });
+  } catch (error: any) {
+    console.error('Get rate limit stats error:', error);
+    sendJson(res, 500, {
+      error: 'Failed to get rate limit stats',
       message: error.message,
     });
   }

@@ -771,10 +771,13 @@ interface ProviderStatus {
 **So that** abuse is prevented
 
 **Acceptance Criteria:**
-- [ ] Per-user rate limits enforced
-- [ ] Tier-based limits (trusted users get higher limits)
-- [ ] 429 Too Many Requests when exceeded
-- [ ] Limits apply to MCP tools and API endpoints
+- [x] Per-user rate limits enforced
+- [x] Tier-based limits (trusted users get higher limits)
+- [x] 429 Too Many Requests when exceeded
+- [x] Limits apply to MCP tools and API endpoints
+- [x] Public promo validation endpoint rate limited (10/min per IP + 100/min global)
+- [x] Rate limit headers included (X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset)
+- [x] Admin endpoint for rate limit stats (`GET /api/admin/ratelimit/stats`)
 
 ---
 
@@ -1015,7 +1018,7 @@ macOS/Linux:
 
 ## See Also
 
-- [PERSONAS.md](PERSONAS.md) - User personas and archetypes
-- [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) - Technical implementation details
-- [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) - Database structure
-- [STATUS.md](STATUS.md) - Project overview
+- [personas.md](personas.md) - User personas and archetypes
+- [letter-send-flow.md](letter-send-flow.md) - Technical implementation details
+- [database-schema.md](database-schema.md) - Database structure
+- [status.md](status.md) - Project overview

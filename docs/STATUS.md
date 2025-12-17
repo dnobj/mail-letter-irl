@@ -89,7 +89,7 @@ Letter IRL is a **physical letter mailing service** integrated with ChatGPT via 
 7. `007_seed_preview_promos.sql` - Preview access promo codes
 8. `008_status_sync.sql` - Status sync tracking columns
 
-See [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) for full schema details.
+See [database-schema.md](database-schema.md) for full schema details.
 
 ---
 
@@ -103,7 +103,7 @@ See [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) for full schema details.
 | `get_account_balance` | View credit balance |
 | `switch_account` | Logout and re-authenticate |
 
-See [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) for the complete send flow.
+See [letter-send-flow.md](letter-send-flow.md) for the complete send flow.
 
 ---
 
@@ -157,6 +157,21 @@ See [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) for the complete send flow.
 - Tier-based limits: standard vs trusted
 - Trusted tier: 3+ purchases, oldest 120+ days ago
 
+**Rate Limit Configuration:**
+| Endpoint Type | Per-IP Limit | Global Limit | Window |
+|---------------|--------------|--------------|--------|
+| auth | 10/min | - | 1 min |
+| send_letter | 20/hour | - | 1 hour |
+| api | 100/min | - | 1 min |
+| checkout | 10/min | - | 1 min |
+| admin | 50/min | - | 1 min |
+| mcp | 60/min | - | 1 min |
+| promo_public | 10/min | 100/min | 1 min |
+
+**Admin Monitoring:**
+- `GET /api/admin/ratelimit/stats` - View rate limit statistics
+- Console logging when rate limits are triggered
+
 ### User Tiers
 | Tier | Criteria | Rate Limit |
 |------|----------|------------|
@@ -203,7 +218,7 @@ letterWorker → Sends to PostGrid
 Letter printed and mailed
 ```
 
-See [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) for details.
+See [letter-send-flow.md](letter-send-flow.md) for details.
 
 ---
 
@@ -371,8 +386,8 @@ npm run db:migrate:rollback # View rollback info
 
 ## Documentation Index
 
-- [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) - Complete letter flow with drafts
-- [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) - Full database schema
+- [letter-send-flow.md](letter-send-flow.md) - Complete letter flow with drafts
+- [database-schema.md](database-schema.md) - Full database schema
 - [user-flows.md](user-flows.md) - User interaction flows
-- [DEPLOYMENT.md](DEPLOYMENT.md) - Deployment guide
-- [INFRASTRUCTURE.md](INFRASTRUCTURE.md) - Infrastructure overview
+- [deployment.md](deployment.md) - Deployment guide
+- [infrastructure.md](infrastructure.md) - Infrastructure overview

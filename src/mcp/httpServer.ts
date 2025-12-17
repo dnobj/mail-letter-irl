@@ -30,7 +30,7 @@ import { initializeJobQueue, stopJobQueue } from "../services/jobQueue.js";
 import { startLetterWorker } from "../workers/letterWorker.js";
 import { startCreditExpirationWorker } from "../workers/creditExpirationWorker.js";
 import { startStatusSyncWorker, stopStatusSyncWorker } from "../workers/statusSyncWorker.js";
-import { rateLimitMiddlewareWithTier } from "../api/middleware/rateLimit.js";
+import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -474,6 +474,9 @@ export async function startHttpServer() {
       const origin = resolveCorsOrigin(req.headers.origin);
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Content-Type', 'application/json');
+
+      // Rate limit check (per-IP + global) - prevents brute force code enumeration
+      if (rateLimitMiddlewareWithGlobal(req, res, 'promo_public')) return;
 
       const code = url.pathname.replace('/api/public/promo/validate/', '');
       if (!code) {
