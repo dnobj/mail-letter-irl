@@ -673,6 +673,43 @@ interface ProviderStatus {
 
 ---
 
+### US-EDGE-08: Promo Redemption Race Condition Prevention
+**As the** system
+**I want to** prevent race conditions during promo code redemption
+**So that** campaign limits cannot be exceeded by concurrent requests
+
+**Acceptance Criteria:**
+- [ ] `max_total_redemptions` enforced atomically
+- [ ] Concurrent redemptions cannot exceed campaign limit
+- [ ] Atomic conditional increment: only succeeds if limit not reached
+- [ ] If increment fails, return "Promo code redemption limit reached"
+- [ ] Fast pre-validation for user feedback (outside transaction)
+- [ ] Safe atomic check inside transaction
+
+**Race Conditions Prevented:**
+1. **Global limit exceeded**: Two users redeeming simultaneously when only 1 redemption remains
+2. **New user check bypass**: Same user redeeming two "new user only" promos concurrently
+
+**Implementation Strategy (Hybrid):**
+1. Keep `validatePromoCode()` for fast user feedback (optimistic)
+2. Inside `redeemPromoCode()` transaction:
+   - Atomic increment with condition: `UPDATE ... SET current_redemptions = current_redemptions + 1 WHERE current_redemptions < max_total_redemptions`
+   - If no rows affected, limit was reached between validation and redemption
+   - Roll back transaction on failure
+
+**Test Scenarios:**
+- [ ] Campaign with max_total_redemptions=1, two concurrent redemptions → only one succeeds
+- [ ] Campaign with max_total_redemptions=100, redemption 100 and 101 concurrent → 100 succeeds, 101 fails
+- [ ] Validation passes but redemption fails due to limit → clear error message
+- [ ] Normal single-user redemption still works correctly
+
+**Related Stories:**
+- US-SEC-06 (Promo Code Abuse Prevention)
+- US-EDGE-03 (Concurrent Request Handling)
+- US-PROMO-02 (Redeem Promo Code)
+
+---
+
 ## Security (SEC)
 
 ### US-SEC-01: Authentication Required
@@ -944,7 +981,7 @@ macOS/Linux:
 | P0 - Critical | Security | US-SEC-01, US-SEC-02 | System |
 | P1 - High | Letter Sending | US-LETTER-04, US-LETTER-05, US-LETTER-06, US-LETTER-07 | Marcus, David, System |
 | P1 - High | Credits | US-CREDIT-03, US-CREDIT-06, US-CREDIT-09 | System |
-| P1 - High | Edge Cases | US-EDGE-01, US-EDGE-03, US-EDGE-04 | Eleanor, System |
+| P1 - High | Edge Cases | US-EDGE-01, US-EDGE-03, US-EDGE-04, US-EDGE-08 | Eleanor, System |
 | P1 - High | Account | US-ACCT-00 | Sarah, Eleanor (new users) |
 | P1 - High | MCP Access | US-MCP-01, US-MCP-03 | Morgan, Jordan |
 | P2 - Medium | Promo | US-PROMO-01, US-PROMO-02, US-PROMO-03 | Alex |
@@ -968,11 +1005,11 @@ macOS/Linux:
 | Promo Codes | US-PROMO | 3 |
 | Account | US-ACCT | 4 |
 | Admin | US-ADMIN | 8 |
-| Edge Cases | US-EDGE | 7 |
+| Edge Cases | US-EDGE | 8 |
 | Security | US-SEC | 6 |
 | Data Integrity | US-DATA | 3 |
 | MCP Access | US-MCP | 5 |
-| **Total** | | **52** |
+| **Total** | | **53** |
 
 ---
 

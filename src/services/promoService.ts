@@ -274,13 +274,21 @@ export async function validatePromoCode(
 
 /**
  * Redeem a promo code for credits
+ *
+ * Uses a hybrid approach for race condition prevention (US-EDGE-08):
+ * 1. Fast validation OUTSIDE transaction for quick user feedback
+ * 2. Atomic conditional increment INSIDE transaction to prevent exceeding limits
+ *
+ * The atomic increment uses: UPDATE ... WHERE current_redemptions < max_total_redemptions
+ * If no rows are affected, another user grabbed the last redemption slot.
  */
 export async function redeemPromoCode(
   params: RedeemPromoParams
 ): Promise<RedeemPromoResult> {
   const { userId, email, promoCode } = params;
 
-  // Validate first
+  // Validate first (optimistic - for fast user feedback)
+  // This catches obvious issues like invalid codes, inactive campaigns, etc.
   const validation = await validatePromoCode(promoCode, userId);
 
   if (!validation.valid) {
@@ -303,7 +311,31 @@ export async function redeemPromoCode(
   // 'never' policy means no expiration
 
   return await transaction(async (client) => {
-    // Upsert user FIRST (credit_ledger has FK constraint on users)
+    // ATOMIC INCREMENT FIRST - prevents race condition (US-EDGE-08)
+    // This UPDATE only succeeds if:
+    // - Campaign has no limit (max_total_redemptions IS NULL), OR
+    // - Current redemptions is still below the limit
+    const incrementResult = await client.query<PromoCampaign>(
+      `UPDATE promo_campaigns
+       SET current_redemptions = current_redemptions + 1,
+           updated_at = NOW()
+       WHERE campaign_id = $1
+         AND status = 'active'
+         AND (max_total_redemptions IS NULL OR current_redemptions < max_total_redemptions)
+       RETURNING *`,
+      [campaign.campaign_id]
+    );
+
+    // If no rows affected, the limit was reached between validation and now
+    if (incrementResult.rows.length === 0) {
+      // Don't throw - return error result so transaction can rollback cleanly
+      return {
+        success: false,
+        error: 'Promo code redemption limit reached',
+      };
+    }
+
+    // Upsert user (credit_ledger has FK constraint on users)
     await client.query(
       `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
        VALUES ($1, $2, $3, 0, 0)
@@ -356,13 +388,7 @@ export async function redeemPromoCode(
       [campaign.campaign_id, userId, ledgerEntry.ledger_id]
     );
 
-    // Increment campaign redemption count
-    await client.query(
-      `UPDATE promo_campaigns
-       SET current_redemptions = current_redemptions + 1, updated_at = NOW()
-       WHERE campaign_id = $1`,
-      [campaign.campaign_id]
-    );
+    // Note: Increment already done above with atomic check
 
     console.log(
       `🎁 Redeemed promo ${promoCode} for user ${userId}: ${campaign.credits_amount} credits, expires: ${expiresAt?.toISOString() || 'never'}`
