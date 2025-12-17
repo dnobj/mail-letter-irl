@@ -1,7 +1,7 @@
 /**
  * Test fixtures for users
  *
- * Based on personas from docs/PERSONAS.md
+ * Based on personas from docs/personas.md
  */
 
 export const testUsers = {

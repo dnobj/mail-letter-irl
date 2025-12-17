@@ -195,7 +195,7 @@ For unit tests, mock JWT validation. For integration tests, you can use test tok
 
 ## User Story Coverage
 
-Tests are mapped to user stories from [USER-STORIES.md](USER-STORIES.md):
+Tests are mapped to user stories from [user-stories.md](user-stories.md):
 
 | Test File | User Stories |
 |-----------|--------------|
@@ -306,6 +306,6 @@ Integration tests with real APIs require secrets:
 
 ## See Also
 
-- [USER-STORIES.md](USER-STORIES.md) - User stories with acceptance criteria
-- [PERSONAS.md](PERSONAS.md) - Test personas
+- [user-stories.md](user-stories.md) - User stories with acceptance criteria
+- [personas.md](personas.md) - Test personas
 - [engineering-plan.md](engineering-plan.md) - Testing strategy recommendations

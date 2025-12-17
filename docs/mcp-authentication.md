@@ -142,5 +142,5 @@ Is this Claude Desktop?
 ## See Also
 
 - [Claude Desktop MCP Learnings](learnings/claude-desktop-mcp.md) - Detailed troubleshooting
-- [PERSONAS.md](PERSONAS.md) - Morgan (MCP Power User) and Jordan (Agent Builder)
-- [USER-STORIES.md](USER-STORIES.md) - US-MCP-01 through US-MCP-05
+- [personas.md](personas.md) - Morgan (MCP Power User) and Jordan (Agent Builder)
+- [user-stories.md](user-stories.md) - US-MCP-01 through US-MCP-05

@@ -8,12 +8,12 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 
 ## Quick Start
 
-- [STATUS.md](STATUS.md) - **Start here** - Project overview, current state, architecture
-- [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) - How letters are sent (draft system, credits, jobs)
-- [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) - Complete database schema (12 tables)
-- [USER-STORIES.md](USER-STORIES.md) - User stories for test coverage and acceptance criteria
-- [PERSONAS.md](PERSONAS.md) - User personas for product design and testing
-- [TESTING.md](TESTING.md) - Testing strategy and guide
+- [status.md](status.md) - **Start here** - Project overview, current state, architecture
+- [letter-send-flow.md](letter-send-flow.md) - How letters are sent (draft system, credits, jobs)
+- [database-schema.md](database-schema.md) - Complete database schema (12 tables)
+- [user-stories.md](user-stories.md) - User stories for test coverage and acceptance criteria
+- [personas.md](personas.md) - User personas for product design and testing
+- [testing.md](testing.md) - Testing strategy and guide
 
 ---
 
@@ -26,14 +26,14 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 
 ### User Flows
 - [User Flows](user-flows.md) - Step-by-step flows for sending letters, checking status, buying credits
-- [LETTER-SEND-FLOW.md](LETTER-SEND-FLOW.md) - Technical implementation of the send flow
+- [letter-send-flow.md](letter-send-flow.md) - Technical implementation of the send flow
 
 ### API & Tools
 - [MCP Tool APIs](tool-apis.md) - JSON schemas and behaviors for MCP tools
 - [UI Widgets](ui-widgets.md) - Apps SDK template layouts and interactions
 
 ### Database & Data Model
-- [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) - Complete table definitions, indexes, triggers
+- [database-schema.md](database-schema.md) - Complete table definitions, indexes, triggers
 - [Account and Credits](account-credits.md) - Credit data model and validation rules
 
 ---
@@ -42,13 +42,13 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 
 ### Setup & Deployment
 - [Database Setup](database-setup.md) - Neon PostgreSQL configuration
-- [DEPLOYMENT.md](DEPLOYMENT.md) - Railway deployment guide
-- [INFRASTRUCTURE.md](INFRASTRUCTURE.md) - Infrastructure overview
+- [deployment.md](deployment.md) - Railway deployment guide
+- [infrastructure.md](infrastructure.md) - Infrastructure overview
 
 ### Integrations
 - [Auth0 Configuration](auth0-tenant-configuration.md) - OAuth setup with 5 identity providers
 - [Stripe Integration](acp-stripe-integration.md) - Payments and webhooks
-- [PostGrid Testing](TESTING-POSTGRID.md) - Letter provider integration
+- [PostGrid Testing](testing-postgrid.md) - Letter provider integration
 
 ### Credit System
 - [Credit API Implementation](credit-api-implementation.md) - Credit service internals
@@ -66,7 +66,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 
 These documents were created during development and may be partially outdated:
 
-- [Implementation Roadmap](IMPLEMENTATION-ROADMAP.md) - Original development phases
+- [Implementation Roadmap](implementation-roadmap.md) - Original development phases
 - [Job Queue Implementation](job-queue-implementation.md) - pg-boss setup guide
 - [Service Providers](service-providers.md) - Provider architecture (Dummy, PostGrid)
 - [OAuth Plan](oauth-plan.md) - Original OAuth design
@@ -81,14 +81,14 @@ These documents were created during development and may be partially outdated:
 ## Security & Policy
 
 - [Security and Policy](security-and-policy.md) - Consent, PII, abuse prevention, audit trails
-- [Address Validation](ADDRESS-VALIDATION.md) - Address handling
-- [Image Support](IMAGE-SUPPORT.md) - Image handling in letters
+- [Address Validation](address-validation.md) - Address handling
+- [Image Support](image-support.md) - Image handling in letters
 
 ---
 
 ## Business
 
-- [Business Overview](BUSINESS-OVERVIEW.md) - Business context
+- [Business Overview](business-overview.md) - Business context
 - [Future Roadmap](future-roadmap.md) - Out-of-scope features and future plans
 
 ---

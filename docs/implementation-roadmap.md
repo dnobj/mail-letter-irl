@@ -377,7 +377,7 @@ Update existing code:
 │   ├── test-db.ts                 ✅ Test DB connection
 │   └── verify-tables.ts           ✅ Verify tables created
 ├── docs/
-│   ├── IMPLEMENTATION-ROADMAP.md  ✅ This file
+│   ├── implementation-roadmap.md  ✅ This file
 │   ├── database-setup.md          ✅ Database guide
 │   ├── credit-api-implementation.md ✅ Credit API guide
 │   ├── acp-implementation-guide.md  ✅ ACP technical spec

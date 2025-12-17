@@ -228,7 +228,7 @@ A: Contact support to request account deletion. See the main documentation for c
 
 - [Auth0 Tenant Configuration](./auth0-tenant-configuration.md) - Technical Auth0 setup
 - [Tool API Specifications](./tool-apis.md) - Complete tool documentation
-- [Project Status](./STATUS.md) - Current project status
+- [Project Status](./status.md) - Current project status
 
 ---
 
