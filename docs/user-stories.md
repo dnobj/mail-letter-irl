@@ -20,6 +20,7 @@ User stories are organized by feature area using semantic prefixes:
 | `US-SEC` | Security | Authorization, data protection |
 | `US-DATA` | Data Integrity | Consistency and audit |
 | `US-MCP` | MCP Access | Token-based auth for non-ChatGPT clients |
+| `US-DEV` | Development | Development environment and workflows |
 
 Each story includes acceptance criteria that can be converted to test cases.
 
@@ -975,6 +976,92 @@ macOS/Linux:
 
 ---
 
+## Development (DEV)
+
+### US-DEV-01: Isolated Development Environment
+**As a** developer
+**I want** a fully isolated development environment
+**So that** I can test changes without affecting production users or data
+
+**Acceptance Criteria:**
+- [ ] Separate Auth0 tenant (letter-irl-dev.us.auth0.com) for complete isolation
+- [ ] Separate Neon database branch (dev) with production data copy
+- [ ] Separate Railway deployment with obscure URL
+- [ ] Stripe test mode (no real charges)
+- [ ] Dummy PostGrid provider (no real letters mailed)
+- [ ] Git branch `dev` auto-deploys to development environment
+- [ ] Git branch `master` auto-deploys to production environment
+
+**Environment Components:**
+| Component | Production | Development |
+|-----------|------------|-------------|
+| Git Branch | `master` | `dev` |
+| Railway | api.letterirl.com | Obscure URL |
+| Neon | main branch | dev branch |
+| Auth0 | dev-ky21dxn3qmi71hjl.us.auth0.com | letter-irl-dev.us.auth0.com |
+| Stripe | Live mode | Test mode |
+| PostGrid | Live mode | Dummy provider |
+
+---
+
+### US-DEV-02: Database Synchronization
+**As a** developer
+**I want** to sync production data to development
+**So that** I can test with realistic data
+
+**Acceptance Criteria:**
+- [ ] Command `npm run dev:sync` triggers sync process
+- [ ] Deletes existing Neon dev branch
+- [ ] Creates new Neon dev branch from production (main)
+- [ ] Exports Username-Password users from production Auth0
+- [ ] Imports Username-Password users to development Auth0
+- [ ] Preserves user IDs to maintain data consistency
+- [ ] One-way sync only (production → development)
+- [ ] Social login user IDs automatically match (no import needed)
+
+**User ID Matching:**
+| Login Type | Same Across Tenants? | Import Needed? |
+|------------|---------------------|----------------|
+| Google (`google-oauth2\|xxx`) | Yes | No |
+| GitHub (`github\|xxx`) | Yes | No |
+| Microsoft (`windowslive\|xxx`) | Yes | No |
+| Apple (`apple\|xxx`) | Yes | No |
+| Username-Password (`auth0\|xxx`) | No | Yes |
+
+**Safety Checks:**
+- [ ] Requires confirmation before deleting dev branch
+- [ ] Validates environment variables before starting
+- [ ] Reports sync progress and results
+- [ ] Handles errors gracefully with clear messages
+
+---
+
+### US-DEV-03: Feature Branch Workflow
+**As a** developer
+**I want** a clear branching strategy
+**So that** feature development is organized
+
+**Acceptance Criteria:**
+- [ ] Features branch from `dev` branch
+- [ ] Feature branch naming: `feature/description`
+- [ ] Features merge to `dev` via pull request
+- [ ] `dev` merges to `master` for production releases
+- [ ] Railway auto-deploys on push to `dev` or `master`
+- [ ] Each environment has isolated credentials
+
+**Git Flow:**
+```
+master (production)
+  ↑
+  └── dev (development)
+        ↑
+        ├── feature/add-email-notifications
+        ├── feature/improve-address-validation
+        └── feature/user-dashboard-redesign
+```
+
+---
+
 ## Priority Matrix
 
 | Priority | Category | Stories | Key Personas |
@@ -996,6 +1083,7 @@ macOS/Linux:
 | P3 - Low | Admin | US-ADMIN-03 - US-ADMIN-08 | Amy |
 | P3 - Low | Edge Cases | US-EDGE-02, US-EDGE-05, US-EDGE-06, US-EDGE-07 | Eleanor |
 | P3 - Low | MCP Access | US-MCP-05 | Amy |
+| P3 - Low | Development | US-DEV-01, US-DEV-02, US-DEV-03 | Developers |
 
 ---
 
@@ -1012,7 +1100,8 @@ macOS/Linux:
 | Security | US-SEC | 6 |
 | Data Integrity | US-DATA | 3 |
 | MCP Access | US-MCP | 5 |
-| **Total** | | **53** |
+| Development | US-DEV | 3 |
+| **Total** | | **56** |
 
 ---
 

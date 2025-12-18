@@ -4,6 +4,8 @@ This document provides a central reference for all services and infrastructure u
 
 ## System Architecture
 
+### Production Environment
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                           USER INTERFACES                            │
@@ -15,10 +17,11 @@ This document provides a central reference for all services and infrastructure u
          │                 │                          │
          ▼                 ▼                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         MCP SERVER (Backend)                         │
+│                   MCP SERVER - PRODUCTION (Backend)                  │
+│  Git Branch: master → Railway: api.letterirl.com                     │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
 │  │ MCP Tools   │  │ REST API    │  │ Dashboard   │  │ Admin API   │ │
-│  │ (ChatGPT)   │  │ (Website)   │  │ API         │  │             │ │
+│  │ (ChatGPT)   │  │ (Website)   │  │ API         │  │ (Disabled)  │ │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘ │
 │                                                                      │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                  │
@@ -29,12 +32,67 @@ This document provides a central reference for all services and infrastructure u
          │                 │                          │
          ▼                 ▼                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        EXTERNAL SERVICES                             │
+│                   EXTERNAL SERVICES - PRODUCTION                     │
 ├─────────────────┬─────────────────┬─────────────────┬───────────────┤
 │   Neon          │   Auth0         │   PostGrid      │   Stripe      │
-│   (Database)    │   (Auth)        │   (Mail API)    │   (Payments)  │
+│   (main branch) │   (prod tenant) │   (live mode)   │   (live mode) │
 └─────────────────┴─────────────────┴─────────────────┴───────────────┘
 ```
+
+### Development Environment
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                           USER INTERFACES                            │
+├─────────────────┬─────────────────┬─────────────────────────────────┤
+│   ChatGPT       │   Website       │   Admin Panel                   │
+│   (MCP Client)  │   (Next.js)     │   (Static HTML/JS)              │
+│                 │   (dev deploy)  │                                 │
+└────────┬────────┴────────┬────────┴────────────────┬────────────────┘
+         │                 │                          │
+         ▼                 ▼                          ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                 MCP SERVER - DEVELOPMENT (Backend)                   │
+│  Git Branch: dev → Railway: obscure URL                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
+│  │ MCP Tools   │  │ REST API    │  │ Dashboard   │  │ Admin API   │ │
+│  │ (ChatGPT)   │  │ (Website)   │  │ API         │  │ (Disabled)  │ │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘ │
+│                                                                      │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                  │
+│  │ Job Queue   │  │ Letter      │  │ Credit      │                  │
+│  │ Processor   │  │ Service     │  │ Service     │                  │
+│  └─────────────┘  └─────────────┘  └─────────────┘                  │
+└─────────────────────────────────────────────────────────────────────┘
+         │                 │                          │
+         ▼                 ▼                          ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                  EXTERNAL SERVICES - DEVELOPMENT                     │
+├─────────────────┬─────────────────┬─────────────────┬───────────────┤
+│   Neon          │   Auth0         │   PostGrid      │   Stripe      │
+│   (dev branch)  │   (dev tenant)  │   (dummy mode)  │   (test mode) │
+└─────────────────┴─────────────────┴─────────────────┴───────────────┘
+```
+
+## Environment Overview
+
+Letter IRL uses a **fully isolated development environment** that mirrors production:
+
+| Component | Production | Development |
+|-----------|------------|-------------|
+| **Git Branch** | `master` | `dev` |
+| **Railway** | api.letterirl.com | Obscure URL |
+| **Neon Database** | main branch | dev branch (synced copy) |
+| **Auth0 Tenant** | dev-ky21dxn3qmi71hjl.us.auth0.com | letter-irl-dev.us.auth0.com |
+| **Stripe** | Live mode (real charges) | Test mode (no charges) |
+| **PostGrid** | Live mode (real mail) | Dummy provider (no mail) |
+
+### Key Design Decisions
+
+1. **Separate Auth0 Tenant**: Complete isolation between environments, prevents accidental cross-environment access
+2. **Neon Branching**: Copy production data to development via `npm run dev:sync`
+3. **User ID Preservation**: Social logins (Google, GitHub, etc.) IDs match across tenants; Username-Password users synced via script
+4. **Auto-Deploy**: Railway automatically deploys `dev` and `master` branches to respective environments
 
 ## Services Summary
 
@@ -57,15 +115,28 @@ This document provides a central reference for all services and infrastructure u
 - 190 compute hours/month
 - Automatic suspend after 5 min inactivity
 
+**Environments**:
+| Environment | Branch | Purpose |
+|-------------|--------|---------|
+| Production | `main` | Live user data |
+| Development | `dev` | Synced copy of production for testing |
+
 **Connection**:
 ```
+# Production
 DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
+
+# Development
+DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require&options=branch%3Ddev
 ```
 
 **Key Features Used**:
 - Connection pooling (recommended for serverless)
 - Automatic backups
-- Branch databases (for development)
+- Branch databases (for development environment isolation)
+- Branch reset via API (for `npm run dev:sync`)
+
+**Database Sync**: Run `npm run dev:sync` to reset dev branch from production main branch.
 
 **Relevant Docs**: `docs/database-schema.md`, `docs/database-setup.md`
 
@@ -80,9 +151,19 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 - 2 social connections
 - Unlimited applications
 
-**Tenant**: `dev-ky21dxn3qmi71hjl.us.auth0.com`
+**Tenants**:
+| Environment | Tenant | Purpose |
+|-------------|--------|---------|
+| Production | `dev-ky21dxn3qmi71hjl.us.auth0.com` | Live user authentication |
+| Development | `letter-irl-dev.us.auth0.com` | Isolated dev authentication |
 
-**Applications**:
+**Why Separate Tenants?**
+- Complete isolation: Users cannot accidentally access wrong environment
+- Different callback URLs for dev/prod
+- Prevents credential leakage between environments
+- Social login provider IDs automatically match across tenants
+
+**Applications** (per tenant):
 | Application | Type | Purpose |
 |-------------|------|---------|
 | Letter IRL MCP | Machine-to-Machine + Regular Web | ChatGPT OAuth flow |
@@ -90,11 +171,15 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 
 **API Audience**: `https://letter-irl/api`
 
+**User ID Matching**:
+Social login IDs (Google, GitHub, Microsoft, Apple) are identical across tenants. Username-Password users have different IDs and require sync via `npm run dev:sync`.
+
 **Key Features Used**:
 - OAuth 2.0 Authorization Code flow (ChatGPT)
 - Session-based auth (Website via SDK v4)
 - JWT access tokens
 - User metadata
+- User import/export for dev sync
 
 **Relevant Docs**: `docs/auth0-tenant-configuration.md`, `docs/chatgpt-auth0-oauth-learnings.md`
 
@@ -104,7 +189,11 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 
 **Purpose**: Send physical letters via USPS mail.
 
-**Current Mode**: Test (switch to Live for production)
+**Environments**:
+| Environment | Mode | API Key | Behavior |
+|-------------|------|---------|----------|
+| Production | Live | `live_sk_...` | Real letters mailed |
+| Development | Dummy | (not used) | Dummy provider (no API calls) |
 
 **Pricing** (approximate):
 - Standard letter: ~$1.50
@@ -112,6 +201,8 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 - Tracking: Included
 
 **API Base**: `https://api.postgrid.com/print-mail/v1`
+
+**Development Mode**: Uses dummy provider that simulates PostGrid API without making real API calls or mailing letters. Useful for testing letter flow without costs.
 
 **Key Features Used**:
 - Letter creation with HTML templates
@@ -127,9 +218,13 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 
 **Purpose**: Credit card payments for credit purchases.
 
-**Current Mode**: Sandbox (switch to Live for production)
+**Environments**:
+| Environment | Mode | API Key | Behavior |
+|-------------|------|---------|----------|
+| Production | Live | `sk_live_...` | Real charges |
+| Development | Test | `sk_test_...` | No charges, test cards only |
 
-**Pricing**: 2.9% + $0.30 per transaction
+**Pricing**: 2.9% + $0.30 per transaction (production only)
 
 **Key Features Used**:
 - Checkout Sessions (hosted payment page)
@@ -159,16 +254,23 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 | Hobby | $5/mo + usage | Small projects, development |
 | Pro | $20/mo + usage | Production workloads |
 
-**Services Deployed**:
-| Service | Domain | Repository |
-|---------|--------|------------|
-| Backend (MCP Server) | api.letterirl.com | mail-letter-irl |
-| Website (Next.js) | letterirl.com | mail-letter-irl-website |
+**Deployments**:
+| Service | Environment | Branch | Domain |
+|---------|-------------|--------|--------|
+| Backend | Production | `master` | api.letterirl.com |
+| Backend | Development | `dev` | Obscure URL (auto-generated) |
+| Website | Production | `master` | letterirl.com |
+| Website | Development | `dev` | Obscure URL (auto-generated) |
+
+**Auto-Deploy Behavior**:
+- Push to `master` → Deploys to production environment
+- Push to `dev` → Deploys to development environment
+- Each environment has separate Railway project with isolated env vars
 
 **Key Features**:
 - Automatic SSL certificates
 - Git-based deployments (auto-deploy on push)
-- Environment variable management
+- Environment variable management per environment
 - Logging and metrics
 - Nixpacks for automatic build detection
 

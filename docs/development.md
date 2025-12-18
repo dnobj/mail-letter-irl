@@ -1,6 +1,6 @@
 # Development Guide
 
-**Last Updated:** December 15, 2025
+**Last Updated:** December 18, 2025
 
 This document provides context for developers and AI agents working on Letter IRL.
 
@@ -20,6 +20,135 @@ Letter IRL is an MCP (Model Context Protocol) server that enables AI assistants 
 |------|---------|-------------|
 | `letter-irl` | MCP server (this repo) | Railway → api.letterirl.com |
 | `letter-irl-website` | Marketing site + dashboard | Railway → letterirl.com |
+
+---
+
+## Development Environment Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  PRODUCTION                                                      │
+├─────────────────────────────────────────────────────────────────┤
+│  Git Branch: master                                              │
+│  Auth0: dev-ky21dxn3qmi71hjl.us.auth0.com                       │
+│  Neon: main branch                                               │
+│  Railway: api.letterirl.com                                      │
+│  Stripe: live mode                                               │
+│  PostGrid: live mode                                             │
+└─────────────────────────────────────────────────────────────────┘
+           │
+           │ npm run dev:sync
+           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  DEVELOPMENT                                                     │
+├─────────────────────────────────────────────────────────────────┤
+│  Git Branch: dev                                                 │
+│  Auth0: letter-irl-dev.us.auth0.com (separate tenant)           │
+│  Neon: dev branch (copy of production)                          │
+│  Railway: letter-irl-dev-xxx.up.railway.app                     │
+│  Stripe: test mode                                               │
+│  PostGrid: dummy provider                                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Git Branching Strategy
+
+```
+master (production) ──────────────────────────────
+    └── dev (development) ────────────────────────
+            └── feature/issue-xxx
+            └── feature/issue-yyy
+```
+
+- **master**: Production code, auto-deploys to `api.letterirl.com`
+- **dev**: Development code, auto-deploys to Railway dev environment
+- **feature/\***: Feature branches, created from `dev`, merged back to `dev`
+
+### Environment Differences
+
+| Aspect | Production | Development |
+|--------|------------|-------------|
+| Git Branch | `master` | `dev` |
+| Auth0 Tenant | `dev-ky21dxn3qmi71hjl` | `letter-irl-dev` |
+| Neon Branch | `main` | `dev` |
+| Stripe Mode | Live (`sk_live_`) | Test (`sk_test_`) |
+| PostGrid | Live (real mail) | Dummy (no mail) |
+| Admin Routes | Disabled | Enabled |
+| URL | `api.letterirl.com` | `xxx.up.railway.app` |
+
+---
+
+## Development Environment Setup
+
+### Prerequisites
+
+- Node.js 20+
+- npm
+- Auth0 CLI (`npm install -g auth0-cli`)
+- Stripe CLI (`brew install stripe/stripe-cli/stripe`)
+- Neon CLI (`npm install -g neonctl`) - optional
+
+### 1. Create Auth0 Development Tenant
+
+1. Go to [Auth0](https://auth0.com) and create a new tenant: `letter-irl-dev`
+2. Configure connections (same as production): Google, Microsoft, Apple, GitHub, Username-Password
+3. Enable DCR: Settings → Advanced → OIDC Dynamic Application Registration
+4. Create API: `https://letter-irl-dev/api`
+5. Set Default Audience: Settings → General → API Authorization Settings
+6. Create M2M Application for sync script with Management API access
+
+### 2. Create Neon Development Branch
+
+1. Go to [Neon Console](https://console.neon.tech/)
+2. Navigate to your project → Branches
+3. Create new branch: `dev` from `main`
+4. Copy the connection string
+
+### 3. Configure Environment
+
+```bash
+cp .env.dev.example .env.dev
+# Edit .env.dev with your values
+```
+
+### 4. Create Stripe Test Products
+
+```bash
+stripe products list --limit=20  # Check if they exist
+# If not, create them via Stripe CLI or dashboard
+stripe prices list --limit=10    # Get price IDs for .env.dev
+```
+
+### 5. Run Development Server
+
+```bash
+# With dev environment config
+npm run dev:env
+
+# Or standard dev mode
+npm run dev
+```
+
+---
+
+## Syncing from Production
+
+The `dev:sync` command refreshes development from production:
+
+```bash
+npm run dev:sync
+```
+
+This performs:
+1. Recreates Neon dev branch from main
+2. Exports Username-Password users from production Auth0
+3. Imports users to development Auth0 (preserving user_ids)
+
+### User ID Strategy
+
+Social login users (Google, GitHub, etc.) automatically have matching IDs across tenants because the ID comes from the provider.
+
+Username-Password users (`auth0|xxx`) need to be imported to preserve IDs.
 
 ---
 
@@ -84,41 +213,48 @@ npm run test:coverage
 
 ## Git Workflow
 
-We use **GitHub Flow** - simple branch-based workflow.
+We use a **dev branch workflow** for testing before production.
 
 ### Branch Naming
 
 ```
-feature/add-pat-support     # New features
-fix/address-validation      # Bug fixes
+feature/issue-xxx           # New features (include issue number)
+fix/issue-xxx               # Bug fixes
 docs/update-readme          # Documentation
 refactor/credit-service     # Code improvements
 ```
 
 ### Workflow
 
-1. **Create a branch** from `main`:
+1. **Create a feature branch** from `dev`:
    ```bash
-   git checkout main
-   git pull
-   git checkout -b feature/my-feature
+   git checkout dev
+   git pull origin dev
+   git checkout -b feature/issue-xxx
    ```
 
 2. **Make changes** and commit:
    ```bash
    git add .
-   git commit -m "Add feature X"
+   git commit -m "feat: Add feature X"
    ```
 
-3. **Push and create PR**:
+3. **Push and create PR to dev**:
    ```bash
-   git push -u origin feature/my-feature
-   gh pr create --title "Add feature X" --body "Description..."
+   git push -u origin feature/issue-xxx
+   gh pr create --base dev --title "Add feature X" --body "Description..."
    ```
 
-4. **PR Review** - Railway creates preview environment automatically
+4. **Merge to dev** - Triggers Railway dev environment deploy
 
-5. **Merge to main** - Triggers production deploy
+5. **Test in dev environment** - Verify feature works
+
+6. **Create PR from dev to master** - When ready for production
+   ```bash
+   gh pr create --base master --head dev --title "Release: Feature X"
+   ```
+
+7. **Merge to master** - Triggers production deploy
 
 ### Commit Messages
 
@@ -242,19 +378,29 @@ npm run db:migrate:rollback
 
 | Environment | URL | Branch | Auto-deploy |
 |-------------|-----|--------|-------------|
-| Production | api.letterirl.com | `main` | Yes |
-| PR Preview | *.up.railway.app | PR branches | Yes |
+| Production | api.letterirl.com | `master` | Yes |
+| Development | xxx.up.railway.app | `dev` | Yes |
 
 ### Railway Configuration
 
-- Service: `letter-irl`
-- Build: Nixpacks (auto-detected)
-- Start: `npm start`
-- Health check: `/health`
+**Production Environment:**
+- Branch: `master`
+- URL: `api.letterirl.com`
+- All production credentials (live Stripe, live PostGrid)
+
+**Development Environment:**
+- Branch: `dev`
+- URL: obscure Railway URL
+- Test credentials (test Stripe, dummy PostGrid)
+- Admin routes enabled
 
 ### Environment Variables on Railway
 
-Same as local, but with production values. Secrets managed in Railway dashboard.
+Production and development environments have different values:
+- Different Auth0 tenants
+- Different Neon branches
+- Different Stripe modes (live vs test)
+- Different PostGrid modes (live vs dummy)
 
 ---
 
