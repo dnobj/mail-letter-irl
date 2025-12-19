@@ -394,6 +394,33 @@ export async function startHttpServer() {
       return;
     }
 
+    // Debug endpoint to check widget registration (no auth required)
+    if (url.pathname === "/debug/widgets") {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      const fs = await import("fs/promises");
+      const pathMod = await import("path");
+      const { fileURLToPath } = await import("url");
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = pathMod.dirname(__filename);
+      const widgetDir = process.env.LETTER_IRL_WIDGET_DIR ?? pathMod.resolve(__dirname, "../../widgets");
+      const widgets = ["BalanceCard", "LetterPreviewCard", "LetterConfirmationCard", "LetterStatusCard"];
+      const status: Record<string, any> = { widgetDir, cwd: process.cwd(), widgets: {} };
+      for (const w of widgets) {
+        const filePath = pathMod.join(widgetDir, `${w}.html`);
+        try {
+          await fs.access(filePath);
+          const stat = await fs.stat(filePath);
+          status.widgets[w] = { exists: true, path: filePath, size: stat.size };
+        } catch (e: any) {
+          status.widgets[w] = { exists: false, path: filePath, error: e.message };
+        }
+      }
+      res.end(JSON.stringify(status, null, 2));
+      return;
+    }
+
     // Serve admin panel (requires ADMIN_ENABLED=true, localhost only)
     if (url.pathname === "/admin" || url.pathname === "/admin.html" || url.pathname === "/admin-panel.html") {
       // Check if admin is enabled (disabled by default)
