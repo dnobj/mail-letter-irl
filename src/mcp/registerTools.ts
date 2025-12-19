@@ -205,6 +205,17 @@ export async function registerLetterTools(
 
         const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
 
+        // Build response _meta with invocation states from tool definition
+        // The response _meta is forwarded to the widget and should contain invocation states
+        const responseMeta: Record<string, unknown> = {};
+        if (tool.meta) {
+          // Only include invocation-related metadata in response
+          const invokingKey = "openai/toolInvocation/invoking";
+          const invokedKey = "openai/toolInvocation/invoked";
+          if (tool.meta[invokingKey]) responseMeta[invokingKey] = tool.meta[invokingKey];
+          if (tool.meta[invokedKey]) responseMeta[invokedKey] = tool.meta[invokedKey];
+        }
+
         return {
           content: [
             {
@@ -212,7 +223,8 @@ export async function registerLetterTools(
               text: summaryText
             }
           ],
-          structuredContent: result
+          structuredContent: result,
+          _meta: Object.keys(responseMeta).length > 0 ? responseMeta : undefined
         };
       }
     );

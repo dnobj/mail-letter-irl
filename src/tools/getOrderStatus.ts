@@ -98,6 +98,7 @@ export const getOrderStatusTool: McpToolDefinition<
   outputSchema: getOrderStatusOutputSchema,
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
+    "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Checking letter status…",
     "openai/toolInvocation/invoked": "Latest status",
     readOnlyHint: true

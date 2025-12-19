@@ -74,6 +74,7 @@ export const switchAccountTool: McpToolDefinition<
   },
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
+    "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Preparing account switch…",
     "openai/toolInvocation/invoked": "Switch account instructions ready",
     readOnlyHint: true

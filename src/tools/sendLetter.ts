@@ -341,6 +341,7 @@ export const sendLetterTool: McpToolDefinition<SendLetterInput, SendLetterOutput
   outputSchema: sendLetterOutputSchema,
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
+    "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Sending letter…",
     "openai/toolInvocation/invoked": "Letter sent"
   },

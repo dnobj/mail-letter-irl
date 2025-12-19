@@ -152,6 +152,7 @@ export const getAccountBalanceTool: McpToolDefinition<
   outputSchema: getAccountBalanceOutputSchema,
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
+    "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Checking credits…",
     "openai/toolInvocation/invoked": "Balance updated",
     readOnlyHint: true
