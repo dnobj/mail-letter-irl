@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { LetterIrlServer } from "../server.js";
 import { toolInputSchemas } from "./toolSchemas.js";
@@ -14,6 +15,24 @@ import {
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
+
+/**
+ * Build MCP tool annotations from tool definition.
+ *
+ * These annotations tell ChatGPT how to classify tools:
+ * - readOnlyHint: true = READ (no user confirmation needed)
+ * - readOnlyHint: false = WRITE (requires user confirmation)
+ * - destructiveHint: true = Shows deletion warning
+ *
+ * @see US-MCP-06: Tool Read/Write Annotations
+ * @see https://developers.openai.com/apps-sdk/plan/tools/
+ */
+function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnotations {
+  return {
+    readOnlyHint: tool.readOnly,
+    destructiveHint: tool.name === 'clear_return_address',
+  };
+}
 
 type ToolName = keyof typeof toolInputSchemas;
 
@@ -93,7 +112,10 @@ export async function registerLetterTools(
       continue;
     }
 
-    mcpServer.tool(tool.name, shape, async (args, extra) => {
+    // Build annotations for ChatGPT to classify tools as READ or WRITE
+    const annotations = buildAnnotations(tool);
+
+    mcpServer.tool(tool.name, shape, annotations, async (args, extra) => {
       console.log(
         `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId}`
       );
