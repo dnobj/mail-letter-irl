@@ -23,7 +23,7 @@ interface GetAccountBalanceOutput {
   expiringCreditsDetails?: ExpiringCreditsInfo[];
 }
 
-const OUTPUT_TEMPLATE = "BalanceCard";
+const OUTPUT_TEMPLATE = "ui://widgets/BalanceCard.html";
 
 async function handler(
   _input: Record<string, never>,

@@ -22,7 +22,7 @@ interface GetOrderStatusOutput {
   followUpSuggestedPrompt?: string;
 }
 
-const OUTPUT_TEMPLATE = "LetterStatusCard";
+const OUTPUT_TEMPLATE = "ui://widgets/LetterStatusCard.html";
 
 function selectOrder(
   orders: OrderRecord[],

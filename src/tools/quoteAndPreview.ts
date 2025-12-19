@@ -49,7 +49,7 @@ interface QuoteAndPreviewOutput {
   };
 }
 
-const OUTPUT_TEMPLATE = "LetterPreviewCard";
+const OUTPUT_TEMPLATE = "ui://widgets/LetterPreviewCard.html";
 
 async function handler(
   input: QuoteAndPreviewInput,

@@ -34,7 +34,7 @@ interface SendLetterOutput {
   saveReturnAddressNote?: string;
 }
 
-const OUTPUT_TEMPLATE = "LetterConfirmationCard";
+const OUTPUT_TEMPLATE = "ui://widgets/LetterConfirmationCard.html";
 
 async function handler(
   input: SendLetterInput,
