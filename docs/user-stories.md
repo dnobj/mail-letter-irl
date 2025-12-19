@@ -976,6 +976,42 @@ macOS/Linux:
 
 ---
 
+### US-MCP-06: Tool Read/Write Annotations
+**As a** ChatGPT user
+**I want** read-only tools to be marked as "READ"
+**So that** I don't have to confirm every tool call
+
+**Acceptance Criteria:**
+- [ ] Read-only tools show as "READ" in ChatGPT connector settings
+- [ ] Write tools show as "WRITE" in ChatGPT connector settings
+- [ ] Read-only tools don't require user confirmation
+- [ ] Write tools require user confirmation before execution
+- [ ] Destructive tools (clear_return_address) show additional warning
+
+**Tool Classification:**
+| Tool | Type | Annotation |
+|------|------|------------|
+| `get_account_balance` | READ | `readOnlyHint: true` |
+| `get_order_status` | READ | `readOnlyHint: true` |
+| `get_return_address` | READ | `readOnlyHint: true` |
+| `list_orders` | READ | `readOnlyHint: true` |
+| `quote_and_preview_letter` | READ | `readOnlyHint: true` |
+| `switch_account` | READ | `readOnlyHint: true` |
+| `send_letter` | WRITE | `readOnlyHint: false` |
+| `set_return_address` | WRITE | `readOnlyHint: false` |
+| `clear_return_address` | WRITE | `readOnlyHint: false`, `destructiveHint: true` |
+
+**Technical Details:**
+- MCP SDK expects annotations in separate `annotations` parameter
+- Not in `_meta` object (current incorrect implementation)
+- Annotations: `readOnlyHint`, `destructiveHint`, `openWorldHint`, `idempotentHint`
+
+**Related:**
+- GitHub Issue: #17
+- [OpenAI: Define Tools](https://developers.openai.com/apps-sdk/plan/tools/)
+
+---
+
 ## Development (DEV)
 
 ### US-DEV-01: Isolated Development Environment
@@ -1099,9 +1135,9 @@ master (production)
 | Edge Cases | US-EDGE | 8 |
 | Security | US-SEC | 6 |
 | Data Integrity | US-DATA | 3 |
-| MCP Access | US-MCP | 5 |
+| MCP Access | US-MCP | 6 |
 | Development | US-DEV | 3 |
-| **Total** | | **56** |
+| **Total** | | **57** |
 
 ---
 
