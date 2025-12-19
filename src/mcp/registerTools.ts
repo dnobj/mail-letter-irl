@@ -183,29 +183,39 @@ export async function registerLetterTools(
     // Build annotations for ChatGPT to classify tools as READ or WRITE
     const annotations = buildAnnotations(tool);
 
-    mcpServer.tool(tool.name, shape, annotations, async (args, extra) => {
-      console.log(
-        `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId}`
-      );
-      const { result, meta } = await appServer.execute({
-        toolName: tool.name,
-        input: args,
-        userId
-      });
+    // Use registerTool to pass _meta with openai/outputTemplate for widget rendering
+    // The _meta in tool registration tells ChatGPT which widget to render
+    mcpServer.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        inputSchema: z.object(shape),
+        annotations,
+        _meta: tool.meta  // Contains openai/outputTemplate for widget discovery
+      },
+      async (args, extra) => {
+        console.log(
+          `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId}`
+        );
+        const { result, meta } = await appServer.execute({
+          toolName: tool.name,
+          input: args,
+          userId
+        });
 
-      const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
+        const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: summaryText
-          }
-        ],
-        structuredContent: result,
-        _meta: meta
-      };
-    });
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: summaryText
+            }
+          ],
+          structuredContent: result
+        };
+      }
+    );
   }
 
 }
