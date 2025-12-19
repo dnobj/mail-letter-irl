@@ -189,7 +189,7 @@ export async function registerLetterTools(
       tool.name,
       {
         description: tool.description,
-        inputSchema: z.object(shape),
+        inputSchema: shape,  // ZodRawShape, not wrapped in z.object()
         annotations,
         _meta: tool.meta  // Contains openai/outputTemplate for widget discovery
       },
