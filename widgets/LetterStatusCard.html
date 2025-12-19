@@ -77,6 +77,7 @@
     </div>
 
     <script type="module">
+      // OpenAI Apps SDK injects window.openai with toolOutput data
       const {
         orderId,
         currentStatus,
@@ -84,7 +85,7 @@
         previewThumbnailHtml,
         canSendFollowUp,
         followUpSuggestedPrompt
-      } = window.renderContext?.data ?? {};
+      } = window.openai?.toolOutput ?? {};
 
       const heading = document.getElementById("status-heading");
       heading.textContent = `Order ${orderId} — ${currentStatus}`;

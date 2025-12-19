@@ -81,7 +81,8 @@
     </div>
 
     <script type="module">
-      const state = window.renderContext?.data ?? {};
+      // OpenAI Apps SDK injects window.openai with toolOutput data
+      const state = window.openai?.toolOutput ?? {};
       const {
         previewHtml,
         requiredCredits,

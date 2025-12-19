@@ -79,12 +79,13 @@
     </div>
 
     <script type="module">
+      // OpenAI Apps SDK injects window.openai with toolOutput data
       const {
         orderId,
         currentStatus,
         recipientSummary,
         creditsRemaining
-      } = window.renderContext?.data ?? {};
+      } = window.openai?.toolOutput ?? {};
 
       const statusText = document.getElementById("status-text");
       statusText.textContent = `Current status: ${currentStatus}`;

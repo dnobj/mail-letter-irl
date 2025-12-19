@@ -64,12 +64,13 @@
     </div>
 
     <script type="module">
+      // OpenAI Apps SDK injects window.openai with toolOutput data
       const {
         creditsRemaining,
         canSendStandardLetter,
         standardLetterCostCredits,
         message
-      } = window.renderContext?.data ?? {};
+      } = window.openai?.toolOutput ?? {};
 
       document.getElementById("balance").textContent = `Credits: ${creditsRemaining ?? 0}`;
 

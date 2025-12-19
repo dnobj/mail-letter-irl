@@ -1,6 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import * as fs from "fs/promises";
+import * as path from "path";
+import { fileURLToPath } from "url";
 import { LetterIrlServer } from "../server.js";
 import { toolInputSchemas } from "./toolSchemas.js";
 import {
@@ -32,6 +35,68 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
     readOnlyHint: tool.readOnly,
     destructiveHint: tool.name === 'clear_return_address',
   };
+}
+
+/**
+ * Widget definitions for OpenAI Apps SDK.
+ * Each widget is registered as an MCP resource with ui:// URI.
+ *
+ * @see US-MCP-07: Widget Resources
+ * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+ */
+const WIDGET_DEFINITIONS = [
+  { name: "BalanceCard", description: "Displays account credit balance and send affordability" },
+  { name: "LetterPreviewCard", description: "Shows letter preview with send action button" },
+  { name: "LetterConfirmationCard", description: "Confirms letter has been queued for sending" },
+  { name: "LetterStatusCard", description: "Shows order status timeline and delivery tracking" },
+];
+
+// Resolve widget directory relative to this module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DEFAULT_WIDGET_DIR = process.env.LETTER_IRL_WIDGET_DIR ?? path.resolve(__dirname, "../../widgets");
+
+/**
+ * Register widget HTML files as MCP resources.
+ *
+ * ChatGPT requires widgets to be:
+ * 1. Registered as MCP resources with ui:// protocol URIs
+ * 2. Served with text/html+skybridge MIME type
+ * 3. Referenced in tool _meta.openai/outputTemplate
+ *
+ * The skybridge MIME type signals ChatGPT to inject window.openai runtime.
+ */
+async function registerWidgetResources(mcpServer: McpServer) {
+  for (const widget of WIDGET_DEFINITIONS) {
+    const uri = `ui://widgets/${widget.name}.html`;
+    const filePath = path.join(DEFAULT_WIDGET_DIR, `${widget.name}.html`);
+
+    // Check if widget file exists before registering
+    try {
+      await fs.access(filePath);
+    } catch {
+      console.warn(`⚠️  Widget file not found: ${filePath}`);
+      continue;
+    }
+
+    mcpServer.resource(
+      widget.name,
+      uri,
+      { mimeType: "text/html+skybridge" },
+      async () => {
+        const html = await fs.readFile(filePath, "utf-8");
+        return {
+          contents: [{
+            uri,
+            mimeType: "text/html+skybridge",
+            text: html
+          }]
+        };
+      }
+    );
+
+    console.log(`📦 Registered widget resource: ${uri}`);
+  }
 }
 
 type ToolName = keyof typeof toolInputSchemas;
@@ -104,6 +169,9 @@ export async function registerLetterTools(
       console.error(`⚠️  Failed to create user ${userId}:`, error);
     }
   }
+
+  // Register widget resources for ChatGPT UI rendering
+  await registerWidgetResources(mcpServer);
 
   const toolDefs = appServer.listTools();
   for (const tool of toolDefs) {
