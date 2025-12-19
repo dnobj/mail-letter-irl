@@ -202,10 +202,8 @@ export async function registerLetterTools(
             text: summaryText
           }
         ],
-        structuredContent: {
-          ...result,
-          _meta: meta
-        }
+        structuredContent: result,
+        _meta: meta
       };
     });
   }
