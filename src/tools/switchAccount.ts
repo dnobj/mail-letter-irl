@@ -6,7 +6,6 @@ interface SwitchAccountOutput {
   availableAuthMethods: string[];
 }
 
-const OUTPUT_TEMPLATE = "text";
 
 async function handler(
   _input: Record<string, never>,
@@ -73,8 +72,6 @@ export const switchAccountTool: McpToolDefinition<
     required: ["logoutUrl", "instructions", "availableAuthMethods"]
   },
   meta: {
-    "openai/outputTemplate": OUTPUT_TEMPLATE,
-    "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Preparing account switch…",
     "openai/toolInvocation/invoked": "Switch account instructions ready",
     readOnlyHint: true

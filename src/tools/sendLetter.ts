@@ -34,7 +34,6 @@ interface SendLetterOutput {
   saveReturnAddressNote?: string;
 }
 
-const OUTPUT_TEMPLATE = "ui://widgets/LetterConfirmationCard.html";
 
 async function handler(
   input: SendLetterInput,
@@ -340,8 +339,6 @@ export const sendLetterTool: McpToolDefinition<SendLetterInput, SendLetterOutput
   inputSchema: sendLetterInputSchema,
   outputSchema: sendLetterOutputSchema,
   meta: {
-    "openai/outputTemplate": OUTPUT_TEMPLATE,
-    "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Sending letter…",
     "openai/toolInvocation/invoked": "Letter sent"
   },

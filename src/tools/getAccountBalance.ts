@@ -23,7 +23,6 @@ interface GetAccountBalanceOutput {
   expiringCreditsDetails?: ExpiringCreditsInfo[];
 }
 
-const OUTPUT_TEMPLATE = "ui://widgets/BalanceCard.html";
 
 async function handler(
   _input: Record<string, never>,
@@ -151,8 +150,6 @@ export const getAccountBalanceTool: McpToolDefinition<
   inputSchema: getAccountBalanceInputSchema,
   outputSchema: getAccountBalanceOutputSchema,
   meta: {
-    "openai/outputTemplate": OUTPUT_TEMPLATE,
-    "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Checking credits…",
     "openai/toolInvocation/invoked": "Balance updated",
     readOnlyHint: true

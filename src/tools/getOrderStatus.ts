@@ -22,7 +22,6 @@ interface GetOrderStatusOutput {
   followUpSuggestedPrompt?: string;
 }
 
-const OUTPUT_TEMPLATE = "ui://widgets/LetterStatusCard.html";
 
 function selectOrder(
   orders: OrderRecord[],
@@ -97,8 +96,6 @@ export const getOrderStatusTool: McpToolDefinition<
   inputSchema: getOrderStatusInputSchema,
   outputSchema: getOrderStatusOutputSchema,
   meta: {
-    "openai/outputTemplate": OUTPUT_TEMPLATE,
-    "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Checking letter status…",
     "openai/toolInvocation/invoked": "Latest status",
     readOnlyHint: true

@@ -45,10 +45,7 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
  * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
  */
 const WIDGET_DEFINITIONS = [
-  { name: "BalanceCard", description: "Displays account credit balance and send affordability" },
-  { name: "LetterPreviewCard", description: "Shows letter preview with send action button" },
-  { name: "LetterConfirmationCard", description: "Confirms letter has been queued for sending" },
-  { name: "LetterStatusCard", description: "Shows order status timeline and delivery tracking" },
+  { name: "LetterPreviewCard", description: "Shows letter preview with cost, delivery info, and status" },
 ];
 
 /**
