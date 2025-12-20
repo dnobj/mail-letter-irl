@@ -10,8 +10,6 @@
         --text-primary: #1f2933;
         --text-secondary: #61748f;
         --border-color: #e2e8f0;
-        --accent-blue: #2563eb;
-        --accent-blue-hover: #1d4ed8;
         --accent-success: #065f46;
         --accent-success-bg: #d1fae5;
         --accent-warning: #b91c1c;
@@ -29,8 +27,6 @@
         --text-primary: #f1f5f9;
         --text-secondary: #94a3b8;
         --border-color: #334155;
-        --accent-blue: #3b82f6;
-        --accent-blue-hover: #2563eb;
         --accent-success: #34d399;
         --accent-success-bg: #064e3b;
         --accent-warning: #f87171;
@@ -129,38 +125,6 @@
         border: 1px solid var(--border-color);
       }
 
-      .actions {
-        padding-top: 0.5rem;
-      }
-
-      .actions button {
-        width: 100%;
-        padding: 0.85rem 1rem;
-        border: none;
-        border-radius: 10px;
-        font-weight: 600;
-        font-size: 0.95rem;
-        cursor: pointer;
-        background: var(--accent-blue);
-        color: #ffffff;
-        transition: background 0.2s ease;
-      }
-
-      .actions button:hover:not(:disabled) {
-        background: var(--accent-blue-hover);
-      }
-
-      .actions button:disabled {
-        background: var(--border-color);
-        color: var(--text-secondary);
-        cursor: not-allowed;
-      }
-
-      .sending {
-        opacity: 0.7;
-        pointer-events: none;
-      }
-
       /* Loading state */
       .loading .info-value,
       .loading .status-pill {
@@ -174,12 +138,6 @@
 
       .loading .status-pill {
         min-width: 100px;
-      }
-
-      .loading .actions button {
-        background: var(--bg-secondary);
-        color: var(--text-secondary);
-        cursor: wait;
       }
 
       @keyframes shimmer {
@@ -216,9 +174,6 @@
           <span class="status-pill" id="status-pill"></span>
         </div>
         <div class="note" id="note" style="display: none;"></div>
-        <div class="actions">
-          <button id="send-button">Send this letter</button>
-        </div>
       </div>
     </div>
 
@@ -226,7 +181,6 @@
       // Per OpenAI docs, data may not be available immediately
       // Must listen for 'openai:set_globals' event
 
-      let currentDraftId = null;
       let dataLoaded = false;
 
       function showLoading() {
@@ -244,10 +198,6 @@
         statusPill.textContent = "Loading...";
 
         document.getElementById("note").style.display = "none";
-
-        const sendButton = document.getElementById("send-button");
-        sendButton.disabled = true;
-        sendButton.textContent = "Loading...";
       }
 
       function render() {
@@ -272,11 +222,8 @@
           reasonCannotSend,
           deliveryClass,
           estimatedDeliveryDays,
-          draftId,
           savedReturnAddressNote
         } = state;
-
-        currentDraftId = draftId;
 
         // Render preview HTML
         const previewPane = document.getElementById("preview-pane");
@@ -317,16 +264,6 @@
         } else {
           noteEl.style.display = "none";
         }
-
-        // Send button
-        const sendButton = document.getElementById("send-button");
-        if (!canSendNow) {
-          sendButton.disabled = true;
-          sendButton.textContent = reasonCannotSend ?? "Cannot send";
-        } else {
-          sendButton.disabled = false;
-          sendButton.textContent = "Send this letter";
-        }
       }
 
       // Apply theme
@@ -341,31 +278,6 @@
       // Listen for data updates (per OpenAI docs)
       window.addEventListener("openai:set_globals", () => {
         render();
-      });
-
-      // Send button click handler
-      document.getElementById("send-button")?.addEventListener("click", async () => {
-        if (!window.openai?.callTool || !currentDraftId) {
-          console.warn("Cannot send: missing callTool or draftId");
-          return;
-        }
-
-        const sendButton = document.getElementById("send-button");
-        sendButton.disabled = true;
-        sendButton.textContent = "Sending...";
-        document.getElementById("card").classList.add("sending");
-
-        try {
-          await window.openai.callTool("send_letter", {
-            draftId: currentDraftId,
-            confirm: true
-          });
-        } catch (error) {
-          console.error("Failed to send letter:", error);
-          sendButton.disabled = false;
-          sendButton.textContent = "Send this letter";
-          document.getElementById("card").classList.remove("sending");
-        }
       });
     </script>
   </body>
