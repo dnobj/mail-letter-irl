@@ -244,24 +244,9 @@ export async function registerLetterTools(
 
         const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
 
-        // Build response _meta with outputTemplate and invocation states
-        // CRITICAL: openai/outputTemplate MUST be in the response _meta for ChatGPT
-        // to know which widget to render and inject structuredContent into toolOutput
-        const responseMeta: Record<string, unknown> = {};
-        if (tool.meta) {
-          // Include outputTemplate - this is REQUIRED for widget rendering
-          const outputTemplateKey = "openai/outputTemplate";
-          if (tool.meta[outputTemplateKey]) {
-            responseMeta[outputTemplateKey] = tool.meta[outputTemplateKey];
-          }
-
-          // Include invocation states for loading UI
-          const invokingKey = "openai/toolInvocation/invoking";
-          const invokedKey = "openai/toolInvocation/invoked";
-          if (tool.meta[invokingKey]) responseMeta[invokingKey] = tool.meta[invokingKey];
-          if (tool.meta[invokedKey]) responseMeta[invokedKey] = tool.meta[invokedKey];
-        }
-
+        // Per OpenAI examples, response should have structuredContent and content
+        // The _meta with openai/outputTemplate goes in tool REGISTRATION only,
+        // not in the response. ChatGPT reads the template from tool definition.
         const response = {
           content: [
             {
@@ -269,12 +254,10 @@ export async function registerLetterTools(
               text: summaryText
             }
           ],
-          structuredContent: result,
-          _meta: Object.keys(responseMeta).length > 0 ? responseMeta : undefined
+          structuredContent: result
         };
 
         console.log(`📤 Tool response ${tool.name}:`);
-        console.log(`   _meta: ${JSON.stringify(response._meta)}`);
         console.log(`   structuredContent keys: ${Object.keys(result as object).join(', ')}`);
 
         return response;
