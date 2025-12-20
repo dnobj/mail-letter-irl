@@ -128,11 +128,19 @@
     </div>
 
     <script type="module">
+      // Debug: Log what window.openai contains
+      console.log("[BalanceCard] window.openai:", window.openai);
+      console.log("[BalanceCard] window.openai?.toolOutput:", window.openai?.toolOutput);
+      console.log("[BalanceCard] Keys:", window.openai ? Object.keys(window.openai) : "undefined");
+
       // OpenAI Apps SDK injects window.openai with toolOutput data
       const theme = window.openai?.theme ?? "light";
       if (theme === "dark") {
         document.documentElement.classList.add("dark");
       }
+
+      const toolOutput = window.openai?.toolOutput ?? {};
+      console.log("[BalanceCard] toolOutput:", JSON.stringify(toolOutput, null, 2));
 
       const {
         creditsRemaining,
@@ -140,7 +148,9 @@
         standardLetterCostCredits,
         userEmail,
         authProvider
-      } = window.openai?.toolOutput ?? {};
+      } = toolOutput;
+
+      console.log("[BalanceCard] creditsRemaining:", creditsRemaining);
 
       document.getElementById("balance").textContent = `${creditsRemaining ?? 0} credits`;
       document.getElementById("letter-cost").textContent = `${standardLetterCostCredits ?? 2} credits`;
