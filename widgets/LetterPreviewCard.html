@@ -5,47 +5,132 @@
     <title>LetterPreviewCard</title>
     <style>
       :root {
+        --bg-primary: #ffffff;
+        --bg-secondary: #f8fafc;
+        --text-primary: #1f2933;
+        --text-secondary: #61748f;
+        --border-color: #e2e8f0;
+        --accent-blue: #2563eb;
+        --accent-blue-hover: #1d4ed8;
+        --accent-success: #065f46;
+        --accent-success-bg: #d1fae5;
+        --accent-warning: #b91c1c;
+        --accent-warning-bg: #fee2e2;
+        --preview-bg: #fefefe;
+
         font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        color: #1f2933;
-        background: #f8fafc;
+        background: transparent;
+        color: var(--text-primary);
+      }
+
+      .dark {
+        --bg-primary: #1e293b;
+        --bg-secondary: #0f172a;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --border-color: #334155;
+        --accent-blue: #3b82f6;
+        --accent-blue-hover: #2563eb;
+        --accent-success: #34d399;
+        --accent-success-bg: #064e3b;
+        --accent-warning: #f87171;
+        --accent-warning-bg: #7f1d1d;
+        --preview-bg: #1e293b;
+      }
+
+      * {
+        box-sizing: border-box;
       }
 
       body {
         margin: 0;
-        padding: 1.5rem;
+        padding: 1rem;
+        background: transparent;
       }
 
       .card {
-        max-width: 32rem;
-        border-radius: 16px;
-        background: #ffffff;
-        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+        width: 100%;
+        border-radius: 12px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
         overflow: hidden;
       }
 
       .preview-pane {
-        max-height: 18rem;
+        max-height: 200px;
         overflow: auto;
-        padding: 1.5rem;
-        border-bottom: 1px solid #e2e8f0;
+        padding: 1rem;
+        background: var(--preview-bg);
+        border-bottom: 1px solid var(--border-color);
+        font-family: "Georgia", "Times New Roman", serif;
+        font-size: 0.9rem;
+        line-height: 1.5;
       }
 
-      .preview-pane iframe {
-        width: 100%;
-        height: 100%;
+      .preview-pane address {
+        font-style: normal;
+        margin-bottom: 1rem;
+      }
+
+      .preview-pane hr {
         border: none;
-        background: #fff;
+        border-top: 1px solid var(--border-color);
+        margin: 1rem 0;
       }
 
       .meta {
-        padding: 1.5rem;
-        display: grid;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
         gap: 0.75rem;
       }
 
-      .cost {
+      .info-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.9rem;
+      }
+
+      .info-label {
+        color: var(--text-secondary);
+      }
+
+      .info-value {
         font-weight: 600;
-        font-size: 1rem;
+        color: var(--text-primary);
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.35rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+      }
+
+      .status-pill.ok {
+        background: var(--accent-success-bg);
+        color: var(--accent-success);
+      }
+
+      .status-pill.alert {
+        background: var(--accent-warning-bg);
+        color: var(--accent-warning);
+      }
+
+      .note {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        padding: 0.75rem;
+        background: var(--bg-secondary);
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+      }
+
+      .actions {
+        padding-top: 0.5rem;
       }
 
       .actions button {
@@ -54,26 +139,48 @@
         border: none;
         border-radius: 10px;
         font-weight: 600;
+        font-size: 0.95rem;
         cursor: pointer;
-        background: #2563eb;
+        background: var(--accent-blue);
         color: #ffffff;
         transition: background 0.2s ease;
       }
 
+      .actions button:hover:not(:disabled) {
+        background: var(--accent-blue-hover);
+      }
+
       .actions button:disabled {
-        background: #cbd5f5;
+        background: var(--border-color);
+        color: var(--text-secondary);
         cursor: not-allowed;
+      }
+
+      .sending {
+        opacity: 0.7;
+        pointer-events: none;
       }
     </style>
   </head>
   <body>
-    <div class="card">
-      <div class="preview-pane">
-        <iframe id="preview-frame" title="Letter preview"></iframe>
+    <div class="card" id="card">
+      <div class="preview-pane" id="preview-pane">
+        <em>Loading preview...</em>
       </div>
       <div class="meta">
-        <div class="cost" id="cost-text"></div>
-        <div id="credit-note"></div>
+        <div class="info-row">
+          <span class="info-label">Cost</span>
+          <span class="info-value" id="cost"></span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Delivery</span>
+          <span class="info-value" id="delivery"></span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Status</span>
+          <span class="status-pill" id="status-pill"></span>
+        </div>
+        <div class="note" id="note" style="display: none;"></div>
         <div class="actions">
           <button id="send-button">Send this letter</button>
         </div>
@@ -82,53 +189,90 @@
 
     <script type="module">
       // OpenAI Apps SDK injects window.openai with toolOutput data
+      const theme = window.openai?.theme ?? "light";
+      if (theme === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+
       const state = window.openai?.toolOutput ?? {};
       const {
         previewHtml,
         requiredCredits,
         canSendNow,
         reasonCannotSend,
-        originalRequest,
-        currentBalance
+        deliveryClass,
+        estimatedDeliveryDays,
+        draftId,
+        savedReturnAddressNote,
+        usedSavedReturnAddress
       } = state;
 
-      const frame = document.getElementById("preview-frame");
-      const costText = document.getElementById("cost-text");
-      const creditNote = document.getElementById("credit-note");
-      const sendButton = document.getElementById("send-button");
-
-      if (frame?.contentWindow && previewHtml) {
-        frame.contentWindow.document.open();
-        frame.contentWindow.document.write(previewHtml);
-        frame.contentWindow.document.close();
-      }
-
-      costText.textContent = `Cost: ${requiredCredits} Letter IRL credit${requiredCredits === 1 ? "" : "s"}`;
-
-      if (typeof currentBalance === "number") {
-        creditNote.textContent = `You currently have ${currentBalance} credits.`;
+      // Render preview HTML directly (safer than iframe in sandboxed widget)
+      const previewPane = document.getElementById("preview-pane");
+      if (previewHtml) {
+        // Extract just the body content from the preview HTML
+        const bodyMatch = previewHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        previewPane.innerHTML = bodyMatch ? bodyMatch[1] : previewHtml;
       } else {
-        creditNote.textContent = "Balance data unavailable in this preview.";
+        previewPane.innerHTML = "<em>No preview available</em>";
       }
 
+      // Cost
+      document.getElementById("cost").textContent =
+        `${requiredCredits ?? 2} credit${requiredCredits === 1 ? "" : "s"}`;
+
+      // Delivery info
+      const deliveryText = [];
+      if (deliveryClass) deliveryText.push(deliveryClass);
+      if (estimatedDeliveryDays) deliveryText.push(`~${estimatedDeliveryDays} days`);
+      document.getElementById("delivery").textContent =
+        deliveryText.length > 0 ? deliveryText.join(" - ") : "Standard";
+
+      // Status pill
+      const statusPill = document.getElementById("status-pill");
+      if (canSendNow) {
+        statusPill.classList.add("ok");
+        statusPill.textContent = "Ready to send";
+      } else {
+        statusPill.classList.add("alert");
+        statusPill.textContent = reasonCannotSend ?? "Cannot send";
+      }
+
+      // Note about saved return address
+      const noteEl = document.getElementById("note");
+      if (savedReturnAddressNote) {
+        noteEl.textContent = savedReturnAddressNote;
+        noteEl.style.display = "block";
+      }
+
+      // Send button
+      const sendButton = document.getElementById("send-button");
       if (!canSendNow) {
         sendButton.disabled = true;
-        sendButton.textContent = reasonCannotSend ?? "Not enough credits";
+        sendButton.textContent = reasonCannotSend ?? "Cannot send";
       }
 
       sendButton?.addEventListener("click", async () => {
-        if (!window.openai?.callTool) {
-          console.warn("window.openai bridge unavailable");
+        if (!window.openai?.callTool || !draftId) {
+          console.warn("Cannot send: missing callTool or draftId");
           return;
         }
 
-        const payload = {
-          ...originalRequest,
-          requiredCredits,
-          confirm: true
-        };
+        sendButton.disabled = true;
+        sendButton.textContent = "Sending...";
+        document.getElementById("card").classList.add("sending");
 
-        await window.openai.callTool("send_letter", payload);
+        try {
+          await window.openai.callTool("send_letter", {
+            draftId,
+            confirm: true
+          });
+        } catch (error) {
+          console.error("Failed to send letter:", error);
+          sendButton.disabled = false;
+          sendButton.textContent = "Send this letter";
+          document.getElementById("card").classList.remove("sending");
+        }
       });
     </script>
   </body>
