@@ -1,5 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import * as fs from "fs/promises";
+import * as path from "path";
+import { fileURLToPath } from "url";
 import { LetterIrlServer } from "../server.js";
 import { toolInputSchemas } from "./toolSchemas.js";
 import {
@@ -14,6 +18,118 @@ import {
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
+
+/**
+ * Build MCP tool annotations from tool definition.
+ *
+ * These annotations tell ChatGPT how to classify tools:
+ * - readOnlyHint: true = READ (no user confirmation needed)
+ * - readOnlyHint: false = WRITE (requires user confirmation)
+ * - destructiveHint: true = Shows deletion warning
+ *
+ * @see US-MCP-06: Tool Read/Write Annotations
+ * @see https://developers.openai.com/apps-sdk/plan/tools/
+ */
+function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnotations {
+  return {
+    readOnlyHint: tool.readOnly,
+    destructiveHint: tool.name === 'clear_return_address',
+  };
+}
+
+/**
+ * Widget definitions for OpenAI Apps SDK.
+ * Each widget is registered as an MCP resource with ui:// URI.
+ *
+ * @see US-MCP-07: Widget Resources
+ * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+ */
+const WIDGET_DEFINITIONS = [
+  { name: "LetterPreviewCard", description: "Shows letter preview with cost, delivery info, and status" },
+];
+
+/**
+ * Widget domain for CSP isolation.
+ * Per OpenAI examples, this should be https://chatgpt.com for widgets
+ * running in the ChatGPT environment.
+ * Required for app submission.
+ *
+ * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+ */
+const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? "https://chatgpt.com";
+
+/**
+ * Content Security Policy for widgets.
+ * Our widgets use window.openai.callTool which communicates with ChatGPT.
+ * We include chatgpt.com to allow this internal communication.
+ *
+ * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+ */
+const WIDGET_CSP = {
+  connect_domains: ["https://chatgpt.com"],
+  resource_domains: ["https://*.oaistatic.com"],
+  // frame_domains not included - we don't use iframes
+  // redirect_domains not included - we don't use openExternal
+};
+
+// Resolve widget directory relative to this module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DEFAULT_WIDGET_DIR = process.env.LETTER_IRL_WIDGET_DIR ?? path.resolve(__dirname, "../../widgets");
+
+/**
+ * Register widget HTML files as MCP resources.
+ *
+ * ChatGPT requires widgets to be:
+ * 1. Registered as MCP resources with ui:// protocol URIs
+ * 2. Served with text/html+skybridge MIME type
+ * 3. Referenced in tool _meta.openai/outputTemplate
+ *
+ * The skybridge MIME type signals ChatGPT to inject window.openai runtime.
+ */
+async function registerWidgetResources(mcpServer: McpServer) {
+  for (const widget of WIDGET_DEFINITIONS) {
+    const uri = `ui://widgets/${widget.name}.html`;
+    const filePath = path.join(DEFAULT_WIDGET_DIR, `${widget.name}.html`);
+
+    // Check if widget file exists before registering
+    try {
+      await fs.access(filePath);
+    } catch {
+      console.warn(`⚠️  Widget file not found: ${filePath}`);
+      continue;
+    }
+
+    // Register widget resource per OpenAI docs:
+    // - Empty {} for options (NOT { mimeType: ... })
+    // - _meta on the content item with CSP, domain, and widgetPrefersBorder
+    mcpServer.registerResource(
+      widget.name,
+      uri,
+      {},  // Empty options per docs
+      async () => {
+        console.log(`🎨 Widget resource requested: ${uri}`);
+        const html = await fs.readFile(filePath, "utf-8");
+        console.log(`🎨 Returning widget HTML (${html.length} bytes)`);
+        return {
+          contents: [{
+            uri,
+            mimeType: "text/html+skybridge",
+            text: html,
+            _meta: {
+              "openai/widgetPrefersBorder": true,
+              "openai/widgetDomain": WIDGET_DOMAIN,
+              "openai/widgetCSP": WIDGET_CSP,
+              "openai/widgetDescription": widget.description
+            }
+          }]
+        };
+      }
+    );
+
+    console.log(`📦 Registered widget resource: ${uri}`);
+  }
+}
 
 type ToolName = keyof typeof toolInputSchemas;
 
@@ -86,6 +202,9 @@ export async function registerLetterTools(
     }
   }
 
+  // Register widget resources for ChatGPT UI rendering
+  await registerWidgetResources(mcpServer);
+
   const toolDefs = appServer.listTools();
   for (const tool of toolDefs) {
     const shape = getZodShape(tool.name);
@@ -93,31 +212,54 @@ export async function registerLetterTools(
       continue;
     }
 
-    mcpServer.tool(tool.name, shape, async (args, extra) => {
-      console.log(
-        `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId}`
-      );
-      const { result, meta } = await appServer.execute({
-        toolName: tool.name,
-        input: args,
-        userId
-      });
+    // Build annotations for ChatGPT to classify tools as READ or WRITE
+    const annotations = buildAnnotations(tool);
 
-      const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
+    // Register tool per OpenAI docs format:
+    // - title field for human-readable name
+    // - _meta with openai/outputTemplate pointing to ui:// resource
+    mcpServer.registerTool(
+      tool.name,
+      {
+        title: tool.description,  // Use description as title
+        description: tool.description,
+        inputSchema: shape,
+        annotations,
+        _meta: tool.meta  // Contains openai/outputTemplate, widgetAccessible, etc.
+      },
+      async (args, extra) => {
+        console.log(
+          `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId}`
+        );
+        const { result, meta } = await appServer.execute({
+          toolName: tool.name,
+          input: args,
+          userId
+        });
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: summaryText
-          }
-        ],
-        structuredContent: {
-          ...result,
-          _meta: meta
-        }
-      };
-    });
+        const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
+
+        // Per OpenAI docs, response has three sibling payloads:
+        // - structuredContent: data for model + widget (→ window.openai.toolOutput)
+        // - content: narration for model
+        // - _meta: widget-only data (→ window.openai.toolResponseMetadata)
+        const response = {
+          structuredContent: result,
+          content: [
+            {
+              type: "text" as const,
+              text: summaryText
+            }
+          ],
+          _meta: meta  // Tool-specific meta (optional, for widget-only data)
+        };
+
+        console.log(`📤 Tool response ${tool.name}:`);
+        console.log(`   structuredContent: ${JSON.stringify(result)}`);
+
+        return response;
+      }
+    );
   }
 
 }

@@ -7,6 +7,8 @@
     "build": "echo 'Skipping tsc - using tsx at runtime'",
     "start": "tsx src/mcp/httpServer.ts",
     "dev": "tsx watch src/mcp/httpServer.ts",
+    "dev:env": "dotenv -e .env.dev -- tsx watch src/mcp/httpServer.ts",
+    "dev:sync": "tsx scripts/dev-sync.ts",
     "lint": "eslint .",
     "flow": "tsx src/cli/flowHarness.ts",
     "mcp:stdio": "tsx src/mcp/stdioServer.ts",

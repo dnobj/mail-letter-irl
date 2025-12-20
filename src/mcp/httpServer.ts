@@ -394,6 +394,33 @@ export async function startHttpServer() {
       return;
     }
 
+    // Debug endpoint to check widget registration (no auth required)
+    if (url.pathname === "/debug/widgets") {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      const fs = await import("fs/promises");
+      const pathMod = await import("path");
+      const { fileURLToPath } = await import("url");
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = pathMod.dirname(__filename);
+      const widgetDir = process.env.LETTER_IRL_WIDGET_DIR ?? pathMod.resolve(__dirname, "../../widgets");
+      const widgets = ["BalanceCard", "LetterPreviewCard", "LetterConfirmationCard", "LetterStatusCard"];
+      const status: Record<string, any> = { widgetDir, cwd: process.cwd(), widgets: {} };
+      for (const w of widgets) {
+        const filePath = pathMod.join(widgetDir, `${w}.html`);
+        try {
+          await fs.access(filePath);
+          const stat = await fs.stat(filePath);
+          status.widgets[w] = { exists: true, path: filePath, size: stat.size };
+        } catch (e: any) {
+          status.widgets[w] = { exists: false, path: filePath, error: e.message };
+        }
+      }
+      res.end(JSON.stringify(status, null, 2));
+      return;
+    }
+
     // Serve admin panel (requires ADMIN_ENABLED=true, localhost only)
     if (url.pathname === "/admin" || url.pathname === "/admin.html" || url.pathname === "/admin-panel.html") {
       // Check if admin is enabled (disabled by default)
@@ -542,6 +569,45 @@ export async function startHttpServer() {
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(payload));
+      return;
+    }
+
+    // OAuth Dynamic Client Registration endpoint (static client approach)
+    // Returns a pre-provisioned client_id instead of creating new clients
+    // Aligned with MCP Nov 2025 spec direction (CIMD replacing DCR)
+    // GitHub Issue: #20
+    if (url.pathname === "/oauth/register" && req.method === "POST") {
+      const staticClientId = process.env.CHATGPT_STATIC_CLIENT_ID;
+
+      if (!staticClientId) {
+        console.error("[DCR] CHATGPT_STATIC_CLIENT_ID not configured");
+        res.statusCode = 503;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({
+          error: "server_error",
+          error_description: "OAuth client registration is not configured"
+        }));
+        return;
+      }
+
+      // RFC 7591 compliant response with static client
+      const response = {
+        client_id: staticClientId,
+        client_id_issued_at: Math.floor(Date.now() / 1000),
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        redirect_uris: [
+          "https://chat.openai.com/aip/auth/callback",
+          "https://chatgpt.com/connector_platform_oauth_redirect",
+          "http://localhost:18883/oauth/callback"
+        ]
+      };
+
+      console.log(`[DCR] Returning static client_id: ${staticClientId.substring(0, 8)}...`);
+      res.statusCode = 201;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(response));
       return;
     }
 

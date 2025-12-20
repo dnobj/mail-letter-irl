@@ -49,7 +49,7 @@ interface QuoteAndPreviewOutput {
   };
 }
 
-const OUTPUT_TEMPLATE = "LetterPreviewCard";
+const OUTPUT_TEMPLATE = "ui://widgets/LetterPreviewCard.html";
 
 async function handler(
   input: QuoteAndPreviewInput,
@@ -444,6 +444,7 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
   outputSchema: quoteAndPreviewOutputSchema,
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
+    "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Generating preview…",
     "openai/toolInvocation/invoked": "Preview ready",
     readOnlyHint: true

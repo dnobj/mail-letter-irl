@@ -27,21 +27,75 @@ Letter IRL is a **physical letter mailing service** integrated with ChatGPT via 
 │                        PRODUCTION                                │
 ├─────────────────────────────────────────────────────────────────┤
 │  Railway (api.letterirl.com)                                     │
+│  ├── Git Branch: master                                          │
 │  ├── MCP HTTP Server                                             │
 │  ├── REST API (/api/*)                                           │
 │  ├── Stripe Webhooks                                             │
 │  ├── pg-boss Workers (job processing)                            │
 │  └── Status Sync Worker (6h interval)                            │
 ├─────────────────────────────────────────────────────────────────┤
-│  Neon PostgreSQL                                                 │
+│  Neon PostgreSQL (main branch)                                   │
 │  └── All tables (users, letters, credits, jobs, etc.)            │
 ├─────────────────────────────────────────────────────────────────┤
 │  External Services                                               │
-│  ├── Auth0 (OAuth 2.1 + PKCE, 5 identity providers)              │
-│  ├── Stripe (payments, webhooks)                                 │
-│  └── PostGrid (letter printing/mailing)                          │
+│  ├── Auth0: dev-ky21dxn3qmi71hjl.us.auth0.com                    │
+│  ├── Stripe (live mode)                                          │
+│  └── PostGrid (live mode)                                        │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                       DEVELOPMENT                                │
+├─────────────────────────────────────────────────────────────────┤
+│  Railway (obscure URL)                                           │
+│  ├── Git Branch: dev                                             │
+│  ├── MCP HTTP Server                                             │
+│  ├── REST API (/api/*)                                           │
+│  ├── Stripe Webhooks                                             │
+│  ├── pg-boss Workers (job processing)                            │
+│  └── Status Sync Worker (6h interval)                            │
+├─────────────────────────────────────────────────────────────────┤
+│  Neon PostgreSQL (dev branch)                                    │
+│  └── Copy of production data (sync via npm run dev:sync)         │
+├─────────────────────────────────────────────────────────────────┤
+│  External Services                                               │
+│  ├── Auth0: letter-irl-dev.us.auth0.com (SEPARATE TENANT)        │
+│  ├── Stripe (test mode)                                          │
+│  └── PostGrid (dummy provider - no real mail)                    │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Development Environment
+
+Letter IRL uses a **fully isolated development environment** that mirrors production architecture:
+
+### Git Branching Strategy
+- **`master`** - Production branch (auto-deploys to Railway production)
+- **`dev`** - Development branch (auto-deploys to Railway dev environment)
+- **`feature/*`** - Feature branches (branch from `dev`, merge to `dev`)
+
+### Environment Isolation
+
+| Component | Production | Development |
+|-----------|------------|-------------|
+| Git Branch | `master` | `dev` |
+| Railway | api.letterirl.com | Obscure URL |
+| Neon | main branch | dev branch (synced copy) |
+| Auth0 | dev-ky21dxn3qmi71hjl.us.auth0.com | letter-irl-dev.us.auth0.com |
+| Stripe | Live mode | Test mode |
+| PostGrid | Live mode | Dummy provider |
+
+### Database Sync
+Run `npm run dev:sync` to synchronize production data to development:
+- Deletes and recreates Neon dev branch from production
+- Exports/imports Username-Password users to preserve Auth0 user IDs
+- One-way sync: Production → Dev only
+
+### User ID Preservation
+Social login IDs (Google, GitHub, etc.) automatically match across Auth0 tenants. Username-Password users require sync script to preserve IDs.
+
+See [deployment.md](deployment.md) for detailed setup instructions.
 
 ---
 
@@ -316,11 +370,12 @@ npm run db:migrate:rollback # View rollback info
 
 ## Deployment
 
-### Railway
-- Auto-deploys from GitHub master branch
+### Railway Environments
+- **Production**: Auto-deploys from `master` branch → api.letterirl.com
+- **Development**: Auto-deploys from `dev` branch → Obscure URL
 - Uses Nixpacks for build
-- Environment variables configured in Railway dashboard
-- Admin routes disabled in production
+- Environment variables configured per environment in Railway dashboard
+- Admin routes disabled in both production and development
 
 ### Key Files
 - `railway.json` - Railway configuration
@@ -345,6 +400,7 @@ npm run db:migrate:rollback # View rollback info
 - [x] Chargeback tracking
 - [x] Railway deployment
 - [x] Letter status sync from PostGrid (6h worker)
+- [x] Live development environment (isolated Auth0 tenant, Neon branch, test mode services)
 
 ---
 

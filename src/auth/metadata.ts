@@ -13,13 +13,17 @@ export function getOpenIdConfiguration(baseUrl: string) {
     authorization_endpoint: authorizationEndpoint,
     token_endpoint: tokenEndpoint,
     jwks_uri: jwksUri,
-    registration_endpoint: registrationEndpoint,
+    registration_endpoint: `${baseUrl}/oauth/register`, // Our static DCR endpoint (Issue #20)
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code"],
     code_challenge_methods_supported: ["S256"],
     scopes_supported: scopes,
     token_endpoint_auth_methods_supported: ["client_secret_post", "client_secret_basic"],
-    redirect_uris_supported: ["https://chat.openai.com/aip/auth/callback"],
+    redirect_uris_supported: [
+      "https://chat.openai.com/aip/auth/callback",
+      "https://chatgpt.com/connector_platform_oauth_redirect",
+      "http://localhost:18883/oauth/callback" // Claude Desktop mcp-remote
+    ],
     claims_supported: ["aud", "exp", "iat", "iss", "sub", "email", "email_verified"],
     service_documentation: `${baseUrl}/manifest.json`
   };

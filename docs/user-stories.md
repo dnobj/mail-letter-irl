@@ -20,6 +20,8 @@ User stories are organized by feature area using semantic prefixes:
 | `US-SEC` | Security | Authorization, data protection |
 | `US-DATA` | Data Integrity | Consistency and audit |
 | `US-MCP` | MCP Access | Token-based auth for non-ChatGPT clients |
+| `US-DEV` | Development | Development environment and workflows |
+| `US-DCR` | OAuth Registration | Dynamic Client Registration handling |
 
 Each story includes acceptance criteria that can be converted to test cases.
 
@@ -975,6 +977,176 @@ macOS/Linux:
 
 ---
 
+### US-MCP-06: Tool Read/Write Annotations
+**As a** ChatGPT user
+**I want** read-only tools to be marked as "READ"
+**So that** I don't have to confirm every tool call
+
+**Acceptance Criteria:**
+- [ ] Read-only tools show as "READ" in ChatGPT connector settings
+- [ ] Write tools show as "WRITE" in ChatGPT connector settings
+- [ ] Read-only tools don't require user confirmation
+- [ ] Write tools require user confirmation before execution
+- [ ] Destructive tools (clear_return_address) show additional warning
+
+**Tool Classification:**
+| Tool | Type | Annotation |
+|------|------|------------|
+| `get_account_balance` | READ | `readOnlyHint: true` |
+| `get_order_status` | READ | `readOnlyHint: true` |
+| `get_return_address` | READ | `readOnlyHint: true` |
+| `list_orders` | READ | `readOnlyHint: true` |
+| `quote_and_preview_letter` | READ | `readOnlyHint: true` |
+| `switch_account` | READ | `readOnlyHint: true` |
+| `send_letter` | WRITE | `readOnlyHint: false` |
+| `set_return_address` | WRITE | `readOnlyHint: false` |
+| `clear_return_address` | WRITE | `readOnlyHint: false`, `destructiveHint: true` |
+
+**Technical Details:**
+- MCP SDK expects annotations in separate `annotations` parameter
+- Not in `_meta` object (current incorrect implementation)
+- Annotations: `readOnlyHint`, `destructiveHint`, `openWorldHint`, `idempotentHint`
+
+**Related:**
+- GitHub Issue: #17
+- [OpenAI: Define Tools](https://developers.openai.com/apps-sdk/plan/tools/)
+
+---
+
+## Development (DEV)
+
+### US-DEV-01: Isolated Development Environment
+**As a** developer
+**I want** a fully isolated development environment
+**So that** I can test changes without affecting production users or data
+
+**Acceptance Criteria:**
+- [ ] Separate Auth0 tenant (letter-irl-dev.us.auth0.com) for complete isolation
+- [ ] Separate Neon database branch (dev) with production data copy
+- [ ] Separate Railway deployment with obscure URL
+- [ ] Stripe test mode (no real charges)
+- [ ] Dummy PostGrid provider (no real letters mailed)
+- [ ] Git branch `dev` auto-deploys to development environment
+- [ ] Git branch `master` auto-deploys to production environment
+
+**Environment Components:**
+| Component | Production | Development |
+|-----------|------------|-------------|
+| Git Branch | `master` | `dev` |
+| Railway | api.letterirl.com | Obscure URL |
+| Neon | main branch | dev branch |
+| Auth0 | dev-ky21dxn3qmi71hjl.us.auth0.com | letter-irl-dev.us.auth0.com |
+| Stripe | Live mode | Test mode |
+| PostGrid | Live mode | Dummy provider |
+
+---
+
+### US-DEV-02: Database Synchronization
+**As a** developer
+**I want** to sync production data to development
+**So that** I can test with realistic data
+
+**Acceptance Criteria:**
+- [ ] Command `npm run dev:sync` triggers sync process
+- [ ] Deletes existing Neon dev branch
+- [ ] Creates new Neon dev branch from production (main)
+- [ ] Exports Username-Password users from production Auth0
+- [ ] Imports Username-Password users to development Auth0
+- [ ] Preserves user IDs to maintain data consistency
+- [ ] One-way sync only (production → development)
+- [ ] Social login user IDs automatically match (no import needed)
+
+**User ID Matching:**
+| Login Type | Same Across Tenants? | Import Needed? |
+|------------|---------------------|----------------|
+| Google (`google-oauth2\|xxx`) | Yes | No |
+| GitHub (`github\|xxx`) | Yes | No |
+| Microsoft (`windowslive\|xxx`) | Yes | No |
+| Apple (`apple\|xxx`) | Yes | No |
+| Username-Password (`auth0\|xxx`) | No | Yes |
+
+**Safety Checks:**
+- [ ] Requires confirmation before deleting dev branch
+- [ ] Validates environment variables before starting
+- [ ] Reports sync progress and results
+- [ ] Handles errors gracefully with clear messages
+
+---
+
+### US-DEV-03: Feature Branch Workflow
+**As a** developer
+**I want** a clear branching strategy
+**So that** feature development is organized
+
+**Acceptance Criteria:**
+- [ ] Features branch from `dev` branch
+- [ ] Feature branch naming: `feature/description`
+- [ ] Features merge to `dev` via pull request
+- [ ] `dev` merges to `master` for production releases
+- [ ] Railway auto-deploys on push to `dev` or `master`
+- [ ] Each environment has isolated credentials
+
+**Git Flow:**
+```
+master (production)
+  ↑
+  └── dev (development)
+        ↑
+        ├── feature/add-email-notifications
+        ├── feature/improve-address-validation
+        └── feature/user-dashboard-redesign
+```
+
+---
+
+## OAuth Registration (DCR)
+
+### US-DCR-01: MCP Client OAuth Registration
+**As an** MCP client (ChatGPT, Claude Desktop)
+**I want to** register for OAuth access
+**So that** I can authenticate users to the Letter IRL service
+
+**Acceptance Criteria:**
+- [ ] `/oauth/register` endpoint accepts POST requests
+- [ ] Returns RFC 7591 compliant response with `client_id`
+- [ ] Returns `token_endpoint_auth_method: none` (public client)
+- [ ] Includes all required redirect URIs (ChatGPT, Claude Desktop)
+- [ ] Returns 201 Created status code
+- [ ] Response includes `client_id_issued_at` timestamp
+
+**Required Redirect URIs:**
+- `https://chat.openai.com/aip/auth/callback` (ChatGPT)
+- `https://chatgpt.com/connector_platform_oauth_redirect` (ChatGPT)
+- `http://localhost:18883/oauth/callback` (Claude Desktop via mcp-remote)
+
+**Personas:**
+- ChatGPT (OpenAI Apps SDK connector)
+- Claude Desktop (Anthropic via mcp-remote)
+
+---
+
+### US-DCR-02: Prevent Duplicate OAuth Client Creation
+**As an** admin
+**I want** the system to prevent duplicate Auth0 client creation
+**So that** we don't hit Auth0 entity limits or clutter the tenant
+
+**Acceptance Criteria:**
+- [ ] Multiple DCR requests return the same static `client_id`
+- [ ] No new clients created in Auth0 on registration requests
+- [ ] Auth0 tenant stays within application entity limits
+- [ ] Pre-provisioned first-party client used for all MCP connections
+- [ ] Environment variable `CHATGPT_STATIC_CLIENT_ID` configures the client
+
+**Background:**
+The MCP spec (Nov 2025) has transitioned from DCR to CIMD (Client ID Metadata Documents).
+This implementation uses a static client approach aligned with the spec direction.
+
+**References:**
+- [MCP Auth Spec Update Nov 2025](https://aaronparecki.com/2025/11/25/1/mcp-authorization-spec-update)
+- GitHub Issue: #20
+
+---
+
 ## Priority Matrix
 
 | Priority | Category | Stories | Key Personas |
@@ -996,6 +1168,8 @@ macOS/Linux:
 | P3 - Low | Admin | US-ADMIN-03 - US-ADMIN-08 | Amy |
 | P3 - Low | Edge Cases | US-EDGE-02, US-EDGE-05, US-EDGE-06, US-EDGE-07 | Eleanor |
 | P3 - Low | MCP Access | US-MCP-05 | Amy |
+| P3 - Low | Development | US-DEV-01, US-DEV-02, US-DEV-03 | Developers |
+| P1 - High | OAuth Registration | US-DCR-01, US-DCR-02 | MCP Clients, Admin |
 
 ---
 
@@ -1011,8 +1185,10 @@ macOS/Linux:
 | Edge Cases | US-EDGE | 8 |
 | Security | US-SEC | 6 |
 | Data Integrity | US-DATA | 3 |
-| MCP Access | US-MCP | 5 |
-| **Total** | | **53** |
+| MCP Access | US-MCP | 6 |
+| Development | US-DEV | 3 |
+| OAuth Registration | US-DCR | 2 |
+| **Total** | | **59** |
 
 ---
 
