@@ -160,6 +160,41 @@
         opacity: 0.7;
         pointer-events: none;
       }
+
+      /* Loading state */
+      .loading .info-value,
+      .loading .status-pill {
+        background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border-color) 50%, var(--bg-secondary) 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        color: transparent;
+        border-radius: 4px;
+        min-width: 60px;
+      }
+
+      .loading .status-pill {
+        min-width: 100px;
+      }
+
+      .loading .actions button {
+        background: var(--bg-secondary);
+        color: var(--text-secondary);
+        cursor: wait;
+      }
+
+      @keyframes shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+      }
+
+      .preview-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100px;
+        color: var(--text-secondary);
+        font-style: italic;
+      }
     </style>
   </head>
   <body>
@@ -191,26 +226,44 @@
       // Per OpenAI docs, data may not be available immediately
       // Must listen for 'openai:set_globals' event
 
-      // Store draftId globally for send button handler
       let currentDraftId = null;
+      let dataLoaded = false;
 
-      function logDebug() {
-        console.log("[LetterPreviewCard] === DEBUG ===");
-        console.log("[LetterPreviewCard] toolOutput:", window.openai?.toolOutput);
-        console.log("[LetterPreviewCard] toolResponseMetadata:", window.openai?.toolResponseMetadata);
-        console.log("[LetterPreviewCard] toolInput:", window.openai?.toolInput);
-        if (window.openai?.toolOutput) {
-          console.log("[LetterPreviewCard] toolOutput JSON:", JSON.stringify(window.openai.toolOutput, null, 2));
-        }
-        console.log("[LetterPreviewCard] === END DEBUG ===");
+      function showLoading() {
+        const card = document.getElementById("card");
+        card.classList.add("loading");
+
+        // Show loading state
+        document.getElementById("preview-pane").innerHTML =
+          '<div class="preview-loading">Loading letter preview...</div>';
+        document.getElementById("cost").textContent = "—";
+        document.getElementById("delivery").textContent = "—";
+
+        const statusPill = document.getElementById("status-pill");
+        statusPill.classList.remove("ok", "alert");
+        statusPill.textContent = "Loading...";
+
+        document.getElementById("note").style.display = "none";
+
+        const sendButton = document.getElementById("send-button");
+        sendButton.disabled = true;
+        sendButton.textContent = "Loading...";
       }
 
       function render() {
-        const state = window.openai?.toolOutput ?? {};
-        console.log("[LetterPreviewCard] render() called");
-        console.log("[LetterPreviewCard] canSendNow:", state.canSendNow);
-        console.log("[LetterPreviewCard] previewHtml length:", state.previewHtml?.length);
-        console.log("[LetterPreviewCard] draftId:", state.draftId);
+        const state = window.openai?.toolOutput;
+
+        // Check if we have actual data
+        if (!state || state.draftId === undefined) {
+          if (!dataLoaded) {
+            showLoading();
+          }
+          return;
+        }
+
+        dataLoaded = true;
+        const card = document.getElementById("card");
+        card.classList.remove("loading");
 
         const {
           previewHtml,
@@ -220,11 +273,9 @@
           deliveryClass,
           estimatedDeliveryDays,
           draftId,
-          savedReturnAddressNote,
-          usedSavedReturnAddress
+          savedReturnAddressNote
         } = state;
 
-        // Store draftId for send handler
         currentDraftId = draftId;
 
         // Render preview HTML
@@ -284,15 +335,11 @@
         document.documentElement.classList.add("dark");
       }
 
-      // Initial debug and render
-      console.log("[LetterPreviewCard] Initial load");
-      logDebug();
+      // Initial render (will show loading state)
       render();
 
       // Listen for data updates (per OpenAI docs)
       window.addEventListener("openai:set_globals", () => {
-        console.log("[LetterPreviewCard] openai:set_globals event fired!");
-        logDebug();
         render();
       });
 

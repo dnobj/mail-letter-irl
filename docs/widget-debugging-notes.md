@@ -203,7 +203,47 @@ window.addEventListener("openai:set_globals", () => {
 });
 ```
 
-## Next Steps
-1. Test if `openai:set_globals` event fires
-2. Check if data is populated when event fires
-3. If event never fires, investigate MCP protocol layer
+## ✅ SOLUTION FOUND (December 20, 2025)
+
+**Root Cause:** Widgets load and execute JavaScript BEFORE ChatGPT populates `window.openai.toolOutput`. The data arrives a few seconds later via the `openai:set_globals` event.
+
+**Solution:** Widgets MUST listen for the `openai:set_globals` event and re-render when it fires.
+
+### Required Widget Pattern:
+
+```javascript
+function render() {
+  const data = window.openai?.toolOutput ?? {};
+  // Update DOM with data
+}
+
+// Initial render (data will be null/empty)
+render();
+
+// Re-render when data arrives
+window.addEventListener("openai:set_globals", () => {
+  render();
+});
+```
+
+### Key Learnings:
+
+1. **`registerTool()` and `registerResource()` are REQUIRED** - The older `tool()` and `resource()` methods don't pass `_meta` to ChatGPT, causing widgets to disappear entirely.
+
+2. **`openai:set_globals` event is REQUIRED** - Data is NOT available on initial widget load. Must listen for this event.
+
+3. **Tool registration format:**
+   - Include `title` field
+   - Include `_meta` with `openai/outputTemplate` pointing to `ui://` resource
+
+4. **Resource registration format:**
+   - Use empty `{}` for options parameter
+   - Include `_meta` on content item with CSP, domain, description
+
+5. **Response format:**
+   - `structuredContent` → becomes `window.openai.toolOutput`
+   - `content` → narration for model
+   - `_meta` → becomes `window.openai.toolResponseMetadata`
+
+### UX Consideration:
+Show a loading state initially since data takes a few seconds to arrive. Don't show misleading defaults like "0 credits".

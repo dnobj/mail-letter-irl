@@ -110,6 +110,31 @@
         padding-top: 0.5rem;
         border-top: 1px solid var(--border-color);
       }
+
+      /* Loading state */
+      .loading .balance,
+      .loading .info-value,
+      .loading .status-pill {
+        background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border-color) 50%, var(--bg-secondary) 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        color: transparent;
+        border-radius: 4px;
+      }
+
+      .loading .status-pill {
+        min-width: 100px;
+      }
+
+      @keyframes shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+      }
+
+      .status-pill.loading-pill {
+        background: var(--bg-secondary);
+        color: var(--text-secondary);
+      }
     </style>
   </head>
   <body>
@@ -131,17 +156,39 @@
       // Per OpenAI docs, data may not be available immediately
       // Must listen for 'openai:set_globals' event
 
-      function logDebug() {
-        console.log("[BalanceCard] === DEBUG ===");
-        console.log("[BalanceCard] toolOutput:", window.openai?.toolOutput);
-        console.log("[BalanceCard] toolResponseMetadata:", window.openai?.toolResponseMetadata);
-        console.log("[BalanceCard] toolInput:", window.openai?.toolInput);
-        console.log("[BalanceCard] === END DEBUG ===");
+      let dataLoaded = false;
+
+      function showLoading() {
+        const card = document.getElementById("card");
+        card.classList.add("loading");
+
+        // Show placeholder content
+        document.getElementById("balance").textContent = "Loading...";
+        document.getElementById("letter-cost").textContent = "—";
+        document.getElementById("can-send").textContent = "—";
+
+        const pill = document.getElementById("status-pill");
+        pill.classList.remove("ok", "alert");
+        pill.classList.add("loading-pill");
+        pill.textContent = "Loading...";
+
+        document.getElementById("account-info").style.display = "none";
       }
 
       function render() {
-        const toolOutput = window.openai?.toolOutput ?? {};
-        console.log("[BalanceCard] render() called, toolOutput:", JSON.stringify(toolOutput, null, 2));
+        const toolOutput = window.openai?.toolOutput;
+
+        // Check if we have actual data (not null/undefined)
+        if (!toolOutput || toolOutput.creditsRemaining === undefined) {
+          if (!dataLoaded) {
+            showLoading();
+          }
+          return;
+        }
+
+        dataLoaded = true;
+        const card = document.getElementById("card");
+        card.classList.remove("loading");
 
         const {
           creditsRemaining,
@@ -151,15 +198,12 @@
           authProvider
         } = toolOutput;
 
-        console.log("[BalanceCard] creditsRemaining:", creditsRemaining);
-
-        document.getElementById("balance").textContent = `${creditsRemaining ?? 0} credits`;
+        document.getElementById("balance").textContent = `${creditsRemaining} credits`;
         document.getElementById("letter-cost").textContent = `${standardLetterCostCredits ?? 2} credits`;
         document.getElementById("can-send").textContent = canSendStandardLetter ? "Yes" : "No";
 
         const pill = document.getElementById("status-pill");
-        // Clear existing classes
-        pill.classList.remove("ok", "alert");
+        pill.classList.remove("ok", "alert", "loading-pill");
         if (canSendStandardLetter) {
           pill.classList.add("ok");
           pill.textContent = "Ready to send";
@@ -183,15 +227,11 @@
         document.documentElement.classList.add("dark");
       }
 
-      // Initial debug and render
-      console.log("[BalanceCard] Initial load");
-      logDebug();
+      // Initial render (will show loading state)
       render();
 
       // Listen for data updates (per OpenAI docs)
       window.addEventListener("openai:set_globals", () => {
-        console.log("[BalanceCard] openai:set_globals event fired!");
-        logDebug();
         render();
       });
     </script>
