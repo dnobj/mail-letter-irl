@@ -103,32 +103,21 @@ async function registerWidgetResources(mcpServer: McpServer) {
       continue;
     }
 
-    // Widget-specific _meta for CSP, domain, and description
-    // Per OpenAI example: https://developers.openai.com/apps-sdk/build/chatgpt-ui/
-    const widgetMeta = {
-      "openai/widgetCSP": WIDGET_CSP,
-      "openai/widgetDomain": WIDGET_DOMAIN,
-      "openai/widgetDescription": widget.description,
-      "openai/widgetAccessible": true,  // Enable window.openai.callTool
-    };
-
-    // Use registerResource to match OpenAI example format
-    // The _meta goes on the content item in the response
-    mcpServer.registerResource(
+    // Register widget resource using the simpler original approach
+    // Try without CSP/domain _meta to see if that's causing the issue
+    mcpServer.resource(
       widget.name,
       uri,
-      { mimeType: "text/html+skybridge", description: widget.description },
+      { mimeType: "text/html+skybridge" },
       async () => {
         console.log(`🎨 Widget resource requested: ${uri}`);
         const html = await fs.readFile(filePath, "utf-8");
-        console.log(`🎨 Returning widget HTML (${html.length} bytes): ${uri}`);
-        console.log(`🎨 Widget _meta: ${JSON.stringify(widgetMeta)}`);
+        console.log(`🎨 Returning widget HTML (${html.length} bytes)`);
         return {
           contents: [{
             uri,
             mimeType: "text/html+skybridge",
-            text: html,
-            _meta: widgetMeta
+            text: html
           }]
         };
       }
@@ -222,52 +211,39 @@ export async function registerLetterTools(
     // Build annotations for ChatGPT to classify tools as READ or WRITE
     const annotations = buildAnnotations(tool);
 
-    // Use registerTool to pass _meta with openai/outputTemplate for widget rendering
-    // The _meta in tool registration tells ChatGPT which widget to render
-    mcpServer.registerTool(
-      tool.name,
-      {
-        description: tool.description,
-        inputSchema: shape,  // ZodRawShape, not wrapped in z.object()
-        annotations,
-        _meta: tool.meta  // Contains openai/outputTemplate for widget discovery
-      },
-      async (args, extra) => {
-        console.log(
-          `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId}`
-        );
-        const { result, meta } = await appServer.execute({
-          toolName: tool.name,
-          input: args,
-          userId
-        });
+    // Use the original simpler tool() method that was working
+    // Pass _meta inside structuredContent as in the original implementation
+    mcpServer.tool(tool.name, shape, annotations, async (args, extra) => {
+      console.log(
+        `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId}`
+      );
+      const { result, meta } = await appServer.execute({
+        toolName: tool.name,
+        input: args,
+        userId
+      });
 
-        const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
+      const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
 
-        // Per official OpenAI docs, response has three parts:
-        // - structuredContent: data for model + widget (becomes window.openai.toolOutput)
-        // - content: text narration for model
-        // - _meta: widget-only data (becomes window.openai.toolResponseMetadata)
-        //
-        // IMPORTANT: Include outputTemplate in response _meta as well for widget discovery
-        const response = {
-          content: [
-            {
-              type: "text" as const,
-              text: summaryText
-            }
-          ],
-          structuredContent: result,
-          _meta: tool.meta  // Include outputTemplate for widget discovery
-        };
+      // Original working format: _meta inside structuredContent
+      const response = {
+        content: [
+          {
+            type: "text" as const,
+            text: summaryText
+          }
+        ],
+        structuredContent: {
+          ...result,
+          _meta: meta  // Include _meta inside structuredContent
+        }
+      };
 
-        console.log(`📤 Tool response ${tool.name}:`);
-        console.log(`   structuredContent keys: ${Object.keys(result as object).join(', ')}`);
-        console.log(`   _meta: ${JSON.stringify(tool.meta)}`);
+      console.log(`📤 Tool response ${tool.name}:`);
+      console.log(`   structuredContent keys: ${Object.keys(result as object).join(', ')}`);
 
-        return response;
-      }
-    );
+      return response;
+    });
   }
 
 }
