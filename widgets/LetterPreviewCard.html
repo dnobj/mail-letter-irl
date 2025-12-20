@@ -188,103 +188,129 @@
     </div>
 
     <script type="module">
-      // Debug: Log ALL window.openai properties to find where data is
-      console.log("[LetterPreviewCard] === FULL DEBUG ===");
-      console.log("[LetterPreviewCard] window.openai:", window.openai);
-      console.log("[LetterPreviewCard] toolOutput:", window.openai?.toolOutput);
-      console.log("[LetterPreviewCard] toolResponseMetadata:", window.openai?.toolResponseMetadata);
-      console.log("[LetterPreviewCard] toolInput:", window.openai?.toolInput);
-      console.log("[LetterPreviewCard] widgetState:", window.openai?.widgetState);
-      console.log("[LetterPreviewCard] widget:", window.openai?.widget);
+      // Per OpenAI docs, data may not be available immediately
+      // Must listen for 'openai:set_globals' event
 
-      // Log all keys if toolOutput exists
-      if (window.openai?.toolOutput) {
-        console.log("[LetterPreviewCard] toolOutput keys:", Object.keys(window.openai.toolOutput));
-        console.log("[LetterPreviewCard] toolOutput JSON:", JSON.stringify(window.openai.toolOutput, null, 2));
+      // Store draftId globally for send button handler
+      let currentDraftId = null;
+
+      function logDebug() {
+        console.log("[LetterPreviewCard] === DEBUG ===");
+        console.log("[LetterPreviewCard] toolOutput:", window.openai?.toolOutput);
+        console.log("[LetterPreviewCard] toolResponseMetadata:", window.openai?.toolResponseMetadata);
+        console.log("[LetterPreviewCard] toolInput:", window.openai?.toolInput);
+        if (window.openai?.toolOutput) {
+          console.log("[LetterPreviewCard] toolOutput JSON:", JSON.stringify(window.openai.toolOutput, null, 2));
+        }
+        console.log("[LetterPreviewCard] === END DEBUG ===");
       }
-      console.log("[LetterPreviewCard] === END DEBUG ===");
 
-      // OpenAI Apps SDK injects window.openai with toolOutput data
+      function render() {
+        const state = window.openai?.toolOutput ?? {};
+        console.log("[LetterPreviewCard] render() called");
+        console.log("[LetterPreviewCard] canSendNow:", state.canSendNow);
+        console.log("[LetterPreviewCard] previewHtml length:", state.previewHtml?.length);
+        console.log("[LetterPreviewCard] draftId:", state.draftId);
+
+        const {
+          previewHtml,
+          requiredCredits,
+          canSendNow,
+          reasonCannotSend,
+          deliveryClass,
+          estimatedDeliveryDays,
+          draftId,
+          savedReturnAddressNote,
+          usedSavedReturnAddress
+        } = state;
+
+        // Store draftId for send handler
+        currentDraftId = draftId;
+
+        // Render preview HTML
+        const previewPane = document.getElementById("preview-pane");
+        if (previewHtml) {
+          const bodyMatch = previewHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+          previewPane.innerHTML = bodyMatch ? bodyMatch[1] : previewHtml;
+        } else {
+          previewPane.innerHTML = "<em>No preview available</em>";
+        }
+
+        // Cost
+        document.getElementById("cost").textContent =
+          `${requiredCredits ?? 2} credit${requiredCredits === 1 ? "" : "s"}`;
+
+        // Delivery info
+        const deliveryText = [];
+        if (deliveryClass) deliveryText.push(deliveryClass);
+        if (estimatedDeliveryDays) deliveryText.push(`~${estimatedDeliveryDays} days`);
+        document.getElementById("delivery").textContent =
+          deliveryText.length > 0 ? deliveryText.join(" - ") : "Standard";
+
+        // Status pill
+        const statusPill = document.getElementById("status-pill");
+        statusPill.classList.remove("ok", "alert");
+        if (canSendNow) {
+          statusPill.classList.add("ok");
+          statusPill.textContent = "Ready to send";
+        } else {
+          statusPill.classList.add("alert");
+          statusPill.textContent = reasonCannotSend ?? "Cannot send";
+        }
+
+        // Note about saved return address
+        const noteEl = document.getElementById("note");
+        if (savedReturnAddressNote) {
+          noteEl.textContent = savedReturnAddressNote;
+          noteEl.style.display = "block";
+        } else {
+          noteEl.style.display = "none";
+        }
+
+        // Send button
+        const sendButton = document.getElementById("send-button");
+        if (!canSendNow) {
+          sendButton.disabled = true;
+          sendButton.textContent = reasonCannotSend ?? "Cannot send";
+        } else {
+          sendButton.disabled = false;
+          sendButton.textContent = "Send this letter";
+        }
+      }
+
+      // Apply theme
       const theme = window.openai?.theme ?? "light";
       if (theme === "dark") {
         document.documentElement.classList.add("dark");
       }
 
-      const state = window.openai?.toolOutput ?? {};
-      console.log("[LetterPreviewCard] canSendNow:", state.canSendNow);
-      console.log("[LetterPreviewCard] previewHtml length:", state.previewHtml?.length);
-      console.log("[LetterPreviewCard] draftId:", state.draftId);
+      // Initial debug and render
+      console.log("[LetterPreviewCard] Initial load");
+      logDebug();
+      render();
 
-      const {
-        previewHtml,
-        requiredCredits,
-        canSendNow,
-        reasonCannotSend,
-        deliveryClass,
-        estimatedDeliveryDays,
-        draftId,
-        savedReturnAddressNote,
-        usedSavedReturnAddress
-      } = state;
+      // Listen for data updates (per OpenAI docs)
+      window.addEventListener("openai:set_globals", () => {
+        console.log("[LetterPreviewCard] openai:set_globals event fired!");
+        logDebug();
+        render();
+      });
 
-      // Render preview HTML directly (safer than iframe in sandboxed widget)
-      const previewPane = document.getElementById("preview-pane");
-      if (previewHtml) {
-        // Extract just the body content from the preview HTML
-        const bodyMatch = previewHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-        previewPane.innerHTML = bodyMatch ? bodyMatch[1] : previewHtml;
-      } else {
-        previewPane.innerHTML = "<em>No preview available</em>";
-      }
-
-      // Cost
-      document.getElementById("cost").textContent =
-        `${requiredCredits ?? 2} credit${requiredCredits === 1 ? "" : "s"}`;
-
-      // Delivery info
-      const deliveryText = [];
-      if (deliveryClass) deliveryText.push(deliveryClass);
-      if (estimatedDeliveryDays) deliveryText.push(`~${estimatedDeliveryDays} days`);
-      document.getElementById("delivery").textContent =
-        deliveryText.length > 0 ? deliveryText.join(" - ") : "Standard";
-
-      // Status pill
-      const statusPill = document.getElementById("status-pill");
-      if (canSendNow) {
-        statusPill.classList.add("ok");
-        statusPill.textContent = "Ready to send";
-      } else {
-        statusPill.classList.add("alert");
-        statusPill.textContent = reasonCannotSend ?? "Cannot send";
-      }
-
-      // Note about saved return address
-      const noteEl = document.getElementById("note");
-      if (savedReturnAddressNote) {
-        noteEl.textContent = savedReturnAddressNote;
-        noteEl.style.display = "block";
-      }
-
-      // Send button
-      const sendButton = document.getElementById("send-button");
-      if (!canSendNow) {
-        sendButton.disabled = true;
-        sendButton.textContent = reasonCannotSend ?? "Cannot send";
-      }
-
-      sendButton?.addEventListener("click", async () => {
-        if (!window.openai?.callTool || !draftId) {
+      // Send button click handler
+      document.getElementById("send-button")?.addEventListener("click", async () => {
+        if (!window.openai?.callTool || !currentDraftId) {
           console.warn("Cannot send: missing callTool or draftId");
           return;
         }
 
+        const sendButton = document.getElementById("send-button");
         sendButton.disabled = true;
         sendButton.textContent = "Sending...";
         document.getElementById("card").classList.add("sending");
 
         try {
           await window.openai.callTool("send_letter", {
-            draftId,
+            draftId: currentDraftId,
             confirm: true
           });
         } catch (error) {

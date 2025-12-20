@@ -128,54 +128,72 @@
     </div>
 
     <script type="module">
-      // Debug: Log ALL window.openai properties to find where data is
-      console.log("[BalanceCard] === FULL DEBUG ===");
-      console.log("[BalanceCard] window.openai:", window.openai);
-      console.log("[BalanceCard] toolOutput:", window.openai?.toolOutput);
-      console.log("[BalanceCard] toolResponseMetadata:", window.openai?.toolResponseMetadata);
-      console.log("[BalanceCard] toolInput:", window.openai?.toolInput);
-      console.log("[BalanceCard] widgetState:", window.openai?.widgetState);
-      console.log("[BalanceCard] widget:", window.openai?.widget);
-      console.log("[BalanceCard] === END DEBUG ===");
+      // Per OpenAI docs, data may not be available immediately
+      // Must listen for 'openai:set_globals' event
 
-      // OpenAI Apps SDK injects window.openai with toolOutput data
+      function logDebug() {
+        console.log("[BalanceCard] === DEBUG ===");
+        console.log("[BalanceCard] toolOutput:", window.openai?.toolOutput);
+        console.log("[BalanceCard] toolResponseMetadata:", window.openai?.toolResponseMetadata);
+        console.log("[BalanceCard] toolInput:", window.openai?.toolInput);
+        console.log("[BalanceCard] === END DEBUG ===");
+      }
+
+      function render() {
+        const toolOutput = window.openai?.toolOutput ?? {};
+        console.log("[BalanceCard] render() called, toolOutput:", JSON.stringify(toolOutput, null, 2));
+
+        const {
+          creditsRemaining,
+          canSendStandardLetter,
+          standardLetterCostCredits,
+          userEmail,
+          authProvider
+        } = toolOutput;
+
+        console.log("[BalanceCard] creditsRemaining:", creditsRemaining);
+
+        document.getElementById("balance").textContent = `${creditsRemaining ?? 0} credits`;
+        document.getElementById("letter-cost").textContent = `${standardLetterCostCredits ?? 2} credits`;
+        document.getElementById("can-send").textContent = canSendStandardLetter ? "Yes" : "No";
+
+        const pill = document.getElementById("status-pill");
+        // Clear existing classes
+        pill.classList.remove("ok", "alert");
+        if (canSendStandardLetter) {
+          pill.classList.add("ok");
+          pill.textContent = "Ready to send";
+        } else {
+          pill.classList.add("alert");
+          pill.textContent = "Need more credits";
+        }
+
+        const accountInfo = document.getElementById("account-info");
+        if (userEmail) {
+          accountInfo.textContent = `Signed in as ${userEmail}${authProvider ? ` (${authProvider})` : ""}`;
+          accountInfo.style.display = "block";
+        } else {
+          accountInfo.style.display = "none";
+        }
+      }
+
+      // Apply theme
       const theme = window.openai?.theme ?? "light";
       if (theme === "dark") {
         document.documentElement.classList.add("dark");
       }
 
-      const toolOutput = window.openai?.toolOutput ?? {};
-      console.log("[BalanceCard] toolOutput JSON:", JSON.stringify(toolOutput, null, 2));
+      // Initial debug and render
+      console.log("[BalanceCard] Initial load");
+      logDebug();
+      render();
 
-      const {
-        creditsRemaining,
-        canSendStandardLetter,
-        standardLetterCostCredits,
-        userEmail,
-        authProvider
-      } = toolOutput;
-
-      console.log("[BalanceCard] creditsRemaining:", creditsRemaining);
-
-      document.getElementById("balance").textContent = `${creditsRemaining ?? 0} credits`;
-      document.getElementById("letter-cost").textContent = `${standardLetterCostCredits ?? 2} credits`;
-      document.getElementById("can-send").textContent = canSendStandardLetter ? "Yes" : "No";
-
-      const pill = document.getElementById("status-pill");
-      if (canSendStandardLetter) {
-        pill.classList.add("ok");
-        pill.textContent = "Ready to send";
-      } else {
-        pill.classList.add("alert");
-        pill.textContent = "Need more credits";
-      }
-
-      const accountInfo = document.getElementById("account-info");
-      if (userEmail) {
-        accountInfo.textContent = `Signed in as ${userEmail}${authProvider ? ` (${authProvider})` : ""}`;
-      } else {
-        accountInfo.style.display = "none";
-      }
+      // Listen for data updates (per OpenAI docs)
+      window.addEventListener("openai:set_globals", () => {
+        console.log("[BalanceCard] openai:set_globals event fired!");
+        logDebug();
+        render();
+      });
     </script>
   </body>
 </html>

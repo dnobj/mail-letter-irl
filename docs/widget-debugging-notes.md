@@ -118,3 +118,92 @@ When we reverted to `mcpServer.tool()` and `mcpServer.resource()`:
 - Widgets disappeared entirely
 - These older APIs don't pass `_meta` to ChatGPT
 - Must use `registerTool()` and `registerResource()`
+
+## Current Implementation (commit b43a41a)
+
+Now using the EXACT format from OpenAI docs:
+
+### Resource Registration:
+```typescript
+mcpServer.registerResource(
+  widget.name,
+  uri,
+  {},  // Empty options
+  async () => ({
+    contents: [{
+      uri,
+      mimeType: "text/html+skybridge",
+      text: html,
+      _meta: {
+        "openai/widgetPrefersBorder": true,
+        "openai/widgetDomain": "https://chatgpt.com",
+        "openai/widgetCSP": { connect_domains: [...], resource_domains: [...] },
+        "openai/widgetDescription": "..."
+      }
+    }]
+  })
+);
+```
+
+### Tool Registration:
+```typescript
+mcpServer.registerTool(
+  tool.name,
+  {
+    title: tool.description,
+    description: tool.description,
+    inputSchema: shape,
+    annotations,
+    _meta: {
+      "openai/outputTemplate": "ui://widgets/LetterPreviewCard.html",
+      "openai/widgetAccessible": true,
+      ...
+    }
+  },
+  async (args) => ({
+    structuredContent: result,
+    content: [{ type: "text", text: summaryText }],
+    _meta: meta
+  })
+);
+```
+
+### Debug Logging Added
+Widgets now log:
+- `window.openai.toolOutput`
+- `window.openai.toolResponseMetadata`
+- `window.openai.toolInput`
+- `window.openai.widgetState`
+- `window.openai.widget`
+
+## Finding #3: Data Arrives AFTER Widget Loads
+
+Console output showed:
+- `toolInput: {}` (empty object, not null)
+- `toolOutput: null`
+- `toolResponseMetadata: null`
+
+The `toolInput: {}` suggests the widget loads BEFORE data is populated.
+Per OpenAI docs, must listen for `openai:set_globals` event!
+
+### Fix Applied
+Updated widgets to:
+1. Define a `render()` function
+2. Call `render()` on initial load
+3. Listen for `openai:set_globals` event and re-render
+
+```javascript
+// Initial render
+render();
+
+// Listen for data updates
+window.addEventListener("openai:set_globals", () => {
+  console.log("openai:set_globals event fired!");
+  render();
+});
+```
+
+## Next Steps
+1. Test if `openai:set_globals` event fires
+2. Check if data is populated when event fires
+3. If event never fires, investigate MCP protocol layer
