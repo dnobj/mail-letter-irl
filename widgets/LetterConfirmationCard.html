@@ -5,101 +5,225 @@
     <title>LetterConfirmationCard</title>
     <style>
       :root {
+        --bg-primary: #ffffff;
+        --bg-secondary: #f8fafc;
+        --text-primary: #102a43;
+        --text-secondary: #61748f;
+        --border-color: #e2e8f0;
+        --accent-blue: #2563eb;
+        --accent-blue-hover: #1d4ed8;
+        --accent-success: #065f46;
+        --accent-success-bg: #d1fae5;
+
         font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        color: #102a43;
-        background: #f8fafc;
+        background: transparent;
+        color: var(--text-primary);
+      }
+
+      .dark {
+        --bg-primary: #1e293b;
+        --bg-secondary: #0f172a;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --border-color: #334155;
+        --accent-blue: #3b82f6;
+        --accent-blue-hover: #2563eb;
+        --accent-success: #34d399;
+        --accent-success-bg: #064e3b;
+      }
+
+      * {
+        box-sizing: border-box;
       }
 
       body {
         margin: 0;
-        padding: 1.5rem;
+        padding: 1rem;
+        background: transparent;
       }
 
       .card {
-        max-width: 28rem;
-        border-radius: 16px;
-        background: #ffffff;
-        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-        padding: 1.75rem;
-        display: grid;
+        width: 100%;
+        border-radius: 12px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        padding: 1.25rem;
+        display: flex;
+        flex-direction: column;
         gap: 1rem;
       }
 
-      .status {
+      .status-header {
         display: flex;
         align-items: center;
         gap: 0.75rem;
       }
 
       .status-icon {
-        width: 44px;
-        height: 44px;
-        border-radius: 22px;
-        background: #d1fae5;
+        width: 40px;
+        height: 40px;
+        border-radius: 20px;
+        background: var(--accent-success-bg);
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        color: #065f46;
-        font-size: 24px;
+        color: var(--accent-success);
+        font-size: 20px;
+        flex-shrink: 0;
       }
 
-      .recipient {
-        font-size: 0.95rem;
-        color: #61748f;
+      .status-text {
+        flex: 1;
       }
 
-      .credits {
-        font-size: 0.95rem;
+      .status-text .headline {
         font-weight: 600;
+        font-size: 1rem;
+        color: var(--text-primary);
+      }
+
+      .status-text .substatus {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+      }
+
+      .info-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid var(--border-color);
+        font-size: 0.9rem;
+      }
+
+      .info-row:last-of-type {
+        border-bottom: none;
+      }
+
+      .info-label {
+        color: var(--text-secondary);
+      }
+
+      .info-value {
+        font-weight: 600;
+        color: var(--text-primary);
+        text-align: right;
+      }
+
+      .note {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        padding: 0.75rem;
+        background: var(--bg-secondary);
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+      }
+
+      .actions {
+        padding-top: 0.5rem;
       }
 
       button {
+        width: 100%;
         padding: 0.85rem 1rem;
         border: none;
         border-radius: 10px;
         font-weight: 600;
+        font-size: 0.95rem;
         cursor: pointer;
-        background: #2563eb;
+        background: var(--accent-blue);
         color: #ffffff;
+        transition: background 0.2s ease;
+      }
+
+      button:hover {
+        background: var(--accent-blue-hover);
       }
     </style>
   </head>
   <body>
     <div class="card">
-      <div class="status">
-        <span class="status-icon">✔</span>
-        <div>
+      <div class="status-header">
+        <span class="status-icon">✓</span>
+        <div class="status-text">
           <div class="headline">Letter queued for print</div>
-          <div class="timestamp" id="status-text"></div>
+          <div class="substatus" id="status-text"></div>
         </div>
       </div>
-      <div class="recipient" id="recipient"></div>
-      <div class="credits" id="credits"></div>
-      <button id="track-button">Track status</button>
+
+      <div class="info-row">
+        <span class="info-label">Order ID</span>
+        <span class="info-value" id="order-id"></span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Recipient</span>
+        <span class="info-value" id="recipient"></span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Credits remaining</span>
+        <span class="info-value" id="credits"></span>
+      </div>
+
+      <div class="note" id="note" style="display: none;"></div>
+
+      <div class="actions">
+        <button id="track-button">Track status</button>
+      </div>
     </div>
 
     <script type="module">
       // OpenAI Apps SDK injects window.openai with toolOutput data
+      const theme = window.openai?.theme ?? "light";
+      if (theme === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+
       const {
         orderId,
         currentStatus,
         recipientSummary,
-        creditsRemaining
+        creditsRemaining,
+        saveReturnAddressNote
       } = window.openai?.toolOutput ?? {};
 
-      const statusText = document.getElementById("status-text");
-      statusText.textContent = `Current status: ${currentStatus}`;
+      // Status
+      document.getElementById("status-text").textContent = currentStatus ?? "Processing";
 
-      const recipient = document.getElementById("recipient");
-      recipient.textContent = `To: ${recipientSummary?.name ?? "Recipient"} — ${recipientSummary?.city ?? "City"}, ${recipientSummary?.state ?? "State"}`;
+      // Order ID (show short version)
+      const shortOrderId = orderId ? orderId.substring(0, 8) + "..." : "—";
+      document.getElementById("order-id").textContent = shortOrderId;
 
-      const credits = document.getElementById("credits");
-      credits.textContent = `Remaining credits: ${creditsRemaining}`;
+      // Recipient
+      const recipientText = recipientSummary
+        ? `${recipientSummary.name ?? ""}${recipientSummary.city ? `, ${recipientSummary.city}` : ""}${recipientSummary.state ? ` ${recipientSummary.state}` : ""}`
+        : "—";
+      document.getElementById("recipient").textContent = recipientText;
 
+      // Credits
+      document.getElementById("credits").textContent =
+        typeof creditsRemaining === "number" ? creditsRemaining : "—";
+
+      // Note about saving return address
+      const noteEl = document.getElementById("note");
+      if (saveReturnAddressNote) {
+        noteEl.textContent = saveReturnAddressNote;
+        noteEl.style.display = "block";
+      }
+
+      // Track button
       const trackButton = document.getElementById("track-button");
       trackButton?.addEventListener("click", async () => {
-        if (!window.openai?.callTool) return;
-        await window.openai.callTool("get_order_status", { orderId });
+        if (!window.openai?.callTool || !orderId) return;
+        trackButton.textContent = "Loading...";
+        trackButton.disabled = true;
+        try {
+          await window.openai.callTool("get_order_status", { orderId });
+        } catch (error) {
+          console.error("Failed to get order status:", error);
+          trackButton.textContent = "Track status";
+          trackButton.disabled = false;
+        }
       });
     </script>
   </body>

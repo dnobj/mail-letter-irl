@@ -5,106 +5,296 @@
     <title>LetterStatusCard</title>
     <style>
       :root {
+        --bg-primary: #ffffff;
+        --bg-secondary: #f8fafc;
+        --text-primary: #102a43;
+        --text-secondary: #61748f;
+        --text-muted: #829ab1;
+        --border-color: #e2e8f0;
+        --accent-blue: #2563eb;
+        --accent-blue-light: #e0e7ff;
+        --accent-blue-text: #1e3a8a;
+        --timeline-dot: #3b82f6;
+        --timeline-line: #e2e8f0;
+
         font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: #f8fafc;
-        color: #102a43;
+        background: transparent;
+        color: var(--text-primary);
+      }
+
+      .dark {
+        --bg-primary: #1e293b;
+        --bg-secondary: #0f172a;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --text-muted: #64748b;
+        --border-color: #334155;
+        --accent-blue: #3b82f6;
+        --accent-blue-light: #1e3a5f;
+        --accent-blue-text: #93c5fd;
+        --timeline-dot: #60a5fa;
+        --timeline-line: #334155;
+      }
+
+      * {
+        box-sizing: border-box;
       }
 
       body {
         margin: 0;
-        padding: 1.5rem;
+        padding: 1rem;
+        background: transparent;
       }
 
       .card {
-        max-width: 34rem;
-        border-radius: 16px;
-        background: #ffffff;
-        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-        padding: 1.75rem;
-        display: grid;
-        gap: 1.5rem;
+        width: 100%;
+        border-radius: 12px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        padding: 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+
+      .header-text h2 {
+        margin: 0;
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .header-text .order-id {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+      }
+
+      .status-badge {
+        display: inline-flex;
+        padding: 0.35rem 0.75rem;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        background: var(--accent-blue-light);
+        color: var(--accent-blue-text);
+        white-space: nowrap;
       }
 
       .preview {
         padding: 1rem;
-        border: 1px solid #d9e2ec;
-        border-radius: 12px;
-        background: #fdfdfd;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg-secondary);
+        font-family: "Georgia", "Times New Roman", serif;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        max-height: 120px;
+        overflow: auto;
       }
 
       .timeline {
         list-style: none;
         margin: 0;
         padding: 0;
-        display: grid;
-        gap: 0.75rem;
-      }
-
-      .timeline li {
         display: flex;
-        gap: 0.5rem;
-        align-items: baseline;
+        flex-direction: column;
+        gap: 0;
       }
 
-      .timeline time {
+      .timeline-item {
+        display: flex;
+        gap: 0.75rem;
+        position: relative;
+        padding-bottom: 0.75rem;
+      }
+
+      .timeline-item:last-child {
+        padding-bottom: 0;
+      }
+
+      .timeline-item:not(:last-child)::before {
+        content: "";
+        position: absolute;
+        left: 5px;
+        top: 14px;
+        bottom: 0;
+        width: 2px;
+        background: var(--timeline-line);
+      }
+
+      .timeline-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--timeline-dot);
+        flex-shrink: 0;
+        margin-top: 4px;
+      }
+
+      .timeline-content {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .timeline-status {
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: var(--text-primary);
+      }
+
+      .timeline-time {
         font-size: 0.8rem;
-        color: #829ab1;
-        min-width: 7rem;
+        color: var(--text-muted);
+        margin-top: 0.15rem;
+      }
+
+      .empty-timeline {
+        text-align: center;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        padding: 1rem 0;
+      }
+
+      .actions {
+        padding-top: 0.5rem;
       }
 
       button {
+        width: 100%;
         padding: 0.85rem 1rem;
         border: none;
         border-radius: 10px;
         font-weight: 600;
+        font-size: 0.95rem;
         cursor: pointer;
-        background: #2563eb;
-        color: #ffffff;
+        background: var(--accent-blue-light);
+        color: var(--accent-blue-text);
+        transition: opacity 0.2s ease;
       }
 
-      button.secondary {
-        background: #e0e7ff;
-        color: #1e3a8a;
+      button:hover:not(:disabled) {
+        opacity: 0.85;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
     </style>
   </head>
   <body>
     <div class="card">
-      <div class="heading" id="status-heading"></div>
-      <div class="preview" id="preview"></div>
-      <ul class="timeline" id="timeline"></ul>
-      <button id="follow-up" class="secondary">Send follow-up letter</button>
+      <div class="header">
+        <div class="header-text">
+          <h2 id="heading">Letter Status</h2>
+          <div class="order-id" id="order-id"></div>
+        </div>
+        <span class="status-badge" id="status-badge"></span>
+      </div>
+
+      <div class="preview" id="preview">
+        <em>Loading preview...</em>
+      </div>
+
+      <ul class="timeline" id="timeline">
+        <li class="empty-timeline">No status updates yet</li>
+      </ul>
+
+      <div class="actions">
+        <button id="follow-up">Send follow-up letter</button>
+      </div>
     </div>
 
     <script type="module">
       // OpenAI Apps SDK injects window.openai with toolOutput data
+      const theme = window.openai?.theme ?? "light";
+      if (theme === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+
       const {
         orderId,
         currentStatus,
         statusTimeline = [],
         previewThumbnailHtml,
         canSendFollowUp,
-        followUpSuggestedPrompt
+        followUpSuggestedPrompt,
+        recipientSummary
       } = window.openai?.toolOutput ?? {};
 
-      const heading = document.getElementById("status-heading");
-      heading.textContent = `Order ${orderId} — ${currentStatus}`;
+      // Header
+      if (recipientSummary?.name) {
+        document.getElementById("heading").textContent = `Letter to ${recipientSummary.name}`;
+      }
 
-      const preview = document.getElementById("preview");
-      preview.innerHTML = previewThumbnailHtml ?? "Preview unavailable.";
+      // Order ID
+      const shortOrderId = orderId ? `Order ${orderId.substring(0, 8)}...` : "";
+      document.getElementById("order-id").textContent = shortOrderId;
 
-      const timeline = document.getElementById("timeline");
-      statusTimeline.forEach((entry) => {
-        const li = document.createElement("li");
-        const time = document.createElement("time");
-        time.textContent = entry.timestampISO;
-        const status = document.createElement("span");
-        status.textContent = entry.statusText;
-        li.appendChild(time);
-        li.appendChild(status);
-        timeline.appendChild(li);
-      });
+      // Status badge
+      document.getElementById("status-badge").textContent = currentStatus ?? "Unknown";
 
+      // Preview
+      const previewEl = document.getElementById("preview");
+      if (previewThumbnailHtml) {
+        const bodyMatch = previewThumbnailHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        previewEl.innerHTML = bodyMatch ? bodyMatch[1] : previewThumbnailHtml;
+      } else {
+        previewEl.innerHTML = "<em>Preview unavailable</em>";
+      }
+
+      // Timeline
+      const timelineEl = document.getElementById("timeline");
+      if (statusTimeline.length > 0) {
+        timelineEl.innerHTML = "";
+        statusTimeline.forEach((entry) => {
+          const li = document.createElement("li");
+          li.className = "timeline-item";
+
+          const dot = document.createElement("div");
+          dot.className = "timeline-dot";
+
+          const content = document.createElement("div");
+          content.className = "timeline-content";
+
+          const status = document.createElement("div");
+          status.className = "timeline-status";
+          status.textContent = entry.statusText ?? entry.status ?? "Update";
+
+          const time = document.createElement("div");
+          time.className = "timeline-time";
+          // Format timestamp nicely
+          if (entry.timestampISO) {
+            try {
+              const date = new Date(entry.timestampISO);
+              time.textContent = date.toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit"
+              });
+            } catch {
+              time.textContent = entry.timestampISO;
+            }
+          }
+
+          content.appendChild(status);
+          content.appendChild(time);
+          li.appendChild(dot);
+          li.appendChild(content);
+          timelineEl.appendChild(li);
+        });
+      }
+
+      // Follow-up button
       const followUpButton = document.getElementById("follow-up");
       if (!canSendFollowUp) {
         followUpButton.disabled = true;
@@ -112,14 +302,25 @@
       }
 
       followUpButton?.addEventListener("click", async () => {
-        if (!window.openai?.sendFollowUpMessage || !followUpSuggestedPrompt) {
+        if (!window.openai?.sendFollowUpMessage) {
+          console.warn("sendFollowUpMessage not available");
           return;
         }
 
-        await window.openai.sendFollowUpMessage({
-          role: "user",
-          content: followUpSuggestedPrompt
-        });
+        const prompt = followUpSuggestedPrompt ?? "I'd like to send a follow-up letter.";
+        followUpButton.disabled = true;
+        followUpButton.textContent = "Opening...";
+
+        try {
+          await window.openai.sendFollowUpMessage({
+            role: "user",
+            content: prompt
+          });
+        } catch (error) {
+          console.error("Failed to send follow-up:", error);
+          followUpButton.disabled = false;
+          followUpButton.textContent = "Send follow-up letter";
+        }
       });
     </script>
   </body>
