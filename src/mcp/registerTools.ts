@@ -244,9 +244,12 @@ export async function registerLetterTools(
 
         const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
 
-        // Per OpenAI examples, response should have structuredContent and content
-        // The _meta with openai/outputTemplate goes in tool REGISTRATION only,
-        // not in the response. ChatGPT reads the template from tool definition.
+        // Per official OpenAI docs, response has three parts:
+        // - structuredContent: data for model + widget (becomes window.openai.toolOutput)
+        // - content: text narration for model
+        // - _meta: widget-only data (becomes window.openai.toolResponseMetadata)
+        //
+        // IMPORTANT: Include outputTemplate in response _meta as well for widget discovery
         const response = {
           content: [
             {
@@ -254,11 +257,13 @@ export async function registerLetterTools(
               text: summaryText
             }
           ],
-          structuredContent: result
+          structuredContent: result,
+          _meta: tool.meta  // Include outputTemplate for widget discovery
         };
 
         console.log(`📤 Tool response ${tool.name}:`);
         console.log(`   structuredContent keys: ${Object.keys(result as object).join(', ')}`);
+        console.log(`   _meta: ${JSON.stringify(tool.meta)}`);
 
         return response;
       }
