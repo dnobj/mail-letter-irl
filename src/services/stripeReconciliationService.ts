@@ -101,13 +101,15 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
     });
 
     for (const session of sessions.data) {
-      if (session.payment_status === 'paid' && session.metadata?.user_id) {
-        const productId = session.metadata?.product_id || 'unknown';
-        const credits = PRODUCT_CREDITS[productId] || 0;
+      // Support both camelCase (userId) and snake_case (user_id) for backwards compatibility
+      const userId = session.metadata?.userId || session.metadata?.user_id || session.client_reference_id;
+      if (session.payment_status === 'paid' && userId) {
+        const productId = session.metadata?.productId || session.metadata?.product_id || 'unknown';
+        const credits = PRODUCT_CREDITS[productId] || parseInt(session.metadata?.credits || '0') || 0;
 
         stripePayments.set(session.id, {
           sessionId: session.id,
-          userId: session.metadata.user_id,
+          userId,
           amount: session.amount_total || 0,
           credits,
           productId,
