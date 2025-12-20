@@ -141,17 +141,37 @@ export async function handleCreateCheckoutSession(
     } else {
       console.error(`❌ Failed to create checkout session: ${result.error}`);
 
-      res.statusCode = 500;
-      res.json({
-        error: result.error || 'Failed to create checkout session'
-      });
+      // Distinguish between configuration errors and other failures
+      const errorMessage = result.error || 'Failed to create checkout session';
+      if (errorMessage.includes('not configured') || errorMessage.includes('environment variable')) {
+        // Configuration error - service temporarily unavailable
+        res.statusCode = 503;
+        res.json({
+          error: 'Service configuration error',
+          message: 'Payment processing is temporarily unavailable. Please try again later.',
+          details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
+        });
+      } else if (errorMessage.includes('Invalid product')) {
+        // Client error - bad request
+        res.statusCode = 400;
+        res.json({
+          error: errorMessage
+        });
+      } else {
+        // Other errors
+        res.statusCode = 500;
+        res.json({
+          error: errorMessage
+        });
+      }
     }
   } catch (error: any) {
     console.error('Error in handleCreateCheckoutSession:', error);
 
     res.statusCode = 500;
     res.json({
-      error: 'Internal server error'
+      error: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 }
