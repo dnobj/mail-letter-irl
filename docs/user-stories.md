@@ -21,6 +21,7 @@ User stories are organized by feature area using semantic prefixes:
 | `US-DATA` | Data Integrity | Consistency and audit |
 | `US-MCP` | MCP Access | Token-based auth for non-ChatGPT clients |
 | `US-DEV` | Development | Development environment and workflows |
+| `US-DCR` | OAuth Registration | Dynamic Client Registration handling |
 
 Each story includes acceptance criteria that can be converted to test cases.
 
@@ -1098,6 +1099,54 @@ master (production)
 
 ---
 
+## OAuth Registration (DCR)
+
+### US-DCR-01: MCP Client OAuth Registration
+**As an** MCP client (ChatGPT, Claude Desktop)
+**I want to** register for OAuth access
+**So that** I can authenticate users to the Letter IRL service
+
+**Acceptance Criteria:**
+- [ ] `/oauth/register` endpoint accepts POST requests
+- [ ] Returns RFC 7591 compliant response with `client_id`
+- [ ] Returns `token_endpoint_auth_method: none` (public client)
+- [ ] Includes all required redirect URIs (ChatGPT, Claude Desktop)
+- [ ] Returns 201 Created status code
+- [ ] Response includes `client_id_issued_at` timestamp
+
+**Required Redirect URIs:**
+- `https://chat.openai.com/aip/auth/callback` (ChatGPT)
+- `https://chatgpt.com/connector_platform_oauth_redirect` (ChatGPT)
+- `http://localhost:18883/oauth/callback` (Claude Desktop via mcp-remote)
+
+**Personas:**
+- ChatGPT (OpenAI Apps SDK connector)
+- Claude Desktop (Anthropic via mcp-remote)
+
+---
+
+### US-DCR-02: Prevent Duplicate OAuth Client Creation
+**As an** admin
+**I want** the system to prevent duplicate Auth0 client creation
+**So that** we don't hit Auth0 entity limits or clutter the tenant
+
+**Acceptance Criteria:**
+- [ ] Multiple DCR requests return the same static `client_id`
+- [ ] No new clients created in Auth0 on registration requests
+- [ ] Auth0 tenant stays within application entity limits
+- [ ] Pre-provisioned first-party client used for all MCP connections
+- [ ] Environment variable `CHATGPT_STATIC_CLIENT_ID` configures the client
+
+**Background:**
+The MCP spec (Nov 2025) has transitioned from DCR to CIMD (Client ID Metadata Documents).
+This implementation uses a static client approach aligned with the spec direction.
+
+**References:**
+- [MCP Auth Spec Update Nov 2025](https://aaronparecki.com/2025/11/25/1/mcp-authorization-spec-update)
+- GitHub Issue: #20
+
+---
+
 ## Priority Matrix
 
 | Priority | Category | Stories | Key Personas |
@@ -1120,6 +1169,7 @@ master (production)
 | P3 - Low | Edge Cases | US-EDGE-02, US-EDGE-05, US-EDGE-06, US-EDGE-07 | Eleanor |
 | P3 - Low | MCP Access | US-MCP-05 | Amy |
 | P3 - Low | Development | US-DEV-01, US-DEV-02, US-DEV-03 | Developers |
+| P1 - High | OAuth Registration | US-DCR-01, US-DCR-02 | MCP Clients, Admin |
 
 ---
 
@@ -1137,7 +1187,8 @@ master (production)
 | Data Integrity | US-DATA | 3 |
 | MCP Access | US-MCP | 6 |
 | Development | US-DEV | 3 |
-| **Total** | | **57** |
+| OAuth Registration | US-DCR | 2 |
+| **Total** | | **59** |
 
 ---
 

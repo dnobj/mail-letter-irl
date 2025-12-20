@@ -572,6 +572,45 @@ export async function startHttpServer() {
       return;
     }
 
+    // OAuth Dynamic Client Registration endpoint (static client approach)
+    // Returns a pre-provisioned client_id instead of creating new clients
+    // Aligned with MCP Nov 2025 spec direction (CIMD replacing DCR)
+    // GitHub Issue: #20
+    if (url.pathname === "/oauth/register" && req.method === "POST") {
+      const staticClientId = process.env.CHATGPT_STATIC_CLIENT_ID;
+
+      if (!staticClientId) {
+        console.error("[DCR] CHATGPT_STATIC_CLIENT_ID not configured");
+        res.statusCode = 503;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({
+          error: "server_error",
+          error_description: "OAuth client registration is not configured"
+        }));
+        return;
+      }
+
+      // RFC 7591 compliant response with static client
+      const response = {
+        client_id: staticClientId,
+        client_id_issued_at: Math.floor(Date.now() / 1000),
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        redirect_uris: [
+          "https://chat.openai.com/aip/auth/callback",
+          "https://chatgpt.com/connector_platform_oauth_redirect",
+          "http://localhost:18883/oauth/callback"
+        ]
+      };
+
+      console.log(`[DCR] Returning static client_id: ${staticClientId.substring(0, 8)}...`);
+      res.statusCode = 201;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(response));
+      return;
+    }
+
     if (url.pathname.startsWith(WIDGET_PATH)) {
       const widgetName = url.pathname.replace(`${WIDGET_PATH}/`, "");
       if (!widgetName) {
