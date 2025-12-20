@@ -51,6 +51,30 @@ const WIDGET_DEFINITIONS = [
   { name: "LetterStatusCard", description: "Shows order status timeline and delivery tracking" },
 ];
 
+/**
+ * Widget domain for CSP isolation.
+ * Per OpenAI examples, this should be https://chatgpt.com for widgets
+ * running in the ChatGPT environment.
+ * Required for app submission.
+ *
+ * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+ */
+const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? "https://chatgpt.com";
+
+/**
+ * Content Security Policy for widgets.
+ * Our widgets use window.openai.callTool which communicates with ChatGPT.
+ * We include chatgpt.com to allow this internal communication.
+ *
+ * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+ */
+const WIDGET_CSP = {
+  connect_domains: ["https://chatgpt.com"],
+  resource_domains: ["https://*.oaistatic.com"],
+  // frame_domains not included - we don't use iframes
+  // redirect_domains not included - we don't use openExternal
+};
+
 // Resolve widget directory relative to this module
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -79,25 +103,38 @@ async function registerWidgetResources(mcpServer: McpServer) {
       continue;
     }
 
-    mcpServer.resource(
+    // Widget-specific _meta for CSP, domain, and description
+    // Per OpenAI example: https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+    const widgetMeta = {
+      "openai/widgetCSP": WIDGET_CSP,
+      "openai/widgetDomain": WIDGET_DOMAIN,
+      "openai/widgetDescription": widget.description,
+      "openai/widgetAccessible": true,  // Enable window.openai.callTool
+    };
+
+    // Use registerResource to match OpenAI example format
+    // The _meta goes on the content item in the response
+    mcpServer.registerResource(
       widget.name,
       uri,
-      { mimeType: "text/html+skybridge" },
+      { mimeType: "text/html+skybridge", description: widget.description },
       async () => {
         console.log(`🎨 Widget resource requested: ${uri}`);
         const html = await fs.readFile(filePath, "utf-8");
         console.log(`🎨 Returning widget HTML (${html.length} bytes): ${uri}`);
+        console.log(`🎨 Widget _meta: ${JSON.stringify(widgetMeta)}`);
         return {
           contents: [{
             uri,
             mimeType: "text/html+skybridge",
-            text: html
+            text: html,
+            _meta: widgetMeta
           }]
         };
       }
     );
 
-    console.log(`📦 Registered widget resource: ${uri}`);
+    console.log(`📦 Registered widget resource: ${uri} (CSP: ${JSON.stringify(WIDGET_CSP)}, domain: ${WIDGET_DOMAIN})`);
   }
 }
 
