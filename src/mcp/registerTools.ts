@@ -103,12 +103,13 @@ async function registerWidgetResources(mcpServer: McpServer) {
       continue;
     }
 
-    // Register widget resource using the simpler original approach
-    // Try without CSP/domain _meta to see if that's causing the issue
-    mcpServer.resource(
+    // Register widget resource per OpenAI docs:
+    // - Empty {} for options (NOT { mimeType: ... })
+    // - _meta on the content item with CSP, domain, and widgetPrefersBorder
+    mcpServer.registerResource(
       widget.name,
       uri,
-      { mimeType: "text/html+skybridge" },
+      {},  // Empty options per docs
       async () => {
         console.log(`🎨 Widget resource requested: ${uri}`);
         const html = await fs.readFile(filePath, "utf-8");
@@ -117,13 +118,19 @@ async function registerWidgetResources(mcpServer: McpServer) {
           contents: [{
             uri,
             mimeType: "text/html+skybridge",
-            text: html
+            text: html,
+            _meta: {
+              "openai/widgetPrefersBorder": true,
+              "openai/widgetDomain": WIDGET_DOMAIN,
+              "openai/widgetCSP": WIDGET_CSP,
+              "openai/widgetDescription": widget.description
+            }
           }]
         };
       }
     );
 
-    console.log(`📦 Registered widget resource: ${uri} (CSP: ${JSON.stringify(WIDGET_CSP)}, domain: ${WIDGET_DOMAIN})`);
+    console.log(`📦 Registered widget resource: ${uri}`);
   }
 }
 
@@ -211,39 +218,51 @@ export async function registerLetterTools(
     // Build annotations for ChatGPT to classify tools as READ or WRITE
     const annotations = buildAnnotations(tool);
 
-    // Use the original simpler tool() method that was working
-    // Pass _meta inside structuredContent as in the original implementation
-    mcpServer.tool(tool.name, shape, annotations, async (args, extra) => {
-      console.log(
-        `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId}`
-      );
-      const { result, meta } = await appServer.execute({
-        toolName: tool.name,
-        input: args,
-        userId
-      });
+    // Register tool per OpenAI docs format:
+    // - title field for human-readable name
+    // - _meta with openai/outputTemplate pointing to ui:// resource
+    mcpServer.registerTool(
+      tool.name,
+      {
+        title: tool.description,  // Use description as title
+        description: tool.description,
+        inputSchema: shape,
+        annotations,
+        _meta: tool.meta  // Contains openai/outputTemplate, widgetAccessible, etc.
+      },
+      async (args, extra) => {
+        console.log(
+          `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId}`
+        );
+        const { result, meta } = await appServer.execute({
+          toolName: tool.name,
+          input: args,
+          userId
+        });
 
-      const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
+        const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
 
-      // Original working format: _meta inside structuredContent
-      const response = {
-        content: [
-          {
-            type: "text" as const,
-            text: summaryText
-          }
-        ],
-        structuredContent: {
-          ...result,
-          _meta: meta  // Include _meta inside structuredContent
-        }
-      };
+        // Per OpenAI docs, response has three sibling payloads:
+        // - structuredContent: data for model + widget (→ window.openai.toolOutput)
+        // - content: narration for model
+        // - _meta: widget-only data (→ window.openai.toolResponseMetadata)
+        const response = {
+          structuredContent: result,
+          content: [
+            {
+              type: "text" as const,
+              text: summaryText
+            }
+          ],
+          _meta: meta  // Tool-specific meta (optional, for widget-only data)
+        };
 
-      console.log(`📤 Tool response ${tool.name}:`);
-      console.log(`   structuredContent keys: ${Object.keys(result as object).join(', ')}`);
+        console.log(`📤 Tool response ${tool.name}:`);
+        console.log(`   structuredContent: ${JSON.stringify(result)}`);
 
-      return response;
-    });
+        return response;
+      }
+    );
   }
 
 }

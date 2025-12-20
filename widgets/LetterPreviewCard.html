@@ -188,10 +188,21 @@
     </div>
 
     <script type="module">
-      // Debug: Log what window.openai contains
+      // Debug: Log ALL window.openai properties to find where data is
+      console.log("[LetterPreviewCard] === FULL DEBUG ===");
       console.log("[LetterPreviewCard] window.openai:", window.openai);
       console.log("[LetterPreviewCard] toolOutput:", window.openai?.toolOutput);
-      console.log("[LetterPreviewCard] toolOutput keys:", window.openai?.toolOutput ? Object.keys(window.openai.toolOutput) : "undefined");
+      console.log("[LetterPreviewCard] toolResponseMetadata:", window.openai?.toolResponseMetadata);
+      console.log("[LetterPreviewCard] toolInput:", window.openai?.toolInput);
+      console.log("[LetterPreviewCard] widgetState:", window.openai?.widgetState);
+      console.log("[LetterPreviewCard] widget:", window.openai?.widget);
+
+      // Log all keys if toolOutput exists
+      if (window.openai?.toolOutput) {
+        console.log("[LetterPreviewCard] toolOutput keys:", Object.keys(window.openai.toolOutput));
+        console.log("[LetterPreviewCard] toolOutput JSON:", JSON.stringify(window.openai.toolOutput, null, 2));
+      }
+      console.log("[LetterPreviewCard] === END DEBUG ===");
 
       // OpenAI Apps SDK injects window.openai with toolOutput data
       const theme = window.openai?.theme ?? "light";

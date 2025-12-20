@@ -4,6 +4,25 @@
 
 Letter IRL is a physical letter mailing service for ChatGPT. Users compose letters through conversation, and the system prints and mails them via PostGrid.
 
+## Project Structure (Two Repositories)
+
+| Repository | Purpose | Deployed To |
+|------------|---------|-------------|
+| `letter-irl` (this repo) | MCP server / API | Railway → api.letterirl.com |
+| `letter-irl-website` | Marketing site + user dashboard | Railway → letterirl.com |
+
+**letter-irl (API):**
+- MCP server for ChatGPT/AI assistants
+- REST API for dashboard
+- Stripe webhooks
+- Background workers (pg-boss)
+
+**letter-irl-website:**
+- Next.js 16 with `@auth0/nextjs-auth0`
+- Marketing pages
+- User dashboard (credits, letters, account)
+- Located at: `/mnt/c/letter-irl-website`
+
 ## Critical Facts
 
 **Primary Goal: OpenAI Apps SDK**
@@ -19,6 +38,9 @@ Letter IRL is a physical letter mailing service for ChatGPT. Users compose lette
 
 **External Services**
 - **Auth0** - OAuth 2.1 + PKCE authentication
+  - Website uses `@auth0/nextjs-auth0` SDK (Regular Web App)
+  - MCP server uses DCR (Dynamic Client Registration) for ChatGPT clients
+  - Both share the same Auth0 tenant and user pool
 - **Stripe** - Payments and webhooks
 - **PostGrid** - Physical letter printing/mailing
 

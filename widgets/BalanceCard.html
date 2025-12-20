@@ -128,10 +128,15 @@
     </div>
 
     <script type="module">
-      // Debug: Log what window.openai contains
+      // Debug: Log ALL window.openai properties to find where data is
+      console.log("[BalanceCard] === FULL DEBUG ===");
       console.log("[BalanceCard] window.openai:", window.openai);
-      console.log("[BalanceCard] window.openai?.toolOutput:", window.openai?.toolOutput);
-      console.log("[BalanceCard] Keys:", window.openai ? Object.keys(window.openai) : "undefined");
+      console.log("[BalanceCard] toolOutput:", window.openai?.toolOutput);
+      console.log("[BalanceCard] toolResponseMetadata:", window.openai?.toolResponseMetadata);
+      console.log("[BalanceCard] toolInput:", window.openai?.toolInput);
+      console.log("[BalanceCard] widgetState:", window.openai?.widgetState);
+      console.log("[BalanceCard] widget:", window.openai?.widget);
+      console.log("[BalanceCard] === END DEBUG ===");
 
       // OpenAI Apps SDK injects window.openai with toolOutput data
       const theme = window.openai?.theme ?? "light";
@@ -140,7 +145,7 @@
       }
 
       const toolOutput = window.openai?.toolOutput ?? {};
-      console.log("[BalanceCard] toolOutput:", JSON.stringify(toolOutput, null, 2));
+      console.log("[BalanceCard] toolOutput JSON:", JSON.stringify(toolOutput, null, 2));
 
       const {
         creditsRemaining,
