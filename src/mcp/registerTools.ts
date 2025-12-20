@@ -84,7 +84,9 @@ async function registerWidgetResources(mcpServer: McpServer) {
       uri,
       { mimeType: "text/html+skybridge" },
       async () => {
+        console.log(`🎨 Widget resource requested: ${uri}`);
         const html = await fs.readFile(filePath, "utf-8");
+        console.log(`🎨 Returning widget HTML (${html.length} bytes): ${uri}`);
         return {
           contents: [{
             uri,
