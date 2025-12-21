@@ -1,0 +1,344 @@
+# Manual Test Checklist
+
+**Purpose:** Integration and end-to-end tests that require manual verification
+**Last Updated:** December 2025
+
+---
+
+## Quick Reference
+
+| Test Suite | When to Run | Time |
+|------------|-------------|------|
+| [Smoke Tests](#smoke-tests) | Every deployment | ~5 min |
+| [ChatGPT Integration](#chatgpt-integration) | After auth/MCP changes | ~10 min |
+| [Payment Flow](#payment-flow) | After Stripe changes | ~10 min |
+| [Full User Journey](#full-user-journey) | Before major releases | ~20 min |
+
+---
+
+## Smoke Tests
+
+Quick checks after every deployment. All should pass before considering deployment successful.
+
+### API Health
+- [ ] `GET https://api.letterirl.com/` returns 200
+- [ ] `GET https://api.letterirl.com/.well-known/openid-configuration` returns valid JSON
+- [ ] `GET https://api.letterirl.com/oauth/register` (POST) returns 201 with static client_id
+
+### MCP Endpoint
+- [ ] `GET https://api.letterirl.com/mcp` responds (SSE connection)
+- [ ] MCP manifest accessible at `/manifest.json`
+
+### Website
+- [ ] `https://letterirl.com` loads
+- [ ] Login button redirects to Auth0
+- [ ] Dashboard loads after login
+
+---
+
+## ChatGPT Integration
+
+Test the full ChatGPT connector flow.
+
+### OAuth Flow (US-ACCT-01, US-DCR-01)
+- [ ] Open ChatGPT → GPT that uses Letter IRL
+- [ ] Click "Sign in" when prompted
+- [ ] Auth0 login page appears
+- [ ] Can login with Google
+- [ ] Can login with Microsoft
+- [ ] Can login with GitHub
+- [ ] Can login with Email/Password
+- [ ] After login, redirected back to ChatGPT
+- [ ] ChatGPT shows "Connected" status
+
+### DCR Behavior (US-DCR-02)
+- [ ] After connecting, check Auth0 dashboard
+- [ ] **No new "ChatGPT" client created** (uses static client)
+- [ ] Only "ChatGPT MCP" first-party client exists
+
+### MCP Tools in ChatGPT
+- [ ] Ask "What's my credit balance?" → `get_account_balance` works
+- [ ] Ask "Show my letters" → `list_orders` works
+- [ ] Ask to preview a letter → `quote_and_preview_letter` works
+- [ ] Letter preview renders in chat (widget or text)
+
+### Widget Rendering (if enabled)
+- [ ] Balance widget shows correct credits
+- [ ] Letter preview widget shows formatted letter
+- [ ] Widgets respect dark/light mode
+
+---
+
+## Claude Desktop Integration
+
+Test Claude Desktop via mcp-remote.
+
+### OAuth Flow (US-MCP-04)
+- [ ] Configure Claude Desktop with mcp-remote config
+- [ ] Start Claude Desktop
+- [ ] Browser opens for Auth0 login
+- [ ] Login completes successfully
+- [ ] Claude Desktop shows Letter IRL tools available
+
+### DCR Behavior
+- [ ] After connecting, check Auth0 dashboard
+- [ ] **No new "MCP CLI Proxy" client created**
+- [ ] Uses same static "ChatGPT MCP" client
+
+### MCP Tools in Claude Desktop
+- [ ] Tools list shows Letter IRL tools
+- [ ] `get_account_balance` returns balance
+- [ ] `quote_and_preview_letter` works
+
+### PAT Authentication (US-MCP-03)
+- [ ] Generate PAT from website dashboard
+- [ ] Configure Claude Desktop with PAT header
+- [ ] Tools work without OAuth flow
+- [ ] `last_used_at` updates in database
+
+---
+
+## Payment Flow
+
+Test Stripe checkout and webhook handling.
+
+### Credit Purchase (US-CREDIT-02)
+- [ ] In ChatGPT, ask to buy credits
+- [ ] Stripe Checkout URL returned
+- [ ] Open URL → Stripe Checkout page loads
+- [ ] Use test card: `4242 4242 4242 4242`
+- [ ] Payment succeeds
+- [ ] Redirected to success page
+
+### Webhook Processing (US-EDGE-04)
+- [ ] After payment, check credit balance
+- [ ] Credits added correctly (4, 10, or 100)
+- [ ] Transaction appears in history
+- [ ] Ledger entry has 2-year expiration
+
+### Webhook Idempotency
+- [ ] Manually replay webhook (Stripe dashboard)
+- [ ] Credits NOT duplicated
+- [ ] Logs show "duplicate detected"
+
+### Refund Handling (US-CREDIT-06)
+- [ ] Issue refund in Stripe dashboard
+- [ ] Credits deducted from balance
+- [ ] Ledger entry marked revoked
+- [ ] Transaction recorded
+
+---
+
+## Letter Sending Flow
+
+Test the complete letter journey.
+
+### Preview (US-LETTER-01)
+- [ ] Provide valid US addresses (sender + recipient)
+- [ ] Provide letter body (< 1800 chars)
+- [ ] Preview returns HTML
+- [ ] Draft ID returned
+- [ ] `canSendNow` reflects actual balance
+
+### Validation Errors
+- [ ] Missing address fields → clear error
+- [ ] Non-US address → "Only supports US" error
+- [ ] Body > 1800 chars → character limit error
+- [ ] Invalid address → suggestions returned
+
+### Send (US-LETTER-02)
+- [ ] Use draft ID from preview
+- [ ] Set `confirm: true`
+- [ ] Credits deducted
+- [ ] Order ID returned
+- [ ] Status is "queued"
+
+### Idempotency (US-LETTER-03)
+- [ ] Call send again with same draft ID
+- [ ] Same order returned
+- [ ] `isRetry: true` in response
+- [ ] Credits NOT deducted again
+
+### Status Check (US-LETTER-04)
+- [ ] Query status with order ID
+- [ ] Status timeline shows history
+- [ ] Recipient info shown (redacted appropriately)
+
+### Background Processing (US-LETTER-06)
+- [ ] Check pg-boss job queue
+- [ ] Job picked up by worker
+- [ ] Status updates: queued → processing → in_transit
+- [ ] PostGrid letter ID recorded (test mode)
+
+---
+
+## Promo Code Flow
+
+Test promotional code redemption.
+
+### Validation (US-PROMO-01)
+- [ ] Valid code returns credits amount
+- [ ] Invalid code returns reason
+- [ ] Expired code shows "expired"
+- [ ] Case insensitive (PROMO = promo)
+
+### Redemption (US-PROMO-02)
+- [ ] Redeem valid code
+- [ ] Credits added with correct expiration
+- [ ] Redemption recorded
+- [ ] Second redemption blocked ("already used")
+
+### Rate Limiting (US-SEC-05)
+- [ ] Public `/api/promo/validate` rate limited
+- [ ] 10+ requests/min from same IP → 429
+- [ ] Rate limit headers present
+
+### New User Only (US-SEC-06)
+- [ ] Create "new users only" campaign
+- [ ] New user can redeem
+- [ ] Existing user (with purchases) blocked
+
+---
+
+## Admin Panel
+
+Test admin functionality (local only).
+
+### Access Control (US-SEC-03)
+- [ ] Admin panel only accessible on localhost
+- [ ] `ADMIN_ENABLED=true` required
+- [ ] Non-admin user rejected
+
+### Dashboard (US-ADMIN-01)
+- [ ] Metrics load correctly
+- [ ] User counts accurate
+- [ ] Credit totals match database
+
+### User Investigation (US-ADMIN-04)
+- [ ] Search user by email
+- [ ] View user's credit ledger
+- [ ] View user's letters
+- [ ] View user's transactions
+
+### Credit Adjustment (US-ADMIN-05)
+- [ ] Add credits to user
+- [ ] Reason/description required
+- [ ] Ledger entry created
+- [ ] Balance updated
+
+### Promo Management (US-ADMIN-07)
+- [ ] Create new campaign
+- [ ] Set limits (per user, total)
+- [ ] Activate/pause campaign
+- [ ] View redemption count
+
+---
+
+## Full User Journey
+
+End-to-end test of complete user experience.
+
+### New User Journey (US-ACCT-00)
+1. [ ] Connect via ChatGPT (first time)
+2. [ ] Account auto-created
+3. [ ] Balance shows 0 credits
+4. [ ] Preview letter → `canSendNow: false`
+5. [ ] Redeem promo code OR purchase credits
+6. [ ] Balance updated
+7. [ ] Send letter with same draft
+8. [ ] Letter queued successfully
+9. [ ] Check status shows progress
+
+### Returning User Journey
+1. [ ] Connect via ChatGPT
+2. [ ] Recognized (existing account)
+3. [ ] Balance shows previous credits
+4. [ ] Can see previous letters
+5. [ ] Send new letter
+6. [ ] Credits deducted correctly
+
+### Multi-Provider Journey (US-ACCT-02)
+1. [ ] Login with Google
+2. [ ] Note user ID
+3. [ ] Switch account
+4. [ ] Login with GitHub
+5. [ ] Different user ID (separate account)
+6. [ ] Each account has own credits/letters
+
+---
+
+## Environment-Specific Tests
+
+### Development Environment
+- [ ] Dev API responds (Railway dev URL)
+- [ ] Uses Neon dev branch
+- [ ] Uses Stripe test mode
+- [ ] Uses dummy letter provider
+- [ ] No real mail sent
+- [ ] No real charges
+
+### Production Environment
+- [ ] api.letterirl.com responds
+- [ ] Uses Neon main branch
+- [ ] Uses Stripe live mode
+- [ ] Uses PostGrid live mode
+- [ ] Real mail capability confirmed
+
+---
+
+## Post-Incident Tests
+
+Run after fixing issues.
+
+### After Auth Changes
+- [ ] All OAuth providers work
+- [ ] Token validation works
+- [ ] PAT authentication works
+- [ ] No duplicate Auth0 clients created
+
+### After Payment Changes
+- [ ] Checkout creates correct session
+- [ ] Webhook processes payment
+- [ ] Credits added correctly
+- [ ] Refunds processed correctly
+
+### After Database Changes
+- [ ] Migrations applied successfully
+- [ ] No data loss
+- [ ] Queries perform acceptably
+- [ ] Indexes working
+
+---
+
+## Test Data
+
+### Stripe Test Cards
+| Card | Behavior |
+|------|----------|
+| `4242 4242 4242 4242` | Success |
+| `4000 0000 0000 0002` | Decline |
+| `4000 0000 0000 9995` | Insufficient funds |
+
+### Test Addresses (US)
+```
+Sender:
+123 Test Street
+San Francisco, CA 94102
+
+Recipient:
+456 Sample Ave
+New York, NY 10001
+```
+
+### Test Promo Codes
+Check admin panel or database for active test campaigns.
+
+---
+
+## Notes
+
+- Always test in **development environment first**
+- Use Stripe test mode for payment tests
+- PostGrid test mode or dummy provider for letter tests
+- Document any issues found in GitHub Issues
+- Update this checklist as features change
