@@ -125,23 +125,13 @@ We implement industry-standard security measures:
 
 ## Your Rights
 
-Depending on your location, you may have rights to:
+You may request:
 
-- **Access** - Request a copy of your personal data
-- **Correction** - Request correction of inaccurate data
-- **Deletion** - Request deletion of your data
-- **Portability** - Request your data in a portable format
-- **Opt-out** - Opt out of certain data uses
+- **Access** - A copy of your personal data
+- **Correction** - Correction of inaccurate data
+- **Deletion** - Deletion of your account and associated data
 
-To exercise these rights, contact us at support@letterirl.com.
-
-### California Residents (CCPA)
-
-California residents have additional rights under the CCPA, including the right to know what personal information is collected and the right to request deletion.
-
-### European Residents (GDPR)
-
-If you're in the EU/EEA, you have rights under GDPR including access, rectification, erasure, and the right to lodge a complaint with a supervisory authority.
+To make a request, contact us at policy-team@letterirl.com.
 
 ---
 
@@ -172,7 +162,7 @@ We may update this Privacy Policy from time to time. We'll notify you of signifi
 
 Questions about this Privacy Policy? Contact us at:
 
-**Email:** support@letterirl.com
+**Email:** policy-team@letterirl.com
 **Website:** https://letterirl.com
 
 ---

@@ -24,16 +24,14 @@ By using Letter IRL, you agree to these terms.
 ### Credits
 
 - Sending letters requires credits, which you purchase through our service
-- Each standard letter costs 2 credits
+- The number of credits required depends on the letter type (shown before you confirm)
 - Credits are non-refundable once used to send a letter
-- Purchased credits expire after 2 years
-- Promotional credits expire after 90 days (or as specified)
+- Credits expire according to the policy shown at time of purchase or grant
 - We use Stripe to process payments securely
 
 ### Sending Letters
 
 - Letters are currently limited to **US addresses only**
-- Letters are limited to **one page** (approximately 1,800 characters)
 - Once a letter is submitted for mailing, it cannot be recalled or cancelled
 - We validate addresses but cannot guarantee delivery to incorrect addresses
 
@@ -172,7 +170,7 @@ To the maximum extent permitted by law:
 
 ### Governing Law
 
-These terms are governed by the laws of the State of California, USA.
+These terms are governed by the laws of the State of Missouri, USA.
 
 ### Resolution
 
@@ -190,7 +188,7 @@ We may update these terms at any time. Your continued use of the Service after c
 
 Questions about these terms? Contact us at:
 
-**Email:** support@letterirl.com
+**Email:** policy-team@letterirl.com
 **Website:** https://letterirl.com
 
 ---
