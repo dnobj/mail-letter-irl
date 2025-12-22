@@ -6,6 +6,8 @@ Letter IRL is a physical letter mailing service for ChatGPT. Users compose lette
 
 ## Project Structure (Two Repositories)
 
+Both repositories use the same branching strategy: `feature/*` → `dev` → `main/master`
+
 | Repository | Purpose | Deployed To |
 |------------|---------|-------------|
 | `letter-irl` (this repo) | MCP server / API | Railway → api.letterirl.com |

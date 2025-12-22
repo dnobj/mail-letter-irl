@@ -71,7 +71,9 @@ Letter IRL is a **physical letter mailing service** integrated with ChatGPT via 
 Letter IRL uses a **fully isolated development environment** that mirrors production architecture:
 
 ### Git Branching Strategy
-- **`master`** - Production branch (auto-deploys to Railway production)
+
+Both repositories (`letter-irl` and `letter-irl-website`) use the same strategy:
+- **`master/main`** - Production branch (auto-deploys to Railway production)
 - **`dev`** - Development branch (auto-deploys to Railway dev environment)
 - **`feature/*`** - Feature branches (branch from `dev`, merge to `dev`)
 
@@ -79,8 +81,10 @@ Letter IRL uses a **fully isolated development environment** that mirrors produc
 
 | Component | Production | Development |
 |-----------|------------|-------------|
-| Git Branch | `master` | `dev` |
-| Railway | api.letterirl.com | Obscure URL |
+| Git Branch (API) | `master` | `dev` |
+| Git Branch (Website) | `main` | `dev` |
+| Railway API | api.letterirl.com | Obscure URL |
+| Railway Website | letterirl.com | Obscure URL |
 | Neon | main branch | dev branch (synced copy) |
 | Auth0 | dev-ky21dxn3qmi71hjl.us.auth0.com | letter-irl-dev.us.auth0.com |
 | Stripe | Live mode | Test mode |

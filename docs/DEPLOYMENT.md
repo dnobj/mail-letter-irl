@@ -56,15 +56,19 @@ This guide covers deploying Letter IRL to both production and development enviro
 
 Letter IRL uses a **dual-environment deployment strategy**:
 
-| Environment | Git Branch | Railway Deployment | Purpose |
-|-------------|------------|--------------------|---------|
-| **Production** | `master` | api.letterirl.com | Live users and data |
-| **Development** | `dev` | Obscure URL | Isolated testing with production-like data |
+| Repository | Environment | Git Branch | Railway Deployment | Purpose |
+|------------|-------------|------------|--------------------|---------|
+| **letter-irl (API)** | Production | `master` | api.letterirl.com | Live users and data |
+| **letter-irl (API)** | Development | `dev` | Obscure URL | Isolated testing with production-like data |
+| **letter-irl-website** | Production | `main` | letterirl.com | Live users and data |
+| **letter-irl-website** | Development | `dev` | Obscure URL | Isolated testing with production-like data |
 
 ### Git Branching Workflow
 
+Both repositories (`letter-irl` and `letter-irl-website`) use the same strategy:
+
 ```
-master (production)
+master/main (production)
   ↑
   └── dev (development)
         ↑
@@ -75,7 +79,7 @@ master (production)
 
 - Features branch from `dev`
 - Features merge to `dev` via pull request
-- `dev` merges to `master` for production releases
+- `dev` merges to `master`/`main` for production releases
 - Railway auto-deploys on push to either branch
 
 ## Pre-Deployment Checklist
@@ -221,7 +225,7 @@ ADMIN_ENABLED=false
 ### 4. Deploy Website to Production
 
 **Railway Project**: `letter-irl-website-production`
-**Git Branch**: `master`
+**Git Branch**: `main`
 **Domain**: letterirl.com
 
 **Environment Variables**:

@@ -259,12 +259,16 @@ Social login IDs (Google, GitHub, Microsoft, Apple) are identical across tenants
 |---------|-------------|--------|--------|
 | Backend | Production | `master` | api.letterirl.com |
 | Backend | Development | `dev` | Obscure URL (auto-generated) |
-| Website | Production | `master` | letterirl.com |
+| Website | Production | `main` | letterirl.com |
 | Website | Development | `dev` | Obscure URL (auto-generated) |
 
+Both repositories use the same workflow: feature branches → `dev` → `main/master`
+
 **Auto-Deploy Behavior**:
-- Push to `master` → Deploys to production environment
-- Push to `dev` → Deploys to development environment
+- API: Push to `master` → Deploys to production environment
+- API: Push to `dev` → Deploys to development environment
+- Website: Push to `main` → Deploys to production environment
+- Website: Push to `dev` → Deploys to development environment
 - Each environment has separate Railway project with isolated env vars
 
 **Key Features**:
