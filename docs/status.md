@@ -38,7 +38,7 @@ Letter IRL is a **physical letter mailing service** integrated with ChatGPT via 
 │  └── All tables (users, letters, credits, jobs, etc.)            │
 ├─────────────────────────────────────────────────────────────────┤
 │  External Services                                               │
-│  ├── Auth0: dev-ky21dxn3qmi71hjl.us.auth0.com                    │
+│  ├── Auth0: dev-njmdyqf8n25rqgy7.us.auth0.com (prod tenant)      │
 │  ├── Stripe (live mode)                                          │
 │  └── PostGrid (live mode)                                        │
 └─────────────────────────────────────────────────────────────────┘
@@ -58,7 +58,7 @@ Letter IRL is a **physical letter mailing service** integrated with ChatGPT via 
 │  └── Copy of production data (sync via npm run dev:sync)         │
 ├─────────────────────────────────────────────────────────────────┤
 │  External Services                                               │
-│  ├── Auth0: letter-irl-dev.us.auth0.com (SEPARATE TENANT)        │
+│  ├── Auth0: dev-ky21dxn3qmi71hjl.us.auth0.com (dev tenant)       │
 │  ├── Stripe (test mode)                                          │
 │  └── PostGrid (dummy provider - no real mail)                    │
 └─────────────────────────────────────────────────────────────────┘
@@ -83,10 +83,10 @@ Both repositories (`letter-irl` and `letter-irl-website`) use the same strategy:
 |-----------|------------|-------------|
 | Git Branch (API) | `master` | `dev` |
 | Git Branch (Website) | `main` | `dev` |
-| Railway API | api.letterirl.com | Obscure URL |
-| Railway Website | letterirl.com | Obscure URL |
-| Neon | main branch | dev branch (synced copy) |
-| Auth0 | dev-ky21dxn3qmi71hjl.us.auth0.com | letter-irl-dev.us.auth0.com |
+| Railway API | api.letterirl.com | Railway dev environment |
+| Railway Website | letterirl.com | https://mail-letter-irl-website-development.up.railway.app |
+| Neon | production branch | dev branch (synced via `npm run dev:sync`) |
+| Auth0 Tenant | dev-njmdyqf8n25rqgy7.us.auth0.com (dnicholl@letterirl.com) | dev-ky21dxn3qmi71hjl.us.auth0.com (dnicholl@objective.works) |
 | Stripe | Live mode | Test mode |
 | PostGrid | Live mode | Dummy provider |
 

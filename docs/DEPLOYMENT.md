@@ -98,10 +98,11 @@ master/main (production)
 - [ ] Backup schedule configured
 
 #### 3. Auth0 Production
-- [ ] Production tenant: `dev-ky21dxn3qmi71hjl.us.auth0.com`
+- [ ] Production tenant: `dev-njmdyqf8n25rqgy7.us.auth0.com` (dnicholl@letterirl.com)
 - [ ] Update callback URLs for production domain
-- [ ] Enable production connections (Google, etc.)
-- [ ] Configure API audience
+- [ ] Enable production connections (Google, GitHub, Microsoft, Apple, Username-Password)
+- [ ] Configure API audience: `https://letter-irl/api`
+- [ ] Enable DCR for MCP OAuth flow
 
 #### 4. Stripe Production
 - [ ] Switch from sandbox to live mode
@@ -122,11 +123,15 @@ master/main (production)
 - [ ] Migrations tested on dev branch
 
 #### 2. Auth0 Development
-- [ ] Development tenant created: `letter-irl-dev.us.auth0.com`
-- [ ] Applications configured (MCP, Website)
-- [ ] Social connections enabled (Google, GitHub, etc.)
+- [ ] Development tenant: `dev-ky21dxn3qmi71hjl.us.auth0.com` (dnicholl@objective.works)
+- [ ] Applications configured (MCP via DCR, Website Regular Web App)
+- [ ] Social connections enabled (Google, GitHub, Microsoft, Apple)
+- [ ] Username-Password connection enabled
+- [ ] API audience configured: `https://letter-irl/api`
+- [ ] Website Client ID: `ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX`
 - [ ] Callback URLs configured for dev Railway URL
 - [ ] Username-Password users synced via `npm run dev:sync`
+- [ ] DCR enabled for MCP OAuth flow
 
 #### 3. Stripe Development
 - [ ] Test mode API keys (sk_test_...)
@@ -172,8 +177,8 @@ Railway is configured for **dual-environment deployment**:
 DATABASE_URL=postgres://...@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
 
 # Auth0 (Production Tenant)
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
 
 # PostGrid (Live Mode)
@@ -203,8 +208,8 @@ ADMIN_ENABLED=false
 DATABASE_URL=postgres://...@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require&options=branch%3Ddev
 
 # Auth0 (Development Tenant)
-LETTER_IRL_OAUTH_JWKS_URI=https://letter-irl-dev.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_ISSUER=https://letter-irl-dev.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
 
 # PostGrid (Dummy Provider)
@@ -234,9 +239,9 @@ ADMIN_ENABLED=false
 # Auth0 (Production Tenant)
 AUTH0_SECRET=<generate-with-openssl-rand-hex-32>
 AUTH0_BASE_URL=https://letterirl.com
-AUTH0_ISSUER_BASE_URL=https://dev-ky21dxn3qmi71hjl.us.auth0.com
-AUTH0_CLIENT_ID=<website-client-id>
-AUTH0_CLIENT_SECRET=<website-client-secret>
+AUTH0_ISSUER_BASE_URL=https://dev-njmdyqf8n25rqgy7.us.auth0.com
+AUTH0_CLIENT_ID=<prod-website-client-id>
+AUTH0_CLIENT_SECRET=<prod-website-client-secret>
 AUTH0_AUDIENCE=https://letter-irl/api
 
 # Backend API
@@ -257,9 +262,9 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_...
 ```env
 # Auth0 (Development Tenant)
 AUTH0_SECRET=<generate-with-openssl-rand-hex-32>
-AUTH0_BASE_URL=https://<your-dev-website-url>.up.railway.app
-AUTH0_ISSUER_BASE_URL=https://letter-irl-dev.us.auth0.com
-AUTH0_CLIENT_ID=<dev-website-client-id>
+AUTH0_BASE_URL=https://mail-letter-irl-website-development.up.railway.app
+AUTH0_ISSUER_BASE_URL=https://dev-ky21dxn3qmi71hjl.us.auth0.com
+AUTH0_CLIENT_ID=ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX
 AUTH0_CLIENT_SECRET=<dev-website-client-secret>
 AUTH0_AUDIENCE=https://letter-irl/api
 
@@ -272,19 +277,27 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 
 ### 6. Update Auth0 URLs
 
-#### Production Tenant
+#### Production Tenant (`dev-njmdyqf8n25rqgy7.us.auth0.com`)
 
-Add production URLs to Auth0 Application:
-- Callback: `https://letterirl.com/auth/callback`
+Add production URLs to Auth0 Website Application:
+- Callback: `https://letterirl.com/api/auth/callback`
 - Logout: `https://letterirl.com`
 - Web Origins: `https://letterirl.com`
 
-#### Development Tenant
+For MCP Server (uses DCR - Dynamic Client Registration):
+- No manual configuration needed
+- ChatGPT creates ephemeral clients automatically
 
-Add development URLs to Auth0 Application:
-- Callback: `https://<your-dev-website-url>.up.railway.app/auth/callback`
-- Logout: `https://<your-dev-website-url>.up.railway.app`
-- Web Origins: `https://<your-dev-website-url>.up.railway.app`
+#### Development Tenant (`dev-ky21dxn3qmi71hjl.us.auth0.com`)
+
+Add development URLs to Auth0 Website Application (`ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX`):
+- Callback: `https://mail-letter-irl-website-development.up.railway.app/api/auth/callback`
+- Logout: `https://mail-letter-irl-website-development.up.railway.app`
+- Web Origins: `https://mail-letter-irl-website-development.up.railway.app`
+
+For MCP Server (uses DCR - Dynamic Client Registration):
+- No manual configuration needed
+- ChatGPT creates ephemeral clients automatically
 
 ## Environment Variables Reference
 

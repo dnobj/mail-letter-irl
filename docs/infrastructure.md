@@ -47,13 +47,14 @@ This document provides a central reference for all services and infrastructure u
 ├─────────────────┬─────────────────┬─────────────────────────────────┤
 │   ChatGPT       │   Website       │   Admin Panel                   │
 │   (MCP Client)  │   (Next.js)     │   (Static HTML/JS)              │
-│                 │   (dev deploy)  │                                 │
+│                 │   Railway dev   │                                 │
 └────────┬────────┴────────┬────────┴────────────────┬────────────────┘
          │                 │                          │
          ▼                 ▼                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                 MCP SERVER - DEVELOPMENT (Backend)                   │
-│  Git Branch: dev → Railway: obscure URL                              │
+│  Git Branch: dev → Railway dev environment                           │
+│  URL: https://mail-letter-irl-website-development.up.railway.app     │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
 │  │ MCP Tools   │  │ REST API    │  │ Dashboard   │  │ Admin API   │ │
 │  │ (ChatGPT)   │  │ (Website)   │  │ API         │  │ (Disabled)  │ │
@@ -80,19 +81,26 @@ Letter IRL uses a **fully isolated development environment** that mirrors produc
 
 | Component | Production | Development |
 |-----------|------------|-------------|
-| **Git Branch** | `master` | `dev` |
-| **Railway** | api.letterirl.com | Obscure URL |
-| **Neon Database** | main branch | dev branch (synced copy) |
-| **Auth0 Tenant** | dev-ky21dxn3qmi71hjl.us.auth0.com | letter-irl-dev.us.auth0.com |
+| **Git Branch (API)** | `master` | `dev` |
+| **Git Branch (Website)** | `main` | `dev` |
+| **Railway API** | api.letterirl.com | Railway dev environment |
+| **Railway Website** | letterirl.com | https://mail-letter-irl-website-development.up.railway.app |
+| **Neon Database** | production branch | dev branch (synced via `npm run dev:sync`) |
+| **Auth0 Tenant** | dev-njmdyqf8n25rqgy7.us.auth0.com (prod, dnicholl@letterirl.com) | dev-ky21dxn3qmi71hjl.us.auth0.com (dev, dnicholl@objective.works) |
 | **Stripe** | Live mode (real charges) | Test mode (no charges) |
 | **PostGrid** | Live mode (real mail) | Dummy provider (no mail) |
 
 ### Key Design Decisions
 
-1. **Separate Auth0 Tenant**: Complete isolation between environments, prevents accidental cross-environment access
+1. **Separate Auth0 Tenants**: Complete isolation between environments, prevents accidental cross-environment access
+   - Production: `dev-njmdyqf8n25rqgy7.us.auth0.com` (dnicholl@letterirl.com)
+   - Development: `dev-ky21dxn3qmi71hjl.us.auth0.com` (dnicholl@objective.works)
 2. **Neon Branching**: Copy production data to development via `npm run dev:sync`
+   - Production: `production` branch
+   - Development: `dev` branch (reset from production on sync)
 3. **User ID Preservation**: Social logins (Google, GitHub, etc.) IDs match across tenants; Username-Password users synced via script
-4. **Auto-Deploy**: Railway automatically deploys `dev` and `master` branches to respective environments
+4. **Auto-Deploy**: Railway automatically deploys `dev` and `master`/`main` branches to respective environments
+5. **Git Workflow**: Both repos use same branching strategy: `feature/*` → `dev` → `main/master`
 
 ## Services Summary
 
@@ -136,7 +144,7 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 - Branch databases (for development environment isolation)
 - Branch reset via API (for `npm run dev:sync`)
 
-**Database Sync**: Run `npm run dev:sync` to reset dev branch from production main branch.
+**Database Sync**: Run `npm run dev:sync` to reset dev branch from production branch. See "Development Sync Workflow" section below for details.
 
 **Relevant Docs**: `docs/database-schema.md`, `docs/database-setup.md`
 
@@ -152,10 +160,10 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 - Unlimited applications
 
 **Tenants**:
-| Environment | Tenant | Purpose |
-|-------------|--------|---------|
-| Production | `dev-ky21dxn3qmi71hjl.us.auth0.com` | Live user authentication |
-| Development | `letter-irl-dev.us.auth0.com` | Isolated dev authentication |
+| Environment | Tenant | Account | Purpose |
+|-------------|--------|---------|---------|
+| Production | `dev-njmdyqf8n25rqgy7.us.auth0.com` | dnicholl@letterirl.com | Live user authentication |
+| Development | `dev-ky21dxn3qmi71hjl.us.auth0.com` | dnicholl@objective.works | Isolated dev authentication |
 
 **Why Separate Tenants?**
 - Complete isolation: Users cannot accidentally access wrong environment
@@ -164,10 +172,10 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 - Social login provider IDs automatically match across tenants
 
 **Applications** (per tenant):
-| Application | Type | Purpose |
-|-------------|------|---------|
-| Letter IRL MCP | Machine-to-Machine + Regular Web | ChatGPT OAuth flow |
-| Letter IRL Website | Regular Web Application | Website auth |
+| Application | Type | Purpose | Dev Client ID |
+|-------------|------|---------|---------------|
+| Letter IRL MCP | Regular Web (with DCR) | ChatGPT OAuth flow | (dynamic via DCR) |
+| Letter IRL Website | Regular Web Application | Website auth | ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX (dev tenant only) |
 
 **API Audience**: `https://letter-irl/api`
 
@@ -181,7 +189,7 @@ Social login IDs (Google, GitHub, Microsoft, Apple) are identical across tenants
 - User metadata
 - User import/export for dev sync
 
-**Relevant Docs**: `docs/auth0-tenant-configuration.md`, `docs/chatgpt-auth0-oauth-learnings.md`
+**Relevant Docs**: `docs/auth0-tenant-configuration.md`, `docs/learnings/chatgpt-auth0-oauth-learnings.md`
 
 ---
 
@@ -258,9 +266,9 @@ Social login IDs (Google, GitHub, Microsoft, Apple) are identical across tenants
 | Service | Environment | Branch | Domain |
 |---------|-------------|--------|--------|
 | Backend | Production | `master` | api.letterirl.com |
-| Backend | Development | `dev` | Obscure URL (auto-generated) |
+| Backend | Development | `dev` | Railway dev environment |
 | Website | Production | `main` | letterirl.com |
-| Website | Development | `dev` | Obscure URL (auto-generated) |
+| Website | Development | `dev` | https://mail-letter-irl-website-development.up.railway.app |
 
 Both repositories use the same workflow: feature branches → `dev` → `main/master`
 
@@ -277,6 +285,91 @@ Both repositories use the same workflow: feature branches → `dev` → `main/ma
 - Environment variable management per environment
 - Logging and metrics
 - Nixpacks for automatic build detection
+
+---
+
+## Development Sync Workflow
+
+### Purpose
+
+The `npm run dev:sync` command synchronizes production data to the development environment, ensuring developers work with production-like data while maintaining complete isolation.
+
+### What Gets Synced
+
+1. **Neon Database**: Entire database is copied from production to dev branch
+   - All tables, indexes, constraints, and data
+   - Letters, users, credits, transactions, etc.
+
+2. **Auth0 Users**: Username-Password users are exported from production and imported to dev
+   - Only Username-Password (`auth0|xxx`) users need syncing
+   - Social login users (Google, GitHub, etc.) automatically have matching IDs
+
+### How It Works
+
+```bash
+npm run dev:sync
+```
+
+The script performs these steps:
+
+1. **Delete and Recreate Neon Dev Branch**
+   - Uses Neon API to delete existing `dev` branch
+   - Recreates `dev` branch from `production` branch
+   - Results in exact copy of production database
+
+2. **Export Production Auth0 Users**
+   - Uses Auth0 Management API
+   - Exports only Username-Password users
+   - Social login users don't need export (IDs match across tenants)
+
+3. **Import Users to Development Auth0**
+   - Imports users to dev tenant
+   - Preserves user IDs to match database records
+   - Maintains email, password hashes, metadata
+
+### User ID Preservation Strategy
+
+| Auth Type | Production ID | Development ID | Sync Method |
+|-----------|---------------|----------------|-------------|
+| Google | `google-oauth2\|123456789` | `google-oauth2\|123456789` | Automatic (same provider ID) |
+| GitHub | `github\|987654321` | `github\|987654321` | Automatic (same provider ID) |
+| Microsoft | `windowslive\|abc123` | `windowslive\|abc123` | Automatic (same provider ID) |
+| Apple | `apple\|xyz789` | `apple\|xyz789` | Automatic (same provider ID) |
+| Username-Password | `auth0\|abc123...` | `auth0\|abc123...` | Import via sync script |
+
+### When to Run Dev Sync
+
+- **After schema changes**: When migrations are applied to production
+- **Testing with real data**: When you need fresh production data
+- **User issues**: When debugging user-specific problems
+- **Weekly maintenance**: Recommended to keep dev environment fresh
+
+### Environment Variables for Sync
+
+The sync script requires:
+
+```bash
+# Production Auth0 (for export)
+AUTH0_PROD_DOMAIN=dev-njmdyqf8n25rqgy7.us.auth0.com
+AUTH0_PROD_CLIENT_ID=<m2m-client-id>
+AUTH0_PROD_CLIENT_SECRET=<m2m-client-secret>
+
+# Development Auth0 (for import)
+AUTH0_DEV_DOMAIN=dev-ky21dxn3qmi71hjl.us.auth0.com
+AUTH0_DEV_CLIENT_ID=<m2m-client-id>
+AUTH0_DEV_CLIENT_SECRET=<m2m-client-secret>
+
+# Neon (for branch reset)
+NEON_API_KEY=<neon-api-key>
+NEON_PROJECT_ID=<neon-project-id>
+```
+
+### Safety Considerations
+
+1. **One-way sync only**: Production → Dev only, never the reverse
+2. **Dev data is destroyed**: All existing dev data is lost during sync
+3. **No production impact**: Sync never touches production database or Auth0
+4. **Credentials isolated**: Dev uses separate Auth0 tenant and Neon branch
 
 ---
 
@@ -307,42 +400,101 @@ Both repositories use the same workflow: feature branches → `dev` → `main/ma
 
 ### Backend (.env)
 
+**Production:**
 ```env
-# Database
+# Database (production branch)
 DATABASE_URL=postgres://...
 
-# Auth0
-AUTH0_DOMAIN=dev-ky21dxn3qmi71hjl.us.auth0.com
-AUTH0_AUDIENCE=https://letter-irl/api
-AUTH0_CLIENT_ID=...
-AUTH0_CLIENT_SECRET=...
+# Auth0 (production tenant)
+LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
 
-# PostGrid
-POSTGRID_API_KEY=test_sk_... (or live_sk_...)
+# PostGrid (live mode)
+POSTGRID_API_KEY=live_sk_...
+ACTIVE_LETTER_PROVIDER=postgrid
 
-# Stripe
-STRIPE_SECRET_KEY=sk_test_... (or sk_live_...)
+# Stripe (live mode)
+STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 
-# Admin
-ADMIN_JWT_SECRET=...
+# Server
+LETTER_IRL_PUBLIC_BASE_URL=https://api.letterirl.com
+ADMIN_ENABLED=false
+```
+
+**Development:**
+```env
+# Database (dev branch)
+DATABASE_URL=postgres://...?options=branch%3Ddev
+
+# Auth0 (dev tenant)
+LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+
+# PostGrid (dummy mode - no real mail)
+ACTIVE_LETTER_PROVIDER=dummy
+
+# Stripe (test mode)
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+
+# Server
+LETTER_IRL_PUBLIC_BASE_URL=https://[your-dev-url].up.railway.app
+ADMIN_ENABLED=false
 ```
 
 ### Website (.env.local)
 
+**Production:**
 ```env
-# Auth0
-AUTH0_SECRET=...
-AUTH0_DOMAIN=dev-ky21dxn3qmi71hjl.us.auth0.com
-AUTH0_CLIENT_ID=...
-AUTH0_CLIENT_SECRET=...
-APP_BASE_URL=http://localhost:3000
+# Auth0 (production tenant)
+AUTH0_SECRET=<generate-with-openssl-rand-hex-32>
+AUTH0_BASE_URL=https://letterirl.com
+AUTH0_ISSUER_BASE_URL=https://dev-njmdyqf8n25rqgy7.us.auth0.com
+AUTH0_CLIENT_ID=<prod-website-client-id>
+AUTH0_CLIENT_SECRET=<prod-website-client-secret>
 AUTH0_AUDIENCE=https://letter-irl/api
 
-# Backend
-LETTER_IRL_API_URL=http://localhost:8788
+# Backend API
+NEXT_PUBLIC_LETTER_IRL_API_URL=https://api.letterirl.com
 
-# Stripe
+# Stripe (live mode)
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_...
+```
+
+**Development:**
+```env
+# Auth0 (dev tenant)
+AUTH0_SECRET=<generate-with-openssl-rand-hex-32>
+AUTH0_BASE_URL=https://mail-letter-irl-website-development.up.railway.app
+AUTH0_ISSUER_BASE_URL=https://dev-ky21dxn3qmi71hjl.us.auth0.com
+AUTH0_CLIENT_ID=ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX
+AUTH0_CLIENT_SECRET=<dev-website-client-secret>
+AUTH0_AUDIENCE=https://letter-irl/api
+
+# Backend API
+NEXT_PUBLIC_LETTER_IRL_API_URL=https://[your-dev-api-url].up.railway.app
+
+# Stripe (test mode)
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
+```
+
+**Local Development:**
+```env
+# Auth0 (dev tenant for local testing)
+AUTH0_SECRET=<generate-with-openssl-rand-hex-32>
+AUTH0_BASE_URL=http://localhost:3000
+AUTH0_ISSUER_BASE_URL=https://dev-ky21dxn3qmi71hjl.us.auth0.com
+AUTH0_CLIENT_ID=ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX
+AUTH0_CLIENT_SECRET=<dev-website-client-secret>
+AUTH0_AUDIENCE=https://letter-irl/api
+
+# Backend API (local or dev Railway)
+NEXT_PUBLIC_LETTER_IRL_API_URL=http://localhost:8788
+
+# Stripe (test mode)
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 ```
 

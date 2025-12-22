@@ -31,10 +31,12 @@ Both repositories use the same branching strategy: `feature/*` → `dev` → `ma
 ┌─────────────────────────────────────────────────────────────────┐
 │  PRODUCTION                                                      │
 ├─────────────────────────────────────────────────────────────────┤
-│  Git Branch: master                                              │
-│  Auth0: dev-ky21dxn3qmi71hjl.us.auth0.com                       │
-│  Neon: main branch                                               │
-│  Railway: api.letterirl.com                                      │
+│  Git Branch: master (API) / main (Website)                       │
+│  Auth0: dev-njmdyqf8n25rqgy7.us.auth0.com (prod tenant)         │
+│         Account: dnicholl@letterirl.com                          │
+│  Neon: production branch                                         │
+│  Railway API: api.letterirl.com                                  │
+│  Railway Website: letterirl.com                                  │
 │  Stripe: live mode                                               │
 │  PostGrid: live mode                                             │
 └─────────────────────────────────────────────────────────────────┘
@@ -44,10 +46,12 @@ Both repositories use the same branching strategy: `feature/*` → `dev` → `ma
 ┌─────────────────────────────────────────────────────────────────┐
 │  DEVELOPMENT                                                     │
 ├─────────────────────────────────────────────────────────────────┤
-│  Git Branch: dev                                                 │
-│  Auth0: letter-irl-dev.us.auth0.com (separate tenant)           │
+│  Git Branch: dev (both repos)                                    │
+│  Auth0: dev-ky21dxn3qmi71hjl.us.auth0.com (dev tenant)          │
+│         Account: dnicholl@objective.works                        │
 │  Neon: dev branch (copy of production)                          │
-│  Railway: letter-irl-dev-xxx.up.railway.app                     │
+│  Railway API: Railway dev environment                            │
+│  Railway Website: mail-letter-irl-website-development...        │
 │  Stripe: test mode                                               │
 │  PostGrid: dummy provider                                        │
 └─────────────────────────────────────────────────────────────────┘
@@ -74,13 +78,13 @@ master/main (production) ──────────────────�
 |--------|------------|-------------|
 | Git Branch (API) | `master` | `dev` |
 | Git Branch (Website) | `main` | `dev` |
-| Auth0 Tenant | `dev-ky21dxn3qmi71hjl` | `letter-irl-dev` |
-| Neon Branch | `main` | `dev` |
+| Auth0 Tenant | `dev-njmdyqf8n25rqgy7` (dnicholl@letterirl.com) | `dev-ky21dxn3qmi71hjl` (dnicholl@objective.works) |
+| Neon Branch | `production` | `dev` (synced via `npm run dev:sync`) |
 | Stripe Mode | Live (`sk_live_`) | Test (`sk_test_`) |
 | PostGrid | Live (real mail) | Dummy (no mail) |
-| Admin Routes | Disabled | Enabled |
-| API URL | `api.letterirl.com` | `xxx.up.railway.app` |
-| Website URL | `letterirl.com` | `xxx.up.railway.app` |
+| Admin Routes | Disabled | Disabled |
+| API URL | `api.letterirl.com` | Railway dev environment |
+| Website URL | `letterirl.com` | `mail-letter-irl-website-development.up.railway.app` |
 
 ---
 
@@ -94,14 +98,24 @@ master/main (production) ──────────────────�
 - Stripe CLI (`brew install stripe/stripe-cli/stripe`)
 - Neon CLI (`npm install -g neonctl`) - optional
 
-### 1. Create Auth0 Development Tenant
+### 1. Use Existing Auth0 Development Tenant
 
-1. Go to [Auth0](https://auth0.com) and create a new tenant: `letter-irl-dev`
+The development tenant is already configured:
+- **Tenant**: `dev-ky21dxn3qmi71hjl.us.auth0.com`
+- **Account**: dnicholl@objective.works
+- **Connections**: Google, Microsoft, Apple, GitHub, Username-Password
+- **DCR**: Enabled (Settings → Advanced → OIDC Dynamic Application Registration)
+- **API Audience**: `https://letter-irl/api`
+- **Website Client ID**: `ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX`
+
+If you need to configure a new development tenant, follow these steps:
+1. Go to [Auth0](https://auth0.com) and create a new tenant
 2. Configure connections (same as production): Google, Microsoft, Apple, GitHub, Username-Password
 3. Enable DCR: Settings → Advanced → OIDC Dynamic Application Registration
-4. Create API: `https://letter-irl-dev/api`
+4. Create API: `https://letter-irl/api`
 5. Set Default Audience: Settings → General → API Authorization Settings
-6. Create M2M Application for sync script with Management API access
+6. Create Regular Web Application for the website
+7. Create M2M Application for sync script with Management API access
 
 ### 2. Create Neon Development Branch
 
@@ -170,21 +184,41 @@ Username-Password users (`auth0|xxx`) need to be imported to preserve IDs.
 
 Copy `.env.example` to `.env` and configure:
 
+**Production (.env):**
 ```bash
-# Database
+# Database (production branch)
 DATABASE_URL=postgres://...
 
-# Auth0
-LETTER_IRL_OAUTH_ISSUER=https://letterirl.auth0.com/
-LETTER_IRL_OAUTH_JWKS_URI=https://letterirl.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_AUDIENCE=https://api.letterirl.com
+# Auth0 (production tenant)
+LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
 
-# Stripe
+# Stripe (live mode)
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+
+# PostGrid (live mode)
+POSTGRID_API_KEY=live_sk_...
+ACTIVE_LETTER_PROVIDER=postgrid
+```
+
+**Development (.env):**
+```bash
+# Database (dev branch)
+DATABASE_URL=postgres://...?options=branch%3Ddev
+
+# Auth0 (dev tenant)
+LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+
+# Stripe (test mode)
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 
-# PostGrid
-POSTGRID_API_KEY=test_...
+# PostGrid (dummy provider)
+ACTIVE_LETTER_PROVIDER=dummy
 ```
 
 ### Running Locally
@@ -390,15 +424,20 @@ npm run db:migrate:rollback
 ### Railway Configuration
 
 **Production Environment:**
-- Branch: `master`
-- URL: `api.letterirl.com`
+- API Branch: `master`
+- Website Branch: `main`
+- API URL: `api.letterirl.com`
+- Website URL: `letterirl.com`
 - All production credentials (live Stripe, live PostGrid)
+- Admin routes disabled
 
 **Development Environment:**
-- Branch: `dev`
-- URL: obscure Railway URL
+- API Branch: `dev`
+- Website Branch: `dev`
+- API URL: Railway dev environment
+- Website URL: `https://mail-letter-irl-website-development.up.railway.app`
 - Test credentials (test Stripe, dummy PostGrid)
-- Admin routes enabled
+- Admin routes disabled
 
 ### Environment Variables on Railway
 
