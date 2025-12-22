@@ -109,12 +109,12 @@ async function syncNeonDatabase(): Promise<string | null> {
     const branches = await listNeonBranches();
     console.log(`   Found ${branches.length} branches`);
 
-    // Find main (production) branch
-    const mainBranch = branches.find(b => b.name === 'main');
+    // Find production branch (could be named 'main' or 'production')
+    const mainBranch = branches.find(b => b.name === 'main' || b.name === 'production');
     if (!mainBranch) {
-      throw new Error('Could not find main branch');
+      throw new Error('Could not find main or production branch');
     }
-    console.log(`   Main branch ID: ${mainBranch.id}`);
+    console.log(`   Production branch: ${mainBranch.name} (${mainBranch.id})`);
 
     // Find existing dev branch
     const devBranch = branches.find(b => b.name === NEON_DEV_BRANCH_NAME);
