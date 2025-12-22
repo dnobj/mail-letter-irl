@@ -16,6 +16,8 @@ Letter IRL is an MCP (Model Context Protocol) server that enables AI assistants 
 
 ### Repositories
 
+Both repositories use the same branching strategy: `feature/*` → `dev` → `main/master`
+
 | Repo | Purpose | Deployed To |
 |------|---------|-------------|
 | `letter-irl` | MCP server (this repo) | Railway → api.letterirl.com |
@@ -53,14 +55,16 @@ Letter IRL is an MCP (Model Context Protocol) server that enables AI assistants 
 
 ### Git Branching Strategy
 
+Both repositories (`letter-irl` and `letter-irl-website`) use the same strategy:
+
 ```
-master (production) ──────────────────────────────
+master/main (production) ──────────────────────────────
     └── dev (development) ────────────────────────
             └── feature/issue-xxx
             └── feature/issue-yyy
 ```
 
-- **master**: Production code, auto-deploys to `api.letterirl.com`
+- **master/main**: Production code, auto-deploys to production Railway environment
 - **dev**: Development code, auto-deploys to Railway dev environment
 - **feature/\***: Feature branches, created from `dev`, merged back to `dev`
 
@@ -68,13 +72,15 @@ master (production) ────────────────────
 
 | Aspect | Production | Development |
 |--------|------------|-------------|
-| Git Branch | `master` | `dev` |
+| Git Branch (API) | `master` | `dev` |
+| Git Branch (Website) | `main` | `dev` |
 | Auth0 Tenant | `dev-ky21dxn3qmi71hjl` | `letter-irl-dev` |
 | Neon Branch | `main` | `dev` |
 | Stripe Mode | Live (`sk_live_`) | Test (`sk_test_`) |
 | PostGrid | Live (real mail) | Dummy (no mail) |
 | Admin Routes | Disabled | Enabled |
-| URL | `api.letterirl.com` | `xxx.up.railway.app` |
+| API URL | `api.letterirl.com` | `xxx.up.railway.app` |
+| Website URL | `letterirl.com` | `xxx.up.railway.app` |
 
 ---
 

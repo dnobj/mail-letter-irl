@@ -8,14 +8,16 @@ This guide documents the Railway configuration for Letter IRL.
 
 ## Overview
 
-Letter IRL uses **two Railway environments** in a single project:
+Letter IRL uses **two Railway environments** in a single project for both repositories:
 
-| Environment | Branch | URL | Purpose |
-|-------------|--------|-----|---------|
-| **production** | `master` | `letter-irl-api-production.up.railway.app` | Live production |
-| **development** | `dev` | `letter-irl-api-development.up.railway.app` | Testing & development |
+| Repository | Environment | Branch | URL | Purpose |
+|------------|-------------|--------|-----|---------|
+| **letter-irl (API)** | production | `master` | `letter-irl-api-production.up.railway.app` | Live production |
+| **letter-irl (API)** | development | `dev` | `letter-irl-api-development.up.railway.app` | Testing & development |
+| **letter-irl-website** | production | `main` | `letterirl.com` | Live production |
+| **letter-irl-website** | development | `dev` | Obscure URL | Testing & development |
 
-Each environment has its own set of environment variables pointing to isolated services.
+Each environment has its own set of environment variables pointing to isolated services. Both repositories use the same branching strategy: feature branches → `dev` → `main/master`.
 
 ---
 
@@ -154,14 +156,19 @@ railway variables
 
 ## Deployment
 
+### API Repository (letter-irl)
 - **Production**: Auto-deploys from `master` branch
-- **Development**: Auto-deploys from `dev` branch (configure in Railway dashboard)
+- **Development**: Auto-deploys from `dev` branch
+
+### Website Repository (letter-irl-website)
+- **Production**: Auto-deploys from `main` branch
+- **Development**: Auto-deploys from `dev` branch
 
 To configure branch tracking:
 1. Go to Railway Dashboard → Project → Environment
 2. Click on the service
 3. Settings → Source → Branch
-4. Set to appropriate branch
+4. Set to appropriate branch (`master`/`main` for production, `dev` for development)
 
 ---
 
