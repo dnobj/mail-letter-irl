@@ -6,21 +6,20 @@ import {
 import { getBalance, getDetailedBalance } from "../services/creditService.js";
 import { findUser } from "../services/userService.js";
 
-interface ExpiringCreditsInfo {
-  amount: number;
+interface ExpiringLettersInfo {
+  letters: number;
   expiresAt: string;
   daysUntilExpiry: number;
 }
 
 interface GetAccountBalanceOutput {
-  creditsRemaining: number;
+  lettersRemaining: number;
   canSendStandardLetter: boolean;
-  standardLetterCostCredits?: number;
   message?: string;
   userEmail?: string;
   authProvider?: string;
-  creditsExpiringSoon?: number;
-  expiringCreditsDetails?: ExpiringCreditsInfo[];
+  lettersExpiringSoon?: number;
+  expiringLettersDetails?: ExpiringLettersInfo[];
 }
 
 
@@ -48,19 +47,20 @@ async function handler(
   };
   const authProvider = providerMap[providerPart] || providerPart;
 
-  let creditsRemaining: number;
-  let creditsExpiringSoon = 0;
-  let expiringCreditsDetails: ExpiringCreditsInfo[] = [];
+  // Internal credit values (2 credits = 1 letter)
+  let internalCredits: number;
+  let internalCreditsExpiring = 0;
+  let expiringLettersDetails: ExpiringLettersInfo[] = [];
 
   try {
     // Get detailed balance with expiration info
     const detailedBalance = await getDetailedBalance(userId);
-    creditsRemaining = detailedBalance.totalAvailable;
-    creditsExpiringSoon = detailedBalance.expiringSoon;
+    internalCredits = detailedBalance.totalAvailable;
+    internalCreditsExpiring = detailedBalance.expiringSoon;
 
-    // Build expiring credits details (only include buckets that expire)
+    // Build expiring letters details (only include buckets that expire)
     const now = new Date();
-    expiringCreditsDetails = detailedBalance.expiringDates
+    expiringLettersDetails = detailedBalance.expiringDates
       .filter(bucket => bucket.expiresAt !== null)
       .map(bucket => {
         const expiresAt = bucket.expiresAt as Date;
@@ -68,29 +68,31 @@ async function handler(
           (expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
         );
         return {
-          amount: bucket.credits,
+          letters: Math.floor(bucket.credits / standardCost),
           expiresAt: expiresAt.toISOString(),
           daysUntilExpiry
         };
       })
-      .filter(info => info.daysUntilExpiry > 0); // Only future expirations
+      .filter(info => info.daysUntilExpiry > 0 && info.letters > 0); // Only future expirations with at least 1 letter
   } catch (error) {
     // User doesn't exist yet or no ledger entries
     if (error instanceof Error && error.message.includes('User not found')) {
-      creditsRemaining = 0;
+      internalCredits = 0;
     } else {
       // Try simple balance as fallback
       try {
         const balance = await getBalance(userId);
-        creditsRemaining = balance.credits;
+        internalCredits = balance.credits;
       } catch {
-        creditsRemaining = 0;
+        internalCredits = 0;
       }
     }
   }
 
-  const canSendStandardLetter = creditsRemaining >= standardCost;
-  const lettersRemaining = Math.floor(creditsRemaining / standardCost);
+  // Convert internal credits to user-facing letters (2 credits = 1 letter)
+  const lettersRemaining = Math.floor(internalCredits / standardCost);
+  const lettersExpiringSoon = Math.floor(internalCreditsExpiring / standardCost);
+  const canSendStandardLetter = lettersRemaining >= 1;
 
   // Enhanced message with identity information
   const identityLine = `Account: ${email} (${authProvider})`;
@@ -103,11 +105,10 @@ async function handler(
 
   // Add expiration warning if letters are expiring soon
   let expirationWarning = '';
-  if (creditsExpiringSoon > 0) {
-    const earliestExpiry = expiringCreditsDetails[0];
+  if (lettersExpiringSoon > 0) {
+    const earliestExpiry = expiringLettersDetails[0];
     if (earliestExpiry) {
-      const lettersExpiring = Math.floor(creditsExpiringSoon / standardCost);
-      expirationWarning = `\n⚠️ ${lettersExpiring} ${lettersExpiring === 1 ? 'letter' : 'letters'} expiring in ${earliestExpiry.daysUntilExpiry} days. Use them before they expire!`;
+      expirationWarning = `\n⚠️ ${lettersExpiringSoon} ${lettersExpiringSoon === 1 ? 'letter' : 'letters'} expiring in ${earliestExpiry.daysUntilExpiry} days. Use them before they expire!`;
     }
   }
 
@@ -119,8 +120,8 @@ async function handler(
     {
       correlationId: context.correlationId,
       event: "balance.lookup",
-      creditsRemaining,
-      creditsExpiringSoon,
+      lettersRemaining,
+      lettersExpiringSoon,
       canSendStandardLetter,
       userId,
       email,
@@ -130,14 +131,13 @@ async function handler(
   );
 
   return {
-    creditsRemaining,
+    lettersRemaining,
     canSendStandardLetter,
-    standardLetterCostCredits: standardCost,
     message,
     userEmail: email,
     authProvider,
-    creditsExpiringSoon: creditsExpiringSoon > 0 ? creditsExpiringSoon : undefined,
-    expiringCreditsDetails: expiringCreditsDetails.length > 0 ? expiringCreditsDetails : undefined
+    lettersExpiringSoon: lettersExpiringSoon > 0 ? lettersExpiringSoon : undefined,
+    expiringLettersDetails: expiringLettersDetails.length > 0 ? expiringLettersDetails : undefined
   };
 }
 
