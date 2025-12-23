@@ -3,7 +3,7 @@
 The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool returns metadata tailored for ChatGPT widgets and respects read-only hints where applicable.
 
 ## quote_and_preview_letter (Read-Only)
-- **Purpose:** Provide a printable preview and required credit estimate without creating an order.
+- **Purpose:** Provide a printable preview and letter cost estimate without creating an order.
 - **Input schema:**
   ```json
   {
@@ -32,15 +32,15 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
     }
   }
   ```
-- **Behavior:** Validate both address blocks (name, street, city, state, postal code, country). If any field is missing, the tool responds with a descriptive error before attempting to render the preview. Otherwise it computes `requiredCredits` (1.0 by default, round up in 0.5 increments for multi-page letters) and generates the preview HTML.
+- **Behavior:** Validate both address blocks (name, street, city, state, postal code, country). If any field is missing, the tool responds with a descriptive error before attempting to render the preview. Otherwise it computes `letterCost` (1 for standard one-page letter) and generates the preview HTML.
 - **Output schema:**
   ```json
   {
     "type": "object",
-    "required": ["previewHtml", "requiredCredits", "canSendNow"],
+    "required": ["previewHtml", "letterCost", "canSendNow"],
     "properties": {
       "previewHtml": { "type": "string" },
-      "requiredCredits": { "type": "number" },
+      "letterCost": { "type": "number", "description": "Number of letters this will cost (always 1 for standard letter)" },
       "canSendNow": { "type": "boolean" },
       "reasonCannotSend": { "type": "string" },
       "deliveryClass": { "type": "string" },
@@ -55,7 +55,7 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
   - `_meta.openai/toolInvocation/invoked = "Preview ready"`
 
 ## send_letter (Mutating)
-- **Purpose:** Consume a draft from `quote_and_preview_letter`, deduct credits, persist an order, and queue it for printing/mailing.
+- **Purpose:** Consume a draft from `quote_and_preview_letter`, deduct from user's letter balance, persist an order, and queue it for printing/mailing.
 - **Input schema:**
   ```json
   {
@@ -67,7 +67,7 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
     }
   }
   ```
-- **Behavior:** Require `confirm === true`; consume draft (idempotent - retries with same draftId return same result); verify sufficient credits; deduct credits; create order snapshot with timeline (initial state `queued_for_print`). Draft contains the sender, recipient, bodyText, signOff, and requiredCredits.
+- **Behavior:** Require `confirm === true`; consume draft (idempotent - retries with same draftId return same result); verify sufficient letters in balance; deduct letter; create order snapshot with timeline (initial state `queued_for_print`). Draft contains the sender, recipient, bodyText, signOff, and letter cost.
 - **Output schema:**
   ```json
   {
@@ -77,7 +77,7 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
       "currentStatus",
       "statusTimeline",
       "recipientSummary",
-      "creditsRemaining"
+      "lettersRemaining"
     ],
     "properties": {
       "orderId": { "type": "string" },
@@ -102,7 +102,7 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
           "state": { "type": "string" }
         }
       },
-      "creditsRemaining": { "type": "number" },
+      "lettersRemaining": { "type": "number", "description": "Number of letters remaining in user's balance" },
       "previewFirstPageHtml": { "type": "string" }
     }
   }
@@ -172,7 +172,7 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
   - `_meta.openai/toolInvocation/invoked = "Latest status"`
 
 ## get_account_balance (Read-Only)
-- **Purpose:** Provide the user's remaining credits, standard letter affordability, and account identity information.
+- **Purpose:** Provide the user's remaining letter balance, standard letter affordability, and account identity information.
 - **Input schema:**
   ```json
   {
@@ -180,33 +180,33 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
     "properties": {}
   }
   ```
-- **Behavior:** Return current balance, whether a standard letter is affordable, user email, authentication provider, and a user-friendly message with tip about switching accounts.
+- **Behavior:** Return current letter balance, whether a standard letter is affordable, user email, authentication provider, and a user-friendly message with tip about switching accounts.
 - **Output schema:**
   ```json
   {
     "type": "object",
-    "required": ["creditsRemaining", "canSendStandardLetter"],
+    "required": ["lettersRemaining", "canSendStandardLetter"],
     "properties": {
-      "creditsRemaining": { "type": "number" },
+      "lettersRemaining": { "type": "number", "description": "Number of letters remaining in user's balance" },
       "canSendStandardLetter": { "type": "boolean" },
-      "standardLetterCostCredits": { "type": "number" },
       "message": { "type": "string" },
       "userEmail": { "type": "string" },
-      "authProvider": { "type": "string", "enum": ["Google", "Microsoft", "Apple", "GitHub", "Email/Password"] }
+      "authProvider": { "type": "string", "enum": ["Google", "Microsoft", "Apple", "GitHub", "Email/Password"] },
+      "lettersExpiringSoon": { "type": "number", "description": "Number of letters expiring within 7 days" }
     }
   }
   ```
 - **Example Response:**
   ```
   Account: user@example.com (Google)
-  Balance: 195 credits — That's enough for 97 letters.
+  Letter Balance: 97 letters remaining.
 
   Tip: Use the switch_account tool to log in with a different account.
   ```
 - **Metadata:**
   - `_meta.readOnlyHint = true`
   - `_meta.openai/outputTemplate = "BalanceCard"`
-  - `_meta.openai/toolInvocation/invoking = "Checking credits…"`
+  - `_meta.openai/toolInvocation/invoking = "Checking letter balance…"`
   - `_meta.openai/toolInvocation/invoked = "Balance updated"`
 
 ## switch_account (Read-Only)

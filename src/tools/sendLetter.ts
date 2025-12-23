@@ -26,7 +26,7 @@ interface SendLetterOutput {
   currentStatus: "queued_for_print" | "printing" | "mailed";
   statusTimeline: { timestampISO: string; statusText: string }[];
   recipientSummary: { name: string; city: string; state: string };
-  creditsRemaining: number;
+  lettersRemaining: number;  // User-facing: number of letters remaining
   previewFirstPageHtml?: string;
   isRetry?: boolean;  // true if this was an idempotent retry (draft already consumed)
   // Suggestion to save return address (only shown if user has no saved address)
@@ -143,7 +143,7 @@ async function handler(
           city: recipient.city,
           state: recipient.state
         },
-        creditsRemaining: context.user.creditsRemaining,
+        lettersRemaining: Math.floor(context.user.creditsRemaining / 2),
         isRetry: true
       };
     }
@@ -308,11 +308,11 @@ async function handler(
     currentStatus: "queued_for_print" as const,
     statusTimeline: [
       { timestampISO: now, statusText: "Letter received" },
-      { timestampISO: now, statusText: "Credits deducted" },
+      { timestampISO: now, statusText: "Letter deducted from balance" },
       { timestampISO: now, statusText: "Queued for printing" }
     ],
     recipientSummary: orderRecord.recipientSummary,
-    creditsRemaining: context.user.creditsRemaining,
+    lettersRemaining: Math.floor(context.user.creditsRemaining / 2),
     previewFirstPageHtml: orderRecord.previewFirstPageHtml,
     isRetry: false,
     suggestSaveReturnAddress,

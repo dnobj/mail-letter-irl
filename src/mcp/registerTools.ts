@@ -298,18 +298,16 @@ function summarizeToolResult(
   switch (toolName) {
     case "get_account_balance": {
       const message = result.message as string;
-      // Convert internal credits to user-facing letters (2 credits = 1 letter)
-      const credits = result.creditsRemaining as number | undefined;
-      const letters = credits !== undefined ? Math.floor(credits / 2) : "unknown";
-      return message || `Letter Balance: ${letters} letters`;
+      // Now returns lettersRemaining directly
+      const letters = result.lettersRemaining as number | undefined;
+      return message || `Letter Balance: ${letters ?? "unknown"} letters`;
     }
     case "quote_and_preview_letter": {
-      // Convert internal credits to user-facing letters (2 credits = 1 letter)
-      const requiredCredits = result.requiredCredits as number | undefined;
-      const letters = requiredCredits !== undefined ? Math.floor(requiredCredits / 2) : 1;
+      // Now returns letterCost directly (always 1 for standard letter)
+      const letterCost = result.letterCost as number | undefined;
       const canSend = result.canSendNow ? "can send now" : "cannot send";
       const usedSaved = result.usedSavedReturnAddress as boolean | undefined;
-      let summary = `Preview ready: costs ${letters} ${letters === 1 ? 'letter' : 'letters'} (${canSend}).`;
+      let summary = `Preview ready: costs ${letterCost ?? 1} ${letterCost === 1 ? 'letter' : 'letters'} (${canSend}).`;
       if (usedSaved) {
         summary += " Using your saved return address.";
       }

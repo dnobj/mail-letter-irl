@@ -27,10 +27,10 @@ export const quoteAndPreviewInputSchema: JsonSchema = {
 
 export const quoteAndPreviewOutputSchema: JsonSchema = {
   type: "object",
-  required: ["previewHtml", "requiredCredits", "canSendNow", "draftId", "draftExpiresAt"],
+  required: ["previewHtml", "letterCost", "canSendNow", "draftId", "draftExpiresAt"],
   properties: {
     previewHtml: { type: "string" },
-    requiredCredits: { type: "number" },
+    letterCost: { type: "number", description: "Number of letters this will cost (always 1 for standard letter)" },
     canSendNow: { type: "boolean" },
     reasonCannotSend: { type: "string" },
     deliveryClass: { type: "string" },
@@ -67,7 +67,7 @@ export const sendLetterInputSchema: JsonSchema = {
 
 export const sendLetterOutputSchema: JsonSchema = {
   type: "object",
-  required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary", "creditsRemaining"],
+  required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary", "lettersRemaining"],
   properties: {
     orderId: { type: "string" },
     currentStatus: { type: "string", enum: ["queued_for_print", "printing", "mailed"] },
@@ -91,7 +91,7 @@ export const sendLetterOutputSchema: JsonSchema = {
         state: { type: "string" }
       }
     },
-    creditsRemaining: { type: "number" },
+    lettersRemaining: { type: "number", description: "Number of letters remaining in user's balance" },
     previewFirstPageHtml: { type: "string" },
     isRetry: { type: "boolean", description: "True if this was an idempotent retry (draft already consumed)" }
   }
@@ -143,12 +143,23 @@ export const getAccountBalanceInputSchema: JsonSchema = {
 
 export const getAccountBalanceOutputSchema: JsonSchema = {
   type: "object",
-  required: ["creditsRemaining", "canSendStandardLetter"],
+  required: ["lettersRemaining", "canSendStandardLetter"],
   properties: {
-    creditsRemaining: { type: "number" },
+    lettersRemaining: { type: "number", description: "Number of letters remaining in user's balance" },
     canSendStandardLetter: { type: "boolean" },
-    standardLetterCostCredits: { type: "number" },
-    message: { type: "string" }
+    message: { type: "string" },
+    lettersExpiringSoon: { type: "number", description: "Number of letters expiring within 7 days" },
+    expiringLettersDetails: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          letters: { type: "number" },
+          expiresAt: { type: "string" },
+          daysUntilExpiry: { type: "number" }
+        }
+      }
+    }
   }
 };
 
