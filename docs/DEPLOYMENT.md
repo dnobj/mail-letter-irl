@@ -183,7 +183,7 @@ LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
 
 # PostGrid (Live Mode)
 POSTGRID_API_KEY=live_sk_...
-ACTIVE_LETTER_PROVIDER=postgrid
+LETTER_PROVIDER=postgrid
 
 # Stripe (Live Mode)
 STRIPE_SECRET_KEY=sk_live_...
@@ -213,7 +213,7 @@ LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
 
 # PostGrid (Dummy Provider)
-ACTIVE_LETTER_PROVIDER=dummy
+LETTER_PROVIDER=dummy
 
 # Stripe (Test Mode)
 STRIPE_SECRET_KEY=sk_test_...
@@ -512,7 +512,7 @@ railway rollback
 - Use test card: 4242 4242 4242 4242
 
 #### Letters Not Sending
-- Verify ACTIVE_LETTER_PROVIDER=dummy in dev environment
+- Verify LETTER_PROVIDER=dummy in dev environment
 - Check logs for dummy provider simulation output
 
 ### Railway Deployment Issues

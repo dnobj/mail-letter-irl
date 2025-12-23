@@ -340,7 +340,7 @@ queued → processing → in_transit → delivered
 | ADMIN_ENABLED | false | Enable admin routes |
 | ADMIN_LOCAL_ONLY | false | Restrict admin to localhost |
 | DISABLE_WORKERS | false | Disable job workers |
-| ACTIVE_LETTER_PROVIDER | postgrid | Letter provider |
+| LETTER_PROVIDER | postgrid | Letter provider |
 
 ---
 

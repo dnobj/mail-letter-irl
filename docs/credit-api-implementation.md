@@ -537,15 +537,15 @@ npm run mcp:http
 # Test endpoints with curl
 
 # 1. Get balance
-curl http://localhost:8788/api/credits/balance \
+curl http://localhost:8090/api/credits/balance \
   -H "Authorization: Bearer <jwt_token>"
 
 # 2. Get transactions
-curl http://localhost:8788/api/credits/transactions?limit=10 \
+curl http://localhost:8090/api/credits/transactions?limit=10 \
   -H "Authorization: Bearer <jwt_token>"
 
 # 3. Get user info
-curl http://localhost:8788/api/credits/users/me \
+curl http://localhost:8090/api/credits/users/me \
   -H "Authorization: Bearer <jwt_token>"
 ```
 
