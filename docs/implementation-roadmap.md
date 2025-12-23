@@ -121,17 +121,17 @@ Create `src/services/types.ts`:
 - `CreditTransaction` interface
 - API request/response types
 
-#### Step 4: Express Routes
-Create `src/api/creditRoutes.ts`:
+#### Step 4: HTTP API Handlers
+Create `src/api/creditApiHandler.ts`:
 - `GET /api/credits/balance` - Get balance
 - `GET /api/credits/transactions` - Get history
 - `GET /api/users/me` - Get user info
 
-#### Step 5: Auth Middleware
+#### Step 5: Auth Helper
 Create `src/api/middleware/auth.ts`:
-- Extract JWT from Authorization header
+- Extract JWT from Authorization header or cookie
 - Validate with Auth0 JWKS
-- Attach `authInfo` to request
+- Return `AuthenticatedUser` object
 
 #### Step 6: Integration
 Update existing code:
@@ -358,9 +358,9 @@ Update existing code:
 │   │   ├── creditService.ts       📝 Credit management
 │   │   └── types.ts               📝 Shared TypeScript types
 │   ├── api/
-│   │   ├── creditRoutes.ts        📝 Credit API routes
+│   │   ├── creditApiHandler.ts    ✅ Credit API handlers
 │   │   └── middleware/
-│   │       └── auth.ts            📝 JWT auth middleware
+│   │       └── auth.ts            ✅ JWT auth helper
 │   ├── acp/
 │   │   ├── productFeed.ts         📋 Product catalog
 │   │   ├── cartService.ts         📋 Shopping cart
