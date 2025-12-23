@@ -340,7 +340,9 @@ export const sendLetterTool: McpToolDefinition<SendLetterInput, SendLetterOutput
   outputSchema: sendLetterOutputSchema,
   meta: {
     "openai/toolInvocation/invoking": "Sending letter…",
-    "openai/toolInvocation/invoked": "Letter sent"
+    "openai/toolInvocation/invoked": "Letter sent",
+    // US-MCP-08: Allow widget to call send_letter via window.openai.callTool
+    "openai/widgetAccessible": true
   },
   handler
 };
