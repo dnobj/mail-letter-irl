@@ -33,12 +33,14 @@ async function main() {
   });
   console.log("Preview canSendNow:", preview.result.canSendNow);
   console.log("Required credits:", preview.result.requiredCredits);
+  console.log("Draft ID:", preview.result.draftId);
 
+  // send_letter uses draft-based input: { draftId, confirm }
+  // The draft contains all letter content from quote_and_preview_letter
   const send = await server.execute({
     toolName: "send_letter",
     input: {
-      ...letterInput,
-      requiredCredits: preview.result.requiredCredits,
+      draftId: preview.result.draftId,
       confirm: true
     },
     userId

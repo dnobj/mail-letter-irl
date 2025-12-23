@@ -91,14 +91,10 @@
     },
     "SendLetterInput": {
       "type": "object",
-      "required": ["sender", "recipient", "bodyText", "signOff", "requiredCredits", "confirm"],
+      "required": ["draftId", "confirm"],
       "properties": {
-        "sender": { "$ref": "#/definitions/Address" },
-        "recipient": { "$ref": "#/definitions/Address" },
-        "bodyText": { "type": "string" },
-        "signOff": { "type": "string" },
-        "requiredCredits": { "type": "number" },
-        "confirm": { "type": "boolean" }
+        "draftId": { "type": "string", "description": "Draft ID from quote_and_preview_letter" },
+        "confirm": { "type": "boolean", "description": "Must be true to send the letter" }
       }
     },
     "GetOrderStatusInput": {
