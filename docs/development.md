@@ -405,10 +405,36 @@ npm run db:migrate:rollback
 
 ### Creating a Migration
 
-1. Create file: `db/migrations/007_description.sql`
-2. Write SQL (include both up and rollback sections)
-3. Run migration
-4. Update `database-schema.md` if needed
+1. Create file: `db/migrations/NNN_description.sql`
+2. Write the "up" SQL (the changes you want to make)
+3. Run migration: `npm run db:migrate`
+4. Update `docs/database-schema.md` if schema changed
+
+### Migration Rollback Policy
+
+**For new migrations (going forward):** Include a rollback section in your migration file:
+
+```sql
+-- UP: Add new table
+CREATE TABLE example (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL
+);
+
+-- DOWN (rollback) - commented out, run manually if needed
+-- DROP TABLE IF EXISTS example;
+```
+
+**For existing migrations (001-011):** No rollback scripts exist. These migrations established the production schema and rolling them back would require a full database rebuild.
+
+**Why this policy:**
+- Writing rollbacks is easiest when the migration is fresh
+- Retroactive rollback scripts are error-prone and rarely tested
+- Production rollbacks should be rare and carefully planned
+
+**If you need to rollback:**
+1. For recent migrations with rollback scripts: Run the DOWN section manually
+2. For older migrations: Restore from Neon backup or recreate from scratch
 
 ---
 
