@@ -97,7 +97,7 @@ async function handler(
   // Enhanced message with identity information
   const identityLine = `Account: ${email} (${authProvider})`;
   let balanceLine: string;
-  if (creditsRemaining === 0) {
+  if (lettersRemaining === 0) {
     balanceLine = "You haven't pre-paid for any letters yet. Buy a Letter Pack to start sending!";
   } else {
     balanceLine = `Letter Balance: ${lettersRemaining} ${lettersRemaining === 1 ? 'letter' : 'letters'} remaining.`;

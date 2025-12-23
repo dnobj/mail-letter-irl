@@ -9,7 +9,8 @@ import {
   listOrdersTool,
   setReturnAddressTool,
   getReturnAddressTool,
-  clearReturnAddressTool
+  clearReturnAddressTool,
+  switchAccountTool
 } from "./tools/index.js";
 import {
   McpToolDefinition,
@@ -27,7 +28,8 @@ const tools: McpToolDefinition<unknown, unknown>[] = [
   listOrdersTool,
   setReturnAddressTool,
   getReturnAddressTool,
-  clearReturnAddressTool
+  clearReturnAddressTool,
+  switchAccountTool
 ];
 
 export interface ServerRequest<Input> {
