@@ -22,6 +22,7 @@ export function getOpenIdConfiguration(baseUrl: string) {
     redirect_uris_supported: [
       "https://chat.openai.com/aip/auth/callback",
       "https://chatgpt.com/connector_platform_oauth_redirect",
+      "https://platform.openai.com/apps-manage/oauth", // OpenAI app review flow
       "http://localhost:18883/oauth/callback" // Claude Desktop mcp-remote
     ],
     claims_supported: ["aud", "exp", "iat", "iss", "sub", "email", "email_verified"],

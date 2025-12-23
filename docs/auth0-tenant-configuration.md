@@ -193,11 +193,13 @@ Default application created by Auth0.
 | **Client ID** | `fH2bdMWvE7ql8AElZSqXk1c2p3lXjOhx` |
 | **Type** | Single Page Application (SPA) |
 | **Grant Types** | `authorization_code`, `implicit`, `refresh_token` |
-| **Callbacks** | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect` |
+| **Callbacks** | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect`<br>`https://platform.openai.com/apps-manage/oauth` |
 | **Logout URLs** | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect` |
-| **Web Origins** | `https://chat.openai.com`<br>`https://chatgpt.com` |
+| **Web Origins** | `https://chat.openai.com`<br>`https://chatgpt.com`<br>`https://platform.openai.com` |
 
 Main application for the Letter IRL project.
+
+> **Important:** The `https://platform.openai.com/apps-manage/oauth` callback is required for the OpenAI app review process. See [OpenAI Apps SDK Auth Documentation](https://developers.openai.com/apps-sdk/build/auth/).
 
 ### 3. Letter IRL API (Test Application)
 
@@ -272,6 +274,12 @@ Auth0's Management API with 200+ scopes for programmatic tenant administration.
 3. **Domain-Level Connections**
    - **All 5 connections** must have `is_domain_connection: true`
    - **Why:** Third-party clients (like dynamically registered ChatGPT apps) can only use domain-level connections
+
+4. **OpenAI Review Redirect URI** ⚠️
+   - **Location:** Applications → Mail Letter IRL → Settings → Allowed Callback URLs
+   - **Required URI:** `https://platform.openai.com/apps-manage/oauth`
+   - **Why:** OpenAI's app review process uses this redirect URI to test OAuth flows
+   - **Reference:** [OpenAI Apps SDK Auth Docs](https://developers.openai.com/apps-sdk/build/auth/)
 
 ### Environment Variables (.env)
 
