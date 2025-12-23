@@ -27,6 +27,7 @@ import {
 } from "../api/dashboardApiHandler.js";
 import { validatePromoCodePublic } from "../services/promoService.js";
 import { initializeJobQueue, stopJobQueue } from "../services/jobQueue.js";
+import { closePool } from "../db/index.js";
 import { startLetterWorker } from "../workers/letterWorker.js";
 import { startCreditExpirationWorker } from "../workers/creditExpirationWorker.js";
 import { startStatusSyncWorker, stopStatusSyncWorker } from "../workers/statusSyncWorker.js";
@@ -788,8 +789,9 @@ export async function startHttpServer() {
     try {
       stopStatusSyncWorker();
       await stopJobQueue();
+      await closePool();
     } catch (error) {
-      console.error('Error stopping workers:', error);
+      console.error('Error during shutdown:', error);
     }
     server.close(() => process.exit(0));
   };
