@@ -18,11 +18,7 @@ export const toolInputSchemas = {
     signOff: z.string()
   }),
   send_letter: z.object({
-    sender: addressSchema,
-    recipient: addressSchema,
-    bodyText: z.string(),
-    signOff: z.string(),
-    requiredCredits: z.number(),
+    draftId: z.string(),
     confirm: z.boolean()
   }),
   get_order_status: z.object({

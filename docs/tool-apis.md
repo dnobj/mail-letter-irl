@@ -55,38 +55,19 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
   - `_meta.openai/toolInvocation/invoked = "Preview ready"`
 
 ## send_letter (Mutating)
-- **Purpose:** Deduct credits, persist an order, and queue it for printing/mailing.
+- **Purpose:** Consume a draft from `quote_and_preview_letter`, deduct credits, persist an order, and queue it for printing/mailing.
 - **Input schema:**
   ```json
   {
     "type": "object",
-    "required": ["sender", "recipient", "bodyText", "signOff", "requiredCredits", "confirm"],
+    "required": ["draftId", "confirm"],
     "properties": {
-      "sender": { "$ref": "#/definitions/addressBlock" },
-      "recipient": { "$ref": "#/definitions/addressBlock" },
-      "bodyText": { "type": "string" },
-      "signOff": { "type": "string" },
-      "requiredCredits": { "type": "number" },
+      "draftId": { "type": "string", "description": "Draft ID from quote_and_preview_letter" },
       "confirm": { "type": "boolean", "description": "Must be true or request fails" }
-    },
-    "definitions": {
-      "addressBlock": {
-        "type": "object",
-        "required": ["name", "addressLine1", "city", "state", "postalCode", "country"],
-        "properties": {
-          "name": { "type": "string" },
-          "addressLine1": { "type": "string" },
-          "addressLine2": { "type": "string" },
-          "city": { "type": "string" },
-          "state": { "type": "string" },
-          "postalCode": { "type": "string" },
-          "country": { "type": "string" }
-        }
-      }
     }
   }
   ```
-- **Behavior:** Require `confirm === true`; verify sufficient credits; deduct credits; create order snapshot with timeline (initial state `queued_for_print`).
+- **Behavior:** Require `confirm === true`; consume draft (idempotent - retries with same draftId return same result); verify sufficient credits; deduct credits; create order snapshot with timeline (initial state `queued_for_print`). Draft contains the sender, recipient, bodyText, signOff, and requiredCredits.
 - **Output schema:**
   ```json
   {
