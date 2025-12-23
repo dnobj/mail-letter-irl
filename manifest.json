@@ -36,10 +36,7 @@
   ],
   "ui": {
     "widgets": [
-      "LetterPreviewCard",
-      "LetterConfirmationCard",
-      "LetterStatusCard",
-      "BalanceCard"
+      "LetterPreviewCard"
     ]
   },
   "servers": [

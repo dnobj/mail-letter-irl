@@ -405,18 +405,22 @@ export async function startHttpServer() {
       const __filename = fileURLToPath(import.meta.url);
       const __dirname = pathMod.dirname(__filename);
       const widgetDir = process.env.LETTER_IRL_WIDGET_DIR ?? pathMod.resolve(__dirname, "../../widgets");
-      const widgets = ["BalanceCard", "LetterPreviewCard", "LetterConfirmationCard", "LetterStatusCard"];
       const status: Record<string, any> = { widgetDir, cwd: process.cwd(), widgets: {} };
-      for (const w of widgets) {
-        const filePath = pathMod.join(widgetDir, `${w}.html`);
-        try {
-          await fs.access(filePath);
+
+      // Dynamically read widget files from directory
+      try {
+        const files = await fs.readdir(widgetDir);
+        const widgetFiles = files.filter(f => f.endsWith('.html'));
+        for (const file of widgetFiles) {
+          const widgetName = file.replace('.html', '');
+          const filePath = pathMod.join(widgetDir, file);
           const stat = await fs.stat(filePath);
-          status.widgets[w] = { exists: true, path: filePath, size: stat.size };
-        } catch (e: any) {
-          status.widgets[w] = { exists: false, path: filePath, error: e.message };
+          status.widgets[widgetName] = { exists: true, path: filePath, size: stat.size };
         }
+      } catch (e: any) {
+        status.error = `Failed to read widget directory: ${e.message}`;
       }
+
       res.end(JSON.stringify(status, null, 2));
       return;
     }
