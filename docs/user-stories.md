@@ -1004,6 +1004,7 @@ macOS/Linux:
 - [ ] Read-only tools don't require user confirmation
 - [ ] Write tools require user confirmation before execution
 - [ ] Destructive tools (clear_return_address) show additional warning
+- [ ] Open-world tools (send_letter) marked with `openWorldHint: true` for real-world effects
 
 **Tool Classification:**
 | Tool | Type | Annotation |
@@ -1014,7 +1015,7 @@ macOS/Linux:
 | `list_orders` | READ | `readOnlyHint: true` |
 | `quote_and_preview_letter` | READ | `readOnlyHint: true` |
 | `switch_account` | READ | `readOnlyHint: true` |
-| `send_letter` | WRITE | `readOnlyHint: false` |
+| `send_letter` | WRITE | `readOnlyHint: false`, `openWorldHint: true` |
 | `set_return_address` | WRITE | `readOnlyHint: false` |
 | `clear_return_address` | WRITE | `readOnlyHint: false`, `destructiveHint: true` |
 

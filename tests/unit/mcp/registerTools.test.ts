@@ -217,6 +217,8 @@ describe('buildAnnotations helper (implementation detail)', () => {
     return {
       readOnlyHint: tool.readOnly,
       destructiveHint: tool.name === 'clear_return_address',
+      // send_letter triggers real-world mail fulfillment (Issue #39)
+      openWorldHint: tool.name === 'send_letter',
     };
   }
 
@@ -224,6 +226,7 @@ describe('buildAnnotations helper (implementation detail)', () => {
     const annotations = buildAnnotations({ name: 'get_account_balance', readOnly: true });
     expect(annotations.readOnlyHint).toBe(true);
     expect(annotations.destructiveHint).toBe(false);
+    expect(annotations.openWorldHint).toBe(false);
   });
 
   it('should return readOnlyHint: false for write tools', () => {
@@ -236,6 +239,7 @@ describe('buildAnnotations helper (implementation detail)', () => {
     const annotations = buildAnnotations({ name: 'clear_return_address', readOnly: false });
     expect(annotations.readOnlyHint).toBe(false);
     expect(annotations.destructiveHint).toBe(true);
+    expect(annotations.openWorldHint).toBe(false);
   });
 
   it('should not mark other write tools as destructive', () => {
@@ -244,5 +248,20 @@ describe('buildAnnotations helper (implementation detail)', () => {
 
     expect(sendLetterAnnotations.destructiveHint).toBe(false);
     expect(setReturnAddressAnnotations.destructiveHint).toBe(false);
+  });
+
+  it('should return openWorldHint: true for send_letter (Issue #39)', () => {
+    const annotations = buildAnnotations({ name: 'send_letter', readOnly: false });
+    expect(annotations.openWorldHint).toBe(true);
+  });
+
+  it('should not mark other tools as open-world', () => {
+    const readOnlyTool = buildAnnotations({ name: 'get_account_balance', readOnly: true });
+    const setReturnAddress = buildAnnotations({ name: 'set_return_address', readOnly: false });
+    const clearReturnAddress = buildAnnotations({ name: 'clear_return_address', readOnly: false });
+
+    expect(readOnlyTool.openWorldHint).toBe(false);
+    expect(setReturnAddress.openWorldHint).toBe(false);
+    expect(clearReturnAddress.openWorldHint).toBe(false);
   });
 });
