@@ -126,7 +126,7 @@ export async function getAllUsers(limit: number = 100, offset: number = 0): Prom
 
   return {
     users: result.rows,
-    total: parseInt(countResult.rows[0].count)
+    total: parseInt(countResult.rows[0].count, 10)
   };
 }
 

@@ -161,7 +161,7 @@ export async function extractCheckoutData(
 ): Promise<CheckoutCompletedData | null> {
   try {
     const userId = session.client_reference_id || session.metadata?.userId;
-    const credits = parseInt(session.metadata?.credits || '0');
+    const credits = parseInt(session.metadata?.credits || '0', 10);
     const productId = session.metadata?.productId || '';
     const amountPaid = (session.amount_total || 0) / 100; // Convert from cents
     const customerEmail = session.customer_email || session.customer_details?.email || '';
