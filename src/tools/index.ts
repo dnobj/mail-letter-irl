@@ -6,4 +6,3 @@ export { listOrdersTool } from "./listOrders.js";
 export { setReturnAddressTool } from "./setReturnAddress.js";
 export { getReturnAddressTool } from "./getReturnAddress.js";
 export { clearReturnAddressTool } from "./clearReturnAddress.js";
-export { switchAccountTool } from "./switchAccount.js";

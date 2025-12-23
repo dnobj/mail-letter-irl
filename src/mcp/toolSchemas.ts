@@ -40,8 +40,7 @@ export const toolInputSchemas = {
   get_return_address: z.object({}).strict(),
   clear_return_address: z.object({
     confirm: z.boolean()
-  }),
-  switch_account: z.object({}).strict()
+  })
 };
 
 export type ToolInputSchemaName = keyof typeof toolInputSchemas;
