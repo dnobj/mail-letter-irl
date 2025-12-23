@@ -71,9 +71,9 @@ src/services/
 └── types.ts              # Shared TypeScript types
 
 src/api/
-├── creditRoutes.ts       # Express routes for Credit API
+├── creditApiHandler.ts   # Credit API request handler (Node.js HTTP)
 └── middleware/
-    └── auth.ts           # JWT authentication middleware
+    └── auth.ts           # JWT authentication helper
 ```
 
 ## Core Functions
@@ -442,85 +442,19 @@ export async function refundCredits(params: RefundCreditsParams): Promise<{
 }
 ```
 
-## Express API Routes
+## HTTP API Handlers
 
-### File: src/api/creditRoutes.ts
+The Credit API is implemented using Node.js HTTP handlers (not Express) in `src/api/creditApiHandler.ts`.
 
-```typescript
-import { Router } from 'express';
-import { getBalance, getTransactions } from '../services/creditService.js';
-import { getUser } from '../services/userService.js';
+### Available Endpoints
 
-export const creditRouter = Router();
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/credits/balance` | Get current credit balance |
+| GET | `/api/credits/transactions` | Get transaction history |
+| GET | `/api/users/me` | Get current user info |
 
-/**
- * GET /api/credits/balance
- * Get current credit balance for authenticated user
- */
-creditRouter.get('/balance', async (req, res) => {
-  try {
-    const userId = req.authInfo.userId; // From JWT middleware
-
-    const balance = await getBalance(userId);
-
-    res.json({
-      userId,
-      ...balance
-    });
-  } catch (error) {
-    console.error('Get balance error:', error);
-    res.status(500).json({ error: 'Failed to get balance' });
-  }
-});
-
-/**
- * GET /api/credits/transactions
- * Get transaction history for authenticated user
- */
-creditRouter.get('/transactions', async (req, res) => {
-  try {
-    const userId = req.authInfo.userId;
-    const limit = parseInt(req.query.limit as string) || 50;
-    const offset = parseInt(req.query.offset as string) || 0;
-    const type = req.query.type as any;
-
-    const result = await getTransactions({ userId, limit, offset, type });
-
-    res.json({
-      transactions: result.transactions,
-      total: result.total,
-      limit,
-      offset
-    });
-  } catch (error) {
-    console.error('Get transactions error:', error);
-    res.status(500).json({ error: 'Failed to get transactions' });
-  }
-});
-
-/**
- * GET /api/users/me
- * Get current user info
- */
-creditRouter.get('/users/me', async (req, res) => {
-  try {
-    const userId = req.authInfo.userId;
-    const user = await getUser(userId);
-
-    res.json({
-      userId: user.user_id,
-      email: user.email,
-      credits: user.credits,
-      creditsPurchased: user.credits_purchased,
-      creditsUsed: user.credits_used,
-      createdAt: user.created_at
-    });
-  } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({ error: 'Failed to get user info' });
-  }
-});
-```
+See `src/api/creditApiHandler.ts` for the full implementation.
 
 ## Integration Points
 
