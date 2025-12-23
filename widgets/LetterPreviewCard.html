@@ -374,6 +374,7 @@
         const sendButton = document.getElementById("send-button");
         const sendButtonText = document.getElementById("send-button-text");
         const sendSection = document.getElementById("send-section");
+        const statusPill = document.getElementById("status-pill");
 
         // Show loading state
         sendInProgress = true;
@@ -388,19 +389,34 @@
             confirm: true
           });
 
-          // Show success
+          // Extract orderId - callTool may return different structures
+          const orderId = result?.orderId
+            || result?.structuredContent?.orderId
+            || result?.content?.[0]?.text?.match(/Order ID: ([a-f0-9-]+)/i)?.[1]
+            || null;
+
+          // Update status pill to show sent
+          statusPill.classList.remove("ok", "alert");
+          statusPill.classList.add("ok");
+          statusPill.textContent = "Sent!";
+
+          // Show success message
           sendSection.innerHTML = `
             <div class="send-result success">
-              Letter sent! Order ID: ${result.orderId || 'Confirmed'}
+              Letter sent!${orderId ? ` Order: ${orderId.substring(0, 8)}...` : ''}
             </div>
           `;
         } catch (error) {
-          // Show error
+          // Show error but keep button for retry
           sendSection.innerHTML = `
             <div class="send-result error">
               Failed to send: ${error.message || 'Unknown error'}
             </div>
           `;
+          // Reset status pill to alert state
+          statusPill.classList.remove("ok");
+          statusPill.classList.add("alert");
+          statusPill.textContent = "Send failed";
         } finally {
           sendInProgress = false;
         }
