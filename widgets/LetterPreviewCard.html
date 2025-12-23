@@ -361,11 +361,9 @@
           noteEl.style.display = "none";
         }
 
-        // Show Draft ID (truncated for display)
+        // Show Draft ID
         document.getElementById("id-label").textContent = "Draft";
-        document.getElementById("id-value").textContent = draftId
-          ? `${draftId.substring(0, 8)}...`
-          : "—";
+        document.getElementById("id-value").textContent = draftId || "—";
 
         // Update send button state
         const sendButton = document.getElementById("send-button");
@@ -417,9 +415,7 @@
 
           // Change Draft label to Order and show order ID
           idLabel.textContent = "Order";
-          idValue.textContent = orderId
-            ? `${orderId.substring(0, 8)}...`
-            : "Confirmed";
+          idValue.textContent = orderId || "Confirmed";
 
           // Update button to show success
           sendButton.classList.remove("loading");
