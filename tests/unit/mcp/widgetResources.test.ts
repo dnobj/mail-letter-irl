@@ -123,12 +123,12 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       expect(content).toContain('showLoading');
     });
 
-    it('LetterPreviewCard should NOT have send button (ChatGPT handles confirmation)', async () => {
+    it('LetterPreviewCard should have send button (US-MCP-08)', async () => {
       const filePath = path.join(path.resolve(__dirname, '../../../widgets'), 'LetterPreviewCard.html');
       const content = await fs.readFile(filePath, 'utf-8');
-      // Button was removed - ChatGPT's native confirmation dialog handles send
-      expect(content).not.toContain('send-button');
-      expect(content).not.toContain('Send this letter');
+      // US-MCP-08: Widget now has a Send button that calls send_letter via callTool
+      expect(content).toContain('send-button');
+      expect(content).toContain('Send Letter');
     });
   });
 });

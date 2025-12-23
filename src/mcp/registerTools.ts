@@ -59,14 +59,24 @@ const WIDGET_DEFINITIONS = [
 const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? "https://chatgpt.com";
 
 /**
+ * Backend API URL for widget CSP.
+ * Widgets may need to communicate with our backend API via callTool.
+ *
+ * @see US-MCP-07: Widget Resources
+ */
+const WIDGET_API_URL = process.env.LETTER_IRL_API_URL ?? "https://api.letterirl.com";
+
+/**
  * Content Security Policy for widgets.
  * Our widgets use window.openai.callTool which communicates with ChatGPT.
  * We include chatgpt.com to allow this internal communication.
+ * We also include our backend API URL for widget → server calls.
  *
  * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+ * @see US-MCP-07: Widget Resources
  */
 const WIDGET_CSP = {
-  connect_domains: ["https://chatgpt.com"],
+  connect_domains: ["https://chatgpt.com", WIDGET_API_URL],
   resource_domains: ["https://*.oaistatic.com"],
   // frame_domains not included - we don't use iframes
   // redirect_domains not included - we don't use openExternal
@@ -243,19 +253,33 @@ export async function registerLetterTools(
         // - structuredContent: data for model + widget (→ window.openai.toolOutput)
         // - content: narration for model
         // - _meta: widget-only data (→ window.openai.toolResponseMetadata)
+        //
+        // US-MCP-07: Separate heavy data (previewHtml) into _meta to reduce model context bloat.
+        // The model doesn't need raw HTML; it gets the summaryText narration instead.
+        const resultObj = result as Record<string, unknown>;
+        const { previewHtml, ...modelFacingData } = resultObj;
+
         const response = {
-          structuredContent: result,
+          structuredContent: modelFacingData,  // Lean data for model (no HTML)
           content: [
             {
               type: "text" as const,
               text: summaryText
             }
           ],
-          _meta: meta  // Tool-specific meta (optional, for widget-only data)
+          _meta: {
+            ...meta,
+            // Heavy data for widget only (→ window.openai.toolResponseMetadata)
+            // Widget reads this via window.openai.toolResponseMetadata.previewHtml
+            ...(previewHtml !== undefined ? { previewHtml } : {})
+          }
         };
 
         console.log(`📤 Tool response ${tool.name}:`);
-        console.log(`   structuredContent: ${JSON.stringify(result)}`);
+        console.log(`   structuredContent: ${JSON.stringify(modelFacingData)}`);
+        if (previewHtml) {
+          console.log(`   _meta.previewHtml: [${(previewHtml as string).length} bytes]`);
+        }
 
         return response;
       }

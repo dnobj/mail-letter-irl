@@ -1,6 +1,6 @@
 # User Stories
 
-**Last Updated:** December 16, 2025
+**Last Updated:** December 23, 2025
 **Purpose:** Test coverage and acceptance criteria for Letter IRL
 
 ---
@@ -1029,6 +1029,66 @@ macOS/Linux:
 
 ---
 
+### US-MCP-07: Widget Resources
+**As a** ChatGPT user
+**I want** rich visual previews of my letters
+**So that** I can see exactly what will be mailed before confirming
+
+**Acceptance Criteria:**
+- [ ] `quote_and_preview_letter` renders in LetterPreviewCard widget
+- [ ] Widget shows letter preview HTML
+- [ ] Widget shows cost (required credits)
+- [ ] Widget shows delivery class and estimated delivery days
+- [ ] Widget shows status pill (Ready to send / Cannot send)
+- [ ] Widget uses correct theme (light/dark)
+- [ ] Heavy data (previewHtml) in `_meta` to reduce model context bloat
+- [ ] Widget can access API via CSP `connect_domains`
+
+**Technical Details:**
+- Widget resource URI: `ui://widgets/LetterPreviewCard.html`
+- MIME type: `text/html+skybridge`
+- Data sources:
+  - `window.openai.toolOutput` → Model-facing data (cost, status, draftId)
+  - `window.openai.toolResponseMetadata` → Widget-only data (previewHtml)
+- CSP includes both ChatGPT domain and backend API URL
+
+**Related:**
+- GitHub Issue: #42
+- [OpenAI: ChatGPT UI](https://developers.openai.com/apps-sdk/build/chatgpt-ui/)
+
+---
+
+### US-MCP-08: Widget Tool Accessibility
+**As a** ChatGPT user
+**I want** to send a letter directly from the preview widget
+**So that** I can complete the send without typing another message
+
+**Acceptance Criteria:**
+- [ ] LetterPreviewCard widget has "Send Now" button
+- [ ] Button is disabled when `canSendNow` is false
+- [ ] Button calls `send_letter` tool via `window.openai.callTool()`
+- [ ] Button shows loading state during send
+- [ ] Button shows success/error feedback after send
+- [ ] `send_letter` tool has `widgetAccessible: true` meta
+
+**User Experience:**
+1. User requests letter preview via ChatGPT
+2. LetterPreviewCard renders with preview and "Send Now" button
+3. User clicks "Send Now" button
+4. Widget calls `send_letter` with `draftId` and `confirm: true`
+5. Widget shows success message and order ID
+
+**Security Considerations:**
+- Idempotency via `draftId` prevents double-send
+- User must explicitly click button (no auto-send)
+- `confirm: true` requirement maintained
+
+**Related:**
+- GitHub Issue: #42
+- [OpenAI: Calling Tools](https://developers.openai.com/apps-sdk/build/chatgpt-ui/#calling-tools)
+
+---
+
 ## Development (DEV)
 
 ### US-DEV-01: Isolated Development Environment
@@ -1174,7 +1234,7 @@ This implementation uses a static client approach aligned with the spec directio
 | P1 - High | Credits | US-CREDIT-03, US-CREDIT-06, US-CREDIT-09 | System |
 | P1 - High | Edge Cases | US-EDGE-01, US-EDGE-03, US-EDGE-04, US-EDGE-08 | Eleanor, System |
 | P1 - High | Account | US-ACCT-00 | Sarah, Eleanor (new users) |
-| P1 - High | MCP Access | US-MCP-01, US-MCP-03 | Morgan, Jordan |
+| P1 - High | MCP Access | US-MCP-01, US-MCP-03, US-MCP-07, US-MCP-08 | Morgan, Jordan |
 | P2 - Medium | Promo | US-PROMO-01, US-PROMO-02, US-PROMO-03 | Alex |
 | P2 - Medium | Account | US-ACCT-01, US-ACCT-02, US-ACCT-03 | All users |
 | P2 - Medium | Admin | US-ADMIN-01, US-ADMIN-02, US-ADMIN-05 | Amy |
@@ -1201,10 +1261,10 @@ This implementation uses a static client approach aligned with the spec directio
 | Edge Cases | US-EDGE | 8 |
 | Security | US-SEC | 6 |
 | Data Integrity | US-DATA | 3 |
-| MCP Access | US-MCP | 6 |
+| MCP Access | US-MCP | 8 |
 | Development | US-DEV | 3 |
 | OAuth Registration | US-DCR | 2 |
-| **Total** | | **59** |
+| **Total** | | **61** |
 
 ---
 

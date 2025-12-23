@@ -14,6 +14,9 @@
         --accent-success-bg: #d1fae5;
         --accent-warning: #b91c1c;
         --accent-warning-bg: #fee2e2;
+        --accent-primary: #2563eb;
+        --accent-primary-hover: #1d4ed8;
+        --accent-primary-disabled: #93c5fd;
         --preview-bg: #fefefe;
 
         font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -31,6 +34,9 @@
         --accent-success-bg: #064e3b;
         --accent-warning: #f87171;
         --accent-warning-bg: #7f1d1d;
+        --accent-primary: #3b82f6;
+        --accent-primary-hover: #60a5fa;
+        --accent-primary-disabled: #1e3a5f;
         --preview-bg: #1e293b;
       }
 
@@ -125,6 +131,69 @@
         border: 1px solid var(--border-color);
       }
 
+      /* Send button styles */
+      .send-button {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        font-size: 1rem;
+        font-weight: 600;
+        color: #ffffff;
+        background: var(--accent-primary);
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+
+      .send-button:hover:not(:disabled) {
+        background: var(--accent-primary-hover);
+      }
+
+      .send-button:disabled {
+        background: var(--accent-primary-disabled);
+        cursor: not-allowed;
+        opacity: 0.7;
+      }
+
+      .send-button.loading {
+        pointer-events: none;
+      }
+
+      .send-button .spinner {
+        width: 1rem;
+        height: 1rem;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top-color: #ffffff;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      /* Success/Error states */
+      .send-result {
+        padding: 0.75rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        text-align: center;
+      }
+
+      .send-result.success {
+        background: var(--accent-success-bg);
+        color: var(--accent-success);
+      }
+
+      .send-result.error {
+        background: var(--accent-warning-bg);
+        color: var(--accent-warning);
+      }
+
       /* Loading state */
       .loading .info-value,
       .loading .status-pill {
@@ -174,14 +243,25 @@
           <span class="status-pill" id="status-pill"></span>
         </div>
         <div class="note" id="note" style="display: none;"></div>
+        <!-- Send button - US-MCP-08 -->
+        <div id="send-section">
+          <button class="send-button" id="send-button" disabled>
+            <span id="send-button-text">Send Letter</span>
+          </button>
+        </div>
       </div>
     </div>
 
     <script type="module">
       // Per OpenAI docs, data may not be available immediately
       // Must listen for 'openai:set_globals' event
+      //
+      // US-MCP-07: previewHtml is in toolResponseMetadata (with fallback to toolOutput)
+      // US-MCP-08: Send button calls send_letter via callTool
 
       let dataLoaded = false;
+      let currentDraftId = null;
+      let sendInProgress = false;
 
       function showLoading() {
         const card = document.getElementById("card");
@@ -198,6 +278,10 @@
         statusPill.textContent = "Loading...";
 
         document.getElementById("note").style.display = "none";
+
+        // Disable send button during loading
+        const sendButton = document.getElementById("send-button");
+        sendButton.disabled = true;
       }
 
       function render() {
@@ -215,15 +299,23 @@
         const card = document.getElementById("card");
         card.classList.remove("loading");
 
+        // US-MCP-07: Get previewHtml from toolResponseMetadata (fallback to toolOutput for backward compat)
+        const previewHtml =
+          window.openai?.toolResponseMetadata?.previewHtml ??
+          state.previewHtml;
+
         const {
-          previewHtml,
           requiredCredits,
           canSendNow,
           reasonCannotSend,
           deliveryClass,
           estimatedDeliveryDays,
-          savedReturnAddressNote
+          savedReturnAddressNote,
+          draftId
         } = state;
+
+        // Store draftId for send button
+        currentDraftId = draftId;
 
         // Render preview HTML
         const previewPane = document.getElementById("preview-pane");
@@ -264,7 +356,58 @@
         } else {
           noteEl.style.display = "none";
         }
+
+        // Update send button state
+        const sendButton = document.getElementById("send-button");
+        const sendButtonText = document.getElementById("send-button-text");
+
+        if (!sendInProgress) {
+          sendButton.disabled = !canSendNow;
+          sendButtonText.textContent = canSendNow ? "Send Letter" : (reasonCannotSend ?? "Cannot Send");
+        }
       }
+
+      // Handle send button click - US-MCP-08
+      async function handleSend() {
+        if (sendInProgress || !currentDraftId) return;
+
+        const sendButton = document.getElementById("send-button");
+        const sendButtonText = document.getElementById("send-button-text");
+        const sendSection = document.getElementById("send-section");
+
+        // Show loading state
+        sendInProgress = true;
+        sendButton.disabled = true;
+        sendButton.classList.add("loading");
+        sendButtonText.innerHTML = '<span class="spinner"></span> Sending...';
+
+        try {
+          // Call send_letter via OpenAI callTool
+          const result = await window.openai.callTool("send_letter", {
+            draftId: currentDraftId,
+            confirm: true
+          });
+
+          // Show success
+          sendSection.innerHTML = `
+            <div class="send-result success">
+              Letter sent! Order ID: ${result.orderId || 'Confirmed'}
+            </div>
+          `;
+        } catch (error) {
+          // Show error
+          sendSection.innerHTML = `
+            <div class="send-result error">
+              Failed to send: ${error.message || 'Unknown error'}
+            </div>
+          `;
+        } finally {
+          sendInProgress = false;
+        }
+      }
+
+      // Attach click handler
+      document.getElementById("send-button").addEventListener("click", handleSend);
 
       // Apply theme
       const theme = window.openai?.theme ?? "light";
