@@ -112,9 +112,7 @@ async function handler(
     }
   }
 
-  const switchTip = "\n\nTip: Use the switch_account tool to log in with a different account.";
-
-  const message = `${identityLine}\n${balanceLine}${expirationWarning}${switchTip}`;
+  const message = `${identityLine}\n${balanceLine}${expirationWarning}`;
 
   context.logger.info(
     {

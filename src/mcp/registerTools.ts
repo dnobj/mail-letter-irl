@@ -14,8 +14,7 @@ import {
   listOrdersInputZ,
   setReturnAddressInputZ,
   getReturnAddressInputZ,
-  clearReturnAddressInputZ,
-  switchAccountInputZ
+  clearReturnAddressInputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
@@ -157,8 +156,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   list_orders: listOrdersInputZ,
   set_return_address: setReturnAddressInputZ,
   get_return_address: getReturnAddressInputZ,
-  clear_return_address: clearReturnAddressInputZ,
-  switch_account: switchAccountInputZ
+  clear_return_address: clearReturnAddressInputZ
 };
 
 function getZodShape(name: string) {

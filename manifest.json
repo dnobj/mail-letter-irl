@@ -32,13 +32,6 @@
       "inputSchema": {
         "$ref": "#/definitions/GetAccountBalanceInput"
       }
-    },
-    {
-      "name": "switch_account",
-      "description": "Log out and switch to a different account or authentication method (Google, Microsoft, Apple, GitHub, or Email/Password).",
-      "inputSchema": {
-        "$ref": "#/definitions/SwitchAccountInput"
-      }
     }
   ],
   "ui": {
@@ -104,10 +97,6 @@
       }
     },
     "GetAccountBalanceInput": {
-      "type": "object",
-      "properties": {}
-    },
-    "SwitchAccountInput": {
       "type": "object",
       "properties": {}
     }
