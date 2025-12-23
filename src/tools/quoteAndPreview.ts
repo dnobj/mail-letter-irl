@@ -237,14 +237,14 @@ async function handler(
       "Address validation complete"
     );
 
-    // Check if addresses need user confirmation (corrected or failed)
-    // Only proceed if BOTH addresses are 'verified' (exact match)
-    const needsConfirmation = senderValidation.status !== 'verified' || recipientValidation.status !== 'verified';
+    // Check if any addresses failed validation (truly invalid/undeliverable)
+    // Corrected addresses are auto-accepted to avoid unnecessary re-submission (US-EDGE-02)
+    const hasFailures = senderValidation.status === 'failed' || recipientValidation.status === 'failed';
 
-    if (needsConfirmation) {
+    if (hasFailures) {
       const errorParts: string[] = [];
 
-      // Handle sender address
+      // Handle failed sender address
       if (senderValidation.status === 'failed') {
         const errorMsg = senderValidation.errors?.map(e => e.message).join('; ') || 'Address is invalid or undeliverable';
         errorParts.push(`❌ Sender address is INVALID: ${errorMsg}`);
@@ -257,18 +257,9 @@ async function handler(
             `   ${senderValidation.verifiedAddress.city}, ${senderValidation.verifiedAddress.state} ${senderValidation.verifiedAddress.postalCode}`
           );
         }
-      } else if (senderValidation.status === 'corrected') {
-        errorParts.push(`⚠️  Sender address was AUTO-CORRECTED for deliverability:`);
-        errorParts.push(`   Original: ${sender.addressLine1}, ${sender.city}, ${sender.state} ${sender.postalCode}`);
-        if (senderValidation.verifiedAddress) {
-          errorParts.push(
-            `   Corrected: ${senderValidation.verifiedAddress.line1}, ` +
-            `${senderValidation.verifiedAddress.city}, ${senderValidation.verifiedAddress.state} ${senderValidation.verifiedAddress.postalCode}`
-          );
-        }
       }
 
-      // Handle recipient address
+      // Handle failed recipient address
       if (recipientValidation.status === 'failed') {
         const errorMsg = recipientValidation.errors?.map(e => e.message).join('; ') || 'Address is invalid or undeliverable';
         errorParts.push(`❌ Recipient address is INVALID: ${errorMsg}`);
@@ -281,35 +272,67 @@ async function handler(
             `   ${recipientValidation.verifiedAddress.city}, ${recipientValidation.verifiedAddress.state} ${recipientValidation.verifiedAddress.postalCode}`
           );
         }
-      } else if (recipientValidation.status === 'corrected') {
-        errorParts.push(`⚠️  Recipient address was AUTO-CORRECTED for deliverability:`);
-        errorParts.push(`   Original: ${input.recipient.addressLine1}, ${input.recipient.city}, ${input.recipient.state} ${input.recipient.postalCode}`);
-        if (recipientValidation.verifiedAddress) {
-          errorParts.push(
-            `   Corrected: ${recipientValidation.verifiedAddress.line1}, ` +
-            `${recipientValidation.verifiedAddress.city}, ${recipientValidation.verifiedAddress.state} ${recipientValidation.verifiedAddress.postalCode}`
-          );
-        }
       }
 
       context.logger.warn(
         {
           correlationId: context.correlationId,
-          event: "quote.preview.address_needs_confirmation",
+          event: "quote.preview.address_validation_failed",
           senderStatus: senderValidation.status,
           recipientStatus: recipientValidation.status
         },
-        "Address validation requires user confirmation"
+        "Address validation failed - invalid addresses"
       );
-
-      const hasFailures = senderValidation.status === 'failed' || recipientValidation.status === 'failed';
-      const actionMsg = hasFailures
-        ? `Please correct the invalid address(es) and try again.`
-        : `Please resubmit using the corrected address(es) shown above to proceed.`;
 
       throw new Error(
-        `Address validation requires confirmation:\n\n${errorParts.join('\n\n')}\n\n${actionMsg}`
+        `Address validation failed:\n\n${errorParts.join('\n\n')}\n\nPlease correct the invalid address(es) and try again.`
       );
+    }
+
+    // For corrected addresses, auto-apply the correction to the preview/draft
+    // This avoids requiring re-submission for minor corrections (ZIP+4, formatting, etc.)
+    if (senderValidation.status === 'corrected' && senderValidation.verifiedAddress) {
+      context.logger.info(
+        {
+          correlationId: context.correlationId,
+          event: "quote.preview.sender_address_corrected",
+          original: `${sender.addressLine1}, ${sender.city}, ${sender.state} ${sender.postalCode}`,
+          corrected: `${senderValidation.verifiedAddress.line1}, ${senderValidation.verifiedAddress.city}, ${senderValidation.verifiedAddress.state} ${senderValidation.verifiedAddress.postalCode}`
+        },
+        "Auto-applying corrected sender address"
+      );
+
+      // Update sender with corrected address (this is what will be mailed)
+      sender.addressLine1 = senderValidation.verifiedAddress.line1;
+      sender.addressLine2 = senderValidation.verifiedAddress.line2;
+      sender.city = senderValidation.verifiedAddress.city;
+      sender.state = senderValidation.verifiedAddress.state;
+      sender.postalCode = senderValidation.verifiedAddress.postalCode;
+      if (senderValidation.verifiedAddress.country) {
+        sender.country = senderValidation.verifiedAddress.country;
+      }
+    }
+
+    if (recipientValidation.status === 'corrected' && recipientValidation.verifiedAddress) {
+      context.logger.info(
+        {
+          correlationId: context.correlationId,
+          event: "quote.preview.recipient_address_corrected",
+          original: `${input.recipient.addressLine1}, ${input.recipient.city}, ${input.recipient.state} ${input.recipient.postalCode}`,
+          corrected: `${recipientValidation.verifiedAddress.line1}, ${recipientValidation.verifiedAddress.city}, ${recipientValidation.verifiedAddress.state} ${recipientValidation.verifiedAddress.postalCode}`
+        },
+        "Auto-applying corrected recipient address"
+      );
+
+      // Update recipient with corrected address (this is what will be mailed)
+      input.recipient.addressLine1 = recipientValidation.verifiedAddress.line1;
+      input.recipient.addressLine2 = recipientValidation.verifiedAddress.line2;
+      input.recipient.city = recipientValidation.verifiedAddress.city;
+      input.recipient.state = recipientValidation.verifiedAddress.state;
+      input.recipient.postalCode = recipientValidation.verifiedAddress.postalCode;
+      if (recipientValidation.verifiedAddress.country) {
+        input.recipient.country = recipientValidation.verifiedAddress.country;
+      }
     }
   }
 
@@ -429,13 +452,11 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
     "2. The draftId is REQUIRED when calling send_letter - you cannot send without it.\n" +
     "3. Each draft expires after 24 hours if not sent.\n" +
     "4. Using the draftId ensures idempotent sends - retrying send_letter with the same draftId will not charge twice.\n\n" +
-    "Address Validation Workflow:\n" +
-    "1. This tool automatically validates all addresses for deliverability (US only).\n" +
-    "2. If validation returns an error with 'AUTO-CORRECTED' addresses, YOU MUST:\n" +
-    "   - Show the user BOTH the original and corrected addresses\n" +
-    "   - Ask the user to confirm they want to use the corrected addresses\n" +
-    "   - If user confirms, call this tool AGAIN with the EXACT corrected addresses shown\n" +
-    "3. Only when addresses are verified as exact matches will you receive a preview with canSendNow: true.\n\n" +
+    "Address Validation:\n" +
+    "- Addresses are automatically validated for deliverability (US only).\n" +
+    "- Minor corrections (ZIP+4, formatting) are auto-applied - no re-submission needed.\n" +
+    "- The response shows both original and corrected addresses when corrections are made.\n" +
+    "- Only truly invalid addresses (not found, undeliverable) will return an error.\n\n" +
     "Service Restrictions:\n" +
     "- US addresses only (both sender and recipient must be in USA)\n" +
     "- Maximum 1 page (~1,800 characters total for body + sign-off)",

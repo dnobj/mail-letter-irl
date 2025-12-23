@@ -593,14 +593,30 @@ interface ProviderStatus {
 
 ### US-EDGE-02: Address Correction Workflow
 **As a** user
-**I want to** correct invalid addresses
-**So that** my letters arrive successfully
+**I want** minor address corrections to be applied automatically
+**So that** I don't have to re-submit for common formatting fixes (ZIP+4, standardization)
 
 **Acceptance Criteria:**
-- [ ] Invalid address returns suggestions
-- [ ] Status indicates: verified, corrected, or failed
-- [ ] User can accept correction or provide new address
-- [ ] Corrected address used in letter
+- [ ] Address validation returns status: `verified`, `corrected`, or `failed`
+- [ ] **Verified addresses**: Used as-is in preview
+- [ ] **Corrected addresses**: Auto-applied to preview (no re-submission required)
+- [ ] **Failed addresses**: Error thrown with suggestions (user must correct)
+- [ ] Preview shows both original and corrected addresses when corrections applied
+- [ ] Draft stores the corrected address (what will actually be mailed)
+- [ ] Response includes `senderAddressValidation` and `recipientAddressValidation` objects
+- [ ] Each validation object includes: status, originalAddress, verifiedAddress (if corrected)
+
+**Error Cases:**
+- [ ] Failed sender address → Error with suggestions, must correct
+- [ ] Failed recipient address → Error with suggestions, must correct
+- [ ] Both addresses failed → Error listing both with suggestions
+
+**User Experience:**
+- [ ] User sees preview immediately for verified/corrected addresses
+- [ ] User informed of any corrections made (can see original vs corrected)
+- [ ] Only truly invalid addresses require user action
+
+**GitHub Issue:** #40
 
 ---
 
