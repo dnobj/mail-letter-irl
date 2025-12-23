@@ -246,7 +246,7 @@ Links credit usage to letters.
 ### Environment Variables
 | Variable | Purpose |
 |----------|---------|
-| ACTIVE_LETTER_PROVIDER | 'postgrid' or 'dummy' |
+| LETTER_PROVIDER | 'postgrid' or 'dummy' |
 | POSTGRID_API_KEY | PostGrid API credentials |
 | DUMMY_PROVIDER_DELAY_MS | Simulated delay for testing |
 | DUMMY_PROVIDER_FAIL_RATE | Failure rate for testing |

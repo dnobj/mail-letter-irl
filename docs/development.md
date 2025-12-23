@@ -200,7 +200,7 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 
 # PostGrid (live mode)
 POSTGRID_API_KEY=live_sk_...
-ACTIVE_LETTER_PROVIDER=postgrid
+LETTER_PROVIDER=postgrid
 ```
 
 **Development (.env):**
@@ -218,7 +218,7 @@ STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 
 # PostGrid (dummy provider)
-ACTIVE_LETTER_PROVIDER=dummy
+LETTER_PROVIDER=dummy
 ```
 
 ### Running Locally
@@ -233,7 +233,7 @@ npm run db:migrate
 # Start the server (development mode with hot reload)
 npm run dev
 
-# Server runs on http://localhost:3000
+# Server runs on http://localhost:8090
 ```
 
 ### Running Tests
@@ -482,7 +482,7 @@ Production and development environments have different values:
 
 **"Stripe webhook signature verification failed"**
 - Ensure `STRIPE_WEBHOOK_SECRET` matches your webhook endpoint
-- For local testing, use Stripe CLI: `stripe listen --forward-to localhost:3000/api/stripe/webhook`
+- For local testing, use Stripe CLI: `stripe listen --forward-to localhost:8090/api/stripe/webhook`
 
 **Database connection errors**
 - Check `DATABASE_URL` is correct

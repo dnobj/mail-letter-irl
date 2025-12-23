@@ -412,7 +412,7 @@ LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
 
 # PostGrid (live mode)
 POSTGRID_API_KEY=live_sk_...
-ACTIVE_LETTER_PROVIDER=postgrid
+LETTER_PROVIDER=postgrid
 
 # Stripe (live mode)
 STRIPE_SECRET_KEY=sk_live_...
@@ -434,7 +434,7 @@ LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
 
 # PostGrid (dummy mode - no real mail)
-ACTIVE_LETTER_PROVIDER=dummy
+LETTER_PROVIDER=dummy
 
 # Stripe (test mode)
 STRIPE_SECRET_KEY=sk_test_...
@@ -492,7 +492,7 @@ AUTH0_CLIENT_SECRET=<dev-website-client-secret>
 AUTH0_AUDIENCE=https://letter-irl/api
 
 # Backend API (local or dev Railway)
-NEXT_PUBLIC_LETTER_IRL_API_URL=http://localhost:8788
+NEXT_PUBLIC_LETTER_IRL_API_URL=http://localhost:8090
 
 # Stripe (test mode)
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...

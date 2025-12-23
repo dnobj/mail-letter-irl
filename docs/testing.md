@@ -175,7 +175,7 @@ Test cards:
 
 Forward webhooks locally:
 ```bash
-stripe listen --forward-to localhost:8788/api/stripe/webhook
+stripe listen --forward-to localhost:8090/api/stripe/webhook
 ```
 
 ### PostGrid (Test Mode)
