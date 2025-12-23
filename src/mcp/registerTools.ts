@@ -298,13 +298,18 @@ function summarizeToolResult(
   switch (toolName) {
     case "get_account_balance": {
       const message = result.message as string;
-      return message || `Balance: ${result.creditsRemaining ?? "unknown"} credits`;
+      // Convert internal credits to user-facing letters (2 credits = 1 letter)
+      const credits = result.creditsRemaining as number | undefined;
+      const letters = credits !== undefined ? Math.floor(credits / 2) : "unknown";
+      return message || `Letter Balance: ${letters} letters`;
     }
     case "quote_and_preview_letter": {
-      const required = result.requiredCredits ?? "?";
+      // Convert internal credits to user-facing letters (2 credits = 1 letter)
+      const requiredCredits = result.requiredCredits as number | undefined;
+      const letters = requiredCredits !== undefined ? Math.floor(requiredCredits / 2) : 1;
       const canSend = result.canSendNow ? "can send now" : "cannot send";
       const usedSaved = result.usedSavedReturnAddress as boolean | undefined;
-      let summary = `Preview ready: requires ${required} credits (${canSend}).`;
+      let summary = `Preview ready: costs ${letters} ${letters === 1 ? 'letter' : 'letters'} (${canSend}).`;
       if (usedSaved) {
         summary += " Using your saved return address.";
       }

@@ -29,24 +29,28 @@ export interface CheckoutSessionResult {
 /**
  * Product configurations matching our pricing model
  * Price IDs are from Stripe Dashboard (live mode)
+ *
+ * Note: Internal "credits" are kept for database/webhook compatibility.
+ * User-facing names use "Letter Pack" terminology per OpenAI commerce policy.
+ * 2 credits = 1 letter
  */
 const PRODUCTS = {
   'credit-pack-4': {
-    credits: 4,
+    credits: 4,  // Internal: 4 credits = 2 letters
     priceId: process.env.STRIPE_PRICE_STARTER || '',
-    name: 'Starter Pack - 4 Credits',
+    name: 'Starter Pack - 2 Letters',
     description: 'Perfect for trying out Letter IRL'
   },
   'credit-pack-10': {
-    credits: 10,
+    credits: 10,  // Internal: 10 credits = 5 letters
     priceId: process.env.STRIPE_PRICE_REGULAR || '',
-    name: 'Regular Pack - 10 Credits',
+    name: 'Regular Pack - 5 Letters',
     description: 'Most popular choice for regular letter senders'
   },
   'credit-pack-100': {
-    credits: 100,
+    credits: 100,  // Internal: 100 credits = 50 letters
     priceId: process.env.STRIPE_PRICE_POWER || '',
-    name: 'Power Pack - 100 Credits',
+    name: 'Power Pack - 50 Letters',
     description: 'Best value - 10% savings for power users'
   }
 };
