@@ -198,7 +198,7 @@ export async function getAllJobs(
 
   return {
     jobs: jobsResult.rows,
-    total: parseInt(countResult.rows[0].count)
+    total: parseInt(countResult.rows[0].count, 10)
   };
 }
 
@@ -228,6 +228,6 @@ export async function getJobsByUserId(
 
   return {
     jobs: result.rows,
-    total: parseInt(countResult.rows[0].count)
+    total: parseInt(countResult.rows[0].count, 10)
   };
 }

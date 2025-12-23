@@ -167,8 +167,8 @@ async function handleListLetters(
   authInfo: AuthInfo,
   queryParams: URLSearchParams
 ) {
-  let limit = parseInt(queryParams.get('limit') || '20');
-  let offset = parseInt(queryParams.get('offset') || '0');
+  let limit = parseInt(queryParams.get('limit') || '20', 10);
+  let offset = parseInt(queryParams.get('offset') || '0', 10);
   const status = queryParams.get('status');
 
   // Validate limits
@@ -216,7 +216,7 @@ async function handleListLetters(
     countSql += ` AND status = $${countParams.length}`;
   }
   const countResult = await query(countSql, countParams);
-  const total = parseInt(countResult.rows[0].count);
+  const total = parseInt(countResult.rows[0].count, 10);
 
   sendJson(res, 200, {
     letters,

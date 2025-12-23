@@ -193,8 +193,8 @@ async function handleGetTransactions(
   authInfo: AuthInfo,
   queryParams: URLSearchParams
 ) {
-  let limit = parseInt(queryParams.get('limit') || '50');
-  let offset = parseInt(queryParams.get('offset') || '0');
+  let limit = parseInt(queryParams.get('limit') || '50', 10);
+  let offset = parseInt(queryParams.get('offset') || '0', 10);
   const type = queryParams.get('type') as any;
 
   // Validate limits
@@ -294,8 +294,8 @@ async function handleGetLedgerEntries(
   authInfo: AuthInfo,
   queryParams: URLSearchParams
 ) {
-  const limit = Math.min(parseInt(queryParams.get('limit') || '50'), 100);
-  const offset = Math.max(parseInt(queryParams.get('offset') || '0'), 0);
+  const limit = Math.min(parseInt(queryParams.get('limit') || '50', 10), 100);
+  const offset = Math.max(parseInt(queryParams.get('offset') || '0', 10), 0);
   const includeExpired = queryParams.get('includeExpired') === 'true';
 
   const result = await getLedgerEntries({

@@ -105,7 +105,7 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
       const userId = session.metadata?.userId || session.metadata?.user_id || session.client_reference_id;
       if (session.payment_status === 'paid' && userId) {
         const productId = session.metadata?.productId || session.metadata?.product_id || 'unknown';
-        const credits = PRODUCT_CREDITS[productId] || parseInt(session.metadata?.credits || '0') || 0;
+        const credits = PRODUCT_CREDITS[productId] || parseInt(session.metadata?.credits || '0', 10) || 0;
 
         stripePayments.set(session.id, {
           sessionId: session.id,

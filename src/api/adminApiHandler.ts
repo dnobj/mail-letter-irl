@@ -439,7 +439,7 @@ async function handleGetUser(res: ServerResponse, userId: string) {
         updatedAt: user.updated_at
       },
       stats: {
-        totalLetters: parseInt(letterResult.rows[0].count),
+        totalLetters: parseInt(letterResult.rows[0].count, 10),
         recentTransactions: txResult.rows
       }
     });
@@ -460,8 +460,8 @@ async function handleGetUser(res: ServerResponse, userId: string) {
  * List all users with pagination
  */
 async function handleGetAllUsers(res: ServerResponse, queryParams: URLSearchParams) {
-  const limit = parseInt(queryParams.get('limit') || '50');
-  const offset = parseInt(queryParams.get('offset') || '0');
+  const limit = parseInt(queryParams.get('limit') || '50', 10);
+  const offset = parseInt(queryParams.get('offset') || '0', 10);
 
   const result = await getAllUsers(limit, offset);
 
@@ -521,21 +521,21 @@ async function handleGetStats(res: ServerResponse) {
 
   sendJson(res, 200, {
     users: {
-      total: parseInt(userStats.rows[0].count),
-      totalCreditsHeld: parseInt(userStats.rows[0].total_credits || '0')
+      total: parseInt(userStats.rows[0].count, 10),
+      totalCreditsHeld: parseInt(userStats.rows[0].total_credits || '0', 10)
     },
     transactions: {
-      totalCreditsPurchased: parseInt(txStats.rows[0].total_purchased || '0'),
-      totalCreditsUsed: parseInt(txStats.rows[0].total_used || '0')
+      totalCreditsPurchased: parseInt(txStats.rows[0].total_purchased || '0', 10),
+      totalCreditsUsed: parseInt(txStats.rows[0].total_used || '0', 10)
     },
     orders: {
-      total: parseInt(orderStats.rows[0].count || '0'),
-      completed: parseInt(orderStats.rows[0].completed_count || '0'),
-      totalRevenueCents: parseInt(orderStats.rows[0].total_revenue || '0')
+      total: parseInt(orderStats.rows[0].count || '0', 10),
+      completed: parseInt(orderStats.rows[0].completed_count || '0', 10),
+      totalRevenueCents: parseInt(orderStats.rows[0].total_revenue || '0', 10)
     },
     letters: {
-      total: parseInt(letterStats.rows[0].count || '0'),
-      sent: parseInt(letterStats.rows[0].sent_count || '0')
+      total: parseInt(letterStats.rows[0].count || '0', 10),
+      sent: parseInt(letterStats.rows[0].sent_count || '0', 10)
     }
   });
 }
@@ -545,8 +545,8 @@ async function handleGetStats(res: ServerResponse) {
  * List all jobs with pagination and filtering
  */
 async function handleGetJobs(res: ServerResponse, queryParams: URLSearchParams) {
-  const limit = parseInt(queryParams.get('limit') || '50');
-  const offset = parseInt(queryParams.get('offset') || '0');
+  const limit = parseInt(queryParams.get('limit') || '50', 10);
+  const offset = parseInt(queryParams.get('offset') || '0', 10);
   const status = queryParams.get('status') || undefined;
 
   const result = await getAllJobs(limit, offset, status);
@@ -619,8 +619,8 @@ async function handleGetJobsByUser(
   userId: string,
   queryParams: URLSearchParams
 ) {
-  const limit = parseInt(queryParams.get('limit') || '50');
-  const offset = parseInt(queryParams.get('offset') || '0');
+  const limit = parseInt(queryParams.get('limit') || '50', 10);
+  const offset = parseInt(queryParams.get('offset') || '0', 10);
 
   const result = await getJobsByUserId(userId, limit, offset);
 
@@ -665,7 +665,7 @@ async function handleGetPgBossJobs(res: ServerResponse) {
 
   sendJson(res, 200, {
     jobs: result.rows,
-    total: parseInt(countResult.rows[0].count)
+    total: parseInt(countResult.rows[0].count, 10)
   });
 }
 
@@ -753,8 +753,8 @@ async function handleCreateCampaign(
  * List all campaigns with pagination
  */
 async function handleListCampaigns(res: ServerResponse, queryParams: URLSearchParams) {
-  const limit = parseInt(queryParams.get('limit') || '50');
-  const offset = parseInt(queryParams.get('offset') || '0');
+  const limit = parseInt(queryParams.get('limit') || '50', 10);
+  const offset = parseInt(queryParams.get('offset') || '0', 10);
   const statusParam = queryParams.get('status');
 
   const status = statusParam
@@ -892,8 +892,8 @@ async function handleGetCampaignRedemptions(
   campaignId: string,
   queryParams: URLSearchParams
 ) {
-  const limit = parseInt(queryParams.get('limit') || '50');
-  const offset = parseInt(queryParams.get('offset') || '0');
+  const limit = parseInt(queryParams.get('limit') || '50', 10);
+  const offset = parseInt(queryParams.get('offset') || '0', 10);
 
   // Verify campaign exists
   const campaign = await getCampaignById(campaignId);
@@ -934,7 +934,7 @@ async function handleStripeReconcile(
   res: ServerResponse,
   queryParams: URLSearchParams
 ) {
-  const days = Math.min(parseInt(queryParams.get('days') || '30'), 90);
+  const days = Math.min(parseInt(queryParams.get('days') || '30', 10), 90);
 
   console.log(`📊 Running Stripe reconciliation for last ${days} days...`);
 
@@ -1095,35 +1095,35 @@ async function handleGetDashboard(res: ServerResponse) {
   // Parse job stats
   const jobStatsByStatus: Record<string, number> = {};
   for (const row of jobStats.rows) {
-    jobStatsByStatus[row.status] = parseInt(row.count);
+    jobStatsByStatus[row.status] = parseInt(row.count, 10);
   }
 
   sendJson(res, 200, {
     generatedAt: now.toISOString(),
     users: {
-      total: parseInt(totalUsers.rows[0].count),
-      newToday: parseInt(newUsersToday.rows[0].count),
-      new7d: parseInt(newUsers7d.rows[0].count),
-      new30d: parseInt(newUsers30d.rows[0].count),
+      total: parseInt(totalUsers.rows[0].count, 10),
+      newToday: parseInt(newUsersToday.rows[0].count, 10),
+      new7d: parseInt(newUsers7d.rows[0].count, 10),
+      new30d: parseInt(newUsers30d.rows[0].count, 10),
     },
     credits: {
-      totalHeld: parseInt(creditStats.rows[0].total_held || '0'),
-      totalPurchased: parseInt(creditStats.rows[0].total_purchased || '0'),
-      totalUsed: parseInt(creditStats.rows[0].total_used || '0'),
+      totalHeld: parseInt(creditStats.rows[0].total_held || '0', 10),
+      totalPurchased: parseInt(creditStats.rows[0].total_purchased || '0', 10),
+      totalUsed: parseInt(creditStats.rows[0].total_used || '0', 10),
     },
     letters: {
-      total: parseInt(letterStats.rows[0].total || '0'),
-      sent: parseInt(letterStats.rows[0].sent || '0'),
-      today: parseInt(lettersToday.rows[0].count),
-      last7d: parseInt(letters7d.rows[0].count),
-      last30d: parseInt(letters30d.rows[0].count),
+      total: parseInt(letterStats.rows[0].total || '0', 10),
+      sent: parseInt(letterStats.rows[0].sent || '0', 10),
+      today: parseInt(lettersToday.rows[0].count, 10),
+      last7d: parseInt(letters7d.rows[0].count, 10),
+      last30d: parseInt(letters30d.rows[0].count, 10),
     },
     revenue: {
-      totalCents: parseInt(revenueStats.rows[0].total_cents || '0'),
-      totalOrders: parseInt(revenueStats.rows[0].total_orders || '0'),
-      todayCents: parseInt(revenueToday.rows[0].total_cents || '0'),
-      last7dCents: parseInt(revenue7d.rows[0].total_cents || '0'),
-      last30dCents: parseInt(revenue30d.rows[0].total_cents || '0'),
+      totalCents: parseInt(revenueStats.rows[0].total_cents || '0', 10),
+      totalOrders: parseInt(revenueStats.rows[0].total_orders || '0', 10),
+      todayCents: parseInt(revenueToday.rows[0].total_cents || '0', 10),
+      last7dCents: parseInt(revenue7d.rows[0].total_cents || '0', 10),
+      last30dCents: parseInt(revenue30d.rows[0].total_cents || '0', 10),
     },
     jobs: {
       pending: jobStatsByStatus['pending'] || 0,
@@ -1249,7 +1249,7 @@ async function handleGetAlerts(res: ServerResponse) {
  */
 async function handleSearchUsers(res: ServerResponse, queryParams: URLSearchParams) {
   const q = queryParams.get('q') || '';
-  const limit = Math.min(parseInt(queryParams.get('limit') || '20'), 100);
+  const limit = Math.min(parseInt(queryParams.get('limit') || '20', 10), 100);
 
   if (!q || q.length < 2) {
     sendJson(res, 400, { error: 'Search query must be at least 2 characters' });
@@ -1293,8 +1293,8 @@ async function handleSearchUsers(res: ServerResponse, queryParams: URLSearchPara
  * List letters with filters
  */
 async function handleGetLetters(res: ServerResponse, queryParams: URLSearchParams) {
-  const limit = Math.min(parseInt(queryParams.get('limit') || '50'), 100);
-  const offset = parseInt(queryParams.get('offset') || '0');
+  const limit = Math.min(parseInt(queryParams.get('limit') || '50', 10), 100);
+  const offset = parseInt(queryParams.get('offset') || '0', 10);
   const status = queryParams.get('status');
   const userId = queryParams.get('userId');
 
@@ -1340,7 +1340,7 @@ async function handleGetLetters(res: ServerResponse, queryParams: URLSearchParam
       createdAt: l.created_at,
       sentAt: l.sent_at,
     })),
-    total: parseInt(countResult.rows[0].count),
+    total: parseInt(countResult.rows[0].count, 10),
     limit,
     offset,
   });
@@ -1352,7 +1352,7 @@ async function handleGetLetters(res: ServerResponse, queryParams: URLSearchParam
  */
 async function handleSearchLetters(res: ServerResponse, queryParams: URLSearchParams) {
   const q = queryParams.get('q') || '';
-  const limit = Math.min(parseInt(queryParams.get('limit') || '20'), 100);
+  const limit = Math.min(parseInt(queryParams.get('limit') || '20', 10), 100);
 
   if (!q || q.length < 2) {
     sendJson(res, 400, { error: 'Search query must be at least 2 characters' });
@@ -1528,7 +1528,7 @@ async function handleStatusSyncDryRun(
   res: ServerResponse,
   queryParams: URLSearchParams
 ) {
-  const maxAge = parseInt(queryParams.get('maxAge') || '30');
+  const maxAge = parseInt(queryParams.get('maxAge') || '30', 10);
 
   console.log(`📊 Running status sync dry run (maxAge: ${maxAge} days)...`);
 
@@ -1587,7 +1587,7 @@ async function handleGetStuckLetters(
   res: ServerResponse,
   queryParams: URLSearchParams
 ) {
-  const maxDays = parseInt(queryParams.get('maxDays') || '14');
+  const maxDays = parseInt(queryParams.get('maxDays') || '14', 10);
 
   try {
     const stuckLetters = await getStuckLetters(maxDays);

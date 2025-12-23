@@ -245,7 +245,7 @@ export async function getTransactions(params: GetTransactionsParams): Promise<Tr
 
   return {
     transactions: result.rows,
-    total: parseInt(countResult.rows[0].count)
+    total: parseInt(countResult.rows[0].count, 10)
   };
 }
 

@@ -297,12 +297,12 @@ export async function getDraftStats(): Promise<{
     consumed: 0,
     expired: 0,
     cancelled: 0,
-    expiringSoon: parseInt(expiringSoonResult.rows[0]?.count ?? '0'),
+    expiringSoon: parseInt(expiringSoonResult.rows[0]?.count ?? '0', 10),
   };
 
   for (const row of result.rows) {
     if (row.status in stats) {
-      stats[row.status as keyof typeof stats] = parseInt(row.count);
+      stats[row.status as keyof typeof stats] = parseInt(row.count, 10);
     }
   }
 
