@@ -8,7 +8,7 @@
 
 ## Overview
 
-This document specifies the changes needed in the `letter-irl-website` (Next.js) repository to support MCP client users who want to use Letter IRL with Claude Desktop, Cursor, or other MCP-compatible tools.
+This document specifies the changes needed in the `letter-irl-website` (Next.js) repository to support MCP client users who want to use Letter IRL with MCP-compatible AI assistants.
 
 ## Architecture
 
@@ -49,11 +49,11 @@ letterirl.com (Next.js)              api.letterirl.com (MCP Server)
 
 ```tsx
 <section className="mcp-section">
-  <h2>Works with Claude Desktop & Other MCP Clients</h2>
+  <h2>Works with MCP Clients</h2>
   <p>
-    Already use Claude Desktop or Cursor? Letter IRL is also available as an
+    Already use an MCP-compatible AI assistant? Letter IRL is also available as an
     MCP (Model Context Protocol) server, letting you send letters from any
-    compatible AI assistant.
+    compatible tool.
   </p>
   <Link href="/mcp" className="btn btn-secondary">
     Learn More →
@@ -72,33 +72,24 @@ letterirl.com (Next.js)              api.letterirl.com (MCP Server)
 **Content Structure:**
 
 ```markdown
-# Send Letters from Claude Desktop & Other MCP Clients
+# Send Letters via MCP
 
 Letter IRL is an MCP server that lets you send real, physical letters from
 any AI assistant that supports the Model Context Protocol.
 
-## Supported Clients
-- Claude Desktop
-- Cursor
-- Any MCP-compatible tool
+## How It Works
+- **OAuth Authentication**: Secure login via browser - no tokens to manage
+- **Token Authentication**: Personal Access Tokens for clients without OAuth
+- **Same Pricing**: Identical letter pricing as ChatGPT - no separate fees
 
 ## Quick Start
 
 ### Step 1: Create an Account
 [Sign Up] or [Sign In] if you already have an account.
 
-### Step 2: Generate an API Token
-Go to your [Dashboard → API Tokens](/dashboard/tokens) to create a
-Personal Access Token. Your token is only shown once—save it securely!
-
-### Step 3: Configure Your Client
-
-Add this to your client's MCP configuration:
-
-**Claude Desktop config locations:**
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-- Linux: `~/.config/claude/claude_desktop_config.json`
+### Step 2: Add MCP Server Configuration
+Add the Letter IRL server to your MCP client's configuration file.
+The location varies by client—check your client's documentation.
 
 ```json
 {
@@ -106,24 +97,35 @@ Add this to your client's MCP configuration:
     "letter-irl": {
       "command": "npx",
       "args": [
+        "-y",
         "mcp-remote",
-        "https://api.letterirl.com/mcp",
-        "--header",
-        "Authorization: Bearer YOUR_TOKEN_HERE"
+        "https://api.letterirl.com/mcp"
       ]
     }
   }
 }
 ```
 
-### Step 4: Restart & Test
-Restart your client to load the configuration, then try:
+### Step 3: Restart & Authenticate
+Restart your MCP client. On first use, a browser window will open asking
+you to log in to Letter IRL.
+
+### Step 4: Start Sending Letters
+Try asking your AI assistant:
 > "Send a thank you letter to John at 123 Main St, New York, NY 10001"
 
+## Token Authentication (Optional)
+For MCP clients that don't support OAuth, generate a Personal Access Token
+in your [Dashboard → API Tokens](/dashboard/tokens).
+
 ## Pricing
-Same as ChatGPT—2 credits per letter. [View pricing →](/pricing)
+Same as ChatGPT. [View pricing →](/pricing)
 
 ## Troubleshooting
+
+**OAuth login window doesn't appear?**
+- Check that your browser isn't blocking pop-ups
+- Try fully restarting your MCP client
 
 **Token not working?**
 - Verify the token hasn't been revoked in your dashboard
@@ -131,7 +133,7 @@ Same as ChatGPT—2 credits per letter. [View pricing →](/pricing)
 
 **Configuration errors?**
 - Ensure the JSON is valid (no trailing commas)
-- Verify the config file location for your OS
+- Check your client's documentation for config file location
 
 **Need help?**
 [Contact support](/support)
@@ -141,8 +143,8 @@ Same as ChatGPT—2 credits per letter. [View pricing →](/pricing)
 ```tsx
 export const metadata = {
   title: 'MCP Setup - Letter IRL',
-  description: 'Use Letter IRL with Claude Desktop, Cursor, and other MCP clients. Send real physical letters from any AI assistant.',
-  keywords: ['MCP', 'Claude Desktop', 'Cursor', 'AI letters', 'physical mail API'],
+  description: 'Connect Letter IRL to any MCP-compatible AI assistant. Send real physical letters using the Model Context Protocol.',
+  keywords: ['MCP', 'Model Context Protocol', 'AI letters', 'physical mail API', 'MCP server'],
 };
 ```
 
@@ -168,7 +170,7 @@ interface Token {
 
 <TokenList>
   <TokenItem>
-    <TokenName>Claude Desktop</TokenName>
+    <TokenName>My AI Assistant</TokenName>
     <TokenMeta>
       <span>lirl_pat_...a1b2</span>
       <span>Created: Dec 15, 2025</span>
@@ -185,7 +187,7 @@ interface Token {
 <CreateTokenForm>
   <Input
     label="Token Name"
-    placeholder="e.g., Claude Desktop, Cursor"
+    placeholder="e.g., My AI Assistant, Dev Machine"
     maxLength={100}
   />
   <Button type="submit">Generate Token</Button>
