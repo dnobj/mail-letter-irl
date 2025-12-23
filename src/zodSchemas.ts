@@ -47,3 +47,5 @@ export const getReturnAddressInputZ = z.object({});
 export const clearReturnAddressInputZ = z.object({
   confirm: z.boolean()
 });
+
+export const switchAccountInputZ = z.object({});
