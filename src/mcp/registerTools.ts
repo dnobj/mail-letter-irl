@@ -26,6 +26,7 @@ import { getOrCreateUser } from "../services/userService.js";
  * - readOnlyHint: true = READ (no user confirmation needed)
  * - readOnlyHint: false = WRITE (requires user confirmation)
  * - destructiveHint: true = Shows deletion warning
+ * - openWorldHint: true = Tool has real-world effects (e.g., sends physical mail)
  *
  * @see US-MCP-06: Tool Read/Write Annotations
  * @see https://developers.openai.com/apps-sdk/plan/tools/
@@ -34,6 +35,8 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
   return {
     readOnlyHint: tool.readOnly,
     destructiveHint: tool.name === 'clear_return_address',
+    // send_letter triggers real-world mail fulfillment (Issue #39)
+    openWorldHint: tool.name === 'send_letter',
   };
 }
 
