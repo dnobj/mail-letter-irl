@@ -242,13 +242,16 @@
           <span class="info-label">Status</span>
           <span class="status-pill" id="status-pill"></span>
         </div>
+        <div class="info-row">
+          <span class="info-label" id="id-label">Draft</span>
+          <span class="info-value" id="id-value"></span>
+        </div>
         <div class="note" id="note" style="display: none;"></div>
         <!-- Send button - US-MCP-08 -->
-        <div id="send-section">
-          <button class="send-button" id="send-button" disabled>
-            <span id="send-button-text">Send Letter</span>
-          </button>
-        </div>
+        <button class="send-button" id="send-button" disabled>
+          <span id="send-button-text">Send Letter</span>
+        </button>
+        <div id="error-message" class="send-result error" style="display: none;"></div>
       </div>
     </div>
 
@@ -357,6 +360,12 @@
           noteEl.style.display = "none";
         }
 
+        // Show Draft ID (truncated for display)
+        document.getElementById("id-label").textContent = "Draft";
+        document.getElementById("id-value").textContent = draftId
+          ? `${draftId.substring(0, 8)}...`
+          : "—";
+
         // Update send button state
         const sendButton = document.getElementById("send-button");
         const sendButtonText = document.getElementById("send-button-text");
@@ -373,8 +382,13 @@
 
         const sendButton = document.getElementById("send-button");
         const sendButtonText = document.getElementById("send-button-text");
-        const sendSection = document.getElementById("send-section");
         const statusPill = document.getElementById("status-pill");
+        const idLabel = document.getElementById("id-label");
+        const idValue = document.getElementById("id-value");
+        const errorMessage = document.getElementById("error-message");
+
+        // Hide any previous error
+        errorMessage.style.display = "none";
 
         // Show loading state
         sendInProgress = true;
@@ -400,24 +414,31 @@
           statusPill.classList.add("ok");
           statusPill.textContent = "Sent!";
 
-          // Show success message
-          sendSection.innerHTML = `
-            <div class="send-result success">
-              Letter sent!${orderId ? ` Order: ${orderId.substring(0, 8)}...` : ''}
-            </div>
-          `;
+          // Change Draft label to Order and show order ID
+          idLabel.textContent = "Order";
+          idValue.textContent = orderId
+            ? `${orderId.substring(0, 8)}...`
+            : "Confirmed";
+
+          // Update button to show success
+          sendButton.classList.remove("loading");
+          sendButtonText.innerHTML = "Letter Sent!";
+          // Keep button disabled
         } catch (error) {
-          // Show error but keep button for retry
-          sendSection.innerHTML = `
-            <div class="send-result error">
-              Failed to send: ${error.message || 'Unknown error'}
-            </div>
-          `;
-          // Reset status pill to alert state
+          // Show error message
+          errorMessage.textContent = `Failed to send: ${error.message || 'Unknown error'}`;
+          errorMessage.style.display = "block";
+
+          // Reset button for retry
+          sendButton.classList.remove("loading");
+          sendButton.disabled = false;
+          sendButtonText.textContent = "Retry Send";
+
+          // Update status pill to alert state
           statusPill.classList.remove("ok");
           statusPill.classList.add("alert");
           statusPill.textContent = "Send failed";
-        } finally {
+
           sendInProgress = false;
         }
       }
