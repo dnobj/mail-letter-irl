@@ -9,6 +9,7 @@ This document provides a complete reference of the Auth0 tenant configuration us
 
 ## Table of Contents
 
+- [Quick Reference: Application Configuration Matrix](#quick-reference-application-configuration-matrix)
 - [Overview](#overview)
 - [Tenant Information](#tenant-information)
 - [Connections (Identity Providers)](#connections-identity-providers)
@@ -17,6 +18,31 @@ This document provides a complete reference of the Auth0 tenant configuration us
 - [Key Settings for ChatGPT MCP](#key-settings-for-chatgpt-mcp)
 - [Management via CLI](#management-via-cli)
 - [Common Operations](#common-operations)
+- [Environment Configuration](#environment-configuration)
+
+---
+
+## Quick Reference: Application Configuration Matrix
+
+Use this table to verify each application has the correct settings:
+
+| Application | Type | Callbacks Required | Web Origins Required | Domain Connection |
+|-------------|------|-------------------|---------------------|-------------------|
+| **Mail Letter IRL** | SPA | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect`<br>`https://platform.openai.com/apps-manage/oauth` | `https://chat.openai.com`<br>`https://chatgpt.com`<br>`https://platform.openai.com` | N/A |
+| **Letter IRL API** | M2M | None | None | N/A |
+| **ChatGPT (DCR)** | Generic | `https://chatgpt.com/connector_platform_oauth_redirect` | N/A | Uses domain-level |
+
+### Tenant-Level Settings Checklist
+
+| Setting | Location | Required Value |
+|---------|----------|----------------|
+| DCR Enabled | Settings → Advanced | ✅ Enabled |
+| Default Audience | Settings → General → API Authorization | `https://letter-irl/api` |
+| Google Connection | Connections | `is_domain_connection: true` |
+| Microsoft Connection | Connections | `is_domain_connection: true` |
+| Apple Connection | Connections | `is_domain_connection: true` |
+| GitHub Connection | Connections | `is_domain_connection: true` |
+| Username-Password | Connections | `is_domain_connection: true` |
 
 ---
 
@@ -458,6 +484,52 @@ auth0 api get connections/CONNECTION_ID | jq '{name, is_domain_connection}'
 
 ---
 
+## Environment Configuration
+
+### Current State: Single Tenant (Production)
+
+Currently, both development and production use the same Auth0 tenant:
+
+| Environment | Auth0 Tenant | Notes |
+|-------------|--------------|-------|
+| Production | `dev-ky21dxn3qmi71hjl.us.auth0.com` | Primary tenant |
+| Development | Same as production | Shared tenant |
+
+### Future State: Separate Dev Tenant
+
+When implementing a separate development environment (see Issue #44), create a new tenant:
+
+| Environment | Auth0 Tenant | Purpose |
+|-------------|--------------|---------|
+| Production | `dev-ky21dxn3qmi71hjl.us.auth0.com` | Live users, real payments |
+| Development | `letter-irl-dev.us.auth0.com` (proposed) | Testing, sync from production |
+
+### Configuration Parity Checklist
+
+When setting up a new environment, ensure these match production:
+
+1. **Connections** - All 5 identity providers with `is_domain_connection: true`
+2. **DCR** - Dynamic Client Registration enabled
+3. **Default Audience** - Set to `https://letter-irl/api`
+4. **Applications** - Create equivalent apps with appropriate callbacks
+5. **APIs** - Register `https://letter-irl/api` resource server
+
+### Environment Variables by Tenant
+
+```bash
+# Production (.env)
+LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+
+# Development (.env.dev) - when separate tenant exists
+LETTER_IRL_OAUTH_ISSUER=https://letter-irl-dev.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://letter-irl-dev.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+```
+
+---
+
 ## References
 
 - [Auth0 Documentation](https://auth0.com/docs)
@@ -465,11 +537,18 @@ auth0 api get connections/CONNECTION_ID | jq '{name, is_domain_connection}'
 - [RFC 7591: Dynamic Client Registration](https://datatracker.ietf.org/doc/html/rfc7591)
 - [OAuth 2.1 Specification](https://oauth.net/2.1/)
 - [ChatGPT Apps SDK - MCP Server](https://developers.openai.com/apps-sdk/build/mcp-server/)
-- [Letter IRL OAuth Learnings](./chatgpt-auth0-oauth-learnings.md)
+- [Letter IRL OAuth Learnings](./learnings/chatgpt-auth0-oauth-learnings.md)
 
 ---
 
 ## Changelog
+
+### December 23, 2025
+- Added Quick Reference: Application Configuration Matrix
+- Added Tenant-Level Settings Checklist
+- Added Environment Configuration section for dev/prod parity
+- Added OpenAI app review callback (`platform.openai.com/apps-manage/oauth`)
+- Updated references to new learnings folder structure
 
 ### November 14, 2025
 - Initial documentation created
