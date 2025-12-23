@@ -21,12 +21,12 @@ By using Letter IRL, you agree to these terms.
 - Your account is personal to you - don't share your login credentials
 - You're responsible for all activity under your account
 
-### Credits
+### Letter Packs and Validity
 
-- Sending letters requires credits, which you purchase through our service
-- The number of credits required depends on the letter type (shown before you confirm)
-- Credits are non-refundable once used to send a letter
-- Credits expire according to the policy shown at time of purchase or grant
+- **Pre-paid Packs:** The Service operates on a pre-paid basis. You purchase "Letter Packs" (or "Letter Balance") which entitle you to send a specific number of physical letters.
+- **Validity Period:** Letter Packs are valid for **24 months** from the date of purchase. Any unused letter balance remaining after 24 months may be forfeited or expired at our discretion.
+- **No Refunds:** All purchases are final. Letter Packs have no monetary value outside of the Service and cannot be exchanged for cash, except where required by law.
+- **Service Discontinuation:** We reserve the right to modify, suspend, or discontinue the Service at any time. In the event of a permanent shutdown, we will provide reasonable notice (e.g., via email or website) to allow you to use remaining Letter Packs. Unused balances after the shutdown date will be forfeited.
 - We use Stripe to process payments securely
 
 ### Sending Letters
@@ -34,6 +34,7 @@ By using Letter IRL, you agree to these terms.
 - Letters are currently limited to **US addresses only**
 - Once a letter is submitted for mailing, it cannot be recalled or cancelled
 - We validate addresses but cannot guarantee delivery to incorrect addresses
+- **Sending a letter deducts from your Letter Balance.**
 
 ---
 
@@ -74,8 +75,8 @@ To provide the Service, your letter content must be processed by our servers and
 ### Letter Processing
 
 1. You compose your letter through ChatGPT or another supported AI assistant
-2. We show you a preview and the cost before you confirm
-3. Once confirmed, credits are deducted and the letter is queued
+2. We show you a preview and the cost (in letter balance) before you confirm
+3. Once confirmed, your letter balance is deducted and the letter is queued
 4. Our printing partner (PostGrid) prints and mails your letter via USPS
 5. You can track the status through the service
 
@@ -92,7 +93,7 @@ To provide the Service, your letter content must be processed by our servers and
 
 ### When We Issue Refunds
 
-- If our system fails to process your letter (credits returned automatically)
+- If our system fails to process your letter (letter balance returned automatically)
 - If there's a technical error on our end that prevents delivery
 
 ### When We Don't Issue Refunds
@@ -100,8 +101,8 @@ To provide the Service, your letter content must be processed by our servers and
 - For letters successfully submitted to our mailing partner
 - For incorrect addresses you provided
 - For content issues that could have been caught in preview
-- For expired unused credits
-- **All credit purchases are final** except where required by law
+- For expired unused letter packs
+- **All purchases are final** except where required by law
 
 ### Chargebacks
 
@@ -134,7 +135,7 @@ Your use of Letter IRL is also governed by our [Privacy Policy](/privacy), which
 
 - Letter IRL and its features are our property
 - The content of your letters remains yours
-- Credits have no monetary value outside of the Service and cannot be exchanged for cash
+- Letter Packs have no monetary value outside of the Service and cannot be exchanged for cash
 
 ---
 

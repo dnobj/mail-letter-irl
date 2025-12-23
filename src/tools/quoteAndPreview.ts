@@ -382,7 +382,7 @@ async function handler(
     previewHtml,
     requiredCredits,
     canSendNow,
-    reasonCannotSend: canSendNow ? undefined : "Insufficient Letter IRL credits.",
+    reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
     deliveryClass: "First Class Letter",
     estimatedDeliveryDays: 5,
     draftId: draftResult.draftId,

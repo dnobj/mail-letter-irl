@@ -96,17 +96,18 @@ async function handler(
   const identityLine = `Account: ${email} (${authProvider})`;
   let balanceLine: string;
   if (creditsRemaining === 0) {
-    balanceLine = "You don't have any credits yet. Purchase credits to send letters!";
+    balanceLine = "You haven't pre-paid for any letters yet. Buy a Letter Pack to start sending!";
   } else {
-    balanceLine = `Balance: ${creditsRemaining} credits — That's enough for ${lettersRemaining} ${lettersRemaining === 1 ? 'letter' : 'letters'}.`;
+    balanceLine = `Letter Balance: ${lettersRemaining} ${lettersRemaining === 1 ? 'letter' : 'letters'} remaining.`;
   }
 
-  // Add expiration warning if credits are expiring soon
+  // Add expiration warning if letters are expiring soon
   let expirationWarning = '';
   if (creditsExpiringSoon > 0) {
     const earliestExpiry = expiringCreditsDetails[0];
     if (earliestExpiry) {
-      expirationWarning = `\n⚠️ ${creditsExpiringSoon} credits expiring in ${earliestExpiry.daysUntilExpiry} days. Use them before they expire!`;
+      const lettersExpiring = Math.floor(creditsExpiringSoon / standardCost);
+      expirationWarning = `\n⚠️ ${lettersExpiring} ${lettersExpiring === 1 ? 'letter' : 'letters'} expiring in ${earliestExpiry.daysUntilExpiry} days. Use them before they expire!`;
     }
   }
 
@@ -145,12 +146,12 @@ export const getAccountBalanceTool: McpToolDefinition<
   GetAccountBalanceOutput
 > = {
   name: "get_account_balance",
-  description: "Return the user's balance of Letter IRL credits.",
+  description: "Check how many pre-paid letters you have remaining.",
   readOnly: true,
   inputSchema: getAccountBalanceInputSchema,
   outputSchema: getAccountBalanceOutputSchema,
   meta: {
-    "openai/toolInvocation/invoking": "Checking credits…",
+    "openai/toolInvocation/invoking": "Checking letter balance…",
     "openai/toolInvocation/invoked": "Balance updated",
     readOnlyHint: true
   },

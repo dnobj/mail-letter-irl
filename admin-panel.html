@@ -636,7 +636,7 @@
         <div class="nav-item" data-section="users">Users</div>
         <div class="nav-item" data-section="letters">Letters</div>
         <div class="nav-item" data-section="jobs">Jobs</div>
-        <div class="nav-item" data-section="credits">Credits</div>
+        <div class="nav-item" data-section="credits">Letter Balance</div>
         <div class="nav-item" data-section="promos">Promos</div>
     </div>
 
@@ -722,33 +722,34 @@
             </div>
         </div>
 
-        <!-- Credits Section -->
+        <!-- Letter Balance Section -->
         <div id="credits" class="section">
             <div class="header">
-                <h2>Credit Management</h2>
+                <h2>Letter Balance Management</h2>
             </div>
 
             <div class="two-col">
                 <div class="card">
-                    <h3>Adjust Credits</h3>
+                    <h3>Adjust Letter Balance</h3>
                     <div class="form-group">
                         <label>User ID</label>
                         <input type="text" id="credit-user-id" placeholder="auth0|...">
                     </div>
                     <div class="form-group">
-                        <label>Amount (+/-)</label>
-                        <input type="number" id="credit-amount" placeholder="25">
+                        <label>Letters (+/-)</label>
+                        <input type="number" id="credit-amount" placeholder="5">
+                        <small style="color: var(--text-muted);">Enter letters to add or remove (negative for deduction)</small>
                     </div>
                     <div class="form-group">
                         <label>Reason</label>
-                        <input type="text" id="credit-reason" placeholder="Customer service credit">
+                        <input type="text" id="credit-reason" placeholder="Customer service adjustment">
                     </div>
-                    <button class="btn" onclick="adjustCredits()">Adjust Credits</button>
+                    <button class="btn" onclick="adjustCredits()">Adjust Letter Balance</button>
                     <div id="credit-result"></div>
                 </div>
 
                 <div class="card">
-                    <h3>User Credit Details</h3>
+                    <h3>User Letter Details</h3>
                     <div class="form-group">
                         <label>User ID</label>
                         <input type="text" id="credit-lookup-user" placeholder="auth0|...">
@@ -783,8 +784,8 @@
                         <input type="text" id="promo-name" placeholder="Welcome Bonus">
                     </div>
                     <div class="form-group">
-                        <label>Credits Amount</label>
-                        <input type="number" id="promo-credits" placeholder="5">
+                        <label>Letters to Grant</label>
+                        <input type="number" id="promo-credits" placeholder="2">
                     </div>
                     <div class="form-group">
                         <label>Max per User</label>
@@ -800,14 +801,14 @@
                             New Users Only
                         </label>
                         <small style="color: #888; display: block; margin-top: 4px;">
-                            If checked, only users with zero credit transactions can redeem this code.
+                            If checked, only users who haven't sent any letters can redeem this code.
                         </small>
                     </div>
                     <div class="form-group">
                         <label>Expiration Days (leave empty for no expiration)</label>
                         <input type="number" id="promo-expiration-days" placeholder="e.g. 90 days">
                         <small style="color: #888; display: block; margin-top: 4px;">
-                            Credits will expire this many days after redemption.
+                            Letters will expire this many days after redemption.
                         </small>
                     </div>
                     <button class="btn" onclick="createPromo()">Create Campaign</button>
@@ -897,9 +898,9 @@
                         <div class="stat-detail">+${dashboard.users.newToday} today / +${dashboard.users.new7d} this week</div>
                     </div>
                     <div class="stat-card">
-                        <h3>Credits Held</h3>
-                        <div class="stat-value">${dashboard.credits.totalHeld}</div>
-                        <div class="stat-detail">${dashboard.credits.totalPurchased} purchased / ${dashboard.credits.totalUsed} used</div>
+                        <h3>Letters Available</h3>
+                        <div class="stat-value">${Math.floor(dashboard.credits.totalHeld / 2)}</div>
+                        <div class="stat-detail">${Math.floor(dashboard.credits.totalPurchased / 2)} purchased / ${Math.floor(dashboard.credits.totalUsed / 2)} used</div>
                     </div>
                     <div class="stat-card">
                         <h3>Letters Sent</h3>
@@ -935,11 +936,11 @@
                 const data = await api('/api/admin/users?limit=20');
                 const html = `
                     <table>
-                        <tr><th>Email</th><th>Credits</th><th>Tier</th><th>Created</th></tr>
+                        <tr><th>Email</th><th>Letters</th><th>Tier</th><th>Created</th></tr>
                         ${data.users.map(u => `
                             <tr>
                                 <td>${u.email}</td>
-                                <td>${u.credits}</td>
+                                <td>${Math.floor(u.credits / 2)}</td>
                                 <td><span class="badge badge-${u.tier || 'standard'}">${u.tier || 'standard'}</span></td>
                                 <td>${formatDate(u.createdAt)}</td>
                             </tr>
@@ -965,12 +966,12 @@
                 }
                 const html = `
                     <table>
-                        <tr><th>Email</th><th>User ID</th><th>Credits</th><th>Tier</th></tr>
+                        <tr><th>Email</th><th>User ID</th><th>Letters</th><th>Tier</th></tr>
                         ${data.users.map(u => `
                             <tr>
                                 <td>${u.email}</td>
                                 <td style="font-family: monospace; font-size: 11px;">${u.userId}</td>
-                                <td>${u.credits}</td>
+                                <td>${Math.floor(u.credits / 2)}</td>
                                 <td><span class="badge badge-${u.tier || 'standard'}">${u.tier || 'standard'}</span></td>
                             </tr>
                         `).join('')}
@@ -1094,21 +1095,25 @@
             }
         }
 
-        // Credits
+        // Letter Balance (internal: 2 credits = 1 letter)
         async function adjustCredits() {
             const userId = document.getElementById('credit-user-id').value.trim();
-            const amount = parseInt(document.getElementById('credit-amount').value);
+            const lettersInput = parseInt(document.getElementById('credit-amount').value);
             const reason = document.getElementById('credit-reason').value.trim();
-            if (!userId || isNaN(amount) || !reason) {
+            if (!userId || isNaN(lettersInput) || !reason) {
                 showError('credit-result', 'Please fill all fields');
                 return;
             }
+            // Convert letters to internal credits (2 credits per letter)
+            const amount = lettersInput * 2;
             showLoading('credit-result');
             try {
                 const data = await api('/api/admin/credits/adjust', 'POST', { userId, amount, reason });
+                // Convert returned credits back to letters for display
+                const newLetterBalance = Math.floor(data.newBalance / 2);
                 document.getElementById('credit-result').innerHTML = `
                     <div class="success-msg">
-                        Credits adjusted! New balance: ${data.newBalance}
+                        Letter balance adjusted! New balance: ${newLetterBalance} letters
                     </div>
                 `;
             } catch (e) {
@@ -1122,24 +1127,31 @@
             showLoading('credit-lookup-result');
             try {
                 const data = await api(`/api/admin/users/${encodeURIComponent(userId)}`);
+                // Convert internal credits to user-facing letters (2 credits = 1 letter)
+                const letterBalance = Math.floor(data.user.credits / 2);
+                const lettersPurchased = Math.floor(data.user.creditsPurchased / 2);
+                const lettersUsed = Math.floor(data.user.creditsUsed / 2);
                 const html = `
                     <div class="result-box">
                         <p><strong>Email:</strong> ${data.user.email}</p>
-                        <p><strong>Credits:</strong> ${data.user.credits}</p>
-                        <p><strong>Purchased:</strong> ${data.user.creditsPurchased}</p>
-                        <p><strong>Used:</strong> ${data.user.creditsUsed}</p>
-                        <p><strong>Letters:</strong> ${data.stats.totalLetters}</p>
+                        <p><strong>Letter Balance:</strong> ${letterBalance}</p>
+                        <p><strong>Letters Purchased:</strong> ${lettersPurchased}</p>
+                        <p><strong>Letters Used:</strong> ${lettersUsed}</p>
+                        <p><strong>Total Letters Sent:</strong> ${data.stats.totalLetters}</p>
                         <h4 style="margin-top: 15px; margin-bottom: 10px;">Recent Transactions</h4>
                         ${data.stats.recentTransactions.length === 0 ? '<p>No transactions</p>' : `
                             <table>
-                                <tr><th>Amount</th><th>Type</th><th>Date</th></tr>
-                                ${data.stats.recentTransactions.slice(0, 5).map(tx => `
+                                <tr><th>Letters</th><th>Type</th><th>Date</th></tr>
+                                ${data.stats.recentTransactions.slice(0, 5).map(tx => {
+                                    const letters = Math.floor(Math.abs(tx.amount) / 2);
+                                    const sign = tx.amount > 0 ? '+' : '-';
+                                    return `
                                     <tr>
-                                        <td style="color: ${tx.amount > 0 ? '#28a745' : '#dc3545'}">${tx.amount > 0 ? '+' : ''}${tx.amount}</td>
+                                        <td style="color: ${tx.amount > 0 ? '#28a745' : '#dc3545'}">${sign}${letters}</td>
                                         <td>${tx.type || tx.transaction_type}</td>
                                         <td>${formatDate(tx.created_at)}</td>
                                     </tr>
-                                `).join('')}
+                                `}).join('')}
                             </table>
                         `}
                     </div>
@@ -1161,12 +1173,12 @@
                 }
                 const html = `
                     <table>
-                        <tr><th>Code</th><th>Name</th><th>Credits</th><th>Expiration</th><th>Redemptions</th><th>Status</th><th>Actions</th></tr>
+                        <tr><th>Code</th><th>Name</th><th>Letters</th><th>Expiration</th><th>Redemptions</th><th>Status</th><th>Actions</th></tr>
                         ${data.campaigns.map(c => `
                             <tr>
                                 <td><strong>${c.code}</strong>${c.requiresNewUser ? '<br><span style="font-size:10px;color:#17a2b8;font-weight:normal;">New Users Only</span>' : ''}</td>
                                 <td>${c.name}</td>
-                                <td>${c.creditsAmount}</td>
+                                <td>${Math.floor(c.creditsAmount / 2)}</td>
                                 <td style="font-size:12px;color:#888;">${c.expirationDays ? c.expirationDays + ' days' : 'Never'}</td>
                                 <td>${c.currentRedemptions}${c.maxTotalRedemptions ? '/' + c.maxTotalRedemptions : ''} (max ${c.maxPerUser}/user)</td>
                                 <td>
@@ -1217,7 +1229,9 @@
         async function createPromo() {
             const code = document.getElementById('promo-code').value.trim();
             const name = document.getElementById('promo-name').value.trim();
-            const creditsAmount = parseInt(document.getElementById('promo-credits').value);
+            // Admin enters letters, we convert to internal credits (2 credits per letter)
+            const lettersInput = parseInt(document.getElementById('promo-credits').value);
+            const creditsAmount = lettersInput * 2;  // Convert letters to credits
             const maxPerUser = parseInt(document.getElementById('promo-max-per-user').value) || 1;
             const maxTotalInput = document.getElementById('promo-max-total').value.trim();
             const maxTotalRedemptions = maxTotalInput ? parseInt(maxTotalInput) : null;
@@ -1225,8 +1239,8 @@
             const expirationDaysInput = document.getElementById('promo-expiration-days').value.trim();
             const expirationDays = expirationDaysInput ? parseInt(expirationDaysInput) : null;
 
-            if (!code || !name || isNaN(creditsAmount)) {
-                showError('promo-result', 'Please fill code, name, and credits amount');
+            if (!code || !name || isNaN(lettersInput)) {
+                showError('promo-result', 'Please fill code, name, and letters amount');
                 return;
             }
             showLoading('promo-result');
@@ -1234,7 +1248,7 @@
                 const payload = {
                     code,
                     name,
-                    creditsAmount,
+                    creditsAmount,  // Send as credits (letters * 2)
                     maxPerUser,
                     expirationPolicy: expirationDays ? 'days_from_activation' : 'never',
                     requiresNewUser
@@ -1349,8 +1363,8 @@
                         <div class="detail-label">Provider</div>
                         <div class="detail-value">${letter.provider || 'N/A'}</div>
 
-                        <div class="detail-label">Credits Cost</div>
-                        <div class="detail-value">${letter.creditsCost || 0}</div>
+                        <div class="detail-label">Letter Cost</div>
+                        <div class="detail-value">${Math.floor((letter.creditsCost || 0) / 2)} letter(s)</div>
 
                         <div class="detail-label">Created</div>
                         <div class="detail-value">${formatDate(letter.createdAt)}</div>

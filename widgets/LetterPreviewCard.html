@@ -329,9 +329,10 @@
           previewPane.innerHTML = "<em>No preview available</em>";
         }
 
-        // Cost
+        // Cost - convert internal credits to user-facing letters (2 credits = 1 letter)
+        const letters = Math.floor((requiredCredits ?? 2) / 2);
         document.getElementById("cost").textContent =
-          `${requiredCredits ?? 2} credit${requiredCredits === 1 ? "" : "s"}`;
+          `${letters} Letter${letters === 1 ? "" : "s"}`;
 
         // Delivery info
         const deliveryText = [];
