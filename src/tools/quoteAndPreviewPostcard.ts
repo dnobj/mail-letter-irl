@@ -479,8 +479,7 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
     "IMPORTANT - Image:\n" +
     "- Attach an image to use as the front of your postcard.\n" +
     "- Supported formats: PNG, JPEG, WebP (max 10MB).\n" +
-    "- Minimum dimensions: 600x900 pixels for good print quality.\n" +
-    "- The image will be resized to fit the postcard (6x9 inches at 300 DPI).\n\n" +
+    "- Any size image works - it will be resized to fit the postcard (6x9 at 300 DPI).\n\n" +
     "IMPORTANT - Sender Address:\n" +
     "- If you don't provide a sender address, your saved return address will be used automatically.\n" +
     "- Use set_return_address to save a return address for all future postcards.\n\n" +

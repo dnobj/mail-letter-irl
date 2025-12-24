@@ -21,8 +21,8 @@ import type { ImageFileParam, ProcessedImage, PostcardSize } from './types.js';
 
 const CONFIG = {
   maxFileSize: 10 * 1024 * 1024, // 10 MB
-  minWidth: 600,
-  minHeight: 900,
+  minWidth: 100,   // Lowered - Sharp will upscale to print size
+  minHeight: 100,  // Lowered - Sharp will upscale to print size
   jpegQuality: 85,
   allowedTypes: ['image/png', 'image/jpeg', 'image/webp'] as const,
   sizes: {
