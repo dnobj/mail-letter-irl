@@ -17,6 +17,7 @@ export interface LetterJobPayload {
   content: any;
   recipient: any;
   creditsCost: number;
+  mailType: 'letter' | 'postcard';
 }
 
 /**
@@ -30,12 +31,15 @@ export async function createLetterJob(letter: Letter): Promise<LetterJob> {
   await boss.createQueue(LETTER_QUEUE);
 
   // Create payload for pg-boss
+  // mail_type defaults to 'letter' if not specified (for backward compatibility)
+  const mailType = (letter as any).mail_type || 'letter';
   const payload: LetterJobPayload = {
     letterId: letter.letter_id,
     userId: letter.user_id,
     content: letter.content,
     recipient: letter.recipient,
-    creditsCost: letter.credits_cost
+    creditsCost: letter.credits_cost,
+    mailType
   };
 
   // Send job to pg-boss

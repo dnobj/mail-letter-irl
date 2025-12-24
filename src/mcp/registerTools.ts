@@ -14,7 +14,9 @@ import {
   listOrdersInputZ,
   setReturnAddressInputZ,
   getReturnAddressInputZ,
-  clearReturnAddressInputZ
+  clearReturnAddressInputZ,
+  quoteAndPreviewPostcardInputZ,
+  sendPostcardInputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
@@ -35,8 +37,8 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
   return {
     readOnlyHint: tool.readOnly,
     destructiveHint: tool.name === 'clear_return_address',
-    // send_letter triggers real-world mail fulfillment (Issue #39)
-    openWorldHint: tool.name === 'send_letter',
+    // send_letter and send_postcard trigger real-world mail fulfillment (Issue #39)
+    openWorldHint: tool.name === 'send_letter' || tool.name === 'send_postcard',
   };
 }
 
@@ -49,6 +51,7 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
  */
 const WIDGET_DEFINITIONS = [
   { name: "LetterPreviewCard", description: "Shows letter preview with cost, delivery info, and status" },
+  { name: "PostcardPreviewCard", description: "Shows postcard front/back preview with cost, delivery info, and status" },
 ];
 
 /**
@@ -156,7 +159,9 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   list_orders: listOrdersInputZ,
   set_return_address: setReturnAddressInputZ,
   get_return_address: getReturnAddressInputZ,
-  clear_return_address: clearReturnAddressInputZ
+  clear_return_address: clearReturnAddressInputZ,
+  quote_and_preview_postcard: quoteAndPreviewPostcardInputZ,
+  send_postcard: sendPostcardInputZ
 };
 
 function getZodShape(name: string) {
@@ -260,7 +265,8 @@ export async function registerLetterTools(
         // US-MCP-07: Separate heavy data (previewHtml) into _meta to reduce model context bloat.
         // The model doesn't need raw HTML; it gets the summaryText narration instead.
         const resultObj = result as Record<string, unknown>;
-        const { previewHtml, ...modelFacingData } = resultObj;
+        // Extract all preview HTML fields (letters have previewHtml, postcards have previewFrontHtml/previewBackHtml)
+        const { previewHtml, previewFrontHtml, previewBackHtml, ...modelFacingData } = resultObj;
 
         const response = {
           structuredContent: modelFacingData,  // Lean data for model (no HTML)
@@ -274,7 +280,10 @@ export async function registerLetterTools(
             ...meta,
             // Heavy data for widget only (→ window.openai.toolResponseMetadata)
             // Widget reads this via window.openai.toolResponseMetadata.previewHtml
-            ...(previewHtml !== undefined ? { previewHtml } : {})
+            ...(previewHtml !== undefined ? { previewHtml } : {}),
+            // Postcard-specific preview fields
+            ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
+            ...(previewBackHtml !== undefined ? { previewBackHtml } : {})
           }
         };
 
@@ -343,6 +352,26 @@ function summarizeToolResult(
     case "clear_return_address": {
       const message = result.message as string;
       return message || "Return address cleared.";
+    }
+    case "quote_and_preview_postcard": {
+      const postcardCost = result.postcardCost as number | undefined;
+      const canSend = result.canSendNow ? "can send now" : "cannot send";
+      const usedSaved = result.usedSavedReturnAddress as boolean | undefined;
+      let summary = `Postcard preview ready: costs ${postcardCost ?? 1} ${postcardCost === 1 ? 'letter' : 'letters'} (${canSend}).`;
+      if (usedSaved) {
+        summary += " Using your saved return address.";
+      }
+      return summary;
+    }
+    case "send_postcard": {
+      const status = result.currentStatus ?? "unknown";
+      const order = result.orderId ?? "(no id)";
+      const note = result.saveReturnAddressNote as string | undefined;
+      let summary = `Postcard ${order} queued with status ${status}.`;
+      if (note) {
+        summary += ` ${note}`;
+      }
+      return summary;
     }
     default:
       return JSON.stringify(result);

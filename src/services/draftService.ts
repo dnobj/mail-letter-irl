@@ -13,6 +13,9 @@ import type {
   CreateDraftResult,
   ConsumeDraftParams,
   ConsumeDraftResult,
+  PostcardDraft,
+  CreatePostcardDraftParams,
+  CreatePostcardDraftResult,
 } from './types.js';
 
 // Default draft expiration: 24 hours
@@ -59,6 +62,61 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
     draftId: draft.draft_id,
     expiresAt: new Date(draft.expires_at),
   };
+}
+
+/**
+ * Create a new draft for a postcard that has been previewed and validated.
+ * Called by quote_and_preview_postcard after successful address validation and image processing.
+ */
+export async function createPostcardDraft(params: CreatePostcardDraftParams): Promise<CreatePostcardDraftResult> {
+  const expiresInHours = params.expiresInHours ?? DEFAULT_EXPIRATION_HOURS;
+  const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
+  const postcardSize = params.postcardSize ?? '6x9';
+
+  const result = await query<PostcardDraft>(
+    `INSERT INTO letter_drafts (
+      user_id, sender, recipient, body_text, sign_off,
+      required_credits, preview_html, sender_validation, recipient_validation,
+      mail_type, front_image_data, front_image_url, postcard_size,
+      status, expires_at
+    ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, 'postcard', $9, $10, $11, 'pending', $12)
+    RETURNING draft_id, expires_at`,
+    [
+      params.userId,
+      JSON.stringify(params.sender),
+      JSON.stringify(params.recipient),
+      params.message,
+      params.requiredCredits ?? 2, // Default cost for postcards
+      params.previewHtml ?? null,
+      params.senderValidation ? JSON.stringify(params.senderValidation) : null,
+      params.recipientValidation ? JSON.stringify(params.recipientValidation) : null,
+      params.frontImageData,
+      params.frontImageUrl,
+      postcardSize,
+      expiresAt,
+    ]
+  );
+
+  const draft = result.rows[0];
+
+  console.log(`📮 Postcard draft created: ${draft.draft_id} (expires: ${expiresAt.toISOString()})`);
+
+  return {
+    draftId: draft.draft_id,
+    expiresAt: new Date(draft.expires_at),
+  };
+}
+
+/**
+ * Get a postcard draft by ID (without consuming it).
+ * Returns null if not found or if not a postcard.
+ */
+export async function getPostcardDraft(draftId: string): Promise<PostcardDraft | null> {
+  const result = await query<PostcardDraft>(
+    `SELECT * FROM letter_drafts WHERE draft_id = $1 AND mail_type = 'postcard'`,
+    [draftId]
+  );
+  return result.rows[0] || null;
 }
 
 // ============================================================================

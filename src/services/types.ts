@@ -123,6 +123,7 @@ export interface Letter {
   recipient: any; // JSON
   credits_cost: number;
   status: LetterStatus;
+  mail_type: MailType;
   preview_html?: string;
   tracking_id?: string;
   created_at: Date;
@@ -649,6 +650,7 @@ export interface CreatePostcardDraftParams {
   frontImageData: string;
   frontImageUrl: string;
   postcardSize?: PostcardSize;    // Default: '6x9'
+  requiredCredits?: number;       // Default: 2
   previewHtml?: string;
   senderValidation?: Record<string, unknown>;
   recipientValidation?: Record<string, unknown>;

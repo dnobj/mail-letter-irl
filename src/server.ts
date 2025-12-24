@@ -9,7 +9,9 @@ import {
   listOrdersTool,
   setReturnAddressTool,
   getReturnAddressTool,
-  clearReturnAddressTool
+  clearReturnAddressTool,
+  quoteAndPreviewPostcardTool,
+  sendPostcardTool
 } from "./tools/index.js";
 import {
   McpToolDefinition,
@@ -27,7 +29,10 @@ const tools: McpToolDefinition<unknown, unknown>[] = [
   listOrdersTool,
   setReturnAddressTool,
   getReturnAddressTool,
-  clearReturnAddressTool
+  clearReturnAddressTool,
+  // Postcard tools (US-POSTCARD-01, US-POSTCARD-02)
+  quoteAndPreviewPostcardTool,
+  sendPostcardTool
 ];
 
 export interface ServerRequest<Input> {

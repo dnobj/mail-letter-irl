@@ -40,6 +40,21 @@ export const toolInputSchemas = {
   get_return_address: z.object({}).strict(),
   clear_return_address: z.object({
     confirm: z.boolean()
+  }),
+  quote_and_preview_postcard: z.object({
+    sender: addressSchema.optional(),  // Optional - will use saved return address if not provided
+    recipient: addressSchema,
+    message: z.string(),
+    size: z.enum(["6x9"]).optional(),
+    // Image from OpenAI fileParams - injected by MCP framework
+    image: z.object({
+      download_url: z.string(),
+      file_id: z.string()
+    }).optional()
+  }),
+  send_postcard: z.object({
+    draftId: z.string(),
+    confirm: z.boolean()
   })
 };
 

@@ -8,7 +8,8 @@ import { getJobQueue } from '../services/jobQueue.js';
 import { query } from '../db/index.js';
 import { updateJobStatus, getJobByLetterId } from '../services/letterJobService.js';
 import type { LetterJobPayload } from '../services/letterJobService.js';
-import { getLetterProvider, type LetterParams } from '../services/providers/index.js';
+import { getLetterProvider } from '../services/providers/index.js';
+import type { LetterParams, PostcardParams, PostcardSize } from '../services/providers/types.js';
 
 const LETTER_QUEUE = 'send-letter';
 
@@ -32,9 +33,10 @@ function normalizeCountryToUS(country?: string): string {
 async function processLetterJob(jobs: any[]): Promise<void> {
   const [job] = jobs; // Destructure the array to get the single job
   const payload: LetterJobPayload = job.data;
-  const { letterId, userId, content, recipient, creditsCost } = payload;
+  const { letterId, userId, content, recipient, creditsCost, mailType } = payload;
 
-  console.log(`📨 Processing letter job: ${job.id} for letter ${letterId}`);
+  const typeEmoji = mailType === 'postcard' ? '📮' : '📨';
+  console.log(`${typeEmoji} Processing ${mailType} job: ${job.id} for letter ${letterId}`);
 
   // Get our internal job record
   const letterJob = await getJobByLetterId(letterId);
@@ -56,47 +58,86 @@ async function processLetterJob(jobs: any[]): Promise<void> {
     // Get the letter provider (DummyProvider or real provider)
     const provider = getLetterProvider();
 
-    // Build provider-specific parameters
-    // Recipient data is already structured with addressLine1, city, state, etc.
-    const letterParams: LetterParams = {
-      recipientName: recipient.name,
-      recipientAddress: {
-        line1: recipient.addressLine1 || '',
-        line2: recipient.addressLine2,
-        city: recipient.city || '',
-        state: recipient.state || '',
-        postalCode: recipient.postalCode || '',
-        country: normalizeCountryToUS(recipient.country)
-      },
-      senderName: content.sender?.name || 'Letter IRL',
-      senderAddress: content.sender ? {
-        line1: content.sender.addressLine1 || '',
-        line2: content.sender.addressLine2,
-        city: content.sender.city || '',
-        state: content.sender.state || '',
-        postalCode: content.sender.postalCode || '',
-        country: normalizeCountryToUS(content.sender.country)
-      } : undefined,
-      message: `${content.bodyText}\n\n${content.signOff || ''}`.trim(),
-      color: false,
-      doubleSided: false,
-      metadata: {
-        letterId,
-        userId,
-        creditsCost
-      }
-    };
+    let result;
 
-    console.log(`📤 Sending letter via provider: ${provider.config.displayName}`);
+    if (mailType === 'postcard') {
+      // Build postcard-specific parameters
+      const postcardParams: PostcardParams = {
+        recipientName: recipient.name,
+        recipientAddress: {
+          line1: recipient.addressLine1 || '',
+          line2: recipient.addressLine2,
+          city: recipient.city || '',
+          state: recipient.state || '',
+          postalCode: recipient.postalCode || '',
+          country: normalizeCountryToUS(recipient.country)
+        },
+        senderName: content.sender?.name,
+        senderAddress: content.sender ? {
+          line1: content.sender.addressLine1 || '',
+          line2: content.sender.addressLine2,
+          city: content.sender.city || '',
+          state: content.sender.state || '',
+          postalCode: content.sender.postalCode || '',
+          country: normalizeCountryToUS(content.sender.country)
+        } : undefined,
+        frontImageBase64: content.frontImageData,
+        backMessage: content.message,
+        size: (content.postcardSize || '6x9') as PostcardSize,
+        metadata: {
+          letterId,
+          userId,
+          creditsCost
+        }
+      };
 
-    // Send the letter via the provider
-    const result = await provider.sendLetter(letterParams);
+      console.log(`📮 Sending postcard via provider: ${provider.config.displayName}`);
+
+      // Send the postcard via the provider
+      result = await provider.sendPostcard(postcardParams);
+    } else {
+      // Build letter-specific parameters
+      const letterParams: LetterParams = {
+        recipientName: recipient.name,
+        recipientAddress: {
+          line1: recipient.addressLine1 || '',
+          line2: recipient.addressLine2,
+          city: recipient.city || '',
+          state: recipient.state || '',
+          postalCode: recipient.postalCode || '',
+          country: normalizeCountryToUS(recipient.country)
+        },
+        senderName: content.sender?.name || 'Letter IRL',
+        senderAddress: content.sender ? {
+          line1: content.sender.addressLine1 || '',
+          line2: content.sender.addressLine2,
+          city: content.sender.city || '',
+          state: content.sender.state || '',
+          postalCode: content.sender.postalCode || '',
+          country: normalizeCountryToUS(content.sender.country)
+        } : undefined,
+        message: `${content.bodyText}\n\n${content.signOff || ''}`.trim(),
+        color: false,
+        doubleSided: false,
+        metadata: {
+          letterId,
+          userId,
+          creditsCost
+        }
+      };
+
+      console.log(`📨 Sending letter via provider: ${provider.config.displayName}`);
+
+      // Send the letter via the provider
+      result = await provider.sendLetter(letterParams);
+    }
 
     if (!result.success) {
       throw new Error(result.error || 'Provider returned unsuccessful result');
     }
 
-    console.log(`✅ Letter sent via ${provider.config.displayName}`);
+    const mailTypeLabel = mailType === 'postcard' ? 'Postcard' : 'Letter';
+    console.log(`✅ ${mailTypeLabel} sent via ${provider.config.displayName}`);
     console.log(`   Tracking ID: ${result.trackingId}`);
     console.log(`   Cost: $${(result.costCents || 0) / 100}`);
     if (result.expectedDeliveryDate) {
@@ -127,7 +168,7 @@ async function processLetterJob(jobs: any[]): Promise<void> {
     // Update job status to 'completed'
     await updateJobStatus(letterJob.job_id, 'completed');
 
-    console.log(`✅ Letter ${letterId} sent successfully (user: ${userId})`);
+    console.log(`✅ ${mailTypeLabel} ${letterId} sent successfully (user: ${userId})`);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error(`❌ Failed to process letter ${letterId}:`, errorMessage);
