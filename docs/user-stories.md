@@ -1,6 +1,6 @@
 # User Stories
 
-**Last Updated:** December 23, 2025
+**Last Updated:** December 24, 2025
 **Purpose:** Test coverage and acceptance criteria for Letter IRL
 
 ---
@@ -12,6 +12,7 @@ User stories are organized by feature area using semantic prefixes:
 | Prefix | Area | Description |
 |--------|------|-------------|
 | `US-LETTER` | Letter Sending | Core letter flow (preview, send, status) |
+| `US-POSTCARD` | Postcards | Postcard preview, send, image handling |
 | `US-CREDIT` | Credits | Balance, purchases, expiration |
 | `US-PROMO` | Promo Codes | Campaign redemption |
 | `US-ACCT` | Account | Authentication, profile |
@@ -200,6 +201,97 @@ interface ProviderStatus {
 **Admin Trigger:**
 - [ ] Manual sync available via `/api/admin/sync-statuses`
 - [ ] Returns count of letters checked and updated
+
+---
+
+## Postcards (POSTCARD)
+
+### US-POSTCARD-01: Preview a Postcard
+**As a** user
+**I want to** preview my postcard with an image before sending
+**So that** I can verify the design and cost before committing
+
+**Acceptance Criteria:**
+- [ ] Can provide sender and recipient addresses (US only)
+- [ ] Can upload/provide an image for the postcard front
+- [ ] Image accepted via OpenAI `_meta["openai/fileParams"]` with `download_url`
+- [ ] System validates addresses via PostGrid
+- [ ] System processes image (resize to 1800x2700px for 6x9 at 300 DPI)
+- [ ] System calculates required credits (2 per postcard, same as letter)
+- [ ] Returns preview of front (image) and back (message)
+- [ ] Returns `canSendNow` based on credit balance
+- [ ] Creates draft with `mail_type='postcard'` and 24-hour expiration
+- [ ] Returns `draftId` for use in send operation
+
+**Image Requirements:**
+- [ ] Maximum file size: 10 MB
+- [ ] Allowed formats: PNG, JPEG, WebP
+- [ ] Minimum dimensions: 600x900 pixels (for print quality)
+- [ ] Images are resized to fit 6x9 postcard (cover/center crop)
+
+**Error Cases:**
+- [ ] Missing image → "Postcard requires an image for the front"
+- [ ] Image too large (>10MB) → "Image is too large. Please use an image under 10MB."
+- [ ] Wrong format → "Unsupported image format. Please use PNG, JPEG, or WebP."
+- [ ] Image too small → "Image is too small for print quality. Please use at least 600x900 pixels."
+- [ ] Image download failed → "Couldn't download the image. Please try again."
+- [ ] Message too long → "Message exceeds postcard limit (~400 characters)"
+- [ ] Non-US address → "Only supports mailing within United States"
+
+---
+
+### US-POSTCARD-02: Send a Postcard
+**As a** user
+**I want to** send my previewed postcard
+**So that** it gets printed and mailed to the recipient
+
+**Acceptance Criteria:**
+- [ ] Must provide valid `draftId` from postcard preview
+- [ ] Must set `confirm: true` to proceed
+- [ ] Credits deducted atomically (FIFO: expiring-soonest first)
+- [ ] Letter record created with `mail_type='postcard'` and status `queued`
+- [ ] Background job queued for processing
+- [ ] Returns `orderId`, `creditsRemaining`, `statusTimeline`
+- [ ] Transaction recorded in audit trail
+- [ ] Worker routes to `provider.sendPostcard()` based on mail_type
+
+**Error Cases:**
+- [ ] Missing `draftId` → "Draft ID required"
+- [ ] `confirm` not true → "Must confirm to send"
+- [ ] Draft expired (>24h) → "DRAFT_EXPIRED" error
+- [ ] Draft already used → Returns existing order (idempotent)
+- [ ] Draft belongs to other user → "DRAFT_NOT_OWNED"
+- [ ] Insufficient credits → "INSUFFICIENT_CREDITS"
+
+---
+
+### US-POSTCARD-03: Postcard Image Processing
+**As the** system
+**I want to** process user images for postcard printing
+**So that** postcards have high-quality, properly-sized images
+
+**Acceptance Criteria:**
+- [ ] Download image from OpenAI `download_url` during preview
+- [ ] Validate file size (max 10MB) before full download
+- [ ] Validate content type (PNG, JPEG, WebP only)
+- [ ] Validate dimensions (min 600x900 pixels)
+- [ ] Resize to print dimensions: 1800x2700px (6x9 at 300 DPI)
+- [ ] Use `cover` fit with `center` position for cropping
+- [ ] Convert to JPEG at 85% quality
+- [ ] Store as base64 data URI in draft
+- [ ] Processing completes inline (not background job)
+- [ ] Memory usage ~50-150MB per image, 2-5 second duration
+
+**Technical Details:**
+- Uses Sharp library for image processing
+- Image stored in `front_image_data` column (base64)
+- Original URL stored in `front_image_url` for debugging
+- PostGrid receives image via `frontHTML` containing base64 img tag
+
+**Error Handling:**
+- [ ] Network timeout → Retry once, then fail with clear error
+- [ ] Corrupted image → "Image could not be processed. Please try a different image."
+- [ ] Processing failure → Log error, return user-friendly message
 
 ---
 
@@ -1232,6 +1324,7 @@ This implementation uses a static client approach aligned with the spec directio
 | P0 - Critical | Credits | US-CREDIT-01, US-CREDIT-02, US-CREDIT-07 | All users |
 | P0 - Critical | Security | US-SEC-01, US-SEC-02 | System |
 | P1 - High | Letter Sending | US-LETTER-04, US-LETTER-05, US-LETTER-06, US-LETTER-07 | Marcus, David, System |
+| P1 - High | Postcards | US-POSTCARD-01, US-POSTCARD-02, US-POSTCARD-03 | Sarah, David, Creative users |
 | P1 - High | Credits | US-CREDIT-03, US-CREDIT-06, US-CREDIT-09 | System |
 | P1 - High | Edge Cases | US-EDGE-01, US-EDGE-03, US-EDGE-04, US-EDGE-08 | Eleanor, System |
 | P1 - High | Account | US-ACCT-00 | Sarah, Eleanor (new users) |
@@ -1255,6 +1348,7 @@ This implementation uses a static client approach aligned with the spec directio
 | Category | Prefix | Count |
 |----------|--------|-------|
 | Letter Sending | US-LETTER | 7 |
+| Postcards | US-POSTCARD | 3 |
 | Credits | US-CREDIT | 9 |
 | Promo Codes | US-PROMO | 3 |
 | Account | US-ACCT | 4 |
@@ -1265,7 +1359,7 @@ This implementation uses a static client approach aligned with the spec directio
 | MCP Access | US-MCP | 8 |
 | Development | US-DEV | 3 |
 | OAuth Registration | US-DCR | 2 |
-| **Total** | | **61** |
+| **Total** | | **64** |
 
 ---
 
