@@ -273,3 +273,81 @@ export interface AddressValidationResult {
  * Provider factory function type
  */
 export type ProviderFactory = (config: ProviderConfig) => LetterFulfillmentProvider;
+
+// ============================================================================
+// Postcard Types (US-POSTCARD-01, US-POSTCARD-02)
+// ============================================================================
+
+/**
+ * Postcard size options
+ */
+export type PostcardSize = '6x4' | '6x9' | '6x11';
+
+/**
+ * Postcard parameters for sending
+ */
+export interface PostcardParams {
+  /** Recipient's full name */
+  recipientName: string;
+
+  /** Complete mailing address */
+  recipientAddress: {
+    line1: string;
+    line2?: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country?: string;
+  };
+
+  /** Sender's name (return address) */
+  senderName?: string;
+
+  /** Sender's address (return address) */
+  senderAddress?: {
+    line1: string;
+    line2?: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country?: string;
+  };
+
+  /** Front image as base64 data URI */
+  frontImageBase64: string;
+
+  /** Back message content */
+  backMessage: string;
+
+  /** Postcard size (default: '6x9') */
+  size?: PostcardSize;
+
+  /** Optional metadata to pass to provider */
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Result of sending a postcard
+ */
+export interface PostcardResult {
+  /** Whether the postcard was successfully queued/sent */
+  success: boolean;
+
+  /** Provider-specific tracking/job ID */
+  trackingId: string;
+
+  /** Expected delivery date (if available) */
+  expectedDeliveryDate?: Date;
+
+  /** Cost in cents */
+  costCents?: number;
+
+  /** URL to view postcard details (if available) */
+  detailsUrl?: string;
+
+  /** Provider-specific metadata */
+  metadata?: Record<string, any>;
+
+  /** Error message if failed */
+  error?: string;
+}

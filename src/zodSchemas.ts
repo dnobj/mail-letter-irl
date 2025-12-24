@@ -47,3 +47,24 @@ export const getReturnAddressInputZ = z.object({});
 export const clearReturnAddressInputZ = z.object({
   confirm: z.boolean()
 });
+
+// ============================================================================
+// Postcard Schemas (US-POSTCARD-01, US-POSTCARD-02)
+// ============================================================================
+
+export const quoteAndPreviewPostcardInputZ = z.object({
+  sender: addressZ.optional(),  // Optional - will use saved return address if not provided
+  recipient: addressZ,
+  message: z.string(),
+  size: z.enum(["6x9"]).optional(),
+  // Image from OpenAI fileParams - injected by MCP framework
+  image: z.object({
+    download_url: z.string(),
+    file_id: z.string()
+  }).optional()
+});
+
+export const sendPostcardInputZ = z.object({
+  draftId: z.string(),
+  confirm: z.boolean()
+});

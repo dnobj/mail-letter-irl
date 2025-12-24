@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>PostcardPreviewCard</title>
+    <style>
+      :root {
+        --bg-primary: #ffffff;
+        --bg-secondary: #f8fafc;
+        --text-primary: #1f2933;
+        --text-secondary: #61748f;
+        --border-color: #e2e8f0;
+        --accent-success: #065f46;
+        --accent-success-bg: #d1fae5;
+        --accent-warning: #b91c1c;
+        --accent-warning-bg: #fee2e2;
+        --accent-primary: #2563eb;
+        --accent-primary-hover: #1d4ed8;
+        --accent-primary-disabled: #93c5fd;
+        --preview-bg: #fefefe;
+
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: transparent;
+        color: var(--text-primary);
+      }
+
+      .dark {
+        --bg-primary: #1e293b;
+        --bg-secondary: #0f172a;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --border-color: #334155;
+        --accent-success: #34d399;
+        --accent-success-bg: #064e3b;
+        --accent-warning: #f87171;
+        --accent-warning-bg: #7f1d1d;
+        --accent-primary: #3b82f6;
+        --accent-primary-hover: #60a5fa;
+        --accent-primary-disabled: #1e3a5f;
+        --preview-bg: #1e293b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 1rem;
+        background: transparent;
+      }
+
+      .card {
+        width: 100%;
+        border-radius: 12px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        overflow: hidden;
+      }
+
+      /* Preview tabs */
+      .preview-tabs {
+        display: flex;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .preview-tab {
+        flex: 1;
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
+        font-weight: 600;
+        text-align: center;
+        cursor: pointer;
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        transition: all 0.15s ease;
+      }
+
+      .preview-tab:hover {
+        color: var(--text-primary);
+        background: var(--bg-secondary);
+      }
+
+      .preview-tab.active {
+        color: var(--accent-primary);
+        border-bottom: 2px solid var(--accent-primary);
+        margin-bottom: -1px;
+      }
+
+      /* Preview panes */
+      .preview-container {
+        position: relative;
+        min-height: 200px;
+      }
+
+      .preview-pane {
+        max-height: 300px;
+        overflow: auto;
+        padding: 1rem;
+        background: var(--preview-bg);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .preview-pane.hidden {
+        display: none;
+      }
+
+      .preview-pane img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      .preview-pane.back-preview {
+        font-family: "Georgia", "Times New Roman", serif;
+        font-size: 0.9rem;
+        line-height: 1.5;
+      }
+
+      .meta {
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .info-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.9rem;
+      }
+
+      .info-label {
+        color: var(--text-secondary);
+      }
+
+      .info-value {
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.35rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+      }
+
+      .status-pill.ok {
+        background: var(--accent-success-bg);
+        color: var(--accent-success);
+      }
+
+      .status-pill.alert {
+        background: var(--accent-warning-bg);
+        color: var(--accent-warning);
+      }
+
+      .note {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        padding: 0.75rem;
+        background: var(--bg-secondary);
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+      }
+
+      /* Send button styles */
+      .send-button {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        font-size: 1rem;
+        font-weight: 600;
+        color: #ffffff;
+        background: var(--accent-primary);
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+
+      .send-button:hover:not(:disabled) {
+        background: var(--accent-primary-hover);
+      }
+
+      .send-button:disabled {
+        background: var(--accent-primary-disabled);
+        cursor: not-allowed;
+        opacity: 0.7;
+      }
+
+      .send-button.loading {
+        pointer-events: none;
+      }
+
+      .send-button .spinner {
+        width: 1rem;
+        height: 1rem;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-top-color: #ffffff;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      /* Success/Error states */
+      .send-result {
+        padding: 0.75rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        text-align: center;
+      }
+
+      .send-result.success {
+        background: var(--accent-success-bg);
+        color: var(--accent-success);
+      }
+
+      .send-result.error {
+        background: var(--accent-warning-bg);
+        color: var(--accent-warning);
+      }
+
+      /* Loading state */
+      .loading .info-value,
+      .loading .status-pill {
+        background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border-color) 50%, var(--bg-secondary) 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        color: transparent;
+        border-radius: 4px;
+        min-width: 60px;
+      }
+
+      .loading .status-pill {
+        min-width: 100px;
+      }
+
+      @keyframes shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+      }
+
+      .preview-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100px;
+        color: var(--text-secondary);
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card" id="card">
+      <div class="preview-tabs">
+        <button class="preview-tab active" id="tab-front" data-tab="front">Front (Image)</button>
+        <button class="preview-tab" id="tab-back" data-tab="back">Back (Message)</button>
+      </div>
+      <div class="preview-container">
+        <div class="preview-pane front-preview" id="preview-front">
+          <em>Loading preview...</em>
+        </div>
+        <div class="preview-pane back-preview hidden" id="preview-back">
+          <em>Loading preview...</em>
+        </div>
+      </div>
+      <div class="meta">
+        <div class="info-row">
+          <span class="info-label">Cost</span>
+          <span class="info-value" id="cost"></span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Delivery</span>
+          <span class="info-value" id="delivery"></span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Status</span>
+          <span class="status-pill" id="status-pill"></span>
+        </div>
+        <div class="info-row">
+          <span class="info-label" id="id-label">Draft</span>
+          <span class="info-value" id="id-value"></span>
+        </div>
+        <div class="note" id="note" style="display: none;"></div>
+        <!-- Send button -->
+        <button class="send-button" id="send-button" disabled>
+          <span id="send-button-text">Send Postcard</span>
+        </button>
+        <div id="error-message" class="send-result error" style="display: none;"></div>
+      </div>
+    </div>
+
+    <script type="module">
+      // Per OpenAI docs, data may not be available immediately
+      // Must listen for 'openai:set_globals' event
+
+      let dataLoaded = false;
+      let currentDraftId = null;
+      let sendInProgress = false;
+      let currentTab = 'front';
+
+      // Tab switching
+      function switchTab(tab) {
+        currentTab = tab;
+        document.getElementById("tab-front").classList.toggle("active", tab === "front");
+        document.getElementById("tab-back").classList.toggle("active", tab === "back");
+        document.getElementById("preview-front").classList.toggle("hidden", tab !== "front");
+        document.getElementById("preview-back").classList.toggle("hidden", tab !== "back");
+      }
+
+      document.getElementById("tab-front").addEventListener("click", () => switchTab("front"));
+      document.getElementById("tab-back").addEventListener("click", () => switchTab("back"));
+
+      function showLoading() {
+        const card = document.getElementById("card");
+        card.classList.add("loading");
+
+        // Show loading state
+        document.getElementById("preview-front").innerHTML =
+          '<div class="preview-loading">Loading postcard preview...</div>';
+        document.getElementById("preview-back").innerHTML =
+          '<div class="preview-loading">Loading message preview...</div>';
+        document.getElementById("cost").textContent = "-";
+        document.getElementById("delivery").textContent = "-";
+
+        const statusPill = document.getElementById("status-pill");
+        statusPill.classList.remove("ok", "alert");
+        statusPill.textContent = "Loading...";
+
+        document.getElementById("note").style.display = "none";
+
+        // Disable send button during loading
+        const sendButton = document.getElementById("send-button");
+        sendButton.disabled = true;
+      }
+
+      function extractBodyContent(html) {
+        if (!html) return null;
+        const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        return bodyMatch ? bodyMatch[1] : html;
+      }
+
+      function render() {
+        const state = window.openai?.toolOutput;
+
+        // Check if we have actual data
+        if (!state || state.draftId === undefined) {
+          if (!dataLoaded) {
+            showLoading();
+          }
+          return;
+        }
+
+        dataLoaded = true;
+        const card = document.getElementById("card");
+        card.classList.remove("loading");
+
+        // Get preview HTML from toolResponseMetadata or toolOutput
+        const previewFrontHtml =
+          window.openai?.toolResponseMetadata?.previewFrontHtml ??
+          state.previewFrontHtml;
+        const previewBackHtml =
+          window.openai?.toolResponseMetadata?.previewBackHtml ??
+          state.previewBackHtml;
+
+        const {
+          postcardCost,
+          canSendNow,
+          reasonCannotSend,
+          deliveryClass,
+          estimatedDeliveryDays,
+          savedReturnAddressNote,
+          draftId
+        } = state;
+
+        // Store draftId for send button
+        currentDraftId = draftId;
+
+        // Render front preview (image)
+        const previewFront = document.getElementById("preview-front");
+        const frontContent = extractBodyContent(previewFrontHtml);
+        if (frontContent) {
+          previewFront.innerHTML = frontContent;
+        } else {
+          previewFront.innerHTML = "<em>No image preview available</em>";
+        }
+
+        // Render back preview (message)
+        const previewBack = document.getElementById("preview-back");
+        const backContent = extractBodyContent(previewBackHtml);
+        if (backContent) {
+          previewBack.innerHTML = backContent;
+        } else {
+          previewBack.innerHTML = "<em>No message preview available</em>";
+        }
+
+        // Cost - postcardCost is already in letters (1 letter = 1 postcard)
+        const letters = postcardCost ?? 1;
+        document.getElementById("cost").textContent =
+          `${letters} Letter${letters === 1 ? "" : "s"}`;
+
+        // Delivery info
+        const deliveryText = [];
+        if (deliveryClass) deliveryText.push(deliveryClass);
+        if (estimatedDeliveryDays) deliveryText.push(`~${estimatedDeliveryDays} days`);
+        document.getElementById("delivery").textContent =
+          deliveryText.length > 0 ? deliveryText.join(" - ") : "Standard";
+
+        // Status pill
+        const statusPill = document.getElementById("status-pill");
+        statusPill.classList.remove("ok", "alert");
+        if (canSendNow) {
+          statusPill.classList.add("ok");
+          statusPill.textContent = "Ready to send";
+        } else {
+          statusPill.classList.add("alert");
+          statusPill.textContent = reasonCannotSend ?? "Cannot send";
+        }
+
+        // Note about saved return address
+        const noteEl = document.getElementById("note");
+        if (savedReturnAddressNote) {
+          noteEl.textContent = savedReturnAddressNote;
+          noteEl.style.display = "block";
+        } else {
+          noteEl.style.display = "none";
+        }
+
+        // Show Draft ID
+        document.getElementById("id-label").textContent = "Draft";
+        document.getElementById("id-value").textContent = draftId || "-";
+
+        // Update send button state
+        const sendButton = document.getElementById("send-button");
+        const sendButtonText = document.getElementById("send-button-text");
+
+        if (!sendInProgress) {
+          sendButton.disabled = !canSendNow;
+          sendButtonText.textContent = canSendNow ? "Send Postcard" : (reasonCannotSend ?? "Cannot Send");
+        }
+      }
+
+      // Handle send button click
+      async function handleSend() {
+        if (sendInProgress || !currentDraftId) return;
+
+        const sendButton = document.getElementById("send-button");
+        const sendButtonText = document.getElementById("send-button-text");
+        const statusPill = document.getElementById("status-pill");
+        const idLabel = document.getElementById("id-label");
+        const idValue = document.getElementById("id-value");
+        const errorMessage = document.getElementById("error-message");
+
+        // Hide any previous error
+        errorMessage.style.display = "none";
+
+        // Show loading state
+        sendInProgress = true;
+        sendButton.disabled = true;
+        sendButton.classList.add("loading");
+        sendButtonText.innerHTML = '<span class="spinner"></span> Sending...';
+
+        try {
+          // Call send_postcard via OpenAI callTool
+          const result = await window.openai.callTool("send_postcard", {
+            draftId: currentDraftId,
+            confirm: true
+          });
+
+          // Extract orderId
+          const orderId = result?.orderId
+            || result?.structuredContent?.orderId
+            || result?.content?.[0]?.text?.match(/Order ID: ([a-f0-9-]+)/i)?.[1]
+            || null;
+
+          // Update status pill to show sent
+          statusPill.classList.remove("ok", "alert");
+          statusPill.classList.add("ok");
+          statusPill.textContent = "Sent!";
+
+          // Change Draft label to Order and show order ID
+          idLabel.textContent = "Order";
+          idValue.textContent = orderId || "Confirmed";
+
+          // Update button to show success
+          sendButton.classList.remove("loading");
+          sendButtonText.innerHTML = "Postcard Sent!";
+          // Keep button disabled
+        } catch (error) {
+          // Show error message
+          errorMessage.textContent = `Failed to send: ${error.message || 'Unknown error'}`;
+          errorMessage.style.display = "block";
+
+          // Reset button for retry
+          sendButton.classList.remove("loading");
+          sendButton.disabled = false;
+          sendButtonText.textContent = "Retry Send";
+
+          // Update status pill to alert state
+          statusPill.classList.remove("ok");
+          statusPill.classList.add("alert");
+          statusPill.textContent = "Send failed";
+
+          sendInProgress = false;
+        }
+      }
+
+      // Attach click handler
+      document.getElementById("send-button").addEventListener("click", handleSend);
+
+      // Apply theme
+      const theme = window.openai?.theme ?? "light";
+      if (theme === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+
+      // Initial render (will show loading state)
+      render();
+
+      // Listen for data updates (per OpenAI docs)
+      window.addEventListener("openai:set_globals", () => {
+        render();
+      });
+    </script>
+  </body>
+</html>

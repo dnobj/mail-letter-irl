@@ -1,6 +1,6 @@
 # Personas
 
-**Last Updated:** December 16, 2025
+**Last Updated:** December 24, 2025
 **Purpose:** Define user archetypes for product design, user stories, and test scenarios
 
 ---
@@ -32,13 +32,15 @@ Letter IRL serves users who want to send physical letters through conversational
 
 **Goals:**
 - Send heartfelt letters for special occasions (birthdays, thank-yous, sympathy)
+- Send postcards from vacations or with personal photos
 - Make letters feel personal, not mass-produced
 - Avoid the hassle of finding stamps, envelopes, mailboxes
 
 **Behaviors:**
-- Sends 2-4 letters per year
+- Sends 2-4 letters per year, plus occasional postcards
 - Buys the smallest credit pack (4 credits)
 - Takes time crafting each letter with ChatGPT's help
+- Uses DALL-E or personal photos for postcard images
 - Wants to preview before committing
 - Cares about letter appearance and formatting
 
@@ -51,12 +53,16 @@ Letter IRL serves users who want to send physical letters through conversational
 **Key User Stories:**
 - US-LETTER-01 (Preview letter)
 - US-LETTER-02 (Send letter)
+- US-POSTCARD-01 (Preview postcard)
+- US-POSTCARD-02 (Send postcard)
 - US-CREDIT-01 (Check balance)
 - US-EDGE-02 (Address correction)
 
 **Test Scenarios:**
 - First-time user flow
 - Single letter with preview → confirm cycle
+- Postcard with personal photo upload
+- Postcard with DALL-E generated image
 - Address validation with corrections
 - Credit expiration warnings
 
@@ -155,12 +161,14 @@ Letter IRL serves users who want to send physical letters through conversational
 **Goals:**
 - Send personalized client communications at scale
 - Thank customers, follow up on meetings
+- Send branded postcards for events, promotions, or thank-yous
 - Differentiate from competitors with physical mail
 - Track ROI of direct mail outreach
 
 **Behaviors:**
-- Sends 20-50 letters per month
+- Sends 20-50 letters or postcards per month
 - Buys the 100-credit power pack
+- Uses AI-generated or brand imagery for postcards
 - Integrates letter sending into business workflows
 - Needs reliable delivery tracking
 - Expense reports require transaction records
@@ -175,11 +183,14 @@ Letter IRL serves users who want to send physical letters through conversational
 - US-CREDIT-02 (Purchase credits - power pack)
 - US-CREDIT-04 (Transaction history for expenses)
 - US-LETTER-05 (List all letters)
+- US-POSTCARD-01 (Preview postcard with brand images)
+- US-POSTCARD-02 (Send postcards)
 - US-CREDIT-05 (Detailed ledger)
 
 **Test Scenarios:**
 - High-volume credit purchase
-- Bulk letter sending
+- Bulk letter and postcard sending
+- Postcard with uploaded brand imagery
 - Export transaction history
 - Letter list pagination
 - Rate limiting at scale
@@ -462,15 +473,15 @@ Letter IRL serves users who want to send physical letters through conversational
 
 | Persona | Category | P0 Stories | P1 Stories | P2 Stories |
 |---------|----------|------------|------------|------------|
-| Sarah | CONSUMER | US-LETTER-01, US-LETTER-02, US-CREDIT-01 | US-LETTER-04, US-EDGE-02 | US-ACCT-03 |
+| Sarah | CONSUMER | US-LETTER-01, US-LETTER-02, US-CREDIT-01 | US-POSTCARD-01, US-POSTCARD-02, US-LETTER-04, US-EDGE-02 | US-ACCT-03 |
 | Marcus | CONSUMER | US-LETTER-01, US-LETTER-02, US-LETTER-03 | US-LETTER-04, US-LETTER-05, US-CREDIT-03 | US-PROMO-02, US-CREDIT-04 |
 | Eleanor | CONSUMER | US-LETTER-01, US-LETTER-02, US-LETTER-03 | US-LETTER-04 | US-ACCT-02 |
-| David | BUSINESS | US-LETTER-02, US-CREDIT-02 | US-LETTER-05, US-CREDIT-04 | US-CREDIT-05 |
+| David | BUSINESS | US-LETTER-02, US-CREDIT-02 | US-POSTCARD-01, US-POSTCARD-02, US-LETTER-05, US-CREDIT-04 | US-CREDIT-05 |
 | Morgan | DEV | US-MCP-01, US-LETTER-01, US-LETTER-02 | US-MCP-02, US-MCP-03 | US-LETTER-04, US-LETTER-05 |
 | Jordan | DEV | US-MCP-01, US-LETTER-03 | US-MCP-02, US-EDGE-03 | US-LETTER-04, US-LETTER-05 |
 | Alex | CONSUMER | US-CREDIT-01 | US-CREDIT-03 | US-PROMO-01, US-PROMO-02, US-PROMO-03 |
 | Amy | INTERNAL | - | - | US-ADMIN-01 - US-ADMIN-08 |
-| System | INTERNAL | US-SEC-01 | US-LETTER-06, US-EDGE-04 | US-DATA-01 - US-DATA-03 |
+| System | INTERNAL | US-SEC-01 | US-LETTER-06, US-POSTCARD-03, US-EDGE-04 | US-DATA-01 - US-DATA-03 |
 
 ---
 
@@ -486,6 +497,7 @@ When writing test cases, consider:
 6. **Integration Tests:** Use System scenarios
 7. **MCP/API Tests:** Use Morgan or Jordan scenarios
 8. **Token Auth Tests:** Use Morgan (PAT generation, revocation)
+9. **Postcard Tests:** Use Sarah (personal photos) or David (brand imagery)
 
 ---
 
