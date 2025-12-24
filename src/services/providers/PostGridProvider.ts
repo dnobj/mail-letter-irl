@@ -21,7 +21,10 @@ import type {
   CostEstimate,
   ProviderConfig,
   AddressValidationInput,
-  AddressValidationResult
+  AddressValidationResult,
+  PostcardParams,
+  PostcardResult,
+  PostcardSize
 } from './types.js';
 
 export interface PostGridProviderOptions {
@@ -83,6 +86,28 @@ interface PostGridError {
     code?: string;
     details?: any;
   };
+}
+
+interface PostGridPostcardRequest {
+  to: PostGridContact;
+  from: PostGridContact;
+  frontHTML: string;
+  backHTML: string;
+  size: '6x4' | '6x9' | '6x11';
+  description?: string;
+}
+
+interface PostGridPostcardResponse {
+  id: string;
+  object: 'postcard';
+  live: boolean;
+  status: string;
+  sendDate?: string;
+  expectedDeliveryDate?: string;
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+  trackingNumber?: string;
 }
 
 interface PostGridAddressVerificationRequest {
@@ -616,5 +641,249 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       postalCode: process.env.LETTER_IRL_DEFAULT_SENDER_ZIP || '94102',
       country: 'US'
     };
+  }
+
+  // ==========================================================================
+  // Postcard Methods (US-POSTCARD-01, US-POSTCARD-02)
+  // ==========================================================================
+
+  /**
+   * Send a postcard via PostGrid API
+   */
+  async sendPostcard(params: PostcardParams): Promise<PostcardResult> {
+    if (this.options.verbose) {
+      console.log(`📤 [PostGrid] Sending postcard to ${params.recipientName}`);
+    }
+
+    try {
+      const size = params.size || '6x9';
+
+      // Build request payload
+      const request: PostGridPostcardRequest = {
+        to: this.buildContact(params.recipientName, params.recipientAddress),
+        from: this.buildContact(
+          params.senderName || 'Letter IRL',
+          params.senderAddress || this.getDefaultSenderAddress()
+        ),
+        frontHTML: this.generatePostcardFrontHTML(params.frontImageBase64, size),
+        backHTML: this.generatePostcardBackHTML(
+          params.backMessage,
+          params.senderName,
+          params.senderAddress
+        ),
+        size,
+        description: `Postcard to ${params.recipientName}`
+      };
+
+      // Make API request
+      const response = await this.apiRequest<PostGridPostcardResponse>('POST', '/postcards', request);
+
+      if (this.options.verbose) {
+        console.log(`✅ [PostGrid] Postcard created successfully`);
+        console.log(`   Postcard ID: ${response.id}`);
+        console.log(`   Status: ${response.status}`);
+        console.log(`   Expected Delivery: ${response.expectedDeliveryDate || 'Unknown'}`);
+      }
+
+      // Parse expected delivery date
+      const expectedDeliveryDate = response.expectedDeliveryDate
+        ? new Date(response.expectedDeliveryDate)
+        : undefined;
+
+      return {
+        success: true,
+        trackingId: response.id,
+        expectedDeliveryDate,
+        costCents: this.estimatePostcardCost(size),
+        detailsUrl: response.url,
+        metadata: {
+          provider: 'postgrid',
+          mode: this.options.mode,
+          status: response.status,
+          trackingNumber: response.trackingNumber,
+          size
+        }
+      };
+    } catch (error) {
+      const errorMessage = this.extractErrorMessage(error);
+
+      if (this.options.verbose) {
+        console.log(`❌ [PostGrid] Failed to send postcard: ${errorMessage}`);
+      }
+
+      return {
+        success: false,
+        trackingId: '',
+        error: errorMessage
+      };
+    }
+  }
+
+  /**
+   * Generate HTML for postcard front (full-bleed image)
+   */
+  private generatePostcardFrontHTML(imageBase64: string, size: PostcardSize): string {
+    // Dimensions for different postcard sizes (at 300 DPI)
+    const dimensions: Record<PostcardSize, { width: string; height: string }> = {
+      '6x4': { width: '6in', height: '4in' },
+      '6x9': { width: '6in', height: '9in' },
+      '6x11': { width: '6in', height: '11in' }
+    };
+
+    const dim = dimensions[size];
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: ${dim.width};
+      height: ${dim.height};
+    }
+    .postcard-front {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    .postcard-front img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="postcard-front">
+    <img src="${imageBase64}" alt="Postcard image" />
+  </div>
+</body>
+</html>`;
+  }
+
+  /**
+   * Generate HTML for postcard back (message + return address)
+   */
+  private generatePostcardBackHTML(
+    message: string,
+    senderName?: string,
+    senderAddress?: PostcardParams['senderAddress']
+  ): string {
+    // Escape HTML special characters in message
+    const escapedMessage = message
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
+    // Build return address if provided
+    let returnAddressHTML = '';
+    if (senderName && senderAddress) {
+      const escapedName = senderName
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+      returnAddressHTML = `
+      <div class="return-address">
+        <div class="name">${escapedName}</div>
+        <div>${senderAddress.line1}</div>
+        ${senderAddress.line2 ? `<div>${senderAddress.line2}</div>` : ''}
+        <div>${senderAddress.city}, ${senderAddress.state} ${senderAddress.postalCode}</div>
+      </div>`;
+    }
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 6in;
+      height: 9in;
+      background: #fffef8;
+    }
+    .postcard-back {
+      display: flex;
+      height: 100%;
+    }
+    .message-area {
+      width: 50%;
+      padding: 0.3in;
+      box-sizing: border-box;
+      border-right: 1px solid #ccc;
+    }
+    .message {
+      font-family: 'Georgia', serif;
+      font-size: 11pt;
+      line-height: 1.5;
+      color: #333;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .address-area {
+      width: 50%;
+      padding: 0.3in;
+      box-sizing: border-box;
+      position: relative;
+    }
+    .stamp-placeholder {
+      position: absolute;
+      top: 0.2in;
+      right: 0.2in;
+      width: 0.8in;
+      height: 1in;
+      border: 2px dashed #999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: Arial, sans-serif;
+      font-size: 8pt;
+      color: #999;
+      text-align: center;
+    }
+    .return-address {
+      font-family: 'Courier New', monospace;
+      font-size: 9pt;
+      line-height: 1.3;
+      margin-bottom: 0.5in;
+    }
+    .return-address .name {
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="postcard-back">
+    <div class="message-area">
+      <div class="message">${escapedMessage}</div>
+    </div>
+    <div class="address-area">
+      <div class="stamp-placeholder">PLACE<br>STAMP<br>HERE</div>
+      ${returnAddressHTML}
+    </div>
+  </div>
+</body>
+</html>`;
+  }
+
+  /**
+   * Estimate cost for a postcard
+   */
+  private estimatePostcardCost(size: PostcardSize): number {
+    // PostGrid postcard pricing (approximate)
+    const costs: Record<PostcardSize, number> = {
+      '6x4': 79,  // ~$0.79
+      '6x9': 98,  // ~$0.98
+      '6x11': 115 // ~$1.15
+    };
+
+    return costs[size] || costs['6x9'];
   }
 }

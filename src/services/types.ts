@@ -577,3 +577,85 @@ export interface RevokeTokenResult {
   success: boolean;
   alreadyRevoked?: boolean;
 }
+
+// ============================================================================
+// Mail Type (Letters vs Postcards)
+// ============================================================================
+
+export type MailType = 'letter' | 'postcard';
+
+export type PostcardSize = '6x4' | '6x9' | '6x11';
+
+// ============================================================================
+// Image Processing Types (US-POSTCARD-03)
+// ============================================================================
+
+export interface ImageFileParam {
+  download_url: string;
+  file_id: string;
+}
+
+export interface ImageMetadata {
+  width: number;
+  height: number;
+  format: string;
+}
+
+export interface ProcessedImage {
+  base64DataUri: string;      // data:image/jpeg;base64,...
+  originalWidth: number;
+  originalHeight: number;
+  processedWidth: number;
+  processedHeight: number;
+}
+
+export interface ImageProcessingError extends Error {
+  code: 'IMAGE_TOO_LARGE' | 'UNSUPPORTED_FORMAT' | 'IMAGE_TOO_SMALL' | 'DOWNLOAD_FAILED' | 'PROCESSING_FAILED';
+  userMessage: string;
+}
+
+// ============================================================================
+// Postcard Draft Types (US-POSTCARD-01, US-POSTCARD-02)
+// ============================================================================
+
+export interface PostcardDraft {
+  draft_id: string;
+  user_id: string;
+  mail_type: 'postcard';
+  sender: Record<string, unknown>;
+  recipient: Record<string, unknown>;
+  body_text: string;              // Message for postcards
+  sign_off: string | null;        // Optional for postcards
+  front_image_data: string;       // Base64 data URI
+  front_image_url: string;        // Original URL for debugging
+  postcard_size: PostcardSize;
+  required_credits: number;
+  preview_html?: string;
+  sender_validation?: Record<string, unknown>;
+  recipient_validation?: Record<string, unknown>;
+  status: DraftStatus;
+  expires_at: Date;
+  consumed_at?: Date;
+  consumed_letter_id?: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface CreatePostcardDraftParams {
+  userId: string;
+  sender: Record<string, unknown>;
+  recipient: Record<string, unknown>;
+  message: string;
+  frontImageData: string;
+  frontImageUrl: string;
+  postcardSize?: PostcardSize;    // Default: '6x9'
+  previewHtml?: string;
+  senderValidation?: Record<string, unknown>;
+  recipientValidation?: Record<string, unknown>;
+  expiresInHours?: number;        // Default: 24
+}
+
+export interface CreatePostcardDraftResult {
+  draftId: string;
+  expiresAt: Date;
+}
