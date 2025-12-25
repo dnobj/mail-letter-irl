@@ -25,10 +25,15 @@ const CONFIG = {
   minHeight: 100,  // Lowered - Sharp will upscale to print size
   jpegQuality: 85,
   allowedTypes: ['image/png', 'image/jpeg', 'image/webp'] as const,
+  // PostGrid uses landscape orientation (width x height)
+  // Our internal names (6x4, 6x9, 6x11) refer to the PostGrid size names
+  // PostGrid 6x4 = 6" wide x 4" tall (landscape)
+  // PostGrid 9x6 = 9" wide x 6" tall (landscape) - we call it '6x9' internally
+  // PostGrid 11x6 = 11" wide x 6" tall (landscape) - we call it '6x11' internally
   sizes: {
-    '6x4': { width: 1800, height: 1200 },   // 6x4 at 300 DPI
-    '6x9': { width: 1800, height: 2700 },   // 6x9 at 300 DPI
-    '6x11': { width: 1800, height: 3300 },  // 6x11 at 300 DPI
+    '6x4': { width: 1800, height: 1200 },   // 6x4 at 300 DPI (6" x 4")
+    '6x9': { width: 2700, height: 1800 },   // 9x6 at 300 DPI (9" x 6") - landscape
+    '6x11': { width: 3300, height: 1800 },  // 11x6 at 300 DPI (11" x 6") - landscape
   } as const,
 } as const;
 

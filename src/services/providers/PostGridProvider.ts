@@ -732,11 +732,14 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * Generate HTML for postcard front (full-bleed image)
    */
   private generatePostcardFrontHTML(imageBase64: string, size: PostcardSize): string {
-    // Dimensions for different postcard sizes (at 300 DPI)
+    // PostGrid uses landscape orientation (width x height)
+    // PostGrid 6x4 = 6" wide x 4" tall
+    // PostGrid 9x6 = 9" wide x 6" tall (we call it '6x9' internally)
+    // PostGrid 11x6 = 11" wide x 6" tall (we call it '6x11' internally)
     const dimensions: Record<PostcardSize, { width: string; height: string }> = {
       '6x4': { width: '6in', height: '4in' },
-      '6x9': { width: '6in', height: '9in' },
-      '6x11': { width: '6in', height: '11in' }
+      '6x9': { width: '9in', height: '6in' },
+      '6x11': { width: '11in', height: '6in' }
     };
 
     const dim = dimensions[size];
@@ -774,12 +777,14 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   }
 
   /**
-   * Generate HTML for postcard back (message + return address)
+   * Generate HTML for postcard back (message only)
+   * Note: PostGrid automatically handles return address, recipient address,
+   * and postage from the 'from' and 'to' fields in the API request
    */
   private generatePostcardBackHTML(
     message: string,
-    senderName?: string,
-    senderAddress?: PostcardParams['senderAddress']
+    _senderName?: string,
+    _senderAddress?: PostcardParams['senderAddress']
   ): string {
     // Escape HTML special characters in message
     const escapedMessage = message
@@ -789,23 +794,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
 
-    // Build return address if provided
-    let returnAddressHTML = '';
-    if (senderName && senderAddress) {
-      const escapedName = senderName
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-
-      returnAddressHTML = `
-      <div class="return-address">
-        <div class="name">${escapedName}</div>
-        <div>${senderAddress.line1}</div>
-        ${senderAddress.line2 ? `<div>${senderAddress.line2}</div>` : ''}
-        <div>${senderAddress.city}, ${senderAddress.state} ${senderAddress.postalCode}</div>
-      </div>`;
-    }
-
+    // PostGrid handles addresses automatically - we only provide the message
+    // The message area is on the left half of a standard postcard back
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -814,8 +804,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     html, body {
       margin: 0;
       padding: 0;
-      width: 6in;
-      height: 9in;
+      width: 9in;
+      height: 6in;
       background: #fffef8;
     }
     .postcard-back {
@@ -824,47 +814,18 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     }
     .message-area {
       width: 50%;
-      padding: 0.3in;
+      padding: 0.4in;
       box-sizing: border-box;
-      border-right: 1px solid #ccc;
+      display: flex;
+      align-items: flex-start;
     }
     .message {
       font-family: 'Georgia', serif;
-      font-size: 11pt;
-      line-height: 1.5;
+      font-size: 14pt;
+      line-height: 1.6;
       color: #333;
       white-space: pre-wrap;
       word-wrap: break-word;
-    }
-    .address-area {
-      width: 50%;
-      padding: 0.3in;
-      box-sizing: border-box;
-      position: relative;
-    }
-    .stamp-placeholder {
-      position: absolute;
-      top: 0.2in;
-      right: 0.2in;
-      width: 0.8in;
-      height: 1in;
-      border: 2px dashed #999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: Arial, sans-serif;
-      font-size: 8pt;
-      color: #999;
-      text-align: center;
-    }
-    .return-address {
-      font-family: 'Courier New', monospace;
-      font-size: 9pt;
-      line-height: 1.3;
-      margin-bottom: 0.5in;
-    }
-    .return-address .name {
-      font-weight: bold;
     }
   </style>
 </head>
@@ -872,10 +833,6 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   <div class="postcard-back">
     <div class="message-area">
       <div class="message">${escapedMessage}</div>
-    </div>
-    <div class="address-area">
-      <div class="stamp-placeholder">PLACE<br>STAMP<br>HERE</div>
-      ${returnAddressHTML}
     </div>
   </div>
 </body>
