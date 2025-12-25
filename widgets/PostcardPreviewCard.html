@@ -91,13 +91,10 @@
       /* Preview panes */
       .preview-container {
         position: relative;
-        min-height: 200px;
       }
 
       .preview-pane {
-        max-height: 300px;
-        overflow: auto;
-        padding: 1rem;
+        padding: 0.75rem;
         background: var(--preview-bg);
         border-bottom: 1px solid var(--border-color);
       }
@@ -106,11 +103,20 @@
         display: none !important;
       }
 
+      .preview-pane.front-preview {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
       .preview-pane img {
+        width: 100%;
         max-width: 100%;
         height: auto;
         border-radius: 8px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        aspect-ratio: 9 / 6;
+        object-fit: cover;
       }
 
       .preview-pane.back-preview {
@@ -122,7 +128,6 @@
       /* Postcard back mockup */
       .postcard-back-mockup {
         width: 100%;
-        max-width: 450px;
         aspect-ratio: 9 / 6;
         background: #fffef8;
         border-radius: 4px;
