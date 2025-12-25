@@ -658,6 +658,15 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     try {
       const size = params.size || '6x9';
 
+      // PostGrid uses width x height format (e.g., '9x6' for a 6x9 postcard)
+      // Our internal format is height x width, so we need to map them
+      const postGridSizeMap: Record<PostcardSize, string> = {
+        '6x4': '6x4',   // 4" tall x 6" wide - same format
+        '6x9': '9x6',   // 9" tall x 6" wide -> PostGrid wants 9x6
+        '6x11': '11x6'  // 11" tall x 6" wide -> PostGrid wants 11x6
+      };
+      const postGridSize = postGridSizeMap[size];
+
       // Build request payload
       const request: PostGridPostcardRequest = {
         to: this.buildContact(params.recipientName, params.recipientAddress),
@@ -671,7 +680,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           params.senderName,
           params.senderAddress
         ),
-        size,
+        size: postGridSize,
         description: `Postcard to ${params.recipientName}`
       };
 

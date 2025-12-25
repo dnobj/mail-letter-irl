@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Personal + Header Image - Letter IRL</title>
+  <!-- Google Font for handwriting style -->
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* Page setup for 8.5x11 preview */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #888;
+    }
+
+    .page {
+      width: 8.5in;
+      height: 11in;
+      background: white;
+      margin: 0.5in auto;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Address window indicator (for visualization only) */
+    .address-window {
+      position: absolute;
+      top: 0.875in;
+      left: 0.5in;
+      width: 3.5in;
+      height: 1in;
+      border: 2px dashed #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #999;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+      background: white;
+      z-index: 10;
+    }
+
+    /* Header image area - Thank You theme */
+    .header-image {
+      margin: 3.5in 0.75in 0 0.75in;
+      text-align: center;
+      background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+      border-radius: 12px;
+      padding: 0.35in 0.25in;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .header-image::before {
+      content: "❤ ❤ ❤";
+      position: absolute;
+      top: 8px;
+      left: 0;
+      right: 0;
+      font-size: 14pt;
+      opacity: 0.5;
+      letter-spacing: 20px;
+    }
+
+    .header-image h1 {
+      font-family: 'Caveat', cursive;
+      font-size: 36pt;
+      margin: 0;
+      color: #e74c3c;
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+    }
+
+    .header-image .flowers {
+      font-size: 24pt;
+      margin-top: 5px;
+    }
+
+    /* Letter content area */
+    .content {
+      font-family: 'Caveat', cursive;
+      font-size: 17pt;
+      line-height: 1.7;
+      color: #1a1a2e;
+      margin: 0.35in 1in 1in 1in;
+    }
+
+    .letter-body {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .signature {
+      font-size: 22pt;
+      font-weight: 500;
+    }
+
+    /* Layout label */
+    .layout-label {
+      position: absolute;
+      top: 0.25in;
+      right: 0.25in;
+      background: #e91e63;
+      color: white;
+      padding: 4px 12px;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+      border-radius: 4px;
+      z-index: 20;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="layout-label">PERSONAL + HEADER</div>
+    <div class="address-window">Address Window Area</div>
+
+    <div class="header-image">
+      <h1>Thank You!</h1>
+      <div class="flowers">🌸 🌺 🌷</div>
+    </div>
+
+    <div class="content">
+      <div class="letter-body">Dear Sarah,
+
+I just wanted to send you a quick note to say THANK YOU for the amazing baby shower you threw for us last weekend!
+
+Everything was absolutely perfect - the decorations, the games, the food... I still can't believe how much work you put into it. The diaper cake was so creative, and I loved the guess-the-baby-food game (even though I was terrible at it!).
+
+Most of all, thank you for being such an incredible friend. Your support through this pregnancy has meant the world to me.
+
+Can't wait for you to meet the little one!
+
+Love you bunches,
+<span class="signature">Emily</span></div>
+    </div>
+  </div>
+</body>
+</html>

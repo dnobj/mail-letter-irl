@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Standard + Header Image - Letter IRL</title>
+  <style>
+    /* Page setup for 8.5x11 preview */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #888;
+    }
+
+    .page {
+      width: 8.5in;
+      height: 11in;
+      background: white;
+      margin: 0.5in auto;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Address window indicator (for visualization only) */
+    .address-window {
+      position: absolute;
+      top: 0.875in;
+      left: 0.5in;
+      width: 3.5in;
+      height: 1in;
+      border: 2px dashed #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #999;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+      background: white;
+      z-index: 10;
+    }
+
+    /* Header image area */
+    .header-image {
+      margin: 3.5in 0.75in 0 0.75in;
+      text-align: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 8px;
+      padding: 0.4in 0.25in;
+      color: white;
+    }
+
+    .header-image h1 {
+      font-family: 'Georgia', serif;
+      font-size: 28pt;
+      margin: 0;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .header-image p {
+      font-family: 'Georgia', serif;
+      font-size: 14pt;
+      margin: 0.15in 0 0 0;
+      opacity: 0.9;
+    }
+
+    /* Placeholder for actual image */
+    .header-image-placeholder {
+      margin: 3.5in 0.75in 0 0.75in;
+      height: 1.4in;
+      background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .header-image-placeholder img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* Letter content area */
+    .content {
+      font-family: 'Times New Roman', Times, serif;
+      font-size: 12pt;
+      line-height: 1.6;
+      color: #000;
+      margin: 0.4in 1in 1in 1in;
+    }
+
+    .letter-body {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    /* Layout label */
+    .layout-label {
+      position: absolute;
+      top: 0.25in;
+      right: 0.25in;
+      background: #9b59b6;
+      color: white;
+      padding: 4px 12px;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+      border-radius: 4px;
+      z-index: 20;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="layout-label">STANDARD + HEADER</div>
+    <div class="address-window">Address Window Area</div>
+
+    <!-- Option A: Text-based decorative header -->
+    <div class="header-image">
+      <h1>Happy Birthday!</h1>
+      <p>Wishing you a wonderful day</p>
+    </div>
+
+    <div class="content">
+      <div class="letter-body">Dear Mom,
+
+Happy 70th birthday! I can't believe you're turning 70 - you don't look a day over 50, and that's the honest truth!
+
+I wish I could be there to celebrate with you in person, but please know that I'm thinking of you and sending all my love from across the miles. I hope Dad is spoiling you today like you deserve.
+
+Remember when we used to make birthday cakes together? I've been practicing your famous chocolate cake recipe, and I think I'm finally getting close to perfecting it. Maybe I can make one for you when I visit next month!
+
+Have the most wonderful birthday, Mom. You deserve all the happiness in the world.
+
+With all my heart and love,
+David</div>
+    </div>
+  </div>
+</body>
+</html>

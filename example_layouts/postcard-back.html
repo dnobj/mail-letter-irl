@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Postcard Back - Letter IRL</title>
+  <style>
+    /* Page setup for 6x4 postcard preview */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #888;
+    }
+
+    .page {
+      width: 6in;
+      height: 4in;
+      background: #fffef8;
+      margin: 0.5in auto;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+    }
+
+    /* Left side - message area */
+    .message-area {
+      width: 50%;
+      padding: 0.3in;
+      box-sizing: border-box;
+      border-right: 1px solid #ccc;
+    }
+
+    .message {
+      font-family: 'Georgia', serif;
+      font-size: 10pt;
+      line-height: 1.5;
+      color: #333;
+    }
+
+    .message .salutation {
+      margin-bottom: 0.5em;
+    }
+
+    .message .body {
+      margin-bottom: 0.5em;
+    }
+
+    .message .closing {
+      margin-top: 0.75em;
+    }
+
+    /* Right side - address area */
+    .address-area {
+      width: 50%;
+      padding: 0.3in;
+      box-sizing: border-box;
+      position: relative;
+    }
+
+    /* Stamp placeholder */
+    .stamp {
+      position: absolute;
+      top: 0.2in;
+      right: 0.2in;
+      width: 0.8in;
+      height: 1in;
+      border: 2px dashed #999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: Arial, sans-serif;
+      font-size: 8pt;
+      color: #999;
+      text-align: center;
+    }
+
+    /* Address block */
+    .address-block {
+      position: absolute;
+      bottom: 0.5in;
+      left: 0.3in;
+      right: 0.3in;
+      font-family: 'Courier New', monospace;
+      font-size: 11pt;
+      line-height: 1.4;
+    }
+
+    .address-block .name {
+      font-weight: bold;
+    }
+
+    /* Divider line decoration */
+    .divider-line {
+      position: absolute;
+      left: 50%;
+      top: 0.2in;
+      bottom: 0.2in;
+      width: 1px;
+      background: #ccc;
+    }
+
+    /* Horizontal lines for writing (decorative) */
+    .message-area::after {
+      content: '';
+      position: absolute;
+      top: 0.5in;
+      left: 0.3in;
+      right: calc(50% + 0.1in);
+      bottom: 0.3in;
+      background: repeating-linear-gradient(
+        transparent,
+        transparent 22px,
+        #e0e0e0 22px,
+        #e0e0e0 23px
+      );
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .message {
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Layout label */
+    .layout-label {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: #3498db;
+      color: white;
+      padding: 4px 12px;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+      border-radius: 4px;
+      z-index: 20;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="layout-label">POSTCARD BACK</div>
+
+    <div class="message-area">
+      <div class="message">
+        <div class="salutation">Hey Mom & Dad!</div>
+        <div class="body">
+          Having an amazing time in Colorado! The mountains are absolutely breathtaking. Yesterday we hiked to a waterfall and saw a family of deer. The weather has been perfect - sunny but cool.
+        </div>
+        <div class="body">
+          Wish you were here!
+        </div>
+        <div class="closing">
+          Love,<br>
+          David & Sarah
+        </div>
+      </div>
+    </div>
+
+    <div class="address-area">
+      <div class="stamp">
+        PLACE<br>STAMP<br>HERE
+      </div>
+
+      <div class="address-block">
+        <div class="name">John & Mary Smith</div>
+        <div>123 Main Street</div>
+        <div>Anytown, CA 90210</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

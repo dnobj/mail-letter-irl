@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Formal + Inline Image - Letter IRL</title>
+  <style>
+    /* Page setup for 8.5x11 preview */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #888;
+    }
+
+    .page {
+      width: 8.5in;
+      height: 11in;
+      background: white;
+      margin: 0.5in auto;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Address window indicator (for visualization only) */
+    .address-window {
+      position: absolute;
+      top: 0.875in;
+      left: 0.5in;
+      width: 3.5in;
+      height: 1in;
+      border: 2px dashed #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #999;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+    }
+
+    /* Letter content area */
+    .content {
+      font-family: 'Georgia', 'Garamond', 'Times New Roman', serif;
+      font-size: 11pt;
+      line-height: 1.65;
+      color: #000;
+      margin: 3.5in 1in 1in 1in;
+    }
+
+    .date {
+      text-align: right;
+      margin-bottom: 1.5em;
+      font-style: italic;
+      color: #333;
+    }
+
+    .salutation {
+      margin-bottom: 1em;
+    }
+
+    .letter-body {
+      text-align: justify;
+      hyphens: auto;
+    }
+
+    .letter-body p {
+      margin: 0 0 0.8em 0;
+    }
+
+    /* Inline image styling */
+    .inline-image {
+      margin: 1em auto;
+      text-align: center;
+    }
+
+    .inline-image .image-container {
+      display: inline-block;
+      border: 1px solid #ccc;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      padding: 4px;
+      background: white;
+    }
+
+    /* Placeholder diagram */
+    .diagram-placeholder {
+      width: 4in;
+      height: 2.5in;
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: Arial, sans-serif;
+    }
+
+    .diagram-placeholder .icon {
+      font-size: 48px;
+      margin-bottom: 10px;
+    }
+
+    .diagram-placeholder .label {
+      color: #666;
+      font-size: 11pt;
+    }
+
+    /* Actual diagram mockup */
+    .diagram-mockup {
+      width: 4in;
+      height: 2.5in;
+      background: white;
+      position: relative;
+      font-family: Arial, sans-serif;
+      font-size: 9pt;
+    }
+
+    .diagram-mockup .room {
+      position: absolute;
+      border: 2px solid #333;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f0f7ff;
+    }
+
+    .diagram-mockup .kitchen {
+      top: 10px;
+      left: 10px;
+      width: 45%;
+      height: 60%;
+    }
+
+    .diagram-mockup .dining {
+      top: 10px;
+      right: 10px;
+      width: 45%;
+      height: 40%;
+      background: #fff7f0;
+    }
+
+    .diagram-mockup .counter {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      right: 10px;
+      height: 25%;
+      border: 2px solid #333;
+      background: #f5f5f5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .inline-image .caption {
+      font-size: 9.5pt;
+      color: #555;
+      font-style: italic;
+      margin-top: 0.5em;
+      font-family: 'Georgia', serif;
+    }
+
+    .closing {
+      margin-top: 1.5em;
+      line-height: 1.8;
+    }
+
+    .signature {
+      font-style: italic;
+    }
+
+    .title {
+      font-size: 9.5pt;
+      color: #555;
+    }
+
+    /* Layout label */
+    .layout-label {
+      position: absolute;
+      top: 0.25in;
+      right: 0.25in;
+      background: #27ae60;
+      color: white;
+      padding: 4px 12px;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="layout-label">FORMAL + INLINE IMAGE</div>
+    <div class="address-window">Address Window Area</div>
+
+    <div class="content">
+      <div class="date">December 23, 2025</div>
+
+      <div class="salutation">Dear Mr. Thompson,</div>
+
+      <div class="letter-body">
+        <p>Thank you for your inquiry about the kitchen renovation project. Based on our discussion last week, I have prepared a preliminary layout that addresses your requirements for improved workflow and additional counter space.</p>
+
+        <p>Please see the proposed floor plan below:</p>
+      </div>
+
+      <div class="inline-image">
+        <div class="image-container">
+          <div class="diagram-mockup">
+            <div class="room kitchen">Kitchen<br>(expanded)</div>
+            <div class="room dining">Dining<br>Area</div>
+            <div class="counter">Island Counter with Storage</div>
+          </div>
+        </div>
+        <div class="caption">Figure 1: Proposed kitchen layout with expanded island</div>
+      </div>
+
+      <div class="letter-body">
+        <p>As you can see, this design maximizes counter space while maintaining an open flow to the dining area. The central island provides additional storage and can accommodate seating for three.</p>
+
+        <p>I would be happy to discuss any modifications or answer questions you may have. Please feel free to contact me at your convenience.</p>
+      </div>
+
+      <div class="closing">
+        Best regards,<br>
+        <span class="signature">David Nicholl</span><br>
+        <span class="title">Nicholl Design Studio</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

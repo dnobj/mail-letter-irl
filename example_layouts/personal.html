@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Personal Layout - Letter IRL</title>
+  <!-- Google Font for handwriting style -->
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* Page setup for 8.5x11 preview */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #888;
+    }
+
+    .page {
+      width: 8.5in;
+      height: 11in;
+      background: white;
+      /* Subtle paper texture effect */
+      background-image:
+        linear-gradient(rgba(0,0,0,0.02) 1px, transparent 1px);
+      background-size: 100% 0.35in;
+      margin: 0.5in auto;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Address window indicator (for visualization only) */
+    .address-window {
+      position: absolute;
+      top: 0.875in;
+      left: 0.5in;
+      width: 3.5in;
+      height: 1in;
+      border: 2px dashed #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #999;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+      background: white;
+    }
+
+    /* Letter content area */
+    .content {
+      font-family: 'Caveat', cursive;
+      font-size: 18pt;
+      line-height: 1.75;
+      color: #1a1a2e;
+      margin: 3.5in 1in 1in 1in;
+    }
+
+    .letter-body {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .signature {
+      font-size: 22pt;
+      font-weight: 500;
+    }
+
+    /* Layout label */
+    .layout-label {
+      position: absolute;
+      top: 0.25in;
+      right: 0.25in;
+      background: #e74c3c;
+      color: white;
+      padding: 4px 12px;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="layout-label">PERSONAL</div>
+    <div class="address-window">Address Window Area</div>
+
+    <div class="content">
+      <div class="letter-body">Dear Mom,
+
+I hope this letter finds you well! I wanted to write to let you know how much I've been thinking about you lately.
+
+The weather here has been beautiful, and it reminds me of those summer afternoons we used to spend in the garden together. Do you remember how we used to plant tomatoes every spring? I tried growing some on my balcony this year, and while they weren't quite as good as yours, it brought back so many wonderful memories!
+
+I'm planning to visit next month if that works for you. I'd love to spend some time together and maybe help out around the house if you need anything.
+
+Love you so much!
+<span class="signature">David</span></div>
+    </div>
+  </div>
+</body>
+</html>

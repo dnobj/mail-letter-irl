@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Formal Layout - Letter IRL</title>
+  <style>
+    /* Page setup for 8.5x11 preview */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #888;
+    }
+
+    .page {
+      width: 8.5in;
+      height: 11in;
+      background: white;
+      margin: 0.5in auto;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Address window indicator (for visualization only) */
+    .address-window {
+      position: absolute;
+      top: 0.875in;
+      left: 0.5in;
+      width: 3.5in;
+      height: 1in;
+      border: 2px dashed #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #999;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+    }
+
+    /* Letter content area */
+    .content {
+      font-family: 'Georgia', 'Garamond', 'Times New Roman', serif;
+      font-size: 11.5pt;
+      line-height: 1.7;
+      color: #000;
+      margin: 3.5in 1in 1in 1in;
+    }
+
+    .date {
+      text-align: right;
+      margin-bottom: 2em;
+      font-style: italic;
+      color: #333;
+    }
+
+    .salutation {
+      margin-bottom: 1.25em;
+    }
+
+    .letter-body {
+      text-align: justify;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      hyphens: auto;
+    }
+
+    .closing {
+      margin-top: 2em;
+      line-height: 2;
+    }
+
+    .signature {
+      font-style: italic;
+    }
+
+    .title {
+      font-size: 10pt;
+      color: #555;
+    }
+
+    /* Layout label */
+    .layout-label {
+      position: absolute;
+      top: 0.25in;
+      right: 0.25in;
+      background: #2d3748;
+      color: white;
+      padding: 4px 12px;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="layout-label">FORMAL</div>
+    <div class="address-window">Address Window Area</div>
+
+    <div class="content">
+      <div class="date">December 23, 2025</div>
+
+      <div class="salutation">Dear Mrs. Johnson,</div>
+
+      <div class="letter-body">Thank you for taking the time to meet with me last Thursday. I greatly appreciated the opportunity to discuss the project proposal and learn more about your organization's strategic goals for the coming year.
+
+Our conversation reinforced my confidence that our team's expertise aligns well with what you are seeking. The challenges you described regarding workflow optimization are precisely the areas where we have demonstrated measurable success with similar clients.
+
+I have attached the detailed proposal we discussed, along with three case studies that illustrate our approach. Please do not hesitate to reach out if you have any questions or would like to schedule a follow-up discussion.
+
+I look forward to the possibility of working together.</div>
+
+      <div class="closing">
+        Respectfully yours,<br>
+        <span class="signature">David Nicholl</span><br>
+        <span class="title">Senior Consultant</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

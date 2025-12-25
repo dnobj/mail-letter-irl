@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Modern Layout - Letter IRL</title>
+  <style>
+    /* Page setup for 8.5x11 preview */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #888;
+    }
+
+    .page {
+      width: 8.5in;
+      height: 11in;
+      background: white;
+      margin: 0.5in auto;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Address window indicator (for visualization only) */
+    .address-window {
+      position: absolute;
+      top: 0.875in;
+      left: 0.5in;
+      width: 3.5in;
+      height: 1in;
+      border: 2px dashed #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #999;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+    }
+
+    /* Letter content area */
+    .content {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.5;
+      color: #1a1a1a;
+      letter-spacing: 0.01em;
+      /* Slightly wider margins for more whitespace */
+      margin: 3.5in 1.25in 1in 1.25in;
+    }
+
+    .salutation {
+      font-weight: 500;
+      margin-bottom: 1.25em;
+    }
+
+    .letter-body {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .closing {
+      margin-top: 1.75em;
+      line-height: 1.8;
+    }
+
+    .signature {
+      font-weight: 500;
+    }
+
+    /* Layout label */
+    .layout-label {
+      position: absolute;
+      top: 0.25in;
+      right: 0.25in;
+      background: #0066cc;
+      color: white;
+      padding: 4px 12px;
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="layout-label">MODERN</div>
+    <div class="address-window">Address Window Area</div>
+
+    <div class="content">
+      <div class="salutation">Dear Mom,</div>
+
+      <div class="letter-body">I hope this letter finds you well. I wanted to write to let you know how much I've been thinking about you lately.
+
+The weather here has been beautiful, and it reminds me of those summer afternoons we used to spend in the garden together. Do you remember how we used to plant tomatoes every spring? I tried growing some on my balcony this year, and while they weren't quite as good as yours, it brought back so many wonderful memories.
+
+I'm planning to visit next month if that works for you. I'd love to spend some time together and maybe help out around the house if you need anything.</div>
+
+      <div class="closing">
+        Love always,<br>
+        <span class="signature">David</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

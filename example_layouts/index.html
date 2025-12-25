@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Letter IRL - Layout Examples</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 2rem;
+      background: #f5f5f5;
+      color: #333;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin-bottom: 2rem;
+    }
+
+    .section {
+      margin-bottom: 3rem;
+    }
+
+    h2 {
+      border-bottom: 2px solid #ddd;
+      padding-bottom: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .card {
+      background: white;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    }
+
+    .card a {
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .card-preview {
+      height: 180px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 3rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    .card-preview.standard { background: linear-gradient(135deg, #333 0%, #555 100%); }
+    .card-preview.modern { background: linear-gradient(135deg, #0066cc 0%, #0099ff 100%); }
+    .card-preview.formal { background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%); }
+    .card-preview.personal { background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); }
+    .card-preview.header { background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%); }
+    .card-preview.inline { background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); }
+    .card-preview.postcard { background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); }
+
+    .card-body {
+      padding: 1rem;
+    }
+
+    .card-title {
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
+    .card-description {
+      font-size: 0.875rem;
+      color: #666;
+      line-height: 1.4;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      background: #eee;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      margin-top: 0.5rem;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 3rem;
+      padding-top: 2rem;
+      border-top: 1px solid #ddd;
+      color: #999;
+      font-size: 0.875rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Letter IRL Layout Examples</h1>
+  <p class="subtitle">Click any card to view the full layout preview</p>
+
+  <div class="section">
+    <h2>Letter Layouts (No Image)</h2>
+    <div class="grid">
+      <div class="card">
+        <a href="standard.html">
+          <div class="card-preview standard">📝</div>
+          <div class="card-body">
+            <div class="card-title">Standard</div>
+            <div class="card-description">Classic Times New Roman format. Traditional, timeless look suitable for any correspondence.</div>
+            <span class="badge">Serif</span>
+          </div>
+        </a>
+      </div>
+
+      <div class="card">
+        <a href="modern.html">
+          <div class="card-preview modern">✨</div>
+          <div class="card-body">
+            <div class="card-title">Modern</div>
+            <div class="card-description">Clean Helvetica with generous whitespace. Contemporary, professional but approachable.</div>
+            <span class="badge">Sans-serif</span>
+          </div>
+        </a>
+      </div>
+
+      <div class="card">
+        <a href="formal.html">
+          <div class="card-preview formal">🎩</div>
+          <div class="card-body">
+            <div class="card-title">Formal</div>
+            <div class="card-description">Elegant Georgia with right-aligned date. Distinguished, official appearance for business.</div>
+            <span class="badge">Serif</span>
+            <span class="badge">Justified</span>
+          </div>
+        </a>
+      </div>
+
+      <div class="card">
+        <a href="personal.html">
+          <div class="card-preview personal">💝</div>
+          <div class="card-body">
+            <div class="card-title">Personal</div>
+            <div class="card-description">Handwriting-style font for a warm, intimate feel. Perfect for friends and family.</div>
+            <span class="badge">Handwriting</span>
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Letter Layouts (With Images)</h2>
+    <div class="grid">
+      <div class="card">
+        <a href="standard-header-image.html">
+          <div class="card-preview header">🎂</div>
+          <div class="card-body">
+            <div class="card-title">Standard + Header Image</div>
+            <div class="card-description">Classic layout with decorative header banner. Great for birthdays, holidays, and celebrations.</div>
+            <span class="badge">Header Image</span>
+          </div>
+        </a>
+      </div>
+
+      <div class="card">
+        <a href="personal-header-image.html">
+          <div class="card-preview header" style="background: linear-gradient(135deg, #e91e63 0%, #c2185b 100%);">💐</div>
+          <div class="card-body">
+            <div class="card-title">Personal + Header Image</div>
+            <div class="card-description">Handwriting font with a thank-you theme header. Warm and heartfelt.</div>
+            <span class="badge">Header Image</span>
+            <span class="badge">Handwriting</span>
+          </div>
+        </a>
+      </div>
+
+      <div class="card">
+        <a href="formal-inline-image.html">
+          <div class="card-preview inline">📊</div>
+          <div class="card-body">
+            <div class="card-title">Formal + Inline Image</div>
+            <div class="card-description">Business letter with embedded diagram/photo. Perfect for proposals, references, and documentation.</div>
+            <span class="badge">Inline Image</span>
+            <span class="badge">Captioned</span>
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Postcards</h2>
+    <div class="grid">
+      <div class="card">
+        <a href="postcard-front.html">
+          <div class="card-preview postcard">🏔️</div>
+          <div class="card-body">
+            <div class="card-title">Postcard - Front</div>
+            <div class="card-description">Full-bleed image with optional text overlay. 6" × 4" format.</div>
+            <span class="badge">6×4 inches</span>
+          </div>
+        </a>
+      </div>
+
+      <div class="card">
+        <a href="postcard-back.html">
+          <div class="card-preview postcard" style="background: linear-gradient(135deg, #2980b9 0%, #1abc9c 100%);">✉️</div>
+          <div class="card-body">
+            <div class="card-title">Postcard - Back</div>
+            <div class="card-description">Split layout with message area and address block. Classic postcard format.</div>
+            <span class="badge">6×4 inches</span>
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Letter IRL Layout Examples • These are browser previews, actual printed output may vary slightly
+  </footer>
+</body>
+</html>
