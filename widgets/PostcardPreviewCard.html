@@ -103,7 +103,7 @@
       }
 
       .preview-pane.hidden {
-        display: none;
+        display: none !important;
       }
 
       .preview-pane img {
@@ -182,6 +182,16 @@
       .postcard-recipient .name {
         font-weight: bold;
         text-transform: uppercase;
+      }
+
+      .postcard-return-address {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        font-family: "Courier New", monospace;
+        font-size: 0.55rem;
+        line-height: 1.3;
+        color: #555;
       }
 
       /* Message box in meta section */
@@ -475,7 +485,12 @@
           savedReturnAddressNote,
           draftId,
           message,
-          recipientName
+          recipientName,
+          recipientCity,
+          recipientState,
+          senderName,
+          senderCity,
+          senderState
         } = state;
 
         // Store draftId for send button
@@ -493,15 +508,21 @@
         // Render back preview (postcard mockup)
         const previewBack = document.getElementById("preview-back");
         if (message) {
-          // Escape HTML in message
-          const escapedMessage = (message || '')
+          // Escape HTML helper
+          const escapeHtml = (str) => (str || '')
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
-          const escapedRecipient = (recipientName || 'Recipient')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
+
+          const escapedMessage = escapeHtml(message);
+          const escapedRecipientName = escapeHtml(recipientName || 'Recipient');
+          const escapedRecipientLocation = escapeHtml(
+            [recipientCity, recipientState].filter(Boolean).join(', ')
+          );
+          const escapedSenderName = escapeHtml(senderName);
+          const escapedSenderLocation = escapeHtml(
+            [senderCity, senderState].filter(Boolean).join(', ')
+          );
 
           previewBack.innerHTML = `
             <div class="postcard-back-mockup">
@@ -510,8 +531,15 @@
               </div>
               <div class="postcard-address-side">
                 <div class="postcard-stamp">STAMP</div>
+                ${escapedSenderName ? `
+                <div class="postcard-return-address">
+                  <div>${escapedSenderName}</div>
+                  <div>${escapedSenderLocation}</div>
+                </div>
+                ` : ''}
                 <div class="postcard-recipient">
-                  <div class="name">${escapedRecipient}</div>
+                  <div class="name">${escapedRecipientName}</div>
+                  <div>${escapedRecipientLocation}</div>
                 </div>
               </div>
             </div>
