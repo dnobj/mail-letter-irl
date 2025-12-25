@@ -45,6 +45,10 @@ interface QuoteAndPreviewPostcardOutput {
   // Draft for idempotent send
   draftId: string;
   draftExpiresAt: string;  // ISO timestamp
+  // Message text (for display in widget)
+  message: string;
+  // Recipient name (for display in widget)
+  recipientName: string;
   // Saved return address used (when sender not provided)
   usedSavedReturnAddress?: boolean;
   savedReturnAddressNote?: string;
@@ -416,6 +420,8 @@ async function handler(
     estimatedDeliveryDays: 5,
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
+    message: input.message,
+    recipientName: input.recipient.name,
     usedSavedReturnAddress: usedSavedReturnAddress || undefined,
     savedReturnAddressNote: savedReturnAddressNote,
   };

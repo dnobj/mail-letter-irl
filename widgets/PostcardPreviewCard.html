@@ -114,9 +114,91 @@
       }
 
       .preview-pane.back-preview {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      /* Postcard back mockup */
+      .postcard-back-mockup {
+        width: 100%;
+        max-width: 450px;
+        aspect-ratio: 9 / 6;
+        background: #fffef8;
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        display: flex;
+        overflow: hidden;
+      }
+
+      .postcard-message-side {
+        width: 50%;
+        padding: 12px;
+        border-right: 1px solid #ddd;
+        display: flex;
+        align-items: flex-start;
+      }
+
+      .postcard-message-text {
+        font-family: "Georgia", "Times New Roman", serif;
+        font-size: 0.75rem;
+        line-height: 1.5;
+        color: #333;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+
+      .postcard-address-side {
+        width: 50%;
+        padding: 12px;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+      }
+
+      .postcard-stamp {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 36px;
+        height: 44px;
+        border: 1.5px dashed #999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 6px;
+        color: #999;
+        text-align: center;
+      }
+
+      .postcard-recipient {
+        font-family: "Courier New", monospace;
+        font-size: 0.65rem;
+        line-height: 1.4;
+        color: #333;
+      }
+
+      .postcard-recipient .name {
+        font-weight: bold;
+        text-transform: uppercase;
+      }
+
+      /* Message box in meta section */
+      .message-box {
+        padding: 0.75rem;
+        background: var(--bg-secondary);
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+      }
+
+      .message-text {
         font-family: "Georgia", "Times New Roman", serif;
         font-size: 0.9rem;
         line-height: 1.5;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+        word-wrap: break-word;
       }
 
       .meta {
@@ -294,6 +376,14 @@
           <span class="info-label" id="id-label">Draft</span>
           <span class="info-value" id="id-value"></span>
         </div>
+        <div class="info-row" id="recipient-row" style="display: none;">
+          <span class="info-label">To</span>
+          <span class="info-value" id="recipient-name"></span>
+        </div>
+        <div class="message-box" id="message-box" style="display: none;">
+          <div class="info-label" style="margin-bottom: 0.5rem;">Message</div>
+          <div class="message-text" id="message-text"></div>
+        </div>
         <div class="note" id="note" style="display: none;"></div>
         <!-- Send button -->
         <button class="send-button" id="send-button" disabled>
@@ -383,7 +473,9 @@
           deliveryClass,
           estimatedDeliveryDays,
           savedReturnAddressNote,
-          draftId
+          draftId,
+          message,
+          recipientName
         } = state;
 
         // Store draftId for send button
@@ -398,13 +490,48 @@
           previewFront.innerHTML = "<em>No image preview available</em>";
         }
 
-        // Render back preview (message)
+        // Render back preview (postcard mockup)
         const previewBack = document.getElementById("preview-back");
-        const backContent = extractBodyContent(previewBackHtml);
-        if (backContent) {
-          previewBack.innerHTML = backContent;
+        if (message) {
+          // Escape HTML in message
+          const escapedMessage = (message || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+          const escapedRecipient = (recipientName || 'Recipient')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+
+          previewBack.innerHTML = `
+            <div class="postcard-back-mockup">
+              <div class="postcard-message-side">
+                <div class="postcard-message-text">${escapedMessage}</div>
+              </div>
+              <div class="postcard-address-side">
+                <div class="postcard-stamp">STAMP</div>
+                <div class="postcard-recipient">
+                  <div class="name">${escapedRecipient}</div>
+                </div>
+              </div>
+            </div>
+          `;
         } else {
           previewBack.innerHTML = "<em>No message preview available</em>";
+        }
+
+        // Show message and recipient in meta section
+        if (message) {
+          const messageBox = document.getElementById("message-box");
+          const messageText = document.getElementById("message-text");
+          messageText.textContent = message;
+          messageBox.style.display = "block";
+        }
+
+        if (recipientName) {
+          const recipientRow = document.getElementById("recipient-row");
+          document.getElementById("recipient-name").textContent = recipientName;
+          recipientRow.style.display = "flex";
         }
 
         // Cost - postcardCost is already in letters (1 letter = 1 postcard)
