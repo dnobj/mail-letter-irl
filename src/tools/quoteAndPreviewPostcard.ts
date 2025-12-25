@@ -49,12 +49,16 @@ interface QuoteAndPreviewPostcardOutput {
   message: string;
   // Recipient info (for display in widget)
   recipientName: string;
+  recipientAddressLine1: string;
   recipientCity: string;
   recipientState: string;
+  recipientPostalCode: string;
   // Sender info (for return address in widget)
   senderName: string;
+  senderAddressLine1: string;
   senderCity: string;
   senderState: string;
+  senderPostalCode: string;
   // Saved return address used (when sender not provided)
   usedSavedReturnAddress?: boolean;
   savedReturnAddressNote?: string;
@@ -428,11 +432,15 @@ async function handler(
     draftExpiresAt: draftResult.expiresAt.toISOString(),
     message: input.message,
     recipientName: input.recipient.name,
+    recipientAddressLine1: input.recipient.addressLine1,
     recipientCity: input.recipient.city,
     recipientState: input.recipient.state,
+    recipientPostalCode: input.recipient.postalCode,
     senderName: sender.name,
+    senderAddressLine1: sender.addressLine1,
     senderCity: sender.city,
     senderState: sender.state,
+    senderPostalCode: sender.postalCode,
     usedSavedReturnAddress: usedSavedReturnAddress || undefined,
     savedReturnAddressNote: savedReturnAddressNote,
   };

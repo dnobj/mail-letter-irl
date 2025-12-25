@@ -228,11 +228,11 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
 
 export const quoteAndPreviewPostcardOutputSchema: JsonSchema = {
   type: "object",
-  required: ["previewFrontHtml", "previewBackHtml", "postcardCost", "canSendNow", "draftId", "draftExpiresAt"],
+  required: ["previewFrontHtml", "previewBackHtml", "lettersRequired", "canSendNow", "draftId", "draftExpiresAt"],
   properties: {
     previewFrontHtml: { type: "string", description: "HTML preview of postcard front (image)" },
     previewBackHtml: { type: "string", description: "HTML preview of postcard back (message)" },
-    postcardCost: { type: "number", description: "Cost in letters (always 1 for 6x9 postcard)" },
+    lettersRequired: { type: "number", description: "Letters required from balance (always 1 for 6x9 postcard)" },
     canSendNow: { type: "boolean" },
     reasonCannotSend: { type: "string" },
     deliveryClass: { type: "string" },

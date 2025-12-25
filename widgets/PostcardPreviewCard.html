@@ -486,11 +486,15 @@
           draftId,
           message,
           recipientName,
+          recipientAddressLine1,
           recipientCity,
           recipientState,
+          recipientPostalCode,
           senderName,
+          senderAddressLine1,
           senderCity,
-          senderState
+          senderState,
+          senderPostalCode
         } = state;
 
         // Store draftId for send button
@@ -515,13 +519,19 @@
             .replace(/>/g, '&gt;');
 
           const escapedMessage = escapeHtml(message);
+
+          // Build full recipient address
           const escapedRecipientName = escapeHtml(recipientName || 'Recipient');
-          const escapedRecipientLocation = escapeHtml(
-            [recipientCity, recipientState].filter(Boolean).join(', ')
+          const escapedRecipientStreet = escapeHtml(recipientAddressLine1 || '');
+          const escapedRecipientCityLine = escapeHtml(
+            [recipientCity, recipientState, recipientPostalCode].filter(Boolean).join(', ').replace(/, (\d)/, ' $1')
           );
+
+          // Build full sender address
           const escapedSenderName = escapeHtml(senderName);
-          const escapedSenderLocation = escapeHtml(
-            [senderCity, senderState].filter(Boolean).join(', ')
+          const escapedSenderStreet = escapeHtml(senderAddressLine1 || '');
+          const escapedSenderCityLine = escapeHtml(
+            [senderCity, senderState, senderPostalCode].filter(Boolean).join(', ').replace(/, (\d)/, ' $1')
           );
 
           previewBack.innerHTML = `
@@ -534,12 +544,14 @@
                 ${escapedSenderName ? `
                 <div class="postcard-return-address">
                   <div>${escapedSenderName}</div>
-                  <div>${escapedSenderLocation}</div>
+                  <div>${escapedSenderStreet}</div>
+                  <div>${escapedSenderCityLine}</div>
                 </div>
                 ` : ''}
                 <div class="postcard-recipient">
                   <div class="name">${escapedRecipientName}</div>
-                  <div>${escapedRecipientLocation}</div>
+                  <div>${escapedRecipientStreet}</div>
+                  <div>${escapedRecipientCityLine}</div>
                 </div>
               </div>
             </div>
