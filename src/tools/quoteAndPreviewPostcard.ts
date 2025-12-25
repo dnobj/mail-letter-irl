@@ -37,7 +37,7 @@ interface QuoteAndPreviewPostcardInput {
 interface QuoteAndPreviewPostcardOutput {
   previewFrontHtml: string;
   previewBackHtml: string;
-  postcardCost: number;  // Number of letters this will cost (always 1 for postcard)
+  lettersRequired: number;  // Number of letters from balance (always 1 for postcard)
   canSendNow: boolean;
   reasonCannotSend?: string;
   deliveryClass?: string;
@@ -372,7 +372,7 @@ async function handler(
   const requiredCredits = POSTCARD_CREDITS_COST;
   const available = context.user.creditsRemaining;
   const canSendNow = available >= requiredCredits;
-  const postcardCost = 1; // User-facing: 1 letter = 1 postcard
+  const lettersRequired = 1; // User-facing: 1 letter = 1 postcard
 
   context.logger.info(
     {
@@ -380,7 +380,7 @@ async function handler(
       event: "quote.postcard.computed",
       availableCredits: available,
       requiredCredits,
-      postcardCost,
+      lettersRequired,
       canSendNow
     },
     "Computed preview requirements"
@@ -419,7 +419,7 @@ async function handler(
   const output: QuoteAndPreviewPostcardOutput = {
     previewFrontHtml,
     previewBackHtml,
-    postcardCost,
+    lettersRequired,
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
     deliveryClass: "First Class Postcard",

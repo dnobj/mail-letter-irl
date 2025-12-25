@@ -477,7 +477,7 @@
           state.previewBackHtml;
 
         const {
-          postcardCost,
+          lettersRequired,
           canSendNow,
           reasonCannotSend,
           deliveryClass,
@@ -562,8 +562,8 @@
           recipientRow.style.display = "flex";
         }
 
-        // Cost - postcardCost is already in letters (1 letter = 1 postcard)
-        const letters = postcardCost ?? 1;
+        // Cost - lettersRequired is already in letters (1 letter = 1 postcard)
+        const letters = lettersRequired ?? 1;
         document.getElementById("cost").textContent =
           `${letters} Letter${letters === 1 ? "" : "s"}`;
 
