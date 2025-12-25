@@ -12,16 +12,21 @@
 -- ENUMS
 -- ============================================================================
 
-CREATE TYPE pat_status AS ENUM (
-  'active',   -- Token is valid and usable
-  'revoked'   -- Token has been revoked by user
-);
+-- Create type only if it doesn't exist (handle partial migration recovery)
+DO $$ BEGIN
+    CREATE TYPE pat_status AS ENUM (
+      'active',   -- Token is valid and usable
+      'revoked'   -- Token has been revoked by user
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 -- ============================================================================
 -- PERSONAL ACCESS TOKENS TABLE
 -- ============================================================================
 
-CREATE TABLE personal_access_tokens (
+CREATE TABLE IF NOT EXISTS personal_access_tokens (
   token_id SERIAL PRIMARY KEY,
   user_id VARCHAR(255) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
 
@@ -50,14 +55,14 @@ CREATE TABLE personal_access_tokens (
 -- ============================================================================
 
 -- Find tokens by user (for listing)
-CREATE INDEX idx_pat_user_id ON personal_access_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_pat_user_id ON personal_access_tokens(user_id);
 
 -- Find active tokens efficiently
-CREATE INDEX idx_pat_user_active ON personal_access_tokens(user_id)
+CREATE INDEX IF NOT EXISTS idx_pat_user_active ON personal_access_tokens(user_id)
   WHERE status = 'active';
 
 -- Find tokens that need expiration checking
-CREATE INDEX idx_pat_expires_at ON personal_access_tokens(expires_at)
+CREATE INDEX IF NOT EXISTS idx_pat_expires_at ON personal_access_tokens(expires_at)
   WHERE expires_at IS NOT NULL AND status = 'active';
 
 -- ============================================================================
