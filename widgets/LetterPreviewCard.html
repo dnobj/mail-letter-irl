@@ -393,7 +393,15 @@
         // This must happen synchronously from the click event
         try {
           window.openai?.sendFollowUpMessage({
-            prompt: `I just clicked the Send Letter button in the widget. The letter should be sent now - please check the order status to confirm.`
+            prompt: `[WIDGET NOTIFICATION - DO NOT CALL ANY TOOLS]
+
+This is an automatic notification from the Mail Letter IRL widget.
+
+What happened: The user clicked the "Send Letter" button in the widget UI.
+What the widget did: The widget called the send_letter tool directly.
+Current status: The letter is being processed and should be sent.
+
+IMPORTANT: Do NOT call any tools in response to this notification. The send has already been initiated by the widget. Simply acknowledge that the letter was sent and inform the user that their letter balance has been updated. If the user asks about the status later, you can use get_order_status at that time.`
           });
         } catch (e) {
           console.warn("Could not notify ChatGPT of send attempt:", e);
