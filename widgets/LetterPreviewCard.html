@@ -251,6 +251,10 @@
         <button class="send-button" id="send-button" disabled>
           <span id="send-button-text">Send Letter</span>
         </button>
+        <!-- Notify ChatGPT button - appears after successful send -->
+        <button class="send-button" id="notify-button" style="display: none; margin-top: 0.5rem; background: var(--accent-success);">
+          <span id="notify-button-text">Tell ChatGPT</span>
+        </button>
         <div id="error-message" class="send-result error" style="display: none;"></div>
       </div>
     </div>
@@ -265,6 +269,7 @@
       let dataLoaded = false;
       let currentDraftId = null;
       let sendInProgress = false;
+      let lastSentOrderId = null;  // Store order ID for notify button
 
       function showLoading() {
         const card = document.getElementById("card");
@@ -422,16 +427,12 @@
           sendButtonText.innerHTML = "Letter Sent!";
           // Keep button disabled
 
-          // Notify ChatGPT about the successful send so it knows the action was taken
-          // This updates the conversation context
-          try {
-            await window.openai?.sendFollowUpMessage({
-              prompt: `The letter has been sent successfully! Order ID: ${orderId || 'confirmed'}. The user's letter balance has been updated.`
-            });
-          } catch (followUpError) {
-            // Don't fail the whole operation if follow-up message fails
-            console.warn("Failed to send follow-up message:", followUpError);
-          }
+          // Store order ID and show notify button
+          // (sendFollowUpMessage must be called synchronously from user event,
+          // so we provide a separate button for the user to click)
+          lastSentOrderId = orderId;
+          const notifyButton = document.getElementById("notify-button");
+          notifyButton.style.display = "block";
         } catch (error) {
           // Show error message
           errorMessage.textContent = `Failed to send: ${error.message || 'Unknown error'}`;
@@ -451,8 +452,28 @@
         }
       }
 
-      // Attach click handler
+      // Attach click handler for send button
       document.getElementById("send-button").addEventListener("click", handleSend);
+
+      // Attach click handler for notify button (must be synchronous user event)
+      document.getElementById("notify-button").addEventListener("click", function() {
+        // This is called synchronously from user click, so sendFollowUpMessage should work
+        const notifyButton = document.getElementById("notify-button");
+        const notifyButtonText = document.getElementById("notify-button-text");
+
+        notifyButtonText.textContent = "Notifying...";
+        notifyButton.disabled = true;
+
+        window.openai?.sendFollowUpMessage({
+          prompt: `The letter has been sent successfully! Order ID: ${lastSentOrderId || 'confirmed'}. The user's letter balance has been updated.`
+        }).then(() => {
+          notifyButtonText.textContent = "ChatGPT Notified ✓";
+        }).catch((err) => {
+          console.warn("Failed to notify ChatGPT:", err);
+          notifyButtonText.textContent = "Notification failed";
+          notifyButton.disabled = false;
+        });
+      });
 
       // Apply theme
       const theme = window.openai?.theme ?? "light";
