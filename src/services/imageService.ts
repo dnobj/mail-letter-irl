@@ -60,18 +60,24 @@ export class ImageProcessingError extends Error {
 // ============================================================================
 
 /**
+ * Input type for image processing - accepts either OpenAI file param or direct URL
+ */
+export type ImageInput = ImageFileParam | { url: string };
+
+/**
  * Download and process an image for postcard printing
  *
- * @param fileParam - OpenAI file parameter with download_url and file_id
+ * @param input - OpenAI file parameter with download_url, or object with url string
  * @param size - Target postcard size (default: '6x9')
  * @returns Processed image as base64 data URI with metadata
  * @throws ImageProcessingError with user-friendly message
  */
 export async function downloadAndProcessImage(
-  fileParam: ImageFileParam,
+  input: ImageInput,
   size: PostcardSize = '6x9'
 ): Promise<ProcessedImage> {
-  const { download_url } = fileParam;
+  // Support both OpenAI fileParams ({download_url, file_id}) and plain URLs ({url})
+  const download_url = 'download_url' in input ? input.download_url : input.url;
   const targetDimensions = CONFIG.sizes[size];
 
   // 1. Download image

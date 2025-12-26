@@ -18,7 +18,7 @@ import { getLetterProvider } from "../services/providers/index.js";
 import type { AddressValidationInput, AddressValidationResult } from "../services/providers/types.js";
 import { createPostcardDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
-import { downloadAndProcessImage, ImageProcessingError } from "../services/imageService.js";
+import { downloadAndProcessImage, ImageProcessingError, type ImageInput } from "../services/imageService.js";
 import type { PostcardSize, ImageFileParam } from "../services/types.js";
 
 // ============================================================================
@@ -32,6 +32,8 @@ interface QuoteAndPreviewPostcardInput {
   size?: PostcardSize;
   // Image from OpenAI fileParams - injected by MCP framework
   image?: ImageFileParam;
+  // Alternative: direct image URL (for when fileParams isn't available)
+  imageUrl?: string;
 }
 
 interface QuoteAndPreviewPostcardOutput {
@@ -101,8 +103,36 @@ async function handler(
   let usedSavedReturnAddress = false;
   let savedReturnAddressNote: string | undefined;
 
-  // Validate image is provided
-  if (!input.image || !input.image.download_url) {
+  // Determine image source - either fileParams or direct URL
+  let imageInput: ImageInput | null = null;
+  let imageSourceUrl: string | undefined;
+
+  if (input.image && input.image.download_url) {
+    // OpenAI fileParams (preferred)
+    imageInput = input.image;
+    imageSourceUrl = input.image.download_url;
+    context.logger.info(
+      {
+        correlationId: context.correlationId,
+        event: "quote.postcard.image_from_fileParams"
+      },
+      "Using image from OpenAI fileParams"
+    );
+  } else if (input.imageUrl) {
+    // Direct URL (fallback for code interpreter images)
+    imageInput = { url: input.imageUrl };
+    imageSourceUrl = input.imageUrl;
+    context.logger.info(
+      {
+        correlationId: context.correlationId,
+        event: "quote.postcard.image_from_url",
+        imageUrl: input.imageUrl.substring(0, 100) // Log first 100 chars
+      },
+      "Using image from direct URL"
+    );
+  }
+
+  if (!imageInput) {
     context.logger.warn(
       {
         correlationId: context.correlationId,
@@ -111,7 +141,9 @@ async function handler(
       "No image provided for postcard"
     );
     throw new Error(
-      "No image provided for postcard. Please attach an image to use as the front of your postcard."
+      "No image provided for postcard. Please provide an image using one of these methods:\n" +
+      "1. Attach an image directly to your message (recommended)\n" +
+      "2. Provide an imageUrl parameter with a publicly accessible image URL"
     );
   }
 
@@ -242,7 +274,7 @@ async function handler(
       "Downloading and processing postcard image"
     );
 
-    processedImage = await downloadAndProcessImage(input.image, size);
+    processedImage = await downloadAndProcessImage(imageInput!, size);
 
     context.logger.info(
       {
@@ -401,7 +433,7 @@ async function handler(
     recipient: input.recipient as unknown as Record<string, unknown>,
     message: input.message,
     frontImageData: processedImage.base64DataUri,
-    frontImageUrl: input.image.download_url,
+    frontImageUrl: imageSourceUrl!,
     postcardSize: size,
     requiredCredits,
     previewHtml: previewFrontHtml,
@@ -501,10 +533,14 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
   description:
     "Generate a preview and cost estimate for a postcard with your image. " +
     "Validates addresses, processes the image for printing, and creates a draft for sending.\n\n" +
-    "IMPORTANT - Image:\n" +
-    "- Attach an image to use as the front of your postcard.\n" +
-    "- Supported formats: PNG, JPEG, WebP (max 10MB).\n" +
-    "- Any size image works - it will be resized to fit the postcard (6x9 at 300 DPI).\n\n" +
+    "IMPORTANT - Image (provide ONE of the following):\n" +
+    "1. Attach an image directly to your message (recommended) - this uses file upload.\n" +
+    "2. Use the imageUrl parameter with a publicly accessible URL (for generated images).\n" +
+    "   Example: If you've created an image in code interpreter, you can upload it to a " +
+    "   hosting service and provide the URL.\n\n" +
+    "Image Requirements:\n" +
+    "- Supported formats: PNG, JPEG, WebP (max 10MB)\n" +
+    "- Any size image works - it will be resized to fit the postcard (6x9 at 300 DPI)\n\n" +
     "IMPORTANT - Sender Address:\n" +
     "- If you don't provide a sender address, your saved return address will be used automatically.\n" +
     "- Use set_return_address to save a return address for all future postcards.\n\n" +

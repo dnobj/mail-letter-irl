@@ -222,6 +222,10 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
       enum: ["6x9"],
       default: "6x9",
       description: "Postcard size (currently only 6x9 is supported)"
+    },
+    imageUrl: {
+      type: "string",
+      description: "URL of image to use for postcard front (alternative to file attachment). Use this when you have generated an image and uploaded it somewhere accessible."
     }
   }
 };

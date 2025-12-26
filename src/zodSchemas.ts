@@ -61,7 +61,9 @@ export const quoteAndPreviewPostcardInputZ = z.object({
   image: z.object({
     download_url: z.string(),
     file_id: z.string()
-  }).optional()
+  }).optional(),
+  // Alternative: direct image URL (for when fileParams isn't available)
+  imageUrl: z.string().optional()
 });
 
 export const sendPostcardInputZ = z.object({
