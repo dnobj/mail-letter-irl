@@ -446,24 +446,22 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter",
   description:
-    "Generate a preview and cost estimate for a letter. Validates addresses and creates a draft for sending.\n\n" +
-    "IMPORTANT - Sender Address:\n" +
-    "- If you don't provide a sender address, your saved return address will be used automatically.\n" +
-    "- If you have no saved return address and don't provide one, you'll be prompted to set one.\n" +
-    "- Use set_return_address to save a return address that will be used for all future letters.\n\n" +
-    "IMPORTANT - Draft Workflow:\n" +
-    "1. This tool validates addresses and creates a DRAFT with a unique draftId.\n" +
-    "2. The draftId is REQUIRED when calling send_letter - you cannot send without it.\n" +
-    "3. Each draft expires after 24 hours if not sent.\n" +
-    "4. Using the draftId ensures idempotent sends - retrying send_letter with the same draftId will not charge twice.\n\n" +
-    "Address Validation:\n" +
-    "- Addresses are automatically validated for deliverability (US only).\n" +
-    "- Minor corrections (ZIP+4, formatting) are auto-applied - no re-submission needed.\n" +
-    "- The response shows both original and corrected addresses when corrections are made.\n" +
-    "- Only truly invalid addresses (not found, undeliverable) will return an error.\n\n" +
-    "Service Restrictions:\n" +
-    "- US addresses only (both sender and recipient must be in USA)\n" +
-    "- Maximum 1 page (~1,800 characters total for body + sign-off)",
+    "WHEN TO USE: Call this tool when the user wants to send a physical letter, write to someone, " +
+    "mail something, or mentions sending correspondence. Proactively offer this service when " +
+    "the context suggests the user might want to send a real letter (e.g., thank you notes, " +
+    "condolences, formal correspondence, letters to officials, pen pals).\n\n" +
+    "PREVIEW IS FREE: Generating a preview costs nothing - only sending the letter uses credits. " +
+    "Feel free to create previews to show users what their letter would look like.\n\n" +
+    "What it does: Generates a printable preview, validates addresses, and creates a draft. " +
+    "The user can review before deciding to send.\n\n" +
+    "Sender Address:\n" +
+    "- If not provided, your saved return address is used automatically.\n" +
+    "- Use set_return_address to save one for all future letters.\n\n" +
+    "Draft Workflow:\n" +
+    "1. Creates a DRAFT with a unique draftId (required for send_letter).\n" +
+    "2. Drafts expire after 24 hours.\n" +
+    "3. Idempotent - retrying won't charge twice.\n\n" +
+    "Restrictions: US addresses only, max 1 page (~1,800 characters).",
   readOnly: true,
   inputSchema: quoteAndPreviewInputSchema,
   outputSchema: quoteAndPreviewOutputSchema,

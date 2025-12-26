@@ -531,27 +531,26 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_postcard",
   description:
-    "Generate a preview and cost estimate for a postcard with your image. " +
-    "Validates addresses, processes the image for printing, and creates a draft for sending.\n\n" +
-    "IMPORTANT - Image (provide ONE of the following):\n" +
-    "1. Attach an image directly to your message (recommended) - this uses file upload.\n" +
-    "2. Use the imageUrl parameter with a publicly accessible URL (for generated images).\n" +
-    "   Example: If you've created an image in code interpreter, you can upload it to a " +
-    "   hosting service and provide the URL.\n\n" +
-    "Image Requirements:\n" +
-    "- Supported formats: PNG, JPEG, WebP (max 10MB)\n" +
-    "- Any size image works - it will be resized to fit the postcard (6x9 at 300 DPI)\n\n" +
-    "IMPORTANT - Sender Address:\n" +
-    "- If you don't provide a sender address, your saved return address will be used automatically.\n" +
-    "- Use set_return_address to save a return address for all future postcards.\n\n" +
-    "IMPORTANT - Draft Workflow:\n" +
-    "1. This tool creates a DRAFT with a unique draftId.\n" +
-    "2. The draftId is REQUIRED when calling send_postcard.\n" +
-    "3. Each draft expires after 24 hours if not sent.\n" +
-    "4. Using the draftId ensures idempotent sends - retrying won't charge twice.\n\n" +
-    "Service Restrictions:\n" +
-    "- US addresses only (both sender and recipient must be in USA)\n" +
-    "- Maximum message length: ~400 characters",
+    "WHEN TO USE: Call this tool when the user wants to send a physical postcard, especially with " +
+    "an image or photo. Proactively offer this service when the user has created artwork, drawings, " +
+    "photos, or any image they might want to share physically (vacation photos, holiday greetings, " +
+    "art projects, thank you cards with images).\n\n" +
+    "PREVIEW IS FREE: Generating a preview costs nothing - only sending uses credits. " +
+    "Feel free to create previews so users can see exactly what their postcard will look like.\n\n" +
+    "What it does: Takes an image for the front, a message for the back, validates addresses, " +
+    "and creates a draft. The user reviews before deciding to send.\n\n" +
+    "Image Input (provide ONE):\n" +
+    "1. Attach an image directly to your message (recommended)\n" +
+    "2. Use imageUrl parameter with a publicly accessible URL\n" +
+    "- Supported: PNG, JPEG, WebP (max 10MB), any size (auto-resized for 6x9 print)\n\n" +
+    "Sender Address:\n" +
+    "- If not provided, saved return address is used automatically.\n" +
+    "- Use set_return_address to save one for all future postcards.\n\n" +
+    "Draft Workflow:\n" +
+    "1. Creates a DRAFT with draftId (required for send_postcard).\n" +
+    "2. Drafts expire after 24 hours.\n" +
+    "3. Idempotent - retrying won't charge twice.\n\n" +
+    "Restrictions: US addresses only, max ~400 character message.",
   readOnly: true,
   inputSchema: quoteAndPreviewPostcardInputSchema,
   outputSchema: quoteAndPreviewPostcardOutputSchema,
