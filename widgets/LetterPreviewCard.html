@@ -389,11 +389,11 @@
         // Hide any previous error
         errorMessage.style.display = "none";
 
-        // IMMEDIATELY notify ChatGPT that user is attempting to send
+        // IMMEDIATELY notify ChatGPT that user clicked send
         // This must happen synchronously from the click event
         try {
           window.openai?.sendFollowUpMessage({
-            prompt: `User clicked "Send Letter" for draft ${currentDraftId}. Processing the send request now.`
+            prompt: `I just clicked the Send Letter button in the widget. The letter should be sent now - please check the order status to confirm.`
           });
         } catch (e) {
           console.warn("Could not notify ChatGPT of send attempt:", e);
