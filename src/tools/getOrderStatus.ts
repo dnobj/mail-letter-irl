@@ -45,7 +45,10 @@ async function handler(
     {
       correlationId: context.correlationId,
       event: "status.lookup.start",
-      hasOrderId: Boolean(input.orderId)
+      hasOrderId: Boolean(input.orderId),
+      requestedOrderId: input.orderId,
+      totalOrdersLoaded: context.user.orders.length,
+      orderIds: context.user.orders.map(o => o.orderId).slice(0, 10)  // Log first 10 order IDs
     },
     "Checking order status"
   );
@@ -54,7 +57,9 @@ async function handler(
     context.logger.warn(
       {
         correlationId: context.correlationId,
-        event: "status.lookup.not_found"
+        event: "status.lookup.not_found",
+        requestedOrderId: input.orderId,
+        availableOrderIds: context.user.orders.map(o => o.orderId)
       },
       "No matching order found"
     );
