@@ -421,6 +421,17 @@
           sendButton.classList.remove("loading");
           sendButtonText.innerHTML = "Letter Sent!";
           // Keep button disabled
+
+          // Notify ChatGPT about the successful send so it knows the action was taken
+          // This updates the conversation context
+          try {
+            await window.openai?.sendFollowUpMessage({
+              prompt: `The letter has been sent successfully! Order ID: ${orderId || 'confirmed'}. The user's letter balance has been updated.`
+            });
+          } catch (followUpError) {
+            // Don't fail the whole operation if follow-up message fails
+            console.warn("Failed to send follow-up message:", followUpError);
+          }
         } catch (error) {
           // Show error message
           errorMessage.textContent = `Failed to send: ${error.message || 'Unknown error'}`;
