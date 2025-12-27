@@ -639,23 +639,10 @@
         // Hide any previous error
         errorMessage.style.display = "none";
 
-        // IMMEDIATELY notify ChatGPT that user clicked send
-        // This must happen synchronously from the click event
-        try {
-          window.openai?.sendFollowUpMessage({
-            prompt: `[WIDGET NOTIFICATION - DO NOT CALL ANY TOOLS]
-
-This is an automatic notification from the Mail Letter IRL widget.
-
-What happened: The user clicked the "Send Postcard" button in the widget UI.
-What the widget did: The widget called the send_postcard tool directly.
-Current status: The postcard is being processed and should be sent.
-
-IMPORTANT: Do NOT call any tools in response to this notification. The send has already been initiated by the widget. Simply acknowledge that the postcard was sent and inform the user that their letter balance has been updated. If the user asks about the status later, you can use get_order_status at that time.`
-          });
-        } catch (e) {
-          console.warn("Could not notify ChatGPT of send attempt:", e);
-        }
+        // NOTE: We intentionally do NOT call sendFollowUpMessage here.
+        // As of Dec 2025, sendFollowUpMessage has a bug that causes the widget
+        // to re-render by replaying the prior tool response. See GitHub issue.
+        // The widget UI shows success state; users can ask ChatGPT for status if needed.
 
         // Show loading state
         sendInProgress = true;
