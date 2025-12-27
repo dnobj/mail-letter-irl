@@ -1,6 +1,6 @@
 # Database Schema
 
-**Last Updated:** December 4, 2025
+**Last Updated:** December 27, 2025
 
 This document describes the Letter IRL database schema as deployed in production (Neon PostgreSQL).
 
@@ -8,15 +8,16 @@ This document describes the Letter IRL database schema as deployed in production
 
 ## Overview
 
-**12 Tables** across 6 migrations:
+**14 Tables** across 13 migrations:
 
 | Category | Tables |
 |----------|--------|
 | Users | `users` |
 | Credits | `credit_ledger`, `credit_transactions`, `credit_consumption` |
-| Letters | `letters`, `letter_drafts`, `letter_jobs` |
+| Letters | `letters`, `letter_drafts`, `letter_status_history`, `letter_jobs` |
 | Payments | `orders`, `stripe_disputes` |
 | Promos | `promo_campaigns`, `promo_redemptions` |
+| Auth | `personal_access_tokens` |
 | System | `migrations` |
 
 ---
@@ -37,6 +38,8 @@ User accounts with credit balances and tier information.
 | tier | user_tier | NO | 'standard' | Current tier (standard, trusted) |
 | tier_override | user_tier | YES | NULL | Admin manual override |
 | tier_calculated_at | TIMESTAMPTZ | YES | NOW() | Last tier calculation |
+| return_address | JSONB | YES | NULL | User preferred return/sender address |
+| return_address_validated_at | TIMESTAMPTZ | YES | NULL | When address was last validated |
 | created_at | TIMESTAMPTZ | NO | NOW() | Account creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update (auto-trigger) |
 
@@ -135,11 +138,20 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | sender | JSONB | NO | - | Sender address |
 | recipient | JSONB | NO | - | Recipient address |
 | body_text | TEXT | NO | - | Letter content |
-| sign_off | TEXT | NO | - | Closing text |
+| sign_off | TEXT | YES | - | Closing text (nullable for postcards) |
 | required_credits | INTEGER | NO | - | Credits needed (> 0) |
 | preview_html | TEXT | YES | - | Generated preview |
 | sender_validation | JSONB | YES | - | Cached address validation |
 | recipient_validation | JSONB | YES | - | Cached address validation |
+| mail_type | mail_type | NO | 'letter' | letter or postcard |
+| front_image_data | TEXT | YES | - | Postcard front image (Base64 JPEG) |
+| front_image_url | TEXT | YES | - | Original image URL (debugging) |
+| postcard_size | VARCHAR(10) | YES | - | Postcard size (e.g., '6x9') |
+| layout_type | VARCHAR(20) | NO | 'text_only' | text_only, header_image, inline_image |
+| header_image_data | TEXT | YES | - | Header image (Base64 JPEG) |
+| header_image_url | TEXT | YES | - | Original header URL (debugging) |
+| inline_image_data | TEXT | YES | - | Inline image (Base64 JPEG) |
+| inline_image_url | TEXT | YES | - | Original inline URL (debugging) |
 | status | draft_status | NO | 'pending' | pending, consumed, expired, cancelled |
 | expires_at | TIMESTAMPTZ | NO | - | Expiration (24h from creation) |
 | consumed_at | TIMESTAMPTZ | YES | - | When draft was sent |
@@ -169,10 +181,13 @@ Sent letters with content and tracking.
 | content | JSONB | NO | - | Letter content (body, sender, etc.) |
 | recipient | JSONB | NO | - | Recipient address |
 | credits_cost | INTEGER | NO | - | Credits charged (> 0) |
-| status | VARCHAR(50) | NO | - | queued, processing, sent, failed, cancelled |
+| status | VARCHAR(50) | NO | - | queued, processing, in_transit, delivered, returned, failed, cancelled |
+| status_updated_at | TIMESTAMPTZ | YES | - | When status last changed |
+| provider_raw_status | TEXT | YES | - | Raw provider status value |
 | preview_html | TEXT | YES | - | HTML preview |
 | tracking_id | VARCHAR(255) | YES | - | Provider tracking ID (PostGrid) |
 | provider | VARCHAR(50) | YES | - | postgrid, dummy |
+| mail_type | mail_type | NO | 'letter' | letter or postcard |
 | cost_cents | INTEGER | YES | - | Actual provider cost |
 | expected_delivery | TIMESTAMPTZ | YES | - | Provider ETA |
 | created_at | TIMESTAMPTZ | NO | NOW() | Letter creation |
@@ -185,6 +200,25 @@ Sent letters with content and tracking.
 - `idx_letters_created_at` on created_at DESC
 - `idx_letters_tracking_id` on tracking_id
 - `idx_letters_provider` on provider
+
+---
+
+### letter_status_history
+
+Complete audit trail of letter status changes.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| history_id | SERIAL | NO | - | Primary key |
+| letter_id | TEXT | NO | - | FK to letters (CASCADE) |
+| old_status | TEXT | YES | - | Previous status (NULL for first entry) |
+| new_status | TEXT | NO | - | New status |
+| provider_raw_status | TEXT | YES | - | Raw provider status value |
+| source | TEXT | NO | 'sync' | Change trigger (sync, send, manual, webhook, backfill) |
+| changed_at | TIMESTAMPTZ | NO | NOW() | When status changed |
+
+**Indexes:**
+- `idx_letter_status_history_letter_id` on (letter_id, changed_at DESC)
 
 ---
 
@@ -314,6 +348,36 @@ User promo code redemption tracking.
 
 ---
 
+### personal_access_tokens
+
+Personal Access Tokens for MCP client authentication (alternative to OAuth).
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| token_id | SERIAL | NO | - | Primary key |
+| user_id | VARCHAR(255) | NO | - | FK to users (CASCADE) |
+| name | VARCHAR(100) | NO | - | User-friendly token name |
+| token_hash | VARCHAR(255) | NO | - | bcrypt hash (never store raw token) |
+| token_prefix | CHAR(4) | NO | - | Last 4 chars for UI identification |
+| status | pat_status | NO | 'active' | active or revoked |
+| expires_at | TIMESTAMPTZ | YES | - | Expiration (NULL = never expires) |
+| last_used_at | TIMESTAMPTZ | YES | - | Last usage timestamp |
+| created_at | TIMESTAMPTZ | NO | NOW() | Token creation |
+| revoked_at | TIMESTAMPTZ | YES | - | Revocation timestamp |
+
+**Enum:**
+- `pat_status`: active, revoked
+
+**Indexes:**
+- `idx_pat_user_id` on user_id
+- `idx_pat_user_active` on user_id WHERE status='active'
+- `idx_pat_expires_at` on expires_at WHERE expires_at IS NOT NULL AND status='active'
+
+**Constraints:**
+- `pat_name_length` CHECK (char_length(name) >= 1 AND char_length(name) <= 100)
+
+---
+
 ### migrations
 
 Migration tracking table.
@@ -336,6 +400,13 @@ Migration tracking table.
 | 4 | 004_letter_drafts.sql | Draft-based idempotency system |
 | 5 | 005_user_tiers.sql | User tier system for rate limiting |
 | 6 | 006_stripe_disputes.sql | Chargeback/dispute tracking |
+| 7 | 007_seed_preview_promos.sql | Preview access promo codes |
+| 8 | 008_status_sync.sql | Status sync tracking columns |
+| 9 | 009_letter_status_history.sql | Letter status audit trail |
+| 10 | 010_user_return_address.sql | User return address storage (JSONB) |
+| 11 | 011_personal_access_tokens.sql | Personal Access Tokens for MCP auth |
+| 12 | 012_mail_types.sql | Postcard support with mail_type enum |
+| 13 | 013_letter_layouts.sql | Letter layouts with header/inline images |
 
 ---
 

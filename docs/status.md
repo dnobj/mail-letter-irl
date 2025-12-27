@@ -1,6 +1,6 @@
 # Letter IRL - Project Status
 
-**Last Updated:** December 4, 2025
+**Last Updated:** December 27, 2025
 **Current Phase:** Production (MVP Complete)
 **Overall Progress:** 95%
 
@@ -120,7 +120,7 @@ See [deployment.md](deployment.md) for detailed setup instructions.
 
 ## Database Schema
 
-**12 Tables:**
+**14 Tables:**
 
 | Table | Purpose |
 |-------|---------|
@@ -130,14 +130,16 @@ See [deployment.md](deployment.md) for detailed setup instructions.
 | credit_consumption | Links credit usage to ledger entries |
 | letter_drafts | Temporary drafts for idempotent sends |
 | letters | Sent letters with tracking |
+| letter_status_history | Status change audit trail |
 | letter_jobs | Background job processing |
 | orders | Stripe purchase records |
 | promo_campaigns | Promo code campaigns |
 | promo_redemptions | User promo code redemptions |
 | stripe_disputes | Chargeback tracking |
+| personal_access_tokens | MCP client authentication tokens |
 | migrations | Migration tracking |
 
-**8 Migrations:**
+**13 Migrations:**
 1. `001_initial_schema.sql` - Core tables
 2. `002_add_provider_fields.sql` - PostGrid fields
 3. `003_credit_ledger.sql` - Credit ledger, promos
@@ -146,6 +148,11 @@ See [deployment.md](deployment.md) for detailed setup instructions.
 6. `006_stripe_disputes.sql` - Chargeback tracking
 7. `007_seed_preview_promos.sql` - Preview access promo codes
 8. `008_status_sync.sql` - Status sync tracking columns
+9. `009_letter_status_history.sql` - Letter status audit trail
+10. `010_user_return_address.sql` - User return address storage
+11. `011_personal_access_tokens.sql` - PAT for MCP authentication
+12. `012_mail_types.sql` - Postcard support (mail_type enum)
+13. `013_letter_layouts.sql` - Letter layouts with images
 
 See [database-schema.md](database-schema.md) for full schema details.
 
@@ -159,7 +166,12 @@ See [database-schema.md](database-schema.md) for full schema details.
 | `send_letter` | Consumes draft, deducts credits, queues job |
 | `get_order_status` | Check letter delivery status |
 | `get_account_balance` | View credit balance |
-| `switch_account` | Logout and re-authenticate |
+| `list_orders` | List recent letter orders |
+| `set_return_address` | Save default return address |
+| `get_return_address` | Retrieve saved return address |
+| `clear_return_address` | Delete saved return address |
+| `quote_and_preview_postcard` | Creates postcard draft with image |
+| `send_postcard` | Sends postcard |
 
 See [letter-send-flow.md](letter-send-flow.md) for the complete send flow.
 
@@ -435,7 +447,7 @@ npm run db:migrate:rollback # View rollback info
 │   ├── tools/            # MCP tools (sendLetter.ts, etc.)
 │   └── db/               # Database utilities
 ├── db/
-│   ├── migrations/       # SQL migrations (001-008)
+│   ├── migrations/       # SQL migrations (001-013)
 │   └── migrate.ts        # Migration runner
 ├── docs/                 # Documentation
 ├── scripts/              # Test and utility scripts

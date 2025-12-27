@@ -1,42 +1,50 @@
-# DCR Static Client Workaround
+# OAuth Static Client Strategy
 
 **Date:** December 2025
 **Issue:** #20 - ChatGPT creating duplicate Auth0 clients via DCR
 **Status:** Resolved
 
-## Problem
+## Overview
 
-ChatGPT (and other MCP clients) calls Auth0's Dynamic Client Registration (DCR) endpoint every time a new session starts. Auth0 has no built-in deduplication, resulting in:
+Letter IRL uses a **pre-registered static client** for MCP OAuth authentication. This is the MCP-recommended approach as of November 2025, not a workaround.
+
+## Background: Why Static Clients?
+
+ChatGPT (and other MCP clients) originally used Auth0's Dynamic Client Registration (DCR) endpoint, which created a new client on every session. This resulted in:
 
 - 17 duplicate "ChatGPT" third-party clients in our tenant
 - Risk of hitting Auth0 entity limits (10 apps for development tenants)
 - Cluttered tenant management
 
-## Root Cause Analysis
+## MCP Specification (November 2025)
 
-```
-ChatGPT → GET /.well-known/openid-configuration
-        ← registration_endpoint: https://dev-xxx.auth0.com/oidc/register
+The MCP Authorization Specification now recommends this priority order:
 
-ChatGPT → POST /oidc/register (EVERY session)
-        ← NEW client_id each time (Auth0 has no deduplication)
-```
+1. **Pre-registered client (static)** - PREFERRED
+2. **CIMD (Client ID Metadata Documents)** - New standard
+3. **DCR (Dynamic Client Registration)** - Fallback only, "for backwards compatibility"
 
-The MCP spec originally required DCR for OAuth client registration. However, the spec has since evolved.
+### Why the Change?
 
-## MCP Spec Update (Nov 2025)
+From the MCP specification authors:
 
-The MCP spec (Nov 2025) introduced **CIMD (Client ID Metadata Documents)** as the default mechanism, replacing DCR. Key points:
+> "DCR introduces massive complexity and risk... authorization servers faced unbounded database growth"
 
-- DCR is now optional, CIMD is the default
-- The spec author noted: "DCR introduces massive complexity and risk... authorization servers faced unbounded database growth"
-- OpenAI is transitioning to CIMD
+The static client approach is now the **recommended standard**, not a hack or workaround.
 
-This means our "static client" approach is **aligned with the spec direction**, not a hack.
+### Authoritative Sources
 
-**Sources:**
+- [MCP Authorization Specification](https://modelcontextprotocol.io/specification/draft/basic/authorization)
+- [MCP Blog: Evolving OAuth Client Registration](https://blog.modelcontextprotocol.io/posts/client_registration/)
+- [OpenAI Apps SDK Authentication](https://developers.openai.com/apps-sdk/build/auth/)
 - [MCP Auth Spec Update](https://aaronparecki.com/2025/11/25/1/mcp-authorization-spec-update)
 - [OpenAI Community Thread](https://community.openai.com/t/oauth-client-id-is-no-longer-optional/1367103)
+
+### OpenAI Apps SDK Status
+
+- Currently uses DCR but transitioning to CIMD
+- Static clients are fully supported and preferred
+- Our implementation is future-proof
 
 ## Solution Implemented
 
