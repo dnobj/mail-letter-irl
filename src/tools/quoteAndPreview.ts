@@ -615,11 +615,16 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
     "Sender Address:\n" +
     "- If not provided, your saved return address is used automatically.\n" +
     "- Use set_return_address to save one for all future letters.\n\n" +
-    "Layout Options:\n" +
-    "- text_only (default): Plain text letter, ~1800 character limit.\n" +
-    "- header_image: Letterhead/branding image at top, ~1500 character limit. Use headerImageUrl.\n" +
-    "- inline_image: Photo after signature, ~1200 character limit. Use inlineImageUrl.\n" +
-    "Layout is auto-detected from provided images, or set explicitly with layoutType.\n\n" +
+    "Including Images (optional):\n" +
+    "If the user wants to include an image in their letter, use ONE of these parameters:\n" +
+    "- headerImageUrl: Image at top of letter (like letterhead/branding). Use for logos, decorative headers.\n" +
+    "- inlineImageUrl: Image after the signature. Use for photos, drawings, artwork the user wants to share.\n" +
+    "Supported: PNG, JPEG, WebP (max 5MB). Images are auto-resized for print quality.\n" +
+    "When an image URL is provided, the layout is auto-detected. You can also set layoutType explicitly.\n\n" +
+    "Character Limits by Layout:\n" +
+    "- text_only (no images): ~1800 characters\n" +
+    "- header_image: ~1500 characters\n" +
+    "- inline_image: ~1200 characters\n\n" +
     "Draft Workflow:\n" +
     "1. Creates a DRAFT with a unique draftId (required for send_letter).\n" +
     "2. Drafts expire after 24 hours.\n" +
