@@ -308,7 +308,7 @@
           state.previewHtml;
 
         const {
-          letterCost,
+          lettersRequired,
           canSendNow,
           reasonCannotSend,
           deliveryClass,
@@ -329,8 +329,8 @@
           previewPane.innerHTML = "<em>No preview available</em>";
         }
 
-        // Cost - now letterCost is already in letters (1 letter = 1 standard letter)
-        const letters = letterCost ?? 1;
+        // Cost - lettersRequired is already in letters (1 letter = 1 standard letter)
+        const letters = lettersRequired ?? 1;
         document.getElementById("cost").textContent =
           `${letters} Letter${letters === 1 ? "" : "s"}`;
 

@@ -32,15 +32,15 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
     }
   }
   ```
-- **Behavior:** Validate both address blocks (name, street, city, state, postal code, country). If any field is missing, the tool responds with a descriptive error before attempting to render the preview. Otherwise it computes `letterCost` (1 for standard one-page letter) and generates the preview HTML.
+- **Behavior:** Validate both address blocks (name, street, city, state, postal code, country). If any field is missing, the tool responds with a descriptive error before attempting to render the preview. Otherwise it computes `lettersRequired` (1 for standard one-page letter) and generates the preview HTML.
 - **Output schema:**
   ```json
   {
     "type": "object",
-    "required": ["previewHtml", "letterCost", "canSendNow"],
+    "required": ["previewHtml", "lettersRequired", "canSendNow"],
     "properties": {
       "previewHtml": { "type": "string" },
-      "letterCost": { "type": "number", "description": "Number of letters this will cost (always 1 for standard letter)" },
+      "lettersRequired": { "type": "number", "description": "Letters required from balance (always 1 for standard letter)" },
       "canSendNow": { "type": "boolean" },
       "reasonCannotSend": { "type": "string" },
       "deliveryClass": { "type": "string" },
