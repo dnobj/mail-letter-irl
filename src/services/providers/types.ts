@@ -7,6 +7,11 @@
  */
 
 /**
+ * Letter layout type (US-LAYOUT-01 through US-LAYOUT-06)
+ */
+export type LetterLayoutType = 'text_only' | 'header_image' | 'inline_image';
+
+/**
  * Letter parameters for sending
  */
 export interface LetterParams {
@@ -50,6 +55,16 @@ export interface LetterParams {
 
   /** Extra services (certified mail, etc.) */
   extraServices?: string[];
+
+  // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
+  /** Letter layout type */
+  layoutType?: LetterLayoutType;
+
+  /** Header image as base64 data URI (for header_image layout) */
+  headerImageData?: string;
+
+  /** Inline image as base64 data URI (for inline_image layout) */
+  inlineImageData?: string;
 }
 
 /**

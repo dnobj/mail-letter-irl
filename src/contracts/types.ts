@@ -1,5 +1,7 @@
 export type LetterStatus = "queued_for_print" | "printing" | "mailed";
 
+export type LetterLayoutType = "text_only" | "header_image" | "inline_image";
+
 export interface Address {
   name: string;
   addressLine1: string;

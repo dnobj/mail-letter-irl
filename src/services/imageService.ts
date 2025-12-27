@@ -1,26 +1,31 @@
 /**
  * Image Service for Letter IRL
  *
- * Handles image processing for postcards:
+ * Handles image processing for postcards and letters:
  * - Download from OpenAI URLs
  * - Validate size, type, and dimensions
- * - Resize for print (1800x2700 for 6x9 at 300 DPI)
+ * - Resize for print (postcard: 1800x2700 for 6x9 at 300 DPI)
+ * - Letter header: 1950x600 (6.5" x 2" at 300 DPI)
+ * - Letter inline: 1950x900 (6.5" x 3" at 300 DPI)
  * - Convert to base64 data URI
  *
  * User Stories:
  * - US-POSTCARD-01: Preview a Postcard
  * - US-POSTCARD-03: Postcard Image Processing
+ * - US-LAYOUT-01: Preview Letter with Header Image
+ * - US-LAYOUT-02: Preview Letter with Inline Image
+ * - US-LAYOUT-04: Letter Layout Image Processing
  */
 
 import sharp from 'sharp';
-import type { ImageFileParam, ProcessedImage, PostcardSize } from './types.js';
+import type { ImageFileParam, ProcessedImage, PostcardSize, LetterImageType } from './types.js';
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
 const CONFIG = {
-  maxFileSize: 10 * 1024 * 1024, // 10 MB
+  maxFileSize: 10 * 1024 * 1024, // 10 MB for postcards
   minWidth: 100,   // Lowered - Sharp will upscale to print size
   minHeight: 100,  // Lowered - Sharp will upscale to print size
   jpegQuality: 85,
@@ -34,6 +39,19 @@ const CONFIG = {
     '6x4': { width: 1800, height: 1200 },   // 6x4 at 300 DPI (6" x 4")
     '6x9': { width: 2700, height: 1800 },   // 9x6 at 300 DPI (9" x 6") - landscape
     '6x11': { width: 3300, height: 1800 },  // 11x6 at 300 DPI (11" x 6") - landscape
+  } as const,
+} as const;
+
+// Letter image configuration (US-LAYOUT-04)
+const LETTER_IMAGE_CONFIG = {
+  maxFileSize: 5 * 1024 * 1024, // 5 MB for letter images
+  jpegQuality: 85,
+  allowedTypes: ['image/png', 'image/jpeg', 'image/webp'] as const,
+  // Letter page is 8.5" x 11" with 1" margins on sides
+  // Content area is 6.5" wide (1950px at 300 DPI)
+  sizes: {
+    header: { width: 1950, height: 600 },   // 6.5" x 2" at 300 DPI (header/letterhead)
+    inline: { width: 1950, height: 900 },   // 6.5" x 3" at 300 DPI (inline after signature)
   } as const,
 } as const;
 
@@ -107,6 +125,123 @@ export async function downloadAndProcessImage(
     processedWidth: targetDimensions.width,
     processedHeight: targetDimensions.height,
   };
+}
+
+// ============================================================================
+// Letter Image Processing (US-LAYOUT-04)
+// ============================================================================
+
+/**
+ * Download and process an image for letter layouts (header or inline)
+ *
+ * @param input - OpenAI file parameter with download_url, or object with url string
+ * @param imageType - 'header' for top of letter, 'inline' for after signature
+ * @returns Processed image as base64 data URI with metadata
+ * @throws ImageProcessingError with user-friendly message
+ */
+export async function downloadAndProcessLetterImage(
+  input: ImageInput,
+  imageType: LetterImageType
+): Promise<ProcessedImage> {
+  const download_url = 'download_url' in input ? input.download_url : input.url;
+  const targetDimensions = LETTER_IMAGE_CONFIG.sizes[imageType];
+
+  // 1. Download image (with letter-specific size limit)
+  const buffer = await downloadLetterImage(download_url, imageType);
+
+  // 2. Get metadata and validate
+  const metadata = await getImageMetadata(buffer);
+  validateDimensions(metadata.width, metadata.height);
+
+  // 3. Resize to fit within dimensions while maintaining aspect ratio
+  // Use 'inside' fit to ensure image doesn't exceed max dimensions
+  const processed = await sharp(buffer)
+    .resize(targetDimensions.width, targetDimensions.height, {
+      fit: 'inside',       // Fit within bounds, don't crop
+      withoutEnlargement: false, // Allow upscaling if needed
+    })
+    .jpeg({ quality: LETTER_IMAGE_CONFIG.jpegQuality })
+    .toBuffer();
+
+  // Get actual processed dimensions
+  const processedMetadata = await sharp(processed).metadata();
+
+  // 4. Convert to base64 data URI
+  const base64 = processed.toString('base64');
+  const dataUri = `data:image/jpeg;base64,${base64}`;
+
+  return {
+    base64DataUri: dataUri,
+    originalWidth: metadata.width,
+    originalHeight: metadata.height,
+    processedWidth: processedMetadata.width || targetDimensions.width,
+    processedHeight: processedMetadata.height || targetDimensions.height,
+  };
+}
+
+/**
+ * Download image for letter layouts with appropriate size validation
+ */
+async function downloadLetterImage(url: string, imageType: LetterImageType): Promise<Buffer> {
+  try {
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new ImageProcessingError(
+        'DOWNLOAD_FAILED',
+        "Couldn't download the image. Please try again."
+      );
+    }
+
+    // Check content-length header
+    const contentLength = response.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > LETTER_IMAGE_CONFIG.maxFileSize) {
+      throw new ImageProcessingError(
+        'IMAGE_TOO_LARGE',
+        `${imageType === 'header' ? 'Header' : 'Inline'} image is too large. Please use an image under 5MB.`
+      );
+    }
+
+    // Check content-type header
+    const contentType = response.headers.get('content-type');
+    if (contentType && !isAllowedLetterType(contentType)) {
+      throw new ImageProcessingError(
+        'UNSUPPORTED_FORMAT',
+        'Unsupported image format. Please use PNG, JPEG, or WebP.'
+      );
+    }
+
+    // Download full content
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // Validate actual size
+    if (buffer.length > LETTER_IMAGE_CONFIG.maxFileSize) {
+      throw new ImageProcessingError(
+        'IMAGE_TOO_LARGE',
+        `${imageType === 'header' ? 'Header' : 'Inline'} image is too large. Please use an image under 5MB.`
+      );
+    }
+
+    return buffer;
+  } catch (error) {
+    if (error instanceof ImageProcessingError) {
+      throw error;
+    }
+    throw new ImageProcessingError(
+      'DOWNLOAD_FAILED',
+      "Couldn't download the image. Please try again.",
+      error instanceof Error ? error : undefined
+    );
+  }
+}
+
+/**
+ * Check if content type is allowed for letter images
+ */
+function isAllowedLetterType(contentType: string): boolean {
+  const type = contentType.split(';')[0].trim().toLowerCase();
+  return (LETTER_IMAGE_CONFIG.allowedTypes as readonly string[]).includes(type);
 }
 
 // ============================================================================
@@ -228,8 +363,11 @@ function isAllowedType(contentType: string): boolean {
 
 export const _testing = {
   CONFIG,
+  LETTER_IMAGE_CONFIG,
   downloadImage,
+  downloadLetterImage,
   getImageMetadata,
   validateDimensions,
   isAllowedType,
+  isAllowedLetterType,
 };

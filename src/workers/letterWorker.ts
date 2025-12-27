@@ -96,7 +96,7 @@ async function processLetterJob(jobs: any[]): Promise<void> {
       // Send the postcard via the provider
       result = await provider.sendPostcard(postcardParams);
     } else {
-      // Build letter-specific parameters
+      // Build letter-specific parameters (including layout fields - US-LAYOUT-06)
       const letterParams: LetterParams = {
         recipientName: recipient.name,
         recipientAddress: {
@@ -117,8 +117,13 @@ async function processLetterJob(jobs: any[]): Promise<void> {
           country: normalizeCountryToUS(content.sender.country)
         } : undefined,
         message: `${content.bodyText}\n\n${content.signOff || ''}`.trim(),
-        color: false,
+        // Enable color for layouts with images (US-LAYOUT-01, US-LAYOUT-02)
+        color: content.layoutType !== 'text_only' && (!!content.headerImageData || !!content.inlineImageData),
         doubleSided: false,
+        // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
+        layoutType: content.layoutType || 'text_only',
+        headerImageData: content.headerImageData,
+        inlineImageData: content.inlineImageData,
         metadata: {
           letterId,
           userId,
@@ -126,7 +131,8 @@ async function processLetterJob(jobs: any[]): Promise<void> {
         }
       };
 
-      console.log(`📨 Sending letter via provider: ${provider.config.displayName}`);
+      const layoutLabel = content.layoutType && content.layoutType !== 'text_only' ? ` (${content.layoutType})` : '';
+      console.log(`📨 Sending letter${layoutLabel} via provider: ${provider.config.displayName}`);
 
       // Send the letter via the provider
       result = await provider.sendLetter(letterParams);

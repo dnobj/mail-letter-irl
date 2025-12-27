@@ -32,13 +32,15 @@ const DEFAULT_EXPIRATION_HOURS = 24;
 export async function createDraft(params: CreateDraftParams): Promise<CreateDraftResult> {
   const expiresInHours = params.expiresInHours ?? DEFAULT_EXPIRATION_HOURS;
   const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
+  const layoutType = params.layoutType ?? 'text_only';
 
   const result = await query<LetterDraft>(
     `INSERT INTO letter_drafts (
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
+      layout_type, header_image_data, header_image_url, inline_image_data, inline_image_url,
       status, expires_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', $15)
     RETURNING draft_id, expires_at`,
     [
       params.userId,
@@ -50,13 +52,18 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       params.previewHtml ?? null,
       params.senderValidation ? JSON.stringify(params.senderValidation) : null,
       params.recipientValidation ? JSON.stringify(params.recipientValidation) : null,
+      layoutType,
+      params.headerImageData ?? null,
+      params.headerImageUrl ?? null,
+      params.inlineImageData ?? null,
+      params.inlineImageUrl ?? null,
       expiresAt,
     ]
   );
 
   const draft = result.rows[0];
 
-  console.log(`📝 Draft created: ${draft.draft_id} (expires: ${expiresAt.toISOString()})`);
+  console.log(`📝 Draft created: ${draft.draft_id} (layout: ${layoutType}, expires: ${expiresAt.toISOString()})`);
 
   return {
     draftId: draft.draft_id,
