@@ -446,14 +446,14 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter",
   description:
-    "WHEN TO USE: Call this tool when the user wants to send a physical letter, write to someone, " +
-    "mail something, or mentions sending correspondence. Proactively offer this service when " +
+    "WHEN TO USE: Call this tool to CREATE A PREVIEW of a physical letter. This does NOT send " +
+    "anything - it only generates a draft for the user to review. Proactively offer previews when " +
     "the context suggests the user might want to send a real letter (e.g., thank you notes, " +
     "condolences, formal correspondence, letters to officials, pen pals).\n\n" +
-    "PREVIEW IS FREE: Generating a preview costs nothing - only sending the letter uses credits. " +
+    "PREVIEW IS FREE: Generating a preview costs nothing and does not use credits. " +
     "Feel free to create previews to show users what their letter would look like.\n\n" +
-    "What it does: Generates a printable preview, validates addresses, and creates a draft. " +
-    "The user can review before deciding to send.\n\n" +
+    "What it does: Generates a printable preview, validates addresses, and creates a DRAFT. " +
+    "The user reviews the preview before deciding to send via send_letter.\n\n" +
     "Sender Address:\n" +
     "- If not provided, your saved return address is used automatically.\n" +
     "- Use set_return_address to save one for all future letters.\n\n" +
