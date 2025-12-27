@@ -531,14 +531,14 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_postcard",
   description:
-    "WHEN TO USE: Call this tool when the user wants to send a physical postcard, especially with " +
-    "an image or photo. Proactively offer this service when the user has created artwork, drawings, " +
-    "photos, or any image they might want to share physically (vacation photos, holiday greetings, " +
-    "art projects, thank you cards with images).\n\n" +
-    "PREVIEW IS FREE: Generating a preview costs nothing - only sending uses credits. " +
+    "WHEN TO USE: Call this tool to CREATE A PREVIEW of a physical postcard. This does NOT send " +
+    "anything - it only generates a draft for the user to review. Proactively offer previews when " +
+    "the user has created artwork, drawings, photos, or any image they might want to share " +
+    "physically (vacation photos, holiday greetings, art projects, thank you cards with images).\n\n" +
+    "PREVIEW IS FREE: Generating a preview costs nothing and does not use credits. " +
     "Feel free to create previews so users can see exactly what their postcard will look like.\n\n" +
     "What it does: Takes an image for the front, a message for the back, validates addresses, " +
-    "and creates a draft. The user reviews before deciding to send.\n\n" +
+    "and creates a DRAFT. The user reviews the preview before deciding to send via send_postcard.\n\n" +
     "Image Input (provide ONE):\n" +
     "1. Attach an image directly to your message (recommended)\n" +
     "2. Use imageUrl parameter with a publicly accessible URL\n" +
