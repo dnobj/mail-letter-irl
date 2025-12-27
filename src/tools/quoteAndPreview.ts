@@ -21,7 +21,7 @@ interface QuoteAndPreviewInput {
 
 interface QuoteAndPreviewOutput {
   previewHtml: string;
-  letterCost: number;  // Number of letters this will cost (always 1 for standard)
+  lettersRequired: number;  // Letters required from balance (always 1 for standard)
   canSendNow: boolean;
   reasonCannotSend?: string;
   deliveryClass?: string;
@@ -340,8 +340,8 @@ async function handler(
   const requiredCredits = estimateRequiredCredits(input.bodyText, input.signOff);
   const available = context.user.creditsRemaining;
   const canSendNow = available >= requiredCredits;
-  // User-facing: letterCost is always 1 for standard letters (2 internal credits)
-  const letterCost = Math.max(1, Math.ceil(requiredCredits / 2));
+  // User-facing: lettersRequired is always 1 for standard letters (2 internal credits)
+  const lettersRequired = Math.max(1, Math.ceil(requiredCredits / 2));
 
   context.logger.info(
     {
@@ -349,7 +349,7 @@ async function handler(
       event: "quote.preview.computed",
       availableCredits: available,
       requiredCredits,
-      letterCost,
+      lettersRequired,
       canSendNow
     },
     "Computed preview requirements"
@@ -384,7 +384,7 @@ async function handler(
   // Build response
   const output: QuoteAndPreviewOutput = {
     previewHtml,
-    letterCost,  // User-facing: 1 letter = 2 internal credits
+    lettersRequired,  // User-facing: 1 letter = 2 internal credits
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
     deliveryClass: "First Class Letter",

@@ -312,11 +312,11 @@ function summarizeToolResult(
       return message || `Letter Balance: ${letters ?? "unknown"} letters`;
     }
     case "quote_and_preview_letter": {
-      // Now returns letterCost directly (always 1 for standard letter)
-      const letterCost = result.letterCost as number | undefined;
+      // Now returns lettersRequired directly (always 1 for standard letter)
+      const lettersRequired = result.lettersRequired as number | undefined;
       const canSend = result.canSendNow ? "can send now" : "cannot send";
       const usedSaved = result.usedSavedReturnAddress as boolean | undefined;
-      let summary = `Preview ready: costs ${letterCost ?? 1} ${letterCost === 1 ? 'letter' : 'letters'} (${canSend}).`;
+      let summary = `Preview ready: requires ${lettersRequired ?? 1} ${lettersRequired === 1 ? 'letter' : 'letters'} from balance (${canSend}).`;
       if (usedSaved) {
         summary += " Using your saved return address.";
       }

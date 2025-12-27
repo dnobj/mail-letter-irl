@@ -27,10 +27,10 @@ export const quoteAndPreviewInputSchema: JsonSchema = {
 
 export const quoteAndPreviewOutputSchema: JsonSchema = {
   type: "object",
-  required: ["previewHtml", "letterCost", "canSendNow", "draftId", "draftExpiresAt"],
+  required: ["previewHtml", "lettersRequired", "canSendNow", "draftId", "draftExpiresAt"],
   properties: {
     previewHtml: { type: "string" },
-    letterCost: { type: "number", description: "Number of letters this will cost (always 1 for standard letter)" },
+    lettersRequired: { type: "number", description: "Letters required from balance (always 1 for standard letter)" },
     canSendNow: { type: "boolean" },
     reasonCannotSend: { type: "string" },
     deliveryClass: { type: "string" },
