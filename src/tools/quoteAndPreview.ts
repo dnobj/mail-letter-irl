@@ -16,6 +16,7 @@ import type { AddressValidationInput, AddressValidationResult } from "../service
 import { createDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
 import { downloadAndProcessLetterImage, ImageProcessingError } from "../services/imageService.js";
+import type { ImageFileParam } from "../services/types.js";
 
 interface QuoteAndPreviewInput {
   sender?: Address;  // Optional - will use saved return address if not provided
@@ -24,6 +25,10 @@ interface QuoteAndPreviewInput {
   signOff: string;
   // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
   layoutType?: LetterLayoutType;     // Explicit override, or auto-detected from images
+  // Image file params from OpenAI fileParams - injected by MCP framework
+  headerImage?: ImageFileParam;      // Header/letterhead image (file upload)
+  inlineImage?: ImageFileParam;      // Inline image after signature (file upload)
+  // Alternative: direct image URLs (fallback for when fileParams isn't available)
   headerImageUrl?: string;           // URL of header/letterhead image
   inlineImageUrl?: string;           // URL of inline image (after signature)
 }
@@ -185,12 +190,30 @@ async function handler(
   // Layout Detection and Image Processing (US-LAYOUT-03, US-LAYOUT-04)
   // =========================================================================
 
+  // Determine image sources - prefer fileParams over URLs
+  const headerImageSource = input.headerImage?.download_url || input.headerImageUrl;
+  const inlineImageSource = input.inlineImage?.download_url || input.inlineImageUrl;
+
+  // Log image sources for debugging
+  if (input.headerImage?.download_url) {
+    context.logger.info(
+      { correlationId: context.correlationId, event: "quote.preview.header_from_fileParams" },
+      "Using header image from OpenAI fileParams"
+    );
+  }
+  if (input.inlineImage?.download_url) {
+    context.logger.info(
+      { correlationId: context.correlationId, event: "quote.preview.inline_from_fileParams" },
+      "Using inline image from OpenAI fileParams"
+    );
+  }
+
   // Detect layout type from input (auto-detect from images or use explicit override)
   let layoutType: LetterLayoutType;
   try {
     layoutType = detectLayoutType({
-      headerImageUrl: input.headerImageUrl,
-      inlineImageUrl: input.inlineImageUrl,
+      headerImageUrl: headerImageSource,
+      inlineImageUrl: inlineImageSource,
       layoutType: input.layoutType,
     });
   } catch (error) {
@@ -210,8 +233,10 @@ async function handler(
       correlationId: context.correlationId,
       event: "quote.preview.layout_detected",
       layoutType,
-      hasHeaderImage: !!input.headerImageUrl,
-      hasInlineImage: !!input.inlineImageUrl,
+      hasHeaderImage: !!headerImageSource,
+      hasInlineImage: !!inlineImageSource,
+      headerFromFileParams: !!input.headerImage?.download_url,
+      inlineFromFileParams: !!input.inlineImage?.download_url,
       explicitOverride: !!input.layoutType
     },
     `Layout type detected: ${layoutType}`
@@ -221,7 +246,7 @@ async function handler(
   let headerImageData: string | undefined;
   let inlineImageData: string | undefined;
 
-  if (input.headerImageUrl && layoutType === 'header_image') {
+  if (headerImageSource && layoutType === 'header_image') {
     try {
       context.logger.info(
         {
@@ -232,7 +257,7 @@ async function handler(
       );
 
       const processed = await downloadAndProcessLetterImage(
-        { url: input.headerImageUrl },
+        { url: headerImageSource },
         'header'
       );
       headerImageData = processed.base64DataUri;
@@ -263,7 +288,7 @@ async function handler(
     }
   }
 
-  if (input.inlineImageUrl && layoutType === 'inline_image') {
+  if (inlineImageSource && layoutType === 'inline_image') {
     try {
       context.logger.info(
         {
@@ -274,7 +299,7 @@ async function handler(
       );
 
       const processed = await downloadAndProcessLetterImage(
-        { url: input.inlineImageUrl },
+        { url: inlineImageSource },
         'inline'
       );
       inlineImageData = processed.base64DataUri;
@@ -519,9 +544,9 @@ async function handler(
     // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
     layoutType,
     headerImageData,
-    headerImageUrl: input.headerImageUrl,
+    headerImageUrl: headerImageSource,  // Resolved from fileParams or URL
     inlineImageData,
-    inlineImageUrl: input.inlineImageUrl,
+    inlineImageUrl: inlineImageSource,  // Resolved from fileParams or URL
   });
 
   context.logger.info(
@@ -616,11 +641,14 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
     "- If not provided, your saved return address is used automatically.\n" +
     "- Use set_return_address to save one for all future letters.\n\n" +
     "Including Images (optional):\n" +
-    "If the user wants to include an image in their letter, use ONE of these parameters:\n" +
-    "- headerImageUrl: Image at top of letter (like letterhead/branding). Use for logos, decorative headers.\n" +
-    "- inlineImageUrl: Image after the signature. Use for photos, drawings, artwork the user wants to share.\n" +
+    "If the user wants to include an image in their letter, provide it using ONE of these options:\n" +
+    "1. Attach the image directly to your message (recommended) - use headerImage or inlineImage parameter\n" +
+    "2. Use headerImageUrl or inlineImageUrl with a publicly accessible URL\n\n" +
+    "Image placement:\n" +
+    "- headerImage/headerImageUrl: Image at top of letter (like letterhead/branding). Use for logos, decorative headers.\n" +
+    "- inlineImage/inlineImageUrl: Image after the signature. Use for photos, drawings, artwork to share.\n" +
     "Supported: PNG, JPEG, WebP (max 5MB). Images are auto-resized for print quality.\n" +
-    "When an image URL is provided, the layout is auto-detected. You can also set layoutType explicitly.\n\n" +
+    "Layout is auto-detected from provided images, or set explicitly with layoutType.\n\n" +
     "Character Limits by Layout:\n" +
     "- text_only (no images): ~1800 characters\n" +
     "- header_image: ~1500 characters\n" +
@@ -636,6 +664,7 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
     "openai/widgetAccessible": true,
+    "openai/fileParams": ["headerImage", "inlineImage"],  // Enables image upload via OpenAI Apps SDK
     "openai/toolInvocation/invoking": "Generating preview…",
     "openai/toolInvocation/invoked": "Preview ready",
     readOnlyHint: true
