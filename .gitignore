@@ -8,3 +8,4 @@ data/accounts.json
 !.env*.example
 admin-token.js
 .admin-jwt
+screenshots/
