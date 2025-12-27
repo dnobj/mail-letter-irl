@@ -413,6 +413,12 @@ export interface LetterDraft {
   preview_html?: string;
   sender_validation?: Record<string, unknown>;
   recipient_validation?: Record<string, unknown>;
+  // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
+  layout_type: LetterLayoutType;
+  header_image_data?: string;            // Base64 data URI for header image
+  header_image_url?: string;             // Original URL for debugging
+  inline_image_data?: string;            // Base64 data URI for inline image
+  inline_image_url?: string;             // Original URL for debugging
   status: DraftStatus;
   expires_at: Date;
   consumed_at?: Date;
@@ -432,6 +438,12 @@ export interface CreateDraftParams {
   senderValidation?: Record<string, unknown>;
   recipientValidation?: Record<string, unknown>;
   expiresInHours?: number;  // Default: 24
+  // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
+  layoutType?: LetterLayoutType;          // Default: 'text_only'
+  headerImageData?: string;               // Base64 data URI for header image
+  headerImageUrl?: string;                // Original URL for debugging
+  inlineImageData?: string;               // Base64 data URI for inline image
+  inlineImageUrl?: string;                // Original URL for debugging
 }
 
 export interface CreateDraftResult {
@@ -586,6 +598,14 @@ export interface RevokeTokenResult {
 export type MailType = 'letter' | 'postcard';
 
 export type PostcardSize = '6x4' | '6x9' | '6x11';
+
+// ============================================================================
+// Letter Layout Types (US-LAYOUT-01 through US-LAYOUT-06)
+// ============================================================================
+
+export type LetterLayoutType = 'text_only' | 'header_image' | 'inline_image';
+
+export type LetterImageType = 'header' | 'inline';
 
 // ============================================================================
 // Image Processing Types (US-POSTCARD-03)

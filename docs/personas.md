@@ -57,6 +57,8 @@ Letter IRL serves users who want to send physical letters through conversational
 - US-POSTCARD-02 (Send postcard)
 - US-CREDIT-01 (Check balance)
 - US-EDGE-02 (Address correction)
+- US-LAYOUT-01 (Header image letter)
+- US-LAYOUT-02 (Inline image letter)
 
 **Test Scenarios:**
 - First-time user flow
@@ -65,6 +67,8 @@ Letter IRL serves users who want to send physical letters through conversational
 - Postcard with DALL-E generated image
 - Address validation with corrections
 - Credit expiration warnings
+- Letter with header image (personal letterhead)
+- Letter with inline image (photo after signature)
 
 ---
 
@@ -186,6 +190,7 @@ Letter IRL serves users who want to send physical letters through conversational
 - US-POSTCARD-01 (Preview postcard with brand images)
 - US-POSTCARD-02 (Send postcards)
 - US-CREDIT-05 (Detailed ledger)
+- US-LAYOUT-01 (Header image for branding)
 
 **Test Scenarios:**
 - High-volume credit purchase

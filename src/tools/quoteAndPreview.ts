@@ -1,22 +1,31 @@
-import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
+import { Address, McpToolDefinition, ToolContext, LetterLayoutType } from "../contracts/types.js";
 import {
   quoteAndPreviewInputSchema,
   quoteAndPreviewOutputSchema
 } from "../schemas.js";
 import {
   estimateRequiredCredits,
-  renderPreviewHtml
+  renderPreviewHtml,
+  renderLayoutPreviewHtml,
+  detectLayoutType,
+  validateCharacterLimit,
+  LAYOUT_CHARACTER_LIMITS,
 } from "../services/previewService.js";
 import { getLetterProvider } from "../services/providers/index.js";
 import type { AddressValidationInput, AddressValidationResult } from "../services/providers/types.js";
 import { createDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
+import { downloadAndProcessLetterImage, ImageProcessingError } from "../services/imageService.js";
 
 interface QuoteAndPreviewInput {
   sender?: Address;  // Optional - will use saved return address if not provided
   recipient: Address;
   bodyText: string;
   signOff: string;
+  // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
+  layoutType?: LetterLayoutType;     // Explicit override, or auto-detected from images
+  headerImageUrl?: string;           // URL of header/letterhead image
+  inlineImageUrl?: string;           // URL of inline image (after signature)
 }
 
 interface QuoteAndPreviewOutput {
@@ -29,6 +38,10 @@ interface QuoteAndPreviewOutput {
   // Draft for idempotent send
   draftId: string;
   draftExpiresAt: string;  // ISO timestamp
+  // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
+  layoutType: LetterLayoutType;
+  headerImageData?: string;  // Base64 data URI for widget preview
+  inlineImageData?: string;  // Base64 data URI for widget preview
   // Saved return address used (when sender not provided)
   usedSavedReturnAddress?: boolean;
   savedReturnAddressNote?: string;
@@ -168,24 +181,150 @@ async function handler(
     "Processing quote_and_preview_letter"
   );
 
-  // Validate one-page constraint (~1,800 characters maximum)
-  const MAX_CHARS_PER_PAGE = 1800;
-  const totalChars = `${input.bodyText}\n\n${input.signOff}`.length;
+  // =========================================================================
+  // Layout Detection and Image Processing (US-LAYOUT-03, US-LAYOUT-04)
+  // =========================================================================
 
-  if (totalChars > MAX_CHARS_PER_PAGE) {
+  // Detect layout type from input (auto-detect from images or use explicit override)
+  let layoutType: LetterLayoutType;
+  try {
+    layoutType = detectLayoutType({
+      headerImageUrl: input.headerImageUrl,
+      inlineImageUrl: input.inlineImageUrl,
+      layoutType: input.layoutType,
+    });
+  } catch (error) {
+    context.logger.warn(
+      {
+        correlationId: context.correlationId,
+        event: "quote.preview.layout_detection_failed",
+        error: error instanceof Error ? error.message : 'Unknown error'
+      },
+      "Layout detection failed"
+    );
+    throw error;
+  }
+
+  context.logger.info(
+    {
+      correlationId: context.correlationId,
+      event: "quote.preview.layout_detected",
+      layoutType,
+      hasHeaderImage: !!input.headerImageUrl,
+      hasInlineImage: !!input.inlineImageUrl,
+      explicitOverride: !!input.layoutType
+    },
+    `Layout type detected: ${layoutType}`
+  );
+
+  // Process images if provided
+  let headerImageData: string | undefined;
+  let inlineImageData: string | undefined;
+
+  if (input.headerImageUrl && layoutType === 'header_image') {
+    try {
+      context.logger.info(
+        {
+          correlationId: context.correlationId,
+          event: "quote.preview.processing_header_image"
+        },
+        "Processing header image"
+      );
+
+      const processed = await downloadAndProcessLetterImage(
+        { url: input.headerImageUrl },
+        'header'
+      );
+      headerImageData = processed.base64DataUri;
+
+      context.logger.info(
+        {
+          correlationId: context.correlationId,
+          event: "quote.preview.header_image_processed",
+          originalSize: `${processed.originalWidth}x${processed.originalHeight}`,
+          processedSize: `${processed.processedWidth}x${processed.processedHeight}`
+        },
+        "Header image processed successfully"
+      );
+    } catch (error) {
+      const message = error instanceof ImageProcessingError
+        ? error.userMessage
+        : 'Could not process header image. Please try a different image.';
+
+      context.logger.warn(
+        {
+          correlationId: context.correlationId,
+          event: "quote.preview.header_image_failed",
+          error: error instanceof Error ? error.message : 'Unknown error'
+        },
+        "Header image processing failed"
+      );
+      throw new Error(message);
+    }
+  }
+
+  if (input.inlineImageUrl && layoutType === 'inline_image') {
+    try {
+      context.logger.info(
+        {
+          correlationId: context.correlationId,
+          event: "quote.preview.processing_inline_image"
+        },
+        "Processing inline image"
+      );
+
+      const processed = await downloadAndProcessLetterImage(
+        { url: input.inlineImageUrl },
+        'inline'
+      );
+      inlineImageData = processed.base64DataUri;
+
+      context.logger.info(
+        {
+          correlationId: context.correlationId,
+          event: "quote.preview.inline_image_processed",
+          originalSize: `${processed.originalWidth}x${processed.originalHeight}`,
+          processedSize: `${processed.processedWidth}x${processed.processedHeight}`
+        },
+        "Inline image processed successfully"
+      );
+    } catch (error) {
+      const message = error instanceof ImageProcessingError
+        ? error.userMessage
+        : 'Could not process inline image. Please try a different image.';
+
+      context.logger.warn(
+        {
+          correlationId: context.correlationId,
+          event: "quote.preview.inline_image_failed",
+          error: error instanceof Error ? error.message : 'Unknown error'
+        },
+        "Inline image processing failed"
+      );
+      throw new Error(message);
+    }
+  }
+
+  // =========================================================================
+  // Character Limit Validation (layout-specific)
+  // =========================================================================
+
+  const charValidation = validateCharacterLimit(input.bodyText, input.signOff, layoutType);
+
+  if (!charValidation.isValid) {
     context.logger.warn(
       {
         correlationId: context.correlationId,
         event: "quote.preview.exceeds_page_limit",
-        totalChars,
-        maxChars: MAX_CHARS_PER_PAGE
+        layoutType,
+        totalChars: charValidation.totalChars,
+        maxChars: charValidation.limit
       },
       "Letter exceeds one-page limit"
     );
     throw new Error(
-      `Letter exceeds one-page limit (${totalChars}/${MAX_CHARS_PER_PAGE} characters). ` +
-      `Please shorten your message to fit on one page. ` +
-      `All letters are currently limited to one page maximum.`
+      `${charValidation.error} (${charValidation.totalChars}/${charValidation.limit} characters). ` +
+      `Please shorten your message to fit on one page.`
     );
   }
 
@@ -355,10 +494,18 @@ async function handler(
     "Computed preview requirements"
   );
 
-  // Generate preview HTML
-  const previewHtml = renderPreviewHtml({ sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff });
+  // Generate preview HTML (layout-aware)
+  const previewHtml = renderLayoutPreviewHtml({
+    sender,
+    recipient: input.recipient,
+    bodyText: input.bodyText,
+    signOff: input.signOff,
+    layoutType,
+    headerImageData,
+    inlineImageData,
+  });
 
-  // Create draft for idempotent send
+  // Create draft for idempotent send (including layout fields)
   const draftResult = await createDraft({
     userId: context.user.userId,
     sender: sender as unknown as Record<string, unknown>,
@@ -369,6 +516,12 @@ async function handler(
     previewHtml,
     senderValidation: senderValidation ? { status: senderValidation.status } : undefined,
     recipientValidation: recipientValidation ? { status: recipientValidation.status } : undefined,
+    // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
+    layoutType,
+    headerImageData,
+    headerImageUrl: input.headerImageUrl,
+    inlineImageData,
+    inlineImageUrl: input.inlineImageUrl,
   });
 
   context.logger.info(
@@ -376,6 +529,7 @@ async function handler(
       correlationId: context.correlationId,
       event: "quote.preview.draft_created",
       draftId: draftResult.draftId,
+      layoutType,
       expiresAt: draftResult.expiresAt.toISOString()
     },
     "Draft created for idempotent send"
@@ -391,6 +545,10 @@ async function handler(
     estimatedDeliveryDays: 5,
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
+    // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
+    layoutType,
+    headerImageData,
+    inlineImageData,
     // Include saved return address info if used
     usedSavedReturnAddress: usedSavedReturnAddress || undefined,
     savedReturnAddressNote: savedReturnAddressNote,
@@ -457,11 +615,16 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
     "Sender Address:\n" +
     "- If not provided, your saved return address is used automatically.\n" +
     "- Use set_return_address to save one for all future letters.\n\n" +
+    "Layout Options:\n" +
+    "- text_only (default): Plain text letter, ~1800 character limit.\n" +
+    "- header_image: Letterhead/branding image at top, ~1500 character limit. Use headerImageUrl.\n" +
+    "- inline_image: Photo after signature, ~1200 character limit. Use inlineImageUrl.\n" +
+    "Layout is auto-detected from provided images, or set explicitly with layoutType.\n\n" +
     "Draft Workflow:\n" +
     "1. Creates a DRAFT with a unique draftId (required for send_letter).\n" +
     "2. Drafts expire after 24 hours.\n" +
     "3. Idempotent - retrying won't charge twice.\n\n" +
-    "Restrictions: US addresses only, max 1 page (~1,800 characters).",
+    "Restrictions: US addresses only, one layout per letter, max 1 page.",
   readOnly: true,
   inputSchema: quoteAndPreviewInputSchema,
   outputSchema: quoteAndPreviewOutputSchema,

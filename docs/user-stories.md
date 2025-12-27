@@ -23,6 +23,7 @@ User stories are organized by feature area using semantic prefixes:
 | `US-MCP` | MCP Access | Token-based auth for non-ChatGPT clients |
 | `US-DEV` | Development | Development environment and workflows |
 | `US-DCR` | OAuth Registration | Dynamic Client Registration handling |
+| `US-LAYOUT` | Letter Layouts | Letter layout options (text-only, header image, inline image) |
 
 Each story includes acceptance criteria that can be converted to test cases.
 
@@ -1316,6 +1317,158 @@ This implementation uses a static client approach aligned with the spec directio
 
 ---
 
+## Letter Layouts (LAYOUT)
+
+### US-LAYOUT-01: Preview Letter with Header Image
+**As a** user (Sarah, David)
+**I want to** add a header image to my letter
+**So that** I can include personal branding or decorative graphics at the top
+
+**Acceptance Criteria:**
+- [ ] Can provide header image via URL or file upload
+- [ ] Image appears at top of letter (below address window area)
+- [ ] Image resized to fit: max 6.5" wide, max 2" tall (300 DPI)
+- [ ] Accepted formats: PNG, JPEG, WebP
+- [ ] Maximum file size: 5 MB
+- [ ] Character limit reduced to ~1500 (accounting for image space)
+- [ ] Preview shows letter mockup with header image
+- [ ] Layout auto-detected when header image provided
+- [ ] Can explicitly set `layoutType: 'header_image'`
+
+**Use Cases:**
+- Personal letterhead (name/logo at top)
+- Decorative headers (holiday themes, seasonal graphics)
+- Business branding
+
+**Error Cases:**
+- [ ] Image too large (>5MB) → "Header image is too large. Please use an image under 5MB."
+- [ ] Wrong format → "Unsupported image format. Please use PNG, JPEG, or WebP."
+- [ ] Image processing fails → "Could not process header image. Please try a different image."
+- [ ] Body exceeds reduced limit → "Letter exceeds one-page limit with header image (~1500 characters)"
+
+---
+
+### US-LAYOUT-02: Preview Letter with Inline Image
+**As a** user (Sarah)
+**I want to** add an image after my signature/closing
+**So that** I can include a personal photo or illustration with my letter
+
+**Acceptance Criteria:**
+- [ ] Can provide inline image via URL or file upload
+- [ ] Image appears after signature/closing text
+- [ ] Image resized to fit: max 6.5" wide, max 3" tall (300 DPI)
+- [ ] Accepted formats: PNG, JPEG, WebP
+- [ ] Maximum file size: 5 MB
+- [ ] Character limit reduced to ~1200 (accounting for image space)
+- [ ] Preview shows letter mockup with inline image
+- [ ] Layout auto-detected when inline image provided
+- [ ] Can explicitly set `layoutType: 'inline_image'`
+
+**Use Cases:**
+- Personal photos with letters
+- Hand-drawn illustrations
+- QR codes or visual content
+
+**Error Cases:**
+- [ ] Image too large (>5MB) → "Inline image is too large. Please use an image under 5MB."
+- [ ] Wrong format → "Unsupported image format. Please use PNG, JPEG, or WebP."
+- [ ] Image processing fails → "Could not process inline image. Please try a different image."
+- [ ] Body exceeds reduced limit → "Letter exceeds one-page limit with inline image (~1200 characters)"
+
+---
+
+### US-LAYOUT-03: Layout Type Detection and Override
+**As a** user
+**I want** the system to automatically detect my layout type
+**So that** I don't have to specify it manually
+
+**Acceptance Criteria:**
+- [ ] Layout auto-detected from provided content:
+  - Header image provided → `header_image` layout
+  - Inline image provided → `inline_image` layout
+  - No images provided → `text_only` layout
+- [ ] Explicit `layoutType` parameter overrides auto-detection
+- [ ] Layouts are mutually exclusive (cannot have both header AND inline image)
+- [ ] If both images provided, error thrown with guidance
+- [ ] Response includes `layoutType` field for confirmation
+
+**Error Cases:**
+- [ ] Both header and inline images provided → "Cannot use both header and inline images. Please choose one layout type."
+
+---
+
+### US-LAYOUT-04: Letter Layout Image Processing
+**As the** system
+**I want to** process images for letter layouts
+**So that** letters print with high-quality images
+
+**Acceptance Criteria:**
+- [ ] Download image from URL during preview (same as postcard flow)
+- [ ] Validate file size (max 5MB) before full download
+- [ ] Validate content type (PNG, JPEG, WebP only)
+- [ ] Resize to print dimensions at 300 DPI:
+  - Header: max 1950x600px (6.5" x 2")
+  - Inline: max 1950x900px (6.5" x 3")
+- [ ] Use `contain` fit to preserve aspect ratio
+- [ ] Convert to JPEG at 85% quality
+- [ ] Store as base64 data URI in draft
+- [ ] Processing completes inline (not background job)
+
+**Technical Details:**
+- Uses existing imageService.ts patterns from postcard
+- Header stored in `header_image_data` column
+- Inline stored in `inline_image_data` column
+- Original URLs stored for debugging
+
+---
+
+### US-LAYOUT-05: Letter Layout Widget Preview
+**As a** ChatGPT user
+**I want** to see a visual mockup of my letter layout
+**So that** I can verify how my letter will look when printed
+
+**Acceptance Criteria:**
+- [ ] Widget shows letter paper mockup (8.5x11 aspect ratio)
+- [ ] Address window area visible at top (grayed/labeled)
+- [ ] Text-only layout: Shows sender address, body text, signature
+- [ ] Header layout: Shows header image, then content below
+- [ ] Inline layout: Shows content, then image below signature
+- [ ] Layout type indicated in widget meta section
+- [ ] Scrollable content area for long letters
+- [ ] Theme-aware (light/dark mode)
+- [ ] Send button still functional for all layouts
+
+**Visual Elements:**
+- [ ] Simulated paper texture/shadow
+- [ ] Proper typography (serif font for letter body)
+- [ ] Clear visual separation of sections
+- [ ] Image preview at appropriate scale
+
+---
+
+### US-LAYOUT-06: Letter Layout PostGrid Printing
+**As the** system
+**I want to** generate correct HTML for each letter layout
+**So that** PostGrid prints letters with images correctly
+
+**Acceptance Criteria:**
+- [ ] Text-only layout: Current behavior (plain text in styled HTML)
+- [ ] Header layout: Image embedded at top, content below
+- [ ] Inline layout: Content at top, image at bottom
+- [ ] Images embedded as base64 data URIs
+- [ ] Proper margins maintained:
+  - Top: 3.5" for address window
+  - Sides/bottom: 1"
+- [ ] Content fits on single page (validation at preview time)
+- [ ] Worker passes layout data to provider
+
+**PostGrid HTML Structure:**
+- Header image positioned below 3.5" address margin
+- Inline image positioned after message content
+- CSS ensures proper sizing and positioning
+
+---
+
 ## Priority Matrix
 
 | Priority | Category | Stories | Key Personas |
@@ -1340,6 +1493,7 @@ This implementation uses a static client approach aligned with the spec directio
 | P3 - Low | MCP Access | US-MCP-05 | Amy |
 | P3 - Low | Development | US-DEV-01, US-DEV-02, US-DEV-03 | Developers |
 | P1 - High | OAuth Registration | US-DCR-01, US-DCR-02 | MCP Clients, Admin |
+| P1 - High | Letter Layouts | US-LAYOUT-01 - US-LAYOUT-06 | Sarah, David |
 
 ---
 
@@ -1359,7 +1513,8 @@ This implementation uses a static client approach aligned with the spec directio
 | MCP Access | US-MCP | 8 |
 | Development | US-DEV | 3 |
 | OAuth Registration | US-DCR | 2 |
-| **Total** | | **64** |
+| Letter Layouts | US-LAYOUT | 6 |
+| **Total** | | **70** |
 
 ---
 

@@ -21,13 +21,26 @@ export const quoteAndPreviewInputSchema: JsonSchema = {
     sender: addressSchema,
     recipient: addressSchema,
     bodyText: { type: "string" },
-    signOff: { type: "string", description: "Closing/signature block" }
+    signOff: { type: "string", description: "Closing/signature block" },
+    layoutType: {
+      type: "string",
+      enum: ["text_only", "header_image", "inline_image"],
+      description: "Letter layout type. If not specified, auto-detected from provided images. text_only=plain text, header_image=image at top, inline_image=image after signature"
+    },
+    headerImageUrl: {
+      type: "string",
+      description: "URL of image to use as header/letterhead (max 5MB, PNG/JPEG/WebP). Sets layout to header_image if not explicitly overridden."
+    },
+    inlineImageUrl: {
+      type: "string",
+      description: "URL of image to include after signature (max 5MB, PNG/JPEG/WebP). Sets layout to inline_image if not explicitly overridden."
+    }
   }
 };
 
 export const quoteAndPreviewOutputSchema: JsonSchema = {
   type: "object",
-  required: ["previewHtml", "lettersRequired", "canSendNow", "draftId", "draftExpiresAt"],
+  required: ["previewHtml", "lettersRequired", "canSendNow", "draftId", "draftExpiresAt", "layoutType"],
   properties: {
     previewHtml: { type: "string" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for standard letter)" },
@@ -37,6 +50,19 @@ export const quoteAndPreviewOutputSchema: JsonSchema = {
     estimatedDeliveryDays: { type: "integer" },
     draftId: { type: "string", description: "Unique draft ID required for send_letter" },
     draftExpiresAt: { type: "string", description: "ISO timestamp when draft expires (24h)" },
+    layoutType: {
+      type: "string",
+      enum: ["text_only", "header_image", "inline_image"],
+      description: "Detected or specified layout type"
+    },
+    headerImageData: {
+      type: "string",
+      description: "Base64 data URI of processed header image (for widget preview)"
+    },
+    inlineImageData: {
+      type: "string",
+      description: "Base64 data URI of processed inline image (for widget preview)"
+    },
     senderAddressValidation: {
       type: "object",
       properties: {

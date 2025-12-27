@@ -17,7 +17,8 @@
         --accent-primary: #2563eb;
         --accent-primary-hover: #1d4ed8;
         --accent-primary-disabled: #93c5fd;
-        --preview-bg: #fefefe;
+        --letter-bg: #fffef8;
+        --address-window-bg: #f0f0f0;
 
         font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background: transparent;
@@ -37,7 +38,8 @@
         --accent-primary: #3b82f6;
         --accent-primary-hover: #60a5fa;
         --accent-primary-disabled: #1e3a5f;
-        --preview-bg: #1e293b;
+        --letter-bg: #2d3748;
+        --address-window-bg: #374151;
       }
 
       * {
@@ -58,28 +60,141 @@
         overflow: hidden;
       }
 
-      .preview-pane {
-        max-height: 200px;
-        overflow: auto;
+      /* Letter Mockup - Visual representation of letter */
+      .letter-mockup-container {
         padding: 1rem;
-        background: var(--preview-bg);
+        background: var(--bg-secondary);
         border-bottom: 1px solid var(--border-color);
-        font-family: "Georgia", "Times New Roman", serif;
-        font-size: 0.9rem;
-        line-height: 1.5;
+        display: flex;
+        justify-content: center;
       }
 
-      .preview-pane address {
-        font-style: normal;
-        margin-bottom: 1rem;
+      .letter-mockup {
+        width: 100%;
+        max-width: 300px;
+        aspect-ratio: 8.5 / 11;
+        background: var(--letter-bg);
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        position: relative;
       }
 
-      .preview-pane hr {
-        border: none;
-        border-top: 1px solid var(--border-color);
-        margin: 1rem 0;
+      /* Address window area (top portion) */
+      .address-window {
+        height: 30%;
+        background: var(--address-window-bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-bottom: 1px dashed var(--border-color);
+        position: relative;
       }
 
+      .address-window-label {
+        font-size: 0.65rem;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      /* Letter content area */
+      .letter-content {
+        flex: 1;
+        padding: 0.5rem;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        font-family: "Times New Roman", Georgia, serif;
+        font-size: 0.55rem;
+        line-height: 1.4;
+        color: var(--text-primary);
+      }
+
+      /* Header image layout */
+      .header-image-wrapper {
+        width: 100%;
+        max-height: 20%;
+        margin-bottom: 0.3rem;
+        display: flex;
+        justify-content: center;
+      }
+
+      .header-image-wrapper img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+      }
+
+      /* Sender address in content */
+      .sender-address {
+        margin-bottom: 0.3rem;
+        font-size: 0.5rem;
+      }
+
+      /* Body text */
+      .body-text {
+        flex: 1;
+        overflow: hidden;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        display: -webkit-box;
+        -webkit-line-clamp: 8;
+        -webkit-box-orient: vertical;
+      }
+
+      /* Sign-off */
+      .sign-off {
+        margin-top: 0.3rem;
+        white-space: pre-wrap;
+        font-size: 0.5rem;
+      }
+
+      /* Inline image layout */
+      .inline-image-wrapper {
+        width: 100%;
+        max-height: 25%;
+        margin-top: 0.3rem;
+        display: flex;
+        justify-content: center;
+      }
+
+      .inline-image-wrapper img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+      }
+
+      /* Layout badge */
+      .layout-badge {
+        position: absolute;
+        top: 0.3rem;
+        right: 0.3rem;
+        font-size: 0.5rem;
+        padding: 0.15rem 0.3rem;
+        background: var(--accent-primary);
+        color: white;
+        border-radius: 3px;
+        text-transform: uppercase;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      .layout-badge.text-only {
+        background: #6b7280;
+      }
+
+      .layout-badge.header-image {
+        background: #8b5cf6;
+      }
+
+      .layout-badge.inline-image {
+        background: #10b981;
+      }
+
+      /* Meta section */
       .meta {
         padding: 1rem;
         display: flex;
@@ -218,7 +333,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        min-height: 100px;
+        min-height: 200px;
         color: var(--text-secondary);
         font-style: italic;
       }
@@ -226,25 +341,29 @@
   </head>
   <body>
     <div class="card" id="card">
-      <div class="preview-pane" id="preview-pane">
-        <em>Loading preview...</em>
+      <div class="letter-mockup-container" id="mockup-container">
+        <div class="preview-loading">Loading letter preview...</div>
       </div>
       <div class="meta">
         <div class="info-row">
+          <span class="info-label">Layout</span>
+          <span class="info-value" id="layout-type">—</span>
+        </div>
+        <div class="info-row">
           <span class="info-label">Cost</span>
-          <span class="info-value" id="cost"></span>
+          <span class="info-value" id="cost">—</span>
         </div>
         <div class="info-row">
           <span class="info-label">Delivery</span>
-          <span class="info-value" id="delivery"></span>
+          <span class="info-value" id="delivery">—</span>
         </div>
         <div class="info-row">
           <span class="info-label">Status</span>
-          <span class="status-pill" id="status-pill"></span>
+          <span class="status-pill" id="status-pill">Loading...</span>
         </div>
         <div class="info-row">
           <span class="info-label" id="id-label">Draft</span>
-          <span class="info-value" id="id-value"></span>
+          <span class="info-value" id="id-value">—</span>
         </div>
         <div class="note" id="note" style="display: none;"></div>
         <!-- Send button - US-MCP-08 -->
@@ -259,20 +378,140 @@
       // Per OpenAI docs, data may not be available immediately
       // Must listen for 'openai:set_globals' event
       //
-      // US-MCP-07: previewHtml is in toolResponseMetadata (with fallback to toolOutput)
+      // US-LAYOUT-05: Visual letter mockup with layout-aware rendering
       // US-MCP-08: Send button calls send_letter via callTool
 
       let dataLoaded = false;
       let currentDraftId = null;
       let sendInProgress = false;
 
+      function escapeHtml(text) {
+        if (!text) return '';
+        return text
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function truncateText(text, maxLength) {
+        if (!text || text.length <= maxLength) return text;
+        return text.substring(0, maxLength) + '...';
+      }
+
+      function getLayoutBadgeClass(layoutType) {
+        switch (layoutType) {
+          case 'header_image': return 'header-image';
+          case 'inline_image': return 'inline-image';
+          default: return 'text-only';
+        }
+      }
+
+      function getLayoutLabel(layoutType) {
+        switch (layoutType) {
+          case 'header_image': return 'Header';
+          case 'inline_image': return 'Inline';
+          default: return 'Text';
+        }
+      }
+
+      function renderLetterMockup(state) {
+        const container = document.getElementById('mockup-container');
+        const layoutType = state.layoutType || 'text_only';
+
+        // Get content from previewHtml fallback or direct fields
+        // Try to extract body text and sign off from the state
+        let bodyText = '';
+        let signOff = '';
+        let senderName = '';
+        let senderAddress = '';
+
+        // Attempt to parse from previewHtml if direct fields not available
+        const previewHtml = window.openai?.toolResponseMetadata?.previewHtml ?? state.previewHtml;
+        if (previewHtml) {
+          // Try to extract sender info
+          const senderMatch = previewHtml.match(/<div class="sender-address">([\s\S]*?)<\/div>/);
+          if (senderMatch) {
+            senderAddress = senderMatch[1].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim();
+          }
+
+          // Try to extract body
+          const bodyMatch = previewHtml.match(/<div class="letter-body">([\s\S]*?)<\/div>/);
+          if (bodyMatch) {
+            bodyText = bodyMatch[1].replace(/<[^>]+>/g, '').trim();
+          }
+
+          // Try to extract sign-off
+          const signOffMatch = previewHtml.match(/<div class="sign-off">([\s\S]*?)<\/div>/);
+          if (signOffMatch) {
+            signOff = signOffMatch[1].replace(/<[^>]+>/g, '').trim();
+          }
+        }
+
+        // Fallback to raw body text display
+        if (!bodyText && !signOff) {
+          // Just show a simplified preview
+          bodyText = "Letter preview";
+        }
+
+        // Build the mockup HTML
+        let mockupHtml = `
+          <div class="letter-mockup">
+            <div class="layout-badge ${getLayoutBadgeClass(layoutType)}">${getLayoutLabel(layoutType)}</div>
+            <div class="address-window">
+              <span class="address-window-label">Address Window</span>
+            </div>
+            <div class="letter-content">
+        `;
+
+        // Header image (if applicable)
+        if (layoutType === 'header_image' && state.headerImageData) {
+          mockupHtml += `
+            <div class="header-image-wrapper">
+              <img src="${state.headerImageData}" alt="Header">
+            </div>
+          `;
+        }
+
+        // Sender address (simplified)
+        if (senderAddress) {
+          mockupHtml += `<div class="sender-address">${escapeHtml(truncateText(senderAddress, 60))}</div>`;
+        }
+
+        // Body text
+        mockupHtml += `<div class="body-text">${escapeHtml(truncateText(bodyText, 200))}</div>`;
+
+        // Sign-off
+        if (signOff) {
+          mockupHtml += `<div class="sign-off">${escapeHtml(truncateText(signOff, 50))}</div>`;
+        }
+
+        // Inline image (if applicable)
+        if (layoutType === 'inline_image' && state.inlineImageData) {
+          mockupHtml += `
+            <div class="inline-image-wrapper">
+              <img src="${state.inlineImageData}" alt="Photo">
+            </div>
+          `;
+        }
+
+        mockupHtml += `
+            </div>
+          </div>
+        `;
+
+        container.innerHTML = mockupHtml;
+      }
+
       function showLoading() {
         const card = document.getElementById("card");
         card.classList.add("loading");
 
         // Show loading state
-        document.getElementById("preview-pane").innerHTML =
+        document.getElementById("mockup-container").innerHTML =
           '<div class="preview-loading">Loading letter preview...</div>';
+        document.getElementById("layout-type").textContent = "—";
         document.getElementById("cost").textContent = "—";
         document.getElementById("delivery").textContent = "—";
 
@@ -302,11 +541,6 @@
         const card = document.getElementById("card");
         card.classList.remove("loading");
 
-        // US-MCP-07: Get previewHtml from toolResponseMetadata (fallback to toolOutput for backward compat)
-        const previewHtml =
-          window.openai?.toolResponseMetadata?.previewHtml ??
-          state.previewHtml;
-
         const {
           lettersRequired,
           canSendNow,
@@ -314,20 +548,23 @@
           deliveryClass,
           estimatedDeliveryDays,
           savedReturnAddressNote,
-          draftId
+          draftId,
+          layoutType
         } = state;
 
         // Store draftId for send button
         currentDraftId = draftId;
 
-        // Render preview HTML
-        const previewPane = document.getElementById("preview-pane");
-        if (previewHtml) {
-          const bodyMatch = previewHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-          previewPane.innerHTML = bodyMatch ? bodyMatch[1] : previewHtml;
-        } else {
-          previewPane.innerHTML = "<em>No preview available</em>";
-        }
+        // Render the letter mockup (US-LAYOUT-05)
+        renderLetterMockup(state);
+
+        // Layout type
+        const layoutLabels = {
+          'text_only': 'Text Only',
+          'header_image': 'Header Image',
+          'inline_image': 'Inline Image'
+        };
+        document.getElementById("layout-type").textContent = layoutLabels[layoutType] || 'Text Only';
 
         // Cost - lettersRequired is already in letters (1 letter = 1 standard letter)
         const letters = lettersRequired ?? 1;
@@ -388,11 +625,6 @@
 
         // Hide any previous error
         errorMessage.style.display = "none";
-
-        // NOTE: We intentionally do NOT call sendFollowUpMessage here.
-        // As of Dec 2025, sendFollowUpMessage has a bug that causes the widget
-        // to re-render by replaying the prior tool response. See GitHub issue.
-        // The widget UI shows success state; users can ask ChatGPT for status if needed.
 
         // Show loading state
         sendInProgress = true;

@@ -24,7 +24,8 @@ import type {
   AddressValidationResult,
   PostcardParams,
   PostcardResult,
-  PostcardSize
+  PostcardSize,
+  LetterLayoutType
 } from './types.js';
 
 export interface PostGridProviderOptions {
@@ -179,9 +180,14 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           params.senderName || 'Letter IRL',
           params.senderAddress || this.getDefaultSenderAddress()
         ),
-        html: this.generateHTML(params.message),
+        html: this.generateHTML(params.message, {
+          layoutType: params.layoutType,
+          headerImageData: params.headerImageData,
+          inlineImageData: params.inlineImageData,
+        }),
         description: `Letter to ${params.recipientName}`,
-        color: params.color ?? false,
+        // Enable color printing for layouts with images
+        color: params.color ?? (params.layoutType !== 'text_only' && (!!params.headerImageData || !!params.inlineImageData)),
         doubleSided: params.doubleSided ?? false,
         addressPlacement: 'top_first_page'
       };
@@ -344,9 +350,19 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   }
 
   /**
-   * Generate HTML content for the letter
+   * Generate HTML content for the letter (US-LAYOUT-06)
+   * Supports text_only, header_image, and inline_image layouts
    */
-  private generateHTML(message: string): string {
+  private generateHTML(
+    message: string,
+    options?: {
+      layoutType?: LetterLayoutType;
+      headerImageData?: string;
+      inlineImageData?: string;
+    }
+  ): string {
+    const layoutType = options?.layoutType || 'text_only';
+
     // Escape HTML special characters in message
     const escapedMessage = message
       .replace(/&/g, '&amp;')
@@ -355,6 +371,21 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
 
+    switch (layoutType) {
+      case 'header_image':
+        return this.generateHeaderImageHTML(escapedMessage, options?.headerImageData);
+      case 'inline_image':
+        return this.generateInlineImageHTML(escapedMessage, options?.inlineImageData);
+      case 'text_only':
+      default:
+        return this.generateTextOnlyHTML(escapedMessage);
+    }
+  }
+
+  /**
+   * Generate text-only layout HTML
+   */
+  private generateTextOnlyHTML(escapedMessage: string): string {
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -376,6 +407,98 @@ export class PostGridProvider implements LetterFulfillmentProvider {
 </head>
 <body>
   <div class="letter-body">${escapedMessage}</div>
+</body>
+</html>`;
+  }
+
+  /**
+   * Generate header image layout HTML (US-LAYOUT-01)
+   * Header image appears at top of content area, below the address window
+   */
+  private generateHeaderImageHTML(escapedMessage: string, headerImageData?: string): string {
+    const headerHtml = headerImageData
+      ? `<div class="header-image"><img src="${headerImageData}" alt="Header"></div>`
+      : '';
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: 'Times New Roman', serif;
+      font-size: 12pt;
+      line-height: 1.6;
+      /* Larger top margin to avoid address window overlap */
+      margin: 3.5in 1in 1in 1in;
+      color: #000;
+    }
+    .header-image {
+      width: 100%;
+      max-height: 2in;
+      margin-bottom: 0.5in;
+      text-align: center;
+    }
+    .header-image img {
+      max-width: 100%;
+      max-height: 2in;
+      object-fit: contain;
+    }
+    .letter-body {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+  </style>
+</head>
+<body>
+  ${headerHtml}
+  <div class="letter-body">${escapedMessage}</div>
+</body>
+</html>`;
+  }
+
+  /**
+   * Generate inline image layout HTML (US-LAYOUT-02)
+   * Inline image appears after the message/signature
+   */
+  private generateInlineImageHTML(escapedMessage: string, inlineImageData?: string): string {
+    const inlineHtml = inlineImageData
+      ? `<div class="inline-image"><img src="${inlineImageData}" alt="Photo"></div>`
+      : '';
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: 'Times New Roman', serif;
+      font-size: 12pt;
+      line-height: 1.6;
+      /* Larger top margin to avoid address window overlap */
+      margin: 3.5in 1in 1in 1in;
+      color: #000;
+    }
+    .letter-body {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .inline-image {
+      width: 100%;
+      max-height: 3in;
+      margin-top: 0.5in;
+      text-align: center;
+    }
+    .inline-image img {
+      max-width: 100%;
+      max-height: 3in;
+      object-fit: contain;
+    }
+  </style>
+</head>
+<body>
+  <div class="letter-body">${escapedMessage}</div>
+  ${inlineHtml}
 </body>
 </html>`;
   }
