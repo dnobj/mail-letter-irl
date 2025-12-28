@@ -141,7 +141,7 @@
         white-space: pre-wrap;
         word-wrap: break-word;
         display: -webkit-box;
-        -webkit-line-clamp: 8;
+        -webkit-line-clamp: 20;  /* Show more lines - content is already validated */
         -webkit-box-orient: vertical;
       }
 
@@ -479,8 +479,8 @@
           mockupHtml += `<div class="sender-address">${escapeHtml(truncateText(senderAddress, 60))}</div>`;
         }
 
-        // Body text
-        mockupHtml += `<div class="body-text">${escapeHtml(truncateText(bodyText, 200))}</div>`;
+        // Body text - show full content (already validated by character limits)
+        mockupHtml += `<div class="body-text">${escapeHtml(bodyText)}</div>`;
 
         // Sign-off
         if (signOff) {
