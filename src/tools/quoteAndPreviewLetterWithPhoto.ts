@@ -32,10 +32,11 @@ interface QuoteAndPreviewLetterWithPhotoInput {
   recipient: Address;
   bodyText: string;
   signOff: string;
-  // Image from OpenAI fileParams - injected by MCP framework
-  image?: ImageFileParam;
-  // Alternative: direct image URL
-  imageUrl?: string;
+  // Photo from OpenAI fileParams - injected by MCP framework
+  // Note: Parameter named 'photo' to match tool name (ChatGPT expects this)
+  photo?: ImageFileParam;
+  // Alternative: direct photo URL
+  photoUrl?: string;
 }
 
 // ============================================================================
@@ -62,14 +63,15 @@ async function handler(
     "Processing quote_and_preview_letter_with_photo"
   );
 
-  // Get image source - REQUIRED
-  const imageSource = input.image?.download_url || input.imageUrl;
+  // Get photo source - REQUIRED
+  // Note: Using 'photo' param name to match tool name (ChatGPT expects this)
+  const photoSource = input.photo?.download_url || input.photoUrl;
 
-  if (!imageSource) {
+  if (!photoSource) {
     context.logger.warn(
       {
         correlationId: context.correlationId,
-        event: "quote.letter.photo.no_image"
+        event: "quote.letter.photo.no_photo"
       },
       "No photo provided"
     );
@@ -77,13 +79,13 @@ async function handler(
       "No photo provided. This tool requires a photo to include with your letter.\n\n" +
       "Please either:\n" +
       "1. Attach a photo to your message (recommended)\n" +
-      "2. Provide an imageUrl parameter with a publicly accessible URL\n\n" +
+      "2. Provide a photoUrl parameter with a publicly accessible URL\n\n" +
       "If you want to send a text-only letter, use quote_and_preview_letter instead."
     );
   }
 
-  // Log image source
-  if (input.image?.download_url) {
+  // Log photo source
+  if (input.photo?.download_url) {
     context.logger.info(
       {
         correlationId: context.correlationId,
@@ -96,7 +98,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "quote.letter.photo.from_url",
-        imageUrl: imageSource.substring(0, 100)
+        photoUrl: photoSource.substring(0, 100)
       },
       "Using photo from URL"
     );
@@ -114,7 +116,7 @@ async function handler(
     );
 
     const processed = await downloadAndProcessLetterImage(
-      { url: imageSource },
+      { url: photoSource },
       'inline'
     );
     inlineImageData = processed.base64DataUri;
@@ -168,7 +170,7 @@ async function handler(
     signOff: input.signOff,
     layoutType,
     inlineImageData,
-    inlineImageUrl: imageSource,
+    inlineImageUrl: photoSource,
     usedSavedReturnAddress,
     savedReturnAddressNote,
     senderValidation,
@@ -204,7 +206,7 @@ export const quoteAndPreviewLetterWithPhotoTool: McpToolDefinition<
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
     "openai/widgetAccessible": true,
-    "openai/fileParams": ["image"],  // ENABLE IMAGE UPLOAD
+    "openai/fileParams": ["photo"],  // ENABLE IMAGE UPLOAD
     "openai/toolInvocation/invoking": "Processing letter with photo...",
     "openai/toolInvocation/invoked": "Preview ready",
     readOnlyHint: true
