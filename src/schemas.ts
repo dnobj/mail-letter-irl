@@ -17,20 +17,17 @@ export const addressSchema: JsonSchema = {
 export const quoteAndPreviewInputSchema: JsonSchema = {
   type: "object",
   required: ["sender", "recipient", "bodyText", "signOff"],
-  additionalProperties: true,
+  additionalProperties: true,  // fileParams injects 'image' automatically when user attaches a file
   properties: {
     sender: addressSchema,
     recipient: addressSchema,
     bodyText: { type: "string" },
     signOff: { type: "string", description: "Closing/signature block" },
-    // IMAGE ATTACHMENT - if user has attached an image, pass it here
-    image: {
-      type: "object",
-      description: "IMPORTANT: If the user has attached an image to include in the letter, pass it here. The image will be printed as part of the physical letter. Supported: PNG, JPEG, WebP."
-    },
+    // Note: 'image' is NOT in schema - it's injected via openai/fileParams when user attaches a file
+    // This matches the postcard pattern which works correctly
     imageUrl: {
       type: "string",
-      description: "URL of image to include (use only if no file attachment available)"
+      description: "URL of image to include in the letter (fallback if no file attached)"
     },
     imagePlacement: {
       type: "string",
