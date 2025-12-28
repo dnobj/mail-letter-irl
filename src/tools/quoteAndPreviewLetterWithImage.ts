@@ -197,7 +197,7 @@ export const quoteAndPreviewLetterWithImageTool: McpToolDefinition<
     "- quote_and_preview_letter: Text-only letters (no image)\n" +
     "- quote_and_preview_letter_with_header_image: Image at TOP (letterhead/branding)\n\n" +
     "Sender Address: If not provided, your saved return address is used automatically.\n\n" +
-    "Restrictions: US addresses only, max ~1200 characters (shorter due to image).",
+    "Restrictions: US addresses only, max ~800 characters (shorter due to image).",
   readOnly: true,
   inputSchema: quoteAndPreviewLetterWithImageInputSchema,
   outputSchema: quoteAndPreviewOutputSchema,

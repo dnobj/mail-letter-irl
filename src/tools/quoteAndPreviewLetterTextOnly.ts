@@ -105,7 +105,7 @@ export const quoteAndPreviewLetterTextOnlyTool: McpToolDefinition<
     "- quote_and_preview_letter_with_image: Image enclosed AFTER signature\n\n" +
     "PREVIEW IS FREE: Generating a preview costs nothing.\n\n" +
     "Sender Address: If not provided, your saved return address is used automatically.\n\n" +
-    "Restrictions: US addresses only, max ~1800 characters.",
+    "Restrictions: US addresses only, max ~1600 characters.",
   readOnly: true,
   inputSchema: quoteAndPreviewLetterTextOnlyInputSchema,
   outputSchema: quoteAndPreviewOutputSchema,

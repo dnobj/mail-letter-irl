@@ -18,9 +18,9 @@ import { Address, LetterLayoutType } from "../contracts/types.js";
 // ============================================================================
 
 export const LAYOUT_CHARACTER_LIMITS: Record<LetterLayoutType, number> = {
-  text_only: 1800,      // Full page of text
-  header_image: 1500,   // Reduced for 2" header image
-  inline_image: 1200,   // Reduced for 3" inline image
+  text_only: 1600,      // ~24 lines of text (conservative for single page)
+  header_image: 1100,   // ~17 lines with 2" header image
+  inline_image: 800,    // ~12 lines with 3" inline image
 };
 
 // ============================================================================
