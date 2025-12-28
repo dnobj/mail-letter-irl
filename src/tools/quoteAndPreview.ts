@@ -656,33 +656,22 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter",
   description:
-    "WHEN TO USE: Call this tool to CREATE A PREVIEW of a physical letter. This does NOT send " +
-    "anything - it only generates a draft for the user to review. Proactively offer previews when " +
-    "the context suggests the user might want to send a real letter (e.g., thank you notes, " +
-    "condolences, formal correspondence, letters to officials, pen pals). " +
-    "If the user has attached an image and wants a letter (not postcard), include it using the 'image' parameter.\n\n" +
-    "PREVIEW IS FREE: Generating a preview costs nothing and does not use credits. " +
+    "WHEN TO USE: Call this tool to CREATE A PREVIEW of a physical printed letter WITH OR WITHOUT AN IMAGE. " +
+    "If the user has attached or wants to include a photo, artwork, or any image with their letter, " +
+    "ALWAYS pass it using the 'image' parameter - the letter will include both your text AND the image printed together. " +
+    "Use this for: thank you notes with photos, letters with enclosed pictures, formal correspondence with letterhead images, " +
+    "condolence letters, letters to officials, pen pal letters with drawings or photos.\n\n" +
+    "LETTER vs POSTCARD: Use THIS tool when the message is the focus (with optional image). " +
+    "Use quote_and_preview_postcard when the IMAGE is the main focus (with short message on back).\n\n" +
+    "PREVIEW IS FREE: Generating a preview costs nothing. " +
     "Feel free to create previews to show users what their letter would look like.\n\n" +
-    "What it does: Generates a printable preview, validates addresses, and creates a DRAFT. " +
-    "The user reviews the preview before deciding to send via send_letter.\n\n" +
-    "Sender Address:\n" +
-    "- If not provided, your saved return address is used automatically.\n" +
-    "- Use set_return_address to save one for all future letters.\n\n" +
-    "Image Input (optional, provide ONE):\n" +
+    "Image Input (provide ONE if user has an image):\n" +
     "1. Attach an image directly to your message (recommended)\n" +
     "2. Use imageUrl parameter with a publicly accessible URL\n" +
-    "- Supported: PNG, JPEG, WebP (max 5MB), auto-resized for print quality\n" +
     "- By default, images appear AFTER the signature (like enclosing a photo)\n" +
-    "- Use imagePlacement='header' to put the image at the TOP (like letterhead)\n\n" +
-    "Character Limits by Layout:\n" +
-    "- text_only (no images): ~1800 characters\n" +
-    "- header_image: ~1500 characters\n" +
-    "- inline_image: ~1200 characters\n\n" +
-    "Draft Workflow:\n" +
-    "1. Creates a DRAFT with a unique draftId (required for send_letter).\n" +
-    "2. Drafts expire after 24 hours.\n" +
-    "3. Idempotent - retrying won't charge twice.\n\n" +
-    "Restrictions: US addresses only, one layout per letter, max 1 page.",
+    "- Use imagePlacement='header' to put the image at the TOP (like letterhead/branding)\n\n" +
+    "Sender Address: If not provided, your saved return address is used automatically.\n\n" +
+    "Restrictions: US addresses only, max 1 page (~1200-1800 chars depending on image).",
   readOnly: true,
   inputSchema: quoteAndPreviewInputSchema,
   outputSchema: quoteAndPreviewOutputSchema,
