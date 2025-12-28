@@ -659,7 +659,8 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
     "WHEN TO USE: Call this tool to CREATE A PREVIEW of a physical letter. This does NOT send " +
     "anything - it only generates a draft for the user to review. Proactively offer previews when " +
     "the context suggests the user might want to send a real letter (e.g., thank you notes, " +
-    "condolences, formal correspondence, letters to officials, pen pals).\n\n" +
+    "condolences, formal correspondence, letters to officials, pen pals). " +
+    "If the user has attached an image and wants a letter (not postcard), include it using the 'image' parameter.\n\n" +
     "PREVIEW IS FREE: Generating a preview costs nothing and does not use credits. " +
     "Feel free to create previews to show users what their letter would look like.\n\n" +
     "What it does: Generates a printable preview, validates addresses, and creates a DRAFT. " +
