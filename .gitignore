@@ -9,3 +9,4 @@ data/accounts.json
 admin-token.js
 .admin-jwt
 screenshots/
+playwright-procedures/

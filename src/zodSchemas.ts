@@ -10,11 +10,46 @@ export const addressZ = z.object({
   country: z.string()
 });
 
+// Text-only letter schema
 export const quoteAndPreviewInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
   recipient: addressZ,
   bodyText: z.string(),
   signOff: z.string()
+});
+
+// ============================================================================
+// Letter with Image Schemas (for fileParams support)
+// ============================================================================
+
+// Image file param schema - OpenAI Apps SDK requires explicit definition
+const imageFileParamZ = z.object({
+  download_url: z.string(),
+  file_id: z.string()
+});
+
+// Letter with header image (image at top, like letterhead)
+export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
+  sender: addressZ.optional(),
+  recipient: addressZ,
+  bodyText: z.string(),
+  signOff: z.string(),
+  // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
+  image: imageFileParamZ.optional(),
+  // Alternative: direct image URL
+  imageUrl: z.string().optional()
+});
+
+// Letter with inline image (image after signature, like enclosing a photo)
+export const quoteAndPreviewLetterWithImageInputZ = z.object({
+  sender: addressZ.optional(),
+  recipient: addressZ,
+  bodyText: z.string(),
+  signOff: z.string(),
+  // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
+  image: imageFileParamZ.optional(),
+  // Alternative: direct image URL
+  imageUrl: z.string().optional()
 });
 
 export const sendLetterInputZ = z.object({

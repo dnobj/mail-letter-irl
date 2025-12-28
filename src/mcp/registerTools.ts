@@ -8,6 +8,8 @@ import { LetterIrlServer } from "../server.js";
 import { toolInputSchemas } from "./toolSchemas.js";
 import {
   quoteAndPreviewInputZ,
+  quoteAndPreviewLetterWithHeaderImageInputZ,
+  quoteAndPreviewLetterWithImageInputZ,
   sendLetterInputZ,
   getOrderStatusInputZ,
   getAccountBalanceInputZ,
@@ -152,14 +154,19 @@ type ToolName = keyof typeof toolInputSchemas;
 const DEFAULT_USER_ID = process.env.LETTER_IRL_DEFAULT_USER_ID ?? "mcp-user";
 
 const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
+  // Letter tools - three separate tools for different layouts
   quote_and_preview_letter: quoteAndPreviewInputZ,
+  quote_and_preview_letter_with_header_image: quoteAndPreviewLetterWithHeaderImageInputZ,
+  quote_and_preview_letter_with_image: quoteAndPreviewLetterWithImageInputZ,
   send_letter: sendLetterInputZ,
+  // Account and order management tools
   get_order_status: getOrderStatusInputZ,
   get_account_balance: getAccountBalanceInputZ,
   list_orders: listOrdersInputZ,
   set_return_address: setReturnAddressInputZ,
   get_return_address: getReturnAddressInputZ,
   clear_return_address: clearReturnAddressInputZ,
+  // Postcard tools
   quote_and_preview_postcard: quoteAndPreviewPostcardInputZ,
   send_postcard: sendPostcardInputZ
 };
@@ -311,12 +318,18 @@ function summarizeToolResult(
       const letters = result.lettersRemaining as number | undefined;
       return message || `Letter Balance: ${letters ?? "unknown"} letters`;
     }
-    case "quote_and_preview_letter": {
+    case "quote_and_preview_letter":
+    case "quote_and_preview_letter_with_header_image":
+    case "quote_and_preview_letter_with_image": {
       // Now returns lettersRequired directly (always 1 for standard letter)
       const lettersRequired = result.lettersRequired as number | undefined;
       const canSend = result.canSendNow ? "can send now" : "cannot send";
       const usedSaved = result.usedSavedReturnAddress as boolean | undefined;
+      const layoutType = result.layoutType as string | undefined;
       let summary = `Preview ready: requires ${lettersRequired ?? 1} ${lettersRequired === 1 ? 'letter' : 'letters'} from balance (${canSend}).`;
+      if (layoutType && layoutType !== 'text_only') {
+        summary += ` Layout: ${layoutType.replace('_', ' ')}.`;
+      }
       if (usedSaved) {
         summary += " Using your saved return address.";
       }

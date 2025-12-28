@@ -10,17 +10,45 @@ const addressSchema = z.object({
   country: z.string()
 });
 
+// Image file param schema - OpenAI Apps SDK requires explicit definition
+const imageFileParamSchema = z.object({
+  download_url: z.string(),
+  file_id: z.string()
+});
+
 export const toolInputSchemas = {
+  // Letter tools - three separate tools for different layouts
   quote_and_preview_letter: z.object({
     sender: addressSchema.optional(),  // Optional - will use saved return address if not provided
     recipient: addressSchema,
     bodyText: z.string(),
     signOff: z.string()
   }),
+  quote_and_preview_letter_with_header_image: z.object({
+    sender: addressSchema.optional(),
+    recipient: addressSchema,
+    bodyText: z.string(),
+    signOff: z.string(),
+    // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
+    image: imageFileParamSchema.optional(),
+    // Alternative: direct image URL
+    imageUrl: z.string().optional()
+  }),
+  quote_and_preview_letter_with_image: z.object({
+    sender: addressSchema.optional(),
+    recipient: addressSchema,
+    bodyText: z.string(),
+    signOff: z.string(),
+    // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
+    image: imageFileParamSchema.optional(),
+    // Alternative: direct image URL
+    imageUrl: z.string().optional()
+  }),
   send_letter: z.object({
     draftId: z.string(),
     confirm: z.boolean()
   }),
+  // Account and order management tools
   get_order_status: z.object({
     orderId: z.string().optional()
   }),
@@ -41,16 +69,16 @@ export const toolInputSchemas = {
   clear_return_address: z.object({
     confirm: z.boolean()
   }),
+  // Postcard tools
   quote_and_preview_postcard: z.object({
     sender: addressSchema.optional(),  // Optional - will use saved return address if not provided
     recipient: addressSchema,
     message: z.string(),
     size: z.enum(["6x9"]).optional(),
-    // Image from OpenAI fileParams - injected by MCP framework
-    image: z.object({
-      download_url: z.string(),
-      file_id: z.string()
-    }).optional()
+    // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
+    image: imageFileParamSchema.optional(),
+    // Alternative: direct image URL
+    imageUrl: z.string().optional()
   }),
   send_postcard: z.object({
     draftId: z.string(),
