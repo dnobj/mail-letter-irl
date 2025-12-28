@@ -667,11 +667,12 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
     "Sender Address:\n" +
     "- If not provided, your saved return address is used automatically.\n" +
     "- Use set_return_address to save one for all future letters.\n\n" +
-    "Including Images (optional):\n" +
-    "To include an image in the letter, attach it directly to your message using the 'image' parameter.\n" +
-    "- By default, images appear AFTER the signature (like enclosing a photo or drawing)\n" +
-    "- Use imagePlacement='header' to put the image at the TOP of the letter (like letterhead)\n" +
-    "Supported: PNG, JPEG, WebP (max 5MB). Images are auto-resized for print quality.\n\n" +
+    "Image Input (optional, provide ONE):\n" +
+    "1. Attach an image directly to your message (recommended)\n" +
+    "2. Use imageUrl parameter with a publicly accessible URL\n" +
+    "- Supported: PNG, JPEG, WebP (max 5MB), auto-resized for print quality\n" +
+    "- By default, images appear AFTER the signature (like enclosing a photo)\n" +
+    "- Use imagePlacement='header' to put the image at the TOP (like letterhead)\n\n" +
     "Character Limits by Layout:\n" +
     "- text_only (no images): ~1800 characters\n" +
     "- header_image: ~1500 characters\n" +
