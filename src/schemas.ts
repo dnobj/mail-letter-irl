@@ -17,35 +17,25 @@ export const addressSchema: JsonSchema = {
 export const quoteAndPreviewInputSchema: JsonSchema = {
   type: "object",
   required: ["sender", "recipient", "bodyText", "signOff"],
-  additionalProperties: true,  // Allow fileParams like 'image' to pass through
+  additionalProperties: true,
   properties: {
     sender: addressSchema,
     recipient: addressSchema,
     bodyText: { type: "string" },
     signOff: { type: "string", description: "Closing/signature block" },
-    // Primary image param - simplest way to include an image (matches postcard pattern)
+    // IMAGE ATTACHMENT - if user has attached an image, pass it here
+    image: {
+      type: "object",
+      description: "IMPORTANT: If the user has attached an image to include in the letter, pass it here. The image will be printed as part of the physical letter. Supported: PNG, JPEG, WebP."
+    },
     imageUrl: {
       type: "string",
-      description: "URL of image to include in the letter (alternative to file attachment). By default appears after signature; use imagePlacement='header' for top of letter."
+      description: "URL of image to include (use only if no file attachment available)"
     },
     imagePlacement: {
       type: "string",
       enum: ["header", "inline"],
-      description: "Where to place the attached image: 'header' (top of letter, like letterhead) or 'inline' (after signature, like enclosing a photo). Default: 'inline'"
-    },
-    // Advanced: explicit layout control
-    layoutType: {
-      type: "string",
-      enum: ["text_only", "header_image", "inline_image"],
-      description: "Explicit layout override. Usually auto-detected from images."
-    },
-    headerImageUrl: {
-      type: "string",
-      description: "URL of header/letterhead image (advanced - prefer using imageUrl with imagePlacement='header')"
-    },
-    inlineImageUrl: {
-      type: "string",
-      description: "URL of inline image after signature (advanced - prefer using imageUrl with default placement)"
+      description: "Where to place image: 'header' (top, like letterhead) or 'inline' (after signature, default)"
     }
   }
 };
