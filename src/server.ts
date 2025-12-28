@@ -5,7 +5,7 @@ import {
   // Letter tools - three separate tools for different layouts
   quoteAndPreviewLetterTextOnlyTool,
   quoteAndPreviewLetterWithHeaderImageTool,
-  quoteAndPreviewLetterWithPhotoTool,
+  quoteAndPreviewLetterWithImageTool,
   sendLetterTool,
   // Account and order management tools
   getOrderStatusTool,
@@ -30,7 +30,7 @@ const tools: McpToolDefinition<unknown, unknown>[] = [
   // Letter tools - three separate tools for different layouts
   quoteAndPreviewLetterTextOnlyTool,
   quoteAndPreviewLetterWithHeaderImageTool,
-  quoteAndPreviewLetterWithPhotoTool,
+  quoteAndPreviewLetterWithImageTool,
   sendLetterTool,
   // Account and order management tools
   getOrderStatusTool,

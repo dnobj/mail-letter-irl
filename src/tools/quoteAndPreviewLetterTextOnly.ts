@@ -4,7 +4,7 @@
  * Creates a preview of a text-only physical letter without images.
  * For letters WITH images, use:
  * - quoteAndPreviewLetterWithHeaderImage (logo/letterhead at top)
- * - quoteAndPreviewLetterWithPhoto (photo after signature)
+ * - quoteAndPreviewLetterWithImage (image after signature)
  */
 
 import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
@@ -102,7 +102,7 @@ export const quoteAndPreviewLetterTextOnlyTool: McpToolDefinition<
     "letters to officials, pen pal letters, personal messages.\n\n" +
     "FOR LETTERS WITH IMAGES, use these tools instead:\n" +
     "- quote_and_preview_letter_with_header_image: Logo or letterhead at TOP\n" +
-    "- quote_and_preview_letter_with_photo: Photo enclosed AFTER signature\n\n" +
+    "- quote_and_preview_letter_with_image: Image enclosed AFTER signature\n\n" +
     "PREVIEW IS FREE: Generating a preview costs nothing.\n\n" +
     "Sender Address: If not provided, your saved return address is used automatically.\n\n" +
     "Restrictions: US addresses only, max ~1800 characters.",

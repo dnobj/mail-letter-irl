@@ -52,8 +52,8 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
   }
 };
 
-// Inline photo letter (NO 'photo' field in schema - let fileParams inject)
-export const quoteAndPreviewLetterWithPhotoInputSchema: JsonSchema = {
+// Inline image letter (NO 'image' field in schema - let fileParams inject)
+export const quoteAndPreviewLetterWithImageInputSchema: JsonSchema = {
   type: "object",
   required: ["recipient", "bodyText", "signOff"],
   properties: {
@@ -62,11 +62,11 @@ export const quoteAndPreviewLetterWithPhotoInputSchema: JsonSchema = {
       description: "Return address (optional - will use saved return address if not provided)"
     },
     recipient: addressSchema,
-    bodyText: { type: "string", description: "Main letter content (max ~1200 characters due to photo)" },
+    bodyText: { type: "string", description: "Main letter content (max ~1200 characters due to image)" },
     signOff: { type: "string", description: "Closing/signature block" },
-    photoUrl: {
+    imageUrl: {
       type: "string",
-      description: "URL of photo (fallback if no file attached)"
+      description: "URL of image (fallback if no file attached)"
     }
   }
 };

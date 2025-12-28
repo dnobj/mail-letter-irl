@@ -1,7 +1,7 @@
 // Letter tools - three separate tools for different layouts
 export { quoteAndPreviewLetterTextOnlyTool } from "./quoteAndPreviewLetterTextOnly.js";
 export { quoteAndPreviewLetterWithHeaderImageTool } from "./quoteAndPreviewLetterWithHeaderImage.js";
-export { quoteAndPreviewLetterWithPhotoTool } from "./quoteAndPreviewLetterWithPhoto.js";
+export { quoteAndPreviewLetterWithImageTool } from "./quoteAndPreviewLetterWithImage.js";
 export { sendLetterTool } from "./sendLetter.js";
 
 // Account and order management tools

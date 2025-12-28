@@ -1,15 +1,15 @@
 /**
- * Quote and Preview Letter with Photo
+ * Quote and Preview Letter with Image
  *
- * Creates a preview of a physical letter WITH a photo enclosed after the signature.
- * The photo appears AFTER the signature, like enclosing a printed photo with your letter.
+ * Creates a preview of a physical letter WITH an image enclosed after the signature.
+ * The image appears AFTER the signature, like enclosing a printed photo with your letter.
  *
- * REQUIRES: A photo attachment or imageUrl parameter.
+ * REQUIRES: An image attachment or imageUrl parameter.
  */
 
 import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
 import {
-  quoteAndPreviewLetterWithPhotoInputSchema,
+  quoteAndPreviewLetterWithImageInputSchema,
   quoteAndPreviewOutputSchema
 } from "../schemas.js";
 import {
@@ -27,16 +27,15 @@ import type { ImageFileParam } from "../services/types.js";
 // Types
 // ============================================================================
 
-interface QuoteAndPreviewLetterWithPhotoInput {
+interface QuoteAndPreviewLetterWithImageInput {
   sender?: Address;
   recipient: Address;
   bodyText: string;
   signOff: string;
-  // Photo from OpenAI fileParams - injected by MCP framework
-  // Note: Parameter named 'photo' to match tool name (ChatGPT expects this)
-  photo?: ImageFileParam;
-  // Alternative: direct photo URL
-  photoUrl?: string;
+  // Image from OpenAI fileParams - injected by MCP framework
+  image?: ImageFileParam;
+  // Alternative: direct image URL
+  imageUrl?: string;
 }
 
 // ============================================================================
@@ -50,7 +49,7 @@ const OUTPUT_TEMPLATE = "ui://widgets/LetterPreviewCard.html";
 // ============================================================================
 
 async function handler(
-  input: QuoteAndPreviewLetterWithPhotoInput,
+  input: QuoteAndPreviewLetterWithImageInput,
   context: ToolContext
 ): Promise<LetterQuoteOutput> {
   const layoutType = 'inline_image';
@@ -58,49 +57,48 @@ async function handler(
   context.logger.info(
     {
       correlationId: context.correlationId,
-      event: "quote.letter.photo.start"
+      event: "quote.letter.image.start"
     },
-    "Processing quote_and_preview_letter_with_photo"
+    "Processing quote_and_preview_letter_with_image"
   );
 
-  // Get photo source - REQUIRED
-  // Note: Using 'photo' param name to match tool name (ChatGPT expects this)
-  const photoSource = input.photo?.download_url || input.photoUrl;
+  // Get image source - REQUIRED
+  const imageSource = input.image?.download_url || input.imageUrl;
 
-  if (!photoSource) {
+  if (!imageSource) {
     context.logger.warn(
       {
         correlationId: context.correlationId,
-        event: "quote.letter.photo.no_photo"
+        event: "quote.letter.image.no_image"
       },
-      "No photo provided"
+      "No image provided"
     );
     throw new Error(
-      "No photo provided. This tool requires a photo to include with your letter.\n\n" +
+      "No image provided. This tool requires an image to include with your letter.\n\n" +
       "Please either:\n" +
-      "1. Attach a photo to your message (recommended)\n" +
-      "2. Provide a photoUrl parameter with a publicly accessible URL\n\n" +
+      "1. Attach an image to your message (recommended)\n" +
+      "2. Provide an imageUrl parameter with a publicly accessible URL\n\n" +
       "If you want to send a text-only letter, use quote_and_preview_letter instead."
     );
   }
 
-  // Log photo source
-  if (input.photo?.download_url) {
+  // Log image source
+  if (input.image?.download_url) {
     context.logger.info(
       {
         correlationId: context.correlationId,
-        event: "quote.letter.photo.from_fileParams"
+        event: "quote.letter.image.from_fileParams"
       },
-      "Using photo from OpenAI fileParams"
+      "Using image from OpenAI fileParams"
     );
   } else {
     context.logger.info(
       {
         correlationId: context.correlationId,
-        event: "quote.letter.photo.from_url",
-        photoUrl: photoSource.substring(0, 100)
+        event: "quote.letter.image.from_url",
+        imageUrl: imageSource.substring(0, 100)
       },
-      "Using photo from URL"
+      "Using image from URL"
     );
   }
 
@@ -110,13 +108,13 @@ async function handler(
     context.logger.info(
       {
         correlationId: context.correlationId,
-        event: "quote.letter.photo.processing"
+        event: "quote.letter.image.processing"
       },
-      "Processing photo"
+      "Processing image"
     );
 
     const processed = await downloadAndProcessLetterImage(
-      { url: photoSource },
+      { url: imageSource },
       'inline'
     );
     inlineImageData = processed.base64DataUri;
@@ -124,24 +122,24 @@ async function handler(
     context.logger.info(
       {
         correlationId: context.correlationId,
-        event: "quote.letter.photo.processed",
+        event: "quote.letter.image.processed",
         originalSize: `${processed.originalWidth}x${processed.originalHeight}`,
         processedSize: `${processed.processedWidth}x${processed.processedHeight}`
       },
-      "Photo processed successfully"
+      "Image processed successfully"
     );
   } catch (error) {
     const message = error instanceof ImageProcessingError
       ? error.userMessage
-      : 'Could not process photo. Please try a different image.';
+      : 'Could not process image. Please try a different image.';
 
     context.logger.warn(
       {
         correlationId: context.correlationId,
-        event: "quote.letter.photo.failed",
+        event: "quote.letter.image.failed",
         error: error instanceof Error ? error.message : 'Unknown error'
       },
-      "Photo processing failed"
+      "Image processing failed"
     );
     throw new Error(message);
   }
@@ -152,7 +150,7 @@ async function handler(
   // Validate addresses
   validateAddresses(sender, input.recipient, context);
 
-  // Validate character limit (reduced for photo layout)
+  // Validate character limit (reduced for image layout)
   validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context);
 
   // Validate with PostGrid provider
@@ -170,7 +168,7 @@ async function handler(
     signOff: input.signOff,
     layoutType,
     inlineImageData,
-    inlineImageUrl: photoSource,
+    inlineImageUrl: imageSource,
     usedSavedReturnAddress,
     savedReturnAddressNote,
     senderValidation,
@@ -183,15 +181,15 @@ async function handler(
 // Tool Definition
 // ============================================================================
 
-export const quoteAndPreviewLetterWithPhotoTool: McpToolDefinition<
-  QuoteAndPreviewLetterWithPhotoInput,
+export const quoteAndPreviewLetterWithImageTool: McpToolDefinition<
+  QuoteAndPreviewLetterWithImageInput,
   LetterQuoteOutput
 > = {
-  name: "quote_and_preview_letter_with_photo",
+  name: "quote_and_preview_letter_with_image",
   description:
-    "WHEN TO USE: Create a preview of a letter WITH A PHOTO enclosed after the signature.\n\n" +
-    "The photo appears AFTER your signature, like enclosing a printed photo with your letter.\n\n" +
-    "REQUIRES: A photo attachment (recommended) or imageUrl parameter.\n\n" +
+    "WHEN TO USE: Create a preview of a letter WITH AN IMAGE enclosed after the signature.\n\n" +
+    "The image appears AFTER your signature, like enclosing a printed photo with your letter.\n\n" +
+    "REQUIRES: An image attachment (recommended) or imageUrl parameter.\n\n" +
     "Use cases: Sending photos to family/friends, thank you cards with pictures, " +
     "letters with vacation photos, sharing artwork or drawings, memory sharing.\n\n" +
     "PREVIEW IS FREE: Generating a preview costs nothing.\n\n" +
@@ -199,15 +197,15 @@ export const quoteAndPreviewLetterWithPhotoTool: McpToolDefinition<
     "- quote_and_preview_letter: Text-only letters (no image)\n" +
     "- quote_and_preview_letter_with_header_image: Image at TOP (letterhead/branding)\n\n" +
     "Sender Address: If not provided, your saved return address is used automatically.\n\n" +
-    "Restrictions: US addresses only, max ~1200 characters (shorter due to photo).",
+    "Restrictions: US addresses only, max ~1200 characters (shorter due to image).",
   readOnly: true,
-  inputSchema: quoteAndPreviewLetterWithPhotoInputSchema,
+  inputSchema: quoteAndPreviewLetterWithImageInputSchema,
   outputSchema: quoteAndPreviewOutputSchema,
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
     "openai/widgetAccessible": true,
-    "openai/fileParams": ["photo"],  // ENABLE IMAGE UPLOAD
-    "openai/toolInvocation/invoking": "Processing letter with photo...",
+    "openai/fileParams": ["image"],  // ENABLE IMAGE UPLOAD
+    "openai/toolInvocation/invoking": "Processing letter with image...",
     "openai/toolInvocation/invoked": "Preview ready",
     readOnlyHint: true
   },

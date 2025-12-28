@@ -4,7 +4,7 @@
  * Shared helper functions for the three letter quote/preview tools:
  * - quoteAndPreviewLetterTextOnly
  * - quoteAndPreviewLetterWithHeaderImage
- * - quoteAndPreviewLetterWithPhoto
+ * - quoteAndPreviewLetterWithImage
  */
 
 import { Address, ToolContext, LetterLayoutType } from "../contracts/types.js";

@@ -195,7 +195,7 @@ export const quoteAndPreviewLetterWithHeaderImageTool: McpToolDefinition<
     "PREVIEW IS FREE: Generating a preview costs nothing.\n\n" +
     "Alternative tools:\n" +
     "- quote_and_preview_letter: Text-only letters (no image)\n" +
-    "- quote_and_preview_letter_with_photo: Photo AFTER signature (like enclosing a photo)\n\n" +
+    "- quote_and_preview_letter_with_image: Image AFTER signature (like enclosing a photo)\n\n" +
     "Sender Address: If not provided, your saved return address is used automatically.\n\n" +
     "Restrictions: US addresses only, max ~1500 characters (shorter due to header image).",
   readOnly: true,
