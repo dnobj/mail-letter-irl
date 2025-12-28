@@ -25,10 +25,13 @@ interface QuoteAndPreviewInput {
   signOff: string;
   // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
   layoutType?: LetterLayoutType;     // Explicit override, or auto-detected from images
-  // Image file params from OpenAI fileParams - injected by MCP framework
+  // Primary image param - simplest way to include an image (defaults to inline placement)
+  image?: ImageFileParam;            // Attach image directly (recommended) - placed after signature by default
+  imageUrl?: string;                 // Alternative: URL for image (placed after signature by default)
+  imagePlacement?: 'header' | 'inline';  // Where to place the image (default: 'inline')
+  // Specific image params for explicit control (override image/imageUrl)
   headerImage?: ImageFileParam;      // Header/letterhead image (file upload)
   inlineImage?: ImageFileParam;      // Inline image after signature (file upload)
-  // Alternative: direct image URLs (fallback for when fileParams isn't available)
   headerImageUrl?: string;           // URL of header/letterhead image
   inlineImageUrl?: string;           // URL of inline image (after signature)
 }
@@ -190,11 +193,35 @@ async function handler(
   // Layout Detection and Image Processing (US-LAYOUT-03, US-LAYOUT-04)
   // =========================================================================
 
-  // Determine image sources - prefer fileParams over URLs
-  const headerImageSource = input.headerImage?.download_url || input.headerImageUrl;
-  const inlineImageSource = input.inlineImage?.download_url || input.inlineImageUrl;
+  // Determine image sources - check primary image param first, then specific params
+  // Primary "image" param defaults to inline placement unless imagePlacement is 'header'
+  const primaryImageSource = input.image?.download_url || input.imageUrl;
+  const placement = input.imagePlacement || 'inline';  // Default to inline (after signature)
+
+  let headerImageSource: string | undefined;
+  let inlineImageSource: string | undefined;
+
+  // Specific params take precedence over primary image param
+  if (input.headerImage?.download_url || input.headerImageUrl) {
+    headerImageSource = input.headerImage?.download_url || input.headerImageUrl;
+  } else if (input.inlineImage?.download_url || input.inlineImageUrl) {
+    inlineImageSource = input.inlineImage?.download_url || input.inlineImageUrl;
+  } else if (primaryImageSource) {
+    // Use primary image param with placement
+    if (placement === 'header') {
+      headerImageSource = primaryImageSource;
+    } else {
+      inlineImageSource = primaryImageSource;
+    }
+  }
 
   // Log image sources for debugging
+  if (primaryImageSource) {
+    context.logger.info(
+      { correlationId: context.correlationId, event: "quote.preview.image_from_primary", placement },
+      `Using primary image param with ${placement} placement`
+    );
+  }
   if (input.headerImage?.download_url) {
     context.logger.info(
       { correlationId: context.correlationId, event: "quote.preview.header_from_fileParams" },
@@ -641,14 +668,10 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
     "- If not provided, your saved return address is used automatically.\n" +
     "- Use set_return_address to save one for all future letters.\n\n" +
     "Including Images (optional):\n" +
-    "If the user wants to include an image in their letter, provide it using ONE of these options:\n" +
-    "1. Attach the image directly to your message (recommended) - use headerImage or inlineImage parameter\n" +
-    "2. Use headerImageUrl or inlineImageUrl with a publicly accessible URL\n\n" +
-    "Image placement:\n" +
-    "- headerImage/headerImageUrl: Image at top of letter (like letterhead/branding). Use for logos, decorative headers.\n" +
-    "- inlineImage/inlineImageUrl: Image after the signature. Use for photos, drawings, artwork to share.\n" +
-    "Supported: PNG, JPEG, WebP (max 5MB). Images are auto-resized for print quality.\n" +
-    "Layout is auto-detected from provided images, or set explicitly with layoutType.\n\n" +
+    "To include an image in the letter, attach it directly to your message using the 'image' parameter.\n" +
+    "- By default, images appear AFTER the signature (like enclosing a photo or drawing)\n" +
+    "- Use imagePlacement='header' to put the image at the TOP of the letter (like letterhead)\n" +
+    "Supported: PNG, JPEG, WebP (max 5MB). Images are auto-resized for print quality.\n\n" +
     "Character Limits by Layout:\n" +
     "- text_only (no images): ~1800 characters\n" +
     "- header_image: ~1500 characters\n" +
@@ -664,7 +687,7 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
     "openai/widgetAccessible": true,
-    "openai/fileParams": ["headerImage", "inlineImage"],  // Enables image upload via OpenAI Apps SDK
+    "openai/fileParams": ["image"],  // Enables image upload via OpenAI Apps SDK (like postcard)
     "openai/toolInvocation/invoking": "Generating preview…",
     "openai/toolInvocation/invoked": "Preview ready",
     readOnlyHint: true
