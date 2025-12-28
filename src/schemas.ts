@@ -17,6 +17,7 @@ export const addressSchema: JsonSchema = {
 export const quoteAndPreviewInputSchema: JsonSchema = {
   type: "object",
   required: ["sender", "recipient", "bodyText", "signOff"],
+  additionalProperties: true,  // Allow fileParams like 'image' to pass through
   properties: {
     sender: addressSchema,
     recipient: addressSchema,
