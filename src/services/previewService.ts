@@ -23,6 +23,16 @@ export const LAYOUT_CHARACTER_LIMITS: Record<LetterLayoutType, number> = {
   inline_image: 800,    // ~12 lines with 3" inline image
 };
 
+// Line limits by layout type (accounts for vertical space)
+export const LAYOUT_LINE_LIMITS: Record<LetterLayoutType, number> = {
+  text_only: 24,        // Full page of text
+  header_image: 17,     // Reduced for 2" header image
+  inline_image: 12,     // Reduced for 3" inline image
+};
+
+// Characters per line (6.5" width at 12pt Times New Roman)
+const CHARS_PER_LINE = 65;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -78,7 +88,38 @@ export function detectLayoutType(input: LayoutDetectionInput): LetterLayoutType 
 }
 
 // ============================================================================
-// Character Limit Validation
+// Line Estimation
+// ============================================================================
+
+/**
+ * Estimate the number of lines text will occupy when rendered.
+ * Accounts for both explicit line breaks and text wrapping.
+ *
+ * @param text - The text to estimate lines for
+ * @param charsPerLine - Characters per line (default: 65 for 6.5" at 12pt)
+ * @returns Estimated number of lines
+ */
+export function estimateLines(text: string, charsPerLine = CHARS_PER_LINE): number {
+  if (!text) return 0;
+
+  const paragraphs = text.split('\n');
+  let totalLines = 0;
+
+  for (const para of paragraphs) {
+    // Empty lines (from consecutive \n) count as 1 line
+    if (para.length === 0) {
+      totalLines += 1;
+    } else {
+      // Each paragraph wraps based on character count
+      totalLines += Math.ceil(para.length / charsPerLine);
+    }
+  }
+
+  return totalLines;
+}
+
+// ============================================================================
+// Content Validation
 // ============================================================================
 
 /**
@@ -89,29 +130,62 @@ export function getCharacterLimit(layoutType: LetterLayoutType): number {
 }
 
 /**
- * Validate content against layout-specific character limit
+ * Get line limit for a given layout type
+ */
+export function getLineLimit(layoutType: LetterLayoutType): number {
+  return LAYOUT_LINE_LIMITS[layoutType];
+}
+
+/**
+ * Validate content against layout-specific character AND line limits.
+ * Both limits must pass for the content to be valid.
  *
- * @returns Object with isValid and optional error message
+ * @returns Object with validation result and details
  */
 export function validateCharacterLimit(
   bodyText: string,
   signOff: string,
   layoutType: LetterLayoutType
-): { isValid: boolean; error?: string; totalChars: number; limit: number } {
+): {
+  isValid: boolean;
+  error?: string;
+  totalChars: number;
+  charLimit: number;
+  totalLines: number;
+  lineLimit: number;
+  /** @deprecated Use charLimit instead */
+  limit: number;
+} {
   const totalChars = bodyText.length + signOff.length;
-  const limit = LAYOUT_CHARACTER_LIMITS[layoutType];
-  const isValid = totalChars <= limit;
+  const charLimit = LAYOUT_CHARACTER_LIMITS[layoutType];
+  const charsValid = totalChars <= charLimit;
+
+  // Estimate lines for combined content (body + sign-off with spacing)
+  const combinedText = signOff ? `${bodyText}\n\n${signOff}` : bodyText;
+  const totalLines = estimateLines(combinedText);
+  const lineLimit = LAYOUT_LINE_LIMITS[layoutType];
+  const linesValid = totalLines <= lineLimit;
+
+  const isValid = charsValid && linesValid;
 
   if (!isValid) {
-    const error = layoutType === 'text_only'
-      ? `Letter exceeds one-page limit (~${limit} characters)`
-      : layoutType === 'header_image'
-        ? `Letter exceeds one-page limit with header image (~${limit} characters)`
-        : `Letter exceeds one-page limit with inline image (~${limit} characters)`;
-    return { isValid, error, totalChars, limit };
+    let error: string;
+    const layoutLabel = layoutType === 'text_only' ? ''
+      : layoutType === 'header_image' ? ' with header image'
+      : ' with inline image';
+
+    if (!charsValid && !linesValid) {
+      error = `Letter exceeds one-page limit${layoutLabel}: ${totalChars}/${charLimit} characters and ${totalLines}/${lineLimit} lines. Please shorten your message.`;
+    } else if (!charsValid) {
+      error = `Letter exceeds character limit${layoutLabel}: ${totalChars}/${charLimit} characters. Please shorten your message.`;
+    } else {
+      error = `Letter has too many line breaks${layoutLabel}: ${totalLines}/${lineLimit} lines. Try combining some paragraphs.`;
+    }
+
+    return { isValid, error, totalChars, charLimit, totalLines, lineLimit, limit: charLimit };
   }
 
-  return { isValid, totalChars, limit };
+  return { isValid, totalChars, charLimit, totalLines, lineLimit, limit: charLimit };
 }
 
 // ============================================================================
