@@ -33,7 +33,7 @@ export const quoteAndPreviewLetterTextOnlyInputSchema: JsonSchema = {
   }
 };
 
-// Header image letter (NO 'image' field - let fileParams inject)
+// Header image letter - image field MUST be explicitly defined for fileParams
 export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
   type: "object",
   required: ["recipient", "bodyText", "signOff"],
@@ -45,6 +45,16 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
     recipient: addressSchema,
     bodyText: { type: "string", description: "Main letter content (max ~1500 characters due to header image)" },
     signOff: { type: "string", description: "Closing/signature block" },
+    // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
+    image: {
+      type: "object",
+      description: "Header image file attachment (recommended method)",
+      properties: {
+        download_url: { type: "string" },
+        file_id: { type: "string" }
+      },
+      required: ["download_url", "file_id"]
+    },
     imageUrl: {
       type: "string",
       description: "URL of header image (fallback if no file attached)"
@@ -52,7 +62,7 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
   }
 };
 
-// Inline image letter (NO 'image' field in schema - let fileParams inject)
+// Inline image letter - image field MUST be explicitly defined for fileParams
 export const quoteAndPreviewLetterWithImageInputSchema: JsonSchema = {
   type: "object",
   required: ["recipient", "bodyText", "signOff"],
@@ -64,6 +74,16 @@ export const quoteAndPreviewLetterWithImageInputSchema: JsonSchema = {
     recipient: addressSchema,
     bodyText: { type: "string", description: "Main letter content (max ~1200 characters due to image)" },
     signOff: { type: "string", description: "Closing/signature block" },
+    // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
+    image: {
+      type: "object",
+      description: "Image file attachment (recommended method)",
+      properties: {
+        download_url: { type: "string" },
+        file_id: { type: "string" }
+      },
+      required: ["download_url", "file_id"]
+    },
     imageUrl: {
       type: "string",
       description: "URL of image (fallback if no file attached)"
@@ -303,6 +323,16 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
       enum: ["6x9"],
       default: "6x9",
       description: "Postcard size (currently only 6x9 is supported)"
+    },
+    // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
+    image: {
+      type: "object",
+      description: "Image file attachment for postcard front (recommended method)",
+      properties: {
+        download_url: { type: "string" },
+        file_id: { type: "string" }
+      },
+      required: ["download_url", "file_id"]
     },
     imageUrl: {
       type: "string",
