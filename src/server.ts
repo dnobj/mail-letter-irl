@@ -2,14 +2,19 @@ import "dotenv/config";
 import { randomUUID, createHash } from "node:crypto";
 import { FileAccountStore } from "./store/fileAccountStore.js";
 import {
-  quoteAndPreviewLetterTool,
+  // Letter tools - three separate tools for different layouts
+  quoteAndPreviewLetterTextOnlyTool,
+  quoteAndPreviewLetterWithHeaderImageTool,
+  quoteAndPreviewLetterWithPhotoTool,
   sendLetterTool,
+  // Account and order management tools
   getOrderStatusTool,
   getAccountBalanceTool,
   listOrdersTool,
   setReturnAddressTool,
   getReturnAddressTool,
   clearReturnAddressTool,
+  // Postcard tools
   quoteAndPreviewPostcardTool,
   sendPostcardTool
 } from "./tools/index.js";
@@ -22,15 +27,19 @@ import {
 import { createLogger } from "./logging/index.js";
 
 const tools: McpToolDefinition<unknown, unknown>[] = [
-  quoteAndPreviewLetterTool,
+  // Letter tools - three separate tools for different layouts
+  quoteAndPreviewLetterTextOnlyTool,
+  quoteAndPreviewLetterWithHeaderImageTool,
+  quoteAndPreviewLetterWithPhotoTool,
   sendLetterTool,
+  // Account and order management tools
   getOrderStatusTool,
   getAccountBalanceTool,
   listOrdersTool,
   setReturnAddressTool,
   getReturnAddressTool,
   clearReturnAddressTool,
-  // Postcard tools (US-POSTCARD-01, US-POSTCARD-02)
+  // Postcard tools
   quoteAndPreviewPostcardTool,
   sendPostcardTool
 ];

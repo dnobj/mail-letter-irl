@@ -14,17 +14,73 @@ export const addressSchema: JsonSchema = {
   }
 };
 
+// ============================================================================
+// Letter Schemas - Three Separate Tools
+// ============================================================================
+
+// Text-only letter (simplified - NO image params)
+export const quoteAndPreviewLetterTextOnlyInputSchema: JsonSchema = {
+  type: "object",
+  required: ["recipient", "bodyText", "signOff"],
+  properties: {
+    sender: {
+      ...addressSchema,
+      description: "Return address (optional - will use saved return address if not provided)"
+    },
+    recipient: addressSchema,
+    bodyText: { type: "string", description: "Main letter content (max ~1800 characters)" },
+    signOff: { type: "string", description: "Closing/signature block" }
+  }
+};
+
+// Header image letter (NO 'image' field - let fileParams inject)
+export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
+  type: "object",
+  required: ["recipient", "bodyText", "signOff"],
+  properties: {
+    sender: {
+      ...addressSchema,
+      description: "Return address (optional - will use saved return address if not provided)"
+    },
+    recipient: addressSchema,
+    bodyText: { type: "string", description: "Main letter content (max ~1500 characters due to header image)" },
+    signOff: { type: "string", description: "Closing/signature block" },
+    imageUrl: {
+      type: "string",
+      description: "URL of header image (fallback if no file attached)"
+    }
+  }
+};
+
+// Inline photo letter (NO 'image' field - let fileParams inject)
+export const quoteAndPreviewLetterWithPhotoInputSchema: JsonSchema = {
+  type: "object",
+  required: ["recipient", "bodyText", "signOff"],
+  properties: {
+    sender: {
+      ...addressSchema,
+      description: "Return address (optional - will use saved return address if not provided)"
+    },
+    recipient: addressSchema,
+    bodyText: { type: "string", description: "Main letter content (max ~1200 characters due to photo)" },
+    signOff: { type: "string", description: "Closing/signature block" },
+    imageUrl: {
+      type: "string",
+      description: "URL of photo (fallback if no file attached)"
+    }
+  }
+};
+
+// DEPRECATED - kept for reference, will be removed
 export const quoteAndPreviewInputSchema: JsonSchema = {
   type: "object",
   required: ["sender", "recipient", "bodyText", "signOff"],
-  additionalProperties: true,  // fileParams injects 'image' automatically when user attaches a file
+  additionalProperties: true,
   properties: {
     sender: addressSchema,
     recipient: addressSchema,
     bodyText: { type: "string" },
     signOff: { type: "string", description: "Closing/signature block" },
-    // Note: 'image' is NOT in schema - it's injected via openai/fileParams when user attaches a file
-    // This matches the postcard pattern which works correctly
     imageUrl: {
       type: "string",
       description: "URL of image to include in the letter (fallback if no file attached)"
