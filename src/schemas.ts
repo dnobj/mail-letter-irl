@@ -22,18 +22,29 @@ export const quoteAndPreviewInputSchema: JsonSchema = {
     recipient: addressSchema,
     bodyText: { type: "string" },
     signOff: { type: "string", description: "Closing/signature block" },
+    // Primary image param - simplest way to include an image (matches postcard pattern)
+    imageUrl: {
+      type: "string",
+      description: "URL of image to include in the letter (alternative to file attachment). By default appears after signature; use imagePlacement='header' for top of letter."
+    },
+    imagePlacement: {
+      type: "string",
+      enum: ["header", "inline"],
+      description: "Where to place the attached image: 'header' (top of letter, like letterhead) or 'inline' (after signature, like enclosing a photo). Default: 'inline'"
+    },
+    // Advanced: explicit layout control
     layoutType: {
       type: "string",
       enum: ["text_only", "header_image", "inline_image"],
-      description: "Letter layout type. If not specified, auto-detected from provided images. text_only=plain text, header_image=image at top, inline_image=image after signature"
+      description: "Explicit layout override. Usually auto-detected from images."
     },
     headerImageUrl: {
       type: "string",
-      description: "URL of image to use as header/letterhead (max 5MB, PNG/JPEG/WebP). Sets layout to header_image if not explicitly overridden."
+      description: "URL of header/letterhead image (advanced - prefer using imageUrl with imagePlacement='header')"
     },
     inlineImageUrl: {
       type: "string",
-      description: "URL of image to include after signature (max 5MB, PNG/JPEG/WebP). Sets layout to inline_image if not explicitly overridden."
+      description: "URL of inline image after signature (advanced - prefer using imageUrl with default placement)"
     }
   }
 };
