@@ -155,15 +155,24 @@ async function handler(
   const bodyText = draft.body_text;
   const signOff = draft.sign_off;
   const requiredCredits = draft.required_credits;
+  // Extract layout and image fields (US-LAYOUT-01 through US-LAYOUT-06)
+  const layoutType = draft.layout_type || 'text_only';
+  const headerImageData = draft.header_image_data;
+  const headerImageUrl = draft.header_image_url;
+  const inlineImageData = draft.inline_image_data;
+  const inlineImageUrl = draft.inline_image_url;
 
   context.logger.info(
     {
       correlationId: context.correlationId,
       event: "send.letter.draft_consumed",
       draftId: input.draftId,
-      requiredCredits
+      requiredCredits,
+      layoutType,
+      hasHeaderImage: !!headerImageData,
+      hasInlineImage: !!inlineImageData
     },
-    "Draft consumed, proceeding with send"
+    `Draft consumed, proceeding with send (layout: ${layoutType})`
   );
 
   // Deduct credits from database
@@ -201,7 +210,19 @@ async function handler(
   }
 
   // Create letter in database
+  // Include layout and image fields in content for the letter worker (US-LAYOUT-06)
   const letterId = orderId;
+  const letterContent = {
+    bodyText,
+    signOff,
+    sender,
+    // Layout fields for PostGrid HTML generation
+    layoutType,
+    headerImageData,
+    headerImageUrl,
+    inlineImageData,
+    inlineImageUrl,
+  };
   const letterResult = await query<Letter>(
     `INSERT INTO letters (
       letter_id, user_id, content, recipient, credits_cost, status, preview_html
@@ -210,7 +231,7 @@ async function handler(
     [
       letterId,
       userId,
-      JSON.stringify({ bodyText, signOff, sender }),
+      JSON.stringify(letterContent),
       JSON.stringify(recipient),
       requiredCredits,
       'draft',
