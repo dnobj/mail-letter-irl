@@ -23,11 +23,22 @@ export const LAYOUT_CHARACTER_LIMITS: Record<LetterLayoutType, number> = {
   inline_image: 800,    // ~12 lines with 3" inline image
 };
 
-// Line limits by layout type (accounts for vertical space)
-export const LAYOUT_LINE_LIMITS: Record<LetterLayoutType, number> = {
+// Line limits by layout type
+// SOFT LIMITS: Guidance for ChatGPT (what we tell it to aim for)
+// These appear in tool descriptions to guide content generation
+export const LAYOUT_LINE_LIMITS_SOFT: Record<LetterLayoutType, number> = {
   text_only: 24,        // Full page of text
   header_image: 17,     // Reduced for 2" header image
   inline_image: 12,     // Reduced for 3" inline image
+};
+
+// HARD LIMITS: Actual validation limits (with buffer for edge cases)
+// These are enforced during validation to avoid unnecessary retries
+// Buffer accounts for: sign-off formatting, character wrapping variations
+export const LAYOUT_LINE_LIMITS: Record<LetterLayoutType, number> = {
+  text_only: 26,        // Soft limit 24 + 2 buffer
+  header_image: 19,     // Soft limit 17 + 2 buffer
+  inline_image: 15,     // Soft limit 12 + 3 buffer
 };
 
 // Characters per line (6.5" width at 12pt Times New Roman)

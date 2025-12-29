@@ -16,6 +16,43 @@ This log captures short notes discovered while connecting Letter IRL to the Chat
 - We added a `/oauth/register` stub that returns a pre-provisioned client ID to unblock testing, but a production deployment should rely on an identity provider that supports RFC 7591 (e.g., Auth0/Okta CIC).
 - If you want to stay on Google Cloud, the recommended best-of-breed approach is: Auth0 for identity (dynamic registration), Firestore/Cloud Run/etc. for data, with the MCP server validating Auth0-issued tokens.
 
+## 2025-12-29 — Soft vs Hard Limits for Line Counts
+
+When validating letter content, we use two tiers of limits:
+
+**Soft Limits (Guidance)**: What we tell ChatGPT to aim for in tool descriptions
+- `inline_image`: 12 lines
+- `header_image`: 17 lines
+- `text_only`: 24 lines
+
+**Hard Limits (Validation)**: What we actually enforce during validation
+- `inline_image`: 15 lines (+3 buffer)
+- `header_image`: 19 lines (+2 buffer)
+- `text_only`: 26 lines (+2 buffer)
+
+**Why the buffer?**
+Even when ChatGPT follows instructions perfectly, line counts can exceed soft limits due to:
+1. **Sign-off formatting**: "With warm regards,\nDave" adds 2 lines, not 1
+2. **Character wrapping**: 612 chars ÷ 65 chars/line = 9.4 → rounds to 10 lines
+3. **Separator lines**: We add `\n\n` between body and sign-off (1 blank line)
+
+**Example scenario** (actual failure before fix):
+- User content: 647 chars, 0 newlines in body (following instructions!)
+- Body: ~612 chars → 10 lines
+- `\n\n` separator → 1 blank line
+- Sign-off with `\n` → 2 lines
+- **Total: 13 lines** (over soft limit of 12, but under hard limit of 15)
+
+**Implementation**:
+- `LAYOUT_LINE_LIMITS_SOFT` - for documentation/reference
+- `LAYOUT_LINE_LIMITS` - used in actual validation
+- Tool descriptions mention soft limits to guide ChatGPT
+- Validation uses hard limits to avoid unnecessary retries
+
+**Files**: `src/services/previewService.ts`
+
+---
+
 ## 2025-12-28 — Tool Call Approval Dialog Button Text Derived from Description
 
 ChatGPT generates the permission prompt text (the dialog asking the user to approve a tool call) based on the tool's `description` field. This means:
