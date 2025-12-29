@@ -74,6 +74,21 @@
         margin: 0;
         padding: 1rem;
         background: transparent;
+        overflow: hidden;  /* Prevent scrollbars */
+      }
+
+      /* Override injected postcard-front styles (which have fixed pixel dimensions) */
+      .postcard-front {
+        width: 100% !important;
+        height: auto !important;
+        max-width: 100% !important;
+      }
+
+      .postcard-front img {
+        width: 100% !important;
+        height: auto !important;
+        aspect-ratio: 9 / 6;
+        object-fit: cover;
       }
 
       .card {
