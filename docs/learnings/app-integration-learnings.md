@@ -16,7 +16,7 @@ This log captures short notes discovered while connecting Letter IRL to the Chat
 - We added a `/oauth/register` stub that returns a pre-provisioned client ID to unblock testing, but a production deployment should rely on an identity provider that supports RFC 7591 (e.g., Auth0/Okta CIC).
 - If you want to stay on Google Cloud, the recommended best-of-breed approach is: Auth0 for identity (dynamic registration), Firestore/Cloud Run/etc. for data, with the MCP server validating Auth0-issued tokens.
 
-## 2025-12-28 — Permission Prompt Text Comes from Tool Description
+## 2025-12-28 — Tool Call Approval Dialog Button Text Derived from Description
 
 ChatGPT generates the permission prompt text (the dialog asking the user to approve a tool call) based on the tool's `description` field. This means:
 
