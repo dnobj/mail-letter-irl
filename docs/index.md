@@ -87,6 +87,14 @@ These documents were created during development and may be partially outdated:
 
 ---
 
+## App Submission
+
+Materials for submitting to app directories:
+
+- [OpenAI Test Cases](app-submission/openai-test-cases.md) - App description, test cases, and pre-submission checklist
+
+---
+
 ## Business
 
 - [Business Overview](business-overview.md) - Business context
