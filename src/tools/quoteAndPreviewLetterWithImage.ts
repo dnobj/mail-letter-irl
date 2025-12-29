@@ -197,7 +197,7 @@ export const quoteAndPreviewLetterWithImageTool: McpToolDefinition<
     "- quote_and_preview_letter: Text-only letters (no image)\n" +
     "- quote_and_preview_letter_with_header_image: Image at TOP (letterhead/branding)\n\n" +
     "Sender Address: If not provided, your saved return address is used automatically.\n\n" +
-    "LIMITS: US addresses only. Max ~800 characters AND ~12 lines. " +
+    "LIMITS: US addresses only. Max 800 characters AND 12 lines. " +
     "Write in continuous paragraphs (not one sentence per line) to stay within line limit.",
   readOnly: true,
   inputSchema: quoteAndPreviewLetterWithImageInputSchema,

@@ -102,7 +102,12 @@ export function detectLayoutType(input: LayoutDetectionInput): LetterLayoutType 
 export function estimateLines(text: string, charsPerLine = CHARS_PER_LINE): number {
   if (!text) return 0;
 
-  const paragraphs = text.split('\n');
+  // Trim trailing newlines to avoid over-counting
+  // (a trailing \n doesn't create a visible line)
+  const trimmed = text.replace(/\n+$/, '');
+  if (!trimmed) return 0;
+
+  const paragraphs = trimmed.split('\n');
   let totalLines = 0;
 
   for (const para of paragraphs) {
@@ -161,7 +166,9 @@ export function validateCharacterLimit(
   const charsValid = totalChars <= charLimit;
 
   // Estimate lines for combined content (body + sign-off with spacing)
-  const combinedText = signOff ? `${bodyText}\n\n${signOff}` : bodyText;
+  // Trim trailing newlines from body to avoid stacking with the \n\n separator
+  const trimmedBody = bodyText.replace(/\n+$/, '');
+  const combinedText = signOff ? `${trimmedBody}\n\n${signOff}` : trimmedBody;
   const totalLines = estimateLines(combinedText);
   const lineLimit = LAYOUT_LINE_LIMITS[layoutType];
   const linesValid = totalLines <= lineLimit;
