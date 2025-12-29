@@ -23,7 +23,7 @@ interface SendLetterInput {
 
 interface SendLetterOutput {
   orderId: string;
-  currentStatus: "queued_for_print" | "printing" | "mailed";
+  currentStatus: "pending" | "accepted" | "printing" | "in_transit" | "delivered" | "returned" | "failed" | "cancelled";
   statusTimeline: { timestampISO: string; statusText: string }[];
   recipientSummary: { name: string; city: string; state: string };
   lettersRemaining: number;  // User-facing: number of letters remaining
@@ -134,7 +134,7 @@ async function handler(
 
       return {
         orderId: existingLetterId,
-        currentStatus: "queued_for_print" as const,
+        currentStatus: "pending" as const,
         statusTimeline: [
           { timestampISO: now, statusText: "Letter already sent (duplicate request)" }
         ],
@@ -326,11 +326,11 @@ async function handler(
 
   return {
     orderId,
-    currentStatus: "queued_for_print" as const,
+    currentStatus: "pending" as const,
     statusTimeline: [
-      { timestampISO: now, statusText: "Letter received" },
+      { timestampISO: now, statusText: "Order placed" },
       { timestampISO: now, statusText: "Letter deducted from balance" },
-      { timestampISO: now, statusText: "Queued for printing" }
+      { timestampISO: now, statusText: "Processing" }
     ],
     recipientSummary: orderRecord.recipientSummary,
     lettersRemaining: Math.floor(context.user.creditsRemaining / 2),

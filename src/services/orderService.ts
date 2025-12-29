@@ -12,7 +12,7 @@ export interface OrderCreationParams {
   timestampISO: string;
 }
 
-const DEFAULT_INITIAL_STATUS: LetterStatus = "queued_for_print";
+const DEFAULT_INITIAL_STATUS: LetterStatus = "pending";
 
 export function createOrderRecord({
   orderId,

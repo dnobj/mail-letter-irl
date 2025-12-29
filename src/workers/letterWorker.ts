@@ -162,7 +162,7 @@ async function processLetterJob(jobs: any[]): Promise<void> {
            updated_at = NOW()
        WHERE letter_id = $6`,
       [
-        'sent',
+        'accepted',
         result.trackingId,
         provider.config.name,
         result.costCents || 0,

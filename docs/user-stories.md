@@ -111,24 +111,37 @@ Each story includes acceptance criteria that can be converted to test cases.
 - [ ] Avoids large base64 image data in model context
 
 **Status Lifecycle (Database):**
+- `draft` - Order created, not yet queued
 - `queued` - Letter is waiting to be processed
-- `processing` - Letter is being rendered/printed by provider
-- `in_transit` - Letter has been mailed and is in postal system
-- `delivered` - Letter has been delivered
-- `returned` - Letter was returned to sender (bad address, etc.)
+- `processing` - Letter is being rendered
+- `accepted` - PostGrid accepted order (awaiting print)
+- `printing` - Letter is being printed (PostGrid: printing)
+- `in_transit` - Letter handed to USPS (PostGrid: processed_for_delivery)
+- `delivered` - Letter delivered (PostGrid: completed, estimated)
+- `returned` - Letter returned to sender (bad address, etc.)
 - `failed` - Processing failed after max retries
-- `cancelled` - Letter was cancelled before sending
+- `cancelled` - Letter was cancelled
 
-**MCP Status Mapping (Simplified for Users):**
+**MCP Status Mapping (User-Facing):**
 | Database Status | MCP Status | User-Friendly Meaning |
 |-----------------|------------|----------------------|
-| queued | queued_for_print | Waiting to print |
-| processing | printing | Being printed |
-| in_transit | mailed | In the mail |
-| delivered | mailed | Delivered |
-| returned | mailed | Returned (see details) |
-| failed | queued_for_print | Failed (see error) |
-| cancelled | queued_for_print | Cancelled |
+| draft, queued | pending | Processing your order |
+| accepted | accepted | Accepted by print facility |
+| processing, printing | printing | Being printed |
+| in_transit | in_transit | In the mail |
+| delivered | delivered | Delivered |
+| returned | returned | Returned to sender |
+| failed | failed | Failed |
+| cancelled | cancelled | Cancelled |
+
+**PostGrid to Database Status Mapping (Future Webhook/Sync):**
+| PostGrid Status | Database Status |
+|-----------------|-----------------|
+| ready | accepted |
+| printing | printing |
+| processed_for_delivery | in_transit |
+| completed | delivered |
+| cancelled | cancelled |
 
 ---
 
@@ -153,7 +166,7 @@ Each story includes acceptance criteria that can be converted to test cases.
 
 **Acceptance Criteria:**
 - [ ] Worker picks up pending jobs from queue
-- [ ] Updates letter status: queued → processing → sent
+- [ ] Updates letter status: queued → processing → accepted
 - [ ] Records tracking ID from PostGrid
 - [ ] Records expected delivery date
 - [ ] On success: job marked completed
