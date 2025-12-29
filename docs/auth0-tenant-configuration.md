@@ -1,9 +1,15 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** November 14, 2025
-**Tenant:** `dev-ky21dxn3qmi71hjl.us.auth0.com`
+**Last Updated:** December 29, 2025
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
+
+## Tenants Overview
+
+| Environment | Tenant Domain | Account |
+|-------------|---------------|---------|
+| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | dnicholl@objective.works |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | dnicholl@letterirl.com |
 
 ---
 
@@ -38,11 +44,24 @@ Use this table to verify each application has the correct settings:
 |---------|----------|----------------|
 | DCR Enabled | Settings → Advanced | ✅ Enabled |
 | Default Audience | Settings → General → API Authorization | `https://letter-irl/api` |
+| Friendly Name | Settings → General | `Letter IRL` |
 | Google Connection | Connections | `is_domain_connection: true` |
 | Microsoft Connection | Connections | `is_domain_connection: true` |
 | Apple Connection | Connections | `is_domain_connection: true` |
 | GitHub Connection | Connections | `is_domain_connection: true` |
 | Username-Password | Connections | `is_domain_connection: true` |
+
+### Branding Checklist
+
+| Setting | Value | Status (Dev) | Status (Prod) |
+|---------|-------|--------------|---------------|
+| Friendly Name | `Letter IRL` | ✅ Applied | ⏳ Pending |
+| Logo URL | `https://letterirl.com/logo.jpg` | ✅ Applied | ⏳ Pending |
+| Favicon URL | `https://letterirl.com/favicon.ico` | ✅ Applied | ⏳ Pending |
+| Primary Color | `#1a8ccc` | ✅ Applied | ⏳ Pending |
+| Page Background | `#ffffff` | ✅ Applied | ⏳ Pending |
+| ChatGPT MCP App Name | `Letter IRL` | ✅ Applied | ⏳ Pending |
+| ChatGPT MCP App Logo | `https://letterirl.com/logo.jpg` | ✅ Applied | ⏳ Pending |
 
 ---
 
@@ -486,46 +505,72 @@ auth0 api get connections/CONNECTION_ID | jq '{name, is_domain_connection}'
 
 ## Environment Configuration
 
-### Current State: Single Tenant (Production)
+### Current State: Dual Tenants
 
-Currently, both development and production use the same Auth0 tenant:
+Letter IRL uses separate Auth0 tenants for complete environment isolation:
 
-| Environment | Auth0 Tenant | Notes |
-|-------------|--------------|-------|
-| Production | `dev-ky21dxn3qmi71hjl.us.auth0.com` | Primary tenant |
-| Development | Same as production | Shared tenant |
-
-### Future State: Separate Dev Tenant
-
-When implementing a separate development environment (see Issue #44), create a new tenant:
-
-| Environment | Auth0 Tenant | Purpose |
-|-------------|--------------|---------|
-| Production | `dev-ky21dxn3qmi71hjl.us.auth0.com` | Live users, real payments |
-| Development | `letter-irl-dev.us.auth0.com` (proposed) | Testing, sync from production |
+| Environment | Auth0 Tenant | Account | Purpose |
+|-------------|--------------|---------|---------|
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | dnicholl@letterirl.com | Live users, real payments |
+| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | dnicholl@objective.works | Testing, sync from production |
 
 ### Configuration Parity Checklist
 
-When setting up a new environment, ensure these match production:
+When updating development, ensure production is also updated:
 
 1. **Connections** - All 5 identity providers with `is_domain_connection: true`
 2. **DCR** - Dynamic Client Registration enabled
 3. **Default Audience** - Set to `https://letter-irl/api`
 4. **Applications** - Create equivalent apps with appropriate callbacks
 5. **APIs** - Register `https://letter-irl/api` resource server
+6. **Branding** - Logo, colors, friendly name (see Branding Checklist above)
 
 ### Environment Variables by Tenant
 
 ```bash
 # Production (.env)
+LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
+LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+
+# Development (.env.dev)
 LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+```
 
-# Development (.env.dev) - when separate tenant exists
-LETTER_IRL_OAUTH_ISSUER=https://letter-irl-dev.us.auth0.com/
-LETTER_IRL_OAUTH_JWKS_URI=https://letter-irl-dev.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+### Applying Branding to Production
+
+When ready to apply branding to production, switch to the production tenant and run these commands:
+
+```bash
+# Switch to production tenant
+auth0 tenants use dev-njmdyqf8n25rqgy7.us.auth0.com
+
+# Set tenant friendly name
+auth0 api patch "tenants/settings" --data '{"friendly_name": "Letter IRL"}'
+
+# Set branding (logo, favicon, colors)
+auth0 api patch "branding" --data '{
+  "logo_url": "https://letterirl.com/logo.jpg",
+  "favicon_url": "https://letterirl.com/favicon.ico",
+  "colors": {
+    "primary": "#1a8ccc",
+    "page_background": "#ffffff"
+  }
+}'
+
+# Update the ChatGPT MCP app with name and logo
+# NOTE: First find the ChatGPT MCP client ID in production tenant:
+auth0 apps list
+# Then patch it (replace CLIENT_ID with actual ID):
+auth0 api patch "clients/CLIENT_ID" --data '{
+  "name": "Letter IRL",
+  "logo_uri": "https://letterirl.com/logo.jpg"
+}'
+
+# Switch back to development tenant
+auth0 tenants use dev-ky21dxn3qmi71hjl.us.auth0.com
 ```
 
 ---
@@ -542,6 +587,18 @@ LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
 ---
 
 ## Changelog
+
+### December 29, 2025
+- Added Tenants Overview section at top (both dev and prod tenants)
+- Added Branding Checklist section with dev/prod status tracking
+- Added "Applying Branding to Production" section with CLI commands
+- Updated Environment Configuration to reflect dual-tenant reality
+- Applied branding to development tenant:
+  - Friendly name: "Letter IRL"
+  - Logo: https://letterirl.com/logo.jpg
+  - Favicon: https://letterirl.com/favicon.ico
+  - Primary color: #1a8ccc
+  - ChatGPT MCP app renamed to "Letter IRL" with logo
 
 ### December 23, 2025
 - Added Quick Reference: Application Configuration Matrix
