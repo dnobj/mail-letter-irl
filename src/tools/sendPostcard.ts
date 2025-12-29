@@ -379,7 +379,10 @@ export const sendPostcardTool: McpToolDefinition<SendPostcardInput, SendPostcard
   meta: {
     "openai/toolInvocation/invoking": "Sending postcard...",
     "openai/toolInvocation/invoked": "Postcard sent",
-    "openai/widgetAccessible": true
+    "openai/widgetAccessible": true,
+    // OpenAI Apps SDK annotations
+    openWorldHint: true,    // Sends physical mail via PostGrid/USPS
+    idempotentHint: true    // Draft consumption makes retries safe
   },
   handler
 };

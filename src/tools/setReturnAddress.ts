@@ -162,7 +162,9 @@ export const setReturnAddressTool: McpToolDefinition<
   },
   meta: {
     "openai/toolInvocation/invoking": "Validating and saving return address...",
-    "openai/toolInvocation/invoked": "Return address saved"
+    "openai/toolInvocation/invoked": "Return address saved",
+    // OpenAI Apps SDK annotations
+    openWorldHint: true     // Validates address via PostGrid external API
   },
   handler
 };
