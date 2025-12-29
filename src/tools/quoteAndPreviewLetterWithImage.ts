@@ -187,9 +187,10 @@ export const quoteAndPreviewLetterWithImageTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter_with_image",
   description:
-    "Create a letter WITH AN IMAGE enclosed after the signature.\n\n" +
+    "PREVIEW a letter with an IMAGE enclosed after the signature. This does NOT send anything.\n\n" +
     "LIMITS: Max 800 characters AND 12 lines for bodyText. Write in continuous paragraphs (not one sentence per line). US addresses only.\n\n" +
     "REQUIRES: An image attachment (recommended) or imageUrl parameter.\n\n" +
+    "Creates a DRAFT for the user to review. Sending happens via send_letter.\n\n" +
     "Use cases: Photos to family/friends, thank you cards with pictures, vacation photos.\n\n" +
     "Alternative tools:\n" +
     "- quote_and_preview_letter: Text-only (1600 chars, 24 lines)\n" +

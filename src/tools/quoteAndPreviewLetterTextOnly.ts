@@ -97,8 +97,9 @@ export const quoteAndPreviewLetterTextOnlyTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter",
   description:
-    "Create a TEXT-ONLY physical letter (no images).\n\n" +
+    "PREVIEW a text-only physical letter (no images). This does NOT send anything.\n\n" +
     "LIMITS: Max 1600 characters AND 24 lines for bodyText. Write in continuous paragraphs (not one sentence per line). US addresses only.\n\n" +
+    "Creates a DRAFT for the user to review. Sending happens via send_letter.\n\n" +
     "Use cases: Thank you notes, formal correspondence, condolence letters, pen pal letters.\n\n" +
     "FOR LETTERS WITH IMAGES:\n" +
     "- quote_and_preview_letter_with_header_image: Logo at TOP (1100 chars, 17 lines)\n" +
