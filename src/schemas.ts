@@ -207,7 +207,8 @@ export const getOrderStatusInputSchema: JsonSchema = {
 
 export const getOrderStatusOutputSchema: JsonSchema = {
   type: "object",
-  required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary", "previewThumbnailHtml"],
+  // Note: previewThumbnailHtml removed for performance (US-LETTER-04, GitHub #83)
+  required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary"],
   properties: {
     orderId: { type: "string" },
     currentStatus: { type: "string" },
@@ -231,7 +232,6 @@ export const getOrderStatusOutputSchema: JsonSchema = {
         state: { type: "string" }
       }
     },
-    previewThumbnailHtml: { type: "string" },
     canSendFollowUp: { type: "boolean" },
     followUpSuggestedPrompt: { type: "string" }
   }

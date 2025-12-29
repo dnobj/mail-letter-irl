@@ -17,7 +17,8 @@ interface GetOrderStatusOutput {
   currentStatus: string;
   statusTimeline: { timestampISO: string; statusText: string }[];
   recipientSummary: { name: string; city: string; state: string };
-  previewThumbnailHtml: string;
+  // Note: previewThumbnailHtml removed for performance (US-LETTER-04)
+  // Preview was already shown at send time; status is for tracking delivery
   canSendFollowUp?: boolean;
   followUpSuggestedPrompt?: string;
 }
@@ -66,9 +67,9 @@ async function handler(
     throw new Error("No matching order found for this user.");
   }
 
-  const previewThumbnailHtml =
-    order.previewFirstPageHtml ??
-    "<div style=\"padding:1rem; border:1px solid #ccc; font-family:serif;\">Preview unavailable in prototype.</div>";
+  // Note: previewThumbnailHtml removed for performance (US-LETTER-04, GitHub #83)
+  // The preview was already shown at send time; status is for tracking delivery
+  // Removing base64 image data reduces response payload significantly
 
   context.logger.info(
     {
@@ -85,7 +86,6 @@ async function handler(
     currentStatus: order.currentStatus,
     statusTimeline: order.statusTimeline,
     recipientSummary: order.recipientSummary,
-    previewThumbnailHtml,
     canSendFollowUp: true,
     followUpSuggestedPrompt: `Write a follow-up letter to ${order.recipientSummary.name}.`
   };

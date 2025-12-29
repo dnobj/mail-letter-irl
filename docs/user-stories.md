@@ -103,8 +103,12 @@ Each story includes acceptance criteria that can be converted to test cases.
 - [ ] Returns current status from fulfillment lifecycle (see below)
 - [ ] Returns status timeline with timestamps
 - [ ] Returns recipient summary (name, city, state)
-- [ ] Returns preview thumbnail
 - [ ] If sent, includes tracking ID and expected delivery
+
+**Response Optimization (Performance):**
+- [ ] Does NOT return preview thumbnail HTML in tool response (reduces payload size)
+- [ ] Preview was already shown at send time; status is for tracking delivery
+- [ ] Avoids large base64 image data in model context
 
 **Status Lifecycle (Database):**
 - `queued` - Letter is waiting to be processed
