@@ -188,7 +188,7 @@ export const quoteAndPreviewLetterWithHeaderImageTool: McpToolDefinition<
   name: "quote_and_preview_letter_with_header_image",
   description:
     "PREVIEW a letter with a HEADER IMAGE at the top (letterhead/branding). This does NOT send anything.\n\n" +
-    "LIMITS: Max 1100 characters AND 17 lines for bodyText. Write in continuous paragraphs (not one sentence per line). US addresses only.\n\n" +
+    "LIMITS: Must not exceed 1100 characters OR 17 lines. CRITICAL: Write as continuous paragraphs - do NOT put blank lines between sentences. US addresses only.\n\n" +
     "REQUIRES: An image attachment (recommended) or imageUrl parameter.\n\n" +
     "Creates a DRAFT for the user to review. Sending happens via send_letter.\n\n" +
     "Use cases: Business letters with logo, custom letterhead, branded correspondence.\n\n" +
