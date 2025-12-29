@@ -74,7 +74,9 @@ export const clearReturnAddressTool: McpToolDefinition<
   },
   meta: {
     "openai/toolInvocation/invoking": "Clearing return address...",
-    "openai/toolInvocation/invoked": "Return address cleared"
+    "openai/toolInvocation/invoked": "Return address cleared",
+    // OpenAI Apps SDK annotations
+    destructiveHint: true   // Permanently deletes saved return address
   },
   handler
 };
