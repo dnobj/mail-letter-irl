@@ -40,6 +40,32 @@
         --preview-bg: #1e293b;
       }
 
+      /* Dark mode scrollbar styling */
+      .dark ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+
+      .dark ::-webkit-scrollbar-track {
+        background: var(--bg-secondary);
+        border-radius: 4px;
+      }
+
+      .dark ::-webkit-scrollbar-thumb {
+        background: var(--border-color);
+        border-radius: 4px;
+      }
+
+      .dark ::-webkit-scrollbar-thumb:hover {
+        background: var(--text-secondary);
+      }
+
+      /* Firefox scrollbar support */
+      .dark * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-color) var(--bg-secondary);
+      }
+
       * {
         box-sizing: border-box;
       }
@@ -107,6 +133,7 @@
         display: flex;
         justify-content: center;
         align-items: center;
+        overflow: hidden;  /* Prevent unnecessary scrollbar on image preview */
       }
 
       .preview-pane img {
