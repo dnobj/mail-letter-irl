@@ -28,8 +28,8 @@ export const quoteAndPreviewLetterTextOnlyInputSchema: JsonSchema = {
       description: "Return address (optional - will use saved return address if not provided)"
     },
     recipient: addressSchema,
-    bodyText: { type: "string", description: "Main letter content (max ~1800 characters)" },
-    signOff: { type: "string", description: "Closing/signature block" }
+    bodyText: { type: "string", description: "Letter body. LIMIT: 1600 chars max, 24 lines max. Use continuous paragraphs, not one sentence per line." },
+    signOff: { type: "string", description: "Closing/signature (e.g., 'Sincerely, Name')" }
   }
 };
 
@@ -43,8 +43,8 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
       description: "Return address (optional - will use saved return address if not provided)"
     },
     recipient: addressSchema,
-    bodyText: { type: "string", description: "Main letter content (max ~1500 characters due to header image)" },
-    signOff: { type: "string", description: "Closing/signature block" },
+    bodyText: { type: "string", description: "Letter body. LIMIT: 1100 chars max, 17 lines max (reduced for header image). Use continuous paragraphs, not one sentence per line." },
+    signOff: { type: "string", description: "Closing/signature (e.g., 'Sincerely, Name')" },
     // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
     image: {
       type: "object",
@@ -72,8 +72,8 @@ export const quoteAndPreviewLetterWithImageInputSchema: JsonSchema = {
       description: "Return address (optional - will use saved return address if not provided)"
     },
     recipient: addressSchema,
-    bodyText: { type: "string", description: "Main letter content (max ~1200 characters due to image)" },
-    signOff: { type: "string", description: "Closing/signature block" },
+    bodyText: { type: "string", description: "Letter body. LIMIT: 800 chars max, 12 lines max (reduced for inline image). Use continuous paragraphs, not one sentence per line." },
+    signOff: { type: "string", description: "Closing/signature (e.g., 'Sincerely, Name')" },
     // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
     image: {
       type: "object",

@@ -97,16 +97,12 @@ export const quoteAndPreviewLetterTextOnlyTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter",
   description:
-    "WHEN TO USE: Create a preview of a TEXT-ONLY physical letter (no images).\n\n" +
-    "Use cases: Thank you notes, formal correspondence, condolence letters, " +
-    "letters to officials, pen pal letters, personal messages.\n\n" +
-    "FOR LETTERS WITH IMAGES, use these tools instead:\n" +
-    "- quote_and_preview_letter_with_header_image: Logo or letterhead at TOP\n" +
-    "- quote_and_preview_letter_with_image: Image enclosed AFTER signature\n\n" +
-    "PREVIEW IS FREE: Generating a preview costs nothing.\n\n" +
-    "Sender Address: If not provided, your saved return address is used automatically.\n\n" +
-    "LIMITS: US addresses only. Max 1600 characters AND 24 lines. " +
-    "Write in continuous paragraphs (not one sentence per line) to stay within line limit.",
+    "Create a TEXT-ONLY physical letter (no images).\n\n" +
+    "LIMITS: Max 1600 characters AND 24 lines for bodyText. Write in continuous paragraphs (not one sentence per line). US addresses only.\n\n" +
+    "Use cases: Thank you notes, formal correspondence, condolence letters, pen pal letters.\n\n" +
+    "FOR LETTERS WITH IMAGES:\n" +
+    "- quote_and_preview_letter_with_header_image: Logo at TOP (1100 chars, 17 lines)\n" +
+    "- quote_and_preview_letter_with_image: Image AFTER signature (800 chars, 12 lines)",
   readOnly: true,
   inputSchema: quoteAndPreviewLetterTextOnlyInputSchema,
   outputSchema: quoteAndPreviewOutputSchema,

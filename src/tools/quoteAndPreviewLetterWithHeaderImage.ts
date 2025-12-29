@@ -187,18 +187,13 @@ export const quoteAndPreviewLetterWithHeaderImageTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter_with_header_image",
   description:
-    "WHEN TO USE: Create a preview of a letter WITH A HEADER IMAGE at the top.\n\n" +
-    "The image appears at the TOP of the letter, like custom letterhead or branding.\n\n" +
+    "Create a letter WITH A HEADER IMAGE at the top (letterhead/branding).\n\n" +
+    "LIMITS: Max 1100 characters AND 17 lines for bodyText. Write in continuous paragraphs (not one sentence per line). US addresses only.\n\n" +
     "REQUIRES: An image attachment (recommended) or imageUrl parameter.\n\n" +
-    "Use cases: Business letters with logo, custom letterhead, branded correspondence, " +
-    "letters with decorative header graphics, personalized stationery.\n\n" +
-    "PREVIEW IS FREE: Generating a preview costs nothing.\n\n" +
+    "Use cases: Business letters with logo, custom letterhead, branded correspondence.\n\n" +
     "Alternative tools:\n" +
-    "- quote_and_preview_letter: Text-only letters (no image)\n" +
-    "- quote_and_preview_letter_with_image: Image AFTER signature (like enclosing a photo)\n\n" +
-    "Sender Address: If not provided, your saved return address is used automatically.\n\n" +
-    "LIMITS: US addresses only. Max 1100 characters AND 17 lines. " +
-    "Write in continuous paragraphs (not one sentence per line) to stay within line limit.",
+    "- quote_and_preview_letter: Text-only (1600 chars, 24 lines)\n" +
+    "- quote_and_preview_letter_with_image: Image AFTER signature (800 chars, 12 lines)",
   readOnly: true,
   inputSchema: quoteAndPreviewLetterWithHeaderImageInputSchema,
   outputSchema: quoteAndPreviewOutputSchema,

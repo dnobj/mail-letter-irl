@@ -187,18 +187,13 @@ export const quoteAndPreviewLetterWithImageTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter_with_image",
   description:
-    "WHEN TO USE: Create a preview of a letter WITH AN IMAGE enclosed after the signature.\n\n" +
-    "The image appears AFTER your signature, like enclosing a printed photo with your letter.\n\n" +
+    "Create a letter WITH AN IMAGE enclosed after the signature.\n\n" +
+    "LIMITS: Max 800 characters AND 12 lines for bodyText. Write in continuous paragraphs (not one sentence per line). US addresses only.\n\n" +
     "REQUIRES: An image attachment (recommended) or imageUrl parameter.\n\n" +
-    "Use cases: Sending photos to family/friends, thank you cards with pictures, " +
-    "letters with vacation photos, sharing artwork or drawings, memory sharing.\n\n" +
-    "PREVIEW IS FREE: Generating a preview costs nothing.\n\n" +
+    "Use cases: Photos to family/friends, thank you cards with pictures, vacation photos.\n\n" +
     "Alternative tools:\n" +
-    "- quote_and_preview_letter: Text-only letters (no image)\n" +
-    "- quote_and_preview_letter_with_header_image: Image at TOP (letterhead/branding)\n\n" +
-    "Sender Address: If not provided, your saved return address is used automatically.\n\n" +
-    "LIMITS: US addresses only. Max 800 characters AND 12 lines. " +
-    "Write in continuous paragraphs (not one sentence per line) to stay within line limit.",
+    "- quote_and_preview_letter: Text-only (1600 chars, 24 lines)\n" +
+    "- quote_and_preview_letter_with_header_image: Image at TOP (1100 chars, 17 lines)",
   readOnly: true,
   inputSchema: quoteAndPreviewLetterWithImageInputSchema,
   outputSchema: quoteAndPreviewOutputSchema,
