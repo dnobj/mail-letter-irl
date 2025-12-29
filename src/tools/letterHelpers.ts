@@ -397,7 +397,9 @@ export function validateCharacterLimitForLayout(
   context: ToolContext
 ): void {
   const charValidation = validateCharacterLimit(bodyText, signOff, layoutType);
-  const isDebug = process.env.NODE_ENV === 'development' || process.env.DEBUG_CONTENT === 'true';
+  const isDebug = process.env.NODE_ENV === 'development' ||
+                  process.env.RAILWAY_ENVIRONMENT === 'development' ||
+                  process.env.DEBUG_CONTENT === 'true';
 
   if (!charValidation.isValid) {
     // Count newlines for debugging
