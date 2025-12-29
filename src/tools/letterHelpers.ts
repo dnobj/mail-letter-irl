@@ -397,15 +397,29 @@ export function validateCharacterLimitForLayout(
   context: ToolContext
 ): void {
   const charValidation = validateCharacterLimit(bodyText, signOff, layoutType);
+  const isDebug = process.env.NODE_ENV === 'development' || process.env.DEBUG_CONTENT === 'true';
 
   if (!charValidation.isValid) {
+    // Count newlines for debugging
+    const newlineCount = (bodyText.match(/\n/g) || []).length;
+
     context.logger.warn(
       {
         correlationId: context.correlationId,
         event: "quote.letter.exceeds_page_limit",
         layoutType,
         totalChars: charValidation.totalChars,
-        maxChars: charValidation.limit
+        charLimit: charValidation.charLimit,
+        totalLines: charValidation.totalLines,
+        lineLimit: charValidation.lineLimit,
+        newlineCount,
+        signOffLength: signOff.length,
+        // Only log actual content in development/debug mode
+        ...(isDebug && {
+          bodyText,
+          signOff,
+          bodyTextEscaped: JSON.stringify(bodyText)  // Shows \n characters explicitly
+        })
       },
       "Letter exceeds one-page limit"
     );
