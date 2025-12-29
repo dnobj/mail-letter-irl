@@ -1,4 +1,27 @@
-# OpenAI App SDK Status (as of 2025-10-29)
+# OpenAI App SDK Status
+
+**Last Updated:** December 29, 2025
+**Purpose:** Track OpenAI Apps SDK requirements, updates, and action items for Letter IRL submission
+
+## Status Summary (as of December 29, 2025)
+
+Letter IRL is ready for Apps SDK submission with the following features:
+- 13 MCP tools exposed via HTTP transport
+- OAuth 2.1 + PKCE authentication via Auth0
+- Custom UI widgets (LetterPreviewCard, PostcardPreviewCard, etc.)
+- Production deployment on Railway at api.letterirl.com
+- Postcard support with image processing
+- Multiple letter layouts (text-only, header image, inline image)
+- Saved return address support
+
+**Next Steps:**
+1. Submit to OpenAI Apps directory before end of 2025
+2. Complete peer review process
+3. Monitor for SDK updates and widget API changes
+
+---
+
+## Historical Notes (as of October 29, 2025)
 
 ## Release & Availability Highlights
 - Apps launched to all ChatGPT users outside the EU on October 6, 2025, with a public Apps directory slated for later in the year; users in the U.S. can submit peer reviews to help enforce quality.citeturn2open0

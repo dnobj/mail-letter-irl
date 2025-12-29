@@ -1,5 +1,8 @@
 # Infrastructure Overview
 
+**Last Updated:** December 29, 2025
+**Purpose:** Central reference for all services, infrastructure, and deployment environments
+
 This document provides a central reference for all services and infrastructure used by Letter IRL.
 
 ## System Architecture

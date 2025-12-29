@@ -1,6 +1,7 @@
 # Letter IRL Documentation Index
 
-**Last Updated:** December 4, 2025
+**Last Updated:** December 29, 2025
+**Purpose:** Central navigation hub for all Letter IRL documentation
 
 Welcome to the Letter IRL documentation. This is a physical letter mailing service integrated with ChatGPT via MCP (Model Context Protocol).
 
@@ -9,8 +10,8 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 ## Quick Start
 
 - [status.md](status.md) - **Start here** - Project overview, current state, architecture
-- [letter-send-flow.md](letter-send-flow.md) - How letters are sent (draft system, credits, jobs)
-- [database-schema.md](database-schema.md) - Complete database schema (12 tables)
+- [letter-send-flow.md](letter-send-flow.md) - How letters and postcards are sent (draft system, credits, jobs)
+- [database-schema.md](database-schema.md) - Complete database schema (13 tables)
 - [user-stories.md](user-stories.md) - User stories for test coverage and acceptance criteria
 - [personas.md](personas.md) - User personas for product design and testing
 - [testing.md](testing.md) - Testing strategy and guide
@@ -26,7 +27,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 
 ### User Flows
 - [User Flows](user-flows.md) - Step-by-step flows for sending letters, checking status, buying credits
-- [letter-send-flow.md](letter-send-flow.md) - Technical implementation of the send flow
+- [letter-send-flow.md](letter-send-flow.md) - Technical implementation of the send flow (letters and postcards)
 
 ### API & Tools
 - [MCP Tool APIs](tool-apis.md) - JSON schemas and behaviors for MCP tools
@@ -73,8 +74,8 @@ These documents were created during development and may be partially outdated:
 - [MCP SSE Plan](mcp-sse-plan.md) - SSE transport implementation
 - [MCP Debugging](mcp-debugging.md) - Transport troubleshooting
 - [App Integration Learnings](app-integration-learnings.md) - Integration quirks
-- [ChatGPT Auth0 Learnings](chatgpt-auth0-oauth-learnings.md) - OAuth debugging notes
-- [OpenAI App SDK Notes](openai-app-sdk-notes.md) - SDK observations
+- [ChatGPT Auth0 Learnings](learnings/chatgpt-auth0-oauth-learnings.md) - OAuth debugging notes
+- [OpenAI App SDK Notes](learnings/openai-app-sdk-notes.md) - SDK observations
 
 ---
 

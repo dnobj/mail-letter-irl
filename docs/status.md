@@ -1,22 +1,25 @@
 # Letter IRL - Project Status
 
-**Last Updated:** December 4, 2025
-**Current Phase:** Production (MVP Complete)
-**Overall Progress:** 95%
+**Last Updated:** December 29, 2025
+**Current Phase:** Production (MVP Complete + Postcard Support)
+**Overall Progress:** 98%
 
 ---
 
 ## Project Overview
 
-Letter IRL is a **physical letter mailing service** integrated with ChatGPT via MCP (Model Context Protocol). Users compose letters through conversation and the system prints and mails them via PostGrid.
+Letter IRL is a **physical letter and postcard mailing service** integrated with ChatGPT via MCP (Model Context Protocol). Users compose letters and postcards through conversation and the system prints and mails them via PostGrid.
 
 **Key Features:**
-- Conversational letter composition via ChatGPT
+- Conversational letter and postcard composition via ChatGPT
+- Multiple letter layouts (text-only, header image, inline image)
+- Postcard support with custom front images (6x9 size)
 - Credit-based billing with Stripe integration
 - PostGrid for physical mail fulfillment
 - Draft-based idempotency to prevent duplicate sends
 - User tier system with rate limiting
 - Admin dashboard for monitoring
+- Saved return address support
 
 ---
 
@@ -120,7 +123,7 @@ See [deployment.md](deployment.md) for detailed setup instructions.
 
 ## Database Schema
 
-**12 Tables:**
+**13 Tables:**
 
 | Table | Purpose |
 |-------|---------|
@@ -128,16 +131,17 @@ See [deployment.md](deployment.md) for detailed setup instructions.
 | credit_ledger | Credit entries with expiration (FIFO) |
 | credit_transactions | Audit trail for all credit changes |
 | credit_consumption | Links credit usage to ledger entries |
-| letter_drafts | Temporary drafts for idempotent sends |
-| letters | Sent letters with tracking |
+| letter_drafts | Temporary drafts for idempotent sends (letters & postcards) |
+| letters | Sent letters and postcards with tracking |
 | letter_jobs | Background job processing |
+| letter_status_history | Historical status changes for letters |
 | orders | Stripe purchase records |
 | promo_campaigns | Promo code campaigns |
 | promo_redemptions | User promo code redemptions |
 | stripe_disputes | Chargeback tracking |
 | migrations | Migration tracking |
 
-**8 Migrations:**
+**13 Migrations:**
 1. `001_initial_schema.sql` - Core tables
 2. `002_add_provider_fields.sql` - PostGrid fields
 3. `003_credit_ledger.sql` - Credit ledger, promos
@@ -146,20 +150,45 @@ See [deployment.md](deployment.md) for detailed setup instructions.
 6. `006_stripe_disputes.sql` - Chargeback tracking
 7. `007_seed_preview_promos.sql` - Preview access promo codes
 8. `008_status_sync.sql` - Status sync tracking columns
+9. `009_letter_status_history.sql` - Historical status tracking
+10. `010_user_return_address.sql` - Saved return addresses
+11. `011_personal_access_tokens.sql` - API token authentication
+12. `012_mail_types.sql` - Postcard support (mail_type enum)
+13. `013_letter_layouts.sql` - Layout support (text-only, header, inline images)
 
 See [database-schema.md](database-schema.md) for full schema details.
 
 ---
 
-## MCP Tools
+## MCP Tools (13 Total)
 
+### Letter Tools (3 variants)
 | Tool | Purpose |
 |------|---------|
-| `quote_and_preview_letter` | Creates draft, returns preview and cost |
+| `quote_and_preview_letter_text_only` | Text-only letters (max ~1600 chars) |
+| `quote_and_preview_letter_with_header_image` | Letters with header/letterhead image (max ~1100 chars) |
+| `quote_and_preview_letter_with_image` | Letters with inline image after signature (max ~800 chars) |
 | `send_letter` | Consumes draft, deducts credits, queues job |
-| `get_order_status` | Check letter delivery status |
-| `get_account_balance` | View credit balance |
-| `switch_account` | Logout and re-authenticate |
+
+### Postcard Tools
+| Tool | Purpose |
+|------|---------|
+| `quote_and_preview_postcard` | Creates postcard draft with front image (max ~500 chars) |
+| `send_postcard` | Consumes postcard draft, deducts credits, queues job |
+
+### Account Management Tools
+| Tool | Purpose |
+|------|---------|
+| `get_account_balance` | View credit balance and account info |
+| `get_order_status` | Check letter/postcard delivery status |
+| `list_orders` | List all sent letters and postcards |
+
+### Return Address Tools
+| Tool | Purpose |
+|------|---------|
+| `set_return_address` | Save default return address for future mailings |
+| `get_return_address` | View saved return address |
+| `clear_return_address` | Remove saved return address |
 
 See [letter-send-flow.md](letter-send-flow.md) for the complete send flow.
 
@@ -389,37 +418,58 @@ npm run db:migrate:rollback # View rollback info
 
 ## What's Complete
 
-- [x] MCP HTTP server with OAuth
-- [x] Auth0 integration (5 providers)
-- [x] Neon PostgreSQL database
-- [x] Credit system with ledger and expiration
+### Core Infrastructure
+- [x] MCP HTTP server with OAuth 2.1 + PKCE
+- [x] Auth0 integration (5 identity providers)
+- [x] Neon PostgreSQL database (13 tables, 13 migrations)
+- [x] Credit system with FIFO ledger and expiration
 - [x] Stripe checkout and webhooks
-- [x] Draft-based idempotency
-- [x] pg-boss job queue
-- [x] PostGrid integration
-- [x] User tier system
-- [x] Rate limiting
-- [x] Admin dashboard (local only)
-- [x] Promo code system
-- [x] Chargeback tracking
-- [x] Railway deployment
+- [x] Draft-based idempotency system
+- [x] pg-boss job queue (PostgreSQL-backed)
+- [x] PostGrid integration (live and dummy providers)
+- [x] Railway deployment (production + dev environments)
+
+### Letter Features
+- [x] Three letter layout variants (text-only, header image, inline image)
+- [x] Image processing and optimization for printing
+- [x] Layout-specific character limits (800-1600 chars)
+- [x] Address validation and auto-correction via PostGrid
 - [x] Letter status sync from PostGrid (6h worker)
+- [x] Letter status history tracking
+
+### Postcard Features
+- [x] Postcard support (6x9 size)
+- [x] Front image processing (1800x2700px at 300 DPI)
+- [x] Back message layout (max ~500 chars)
+- [x] Image download from OpenAI file attachments
+
+### Account Management
+- [x] Saved return address per user
+- [x] User tier system (standard, trusted)
+- [x] Rate limiting (per-user, tier-based)
+- [x] Promo code system with expiration
+- [x] Chargeback tracking
+- [x] Personal access tokens (API authentication)
+
+### Admin & Operations
+- [x] Admin dashboard (local only, disabled in production)
+- [x] Credit adjustment tools
+- [x] Job retry mechanism
+- [x] Status sync dry-run mode
 - [x] Live development environment (isolated Auth0 tenant, Neon branch, test mode services)
 
 ---
 
 ## Known Issues / Future Work
 
-### Critical to Fix
-1. Undefined `STATIC_CLIENT_ID`/`STATIC_CLIENT_SECRET` in OAuth registration
-2. Missing request body timeout in webhook handling
-3. Missing env var validation at startup
-
-### Improvements
+### Improvements for Future Consideration
+- Additional postcard sizes (6x4, 6x11)
 - Redis-based rate limiting for multi-instance scaling
-- More comprehensive address validation
-- Webhook retry logic enhancement
-- Email notifications for letter status
+- Email notifications for letter status changes
+- Webhook retry logic enhancement with exponential backoff
+- More comprehensive address validation beyond PostGrid
+- Multi-page letter support (currently 1 page only)
+- Bulk sending API for marketing use cases
 
 ---
 
@@ -435,7 +485,7 @@ npm run db:migrate:rollback # View rollback info
 │   ├── tools/            # MCP tools (sendLetter.ts, etc.)
 │   └── db/               # Database utilities
 ├── db/
-│   ├── migrations/       # SQL migrations (001-008)
+│   ├── migrations/       # SQL migrations (001-013)
 │   └── migrate.ts        # Migration runner
 ├── docs/                 # Documentation
 ├── scripts/              # Test and utility scripts

@@ -67,8 +67,9 @@ When you need more detail, read these docs:
 - `docs/status.md` - Current state, architecture, progress
 - `docs/infrastructure.md` - External services configuration
 - `docs/letter-send-flow.md` - How letters are sent (drafts, credits, jobs)
-- `docs/database-schema.md` - Complete schema (12 tables)
+- `docs/database-schema.md` - Complete schema (13 tables)
 - `docs/user-stories.md` - Acceptance criteria and test coverage
+- `docs/standards.md` - Documentation standards (follow when updating docs)
 
 ## Learnings (Important Gotchas)
 

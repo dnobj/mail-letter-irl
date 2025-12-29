@@ -1,9 +1,17 @@
 # MCP Tool API Specifications
 
-The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool returns metadata tailored for ChatGPT widgets and respects read-only hints where applicable.
+**Last Updated:** December 29, 2025
+**Purpose:** Complete specification of all MCP tools exposed by Letter IRL
 
-## quote_and_preview_letter (Read-Only)
-- **Purpose:** Provide a printable preview and letter cost estimate without creating an order.
+The Letter IRL MCP server exposes **13 tools** to the OpenAI Apps SDK. Tools are organized into four categories: Letter Tools (4), Postcard Tools (2), Account Management (3), and Return Address (4). Each tool returns metadata tailored for ChatGPT widgets and respects read-only hints where applicable.
+
+---
+
+## Letter Tools (4 tools)
+
+### quote_and_preview_letter_text_only (Read-Only)
+- **Purpose:** Create a preview and draft for a text-only letter (no images). Maximum ~1600 characters (~24 lines).
+- **Layout:** Text-only
 - **Input schema:**
   ```json
   {
@@ -50,11 +58,59 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
   ```
 - **Metadata:**
   - `_meta.readOnlyHint = true`
-  - `_meta.openai/outputTemplate = "LetterPreviewCard"`
+  - `_meta.openai/outputTemplate = "ui://widgets/LetterPreviewCard.html"`
   - `_meta.openai/toolInvocation/invoking = "Generating preview…"`
   - `_meta.openai/toolInvocation/invoked = "Preview ready"`
 
-## send_letter (Mutating)
+### quote_and_preview_letter_with_header_image (Read-Only)
+- **Purpose:** Create a preview and draft for a letter with a header/letterhead image at the top. Maximum ~1100 characters (~17 lines).
+- **Layout:** Header image (like business letterhead or logo)
+- **Input schema:** Same as text-only, plus:
+  ```json
+  {
+    "image": { "$ref": "#/definitions/imageFileParam" }
+  }
+  ```
+- **Behavior:** Downloads and processes header image (resized to fit letterhead area), validates addresses, creates draft.
+- **Output schema:** Same as text-only, plus:
+  ```json
+  {
+    "headerImageData": { "type": "string", "description": "Base64 data URI for widget preview" },
+    "layoutType": { "type": "string", "enum": ["header_image"] }
+  }
+  ```
+- **Metadata:**
+  - `_meta.readOnlyHint = true`
+  - `_meta.openai/outputTemplate = "ui://widgets/LetterPreviewCard.html"`
+  - `_meta.openai/fileParams = ["image"]` (enables image upload)
+  - `_meta.openai/toolInvocation/invoking = "Processing letter with header image…"`
+  - `_meta.openai/toolInvocation/invoked = "Preview ready"`
+
+### quote_and_preview_letter_with_image (Read-Only)
+- **Purpose:** Create a preview and draft for a letter with an inline image after the signature (like enclosing a photo). Maximum ~800 characters (~12 lines).
+- **Layout:** Inline image (image appears after signature)
+- **Input schema:** Same as text-only, plus:
+  ```json
+  {
+    "image": { "$ref": "#/definitions/imageFileParam" }
+  }
+  ```
+- **Behavior:** Downloads and processes inline image (resized for printing), validates addresses, creates draft.
+- **Output schema:** Same as text-only, plus:
+  ```json
+  {
+    "inlineImageData": { "type": "string", "description": "Base64 data URI for widget preview" },
+    "layoutType": { "type": "string", "enum": ["inline_image"] }
+  }
+  ```
+- **Metadata:**
+  - `_meta.readOnlyHint = true`
+  - `_meta.openai/outputTemplate = "ui://widgets/LetterPreviewCard.html"`
+  - `_meta.openai/fileParams = ["image"]` (enables image upload)
+  - `_meta.openai/toolInvocation/invoking = "Processing letter with image…"`
+  - `_meta.openai/toolInvocation/invoked = "Preview ready"`
+
+### send_letter (Mutating)
 - **Purpose:** Consume a draft from `quote_and_preview_letter`, deduct from user's letter balance, persist an order, and queue it for printing/mailing.
 - **Input schema:**
   ```json
@@ -108,13 +164,88 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
   }
   ```
 - **Metadata:**
-  - No `readOnlyHint`
-  - `_meta.openai/outputTemplate = "LetterConfirmationCard"`
+  - `_meta.readOnlyHint = false`
+  - `_meta.openWorldHint = true` (triggers real-world mail fulfillment)
+  - `_meta.openai/outputTemplate = "ui://widgets/LetterConfirmationCard.html"`
   - `_meta.openai/toolInvocation/invoking = "Sending letter…"`
   - `_meta.openai/toolInvocation/invoked = "Letter sent"`
 
-## get_order_status (Read-Only)
-- **Purpose:** Retrieve the latest order status or a specific order by `orderId`.
+---
+
+## Postcard Tools (2 tools)
+
+### quote_and_preview_postcard (Read-Only)
+- **Purpose:** Create a preview and draft for a 6x9 postcard with a front image and back message. Maximum ~500 characters for back message.
+- **Input schema:**
+  ```json
+  {
+    "type": "object",
+    "required": ["recipient", "message"],
+    "properties": {
+      "sender": { "$ref": "#/definitions/addressBlock" },
+      "recipient": { "$ref": "#/definitions/addressBlock" },
+      "message": { "type": "string", "description": "Message for postcard back (max 500 chars)" },
+      "image": { "$ref": "#/definitions/imageFileParam" },
+      "imageUrl": { "type": "string", "description": "Alternative: direct image URL" },
+      "size": { "type": "string", "enum": ["6x9"], "default": "6x9" }
+    }
+  }
+  ```
+- **Behavior:** Downloads and processes front image (1800x2700px at 300 DPI for 6x9), validates addresses, creates postcard draft. Sender address is optional (uses saved return address if not provided).
+- **Output schema:**
+  ```json
+  {
+    "type": "object",
+    "required": ["previewFrontHtml", "previewBackHtml", "lettersRequired", "canSendNow", "draftId", "draftExpiresAt"],
+    "properties": {
+      "previewFrontHtml": { "type": "string" },
+      "previewBackHtml": { "type": "string" },
+      "lettersRequired": { "type": "number", "description": "Always 1 for postcard" },
+      "canSendNow": { "type": "boolean" },
+      "draftId": { "type": "string" },
+      "draftExpiresAt": { "type": "string" },
+      "message": { "type": "string" },
+      "recipientName": { "type": "string" },
+      "senderName": { "type": "string" },
+      "usedSavedReturnAddress": { "type": "boolean" }
+    }
+  }
+  ```
+- **Metadata:**
+  - `_meta.readOnlyHint = true`
+  - `_meta.openai/outputTemplate = "ui://widgets/PostcardPreviewCard.html"`
+  - `_meta.openai/fileParams = ["image"]` (enables image upload)
+  - `_meta.openai/toolInvocation/invoking = "Processing postcard…"`
+  - `_meta.openai/toolInvocation/invoked = "Postcard preview ready"`
+
+### send_postcard (Mutating)
+- **Purpose:** Consume a postcard draft, deduct credits, and queue for printing/mailing.
+- **Input schema:**
+  ```json
+  {
+    "type": "object",
+    "required": ["draftId", "confirm"],
+    "properties": {
+      "draftId": { "type": "string" },
+      "confirm": { "type": "boolean", "description": "Must be true" }
+    }
+  }
+  ```
+- **Behavior:** Same as send_letter but for postcards. Consumes draft idempotently, deducts 1 letter (2 internal credits), queues postcard job.
+- **Output schema:** Similar to send_letter output
+- **Metadata:**
+  - `_meta.readOnlyHint = false`
+  - `_meta.openWorldHint = true` (triggers real-world mail fulfillment)
+  - `_meta.openai/outputTemplate = "ui://widgets/PostcardConfirmationCard.html"`
+  - `_meta.openai/toolInvocation/invoking = "Sending postcard…"`
+  - `_meta.openai/toolInvocation/invoked = "Postcard sent"`
+
+---
+
+## Account Management Tools (3 tools)
+
+### get_order_status (Read-Only)
+- **Purpose:** Retrieve the status of a specific letter/postcard order by `orderId` or the most recent order if omitted.
 - **Input schema:**
   ```json
   {
@@ -167,11 +298,52 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
   ```
 - **Metadata:**
   - `_meta.readOnlyHint = true`
-  - `_meta.openai/outputTemplate = "LetterStatusCard"`
-  - `_meta.openai/toolInvocation/invoking = "Checking letter status…"`
-  - `_meta.openai/toolInvocation/invoked = "Latest status"`
+  - `_meta.openai/outputTemplate = "ui://widgets/LetterStatusCard.html"`
+  - `_meta.openai/toolInvocation/invoking = "Checking status…"`
+  - `_meta.openai/toolInvocation/invoked = "Status retrieved"`
 
-## get_account_balance (Read-Only)
+### list_orders (Read-Only)
+- **Purpose:** List all sent letters and postcards for the authenticated user.
+- **Input schema:**
+  ```json
+  {
+    "type": "object",
+    "properties": {
+      "limit": { "type": "number", "default": 10, "description": "Max results to return" },
+      "offset": { "type": "number", "default": 0 }
+    }
+  }
+  ```
+- **Behavior:** Returns paginated list of all letters and postcards with status, recipient, and timestamps.
+- **Output schema:**
+  ```json
+  {
+    "type": "object",
+    "required": ["orders", "total"],
+    "properties": {
+      "orders": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["orderId", "mailType", "currentStatus", "recipientName", "createdAt"],
+          "properties": {
+            "orderId": { "type": "string" },
+            "mailType": { "type": "string", "enum": ["letter", "postcard"] },
+            "currentStatus": { "type": "string" },
+            "recipientName": { "type": "string" },
+            "createdAt": { "type": "string" }
+          }
+        }
+      },
+      "total": { "type": "number" }
+    }
+  }
+  ```
+- **Metadata:**
+  - `_meta.readOnlyHint = true`
+  - `_meta.openai/outputTemplate = "ui://widgets/OrderListCard.html"`
+
+### get_account_balance (Read-Only)
 - **Purpose:** Provide the user's remaining letter balance, standard letter affordability, and account identity information.
 - **Input schema:**
   ```json
@@ -203,6 +375,85 @@ The Letter IRL MCP server exposes five tools to the OpenAI Apps SDK. Each tool r
   ```
 - **Metadata:**
   - `_meta.readOnlyHint = true`
-  - `_meta.openai/outputTemplate = "BalanceCard"`
-  - `_meta.openai/toolInvocation/invoking = "Checking letter balance…"`
-  - `_meta.openai/toolInvocation/invoked = "Balance updated"`
+  - `_meta.openai/outputTemplate = "ui://widgets/BalanceCard.html"`
+  - `_meta.openai/toolInvocation/invoking = "Checking balance…"`
+  - `_meta.openai/toolInvocation/invoked = "Balance retrieved"`
+
+---
+
+## Return Address Tools (4 tools)
+
+### set_return_address (Mutating)
+- **Purpose:** Save a default return address for the user to be used automatically in all future letters and postcards.
+- **Input schema:**
+  ```json
+  {
+    "type": "object",
+    "required": ["address"],
+    "properties": {
+      "address": { "$ref": "#/definitions/addressBlock" }
+    }
+  }
+  ```
+- **Behavior:** Validates and saves the return address to the database. Address is validated via provider.
+- **Output schema:**
+  ```json
+  {
+    "type": "object",
+    "required": ["success", "message"],
+    "properties": {
+      "success": { "type": "boolean" },
+      "message": { "type": "string" },
+      "savedAddress": { "$ref": "#/definitions/addressBlock" }
+    }
+  }
+  ```
+- **Metadata:**
+  - `_meta.readOnlyHint = false`
+
+### get_return_address (Read-Only)
+- **Purpose:** Retrieve the user's saved return address.
+- **Input schema:** Empty object
+- **Behavior:** Returns saved return address or error if none saved.
+- **Output schema:**
+  ```json
+  {
+    "type": "object",
+    "required": ["hasReturnAddress"],
+    "properties": {
+      "hasReturnAddress": { "type": "boolean" },
+      "address": { "$ref": "#/definitions/addressBlock" },
+      "message": { "type": "string" }
+    }
+  }
+  ```
+- **Metadata:**
+  - `_meta.readOnlyHint = true`
+
+### clear_return_address (Mutating)
+- **Purpose:** Remove the user's saved return address.
+- **Input schema:**
+  ```json
+  {
+    "type": "object",
+    "required": ["confirm"],
+    "properties": {
+      "confirm": { "type": "boolean", "description": "Must be true" }
+    }
+  }
+  ```
+- **Behavior:** Deletes saved return address from database.
+- **Output schema:**
+  ```json
+  {
+    "type": "object",
+    "required": ["success", "message"],
+    "properties": {
+      "success": { "type": "boolean" },
+      "message": { "type": "string" }
+    }
+  }
+  ```
+- **Metadata:**
+  - `_meta.readOnlyHint = false`
+  - `_meta.destructiveHint = true` (shows deletion warning)

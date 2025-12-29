@@ -1,6 +1,6 @@
 # Documentation Standards
 
-**Last Updated:** December 17, 2025
+**Last Updated:** December 29, 2025
 **Purpose:** Codify documentation conventions and best practices for Letter IRL
 
 ---
@@ -152,7 +152,7 @@ Use tables for structured comparisons and reference data:
 
 ### 1. Feature Specifications
 
-**Naming:** `feature-name-spec.md` or `FEATURE-NAME.md`
+**Naming:** `feature-name-spec.md`
 
 **Template:**
 ```markdown
@@ -221,7 +221,7 @@ Use tables for structured comparisons and reference data:
 
 ### 3. Flow Documentation
 
-**Naming:** `feature-flow.md` or `FEATURE-FLOW.md`
+**Naming:** `feature-flow.md`
 
 **Template:**
 ```markdown
@@ -342,8 +342,8 @@ Every document should end with links to related documents:
 ```markdown
 ## See Also
 
-- [DOCUMENT-NAME.md](DOCUMENT-NAME.md) - Brief description
-- [Other-Doc.md](Other-Doc.md) - Brief description
+- [document-name.md](document-name.md) - Brief description
+- [other-doc.md](other-doc.md) - Brief description
 ```
 
 **Purpose:**
@@ -686,6 +686,7 @@ npx markdown-link-check docs/**/*.md
 
 | Date | Change |
 |------|--------|
+| 2025-12-29 | Removed remaining uppercase examples for consistency |
 | 2025-12-17 | Standardized all filenames to lowercase-with-hyphens |
 | 2025-12-17 | Initial standards document based on observed patterns |
 

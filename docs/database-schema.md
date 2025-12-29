@@ -1,6 +1,7 @@
 # Database Schema
 
-**Last Updated:** December 4, 2025
+**Last Updated:** December 29, 2025
+**Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
 This document describes the Letter IRL database schema as deployed in production (Neon PostgreSQL).
 
@@ -8,16 +9,16 @@ This document describes the Letter IRL database schema as deployed in production
 
 ## Overview
 
-**12 Tables** across 6 migrations:
+**13 Tables** across 13 migrations:
 
 | Category | Tables |
 |----------|--------|
 | Users | `users` |
 | Credits | `credit_ledger`, `credit_transactions`, `credit_consumption` |
-| Letters | `letters`, `letter_drafts`, `letter_jobs` |
+| Letters | `letters`, `letter_drafts`, `letter_jobs`, `letter_status_history` |
 | Payments | `orders`, `stripe_disputes` |
 | Promos | `promo_campaigns`, `promo_redemptions` |
-| System | `migrations` |
+| System | `migrations`, `personal_access_tokens` |
 
 ---
 
@@ -132,10 +133,11 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 |--------|------|----------|---------|-------------|
 | draft_id | UUID | NO | gen_random_uuid() | Primary key (idempotency key) |
 | user_id | VARCHAR(255) | NO | - | FK to users |
+| mail_type | mail_type | NO | 'letter' | letter or postcard (enum) |
 | sender | JSONB | NO | - | Sender address |
 | recipient | JSONB | NO | - | Recipient address |
-| body_text | TEXT | NO | - | Letter content |
-| sign_off | TEXT | NO | - | Closing text |
+| body_text | TEXT | NO | - | Letter content (message for postcards) |
+| sign_off | TEXT | YES | - | Closing text (NULL for postcards) |
 | required_credits | INTEGER | NO | - | Credits needed (> 0) |
 | preview_html | TEXT | YES | - | Generated preview |
 | sender_validation | JSONB | YES | - | Cached address validation |
@@ -144,17 +146,26 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | expires_at | TIMESTAMPTZ | NO | - | Expiration (24h from creation) |
 | consumed_at | TIMESTAMPTZ | YES | - | When draft was sent |
 | consumed_letter_id | VARCHAR(255) | YES | - | FK to letters (after send) |
+| front_image_data | TEXT | YES | - | Base64 JPEG for postcard front (NULL for letters) |
+| front_image_url | TEXT | YES | - | Original image URL for debugging |
+| postcard_size | VARCHAR(10) | YES | - | Postcard size: '6x9' (NULL for letters) |
 | created_at | TIMESTAMPTZ | NO | NOW() | Draft creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
 
 **Enum:**
 - `draft_status`: pending, consumed, expired, cancelled
 
+**Constraints:**
+- `postcard_requires_image`: Postcards must have front_image_data
+- `postcard_requires_size`: Postcards must have postcard_size
+- `valid_postcard_size`: postcard_size must be '6x4', '6x9', or '6x11'
+
 **Indexes:**
 - `idx_letter_drafts_user_pending` on (user_id, status) WHERE status='pending'
 - `idx_letter_drafts_expires_at` on expires_at WHERE status='pending'
 - `idx_letter_drafts_consumed_letter` on consumed_letter_id WHERE NOT NULL
 - `idx_letter_drafts_id_user` on (draft_id, user_id)
+- `idx_letter_drafts_mail_type` on mail_type
 
 ---
 
@@ -166,6 +177,7 @@ Sent letters with content and tracking.
 |--------|------|----------|---------|-------------|
 | letter_id | VARCHAR(255) | NO | - | Primary key |
 | user_id | VARCHAR(255) | NO | - | FK to users |
+| mail_type | mail_type | NO | 'letter' | letter or postcard (enum) |
 | content | JSONB | NO | - | Letter content (body, sender, etc.) |
 | recipient | JSONB | NO | - | Recipient address |
 | credits_cost | INTEGER | NO | - | Credits charged (> 0) |
@@ -179,12 +191,16 @@ Sent letters with content and tracking.
 | sent_at | TIMESTAMPTZ | YES | - | When sent to provider |
 | updated_at | TIMESTAMPTZ | YES | - | Last update |
 
+**Enums:**
+- `mail_type`: letter, postcard
+
 **Indexes:**
 - `idx_letters_user_id` on user_id
 - `idx_letters_status` on status
 - `idx_letters_created_at` on created_at DESC
 - `idx_letters_tracking_id` on tracking_id
 - `idx_letters_provider` on provider
+- `idx_letters_mail_type` on mail_type
 
 ---
 
@@ -326,6 +342,46 @@ Migration tracking table.
 
 ---
 
+### letter_status_history
+
+Historical record of all status changes for letters and postcards.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | SERIAL | NO | - | Primary key |
+| letter_id | VARCHAR(255) | NO | - | FK to letters |
+| old_status | VARCHAR(50) | YES | - | Previous status (NULL for first entry) |
+| new_status | VARCHAR(50) | NO | - | New status |
+| changed_at | TIMESTAMPTZ | NO | NOW() | When status changed |
+| changed_by | VARCHAR(50) | YES | - | Source of change (system, worker, admin) |
+| metadata | JSONB | YES | - | Additional context |
+
+**Indexes:**
+- `idx_letter_status_history_letter_id` on letter_id
+- `idx_letter_status_history_changed_at` on changed_at DESC
+
+---
+
+### personal_access_tokens
+
+API tokens for programmatic access (future use).
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| token_id | UUID | NO | gen_random_uuid() | Primary key |
+| user_id | VARCHAR(255) | NO | - | FK to users |
+| token_hash | VARCHAR(255) | NO | - | Bcrypt hash of token |
+| name | VARCHAR(255) | NO | - | User-friendly name |
+| last_used_at | TIMESTAMPTZ | YES | - | Last usage timestamp |
+| expires_at | TIMESTAMPTZ | YES | - | Expiration (NULL = never) |
+| created_at | TIMESTAMPTZ | NO | NOW() | Token creation |
+
+**Indexes:**
+- `idx_personal_access_tokens_user_id` on user_id
+- `idx_personal_access_tokens_token_hash` on token_hash
+
+---
+
 ## Migrations History
 
 | # | File | Description |
@@ -336,6 +392,13 @@ Migration tracking table.
 | 4 | 004_letter_drafts.sql | Draft-based idempotency system |
 | 5 | 005_user_tiers.sql | User tier system for rate limiting |
 | 6 | 006_stripe_disputes.sql | Chargeback/dispute tracking |
+| 7 | 007_seed_preview_promos.sql | Preview access promo codes |
+| 8 | 008_status_sync.sql | Status sync tracking columns |
+| 9 | 009_letter_status_history.sql | Historical status change tracking |
+| 10 | 010_user_return_address.sql | Saved return addresses per user |
+| 11 | 011_personal_access_tokens.sql | API token authentication |
+| 12 | 012_mail_types.sql | Postcard support (mail_type enum, postcard fields) |
+| 13 | 013_letter_layouts.sql | Layout support for letters (text-only, header, inline images) |
 
 ---
 

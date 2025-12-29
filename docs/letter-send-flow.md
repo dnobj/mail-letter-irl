@@ -1,17 +1,25 @@
 # Letter Send Flow - Technical Reference
 
-**Last Updated:** December 4, 2025
+**Last Updated:** December 29, 2025
+**Purpose:** Technical reference for letter and postcard send flows, including draft-based idempotency
 
-This document describes the complete flow for sending a letter, including the draft-based idempotency system, credit deduction, job queuing, and delivery.
+This document describes the complete flow for sending letters and postcards, including the draft-based idempotency system, credit deduction, job queuing, and delivery.
 
 ---
 
 ## Overview
 
-The letter sending process uses a **two-phase commit** pattern with drafts:
+The letter and postcard sending process uses a **two-phase commit** pattern with drafts:
 
-1. **Quote Phase** (`quote_and_preview_letter`) - Creates a draft, locks in pricing
-2. **Send Phase** (`send_letter`) - Consumes draft, deducts credits, queues job
+1. **Quote Phase** (quote tools) - Creates a draft, locks in pricing
+   - `quote_and_preview_letter_text_only`
+   - `quote_and_preview_letter_with_header_image`
+   - `quote_and_preview_letter_with_image`
+   - `quote_and_preview_postcard`
+
+2. **Send Phase** (send tools) - Consumes draft, deducts credits, queues job
+   - `send_letter` (for all letter drafts)
+   - `send_postcard` (for postcard drafts)
 
 This prevents duplicate sends and ensures credits are deducted exactly once.
 
@@ -27,7 +35,7 @@ This prevents duplicate sends and ensures credits are deducted exactly once.
 │  User Request                                                                │
 │       │                                                                      │
 │       ▼                                                                      │
-│  quote_and_preview_letter(recipient, body, sender, signOff)                  │
+│  quote_and_preview_[tool_variant](recipient, body, sender, signOff, image?)  │
 │       │                                                                      │
 │       ├──► Calculate required credits (based on page count)                  │
 │       │                                                                      │
@@ -49,7 +57,7 @@ This prevents duplicate sends and ensures credits are deducted exactly once.
 │                            SEND PHASE                                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  send_letter(draftId, confirm: true)                                         │
+│  send_letter/send_postcard(draftId, confirm: true)                           │
 │       │                                                                      │
 │       ├──► CONSUME DRAFT (atomic operation)                                  │
 │       │    - Validates: draft exists, owned by user, not expired             │
