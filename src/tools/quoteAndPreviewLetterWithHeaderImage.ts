@@ -195,7 +195,9 @@ export const quoteAndPreviewLetterWithHeaderImageTool: McpToolDefinition<
     "Alternative tools:\n" +
     "- quote_and_preview_letter: Text-only (1600 chars, 24 lines)\n" +
     "- quote_and_preview_letter_with_image: Image AFTER signature (800 chars, 12 lines)",
-  readOnly: true,
+  // readOnly: false because this tool creates draft records in the database
+  // See docs/learnings/tool-annotation-decision.md for rationale
+  readOnly: false,
   inputSchema: quoteAndPreviewLetterWithHeaderImageInputSchema,
   outputSchema: quoteAndPreviewOutputSchema,
   meta: {
@@ -203,8 +205,8 @@ export const quoteAndPreviewLetterWithHeaderImageTool: McpToolDefinition<
     "openai/widgetAccessible": true,
     "openai/fileParams": ["image"],  // ENABLE IMAGE UPLOAD
     "openai/toolInvocation/invoking": "Processing letter with header image...",
-    "openai/toolInvocation/invoked": "Preview ready",
-    readOnlyHint: true
+    "openai/toolInvocation/invoked": "Preview ready"
+    // Note: readOnlyHint is set by buildAnnotations() in registerTools.ts
   },
   handler
 };

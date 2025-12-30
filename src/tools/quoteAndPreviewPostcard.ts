@@ -559,7 +559,9 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
     "2. Drafts expire after 24 hours.\n" +
     "3. Idempotent - retrying won't charge twice.\n\n" +
     "Restrictions: US addresses only, max ~400 character message.",
-  readOnly: true,
+  // readOnly: false because this tool creates draft records in the database
+  // See docs/learnings/tool-annotation-decision.md for rationale
+  readOnly: false,
   inputSchema: quoteAndPreviewPostcardInputSchema,
   outputSchema: quoteAndPreviewPostcardOutputSchema,
   meta: {
@@ -567,8 +569,8 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
     "openai/widgetAccessible": true,
     "openai/fileParams": ["image"],  // Enables image upload via OpenAI Apps SDK
     "openai/toolInvocation/invoking": "Processing postcard...",
-    "openai/toolInvocation/invoked": "Postcard preview ready",
-    readOnlyHint: true
+    "openai/toolInvocation/invoked": "Postcard preview ready"
+    // Note: readOnlyHint is set by buildAnnotations() in registerTools.ts
   },
   handler
 };

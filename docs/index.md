@@ -77,6 +77,7 @@ These documents were created during development and may be partially outdated:
 - [App Integration Learnings](app-integration-learnings.md) - Integration quirks
 - [ChatGPT Auth0 Learnings](learnings/chatgpt-auth0-oauth-learnings.md) - OAuth debugging notes
 - [OpenAI App SDK Notes](learnings/openai-app-sdk-notes.md) - SDK observations
+- [Tool Annotation Decision](learnings/tool-annotation-decision.md) - MCP tool annotation correctness
 
 ---
 
