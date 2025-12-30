@@ -106,7 +106,7 @@ export class DummyProvider implements LetterFulfillmentProvider {
     letterStore.set(trackingId, {
       params,
       sentAt: new Date(),
-      status: 'queued',
+      status: 'accepted',
       deliveryDate
     });
 
@@ -152,8 +152,8 @@ export class DummyProvider implements LetterFulfillmentProvider {
     let statusMessage: string;
 
     if (progress < 0.1) {
-      currentStatus = 'queued';
-      statusMessage = 'Letter is queued for processing';
+      currentStatus = 'accepted';
+      statusMessage = 'Letter accepted by print facility';
     } else if (progress < 0.3) {
       currentStatus = 'processing';
       statusMessage = 'Letter is being printed';
@@ -292,8 +292,8 @@ export class DummyProvider implements LetterFulfillmentProvider {
 
     events.push({
       timestamp: sentAt,
-      status: 'queued',
-      message: 'Letter received and queued for processing',
+      status: 'accepted',
+      message: 'Letter accepted by print facility',
       location: 'Processing Center'
     });
 

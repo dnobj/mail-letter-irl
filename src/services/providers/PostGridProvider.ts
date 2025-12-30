@@ -556,21 +556,28 @@ export class PostGridProvider implements LetterFulfillmentProvider {
 
   /**
    * Map PostGrid status to our standard status
+   *
+   * PostGrid lifecycle: ready → rendered → processed → printed → mailed → in_transit → delivered
+   * Our lifecycle: accepted → printing → in_transit → delivered
    */
   private mapStatus(postgridStatus: string): LetterStatus['status'] {
     const statusMap: Record<string, LetterStatus['status']> = {
-      'ready': 'queued',
-      'rendered': 'processing',
+      // PostGrid accepted the order (awaiting print)
+      'ready': 'accepted',
+      'rendered': 'accepted',
+      // At printer / being printed
       'processed': 'processing',
       'printed': 'processing',
+      // Handed to USPS / in postal system
       'mailed': 'in_transit',
       'in_transit': 'in_transit',
+      // Terminal statuses
       'delivered': 'delivered',
       'returned': 'returned',
       'canceled': 'failed'
     };
 
-    return statusMap[postgridStatus.toLowerCase()] || 'queued';
+    return statusMap[postgridStatus.toLowerCase()] || 'accepted';
   }
 
   /**
