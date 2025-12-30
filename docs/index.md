@@ -11,6 +11,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 
 - [status.md](status.md) - **Start here** - Project overview, current state, architecture
 - [letter-send-flow.md](letter-send-flow.md) - How letters and postcards are sent (draft system, credits, jobs)
+- [status-labels.md](status-labels.md) - Letter status values across all layers (DB, API, Dashboard, PostGrid)
 - [database-schema.md](database-schema.md) - Complete database schema (13 tables)
 - [user-stories.md](user-stories.md) - User stories for test coverage and acceptance criteria
 - [personas.md](personas.md) - User personas for product design and testing
