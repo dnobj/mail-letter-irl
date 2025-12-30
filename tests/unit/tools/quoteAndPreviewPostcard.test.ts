@@ -182,9 +182,10 @@ describe('quote_and_preview_postcard Tool', () => {
 
       expect(draftWithoutImage.front_image_data).toBeNull();
 
-      // Should throw error
+      // Should throw error with mobile-friendly guidance
       const errorMsg = postcardErrors.missingImage;
-      expect(errorMsg).toBe('Postcard requires an image for the front');
+      expect(errorMsg).toContain('No image received');
+      expect(errorMsg).toContain('mobile devices');
     });
 
     it('should reject images over 10MB', () => {
@@ -286,8 +287,16 @@ describe('quote_and_preview_postcard Tool', () => {
   // Error Handling
   // ==========================================================================
   describe('Error Handling', () => {
-    it('should provide clear error for missing image', () => {
-      expect(postcardErrors.missingImage).toBe('Postcard requires an image for the front');
+    it('should provide clear error for missing image with mobile guidance', () => {
+      expect(postcardErrors.missingImage).toContain('No image received');
+      expect(postcardErrors.missingImage).toContain('mobile devices');
+    });
+
+    it('should include optimization guidance in missing image error', () => {
+      // US-POSTCARD-04: Mobile Image Compatibility
+      expect(postcardErrors.missingImage).toContain('1872×1248 pixels');
+      expect(postcardErrors.missingImage).toContain('high-quality JPEG');
+      expect(postcardErrors.missingImage).toContain('direct image URL');
     });
 
     it('should provide clear error for image too large', () => {

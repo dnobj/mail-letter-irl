@@ -313,6 +313,33 @@ interface ProviderStatus {
 
 ---
 
+### US-POSTCARD-04: Mobile Image Compatibility
+**As a** mobile ChatGPT user
+**I want** clear guidance when image attachments don't transfer
+**So that** I can still create postcards using the optimization workaround
+
+**Background:**
+On mobile ChatGPT, the `fileParams` mechanism (image attachments to MCP tools) doesn't work reliably.
+However, if ChatGPT preprocesses the image via Code Interpreter first, the resulting file CAN be used.
+We frame this as "print quality optimization" rather than a workaround.
+
+**Acceptance Criteria:**
+- [ ] Tool description includes image optimization guidance for best print quality
+- [ ] Error message when no image received suggests the optimization workaround
+- [ ] Optimization framing: resize to 1872×1248 pixels (6x9 @ 300dpi)
+- [ ] Direct image URL (imageUrl parameter) works as fallback on all platforms
+- [ ] Works transparently on both mobile and desktop
+
+**Error Scenarios:**
+| Scenario | Expected Behavior |
+|----------|-------------------|
+| No image received | Suggest optimization workaround + direct URL option |
+| Mobile user with attached image | ChatGPT guided to preprocess via Code Interpreter |
+
+**Reference:** https://community.openai.com/t/apps-sdk-on-mobile-devices/1366422
+
+---
+
 ## Credits (CREDIT)
 
 ### US-CREDIT-01: Check Credit Balance

@@ -141,9 +141,11 @@ async function handler(
       "No image provided for postcard"
     );
     throw new Error(
-      "No image provided for postcard. Please provide an image using one of these methods:\n" +
-      "1. Attach an image directly to your message (recommended)\n" +
-      "2. Provide an imageUrl parameter with a publicly accessible image URL"
+      "No image received. This can happen on mobile devices.\n\n" +
+      "FOR BEST RESULTS: Ask ChatGPT to optimize your image for postcard printing:\n" +
+      "\"Resize this image to 1872×1248 pixels and save as high-quality JPEG\"\n" +
+      "Then retry - ChatGPT will use the optimized image.\n\n" +
+      "Alternatively, provide a direct image URL (ending in .jpg, .png, or .webp)."
     );
   }
 
@@ -539,8 +541,14 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
     "Feel free to create previews so users can see exactly what their postcard will look like.\n\n" +
     "What it does: Takes an image for the front, a message for the back, validates addresses, " +
     "and creates a DRAFT. The user reviews the preview before deciding to send via send_postcard.\n\n" +
+    "IMAGE OPTIMIZATION (Recommended for best print quality):\n" +
+    "For optimal results and reliable image transfer on all platforms:\n" +
+    "1. Use Code Interpreter to resize the image to 1872×1248 pixels (optimal for 6x9 postcard at 300dpi)\n" +
+    "2. Save as high-quality JPEG\n" +
+    "3. Use the resulting file with this tool\n" +
+    "This ensures optimal print quality and works reliably on all platforms including mobile.\n\n" +
     "Image Input (provide ONE):\n" +
-    "1. Attach an image directly to your message (recommended)\n" +
+    "1. Attach an image directly to your message\n" +
     "2. Use imageUrl parameter with a publicly accessible URL\n" +
     "- Supported: PNG, JPEG, WebP (max 10MB), any size (auto-resized for 6x9 print)\n\n" +
     "Sender Address:\n" +
