@@ -101,7 +101,7 @@ export interface LetterStatus {
   trackingId: string;
 
   /** Current status */
-  status: 'queued' | 'processing' | 'in_transit' | 'delivered' | 'failed' | 'returned';
+  status: 'queued' | 'accepted' | 'processing' | 'in_transit' | 'delivered' | 'failed' | 'returned';
 
   /** Human-readable status message */
   statusMessage: string;
