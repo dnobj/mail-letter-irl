@@ -27,20 +27,65 @@ import { getOrCreateUser } from "../services/userService.js";
  * Build MCP tool annotations from tool definition.
  *
  * These annotations tell ChatGPT how to classify tools:
- * - readOnlyHint: true = READ (no user confirmation needed)
- * - readOnlyHint: false = WRITE (requires user confirmation)
- * - destructiveHint: true = Shows deletion warning
- * - openWorldHint: true = Tool has real-world effects (e.g., sends physical mail)
+ * - readOnlyHint: true = Tool does NOT modify its environment (read operations)
+ * - readOnlyHint: false = Tool modifies its environment (write operations)
+ * - destructiveHint: true = Tool may delete or overwrite user data
+ * - openWorldHint: true = Tool interacts with external entities (APIs, mail services)
+ * - idempotentHint: true = Repeated calls with same args have no additional effect
+ *
+ * IMPORTANT: Quote/preview tools are NOT read-only because they create draft records
+ * in the database. Per MCP specification: "readOnlyHint: true = tool does NOT modify
+ * its environment". Creating database records IS modifying the environment.
  *
  * @see US-MCP-06: Tool Read/Write Annotations
+ * @see docs/learnings/tool-annotation-decision.md
  * @see https://developers.openai.com/apps-sdk/plan/tools/
+ * @see https://modelcontextprotocol.io/legacy/concepts/tools
  */
 function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnotations {
+  const name = tool.name;
+
+  // Read-only tools: only retrieve data, no modifications
+  const readOnlyTools = [
+    'get_account_balance',
+    'list_orders',
+    'get_order_status',
+    'get_return_address'
+  ];
+
+  // Tools that call external APIs (PostGrid for validation or mail fulfillment)
+  const openWorldTools = [
+    'quote_and_preview_letter',
+    'quote_and_preview_letter_with_header_image',
+    'quote_and_preview_letter_with_image',
+    'quote_and_preview_postcard',
+    'send_letter',
+    'send_postcard',
+    'set_return_address'  // Validates address via PostGrid
+  ];
+
+  // Tools where repeated calls with same args have no additional effect
+  const idempotentTools = [
+    'quote_and_preview_letter',
+    'quote_and_preview_letter_with_header_image',
+    'quote_and_preview_letter_with_image',
+    'quote_and_preview_postcard',
+    'send_letter',           // Draft consumption makes retries safe
+    'send_postcard',         // Draft consumption makes retries safe
+    'set_return_address',    // Setting same address twice = no change
+    'clear_return_address'   // Clearing twice = no additional effect
+  ];
+
+  // Destructive tools that delete or overwrite user data
+  const destructiveTools = [
+    'clear_return_address'
+  ];
+
   return {
-    readOnlyHint: tool.readOnly,
-    destructiveHint: tool.name === 'clear_return_address',
-    // send_letter and send_postcard trigger real-world mail fulfillment (Issue #39)
-    openWorldHint: tool.name === 'send_letter' || tool.name === 'send_postcard',
+    readOnlyHint: readOnlyTools.includes(name),
+    destructiveHint: destructiveTools.includes(name),
+    openWorldHint: openWorldTools.includes(name),
+    idempotentHint: idempotentTools.includes(name)
   };
 }
 
