@@ -284,7 +284,12 @@ export const testPostcardDrafts = {
 // =============================================================================
 
 export const postcardErrors = {
-  missingImage: 'Postcard requires an image for the front',
+  missingImage:
+    'No image received. This can happen on mobile devices.\n\n' +
+    'FOR BEST RESULTS: Ask ChatGPT to optimize your image for postcard printing:\n' +
+    '"Resize this image to 1872×1248 pixels and save as high-quality JPEG"\n' +
+    'Then retry - ChatGPT will use the optimized image.\n\n' +
+    'Alternatively, provide a direct image URL (ending in .jpg, .png, or .webp).',
   imageTooLarge: 'Image is too large. Please use an image under 10MB.',
   unsupportedFormat: 'Unsupported image format. Please use PNG, JPEG, or WebP.',
   imageTooSmall: 'Image is too small for print quality. Please use at least 600x900 pixels.',
