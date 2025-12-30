@@ -1,4 +1,12 @@
-export type LetterStatus = "queued_for_print" | "printing" | "mailed";
+export type LetterStatus =
+  | "pending"      // draft, queued
+  | "accepted"     // PostGrid accepted order
+  | "printing"     // Being printed
+  | "in_transit"   // In the mail
+  | "delivered"    // Delivered
+  | "returned"     // Returned to sender
+  | "failed"       // Failed
+  | "cancelled";   // Cancelled
 
 export type LetterLayoutType = "text_only" | "header_image" | "inline_image";
 

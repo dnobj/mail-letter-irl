@@ -24,7 +24,7 @@ import { getOrderStatusTool } from '../../../src/tools/getOrderStatus.js';
 // Test fixtures
 const createMockOrder = (orderId: string, withPreview: boolean = true): OrderRecord => ({
   orderId,
-  currentStatus: 'queued_for_print',
+  currentStatus: 'accepted',
   statusTimeline: [
     { timestampISO: '2025-12-29T10:00:00Z', statusText: 'Letter received' },
     { timestampISO: '2025-12-29T10:00:01Z', statusText: 'Queued for printing' },
@@ -101,7 +101,7 @@ describe('get_order_status tool', () => {
 
       // Assert - all essential fields should be present
       expect(result.orderId).toBe('order-123');
-      expect(result.currentStatus).toBe('queued_for_print');
+      expect(result.currentStatus).toBe('accepted');
       expect(result.statusTimeline).toHaveLength(2);
       expect(result.recipientSummary).toEqual({
         name: 'Jane Recipient',

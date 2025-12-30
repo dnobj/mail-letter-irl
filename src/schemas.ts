@@ -171,7 +171,7 @@ export const sendLetterOutputSchema: JsonSchema = {
   required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary", "lettersRemaining"],
   properties: {
     orderId: { type: "string" },
-    currentStatus: { type: "string", enum: ["queued_for_print", "printing", "mailed"] },
+    currentStatus: { type: "string", enum: ["pending", "accepted", "printing", "in_transit", "delivered", "returned", "failed", "cancelled"] },
     statusTimeline: {
       type: "array",
       items: {
@@ -389,7 +389,7 @@ export const sendPostcardOutputSchema: JsonSchema = {
   required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary", "lettersRemaining"],
   properties: {
     orderId: { type: "string" },
-    currentStatus: { type: "string", enum: ["queued_for_print", "printing", "mailed"] },
+    currentStatus: { type: "string", enum: ["pending", "accepted", "printing", "in_transit", "delivered", "returned", "failed", "cancelled"] },
     statusTimeline: {
       type: "array",
       items: {

@@ -20,29 +20,48 @@ export class FileAccountStore {
   /**
    * Convert database letter status to OrderRecord status
    *
-   * Database statuses: queued, processing, in_transit, delivered, returned, failed, cancelled
-   * MCP statuses: queued_for_print, printing, mailed
+   * Database statuses: draft, queued, processing, accepted, sent, in_transit, delivered, returned, failed, cancelled
+   * MCP statuses: pending, accepted, printing, in_transit, delivered, returned, failed, cancelled
    */
   private mapStatus(dbStatus: string): LetterStatus {
     switch (dbStatus) {
-      // Post-send statuses all map to "mailed"
-      case 'sent':        // Legacy status
-      case 'in_transit':  // Letter is in postal system
-      case 'delivered':   // Letter was delivered
-      case 'returned':    // Letter was returned (bad address, etc.)
-        return 'mailed';
+      // Pre-send statuses
+      case 'draft':
+      case 'queued':
+        return 'pending';
 
-      // Processing status
+      // PostGrid accepted order (sent is legacy, accepted is new)
+      case 'sent':
+      case 'accepted':
+        return 'accepted';
+
+      // Being printed
       case 'processing':
+      case 'printing':
         return 'printing';
 
-      // Pre-send and error statuses
-      case 'queued':
-      case 'draft':
+      // In the mail (PostGrid: processed_for_delivery)
+      case 'in_transit':
+        return 'in_transit';
+
+      // Delivered (PostGrid: completed)
+      case 'delivered':
+        return 'delivered';
+
+      // Returned to sender
+      case 'returned':
+        return 'returned';
+
+      // Failed
       case 'failed':
+        return 'failed';
+
+      // Cancelled
       case 'cancelled':
+        return 'cancelled';
+
       default:
-        return 'queued_for_print';
+        return 'pending';
     }
   }
 
@@ -77,14 +96,14 @@ export class FileAccountStore {
         if (row.created_at) {
           timeline.push({
             timestampISO: row.created_at.toISOString(),
-            statusText: 'Order created'
+            statusText: 'Order placed'
           });
         }
 
         if (row.sent_at) {
           timeline.push({
             timestampISO: row.sent_at.toISOString(),
-            statusText: 'Letter sent'
+            statusText: 'Accepted by print facility'
           });
         }
 

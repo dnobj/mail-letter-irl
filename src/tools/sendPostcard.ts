@@ -33,7 +33,7 @@ interface SendPostcardInput {
 
 interface SendPostcardOutput {
   orderId: string;
-  currentStatus: "queued_for_print" | "printing" | "mailed";
+  currentStatus: "pending" | "accepted" | "printing" | "in_transit" | "delivered" | "returned" | "failed" | "cancelled";
   statusTimeline: { timestampISO: string; statusText: string }[];
   recipientSummary: { name: string; city: string; state: string };
   lettersRemaining: number;  // User-facing: number of letters remaining
@@ -170,7 +170,7 @@ async function handler(
 
       return {
         orderId: existingLetterId,
-        currentStatus: "queued_for_print" as const,
+        currentStatus: "pending" as const,
         statusTimeline: [
           { timestampISO: now, statusText: "Postcard already sent (duplicate request)" }
         ],
@@ -335,11 +335,11 @@ async function handler(
 
   return {
     orderId,
-    currentStatus: "queued_for_print" as const,
+    currentStatus: "pending" as const,
     statusTimeline: [
-      { timestampISO: now, statusText: "Postcard received" },
+      { timestampISO: now, statusText: "Order placed" },
       { timestampISO: now, statusText: "Letter deducted from balance" },
-      { timestampISO: now, statusText: "Queued for printing" }
+      { timestampISO: now, statusText: "Processing" }
     ],
     recipientSummary: {
       name: recipient.name,
