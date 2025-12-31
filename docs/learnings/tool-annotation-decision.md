@@ -1,12 +1,16 @@
-# Tool Annotation Decision: readOnlyHint for Quote/Preview Tools
+# Tool Annotation Decision: readOnlyHint and idempotentHint Correctness
 
-**Last Updated:** December 30, 2025
+**Last Updated:** December 31, 2025
 **Purpose:** Document the decision to correct tool annotations for OpenAI Apps SDK compliance
-**GitHub Issue:** #92
+**GitHub Issues:** #92 (readOnlyHint), #94 (idempotentHint)
 
 ## Summary
 
-The quote and preview tools were incorrectly marked with `readOnlyHint: true`. This document explains why they should be `readOnlyHint: false` and the correct annotation values.
+The quote and preview tools had two incorrect annotations:
+1. `readOnlyHint: true` - Wrong because they create draft records in the database
+2. `idempotentHint: true` - Wrong because each call creates a NEW draft
+
+This document explains the correct annotation values for all 12 tools.
 
 ---
 
@@ -77,9 +81,11 @@ annotations: {
   readOnlyHint: false,    // Creates draft record in database
   destructiveHint: false, // Draft creation is non-destructive (can be recreated)
   openWorldHint: true,    // Calls PostGrid API for address validation
-  idempotentHint: true    // Same inputs produce consistent draft (essentially idempotent)
+  idempotentHint: false   // Each call creates a NEW draft with new draftId
 }
 ```
+
+**Why idempotentHint: false?** Per MCP spec, idempotent means "repeated calls with same args have no additional effect." But quote/preview tools create a new draft record on each call, even with identical inputs. This IS an additional effect.
 
 ### Send Tools (send_letter, send_postcard)
 
@@ -129,10 +135,10 @@ The annotations help ChatGPT "categorize and present tools appropriately" withou
 
 | Tool | readOnly | destructive | openWorld | idempotent |
 |------|----------|-------------|-----------|------------|
-| `quote_and_preview_letter` | false | false | true | true |
-| `quote_and_preview_letter_with_header_image` | false | false | true | true |
-| `quote_and_preview_letter_with_image` | false | false | true | true |
-| `quote_and_preview_postcard` | false | false | true | true |
+| `quote_and_preview_letter` | false | false | true | **false** |
+| `quote_and_preview_letter_with_header_image` | false | false | true | **false** |
+| `quote_and_preview_letter_with_image` | false | false | true | **false** |
+| `quote_and_preview_postcard` | false | false | true | **false** |
 | `send_letter` | false | false | true | true |
 | `send_postcard` | false | false | true | true |
 | `get_account_balance` | true | - | - | - |
@@ -141,6 +147,8 @@ The annotations help ChatGPT "categorize and present tools appropriately" withou
 | `get_return_address` | true | - | - | - |
 | `set_return_address` | false | false | true | true |
 | `clear_return_address` | false | true | false | true |
+
+**Note:** Quote/preview tools have `idempotentHint: false` because each call creates a new draft record (see #94).
 
 ---
 
@@ -158,3 +166,4 @@ The annotations help ChatGPT "categorize and present tools appropriately" withou
 
 - `docs/learnings/openai-app-sdk-notes.md` - Apps SDK status and action items
 - `docs/user-stories.md` - US-MCP-06: Tool Read/Write Annotations
+- `docs/user-stories.md` - US-MCP-09: Tool Idempotency Annotations

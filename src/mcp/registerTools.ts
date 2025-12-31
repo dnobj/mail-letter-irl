@@ -65,11 +65,9 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
   ];
 
   // Tools where repeated calls with same args have no additional effect
+  // NOTE: Quote/preview tools are NOT idempotent - each call creates a new draft
+  // See US-MCP-09 and docs/learnings/tool-annotation-decision.md
   const idempotentTools = [
-    'quote_and_preview_letter',
-    'quote_and_preview_letter_with_header_image',
-    'quote_and_preview_letter_with_image',
-    'quote_and_preview_postcard',
     'send_letter',           // Draft consumption makes retries safe
     'send_postcard',         // Draft consumption makes retries safe
     'set_return_address',    // Setting same address twice = no change
