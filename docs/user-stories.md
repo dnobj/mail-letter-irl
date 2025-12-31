@@ -1227,6 +1227,41 @@ macOS/Linux:
 
 ---
 
+### US-MCP-09: Tool Idempotency Annotations
+
+**As a** ChatGPT user
+**I want** tools to be correctly annotated for idempotency
+**So that** ChatGPT doesn't unnecessarily call tools multiple times
+
+**Acceptance Criteria:**
+- [ ] Quote/preview tools have `idempotentHint: false` (each call creates new draft)
+- [ ] Send tools have `idempotentHint: true` (draft consumption makes retries safe)
+- [ ] set_return_address has `idempotentHint: true` (same address = no change)
+- [ ] clear_return_address has `idempotentHint: true` (clearing twice = no effect)
+- [ ] Tests verify correct idempotency annotations for all 12 tools
+
+**Idempotency Classification:**
+| Tool | idempotentHint | Reason |
+|------|----------------|--------|
+| quote_and_preview_letter | false | Creates new draft each call |
+| quote_and_preview_letter_with_header_image | false | Creates new draft each call |
+| quote_and_preview_letter_with_image | false | Creates new draft each call |
+| quote_and_preview_postcard | false | Creates new draft each call |
+| send_letter | true | Draft consumption makes retries safe |
+| send_postcard | true | Draft consumption makes retries safe |
+| set_return_address | true | Setting same address = no change |
+| clear_return_address | true | Clearing twice = no additional effect |
+| get_account_balance | true | Read-only, always same result |
+| list_orders | true | Read-only, always same result |
+| get_order_status | true | Read-only, always same result |
+| get_return_address | true | Read-only, always same result |
+
+**Related:**
+- GitHub Issue: #94
+- docs/learnings/tool-annotation-decision.md
+
+---
+
 ## Development (DEV)
 
 ### US-DEV-01: Isolated Development Environment

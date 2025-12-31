@@ -45,11 +45,9 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }) {
   ];
 
   // Tools where repeated calls with same args have no additional effect
+  // NOTE: Quote/preview tools are NOT idempotent - each call creates a new draft
+  // See US-MCP-09 and docs/learnings/tool-annotation-decision.md
   const idempotentTools = [
-    'quote_and_preview_letter',
-    'quote_and_preview_letter_with_header_image',
-    'quote_and_preview_letter_with_image',
-    'quote_and_preview_postcard',
     'send_letter',           // Draft consumption makes retries safe
     'send_postcard',         // Draft consumption makes retries safe
     'set_return_address',    // Setting same address twice = no change
@@ -161,10 +159,10 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
     );
 
     it.each(quotePreviewTools)(
-      '$name should have idempotentHint: true (same inputs = consistent draft)',
+      '$name should have idempotentHint: false (each call creates new draft)',
       ({ name }) => {
         const annotations = buildAnnotations({ name, readOnly: false });
-        expect(annotations.idempotentHint).toBe(true);
+        expect(annotations.idempotentHint).toBe(false);
       }
     );
 
@@ -292,12 +290,12 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       expect(openWorldCount).toBe(7);
     });
 
-    it('should have 8 idempotent tools', () => {
+    it('should have 4 idempotent tools (send + address management)', () => {
       const idempotentCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.idempotentHint === true;
       }).length;
-      expect(idempotentCount).toBe(8);
+      expect(idempotentCount).toBe(4);
     });
 
     it('should have 1 destructive tool', () => {
