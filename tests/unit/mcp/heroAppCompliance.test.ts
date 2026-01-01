@@ -66,6 +66,41 @@ describe('Hero App SDK Compliance (Issue #42)', () => {
         expect(previewHtml).toBe(toolResult.previewHtml);
       });
 
+      it('should exclude base64 image data from model-facing response (Issue #96)', () => {
+        // Base64 image data (60K+ characters) must NOT go to the model
+        // This prevents 68K+ token responses that confuse ChatGPT
+        // Image data is already embedded in previewHtml for the widget
+        const toolResult = {
+          previewHtml: '<html><img src="data:image/png;base64,..."></html>',
+          inlineImageData: 'data:image/png;base64,iVBORw0KGgoAAAANSU...',  // 60K+ chars
+          headerImageData: 'data:image/png;base64,iVBORw0KGgoAAAANSU...',  // 60K+ chars
+          frontImageData: 'data:image/jpeg;base64,/9j/4AAQSkZJRg...',     // Postcard front
+          lettersRequired: 1,
+          canSendNow: true,
+          draftId: 'draft-123',
+        };
+
+        // Expected separation - all heavy data excluded
+        const {
+          previewHtml,
+          inlineImageData,
+          headerImageData,
+          frontImageData,
+          ...modelFacingData
+        } = toolResult;
+
+        // Model should NOT see any image data (massive context bloat)
+        expect(modelFacingData).not.toHaveProperty('previewHtml');
+        expect(modelFacingData).not.toHaveProperty('inlineImageData');
+        expect(modelFacingData).not.toHaveProperty('headerImageData');
+        expect(modelFacingData).not.toHaveProperty('frontImageData');
+
+        // Model SHOULD see essential fields
+        expect(modelFacingData).toHaveProperty('lettersRequired');
+        expect(modelFacingData).toHaveProperty('canSendNow');
+        expect(modelFacingData).toHaveProperty('draftId');
+      });
+
       it('should keep essential data in structuredContent', () => {
         // These fields are needed by both model and widget
         const essentialFields = ['requiredCredits', 'canSendNow', 'draftId'];

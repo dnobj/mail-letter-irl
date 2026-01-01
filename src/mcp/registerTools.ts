@@ -315,8 +315,19 @@ export async function registerLetterTools(
         // US-MCP-07: Separate heavy data (previewHtml) into _meta to reduce model context bloat.
         // The model doesn't need raw HTML; it gets the summaryText narration instead.
         const resultObj = result as Record<string, unknown>;
-        // Extract all preview HTML fields (letters have previewHtml, postcards have previewFrontHtml/previewBackHtml)
-        const { previewHtml, previewFrontHtml, previewBackHtml, ...modelFacingData } = resultObj;
+        // Extract heavy data that the model doesn't need - only the widget uses it
+        // Letters have previewHtml, postcards have previewFrontHtml/previewBackHtml
+        // Image data (base64) should ONLY go to the widget, not to the model
+        // This prevents 60K+ token responses from confusing ChatGPT
+        const {
+          previewHtml,
+          previewFrontHtml,
+          previewBackHtml,
+          inlineImageData,      // Letter inline image (base64)
+          headerImageData,      // Letter header image (base64)
+          frontImageData,       // Postcard front image (base64)
+          ...modelFacingData
+        } = resultObj;
 
         const response = {
           structuredContent: modelFacingData,  // Lean data for model (no HTML)
