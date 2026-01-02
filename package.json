@@ -18,6 +18,7 @@
     "db:migrate:rollback": "tsx db/migrate.ts rollback",
     "test:postgrid": "tsx scripts/test-postgrid.ts",
     "admin": "env $(grep -v '^#' .env.admin | xargs) tsx src/mcp/httpServer.ts",
+    "admin:dev": "env $(grep -v '^#' .env.admin.dev | xargs) tsx src/mcp/httpServer.ts",
     "test": "vitest",
     "test:run": "vitest run",
     "test:unit": "vitest run tests/unit",

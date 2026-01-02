@@ -10,3 +10,4 @@ admin-token.js
 .admin-jwt
 screenshots/
 playwright-procedures/
+.env.admin.dev

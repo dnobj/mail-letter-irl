@@ -43,6 +43,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 ## Technical Guides
 
 ### Setup & Deployment
+- [Environment Files](env-files.md) - All `.env` files explained (dev, admin, test)
 - [Database Setup](database-setup.md) - Neon PostgreSQL configuration
 - [deployment.md](deployment.md) - Railway deployment guide
 - [infrastructure.md](infrastructure.md) - Infrastructure overview
