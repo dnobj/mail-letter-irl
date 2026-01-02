@@ -1,406 +1,389 @@
-# Image Support Research
+# Image Support Documentation
 
-**Last Updated**: November 21, 2025
+**Last Updated**: January 2, 2026
 
-This document summarizes research on image support for Letter IRL, including PostGrid capabilities, ChatGPT/MCP limitations, and future enhancement options.
+This document describes Letter IRL's image support capabilities for postcards and letters, including technical specifications, processing details, and implementation notes.
 
 ## Executive Summary
 
-- **PostGrid**: Supports images in letters (via HTML) and postcards
-- **ChatGPT/MCP**: Currently **cannot** pass user-uploaded or AI-generated images to MCP tools (known issue #67)
-- **Letter IRL Decision**: Focus on text-based letters initially; add image support when ChatGPT resolves platform limitations
+Letter IRL **fully supports** images in both postcards and letters:
+
+- **Postcards**: Full-image front with custom message on back
+- **Letters with Header Image**: Image at top of letter (letterhead style)
+- **Letters with Inline Image**: Image after signature
+- **Text-Only Letters**: No images (baseline option)
+
+Images are accepted via:
+1. **File attachments** in ChatGPT (OpenAI Apps SDK `fileParams`)
+2. **Direct URLs** as fallback (publicly accessible image URLs)
+
+All images are validated, resized to print specifications (300 DPI), optimized for quality, and embedded as base64 in HTML templates sent to PostGrid.
 
 ---
 
-## 1. PostGrid Image Capabilities
+## Current Implementation
 
-### Letters
+### 1. Postcard Images
 
-**Image Support**: ✅ YES via HTML
+**Tool**: `quote_and_preview_postcard`
 
-PostGrid's letters API accepts HTML content that can include images:
+**Image Specifications**:
 
+| Property | Value |
+|----------|-------|
+| Max File Size | 10 MB |
+| Min Resolution | 100×100 pixels |
+| Recommended Resolution | 1872×1248 pixels (optimal for 6×9 at 300 DPI) |
+| Supported Formats | PNG, JPEG, WebP |
+| Output Dimensions | 2700×1800 pixels (9"×6" landscape at 300 DPI) |
+| Output DPI | 300 |
+| JPEG Quality | 85 |
+| Resize Mode | `cover` with `center` position (crops to fill) |
+| Supported Sizes | 6×9 only (currently) |
+
+**Text Specifications**:
+- Message limit: 500 characters
+- Printed on back of postcard
+
+**Processing Pipeline**:
+1. Download image from URL or file attachment
+2. Validate file size (≤10 MB)
+3. Validate format (PNG, JPEG, or WebP)
+4. Validate dimensions (≥100×100 pixels)
+5. Resize to 2700×1800 using Sharp with `cover` fit (crops and fills)
+6. Convert to JPEG at quality 85
+7. Encode as base64 data URI
+8. Embed in PostGrid HTML template
+
+**Validation Errors**:
+- File too large: "Image is too large. Please use an image under 10MB."
+- Unsupported format: "Unsupported image format. Please use PNG, JPEG, or WebP."
+- Too small: "Image is too small for print quality. Please use at least 100x100 pixels."
+
+### 2. Letter Header Images
+
+**Tool**: `quote_and_preview_letter_with_header_image`
+
+**Image Specifications**:
+
+| Property | Value |
+|----------|-------|
+| Max File Size | 5 MB |
+| Min Resolution | 100×100 pixels |
+| Supported Formats | PNG, JPEG, WebP |
+| Output Dimensions | 1950×600 pixels (6.5"×2" at 300 DPI) |
+| Output DPI | 300 |
+| JPEG Quality | 85 |
+| Resize Mode | `inside` (fits within bounds, no crop, allows upscale) |
+| Placement | Top of letter (letterhead style) |
+
+**Text Specifications**:
+- Body text limit: 1100 characters OR 17 lines
+- Sign-off required
+
+**Processing Pipeline**:
+1. Download image from URL or file attachment
+2. Validate file size (≤5 MB)
+3. Validate format (PNG, JPEG, or WebP)
+4. Validate dimensions (≥100×100 pixels)
+5. Resize to fit within 1950×600 using Sharp with `inside` fit (maintains aspect ratio)
+6. Convert to JPEG at quality 85
+7. Encode as base64 data URI
+8. Embed at top of letter HTML template
+
+**Validation Errors**:
+- File too large: "Header image is too large. Please use an image under 5MB."
+- Unsupported format: "Unsupported image format. Please use PNG, JPEG, or WebP."
+- Too small: "Image is too small for print quality. Please use at least 100x100 pixels."
+
+### 3. Letter Inline Images
+
+**Tool**: `quote_and_preview_letter_with_image`
+
+**Image Specifications**:
+
+| Property | Value |
+|----------|-------|
+| Max File Size | 5 MB |
+| Min Resolution | 100×100 pixels |
+| Supported Formats | PNG, JPEG, WebP |
+| Output Dimensions | 1950×900 pixels (6.5"×3" at 300 DPI) |
+| Output DPI | 300 |
+| JPEG Quality | 85 |
+| Resize Mode | `inside` (fits within bounds, no crop, allows upscale) |
+| Placement | After signature (inline in body) |
+
+**Text Specifications**:
+- Body text limit: 800 characters OR 12 lines
+- Sign-off required
+
+**Processing Pipeline**:
+Same as header images, but with different output dimensions (1950×900) and placement after signature.
+
+**Validation Errors**:
+- File too large: "Inline image is too large. Please use an image under 5MB."
+- Unsupported format: "Unsupported image format. Please use PNG, JPEG, or WebP."
+- Too small: "Image is too small for print quality. Please use at least 100x100 pixels."
+
+### 4. Text-Only Letters
+
+**Tool**: `quote_and_preview_letter_text_only`
+
+**Text Specifications**:
+- Body text limit: 1600 characters OR 24 lines
+- No images
+- Baseline option for pure text letters
+
+---
+
+## Technical Implementation
+
+### Image Service
+
+**File**: `src/services/imageService.ts`
+
+**Key Functions**:
+
+1. **`downloadAndProcessImage(input, size)`** - Postcard image processing
+   - Accepts OpenAI `fileParams` or URL object
+   - Returns base64 data URI with metadata
+   - Throws `ImageProcessingError` on validation failure
+
+2. **`downloadAndProcessLetterImage(input, imageType)`** - Letter image processing
+   - Accepts OpenAI `fileParams` or URL object
+   - `imageType`: `'header'` or `'inline'`
+   - Returns base64 data URI with metadata
+   - Throws `ImageProcessingError` on validation failure
+
+**Dependencies**:
+- `sharp` - Image processing library for Node.js
+
+### Schema Definitions
+
+**File**: `src/schemas.ts`
+
+**Letter Schemas**:
+- `quoteAndPreviewLetterTextOnlyInputSchema` - No image parameters
+- `quoteAndPreviewLetterWithHeaderImageInputSchema` - Header image parameters
+- `quoteAndPreviewLetterWithImageInputSchema` - Inline image parameters
+
+**Postcard Schema**:
+- `quoteAndPreviewPostcardInputSchema` - Front image parameters
+
+**Image Parameters** (all schemas with images):
 ```typescript
 {
-  html: `
-    <!DOCTYPE html>
-    <html>
-    <body>
-      <p>Dear Friend,</p>
-      <img src="https://example.com/photo.jpg" alt="Photo" />
-      <p>Hope you enjoy this photo!</p>
-    </body>
-    </html>
-  `
+  // Primary method: file attachment
+  image: {
+    download_url: string,  // OpenAI-provided download URL
+    file_id: string        // OpenAI file identifier
+  },
+  // Fallback method: direct URL
+  imageUrl?: string
 }
 ```
 
-**Methods for Including Images**:
-- `<img>` tags with **URLs to hosted images**
-- `<img>` tags with **base64 data URIs** (e.g., `data:image/jpeg;base64,/9j/4AAQ...`)
-- **Merge variables** for dynamic images: `<img src="{{imageUrl}}" />`
+### Tool Implementations
 
-**Image Processing**:
-- ❌ PostGrid does **not** document automatic image processing/optimization
-- ❌ No documented DPI conversion, resizing, or format conversion
-- ✅ PostGrid converts HTML to PDF for printing (likely 300 DPI)
-- ⚠️ **Recommendation**: Handle image processing client-side (resize, optimize, validate)
+**Files**:
+- `src/tools/quoteAndPreviewLetterTextOnly.ts`
+- `src/tools/quoteAndPreviewLetterWithHeaderImage.ts`
+- `src/tools/quoteAndPreviewLetterWithImage.ts`
+- `src/tools/quoteAndPreviewPostcard.ts`
 
-**Best Practices** (per PostGrid docs):
+Each tool:
+1. Validates input (address, text length, image if provided)
+2. Processes image if present (download, validate, resize, encode)
+3. Generates HTML preview
+4. Creates draft record in database
+5. Returns preview with base64 image (widget) or lean response (model)
+
+**Performance Optimization** (PR #97):
+- Widget displays full base64 preview
+- Model receives lean response without base64 (reduces token usage)
+- Split implemented via `_meta.openai/outputTemplate` vs. regular response
+
+---
+
+## Platform-Specific Notes
+
+### OpenAI Apps SDK / ChatGPT
+
+**File Attachments** (`fileParams`):
+- Desktop: Works reliably when app is selected first (see timing note below)
+- Mobile: **Unreliable** - ChatGPT mobile app doesn't always pass file attachments to MCP tools
+
+**Desktop Timing Requirement**:
+- **Critical**: The Letter IRL app must be **active/selected** when uploading images
+- If user uploads an image BEFORE selecting the app, ChatGPT passes a local path string instead of `fileParams`
+- **Solution**: Always select the Letter IRL app first, then upload images
+- This ensures proper file attachment handling
+
+**Workaround for Mobile** (US-POSTCARD-04):
+- Guide users to "optimize for print quality" by preprocessing image with Code Interpreter
+- ChatGPT resizes image to 1872×1248 (6×9 @ 300 DPI recommended resolution)
+- Preprocessed file CAN be passed to MCP tools on mobile
+- Framed as "print optimization" rather than technical workaround
+- Direct URL fallback (`imageUrl` parameter) always works
+
+**Workaround for AI-Generated Images**:
+- When ChatGPT generates an image using ChatGPT Images (GPT Image 1.5, released December 16, 2025), it cannot pass the image directly to MCP tools
+- **Solution**: Ask ChatGPT to modify the generated image (resize, adjust, crop, etc.)
+- Example prompts: "Resize this image to 1872×1248 pixels" or "Crop this to postcard dimensions"
+- This creates a new file reference via Code Interpreter that CAN be passed to tools
+- The modified image becomes accessible through `fileParams`
+
+**References**:
+- [OpenAI Community Discussion - Mobile Issues](https://community.openai.com/t/apps-sdk-on-mobile-devices/1366422)
+- [ChatGPT Images (GPT Image 1.5) Announcement](https://openai.com/index/new-chatgpt-images-is-here/) (December 16, 2025)
+
+### Claude Desktop / MCP Clients
+
+**Image Support**:
+- Accepts file attachments via MCP protocol
+- Base64 image responses work (1MB limit)
+- URL-based images work as fallback
+
+---
+
+## PostGrid Integration
+
+### HTML Template Method
+
+PostGrid accepts HTML content with embedded images via:
+1. **Base64 data URIs**: `<img src="data:image/jpeg;base64,..." />`
+2. **External URLs**: `<img src="https://example.com/photo.jpg" />`
+3. **Merge variables**: `<img src="{{imageUrl}}" />`
+
+Letter IRL uses **base64 data URIs** for reliability and control.
+
+### Print Specifications
+
+**PostGrid Processing**:
+- Converts HTML to PDF for printing
+- Likely renders at 300 DPI (not explicitly documented)
+- Handles CSS styling and layout
+
+**Best Practices** (from PostGrid docs):
 - "For optimal results with custom images, all replacements should have the same size"
 - Inconsistent sizes may cause unpredictable visual behavior
 
-### Postcards
+**Letter Margins**:
+- Standard US letter: 8.5"×11"
+- Side margins: 1" each
+- Content area: 6.5" wide (1950px at 300 DPI)
 
-**Support**: ✅ YES - Full support for images
-
-**API Endpoint**: `POST /postcards`
-
-**Content Methods**:
-1. **HTML templates** with front and back designs
-2. **PDF uploads** (local files or publicly accessible URLs)
-3. **Template builder** with image placeholders
-
-**Standard Size**: 6x4 inches (other sizes available)
-
-**Image Capabilities**:
-- Background images
-- Picture placeholders
-- Dynamic images via merge variables
-- HTML/CSS layouts
-
-**Key Parameters**:
-```typescript
-{
-  frontTemplate: "template_id",
-  backTemplate: "template_id",
-  to: { /* address */ },
-  from: { /* address */ },
-  mergeVariables: {
-    imageUrl: "https://example.com/photo.jpg"
-  },
-  size: "6x4"
-}
-```
+**Color vs B&W**:
+- Color letters cost more than B&W
+- Letter IRL uses color for all letters with images
 
 ---
 
-## 2. ChatGPT / MCP Limitations (November 2025)
+## Known Limitations and Future Enhancements
 
-### User-Uploaded Images: ❌ NOT Supported
+### Current Limitations
 
-**Problem**: Users cannot upload images to ChatGPT and have them passed to MCP tools.
+1. **Postcard Size**: Only 6×9 supported (PostGrid supports 6×4 and 6×11 as well)
+2. **Image Processing**: Cannot accept AI-generated images directly from ChatGPT Images (GPT Image 1.5) - see GitHub issue #67 (workaround available)
+3. **Mobile File Attachments**: Unreliable on ChatGPT mobile (workaround in place via Code Interpreter preprocessing)
+4. **Desktop Timing**: App must be selected before uploading images (local path issue)
+5. **File Size**: 5-10 MB limits (reasonable for most use cases)
 
-**What ChatGPT Sends**:
-- File IDs: `file_0000000048e0620a99b5f4a30a7da9ec`
-- Local paths: `/mnt/data/image-filename.jpg`
-- **NOT** full URLs
-- **NOT** base64 data
-- **NOT** accessible file content
+### GitHub Issue #67 (OpenAI Apps SDK)
 
-**Official Status** (GitHub Issue #67):
-- **Opened**: October 19, 2025
-- **Status**: OPEN
-- **OpenAI Response** (@katia-openai, Oct 23, 2025):
-  > "This is a known issue as there are **safety implications**. It's **on the roadmap** to find a way around this."
-- **ETA**: Not specified
+**Status**: OPEN (as of January 2026)
 
-**GitHub Issue**: https://github.com/openai/openai-apps-sdk-examples/issues/67
+**Problem**: ChatGPT cannot pass certain image types to MCP tools
 
-### DALL-E Generated Images: ❌ NOT Supported
+**Affected Scenarios**:
 
-**Problem**: ChatGPT generates images with DALL-E, but cannot pass URLs to MCP tools.
+1. **AI-Generated Images** (ChatGPT Images / GPT Image 1.5, released December 16, 2025):
+   - Relative paths: `/mnt/data/generated-image.png`
+   - NOT the `chatgpt.com/backend-api/estuary/...` URLs visible in browser
+   - Signed URLs created after tool execution, inaccessible to tools
+   - **Workaround**: Have ChatGPT modify the image (resize, crop, etc.) via Code Interpreter - creates new file reference that CAN be passed
 
-**What ChatGPT Provides**:
-- Relative paths: `/mnt/data/generated-image.png`
-- **NOT** the `chatgpt.com/backend-api/estuary/...` URLs visible in browser
-- Signed URLs are created after metadata response, inaccessible to tools
+2. **Mobile File Attachments**:
+   - File IDs: `file_0000000048e0620a99b5f4a30a7da9ec`
+   - NOT full URLs or accessible content
+   - **Workaround**: Preprocess with Code Interpreter for "print optimization" (US-POSTCARD-04)
 
-### MCP Protocol Limitations
+3. **Desktop Timing Issues**:
+   - Local paths: `/mnt/data/image-filename.jpg` if image uploaded before app selected
+   - NOT `fileParams` with download URLs
+   - **Workaround**: Select Letter IRL app first, then upload images
 
-**Tool Input Parameters**: Only JSON Schema types
-- ✅ String, number, boolean, object, array
-- ❌ **No binary data** or file objects
-- ❌ **No image type**
+**OpenAI Response** (@katia-openai, Oct 23, 2025):
+> "This is a known issue as there are **safety implications**. It's **on the roadmap** to find a way around this."
 
-**Workaround**: Accept image URLs as strings
-```typescript
-imageUrl: z.string().url().optional()
-```
+**ETA**: Not specified
 
----
+**Fallback**: Users can always upload images to external hosting (Imgur, Dropbox, etc.) and provide URL via `imageUrl` parameter
 
-## 3. What Works Today
+**References**:
+- GitHub Issue: https://github.com/openai/openai-apps-sdk-examples/issues/67
+- ChatGPT Images (GPT Image 1.5): https://openai.com/index/new-chatgpt-images-is-here/
+- TechCrunch Coverage: https://techcrunch.com/2025/12/16/openai-continues-on-its-code-red-warpath-with-new-image-generation-model/
 
-### ✅ External Image URLs as Parameters
+**Model Timeline**:
+- **DALL-E 3**: Previous external model (legacy)
+- **GPT Image 1 (GPT-4o native)**: April 2025 - first native image generation
+- **GPT Image 1.5 (ChatGPT Images)**: December 16, 2025 - current model (4x faster, better instruction-following, precise editing)
 
-MCP tools **can** accept publicly accessible image URLs:
+### Potential Future Enhancements
 
-```typescript
-// Tool schema
-const schema = z.object({
-  bodyText: z.string(),
-  imageUrl: z.string().url().optional()
-});
-
-// Tool handler
-async function handler(input, context) {
-  if (input.imageUrl) {
-    // Fetch image from URL
-    const response = await fetch(input.imageUrl);
-    const imageBuffer = await response.arrayBuffer();
-
-    // Process image (resize, optimize, etc.)
-    const processedImage = await processImage(imageBuffer);
-
-    // Embed in HTML
-    const html = generateLetterHTML(input.bodyText, processedImage);
-  }
-}
-```
-
-**User Experience**:
-- User must host image externally (Imgur, Dropbox, Google Drive, etc.)
-- User provides URL in conversation
-- Tool fetches and processes image
-
-### ✅ MCP Tools Can Return Image URLs
-
-Tools can return image URLs for display in ChatGPT:
-
-**Method 1: Text with URL**
-```typescript
-return {
-  content: [{
-    type: "text",
-    text: `Letter preview: https://example.com/preview.jpg`
-  }]
-};
-```
-
-**Method 2: Widget Display**
-```typescript
-return {
-  structuredContent: {
-    previewUrl: "https://example.com/preview.jpg",
-    requiredCredits: 5
-  },
-  _meta: {
-    "openai/outputTemplate": "ui://widget/letter-preview.html"
-  }
-};
-```
-
-Widget HTML:
-```html
-<script>
-  const data = window.openai.toolOutput;
-  document.getElementById('preview').src = data.previewUrl;
-</script>
-<img id="preview" alt="Letter Preview" />
-```
-
-**Method 3: Base64 Image (MCP Standard)**
-```typescript
-return {
-  content: [{
-    type: "image",
-    data: "base64-encoded-image-data",
-    mimeType: "image/jpeg"
-  }]
-};
-```
-
-**Limitations**:
-- 1MB size limit (Claude Desktop)
-- Mixed results with ChatGPT interpretation
-- Base64 encoding increases payload size by ~33%
+1. **Additional Postcard Sizes**: Support 6×4 and 6×11 PostGrid sizes
+2. **ChatGPT Images Integration**: Direct integration when GitHub issue #67 is resolved (seamless AI-generated image support from GPT Image 1.5)
+3. **Image URL Generation**: Built-in image hosting for user-uploaded files
+4. **Advanced Styling**: Borders, fonts, letterhead templates (HTML/CSS only, no images)
+5. **Color Options**: B&W letters for cost savings
+6. **Multi-page Letters**: Support for longer letters with images
 
 ---
 
-## 4. Current Letter IRL Decision
+## Character Limit Reference
 
-### Text-Only Letters (Phase 1)
+Quick reference for text limits per layout:
 
-**Rationale**:
-1. **Known blocker**: GitHub issue #67 open with no ETA
-2. **Scope creep**: Adding image generation would require additional APIs, storage, moderation
-3. **Core value**: Text-based letters are already valuable and complete
-4. **Clean upgrade**: Easy to add images when platform supports it
+| Layout Type | Tool | Max Characters | Max Lines |
+|-------------|------|----------------|-----------|
+| Text-only letter | `quote_and_preview_letter_text_only` | 1600 | 24 |
+| Header image letter | `quote_and_preview_letter_with_header_image` | 1100 | 17 |
+| Inline image letter | `quote_and_preview_letter_with_image` | 800 | 12 |
+| Postcard message | `quote_and_preview_postcard` | 500 | N/A |
 
-**Current Implementation**:
-- Simple HTML template with text-only content (src/services/providers/PostGridProvider.ts)
-- Address validation with PostGrid
-- Credit-based pricing
-- Order tracking
-- Job queue for reliability
-
-### When to Revisit
-
-**Monitor these signals**:
-1. GitHub issue #67 gets resolved or updated
-2. Apps SDK adds file upload support in release notes
-3. Community finds reliable workarounds
-4. User feedback specifically requests image support
-5. Competitor apps successfully implement it
+**Important**: Text limits are enforced as **continuous paragraphs**. Users should NOT add blank lines between sentences - write as flowing text.
 
 ---
 
-## 5. Future Enhancement Options
+## Testing Image Support
 
-### Option A: User-Provided Image URLs
+### Test Cases
 
-**When**: After ChatGPT supports image passing, OR as immediate workaround
+See `docs/user-stories.md` for complete acceptance criteria:
+- **US-POSTCARD-01**: Preview a Postcard
+- **US-POSTCARD-02**: Send a Postcard
+- **US-POSTCARD-03**: Postcard Image Processing
+- **US-POSTCARD-04**: Mobile Image Compatibility
+- **US-LAYOUT-01**: Preview Letter with Header Image
+- **US-LAYOUT-02**: Preview Letter with Inline Image
+- **US-LAYOUT-04**: Letter Layout Image Processing
 
-**Implementation**:
-```typescript
-// Add to tool schema
-imageUrl: z.string().url().optional()
+### Error Scenarios
 
-// Tool description update
-"Optionally provide a publicly accessible image URL to include in the letter"
-```
-
-**Image Processing** (using Sharp):
-```typescript
-import sharp from 'sharp';
-
-async function processImageForLetter(
-  imageBuffer: Buffer,
-  maxWidth: number = 600,
-  maxHeight: number = 400
-): Promise<string> {
-  const processed = await sharp(imageBuffer)
-    .resize(maxWidth, maxHeight, {
-      fit: 'inside',
-      withoutEnlargement: true
-    })
-    .jpeg({ quality: 85 })
-    .toBuffer();
-
-  return `data:image/jpeg;base64,${processed.toString('base64')}`;
-}
-```
-
-**Pros**:
-- Works with current MCP limitations
-- User has full control over image
-- No additional API costs
-
-**Cons**:
-- User must host image externally
-- Extra step in workflow
-
-### Option B: PostGrid Postcard Integration
-
-**What**: New tool for sending postcards with images
-
-**Implementation**:
-- New endpoint: `POST /postcards`
-- Front and back templates
-- Image URL parameters
-- Different pricing structure
-
-**Value Add**:
-- Visual impact (postcards are image-forward)
-- Lower cost than letters
-- Different use cases (vacation photos, announcements, etc.)
-
-**Complexity**: Medium
-- New tool and schemas
-- Template management
-- Updated pricing/credits
-
-### Option C: Letter Preview Images via Widgets
-
-**What**: Display letter preview inline in ChatGPT
-
-**Implementation**:
-1. Generate preview image of letter (HTML → PDF → PNG)
-2. Return preview URL in tool response
-3. Widget displays preview inline
-
-**Files**:
-- `ui/letter-preview.html` - Widget HTML
-- Update tool response to include preview URL
-
-**Pros**:
-- Great UX (see before sending)
-- Builds confidence
-- "Wow factor"
-
-**Cons**:
-- Requires preview generation infrastructure
-- Additional API calls to PostGrid or rendering service
-- Widget complexity
-
-### Option D: HTML/CSS Styling Enhancements
-
-**What**: Fancy text styling without images
-
-**Options**:
-- Borders and decorative CSS
-- Different fonts (handwriting, serif, sans-serif)
-- Letterhead templates
-- Holiday themes
-- Color options
-
-**Implementation**: Pure HTML/CSS in template
-```html
-<style>
-  body {
-    font-family: 'Brush Script MT', cursive;
-    border: 3px double #333;
-    padding: 2em;
-  }
-</style>
-```
-
-**Pros**:
-- No platform limitations
-- No image processing needed
-- Works today
-- Low complexity
-
-**Cons**:
-- Limited visual impact vs. photos
-- Constrained by print capabilities
+| Scenario | Expected Behavior |
+|----------|-------------------|
+| No image provided (postcard) | Error: "No image provided. Please attach an image or provide imageUrl." |
+| File too large (postcard) | Error: "Image is too large. Please use an image under 10MB." |
+| File too large (letter) | Error: "[Header/Inline] image is too large. Please use an image under 5MB." |
+| Unsupported format | Error: "Unsupported image format. Please use PNG, JPEG, or WebP." |
+| Image too small | Error: "Image is too small for print quality. Please use at least 100x100 pixels." |
+| Mobile file attachment fails | Suggest Code Interpreter preprocessing + URL fallback |
+| Download fails | Error: "Couldn't download the image. Please try again." |
 
 ---
 
-## 6. Technical Implementation Notes
-
-### If/When Adding Image Support
-
-**Required Dependencies**:
-```bash
-npm install sharp  # Image processing
-```
-
-**Image Processing Pipeline**:
-1. **Validation**: Check file type, size, dimensions
-2. **Resize**: Constrain to printable dimensions (e.g., 600x400px)
-3. **Optimize**: Compress to reduce payload size
-4. **Format**: Convert to JPEG/PNG
-5. **Embed**: Base64 encode or host on CDN
-
-**Considerations**:
-- Print resolution: 300 DPI ideal, 150 DPI minimum
-- Letter margins: Account for 1" margins on 8.5x11" paper
-- Color vs B&W: Color costs more ($1.20 vs $0.85)
-- File size: Keep under 1MB for MCP responses
-- Security: Validate image content, strip EXIF data
-
-### Credit Pricing Updates
-
-If adding images, update credit calculations:
-- Color letter: Higher cost than B&W
-- Image processing fee (if applicable)
-- Storage costs (if hosting previews)
-
----
-
-## 7. References
+## References
 
 ### PostGrid Documentation
 - **Letters API**: https://postgrid.readme.io/docs/sending-letters-using-the-api
@@ -408,19 +391,54 @@ If adding images, update credit calculations:
 - **Images in Templates**: https://postgrid.readme.io/docs/customizable-images-and-backgrounds-in-templates
 - **Design Guidelines**: https://postgrid.readme.io/docs/design-and-templates
 
-### ChatGPT / OpenAI
-- **GitHub Issue #67**: https://github.com/openai/openai-apps-sdk-examples/issues/67
+### OpenAI / ChatGPT
+- **GitHub Issue #67** (Image Passing): https://github.com/openai/openai-apps-sdk-examples/issues/67
 - **Apps SDK Widgets**: https://developers.openai.com/apps-sdk/build/chatgpt-ui
 - **MCP Server Guide**: https://developers.openai.com/apps-sdk/build/mcp-server
 - **Apps SDK Examples**: https://github.com/openai/openai-apps-sdk-examples
+- **Mobile Issues Discussion**: https://community.openai.com/t/apps-sdk-on-mobile-devices/1366422
 
 ### Model Context Protocol (MCP)
 - **Tools Specification**: https://modelcontextprotocol.io/specification/2025-06-18/server/tools
 - **MCP Discussions**: https://github.com/orgs/modelcontextprotocol/discussions
 
+### Internal Documentation
+- `docs/user-stories.md` - Acceptance criteria for all image features
+- `docs/status.md` - Current implementation status
+- `docs/ui-widgets.md` - Widget rendering with images
+- `src/services/imageService.ts` - Image processing implementation
+- `src/schemas.ts` - Tool schemas with image parameters
+
 ---
 
-## 8. Changelog
+## Changelog
+
+**January 2, 2026** (Second Update)
+- Corrected OpenAI image generation model information:
+  - Updated "GPT-4o native image generation" → "ChatGPT Images (GPT Image 1.5)"
+  - Added model timeline: DALL-E 3 → GPT Image 1 (April 2025) → GPT Image 1.5 (December 16, 2025)
+  - Updated all references to current model (GPT Image 1.5)
+  - Added TechCrunch reference and OpenAI announcement link for GPT Image 1.5
+  - Noted key features: 4x faster, better instruction-following, precise editing
+- Core issue and workaround remain unchanged
+
+**January 2, 2026** (First Update)
+- Updated terminology: "DALL-E" → "GPT-4o native image generation" (launched March 2025)
+- Added desktop timing requirement: app must be selected before uploading images
+- Added workaround for AI-generated images: modify via Code Interpreter to create accessible file reference
+- Updated GitHub issue #67 section with three affected scenarios (AI-generated, mobile, desktop timing)
+- Updated status date to January 2026
+
+**January 1, 2026**
+- **MAJOR UPDATE**: Rewrote document to reflect fully implemented image support
+- Changed from "future enhancement" to "current implementation"
+- Added comprehensive specifications for all three image types (postcard, header, inline)
+- Added technical implementation details from `imageService.ts`
+- Added character limit reference table
+- Added mobile compatibility notes (US-POSTCARD-04)
+- Preserved GitHub issue #67 reference material
+- Preserved PostGrid integration notes
+- Updated all sections to reflect production status
 
 **November 21, 2025**
 - Initial research and documentation
