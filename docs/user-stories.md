@@ -1262,6 +1262,42 @@ macOS/Linux:
 
 ---
 
+### US-MCP-10: Tracking Support Transparency
+
+**As a** ChatGPT user (David, Marcus, Eleanor)
+**I want** the send response to indicate tracking capabilities
+**So that** the AI doesn't over-promise delivery tracking features
+
+**Background:**
+ChatGPT offered "Track it until delivery" to a user after sending a postcard, but Letter IRL only has estimated delivery status from PostGrid. This field lets AI models accurately communicate tracking limitations without hardcoding negative text responses.
+
+**Acceptance Criteria:**
+- [ ] `send_letter` response includes `trackingSupport` field
+- [ ] `send_postcard` response includes `trackingSupport` field
+- [ ] Field value is `"estimated_only"` (current capability)
+- [ ] Schema description explains enum values
+- [ ] Field present in both normal sends and idempotent retries
+- [ ] Tests verify trackingSupport field is returned
+
+**Field Definition:**
+| Value | Meaning |
+|-------|---------|
+| `none` | No tracking available |
+| `estimated_only` | Status updates via periodic PostGrid sync, delivery is ESTIMATED |
+| `carrier_tracking` | Real-time carrier tracking with confirmed delivery (future) |
+
+**Current Value:** `"estimated_only"`
+- PostGrid syncs status every 6 hours via `statusSyncService.ts`
+- "Delivered" status is ESTIMATED based on USPS mail timing
+- No USPS tracking numbers or confirmed delivery scans
+
+**Related:**
+- GitHub Issue: #98
+- US-LETTER-04: Check Letter Status
+- US-LETTER-07: Letter Status Sync from Providers
+
+---
+
 ## Development (DEV)
 
 ### US-DEV-01: Isolated Development Environment
