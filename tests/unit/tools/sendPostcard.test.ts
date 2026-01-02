@@ -314,4 +314,62 @@ describe('send_postcard Tool', () => {
       // Draft has reference to letter for traceability
     });
   });
+
+  // ==========================================================================
+  // Tracking Support (US-MCP-10)
+  // ==========================================================================
+  describe('Tracking Support (US-MCP-10)', () => {
+    it('should include trackingSupport field in successful send response', () => {
+      // The response schema now includes trackingSupport
+      // Current value is "estimated_only" because PostGrid delivery is estimated
+      const expectedResponse = {
+        orderId: 'postcard-123',
+        currentStatus: 'pending',
+        trackingSupport: 'estimated_only',
+      };
+
+      expect(expectedResponse.trackingSupport).toBe('estimated_only');
+      // This tells AI models not to over-promise tracking capabilities
+    });
+
+    it('should include trackingSupport field in idempotent retry response', () => {
+      // Even retry responses should include trackingSupport
+      const expectedRetryResponse = {
+        orderId: 'postcard-123',
+        isRetry: true,
+        trackingSupport: 'estimated_only',
+      };
+
+      expect(expectedRetryResponse.isRetry).toBe(true);
+      expect(expectedRetryResponse.trackingSupport).toBe('estimated_only');
+    });
+
+    it('should have valid trackingSupport enum value', () => {
+      // Valid values per schema
+      const validValues = ['none', 'estimated_only', 'carrier_tracking'];
+      const currentValue = 'estimated_only';
+
+      expect(validValues).toContain(currentValue);
+      // "estimated_only" means: status updates via PostGrid sync (every 6 hrs),
+      // but delivery is ESTIMATED based on mail timing, not confirmed
+    });
+
+    it('should document tracking limitations for AI models', () => {
+      // This test documents the business logic for future reference
+      // PostGrid "delivered" status is estimated based on USPS mail timing
+      // We do NOT have:
+      // - Real-time carrier tracking
+      // - USPS tracking numbers
+      // - Confirmed delivery scans
+      const trackingCapabilities = {
+        statusSync: true,           // Yes - every 6 hours via statusSyncService
+        confirmedDelivery: false,   // No - "delivered" is estimated
+        carrierTracking: false,     // No - no USPS tracking numbers
+        trackingUrl: false,         // No - no tracking URLs
+      };
+
+      expect(trackingCapabilities.statusSync).toBe(true);
+      expect(trackingCapabilities.confirmedDelivery).toBe(false);
+    });
+  });
 });

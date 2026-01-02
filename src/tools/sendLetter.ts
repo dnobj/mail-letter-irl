@@ -32,6 +32,8 @@ interface SendLetterOutput {
   // Suggestion to save return address (only shown if user has no saved address)
   suggestSaveReturnAddress?: boolean;
   saveReturnAddressNote?: string;
+  // Tracking capability (US-MCP-10) - tells AI what tracking is available
+  trackingSupport: "none" | "estimated_only" | "carrier_tracking";
 }
 
 
@@ -144,7 +146,8 @@ async function handler(
           state: recipient.state
         },
         lettersRemaining: Math.floor(context.user.creditsRemaining / 2),
-        isRetry: true
+        isRetry: true,
+        trackingSupport: "estimated_only"
       };
     }
   }
@@ -337,7 +340,8 @@ async function handler(
     previewFirstPageHtml: orderRecord.previewFirstPageHtml,
     isRetry: false,
     suggestSaveReturnAddress,
-    saveReturnAddressNote
+    saveReturnAddressNote,
+    trackingSupport: "estimated_only"
   };
 }
 

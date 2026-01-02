@@ -194,7 +194,12 @@ export const sendLetterOutputSchema: JsonSchema = {
     },
     lettersRemaining: { type: "number", description: "Number of letters remaining in user's balance" },
     previewFirstPageHtml: { type: "string" },
-    isRetry: { type: "boolean", description: "True if this was an idempotent retry (draft already consumed)" }
+    isRetry: { type: "boolean", description: "True if this was an idempotent retry (draft already consumed)" },
+    trackingSupport: {
+      type: "string",
+      enum: ["none", "estimated_only", "carrier_tracking"],
+      description: "Tracking capability level. 'estimated_only' = periodic status updates available but delivery is estimated (not confirmed). Use get_order_status to check current status."
+    }
   }
 };
 
@@ -413,6 +418,11 @@ export const sendPostcardOutputSchema: JsonSchema = {
     lettersRemaining: { type: "number", description: "Number of letters remaining in user's balance" },
     previewFrontHtml: { type: "string" },
     previewBackHtml: { type: "string" },
-    isRetry: { type: "boolean", description: "True if this was an idempotent retry (draft already consumed)" }
+    isRetry: { type: "boolean", description: "True if this was an idempotent retry (draft already consumed)" },
+    trackingSupport: {
+      type: "string",
+      enum: ["none", "estimated_only", "carrier_tracking"],
+      description: "Tracking capability level. 'estimated_only' = periodic status updates available but delivery is estimated (not confirmed). Use get_order_status to check current status."
+    }
   }
 };
