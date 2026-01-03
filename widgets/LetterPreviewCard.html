@@ -520,10 +520,13 @@
         `;
 
         // Header image (if applicable)
-        if (layoutType === 'header_image' && state.headerImageData) {
+        // Prefer the small preview image (headerImagePreview) for faster widget loading
+        // Fall back to full-quality headerImageData if preview not available
+        const headerImage = state.headerImagePreview || state.headerImageData;
+        if (layoutType === 'header_image' && headerImage) {
           mockupHtml += `
             <div class="header-image-wrapper">
-              <img src="${state.headerImageData}" alt="Header">
+              <img src="${headerImage}" alt="Header">
             </div>
           `;
         }
@@ -537,10 +540,13 @@
         }
 
         // Inline image (if applicable)
-        if (layoutType === 'inline_image' && state.inlineImageData) {
+        // Prefer the small preview image (inlineImagePreview) for faster widget loading
+        // Fall back to full-quality inlineImageData if preview not available
+        const inlineImage = state.inlineImagePreview || state.inlineImageData;
+        if (layoutType === 'inline_image' && inlineImage) {
           mockupHtml += `
             <div class="inline-image-wrapper">
-              <img src="${state.inlineImageData}" alt="Photo">
+              <img src="${inlineImage}" alt="Photo">
             </div>
           `;
         }

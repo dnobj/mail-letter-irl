@@ -20,7 +20,7 @@ import {
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
-import { downloadAndProcessLetterImage, ImageProcessingError } from "../services/imageService.js";
+import { downloadAndProcessLetterImageWithPreview, ImageProcessingError } from "../services/imageService.js";
 import type { ImageFileParam } from "../services/types.js";
 
 // ============================================================================
@@ -102,8 +102,9 @@ async function handler(
     );
   }
 
-  // Process the image
+  // Process the image (generates both full-quality and preview versions)
   let inlineImageData: string;
+  let inlineImagePreview: string;
   try {
     context.logger.info(
       {
@@ -113,18 +114,20 @@ async function handler(
       "Processing image"
     );
 
-    const processed = await downloadAndProcessLetterImage(
+    const processed = await downloadAndProcessLetterImageWithPreview(
       { url: imageSource },
       'inline'
     );
     inlineImageData = processed.base64DataUri;
+    inlineImagePreview = processed.previewDataUri;
 
     context.logger.info(
       {
         correlationId: context.correlationId,
         event: "quote.letter.image.processed",
         originalSize: `${processed.originalWidth}x${processed.originalHeight}`,
-        processedSize: `${processed.processedWidth}x${processed.processedHeight}`
+        processedSize: `${processed.processedWidth}x${processed.processedHeight}`,
+        previewSize: `${Math.round(inlineImagePreview.length / 1024)}KB`
       },
       "Image processed successfully"
     );
@@ -168,6 +171,7 @@ async function handler(
     signOff: input.signOff,
     layoutType,
     inlineImageData,
+    inlineImagePreview,  // Small preview for ChatGPT widget
     inlineImageUrl: imageSource,
     usedSavedReturnAddress,
     savedReturnAddressNote,

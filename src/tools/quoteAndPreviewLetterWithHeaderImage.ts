@@ -20,7 +20,7 @@ import {
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
-import { downloadAndProcessLetterImage, ImageProcessingError } from "../services/imageService.js";
+import { downloadAndProcessLetterImageWithPreview, ImageProcessingError } from "../services/imageService.js";
 import type { ImageFileParam } from "../services/types.js";
 
 // ============================================================================
@@ -102,8 +102,9 @@ async function handler(
     );
   }
 
-  // Process the image
+  // Process the image (generates both full-quality and preview versions)
   let headerImageData: string;
+  let headerImagePreview: string;
   try {
     context.logger.info(
       {
@@ -113,18 +114,20 @@ async function handler(
       "Processing header image"
     );
 
-    const processed = await downloadAndProcessLetterImage(
+    const processed = await downloadAndProcessLetterImageWithPreview(
       { url: imageSource },
       'header'
     );
     headerImageData = processed.base64DataUri;
+    headerImagePreview = processed.previewDataUri;
 
     context.logger.info(
       {
         correlationId: context.correlationId,
         event: "quote.letter.header_image.processed",
         originalSize: `${processed.originalWidth}x${processed.originalHeight}`,
-        processedSize: `${processed.processedWidth}x${processed.processedHeight}`
+        processedSize: `${processed.processedWidth}x${processed.processedHeight}`,
+        previewSize: `${Math.round(headerImagePreview.length / 1024)}KB`
       },
       "Header image processed successfully"
     );
@@ -168,6 +171,7 @@ async function handler(
     signOff: input.signOff,
     layoutType,
     headerImageData,
+    headerImagePreview,  // Small preview for ChatGPT widget
     headerImageUrl: imageSource,
     usedSavedReturnAddress,
     savedReturnAddressNote,

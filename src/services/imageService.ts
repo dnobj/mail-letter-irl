@@ -128,6 +128,19 @@ export async function downloadAndProcessImage(
 }
 
 // ============================================================================
+// Preview Image Configuration (for ChatGPT widget)
+// ============================================================================
+
+// Preview images are smaller for fast widget loading in ChatGPT
+// ChatGPT filters out large base64 data from tool outputs
+const PREVIEW_CONFIG = {
+  // Small enough to pass through ChatGPT's widget data filtering
+  maxWidth: 400,
+  maxHeight: 300,
+  jpegQuality: 60,  // Lower quality for smaller size
+} as const;
+
+// ============================================================================
 // Letter Image Processing (US-LAYOUT-04)
 // ============================================================================
 
@@ -172,6 +185,72 @@ export async function downloadAndProcessLetterImage(
 
   return {
     base64DataUri: dataUri,
+    originalWidth: metadata.width,
+    originalHeight: metadata.height,
+    processedWidth: processedMetadata.width || targetDimensions.width,
+    processedHeight: processedMetadata.height || targetDimensions.height,
+  };
+}
+
+/**
+ * Result type for letter image processing with preview
+ */
+export interface ProcessedImageWithPreview extends ProcessedImage {
+  /** Small preview image for ChatGPT widget display (~20-50KB) */
+  previewDataUri: string;
+}
+
+/**
+ * Download and process an image for letter layouts, generating both:
+ * - Full quality image for PostGrid printing
+ * - Smaller preview image for ChatGPT widget display
+ *
+ * @param input - OpenAI file parameter with download_url, or object with url string
+ * @param imageType - 'header' for top of letter, 'inline' for after signature
+ * @returns Processed images (full + preview) with metadata
+ * @throws ImageProcessingError with user-friendly message
+ */
+export async function downloadAndProcessLetterImageWithPreview(
+  input: ImageInput,
+  imageType: LetterImageType
+): Promise<ProcessedImageWithPreview> {
+  const download_url = 'download_url' in input ? input.download_url : input.url;
+  const targetDimensions = LETTER_IMAGE_CONFIG.sizes[imageType];
+
+  // 1. Download image (with letter-specific size limit)
+  const buffer = await downloadLetterImage(download_url, imageType);
+
+  // 2. Get metadata and validate
+  const metadata = await getImageMetadata(buffer);
+  validateDimensions(metadata.width, metadata.height);
+
+  // 3. Create full-quality image for PostGrid
+  const processed = await sharp(buffer)
+    .resize(targetDimensions.width, targetDimensions.height, {
+      fit: 'inside',
+      withoutEnlargement: false,
+    })
+    .jpeg({ quality: LETTER_IMAGE_CONFIG.jpegQuality })
+    .toBuffer();
+
+  const processedMetadata = await sharp(processed).metadata();
+
+  // 4. Create small preview for ChatGPT widget
+  const preview = await sharp(buffer)
+    .resize(PREVIEW_CONFIG.maxWidth, PREVIEW_CONFIG.maxHeight, {
+      fit: 'inside',
+      withoutEnlargement: true,  // Don't upscale small images for preview
+    })
+    .jpeg({ quality: PREVIEW_CONFIG.jpegQuality })
+    .toBuffer();
+
+  // 5. Convert both to base64 data URIs
+  const base64Full = processed.toString('base64');
+  const base64Preview = preview.toString('base64');
+
+  return {
+    base64DataUri: `data:image/jpeg;base64,${base64Full}`,
+    previewDataUri: `data:image/jpeg;base64,${base64Preview}`,
     originalWidth: metadata.width,
     originalHeight: metadata.height,
     processedWidth: processedMetadata.width || targetDimensions.width,

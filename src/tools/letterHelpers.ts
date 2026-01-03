@@ -51,7 +51,9 @@ export interface LetterQuoteOutput {
   draftExpiresAt: string;
   layoutType: LetterLayoutType;
   headerImageData?: string;
+  headerImagePreview?: string;  // Small preview for ChatGPT widget
   inlineImageData?: string;
+  inlineImagePreview?: string;  // Small preview for ChatGPT widget
   usedSavedReturnAddress?: boolean;
   savedReturnAddressNote?: string;
   senderAddressValidation?: {
@@ -443,8 +445,10 @@ export interface CreateLetterDraftParams {
   signOff: string;
   layoutType: LetterLayoutType;
   headerImageData?: string;
+  headerImagePreview?: string;  // Small preview for ChatGPT widget
   headerImageUrl?: string;
   inlineImageData?: string;
+  inlineImagePreview?: string;  // Small preview for ChatGPT widget
   inlineImageUrl?: string;
   senderValidation?: AddressValidationResult;
   recipientValidation?: AddressValidationResult;
@@ -463,8 +467,10 @@ export async function createLetterDraftAndBuildOutput(
     signOff,
     layoutType,
     headerImageData,
+    headerImagePreview,
     headerImageUrl,
     inlineImageData,
+    inlineImagePreview,
     inlineImageUrl,
     senderValidation,
     recipientValidation,
@@ -532,6 +538,9 @@ export async function createLetterDraftAndBuildOutput(
   );
 
   // Build output
+  // Note: We pass the small preview images (headerImagePreview, inlineImagePreview)
+  // for ChatGPT widget display. The full-quality images are stored in the draft
+  // and used when sending to PostGrid.
   const output: LetterQuoteOutput = {
     previewHtml,
     lettersRequired,
@@ -542,8 +551,12 @@ export async function createLetterDraftAndBuildOutput(
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
     layoutType,
+    // Full-quality images (large, may be filtered by ChatGPT)
     headerImageData,
     inlineImageData,
+    // Small preview images for ChatGPT widget (~20-50KB)
+    headerImagePreview,
+    inlineImagePreview,
     usedSavedReturnAddress: usedSavedReturnAddress || undefined,
     savedReturnAddressNote,
   };
