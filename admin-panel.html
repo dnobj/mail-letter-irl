@@ -653,6 +653,19 @@
             <div id="stats-container" class="stats-grid">
                 <div class="loading"><div class="spinner"></div>Loading dashboard...</div>
             </div>
+
+            <!-- Status Sync Card -->
+            <div class="card" style="margin-top: 20px;">
+                <h3>Status Sync</h3>
+                <p style="color: #888; margin-bottom: 15px;">
+                    Sync letter statuses from PostGrid (normally runs every 6 hours automatically)
+                </p>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <button class="btn" onclick="previewStatusSync()">Preview Changes</button>
+                    <button class="btn" style="background: #e94560;" onclick="runStatusSync()">Run Sync Now</button>
+                </div>
+                <div id="status-sync-result"></div>
+            </div>
         </div>
 
         <!-- Users Section -->
@@ -1093,6 +1106,74 @@
             } catch (e) {
                 alert('Error: ' + e.message);
             }
+        }
+
+        // Status Sync
+        async function previewStatusSync() {
+            showLoading('status-sync-result');
+            try {
+                const data = await api('/api/admin/sync/statuses?maxAge=30');
+                renderSyncResult(data, true);
+            } catch (e) {
+                showError('status-sync-result', e.message);
+            }
+        }
+
+        async function runStatusSync() {
+            if (!confirm('Run status sync now? This will update letter statuses from PostGrid.')) return;
+            showLoading('status-sync-result');
+            try {
+                const data = await api('/api/admin/sync/statuses', 'POST');
+                renderSyncResult(data, false);
+            } catch (e) {
+                showError('status-sync-result', e.message);
+            }
+        }
+
+        function renderSyncResult(data, isDryRun) {
+            const el = document.getElementById('status-sync-result');
+            const modeLabel = isDryRun ? 'Preview (Dry Run)' : 'Applied';
+            const updateLabel = isDryRun ? 'Would update' : 'Updated';
+
+            let html = `
+                <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 10px;">
+                    <div style="margin-bottom: 10px; color: ${isDryRun ? '#ffc107' : '#28a745'}; font-weight: bold;">
+                        ${modeLabel}
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px;">
+                        <div><span style="color: #888;">Checked:</span> ${data.checked}</div>
+                        <div><span style="color: #888;">${updateLabel}:</span> ${data.wouldUpdate ?? data.updated ?? 0}</div>
+                        <div><span style="color: #888;">Errors:</span> <span style="color: ${data.errors > 0 ? '#e94560' : 'inherit'}">${data.errors}</span></div>
+                    </div>
+            `;
+
+            if (data.details && data.details.length > 0) {
+                const changes = data.details.filter(d => d.oldStatus !== d.newStatus || d.error);
+                if (changes.length > 0) {
+                    html += `<div style="border-top: 1px solid #333; padding-top: 10px;">`;
+                    html += `<div style="color: #888; margin-bottom: 8px;">Details:</div>`;
+                    changes.slice(0, 20).forEach(d => {
+                        if (d.error) {
+                            html += `<div style="color: #e94560; font-size: 12px; margin-bottom: 4px;">
+                                ${d.letterId.substring(0, 8)}...: ${d.error}
+                            </div>`;
+                        } else {
+                            html += `<div style="font-size: 12px; margin-bottom: 4px;">
+                                ${d.letterId.substring(0, 8)}...:
+                                <span style="color: #888;">${d.oldStatus}</span> →
+                                <span style="color: #28a745;">${d.newStatus}</span>
+                            </div>`;
+                        }
+                    });
+                    if (changes.length > 20) {
+                        html += `<div style="color: #888; font-size: 12px;">...and ${changes.length - 20} more</div>`;
+                    }
+                    html += `</div>`;
+                }
+            }
+
+            html += `</div>`;
+            el.innerHTML = html;
         }
 
         // Letter Balance (internal: 2 credits = 1 letter)
