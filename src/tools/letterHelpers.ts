@@ -498,14 +498,16 @@ export async function createLetterDraftAndBuildOutput(
   );
 
   // Generate preview HTML
+  // Use preview images (compressed) for the HTML to reduce payload size
+  // Full-quality images are stored separately in the draft for PostGrid
   const previewHtml = renderLayoutPreviewHtml({
     sender,
     recipient,
     bodyText,
     signOff,
     layoutType,
-    headerImageData,
-    inlineImageData,
+    headerImageData: headerImagePreview || headerImageData,
+    inlineImageData: inlineImagePreview || inlineImageData,
   });
 
   // Create draft
