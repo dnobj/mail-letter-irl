@@ -103,14 +103,14 @@ The Dashboard shows status badges in the Letters section.
 | DB Status | Display Label | Badge Color | Notes |
 |-----------|---------------|-------------|-------|
 | `draft` | "Draft" | Gray | Rarely seen |
-| `queued` | "Processing" | Yellow | Rarely seen (brief) |
+| `queued` | "Queued" | Yellow | Rarely seen (brief) |
 | `processing` | "Processing" | Yellow | Rarely seen (brief) |
-| `accepted` | "Sent" | Green | **Current final success state** |
+| `accepted` | "Accepted" | Blue | PostGrid accepted order |
 | `sent` | "Sent" | Green | Legacy, same as accepted |
-| `printing` | "Printing" | Blue | Future |
-| `in_transit` | "In Transit" | Blue | Future |
-| `delivered` | "Delivered" | Green | Future |
-| `returned` | "Returned" | Orange | Future |
+| `printing` | "Printing" | Blue | Future (with webhooks) |
+| `in_transit` | "In Transit" | Blue | In postal system |
+| `delivered` | "Est. Delivered" | Green | **Estimated** - not confirmed (see US-MCP-10) |
+| `returned` | "Returned" | Orange | Returned to sender |
 | `failed` | "Failed" | Red | |
 | `cancelled` | "Cancelled" | Gray | |
 
@@ -188,12 +188,21 @@ When displaying status timeline to users:
 |-------|---------------|
 | Order created | "Order placed" |
 | PostGrid accepts | "Accepted by print facility" |
-| Printing starts | "Being printed" (future) |
-| In mail | "In the mail" (future) |
-| Delivered | "Delivered" (future) |
-| Returned | "Returned to sender" (future) |
+| Printing starts | "Being printed" |
+| In mail | "In transit via USPS" |
+| Delivered | "Est. delivered (based on mail timing)" |
+| Returned | "Returned to sender" |
 | Failed | "Processing failed" |
 | Cancelled | "Cancelled" |
+
+### Delivery Status Disclaimer
+
+**Important:** PostGrid's "delivered" status is **estimated** based on typical USPS mail timing, NOT confirmed delivery. We do not have:
+- Real-time carrier tracking
+- USPS tracking numbers
+- Confirmed delivery scans
+
+The MCP API returns `trackingSupport: "estimated_only"` to communicate this to AI models. See US-MCP-10 for details.
 
 ---
 
