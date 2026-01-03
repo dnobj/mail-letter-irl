@@ -177,9 +177,9 @@ export function validateCharacterLimit(
   const charsValid = totalChars <= charLimit;
 
   // Estimate lines for combined content (body + sign-off with spacing)
-  // Trim trailing newlines from body to avoid stacking with the \n\n separator
+  // Trim trailing newlines from body to avoid stacking with the \n separator
   const trimmedBody = bodyText.replace(/\n+$/, '');
-  const combinedText = signOff ? `${trimmedBody}\n\n${signOff}` : trimmedBody;
+  const combinedText = signOff ? `${trimmedBody}\n${signOff}` : trimmedBody;
   const totalLines = estimateLines(combinedText);
   const lineLimit = LAYOUT_LINE_LIMITS[layoutType];
   const linesValid = totalLines <= lineLimit;
@@ -254,6 +254,9 @@ export function renderLayoutPreviewHtml(input: LayoutPreviewInput): string {
  * Render text-only layout preview
  */
 function renderTextOnlyPreview(input: LayoutPreviewInput): string {
+  // Trim trailing newlines from body text to prevent gap before sign-off
+  const trimmedBodyText = input.bodyText.replace(/\n+$/, '');
+
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -263,7 +266,8 @@ function renderTextOnlyPreview(input: LayoutPreviewInput): string {
       font-family: 'Times New Roman', serif;
       font-size: 12pt;
       line-height: 1.6;
-      margin: 0.5in;
+      /* 12% margin matches PostGrid's 1in on 8.5in page width */
+      margin: 9% 12%;
       color: #000;
     }
     .sender-address {
@@ -275,7 +279,6 @@ function renderTextOnlyPreview(input: LayoutPreviewInput): string {
     }
     .sign-off {
       white-space: pre-wrap;
-      margin-top: 1em;
     }
   </style>
 </head>
@@ -285,7 +288,7 @@ function renderTextOnlyPreview(input: LayoutPreviewInput): string {
     ${escapeHtml(input.sender.addressLine1)}${input.sender.addressLine2 ? '<br>' + escapeHtml(input.sender.addressLine2) : ''}<br>
     ${escapeHtml(input.sender.city)}, ${escapeHtml(input.sender.state)} ${escapeHtml(input.sender.postalCode)}
   </div>
-  <div class="letter-body">${escapeHtml(input.bodyText)}</div>
+  <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
   <div class="sign-off">${escapeHtml(input.signOff)}</div>
 </body>
 </html>`;
@@ -299,6 +302,9 @@ function renderHeaderImagePreview(input: LayoutPreviewInput): string {
     ? `<div class="header-image"><img src="${input.headerImageData}" alt="Header" style="width: 100%; max-height: 2in; object-fit: contain;"></div>`
     : '';
 
+  // Trim trailing newlines from body text to prevent gap before sign-off
+  const trimmedBodyText = input.bodyText.replace(/\n+$/, '');
+
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -308,7 +314,8 @@ function renderHeaderImagePreview(input: LayoutPreviewInput): string {
       font-family: 'Times New Roman', serif;
       font-size: 12pt;
       line-height: 1.6;
-      margin: 0.5in;
+      /* 12% margin matches PostGrid's 1in on 8.5in page width */
+      margin: 9% 12%;
       color: #000;
     }
     .header-image {
@@ -328,7 +335,6 @@ function renderHeaderImagePreview(input: LayoutPreviewInput): string {
     }
     .sign-off {
       white-space: pre-wrap;
-      margin-top: 1em;
     }
   </style>
 </head>
@@ -339,7 +345,7 @@ function renderHeaderImagePreview(input: LayoutPreviewInput): string {
     ${escapeHtml(input.sender.addressLine1)}${input.sender.addressLine2 ? '<br>' + escapeHtml(input.sender.addressLine2) : ''}<br>
     ${escapeHtml(input.sender.city)}, ${escapeHtml(input.sender.state)} ${escapeHtml(input.sender.postalCode)}
   </div>
-  <div class="letter-body">${escapeHtml(input.bodyText)}</div>
+  <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
   <div class="sign-off">${escapeHtml(input.signOff)}</div>
 </body>
 </html>`;
@@ -353,6 +359,10 @@ function renderInlineImagePreview(input: LayoutPreviewInput): string {
     ? `<div class="inline-image"><img src="${input.inlineImageData}" alt="Photo" style="max-width: 100%; max-height: 3in; object-fit: contain;"></div>`
     : '';
 
+  // Trim trailing newlines from body text to prevent gap before sign-off
+  // (matches PostGrid behavior which trims the combined message)
+  const trimmedBodyText = input.bodyText.replace(/\n+$/, '');
+
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -362,7 +372,8 @@ function renderInlineImagePreview(input: LayoutPreviewInput): string {
       font-family: 'Times New Roman', serif;
       font-size: 12pt;
       line-height: 1.6;
-      margin: 0.5in;
+      /* 12% margin matches PostGrid's 1in on 8.5in page width */
+      margin: 9% 12%;
       color: #000;
     }
     .sender-address {
@@ -374,7 +385,6 @@ function renderInlineImagePreview(input: LayoutPreviewInput): string {
     }
     .sign-off {
       white-space: pre-wrap;
-      margin-top: 1em;
     }
     .inline-image {
       margin-top: 1em;
@@ -392,7 +402,7 @@ function renderInlineImagePreview(input: LayoutPreviewInput): string {
     ${escapeHtml(input.sender.addressLine1)}${input.sender.addressLine2 ? '<br>' + escapeHtml(input.sender.addressLine2) : ''}<br>
     ${escapeHtml(input.sender.city)}, ${escapeHtml(input.sender.state)} ${escapeHtml(input.sender.postalCode)}
   </div>
-  <div class="letter-body">${escapeHtml(input.bodyText)}</div>
+  <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
   <div class="sign-off">${escapeHtml(input.signOff)}</div>
   ${inlineImageHtml}
 </body>

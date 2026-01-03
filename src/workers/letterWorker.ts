@@ -116,7 +116,7 @@ async function processLetterJob(jobs: any[]): Promise<void> {
           postalCode: content.sender.postalCode || '',
           country: normalizeCountryToUS(content.sender.country)
         } : undefined,
-        message: `${content.bodyText}\n\n${content.signOff || ''}`.trim(),
+        message: `${content.bodyText}\n${content.signOff || ''}`.trim(),
         // Enable color for layouts with images (US-LAYOUT-01, US-LAYOUT-02)
         color: content.layoutType !== 'text_only' && (!!content.headerImageData || !!content.inlineImageData),
         doubleSided: false,
