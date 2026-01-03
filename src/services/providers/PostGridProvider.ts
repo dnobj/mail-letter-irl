@@ -571,6 +571,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       // Handed to USPS / in postal system
       'mailed': 'in_transit',
       'in_transit': 'in_transit',
+      'processed_for_delivery': 'in_transit',  // PostGrid test mode status
       // Terminal statuses
       'delivered': 'delivered',
       'completed': 'delivered',  // PostGrid test mode uses "completed" instead of "delivered"
@@ -592,6 +593,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'printed': 'Letter has been printed',
       'mailed': 'Letter has been handed to postal service',
       'in_transit': 'Letter is in transit to recipient',
+      'processed_for_delivery': 'Letter is in transit to recipient',  // PostGrid test mode
       'delivered': 'Letter has been delivered',
       'completed': 'Letter has been delivered',  // PostGrid test mode
       'returned': 'Letter was returned to sender',
