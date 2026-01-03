@@ -143,10 +143,12 @@ PostGrid has its own status lifecycle. This mapping is used by `statusSyncServic
 ### PostGrid Lifecycle
 
 ```
-ready → rendered → processed → printed → mailed → in_transit → delivered (live mode)
-                                                              → completed (test mode)
-                                                              → returned
-                                       → canceled
+Live mode:  ready → rendered → processed → printed → mailed → in_transit → delivered
+                                                                          → returned
+                                                   → canceled
+
+Test mode:  ready → rendered → processed → printed → processed_for_delivery → completed
+                                                   → canceled
 ```
 
 ### Test Mode vs Live Mode
@@ -167,6 +169,7 @@ Both are mapped to our `delivered` status.
 | `printed` | `printing` | Printed, awaiting mail |
 | `mailed` | `in_transit` | Handed to USPS |
 | `in_transit` | `in_transit` | In postal system |
+| `processed_for_delivery` | `in_transit` | In transit - test mode |
 | `delivered` | `delivered` | Delivered (estimated) - live mode |
 | `completed` | `delivered` | Delivered (simulated) - test mode |
 | `returned` | `returned` | Returned to sender |
