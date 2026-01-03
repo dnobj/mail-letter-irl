@@ -1,17 +1,19 @@
 /**
- * Unit tests for get_order_status tool - Response Optimization
+ * Unit tests for get_order_status tool - Response Optimization & Tracking Support
  *
  * Tests that the tool response does not include large preview HTML data
  * to reduce payload size and avoid base64 image data in model context.
+ * Also tests trackingSupport field for AI model awareness of tracking limitations.
  *
  * User Stories Covered:
  * - US-LETTER-04: Check Letter Status (Response Optimization section)
+ * - US-MCP-10: Tracking Support Transparency
  *
  * Personas Covered:
  * - Marcus (Regular Correspondent) - checks status frequently
  * - Eleanor (Elderly User) - wants to know if letter was sent
  *
- * GitHub Issue: #83
+ * GitHub Issues: #83, #98
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -163,6 +165,34 @@ describe('get_order_status tool', () => {
       await expect(
         getOrderStatusTool.handler({ orderId: 'nonexistent-order' }, context)
       ).rejects.toThrow('No matching order found for this user');
+    });
+  });
+
+  describe('Tracking Support Transparency (US-MCP-10)', () => {
+    it('should return trackingSupport: "estimated_only" in response', async () => {
+      // Arrange
+      const mockOrder = createMockOrder('order-123');
+      const context = createMockContext([mockOrder]);
+
+      // Act
+      const result = await getOrderStatusTool.handler({ orderId: 'order-123' }, context);
+
+      // Assert - AI models should know tracking is estimated, not confirmed
+      expect(result.trackingSupport).toBe('estimated_only');
+    });
+
+    it('should include trackingSupport in all status responses', async () => {
+      // Arrange - order with different status
+      const mockOrder = createMockOrder('order-delivered');
+      mockOrder.currentStatus = 'delivered';
+      const context = createMockContext([mockOrder]);
+
+      // Act
+      const result = await getOrderStatusTool.handler({ orderId: 'order-delivered' }, context);
+
+      // Assert - even for "delivered" status, AI should know it's estimated
+      expect(result.trackingSupport).toBe('estimated_only');
+      expect(result.currentStatus).toBe('delivered');
     });
   });
 });

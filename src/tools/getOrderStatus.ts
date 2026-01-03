@@ -21,6 +21,7 @@ interface GetOrderStatusOutput {
   // Preview was already shown at send time; status is for tracking delivery
   canSendFollowUp?: boolean;
   followUpSuggestedPrompt?: string;
+  trackingSupport: "none" | "estimated_only" | "carrier_tracking";
 }
 
 
@@ -87,7 +88,8 @@ async function handler(
     statusTimeline: order.statusTimeline,
     recipientSummary: order.recipientSummary,
     canSendFollowUp: true,
-    followUpSuggestedPrompt: `Write a follow-up letter to ${order.recipientSummary.name}.`
+    followUpSuggestedPrompt: `Write a follow-up letter to ${order.recipientSummary.name}.`,
+    trackingSupport: "estimated_only"
   };
 }
 

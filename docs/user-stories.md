@@ -1272,12 +1272,13 @@ macOS/Linux:
 ChatGPT offered "Track it until delivery" to a user after sending a postcard, but Letter IRL only has estimated delivery status from PostGrid. This field lets AI models accurately communicate tracking limitations without hardcoding negative text responses.
 
 **Acceptance Criteria:**
-- [ ] `send_letter` response includes `trackingSupport` field
-- [ ] `send_postcard` response includes `trackingSupport` field
-- [ ] Field value is `"estimated_only"` (current capability)
-- [ ] Schema description explains enum values
-- [ ] Field present in both normal sends and idempotent retries
-- [ ] Tests verify trackingSupport field is returned
+- [x] `send_letter` response includes `trackingSupport` field
+- [x] `send_postcard` response includes `trackingSupport` field
+- [x] `get_order_status` response includes `trackingSupport` field
+- [x] Field value is `"estimated_only"` (current capability)
+- [x] Schema description explains enum values
+- [x] Field present in both normal sends and idempotent retries
+- [x] Tests verify trackingSupport field is returned
 
 **Field Definition:**
 | Value | Meaning |

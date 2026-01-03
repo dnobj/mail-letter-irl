@@ -202,7 +202,7 @@ When displaying status timeline to users:
 - USPS tracking numbers
 - Confirmed delivery scans
 
-The MCP API returns `trackingSupport: "estimated_only"` to communicate this to AI models. See US-MCP-10 for details.
+The MCP API returns `trackingSupport: "estimated_only"` in `send_letter`, `send_postcard`, and `get_order_status` responses to communicate this to AI models. See US-MCP-10 for details.
 
 ---
 

@@ -213,7 +213,7 @@ export const getOrderStatusInputSchema: JsonSchema = {
 export const getOrderStatusOutputSchema: JsonSchema = {
   type: "object",
   // Note: previewThumbnailHtml removed for performance (US-LETTER-04, GitHub #83)
-  required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary"],
+  required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary", "trackingSupport"],
   properties: {
     orderId: { type: "string" },
     currentStatus: { type: "string" },
@@ -238,7 +238,12 @@ export const getOrderStatusOutputSchema: JsonSchema = {
       }
     },
     canSendFollowUp: { type: "boolean" },
-    followUpSuggestedPrompt: { type: "string" }
+    followUpSuggestedPrompt: { type: "string" },
+    trackingSupport: {
+      type: "string",
+      enum: ["none", "estimated_only", "carrier_tracking"],
+      description: "Tracking capability level. 'estimated_only' = periodic status updates available but delivery is estimated based on mail timing, not confirmed by carrier."
+    }
   }
 };
 
