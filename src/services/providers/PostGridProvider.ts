@@ -573,6 +573,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'in_transit': 'in_transit',
       // Terminal statuses
       'delivered': 'delivered',
+      'completed': 'delivered',  // PostGrid test mode uses "completed" instead of "delivered"
       'returned': 'returned',
       'canceled': 'failed'
     };
@@ -592,6 +593,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'mailed': 'Letter has been handed to postal service',
       'in_transit': 'Letter is in transit to recipient',
       'delivered': 'Letter has been delivered',
+      'completed': 'Letter has been delivered',  // PostGrid test mode
       'returned': 'Letter was returned to sender',
       'canceled': 'Letter was canceled before sending'
     };
