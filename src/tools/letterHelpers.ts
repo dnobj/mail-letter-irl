@@ -50,10 +50,10 @@ export interface LetterQuoteOutput {
   draftId: string;
   draftExpiresAt: string;
   layoutType: LetterLayoutType;
-  headerImageData?: string;
-  headerImagePreview?: string;  // Small preview for ChatGPT widget
-  inlineImageData?: string;
-  inlineImagePreview?: string;  // Small preview for ChatGPT widget
+  // Small preview images for ChatGPT widget (~3KB each)
+  // Full images are stored in draft, not sent in response
+  headerImagePreview?: string;
+  inlineImagePreview?: string;
   usedSavedReturnAddress?: boolean;
   savedReturnAddressNote?: string;
   senderAddressValidation?: {
@@ -540,9 +540,8 @@ export async function createLetterDraftAndBuildOutput(
   );
 
   // Build output
-  // Note: We pass the small preview images (headerImagePreview, inlineImagePreview)
-  // for ChatGPT widget display. The full-quality images are stored in the draft
-  // and used when sending to PostGrid.
+  // Only pass small preview images for ChatGPT widget display (~3KB each)
+  // Full-quality images are stored in the draft and retrieved when sending to PostGrid
   const output: LetterQuoteOutput = {
     previewHtml,
     lettersRequired,
@@ -553,10 +552,8 @@ export async function createLetterDraftAndBuildOutput(
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
     layoutType,
-    // Full-quality images (large, may be filtered by ChatGPT)
-    headerImageData,
-    inlineImageData,
-    // Small preview images for ChatGPT widget (~20-50KB)
+    // Small preview images for ChatGPT widget (~3KB each)
+    // Full images stored in draft, not sent in response
     headerImagePreview,
     inlineImagePreview,
     usedSavedReturnAddress: usedSavedReturnAddress || undefined,
