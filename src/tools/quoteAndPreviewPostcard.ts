@@ -112,6 +112,20 @@ async function handler(
   const isValidImageFileParam = (img: unknown): img is ImageFileParam =>
     typeof img === 'object' && img !== null && 'download_url' in img;
 
+  // DEBUG: Log what we're actually receiving for image
+  context.logger.info(
+    {
+      correlationId: context.correlationId,
+      event: "quote.postcard.image_debug",
+      imageType: typeof input.image,
+      imageValue: typeof input.image === 'string'
+        ? input.image.substring(0, 100)
+        : (input.image ? JSON.stringify(input.image).substring(0, 200) : 'undefined'),
+      isValidFileParam: isValidImageFileParam(input.image)
+    },
+    "Debug: Received image parameter"
+  );
+
   if (input.image && isValidImageFileParam(input.image)) {
     // OpenAI fileParams (preferred)
     imageInput = input.image;
