@@ -11,10 +11,15 @@ const addressSchema = z.object({
 });
 
 // Image file param schema - OpenAI Apps SDK requires explicit definition
-const imageFileParamSchema = z.object({
-  download_url: z.string(),
-  file_id: z.string()
-});
+// Union allows both object (valid image) and string (empty from ChatGPT mobile)
+// ChatGPT mobile sends image: '' when no file is attached instead of omitting the field
+const imageFileParamSchema = z.union([
+  z.object({
+    download_url: z.string(),
+    file_id: z.string()
+  }),
+  z.string()
+]);
 
 export const toolInputSchemas = {
   // Letter tools - three separate tools for different layouts

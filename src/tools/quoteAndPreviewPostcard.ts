@@ -31,7 +31,8 @@ interface QuoteAndPreviewPostcardInput {
   message: string;
   size?: PostcardSize;
   // Image from OpenAI fileParams - injected by MCP framework
-  image?: ImageFileParam;
+  // Union type handles ChatGPT mobile sending '' when no file attached
+  image?: ImageFileParam | string;
   // Alternative: direct image URL (for when fileParams isn't available)
   imageUrl?: string;
 }
@@ -107,7 +108,11 @@ async function handler(
   let imageInput: ImageInput | null = null;
   let imageSourceUrl: string | undefined;
 
-  if (input.image && input.image.download_url) {
+  // Type guard: Check if image is a valid ImageFileParam object (not empty string from mobile)
+  const isValidImageFileParam = (img: unknown): img is ImageFileParam =>
+    typeof img === 'object' && img !== null && 'download_url' in img;
+
+  if (input.image && isValidImageFileParam(input.image)) {
     // OpenAI fileParams (preferred)
     imageInput = input.image;
     imageSourceUrl = input.image.download_url;

@@ -23,10 +23,15 @@ export const quoteAndPreviewInputZ = z.object({
 // ============================================================================
 
 // Image file param schema - OpenAI Apps SDK requires explicit definition
-const imageFileParamZ = z.object({
-  download_url: z.string(),
-  file_id: z.string()
-});
+// Union allows both object (valid image) and string (empty from ChatGPT mobile)
+// ChatGPT mobile sends image: '' when no file is attached instead of omitting the field
+const imageFileParamZ = z.union([
+  z.object({
+    download_url: z.string(),
+    file_id: z.string()
+  }),
+  z.string()
+]);
 
 // Letter with header image (image at top, like letterhead)
 export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
@@ -93,10 +98,14 @@ export const quoteAndPreviewPostcardInputZ = z.object({
   message: z.string(),
   size: z.enum(["6x9"]).optional(),
   // Image from OpenAI fileParams - injected by MCP framework
-  image: z.object({
-    download_url: z.string(),
-    file_id: z.string()
-  }).optional(),
+  // Union allows string to handle ChatGPT mobile sending '' when no file attached
+  image: z.union([
+    z.object({
+      download_url: z.string(),
+      file_id: z.string()
+    }),
+    z.string()
+  ]).optional(),
   // Alternative: direct image URL (for when fileParams isn't available)
   imageUrl: z.string().optional()
 });
