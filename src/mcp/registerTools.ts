@@ -296,6 +296,10 @@ export async function registerLetterTools(
         _meta: tool.meta  // Contains openai/outputTemplate, widgetAccessible, etc.
       },
       async (args, extra) => {
+        // Debug: Log args._meta and extra to find userAgent
+        const argsMeta = (args as Record<string, unknown>)._meta;
+        console.log(`🔍 DEBUG args._meta: ${JSON.stringify(argsMeta)}`);
+        console.log(`🔍 DEBUG extra: ${JSON.stringify(extra)}`);
         console.log(
           `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId}`
         );
