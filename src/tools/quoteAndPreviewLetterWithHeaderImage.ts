@@ -33,7 +33,8 @@ interface QuoteAndPreviewLetterWithHeaderImageInput {
   bodyText: string;
   signOff: string;
   // Image from OpenAI fileParams - injected by MCP framework
-  image?: ImageFileParam;
+  // Union type handles ChatGPT mobile sending '' when no file attached
+  image?: ImageFileParam | string;
   // Alternative: direct image URL
   imageUrl?: string;
 }
@@ -62,8 +63,12 @@ async function handler(
     "Processing quote_and_preview_letter_with_header_image"
   );
 
+  // Type guard: Check if image is a valid ImageFileParam object (not empty string from mobile)
+  const isValidImageFileParam = (img: unknown): img is ImageFileParam =>
+    typeof img === 'object' && img !== null && 'download_url' in img;
+
   // Get image source - REQUIRED
-  const imageSource = input.image?.download_url || input.imageUrl;
+  const imageSource = (isValidImageFileParam(input.image) ? input.image.download_url : null) || input.imageUrl;
 
   if (!imageSource) {
     context.logger.warn(
@@ -83,7 +88,7 @@ async function handler(
   }
 
   // Log image source
-  if (input.image?.download_url) {
+  if (isValidImageFileParam(input.image)) {
     context.logger.info(
       {
         correlationId: context.correlationId,
