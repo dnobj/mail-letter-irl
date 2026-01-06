@@ -182,10 +182,15 @@ describe('quote_and_preview_postcard Tool', () => {
 
       expect(draftWithoutImage.front_image_data).toBeNull();
 
-      // Should throw error with mobile-friendly guidance
-      const errorMsg = postcardErrors.missingImage;
-      expect(errorMsg).toContain('No image received');
-      expect(errorMsg).toContain('mobile devices');
+      // Desktop error should be clear and direct
+      const desktopError = postcardErrors.missingImage;
+      expect(desktopError).toContain('No image received');
+      expect(desktopError).toContain('imageUrl');
+
+      // Mobile error should guide users to text-only letter (US-POSTCARD-04)
+      const mobileError = postcardErrors.missingImageMobile;
+      expect(mobileError).toContain('MOBILE IMAGE LIMITATION');
+      expect(mobileError).toContain('quote_and_preview_letter');
     });
 
     it('should reject images over 10MB', () => {
@@ -287,16 +292,19 @@ describe('quote_and_preview_postcard Tool', () => {
   // Error Handling
   // ==========================================================================
   describe('Error Handling', () => {
-    it('should provide clear error for missing image with mobile guidance', () => {
+    it('should provide clear desktop error for missing image', () => {
+      // Desktop error is simple and direct
       expect(postcardErrors.missingImage).toContain('No image received');
-      expect(postcardErrors.missingImage).toContain('mobile devices');
+      expect(postcardErrors.missingImage).toContain('imageUrl');
     });
 
-    it('should include optimization guidance in missing image error', () => {
-      // US-POSTCARD-04: Mobile Image Compatibility
-      expect(postcardErrors.missingImage).toContain('1872×1248 pixels');
-      expect(postcardErrors.missingImage).toContain('high-quality JPEG');
-      expect(postcardErrors.missingImage).toContain('direct image URL');
+    it('should provide mobile-specific error with guidance (US-POSTCARD-04)', () => {
+      // Mobile error guides users to text-only letter alternative
+      expect(postcardErrors.missingImageMobile).toContain('MOBILE IMAGE LIMITATION');
+      expect(postcardErrors.missingImageMobile).toContain('quote_and_preview_letter');
+      expect(postcardErrors.missingImageMobile).toContain('desktop/web browser');
+      expect(postcardErrors.missingImageMobile).toContain('imageUrl parameter');
+      expect(postcardErrors.missingImageMobile).toContain('workaround');
     });
 
     it('should provide clear error for image too large', () => {

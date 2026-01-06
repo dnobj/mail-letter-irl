@@ -22,6 +22,7 @@ import {
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
+import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
 
 /**
  * Build MCP tool annotations from tool definition.
@@ -296,17 +297,21 @@ export async function registerLetterTools(
         _meta: tool.meta  // Contains openai/outputTemplate, widgetAccessible, etc.
       },
       async (args, extra) => {
-        // Debug: Log args._meta and extra to find userAgent
-        const argsMeta = (args as Record<string, unknown>)._meta;
-        console.log(`🔍 DEBUG args._meta: ${JSON.stringify(argsMeta)}`);
-        console.log(`🔍 DEBUG extra: ${JSON.stringify(extra)}`);
+        // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
+        const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
+        const extraMeta = extra._meta as Record<string, unknown> | undefined;
+        const userAgent = extractUserAgent(argsMeta, extraMeta);
+        const isMobile = userAgent ? isMobileClient(userAgent) : undefined;
+
         console.log(
-          `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId}`
+          `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId} (mobile: ${isMobile ?? 'unknown'})`
         );
+
         const { result, meta } = await appServer.execute({
           toolName: tool.name,
           input: args,
-          userId
+          userId,
+          isMobile
         });
 
         const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
