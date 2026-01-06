@@ -22,6 +22,7 @@ import {
 } from "./letterHelpers.js";
 import { downloadAndProcessLetterImageWithPreview, ImageProcessingError } from "../services/imageService.js";
 import type { ImageFileParam } from "../services/types.js";
+import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
 
 // ============================================================================
 // Types
@@ -74,17 +75,19 @@ async function handler(
     context.logger.warn(
       {
         correlationId: context.correlationId,
-        event: "quote.letter.header_image.no_image"
+        event: "quote.letter.header_image.no_image",
+        isMobile: context.isMobile
       },
       "No header image provided"
     );
-    throw new Error(
-      "No header image provided. This tool requires an image for the letter header.\n\n" +
-      "Please either:\n" +
-      "1. Attach an image to your message (recommended)\n" +
-      "2. Provide an imageUrl parameter with a publicly accessible URL\n\n" +
-      "If you want to send a text-only letter, use quote_and_preview_letter instead."
-    );
+
+    // US-POSTCARD-04: Mobile Image Graceful Degradation
+    // Provide mobile-specific error message with guidance to use text-only letter
+    if (context.isMobile) {
+      throw new Error(MOBILE_IMAGE_ERRORS.letterWithImage);
+    } else {
+      throw new Error(MOBILE_IMAGE_ERRORS.desktop);
+    }
   }
 
   // Log image source

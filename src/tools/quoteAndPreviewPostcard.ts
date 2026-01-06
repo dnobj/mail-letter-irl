@@ -20,6 +20,7 @@ import { createPostcardDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
 import { downloadAndProcessImage, ImageProcessingError, type ImageInput } from "../services/imageService.js";
 import type { PostcardSize, ImageFileParam } from "../services/types.js";
+import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
 
 // ============================================================================
 // Types
@@ -155,17 +156,19 @@ async function handler(
     context.logger.warn(
       {
         correlationId: context.correlationId,
-        event: "quote.postcard.no_image"
+        event: "quote.postcard.no_image",
+        isMobile: context.isMobile
       },
       "No image provided for postcard"
     );
-    throw new Error(
-      "No image received. This can happen on mobile devices.\n\n" +
-      "FOR BEST RESULTS: Ask ChatGPT to optimize your image for postcard printing:\n" +
-      "\"Resize this image to 1872×1248 pixels and save as high-quality JPEG\"\n" +
-      "Then retry - ChatGPT will use the optimized image.\n\n" +
-      "Alternatively, provide a direct image URL (ending in .jpg, .png, or .webp)."
-    );
+
+    // US-POSTCARD-04: Mobile Image Graceful Degradation
+    // Provide mobile-specific error message with guidance to use text-only letter
+    if (context.isMobile) {
+      throw new Error(MOBILE_IMAGE_ERRORS.postcard);
+    } else {
+      throw new Error(MOBILE_IMAGE_ERRORS.desktop);
+    }
   }
 
   // Validate message length

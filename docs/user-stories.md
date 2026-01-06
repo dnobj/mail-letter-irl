@@ -313,30 +313,80 @@ interface ProviderStatus {
 
 ---
 
-### US-POSTCARD-04: Mobile Image Compatibility
+### US-POSTCARD-04: Mobile Image Graceful Degradation
 **As a** mobile ChatGPT user
-**I want** clear guidance when image attachments don't transfer
-**So that** I can still create postcards using the optimization workaround
+**I want** clear guidance when image attachments don't work
+**So that** I can still send letters (text-only) or use the workaround for images
 
 **Background:**
-On mobile ChatGPT, the `fileParams` mechanism (image attachments to MCP tools) doesn't work reliably.
-However, if ChatGPT preprocesses the image via Code Interpreter first, the resulting file CAN be used.
-We frame this as "print quality optimization" rather than a workaround.
+ChatGPT mobile doesn't properly pass file attachments to MCP tools. Instead of sending the expected `{download_url, file_id}` object, it sends a placeholder string `"attached"`. This is a ChatGPT platform limitation. Desktop and web work correctly.
+
+**Root Cause:**
+- Mobile sends: `image: "attached"` (string)
+- Expected: `image: {download_url: "...", file_id: "..."}` (object)
+- Our schema accepts both to prevent client-side validation errors
+- But the actual file data is never transmitted on mobile
 
 **Acceptance Criteria:**
-- [ ] Tool description includes image optimization guidance for best print quality
-- [ ] Error message when no image received suggests the optimization workaround
-- [ ] Optimization framing: resize to 1872×1248 pixels (6x9 @ 300dpi)
-- [ ] Direct image URL (imageUrl parameter) works as fallback on all platforms
-- [ ] Works transparently on both mobile and desktop
+- [ ] Detect mobile from `openai/userAgent` in request metadata
+- [ ] Pass `isMobile` flag through ToolContext to handlers
+- [ ] Show mobile-specific error when image not received on mobile
+- [ ] Recommend text-only letter (`quote_and_preview_letter`) as primary option
+- [ ] Mention desktop/web for image support
+- [ ] Include workaround hint: "ask me about it if you want to try"
+- [ ] Include workaround steps (for ChatGPT to share if user asks)
+- [ ] Desktop users see simple error (images work fine there)
+- [ ] Direct image URL (imageUrl parameter) works on all platforms
 
-**Error Scenarios:**
-| Scenario | Expected Behavior |
-|----------|-------------------|
-| No image received | Suggest optimization workaround + direct URL option |
-| Mobile user with attached image | ChatGPT guided to preprocess via Code Interpreter |
+**Mobile-Specific Error (Postcards):**
+```
+MOBILE IMAGE LIMITATION
 
-**Reference:** https://community.openai.com/t/apps-sdk-on-mobile-devices/1366422
+ChatGPT mobile cannot send images to this app yet. Postcards require an image.
+
+RECOMMENDED: Use quote_and_preview_letter for a text-only letter instead.
+
+OTHER OPTIONS:
+- Switch to desktop/web browser for postcards with images
+- Provide a direct image URL (imageUrl parameter)
+
+There is a mobile workaround - ask me about it if you want to try.
+
+[WORKAROUND - only share if user explicitly asks]
+1. Open a NEW chat (without Letter IRL connected)
+2. Upload your photo
+3. Ask ChatGPT to edit/resize the photo
+4. Add Letter IRL to the chat
+5. Now try sending the postcard with the edited photo
+```
+
+**Mobile-Specific Error (Letters with Images):**
+```
+MOBILE IMAGE LIMITATION
+
+ChatGPT mobile cannot send images to this app yet.
+
+RECOMMENDED: Use quote_and_preview_letter for a text-only letter instead.
+
+OTHER OPTIONS:
+- Switch to desktop/web browser for letters with images
+- Provide a direct image URL (imageUrl parameter)
+
+There is a mobile workaround - ask me about it if you want to try.
+
+[WORKAROUND - only share if user explicitly asks]
+...same steps...
+```
+
+**Affected Tools:**
+- `quote_and_preview_postcard`
+- `quote_and_preview_letter_with_image`
+- `quote_and_preview_letter_with_header_image`
+
+**References:**
+- https://community.openai.com/t/mcp-tool-invocation-issues-with-openai-fileparams/1370569
+- https://community.openai.com/t/chatgpt-android-mcp-tools-call-failure-bug-report/1370786
+- GitHub Issue: #100
 
 ---
 

@@ -75,6 +75,12 @@ export interface ToolContext {
   persist(account: UserAccount): Promise<void>;
   logger: Logger;
   correlationId: string;
+  /**
+   * True if request is from a mobile client (detected from userAgent).
+   * Used for graceful degradation of features that don't work on mobile.
+   * @see US-POSTCARD-04: Mobile Image Graceful Degradation
+   */
+  isMobile?: boolean;
 }
 
 export interface ToolMeta {

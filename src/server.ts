@@ -48,6 +48,11 @@ export interface ServerRequest<Input> {
   toolName: string;
   input: Input;
   userId: string;
+  /**
+   * True if request is from a mobile client (detected from userAgent).
+   * @see US-POSTCARD-04: Mobile Image Graceful Degradation
+   */
+  isMobile?: boolean;
 }
 
 export interface ServerResponse<Output> {
@@ -68,7 +73,8 @@ export class LetterIrlServer {
   private async createContext(
     userId: string,
     logger: Logger,
-    correlationId: string
+    correlationId: string,
+    isMobile?: boolean
   ): Promise<ToolContext> {
     const account = await this.store.getOrCreate(userId);
     return {
@@ -78,7 +84,8 @@ export class LetterIrlServer {
         await this.store.persist(updated);
       },
       logger,
-      correlationId
+      correlationId,
+      isMobile
     };
   }
 
@@ -129,7 +136,8 @@ export class LetterIrlServer {
     const context = await this.createContext(
       request.userId,
       requestLogger.child({ stage: "tool-handler" }),
-      correlationId
+      correlationId,
+      request.isMobile
     );
 
     try {
