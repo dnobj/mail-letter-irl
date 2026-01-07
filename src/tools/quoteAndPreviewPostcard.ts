@@ -113,18 +113,39 @@ async function handler(
   const isValidImageFileParam = (img: unknown): img is ImageFileParam =>
     typeof img === 'object' && img !== null && 'download_url' in img;
 
-  // DEBUG: Log what we're actually receiving for image
+  // Check if we have file_id even without download_url (potential mobile workaround via sediment://)
+  const hasFileIdOnly = (img: unknown): img is { file_id: string } =>
+    typeof img === 'object' && img !== null && 'file_id' in img && !('download_url' in img);
+
+  // DEBUG: Log full details of image parameter for mobile debugging
+  const imageObj = input.image as Record<string, unknown> | undefined;
   context.logger.info(
     {
       correlationId: context.correlationId,
       event: "quote.postcard.image_debug",
       imageType: typeof input.image,
-      imageValue: typeof input.image === 'string'
-        ? input.image.substring(0, 100)
-        : (input.image ? JSON.stringify(input.image).substring(0, 200) : 'undefined'),
-      isValidFileParam: isValidImageFileParam(input.image)
+      imageIsNull: input.image === null,
+      imageIsEmptyString: input.image === '',
+      imageIsObject: typeof input.image === 'object' && input.image !== null,
+      // Log specific fields if object
+      hasDownloadUrl: imageObj && 'download_url' in imageObj,
+      hasFileId: imageObj && 'file_id' in imageObj,
+      hasMimeType: imageObj && 'mime_type' in imageObj,
+      hasFileName: imageObj && 'file_name' in imageObj,
+      // Log actual values (truncated for URLs, full for file_id)
+      fileId: imageObj?.file_id as string | undefined,  // Full file_id (sediment://) for debugging
+      downloadUrlPrefix: typeof imageObj?.download_url === 'string'
+        ? imageObj.download_url.substring(0, 80) + '...'
+        : undefined,
+      mimeType: imageObj?.mime_type as string | undefined,
+      fileName: imageObj?.file_name as string | undefined,
+      // Raw value for non-objects (e.g., empty string from mobile)
+      rawValue: typeof input.image === 'string' ? input.image : undefined,
+      // Validation results
+      isValidFileParam: isValidImageFileParam(input.image),
+      hasFileIdOnly: hasFileIdOnly(input.image)
     },
-    "Debug: Received image parameter"
+    "Debug: Full image parameter details for mobile investigation"
   );
 
   if (input.image && isValidImageFileParam(input.image)) {
