@@ -22,16 +22,10 @@ export const quoteAndPreviewInputZ = z.object({
 // Letter with Image Schemas (for fileParams support)
 // ============================================================================
 
-// Image file param schema - OpenAI Apps SDK requires explicit definition
-// Union allows both object (valid image) and string (empty from ChatGPT mobile)
-// ChatGPT mobile sends image: '' when no file is attached instead of omitting the field
-const imageFileParamZ = z.union([
-  z.object({
-    download_url: z.string(),
-    file_id: z.string()
-  }),
-  z.string()
-]);
+// Image file param schema - permissive to handle mobile edge cases
+// Mobile may send file_id without download_url (sediment:// protocol)
+// Using z.any() allows any value - validation happens at runtime in tool handlers
+const imageFileParamZ = z.any();
 
 // Letter with header image (image at top, like letterhead)
 export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
@@ -97,15 +91,9 @@ export const quoteAndPreviewPostcardInputZ = z.object({
   recipient: addressZ,
   message: z.string(),
   size: z.enum(["6x9"]).optional(),
-  // Image from OpenAI fileParams - injected by MCP framework
-  // Union allows string to handle ChatGPT mobile sending '' when no file attached
-  image: z.union([
-    z.object({
-      download_url: z.string(),
-      file_id: z.string()
-    }),
-    z.string()
-  ]).optional(),
+  // Image from OpenAI fileParams - permissive to handle mobile edge cases
+  // Mobile may send file_id without download_url (sediment:// protocol)
+  image: imageFileParamZ.optional(),
   // Alternative: direct image URL (for when fileParams isn't available)
   imageUrl: z.string().optional()
 });
