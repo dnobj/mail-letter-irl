@@ -18,7 +18,7 @@ import { getLetterProvider } from "../services/providers/index.js";
 import type { AddressValidationInput, AddressValidationResult } from "../services/providers/types.js";
 import { createPostcardDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
-import { downloadAndProcessImage, ImageProcessingError, type ImageInput } from "../services/imageService.js";
+import { downloadAndProcessPostcardImageWithPreview, ImageProcessingError, type ImageInput } from "../services/imageService.js";
 import type { PostcardSize, ImageFileParam } from "../services/types.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
 
@@ -298,7 +298,7 @@ async function handler(
       "Downloading and processing postcard image"
     );
 
-    processedImage = await downloadAndProcessImage(imageInput!, size);
+    processedImage = await downloadAndProcessPostcardImageWithPreview(imageInput!, size);
 
     context.logger.info(
       {
@@ -446,8 +446,9 @@ async function handler(
     "Computed preview requirements"
   );
 
-  // Generate preview HTML
-  const previewFrontHtml = generatePreviewFrontHtml(processedImage.base64DataUri, size);
+  // Generate preview HTML using smaller preview image (~10-20KB vs ~200-400KB)
+  // Full-quality image is stored in draft for PostGrid printing
+  const previewFrontHtml = generatePreviewFrontHtml(processedImage.previewDataUri, size);
   const previewBackHtml = generatePreviewBackHtml(input.message, sender);
 
   // Create draft for idempotent send

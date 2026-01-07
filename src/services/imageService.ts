@@ -141,6 +141,78 @@ const PREVIEW_CONFIG = {
 } as const;
 
 // ============================================================================
+// Postcard Image Processing with Preview
+// ============================================================================
+
+/**
+ * Result type for postcard image processing with preview
+ */
+export interface ProcessedPostcardImage extends ProcessedImage {
+  /** Small preview image for ChatGPT widget display (~10-20KB) */
+  previewDataUri: string;
+}
+
+/**
+ * Download and process an image for postcard printing, generating both:
+ * - Full quality image for PostGrid printing (2700x1800 at 300 DPI)
+ * - Smaller preview image for ChatGPT widget display (~400x300)
+ *
+ * @param input - OpenAI file parameter with download_url, or object with url string
+ * @param size - Target postcard size (default: '6x9')
+ * @returns Processed images (full + preview) with metadata
+ * @throws ImageProcessingError with user-friendly message
+ */
+export async function downloadAndProcessPostcardImageWithPreview(
+  input: ImageInput,
+  size: PostcardSize = '6x9'
+): Promise<ProcessedPostcardImage> {
+  const download_url = 'download_url' in input ? input.download_url : input.url;
+  const targetDimensions = CONFIG.sizes[size];
+
+  // 1. Download image
+  const buffer = await downloadImage(download_url);
+
+  // 2. Get metadata and validate dimensions
+  const metadata = await getImageMetadata(buffer);
+  validateDimensions(metadata.width, metadata.height);
+
+  // 3. Create full-quality image for PostGrid printing
+  const processed = await sharp(buffer)
+    .resize(targetDimensions.width, targetDimensions.height, {
+      fit: 'cover',
+      position: 'center',
+    })
+    .jpeg({ quality: CONFIG.jpegQuality })
+    .toBuffer();
+
+  // 4. Create small preview for ChatGPT widget
+  // Maintain aspect ratio of postcard (landscape)
+  const previewWidth = PREVIEW_CONFIG.maxWidth;
+  const previewHeight = Math.round(previewWidth * (targetDimensions.height / targetDimensions.width));
+
+  const preview = await sharp(buffer)
+    .resize(previewWidth, previewHeight, {
+      fit: 'cover',
+      position: 'center',
+    })
+    .jpeg({ quality: PREVIEW_CONFIG.jpegQuality })
+    .toBuffer();
+
+  // 5. Convert both to base64 data URIs
+  const base64Full = processed.toString('base64');
+  const base64Preview = preview.toString('base64');
+
+  return {
+    base64DataUri: `data:image/jpeg;base64,${base64Full}`,
+    previewDataUri: `data:image/jpeg;base64,${base64Preview}`,
+    originalWidth: metadata.width,
+    originalHeight: metadata.height,
+    processedWidth: targetDimensions.width,
+    processedHeight: targetDimensions.height,
+  };
+}
+
+// ============================================================================
 // Letter Image Processing (US-LAYOUT-04)
 // ============================================================================
 
