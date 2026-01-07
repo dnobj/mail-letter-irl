@@ -45,12 +45,16 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
     recipient: addressSchema,
     bodyText: { type: "string", description: "Letter body. Must not exceed 1100 characters OR 17 lines. Write as continuous paragraphs - do NOT put blank lines between sentences." },
     signOff: { type: "string", description: "Closing/signature (e.g., 'Sincerely, Name')" },
-    // Image from file attachment - permissive schema to handle mobile edge cases
-    // Mobile may send file_id without download_url (sediment:// protocol)
+    // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
+    // Schema tells OpenAI how to transform file attachments into the expected format
     image: {
-      description: "Image file attachment (recommended method). OpenAI transforms to {download_url, file_id, mime_type, file_name}",
-      // No type constraint - allows any value including objects, strings, or undefined
-      // This is equivalent to z.any() in Zod
+      type: "object",
+      description: "Header image file attachment (recommended method)",
+      properties: {
+        download_url: { type: "string" },
+        file_id: { type: "string" }
+      },
+      required: ["download_url", "file_id"]
     },
     imageUrl: {
       type: "string",
@@ -71,12 +75,16 @@ export const quoteAndPreviewLetterWithImageInputSchema: JsonSchema = {
     recipient: addressSchema,
     bodyText: { type: "string", description: "Letter body. Must not exceed 800 characters OR 12 lines. Write as continuous paragraphs - do NOT put blank lines between sentences." },
     signOff: { type: "string", description: "Closing/signature (e.g., 'Sincerely, Name')" },
-    // Image from file attachment - permissive schema to handle mobile edge cases
-    // Mobile may send file_id without download_url (sediment:// protocol)
+    // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
+    // Schema tells OpenAI how to transform file attachments into the expected format
     image: {
-      description: "Image file attachment (recommended method). OpenAI transforms to {download_url, file_id, mime_type, file_name}",
-      // No type constraint - allows any value including objects, strings, or undefined
-      // This is equivalent to z.any() in Zod
+      type: "object",
+      description: "Image file attachment (recommended method)",
+      properties: {
+        download_url: { type: "string" },
+        file_id: { type: "string" }
+      },
+      required: ["download_url", "file_id"]
     },
     imageUrl: {
       type: "string",
@@ -328,12 +336,16 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
       default: "6x9",
       description: "Postcard size (currently only 6x9 is supported)"
     },
-    // Image from file attachment - permissive schema to handle mobile edge cases
-    // Mobile may send file_id without download_url (sediment:// protocol)
+    // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
+    // Schema tells OpenAI how to transform file attachments into the expected format
     image: {
-      description: "Image file attachment for postcard front (recommended method). OpenAI transforms to {download_url, file_id, mime_type, file_name}",
-      // No type constraint - allows any value including objects, strings, or undefined
-      // This is equivalent to z.any() in Zod
+      type: "object",
+      description: "Image file attachment for postcard front (recommended method)",
+      properties: {
+        download_url: { type: "string" },
+        file_id: { type: "string" }
+      },
+      required: ["download_url", "file_id"]
     },
     imageUrl: {
       type: "string",

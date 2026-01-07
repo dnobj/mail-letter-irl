@@ -22,9 +22,12 @@ export const quoteAndPreviewInputZ = z.object({
 // Letter with Image Schemas (for fileParams support)
 // ============================================================================
 
-// Image file param schema - permissive to handle mobile edge cases
-// Mobile may send file_id without download_url (sediment:// protocol)
-// Using z.any() allows any value - validation happens at runtime in tool handlers
+// Image file param schema - INTENTIONALLY PERMISSIVE for runtime validation
+// Note: The JSON schema (schemas.ts) uses strict typing to tell OpenAI how to transform files.
+// This Zod schema is permissive to gracefully handle edge cases at runtime:
+// - Mobile sends "attached" string instead of file object (platform limitation)
+// - Empty strings or undefined values
+// Actual validation happens in tool handlers with graceful error messages.
 const imageFileParamZ = z.any();
 
 // Letter with header image (image at top, like letterhead)
