@@ -141,9 +141,7 @@ export function getProviderByName(providerName: string): LetterFulfillmentProvid
     ? process.env.POSTGRID_API_KEY || process.env.LETTER_PROVIDER_API_KEY
     : providerName === 'lob'
       ? process.env.LOB_API_KEY
-      : providerName === 'diy'
-        ? process.env.DIY_ADMIN_SECRET
-        : undefined;
+      : undefined;
 
   const configJson = process.env.LETTER_PROVIDER_CONFIG;
   let additionalConfig: Record<string, any> = {};
@@ -264,20 +262,9 @@ function initializeProviders(): void {
     return new PostGridProvider(config, options);
   });
 
-  // Register DIYProvider
+  // Register DIYProvider (no external service needed - uses shared database)
   registerProvider('diy', (config) => {
-    const serviceUrl = process.env.DIY_SERVICE_URL;
-    if (!serviceUrl) {
-      throw new Error('DIY_SERVICE_URL environment variable is required for DIY provider.');
-    }
-
-    const options = {
-      serviceUrl,
-      adminSecret: process.env.DIY_ADMIN_SECRET,
-      verbose: config.config?.verbose ?? true
-    };
-
-    return new DIYProvider(config, options);
+    return new DIYProvider(config);
   });
 
   // TODO: Register other providers as they're implemented
