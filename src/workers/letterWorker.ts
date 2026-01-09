@@ -8,10 +8,36 @@ import { getJobQueue } from '../services/jobQueue.js';
 import { query } from '../db/index.js';
 import { updateJobStatus, getJobByLetterId } from '../services/letterJobService.js';
 import type { LetterJobPayload } from '../services/letterJobService.js';
-import { getLetterProvider } from '../services/providers/index.js';
+import { getProviderForMailType, getLetterProvider, type MailType } from '../services/providers/index.js';
 import type { LetterParams, PostcardParams, PostcardSize } from '../services/providers/types.js';
 
 const LETTER_QUEUE = 'send-letter';
+
+/**
+ * Determine the mail type for provider routing
+ *
+ * Maps the job payload to one of the routing mail types:
+ * - postcard
+ * - text_only_letter
+ * - header_image_letter
+ * - inline_image_letter
+ */
+function determineMailType(mailType: string, layoutType?: string): MailType {
+  if (mailType === 'postcard') {
+    return 'postcard';
+  }
+
+  // Map letter layout types to routing mail types
+  switch (layoutType) {
+    case 'header_image':
+      return 'header_image_letter';
+    case 'inline_image':
+      return 'inline_image_letter';
+    case 'text_only':
+    default:
+      return 'text_only_letter';
+  }
+}
 
 /**
  * Normalize country codes to US (2-letter ISO code)
@@ -55,8 +81,11 @@ async function processLetterJob(jobs: any[]): Promise<void> {
       ['processing', letterId]
     );
 
-    // Get the letter provider (DummyProvider or real provider)
-    const provider = getLetterProvider();
+    // Determine the mail type for routing
+    const routingMailType = determineMailType(mailType, content.layoutType);
+
+    // Get the provider based on routing rules (from database)
+    const provider = await getProviderForMailType(routingMailType);
 
     let result;
 

@@ -12,6 +12,8 @@ import type {
 } from './types.js';
 import { DummyProvider } from './DummyProvider.js';
 import { PostGridProvider } from './PostGridProvider.js';
+import { DIYProvider } from './DIYProvider.js';
+import { query } from '../../db/index.js';
 
 /**
  * Registry of available providers
@@ -116,6 +118,105 @@ export function resetProvider(): void {
 }
 
 /**
+ * Cache for providers by name (allows multiple providers to be active)
+ */
+const providersByName = new Map<string, LetterFulfillmentProvider>();
+
+/**
+ * Get a provider by name
+ *
+ * Creates and caches a provider instance for the given name.
+ * Falls back to default provider if the requested one isn't configured.
+ */
+export function getProviderByName(providerName: string): LetterFulfillmentProvider {
+  const normalizedName = providerName.toLowerCase();
+
+  // Check cache first
+  if (providersByName.has(normalizedName)) {
+    return providersByName.get(normalizedName)!;
+  }
+
+  // Build provider config based on provider name
+  const apiKey = providerName === 'postgrid'
+    ? process.env.POSTGRID_API_KEY || process.env.LETTER_PROVIDER_API_KEY
+    : providerName === 'lob'
+      ? process.env.LOB_API_KEY
+      : providerName === 'diy'
+        ? process.env.DIY_ADMIN_SECRET
+        : undefined;
+
+  const configJson = process.env.LETTER_PROVIDER_CONFIG;
+  let additionalConfig: Record<string, any> = {};
+  if (configJson) {
+    try {
+      additionalConfig = JSON.parse(configJson);
+    } catch (error) {
+      console.warn('⚠️  Failed to parse LETTER_PROVIDER_CONFIG:', error);
+    }
+  }
+
+  const config: ProviderConfig = {
+    name: normalizedName,
+    displayName: getProviderDisplayName(normalizedName),
+    enabled: true,
+    credentials: apiKey ? { apiKey } : undefined,
+    config: additionalConfig
+  };
+
+  try {
+    const provider = createProvider(config);
+    providersByName.set(normalizedName, provider);
+    console.log(`✅ Initialized provider by name: ${config.displayName}`);
+    return provider;
+  } catch (error) {
+    console.warn(`⚠️  Failed to create provider ${providerName}, falling back to default:`, error);
+    return getLetterProvider();
+  }
+}
+
+/**
+ * Valid mail types for routing
+ */
+export type MailType = 'text_only_letter' | 'header_image_letter' | 'inline_image_letter' | 'postcard';
+
+/**
+ * Get the provider name for a specific mail type from the routing table
+ *
+ * Falls back to environment default if no routing rule exists or is disabled.
+ */
+export async function getProviderRouting(mailType: MailType): Promise<string> {
+  try {
+    const result = await query(
+      'SELECT provider FROM provider_routing WHERE mail_type = $1 AND enabled = true',
+      [mailType]
+    );
+
+    if (result.rows.length > 0) {
+      const providerName = result.rows[0].provider;
+      console.log(`📋 Routing ${mailType} → ${providerName} (from database)`);
+      return providerName;
+    }
+  } catch (error) {
+    console.warn(`⚠️  Failed to get routing for ${mailType}:`, error);
+  }
+
+  // Fall back to default provider
+  const defaultProvider = process.env.LETTER_PROVIDER || 'postgrid';
+  console.log(`📋 Routing ${mailType} → ${defaultProvider} (default fallback)`);
+  return defaultProvider;
+}
+
+/**
+ * Get a provider instance based on mail type routing
+ *
+ * Combines routing lookup with provider instantiation.
+ */
+export async function getProviderForMailType(mailType: MailType): Promise<LetterFulfillmentProvider> {
+  const providerName = await getProviderRouting(mailType);
+  return getProviderByName(providerName);
+}
+
+/**
  * Get display name for a provider
  */
 function getProviderDisplayName(name: string): string {
@@ -123,7 +224,8 @@ function getProviderDisplayName(name: string): string {
     dummy: 'Dummy Provider (Testing)',
     lob: 'Lob',
     postgrid: 'PostGrid',
-    click2mail: 'Click2Mail'
+    click2mail: 'Click2Mail',
+    diy: 'DIY (Manual Print)'
   };
 
   return displayNames[name.toLowerCase()] || name;
@@ -162,6 +264,22 @@ function initializeProviders(): void {
     return new PostGridProvider(config, options);
   });
 
+  // Register DIYProvider
+  registerProvider('diy', (config) => {
+    const serviceUrl = process.env.DIY_SERVICE_URL;
+    if (!serviceUrl) {
+      throw new Error('DIY_SERVICE_URL environment variable is required for DIY provider.');
+    }
+
+    const options = {
+      serviceUrl,
+      adminSecret: process.env.DIY_ADMIN_SECRET,
+      verbose: config.config?.verbose ?? true
+    };
+
+    return new DIYProvider(config, options);
+  });
+
   // TODO: Register other providers as they're implemented
   // registerProvider('lob', (config) => new LobProvider(config));
   // registerProvider('click2mail', (config) => new Click2MailProvider(config));
@@ -184,3 +302,4 @@ export type {
 
 export { DummyProvider } from './DummyProvider.js';
 export { PostGridProvider } from './PostGridProvider.js';
+export { DIYProvider } from './DIYProvider.js';

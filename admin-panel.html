@@ -638,6 +638,7 @@
         <div class="nav-item" data-section="jobs">Jobs</div>
         <div class="nav-item" data-section="credits">Letter Balance</div>
         <div class="nav-item" data-section="promos">Promos</div>
+        <div class="nav-item" data-section="routing">Provider Routing</div>
     </div>
 
     <div class="main">
@@ -829,6 +830,38 @@
                 </div>
             </div>
         </div>
+
+        <!-- Provider Routing Section -->
+        <div id="routing" class="section">
+            <div class="header">
+                <h2>Provider Routing</h2>
+                <button class="refresh-btn" onclick="loadRouting()">Refresh</button>
+            </div>
+
+            <div class="two-col">
+                <div class="card">
+                    <h3>Routing Rules</h3>
+                    <p style="color: #888; margin-bottom: 15px;">Control which provider handles each mail type.</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Mail Type</th>
+                                <th>Provider</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="routing-table"></tbody>
+                    </table>
+                </div>
+
+                <div class="card">
+                    <h3>Available Providers</h3>
+                    <p style="color: #888; margin-bottom: 15px;">Provider configuration status.</p>
+                    <div id="providers-list"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -849,6 +882,7 @@
                 if (section === 'letters') loadLetters();
                 if (section === 'jobs') loadJobs();
                 if (section === 'promos') loadPromos();
+                if (section === 'routing') loadRouting();
             });
         });
 
@@ -1540,11 +1574,12 @@
                 const data = await api('/api/admin/letters?limit=20');
                 const html = `
                     <table>
-                        <tr><th>Letter ID</th><th>Recipient</th><th>Status</th><th>Created</th></tr>
+                        <tr><th>Letter ID</th><th>Recipient</th><th>Provider</th><th>Status</th><th>Created</th></tr>
                         ${data.letters.map(l => `
                             <tr class="clickable-row" onclick="openLetterModal('${l.letterId}')">
                                 <td style="font-family: monospace; font-size: 11px;">${l.letterId.substring(0, 8)}...</td>
                                 <td>${l.recipient?.name || 'N/A'}</td>
+                                <td style="font-size: 11px;">${l.provider || '-'}</td>
                                 <td><span class="badge badge-${l.status}">${l.status}</span></td>
                                 <td>${formatDate(l.createdAt)}</td>
                             </tr>
@@ -1572,12 +1607,13 @@
                 }
                 const html = `
                     <table>
-                        <tr><th>Letter ID</th><th>User</th><th>Recipient</th><th>Status</th></tr>
+                        <tr><th>Letter ID</th><th>User</th><th>Recipient</th><th>Provider</th><th>Status</th></tr>
                         ${data.letters.map(l => `
                             <tr class="clickable-row" onclick="openLetterModal('${l.letterId}')">
                                 <td style="font-family: monospace; font-size: 11px;">${l.letterId.substring(0, 8)}...</td>
                                 <td style="font-family: monospace; font-size: 11px;">${l.userId?.substring(0, 15)}...</td>
                                 <td>${l.recipient?.name || 'N/A'}</td>
+                                <td style="font-size: 11px;">${l.provider || '-'}</td>
                                 <td><span class="badge badge-${l.status}">${l.status}</span></td>
                             </tr>
                         `).join('')}
@@ -1589,6 +1625,81 @@
                 showError('letters-search-result', e.message);
             }
         };
+
+        // Provider Routing Functions
+        const mailTypeLabels = {
+            'text_only_letter': 'Text-Only Letter',
+            'header_image_letter': 'Letter w/ Header Image',
+            'inline_image_letter': 'Letter w/ Inline Image',
+            'postcard': 'Postcard'
+        };
+
+        const providerOptions = ['postgrid', 'diy', 'lob', 'dummy'];
+
+        async function loadRouting() {
+            showLoading('routing-table');
+            showLoading('providers-list');
+            try {
+                const [routingData, providersData] = await Promise.all([
+                    api('/api/admin/routing'),
+                    api('/api/admin/providers')
+                ]);
+
+                // Render routing table
+                const routingHtml = routingData.routing.map(r => `
+                    <tr data-mailtype="${r.mailType}">
+                        <td>${mailTypeLabels[r.mailType] || r.mailType}</td>
+                        <td>
+                            <select onchange="updateRouting('${r.mailType}', this.value)" style="padding: 5px; background: #2a2a4a; border: 1px solid #444; color: #fff; border-radius: 4px;">
+                                ${providerOptions.map(p => `<option value="${p}" ${r.provider === p ? 'selected' : ''}>${p}</option>`).join('')}
+                            </select>
+                        </td>
+                        <td>
+                            <span class="badge ${r.enabled ? 'badge-completed' : 'badge-failed'}">${r.enabled ? 'Active' : 'Disabled'}</span>
+                        </td>
+                        <td style="font-size: 11px; color: #888;">
+                            ${r.updatedBy ? `by ${r.updatedBy.substring(0, 20)}` : ''}
+                        </td>
+                    </tr>
+                `).join('');
+                document.getElementById('routing-table').innerHTML = routingHtml;
+
+                // Render providers list
+                const providersHtml = providersData.providers.map(p => `
+                    <div style="display: flex; align-items: center; gap: 10px; padding: 10px; background: #2a2a4a; border-radius: 6px; margin-bottom: 8px;">
+                        <span style="width: 10px; height: 10px; border-radius: 50%; background: ${p.status === 'available' ? '#28a745' : '#666'};"></span>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600;">${p.name}</div>
+                            <div style="font-size: 11px; color: #888;">${p.description}</div>
+                        </div>
+                        <span class="badge ${p.configured ? 'badge-completed' : 'badge-pending'}">${p.configured ? 'Configured' : 'Not Configured'}</span>
+                        ${p.isDefault ? '<span class="badge badge-processing">Default</span>' : ''}
+                    </div>
+                `).join('');
+                document.getElementById('providers-list').innerHTML = providersHtml;
+
+            } catch (e) {
+                showError('routing-table', e.message);
+                showError('providers-list', e.message);
+            }
+        }
+
+        async function updateRouting(mailType, provider) {
+            try {
+                const result = await api(`/api/admin/routing/${mailType}`, 'PUT', { provider, enabled: true });
+                if (result.success) {
+                    // Briefly show success feedback
+                    const row = document.querySelector(`tr[data-mailtype="${mailType}"]`);
+                    if (row) {
+                        row.style.background = 'rgba(40, 167, 69, 0.2)';
+                        setTimeout(() => row.style.background = '', 1000);
+                    }
+                }
+            } catch (e) {
+                alert('Failed to update routing: ' + e.message);
+                loadRouting(); // Reload to reset dropdown
+            }
+        }
     </script>
 </body>
 </html>

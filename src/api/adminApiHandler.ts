@@ -330,6 +330,31 @@ export async function handleAdminApiRequest(
       return true;
     }
 
+    // =========================================================================
+    // Provider Routing Routes
+    // =========================================================================
+
+    // GET /api/admin/routing - List all routing rules
+    if (pathname === '/api/admin/routing' && req.method === 'GET') {
+      await handleGetRouting(res);
+      return true;
+    }
+
+    // PUT /api/admin/routing/:mailType - Update routing for a mail type
+    if (pathname.match(/^\/api\/admin\/routing\/[^/]+$/) && req.method === 'PUT') {
+      const mailType = pathname.split('/').pop();
+      if (mailType) {
+        await handleUpdateRouting(req, res, decodeURIComponent(mailType), adminInfo);
+        return true;
+      }
+    }
+
+    // GET /api/admin/providers - List available providers with status
+    if (pathname === '/api/admin/providers' && req.method === 'GET') {
+      await handleGetProviders(res);
+      return true;
+    }
+
     // Route not found
     sendJson(res, 404, {
       error: 'Not found',
@@ -1316,7 +1341,7 @@ async function handleGetLetters(res: ServerResponse, queryParams: URLSearchParam
 
   const [lettersResult, countResult] = await Promise.all([
     query(
-      `SELECT letter_id, user_id, recipient, credits_cost, status, tracking_id, created_at, sent_at
+      `SELECT letter_id, user_id, recipient, credits_cost, status, tracking_id, provider, created_at, sent_at
        FROM letters
        ${whereClause}
        ORDER BY created_at DESC
@@ -1337,6 +1362,7 @@ async function handleGetLetters(res: ServerResponse, queryParams: URLSearchParam
       creditsCost: l.credits_cost,
       status: l.status,
       trackingId: l.tracking_id,
+      provider: l.provider,
       createdAt: l.created_at,
       sentAt: l.sent_at,
     })),
@@ -1360,7 +1386,7 @@ async function handleSearchLetters(res: ServerResponse, queryParams: URLSearchPa
   }
 
   const result = await query(
-    `SELECT letter_id, user_id, recipient, credits_cost, status, tracking_id, created_at, sent_at
+    `SELECT letter_id, user_id, recipient, credits_cost, status, tracking_id, provider, created_at, sent_at
      FROM letters
      WHERE letter_id ILIKE $1
        OR user_id ILIKE $1
@@ -1380,6 +1406,7 @@ async function handleSearchLetters(res: ServerResponse, queryParams: URLSearchPa
       creditsCost: l.credits_cost,
       status: l.status,
       trackingId: l.tracking_id,
+      provider: l.provider,
       createdAt: l.created_at,
       sentAt: l.sent_at,
     })),
@@ -1680,6 +1707,186 @@ async function handleGetRateLimitStats(res: ServerResponse) {
     console.error('Get rate limit stats error:', error);
     sendJson(res, 500, {
       error: 'Failed to get rate limit stats',
+      message: error.message,
+    });
+  }
+}
+
+// =========================================================================
+// Provider Routing Handlers
+// =========================================================================
+
+/**
+ * GET /api/admin/routing
+ * List all provider routing rules
+ */
+async function handleGetRouting(res: ServerResponse) {
+  try {
+    const result = await query(`
+      SELECT
+        id,
+        mail_type,
+        provider,
+        enabled,
+        updated_at,
+        updated_by
+      FROM provider_routing
+      ORDER BY mail_type
+    `);
+
+    sendJson(res, 200, {
+      routing: result.rows.map(row => ({
+        id: row.id,
+        mailType: row.mail_type,
+        provider: row.provider,
+        enabled: row.enabled,
+        updatedAt: row.updated_at,
+        updatedBy: row.updated_by,
+      })),
+    });
+  } catch (error: any) {
+    console.error('Get routing error:', error);
+    sendJson(res, 500, {
+      error: 'Failed to get routing rules',
+      message: error.message,
+    });
+  }
+}
+
+/**
+ * PUT /api/admin/routing/:mailType
+ * Update provider routing for a specific mail type
+ */
+async function handleUpdateRouting(
+  req: IncomingMessage,
+  res: ServerResponse,
+  mailType: string,
+  adminInfo: { userId: string; email?: string }
+) {
+  try {
+    const body = await parseBody(req);
+
+    // Validate mail type
+    const validMailTypes = ['text_only_letter', 'header_image_letter', 'inline_image_letter', 'postcard'];
+    if (!validMailTypes.includes(mailType)) {
+      sendJson(res, 400, {
+        error: 'Invalid mail type',
+        message: `Mail type must be one of: ${validMailTypes.join(', ')}`,
+      });
+      return;
+    }
+
+    // Validate provider
+    const validProviders = ['postgrid', 'diy', 'lob', 'dummy'];
+    if (!body.provider || !validProviders.includes(body.provider)) {
+      sendJson(res, 400, {
+        error: 'Invalid provider',
+        message: `Provider must be one of: ${validProviders.join(', ')}`,
+      });
+      return;
+    }
+
+    // Update routing
+    const result = await query(
+      `UPDATE provider_routing
+       SET provider = $1, enabled = $2, updated_by = $3
+       WHERE mail_type = $4
+       RETURNING *`,
+      [
+        body.provider,
+        body.enabled !== false, // Default to true if not specified
+        adminInfo.email || adminInfo.userId,
+        mailType,
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      sendJson(res, 404, {
+        error: 'Routing not found',
+        message: `No routing rule found for mail type: ${mailType}`,
+      });
+      return;
+    }
+
+    const row = result.rows[0];
+    console.log(`🔧 Admin ${adminInfo.email || adminInfo.userId} updated routing: ${mailType} → ${body.provider}`);
+
+    sendJson(res, 200, {
+      success: true,
+      routing: {
+        id: row.id,
+        mailType: row.mail_type,
+        provider: row.provider,
+        enabled: row.enabled,
+        updatedAt: row.updated_at,
+        updatedBy: row.updated_by,
+      },
+    });
+  } catch (error: any) {
+    console.error('Update routing error:', error);
+    sendJson(res, 500, {
+      error: 'Failed to update routing',
+      message: error.message,
+    });
+  }
+}
+
+/**
+ * GET /api/admin/providers
+ * List available providers with their status
+ */
+async function handleGetProviders(res: ServerResponse) {
+  try {
+    // Get environment configuration
+    const currentProvider = process.env.LETTER_PROVIDER || 'postgrid';
+    const postgridConfigured = !!(process.env.POSTGRID_API_KEY);
+    const diyServiceUrl = process.env.DIY_SERVICE_URL;
+    const lobConfigured = !!(process.env.LOB_API_KEY);
+
+    const providers = [
+      {
+        id: 'postgrid',
+        name: 'PostGrid',
+        description: 'Third-party print and mail API',
+        configured: postgridConfigured,
+        status: postgridConfigured ? 'available' : 'not_configured',
+        isDefault: currentProvider === 'postgrid',
+      },
+      {
+        id: 'diy',
+        name: 'DIY',
+        description: 'Manual print fulfillment service',
+        configured: !!diyServiceUrl,
+        status: diyServiceUrl ? 'available' : 'not_configured',
+        serviceUrl: diyServiceUrl || null,
+        isDefault: currentProvider === 'diy',
+      },
+      {
+        id: 'lob',
+        name: 'Lob',
+        description: 'Third-party print and mail API (alternative)',
+        configured: lobConfigured,
+        status: lobConfigured ? 'available' : 'not_configured',
+        isDefault: currentProvider === 'lob',
+      },
+      {
+        id: 'dummy',
+        name: 'Dummy',
+        description: 'Testing only - does not send mail',
+        configured: true,
+        status: 'available',
+        isDefault: currentProvider === 'dummy',
+      },
+    ];
+
+    sendJson(res, 200, {
+      defaultProvider: currentProvider,
+      providers,
+    });
+  } catch (error: any) {
+    console.error('Get providers error:', error);
+    sendJson(res, 500, {
+      error: 'Failed to get providers',
       message: error.message,
     });
   }
