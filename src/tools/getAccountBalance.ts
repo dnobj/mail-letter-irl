@@ -98,7 +98,7 @@ async function handler(
   const identityLine = `Account: ${email} (${authProvider})`;
   let balanceLine: string;
   if (lettersRemaining === 0) {
-    balanceLine = "You haven't pre-paid for any letters yet. Buy a Letter Pack to start sending!";
+    balanceLine = "You haven't pre-paid for any letters yet. Visit letterirl.com to purchase a Letter Pack and start sending!";
   } else {
     balanceLine = `Letter Balance: ${lettersRemaining} ${lettersRemaining === 1 ? 'letter' : 'letters'} remaining.`;
   }
@@ -144,7 +144,7 @@ export const getAccountBalanceTool: McpToolDefinition<
   GetAccountBalanceOutput
 > = {
   name: "get_account_balance",
-  description: "Check how many pre-paid letters you have remaining.",
+  description: "Check how many pre-paid letters you have remaining. Visit letterirl.com to purchase more.",
   readOnly: true,
   inputSchema: getAccountBalanceInputSchema,
   outputSchema: getAccountBalanceOutputSchema,

@@ -587,7 +587,7 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
     "anything - it only generates a draft for the user to review. Proactively offer previews when " +
     "the user has created artwork, drawings, photos, or any image they might want to share " +
     "physically (vacation photos, holiday greetings, art projects, thank you cards with images).\n\n" +
-    "PREVIEW IS FREE: Generating a preview costs nothing and does not use credits. " +
+    "PREVIEW IS FREE: Generating a preview costs nothing and does not use any pre-paid letters. " +
     "Feel free to create previews so users can see exactly what their postcard will look like.\n\n" +
     "What it does: Takes an image for the front, a message for the back, validates addresses, " +
     "and creates a DRAFT. The user reviews the preview before deciding to send via send_postcard.\n\n" +

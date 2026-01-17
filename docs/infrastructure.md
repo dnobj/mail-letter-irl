@@ -1,6 +1,6 @@
 # Infrastructure Overview
 
-**Last Updated:** December 29, 2025
+**Last Updated:** January 17, 2026
 **Purpose:** Central reference for all services, infrastructure, and deployment environments
 
 This document provides a central reference for all services and infrastructure used by Letter IRL.
@@ -150,6 +150,34 @@ DATABASE_URL=postgres://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=
 **Database Sync**: Run `npm run dev:sync` to reset dev branch from production branch. See "Development Sync Workflow" section below for details.
 
 **Relevant Docs**: `docs/database-schema.md`, `docs/database-setup.md`
+
+#### Neon CLI Commands
+
+The Neon CLI (`neonctl`) is useful for querying the database directly. **Important**: Always specify `--branch dev` for development work, otherwise you'll connect to the production branch.
+
+```bash
+# List all branches
+npx neonctl branches list --project-id summer-band-85969681
+
+# Get connection string for PRODUCTION (default branch)
+npx neonctl connection-string --project-id summer-band-85969681
+
+# Get connection string for DEV branch
+npx neonctl connection-string --project-id summer-band-85969681 --branch dev
+
+# Run a script against the dev database
+CS=$(npx neonctl connection-string --project-id summer-band-85969681 --branch dev) \
+DATABASE_URL="$CS" npx tsx scripts/your-script.ts
+
+# Example: Run status sync against dev
+CS=$(npx neonctl connection-string --project-id summer-band-85969681 --branch dev) \
+DATABASE_URL="$CS" \
+LETTER_PROVIDER=postgrid \
+LETTER_PROVIDER_API_KEY=test_sk_xxx \
+npx tsx scripts/trigger-status-sync.ts
+```
+
+**Project ID**: `summer-band-85969681` (Letter IRL Neon project)
 
 ---
 

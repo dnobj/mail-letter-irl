@@ -38,6 +38,14 @@ Both repositories use the same branching strategy: `feature/*` → `dev` → `ma
 - **Neon PostgreSQL** for database - NOT other databases
 - **pg-boss** for job queue - PostgreSQL-backed, NOT Redis
 
+**Development vs Production Environments**
+- Two fully isolated environments exist for all services
+- **Database**: Neon has `production` and `dev` branches - always specify which when querying
+- **Auth0**: Separate tenants for prod vs dev
+- **PostGrid**: Live mode (prod) vs test mode (dev)
+- **Stripe**: Live mode (prod) vs test mode (dev)
+- See `docs/infrastructure.md` for full environment details
+
 **External Services**
 - **Auth0** - OAuth 2.1 + PKCE authentication
   - Website uses `@auth0/nextjs-auth0` SDK (Regular Web App)

@@ -125,13 +125,40 @@ LETTER_PROVIDER_CONFIG='{"mode":"test","verbose":true}'
 
 ---
 
-### 4. **Click2Mail Provider** (Planned)
+### 4. **Click2Mail Provider** (Planned - Recommended for Launch)
 
-**Purpose:** Low-volume testing
+**Purpose:** Production fulfillment with tracking and fast production
 
-**Pricing:** $1.00 - $1.50 per letter
-**Minimum:** None
-**Best For:** Low volume, manual testing
+**Pricing:** $1.45 per color First Class letter (includes print + postage)
+**Minimum:** None (pay-per-piece)
+**Best For:** Launch phase - fast production + IMb tracking
+
+**Features:**
+- **Next-day production SLA** (submit by 8 PM ET)
+- IMb tracking on every piece (no volume minimum)
+- Confirmation of Mailing (CoM) documentation
+- REST API with test/staging environment
+- CASS address verification
+- Postcards: 3.5x5, 4.25x6, 5x8, 6x9, 6x11
+
+**Configuration:**
+```bash
+LETTER_PROVIDER=click2mail
+LETTER_PROVIDER_API_KEY=your_api_key
+LETTER_PROVIDER_CONFIG='{"mode":"test","verbose":true}'
+```
+
+**When to Use:**
+- Launch phase (need confidence mail is being sent)
+- When tracking visibility is important
+- When fast production matters more than lowest cost
+
+**Trade-off vs PostGrid:**
+- +$0.27/letter ($1.45 vs $1.18)
+- But: Next-day production vs 2 days
+- But: IMb tracking included vs 200+ volume minimum
+
+See `docs/mail-provider-comparison.md` for detailed provider comparison.
 
 ---
 
@@ -474,17 +501,19 @@ try {
 
 ## Costs Comparison
 
-| Provider | Per Letter | Monthly Fee | Best Volume | Total (100 letters) |
-|----------|------------|-------------|-------------|---------------------|
-| **Dummy** | $0 | $0 | Testing | **$0** |
-| **Click2Mail** | $1.25 | $0 | <10/month | $125 |
-| **PostGrid** | $1.00 | $0 | 10-100/month | $100 |
-| **Lob** | $0.80 | $260 | 100+/month | $340 |
+| Provider | Per Letter (Color, FC) | Monthly Fee | IMb Tracking | Production SLA |
+|----------|------------------------|-------------|--------------|----------------|
+| **Dummy** | $0 | $0 | Simulated | Instant |
+| **PostGrid** | $1.18 | $0 | 200+ min | 2 days |
+| **Click2Mail** | $1.45 | $0 | **Yes** | **Next day** |
+| **Lob** | ~$0.85 | $0 (500 cap) | **Yes** | ~4 days |
 
-**Cost Breakeven:**
-- < 100 letters/month → PostGrid or Click2Mail
-- 100-300 letters/month → PostGrid
-- 300+ letters/month → Lob
+**Recommendation by Phase:**
+- **Launch (<500/month):** Click2Mail - fast production + tracking for confidence
+- **Growth (500-3000/month):** Evaluate Lob Startup ($260/mo) vs Click2Mail
+- **Scale (3000+/month):** Lob Growth or negotiate enterprise rates
+
+See `docs/mail-provider-comparison.md` for detailed comparison.
 
 ---
 

@@ -237,11 +237,15 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   }
 
   /**
-   * Get delivery status of a letter
+   * Get delivery status of a letter or postcard
    */
   async getStatus(trackingId: string): Promise<LetterStatus> {
     try {
-      const response = await this.apiRequest<PostGridLetterResponse>('GET', `/letters/${trackingId}`);
+      // Determine endpoint based on tracking ID prefix
+      const isPostcard = trackingId.startsWith('postcard_');
+      const endpoint = isPostcard ? `/postcards/${trackingId}` : `/letters/${trackingId}`;
+
+      const response = await this.apiRequest<PostGridLetterResponse>('GET', endpoint);
 
       // Map PostGrid status to our status
       const status = this.mapStatus(response.status);
