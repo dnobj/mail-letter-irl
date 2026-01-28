@@ -395,6 +395,8 @@ User-submitted feature requests for product feedback.
 | description | TEXT | NO | - | Detailed description (max 2000 chars) |
 | category | feature_request_category | NO | 'other' | Category enum |
 | attempted_action | VARCHAR(255) | YES | - | What user was trying to do |
+| contact_email | VARCHAR(255) | YES | - | Email to contact about request |
+| contact_consent | BOOLEAN | NO | false | User consents to being contacted |
 | status | feature_request_status | NO | 'new' | Status workflow enum |
 | admin_notes | TEXT | YES | - | Internal notes |
 | created_at | TIMESTAMPTZ | NO | NOW() | Creation timestamp |
@@ -435,6 +437,7 @@ User-submitted feature requests for product feedback.
 | 14 | 014_update_letter_status_constraint.sql | Update letter status constraint |
 | 15 | 015_provider_routing.sql | Provider routing system |
 | 16 | 016_feature_requests.sql | Feature request submission (US-FEEDBACK-01) |
+| 17 | 017_feature_request_contact.sql | Add contact email and consent fields |
 
 ---
 

@@ -36,6 +36,8 @@ export interface FeatureRequest {
   description: string;
   category: FeatureRequestCategory;
   attempted_action: string | null;
+  contact_email: string | null;
+  contact_consent: boolean;
   status: FeatureRequestStatus;
   admin_notes: string | null;
   created_at: Date;
@@ -49,6 +51,8 @@ export interface SubmitFeatureRequestInput {
   description: string;
   category?: FeatureRequestCategory;
   attemptedAction?: string;
+  contactEmail?: string;
+  okToContact?: boolean;
 }
 
 export interface SubmitFeatureRequestResult {
@@ -147,8 +151,8 @@ export async function submitFeatureRequest(
   // Insert feature request
   const result = await query<FeatureRequest>(
     `INSERT INTO feature_requests (
-      user_id, title, description, category, attempted_action
-    ) VALUES ($1, $2, $3, $4, $5)
+      user_id, title, description, category, attempted_action, contact_email, contact_consent
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *`,
     [
       userId,
@@ -156,6 +160,8 @@ export async function submitFeatureRequest(
       input.description.trim(),
       category,
       input.attemptedAction?.trim() || null,
+      input.contactEmail?.trim() || null,
+      input.okToContact ?? false,
     ]
   );
 

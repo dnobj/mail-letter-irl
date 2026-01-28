@@ -23,6 +23,8 @@ interface SubmitFeatureRequestInput {
   description: string;
   category?: FeatureRequestCategory;
   attemptedAction?: string;
+  contactEmail?: string;
+  okToContact?: boolean;
 }
 
 interface SubmitFeatureRequestOutput {
@@ -54,7 +56,9 @@ async function handler(
       title: input.title,
       description: input.description,
       category: input.category,
-      attemptedAction: input.attemptedAction
+      attemptedAction: input.attemptedAction,
+      contactEmail: input.contactEmail,
+      okToContact: input.okToContact
     });
 
     context.logger.info(
@@ -124,7 +128,9 @@ CATEGORIES:
 TIPS:
 - Include the attemptedAction field when the user was trying to do something specific
 - Summarize the user's request clearly in the title
-- Include context in the description about why this would be valuable`,
+- Include context in the description about why this would be valuable
+- Ask if the user would like to be contacted about the feature (okToContact)
+- If they say yes, ask for their preferred email or use their account email`,
   readOnly: false,
   inputSchema: submitFeatureRequestInputSchema,
   outputSchema: submitFeatureRequestOutputSchema,

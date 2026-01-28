@@ -462,6 +462,15 @@ export const submitFeatureRequestInputSchema: JsonSchema = {
       type: "string",
       description: "What you were trying to do when you realized this feature was needed (max 255 characters)",
       maxLength: 255
+    },
+    contactEmail: {
+      type: "string",
+      description: "Email address to contact about this feature request (optional, uses account email if not provided)",
+      maxLength: 255
+    },
+    okToContact: {
+      type: "boolean",
+      description: "Whether the user consents to being contacted about this feature request"
     }
   }
 };

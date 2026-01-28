@@ -121,5 +121,7 @@ export const submitFeatureRequestInputZ = z.object({
     "international",
     "other"
   ]).optional(),
-  attemptedAction: z.string().optional()
+  attemptedAction: z.string().optional(),
+  contactEmail: z.string().optional(),
+  okToContact: z.boolean().optional()
 });
