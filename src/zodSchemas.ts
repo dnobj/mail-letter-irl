@@ -105,3 +105,21 @@ export const sendPostcardInputZ = z.object({
   draftId: z.string(),
   confirm: z.boolean()
 });
+
+// ============================================================================
+// Feature Request Schema (US-FEEDBACK-01)
+// ============================================================================
+
+export const submitFeatureRequestInputZ = z.object({
+  title: z.string(),
+  description: z.string(),
+  category: z.enum([
+    "new_feature",
+    "improvement",
+    "integration",
+    "mail_type",
+    "international",
+    "other"
+  ]).optional(),
+  attemptedAction: z.string().optional()
+});

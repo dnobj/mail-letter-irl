@@ -18,7 +18,8 @@ import {
   getReturnAddressInputZ,
   clearReturnAddressInputZ,
   quoteAndPreviewPostcardInputZ,
-  sendPostcardInputZ
+  sendPostcardInputZ,
+  submitFeatureRequestInputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
@@ -212,7 +213,9 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   clear_return_address: clearReturnAddressInputZ,
   // Postcard tools
   quote_and_preview_postcard: quoteAndPreviewPostcardInputZ,
-  send_postcard: sendPostcardInputZ
+  send_postcard: sendPostcardInputZ,
+  // Feedback tools
+  submit_feature_request: submitFeatureRequestInputZ
 };
 
 function getZodShape(name: string) {
@@ -448,6 +451,10 @@ function summarizeToolResult(
         summary += ` ${note}`;
       }
       return summary;
+    }
+    case "submit_feature_request": {
+      const message = result.message as string;
+      return message || "Feature request submitted.";
     }
     default:
       return JSON.stringify(result);

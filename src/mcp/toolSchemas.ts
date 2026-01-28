@@ -88,6 +88,20 @@ export const toolInputSchemas = {
   send_postcard: z.object({
     draftId: z.string(),
     confirm: z.boolean()
+  }),
+  // Feedback tools
+  submit_feature_request: z.object({
+    title: z.string(),
+    description: z.string(),
+    category: z.enum([
+      "new_feature",
+      "improvement",
+      "integration",
+      "mail_type",
+      "international",
+      "other"
+    ]).optional(),
+    attemptedAction: z.string().optional()
   })
 };
 
