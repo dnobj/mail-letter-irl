@@ -1,6 +1,6 @@
 # Personas
 
-**Last Updated:** December 24, 2025
+**Last Updated:** January 28, 2026
 **Purpose:** Define user archetypes for product design, user stories, and test scenarios
 
 ---
@@ -59,6 +59,7 @@ Letter IRL serves users who want to send physical letters through conversational
 - US-EDGE-02 (Address correction)
 - US-LAYOUT-01 (Header image letter)
 - US-LAYOUT-02 (Inline image letter)
+- US-FEEDBACK-01 (Submit feature request)
 
 **Test Scenarios:**
 - First-time user flow
@@ -69,6 +70,7 @@ Letter IRL serves users who want to send physical letters through conversational
 - Credit expiration warnings
 - Letter with header image (personal letterhead)
 - Letter with inline image (photo after signature)
+- Submit feature request for international mailing
 
 ---
 
