@@ -16,3 +16,6 @@ export { clearReturnAddressTool } from "./clearReturnAddress.js";
 export { quoteAndPreviewPostcardTool } from "./quoteAndPreviewPostcard.js";
 export { sendPostcardTool } from "./sendPostcard.js";
 
+// Feedback tools (US-FEEDBACK-01)
+export { submitFeatureRequestTool } from "./submitFeatureRequest.js";
+

@@ -1,6 +1,6 @@
 # Database Schema
 
-**Last Updated:** December 29, 2025
+**Last Updated:** January 28, 2026
 **Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
 This document describes the Letter IRL database schema as deployed in production (Neon PostgreSQL).
@@ -9,7 +9,7 @@ This document describes the Letter IRL database schema as deployed in production
 
 ## Overview
 
-**13 Tables** across 13 migrations:
+**14 Tables** across 14 migrations:
 
 | Category | Tables |
 |----------|--------|
@@ -18,6 +18,7 @@ This document describes the Letter IRL database schema as deployed in production
 | Letters | `letters`, `letter_drafts`, `letter_jobs`, `letter_status_history` |
 | Payments | `orders`, `stripe_disputes` |
 | Promos | `promo_campaigns`, `promo_redemptions` |
+| Feedback | `feature_requests` |
 | System | `migrations`, `personal_access_tokens` |
 
 ---
@@ -382,6 +383,38 @@ API tokens for programmatic access (future use).
 
 ---
 
+### feature_requests
+
+User-submitted feature requests for product feedback.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| request_id | UUID | NO | gen_random_uuid() | Primary key |
+| user_id | VARCHAR(255) | NO | - | FK to users |
+| title | VARCHAR(200) | NO | - | Brief title for the request |
+| description | TEXT | NO | - | Detailed description (max 2000 chars) |
+| category | feature_request_category | NO | 'other' | Category enum |
+| attempted_action | VARCHAR(255) | YES | - | What user was trying to do |
+| status | feature_request_status | NO | 'new' | Status workflow enum |
+| admin_notes | TEXT | YES | - | Internal notes |
+| created_at | TIMESTAMPTZ | NO | NOW() | Creation timestamp |
+| updated_at | TIMESTAMPTZ | NO | NOW() | Last update (auto-trigger) |
+| reviewed_at | TIMESTAMPTZ | YES | - | When reviewed by admin |
+| resolved_at | TIMESTAMPTZ | YES | - | When resolved |
+
+**Enums:**
+- `feature_request_status`: new, reviewed, planned, in_progress, completed, declined, duplicate
+- `feature_request_category`: new_feature, improvement, integration, mail_type, international, other
+
+**Indexes:**
+- `idx_feature_requests_user_id` on user_id
+- `idx_feature_requests_status` on status
+- `idx_feature_requests_category` on category
+- `idx_feature_requests_created_at` on created_at DESC
+- `idx_feature_requests_user_recent` on (user_id, created_at DESC) for rate limiting
+
+---
+
 ## Migrations History
 
 | # | File | Description |
@@ -399,6 +432,9 @@ API tokens for programmatic access (future use).
 | 11 | 011_personal_access_tokens.sql | API token authentication |
 | 12 | 012_mail_types.sql | Postcard support (mail_type enum, postcard fields) |
 | 13 | 013_letter_layouts.sql | Layout support for letters (text-only, header, inline images) |
+| 14 | 014_update_letter_status_constraint.sql | Update letter status constraint |
+| 15 | 015_provider_routing.sql | Provider routing system |
+| 16 | 016_feature_requests.sql | Feature request submission (US-FEEDBACK-01) |
 
 ---
 

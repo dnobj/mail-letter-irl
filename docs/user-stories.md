@@ -1,6 +1,6 @@
 # User Stories
 
-**Last Updated:** December 24, 2025
+**Last Updated:** January 28, 2026
 **Purpose:** Test coverage and acceptance criteria for Letter IRL
 
 ---
@@ -24,6 +24,7 @@ User stories are organized by feature area using semantic prefixes:
 | `US-DEV` | Development | Development environment and workflows |
 | `US-DCR` | OAuth Registration | Dynamic Client Registration handling |
 | `US-LAYOUT` | Letter Layouts | Letter layout options (text-only, header image, inline image) |
+| `US-FEEDBACK` | Feedback | Feature requests and user feedback |
 
 Each story includes acceptance criteria that can be converted to test cases.
 
@@ -1635,6 +1636,52 @@ This implementation uses a static client approach aligned with the spec directio
 
 ---
 
+## Feedback (FEEDBACK)
+
+### US-FEEDBACK-01: Submit Feature Request
+**As a** user (Sarah, Marcus, Morgan)
+**I want to** submit feature requests directly through ChatGPT
+**So that** I can share ideas for new features without leaving the conversation
+
+**Acceptance Criteria:**
+- [x] Can submit feature request with title and description
+- [x] Category is optional (defaults to 'other')
+- [x] Can include attempted_action context (what user was trying to do)
+- [x] Receive confirmation with unique request ID
+- [x] Rate limited to 5 requests per user per 24 hours
+- [x] Title limited to 200 characters
+- [x] Description limited to 2000 characters
+- [x] Tool description guides ChatGPT to suggest it proactively
+
+**Categories:**
+- `new_feature` - Brand new functionality
+- `improvement` - Enhancement to existing features
+- `integration` - Connecting with other services
+- `mail_type` - New mail formats (greeting cards, packages, etc.)
+- `international` - Sending mail outside the US
+- `other` - Anything else (default)
+
+**ChatGPT Behavior:**
+The tool description instructs ChatGPT to suggest this tool when:
+- User asks about sending mail internationally
+- User asks about unsupported mail formats (greeting cards, etc.)
+- User asks about features that don't exist
+- User expresses "I wish I could..." or "Can you add..."
+
+**Error Cases:**
+- [x] Empty title → "Title is required"
+- [x] Empty description → "Description is required"
+- [x] Title too long → "Title must be 200 characters or less"
+- [x] Description too long → "Description must be 2000 characters or less"
+- [x] Rate limit exceeded → "You've submitted several feature requests recently..."
+
+**Database:**
+- Table: `feature_requests`
+- Status workflow: new → reviewed → planned → in_progress → completed/declined/duplicate
+- Indexes for user lookup, status filtering, and rate limiting
+
+---
+
 ## Priority Matrix
 
 | Priority | Category | Stories | Key Personas |
@@ -1660,6 +1707,7 @@ This implementation uses a static client approach aligned with the spec directio
 | P3 - Low | Development | US-DEV-01, US-DEV-02, US-DEV-03 | Developers |
 | P1 - High | OAuth Registration | US-DCR-01, US-DCR-02 | MCP Clients, Admin |
 | P1 - High | Letter Layouts | US-LAYOUT-01 - US-LAYOUT-06 | Sarah, David |
+| P2 - Medium | Feedback | US-FEEDBACK-01 | Sarah, Marcus, Morgan |
 
 ---
 
@@ -1680,7 +1728,8 @@ This implementation uses a static client approach aligned with the spec directio
 | Development | US-DEV | 3 |
 | OAuth Registration | US-DCR | 2 |
 | Letter Layouts | US-LAYOUT | 6 |
-| **Total** | | **70** |
+| Feedback | US-FEEDBACK | 1 |
+| **Total** | | **71** |
 
 ---
 

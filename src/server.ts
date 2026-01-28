@@ -16,7 +16,9 @@ import {
   clearReturnAddressTool,
   // Postcard tools
   quoteAndPreviewPostcardTool,
-  sendPostcardTool
+  sendPostcardTool,
+  // Feedback tools
+  submitFeatureRequestTool
 } from "./tools/index.js";
 import {
   McpToolDefinition,
@@ -41,7 +43,9 @@ const tools: McpToolDefinition<unknown, unknown>[] = [
   clearReturnAddressTool,
   // Postcard tools
   quoteAndPreviewPostcardTool,
-  sendPostcardTool
+  sendPostcardTool,
+  // Feedback tools
+  submitFeatureRequestTool
 ];
 
 export interface ServerRequest<Input> {

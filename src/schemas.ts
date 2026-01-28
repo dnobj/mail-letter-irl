@@ -434,3 +434,57 @@ export const sendPostcardOutputSchema: JsonSchema = {
     }
   }
 };
+
+// ============================================================================
+// Feature Request Schemas (US-FEEDBACK-01)
+// ============================================================================
+
+export const submitFeatureRequestInputSchema: JsonSchema = {
+  type: "object",
+  required: ["title", "description"],
+  properties: {
+    title: {
+      type: "string",
+      description: "Brief title for the feature request (max 200 characters)",
+      maxLength: 200
+    },
+    description: {
+      type: "string",
+      description: "Detailed description of the feature you'd like to see (max 2000 characters)",
+      maxLength: 2000
+    },
+    category: {
+      type: "string",
+      enum: ["new_feature", "improvement", "integration", "mail_type", "international", "other"],
+      description: "Category of the feature request. Defaults to 'other' if not specified."
+    },
+    attemptedAction: {
+      type: "string",
+      description: "What you were trying to do when you realized this feature was needed (max 255 characters)",
+      maxLength: 255
+    }
+  }
+};
+
+export const submitFeatureRequestOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["success", "requestId", "message", "category"],
+  properties: {
+    success: {
+      type: "boolean",
+      description: "Whether the feature request was submitted successfully"
+    },
+    requestId: {
+      type: "string",
+      description: "Unique identifier for the submitted feature request"
+    },
+    message: {
+      type: "string",
+      description: "Confirmation message to display to the user"
+    },
+    category: {
+      type: "string",
+      description: "The category assigned to the feature request"
+    }
+  }
+};
