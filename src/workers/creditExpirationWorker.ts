@@ -5,6 +5,11 @@
  * - Marks expired credit ledger entries
  * - Reconciles users.credits cache with ledger
  * - Schedules itself to run daily
+ *
+ * Configuration (environment variables):
+ * - WORKER_POLLING_SECONDS: How often to poll for jobs (default: 2)
+ *
+ * @see US-INFRA-01: Configurable Worker Polling
  */
 
 import { getJobQueue } from '../services/jobQueue.js';
@@ -20,6 +25,7 @@ import {
 } from '../services/draftService.js';
 import { reconcileStripePayments } from '../services/stripeReconciliationService.js';
 import { updateAllUserTiers, clearTierCache } from '../services/tierService.js';
+import { getPollingIntervalSeconds } from './workerEvents.js';
 
 const CREDIT_EXPIRATION_QUEUE = 'credit-expiration';
 const CREDIT_EXPIRATION_SCHEDULE = 'credit-expiration-daily';
@@ -147,6 +153,9 @@ export async function startCreditExpirationWorker(): Promise<void> {
   await boss.createQueue(CREDIT_EXPIRATION_QUEUE);
   console.log(`📋 Queue "${CREDIT_EXPIRATION_QUEUE}" created/verified`);
 
+  // Get configurable polling interval (US-INFRA-01)
+  const pollingIntervalSeconds = getPollingIntervalSeconds();
+
   // Register the worker
   // Note: teamSize/teamConcurrency work at runtime but types are outdated
   await boss.work(
@@ -155,11 +164,12 @@ export async function startCreditExpirationWorker(): Promise<void> {
     {
       teamSize: 1,        // Only one job at a time
       teamConcurrency: 1,
+      pollingIntervalSeconds // Configurable via WORKER_POLLING_SECONDS env var
     },
     processCreditExpiration
   );
 
-  console.log(`✅ Credit expiration worker registered on queue: ${CREDIT_EXPIRATION_QUEUE}`);
+  console.log(`✅ Credit expiration worker registered (polling: ${pollingIntervalSeconds}s) on queue: ${CREDIT_EXPIRATION_QUEUE}`);
 
   // Schedule daily job at 3 AM UTC
   // Using cron: minute hour day month day-of-week

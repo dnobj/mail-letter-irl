@@ -368,6 +368,7 @@ Letter IRL serves users who want to send physical letters through conversational
 - US-ADMIN-06 (Retry jobs)
 - US-ADMIN-07 (Manage promos)
 - US-ADMIN-08 (Stripe reconciliation)
+- US-INFRA-01 (Configurable worker polling)
 
 **Test Scenarios:**
 - Dashboard metrics accuracy
@@ -376,6 +377,7 @@ Letter IRL serves users who want to send physical letters through conversational
 - Credit adjustment with audit
 - Failed job retry workflow
 - Promo campaign lifecycle
+- Worker polling configuration via env vars
 
 ---
 
