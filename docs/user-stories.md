@@ -25,6 +25,7 @@ User stories are organized by feature area using semantic prefixes:
 | `US-DCR` | OAuth Registration | Dynamic Client Registration handling |
 | `US-LAYOUT` | Letter Layouts | Letter layout options (text-only, header image, inline image) |
 | `US-FEEDBACK` | Feedback | Feature requests and user feedback |
+| `US-INFRA` | Infrastructure | Platform operations and cost optimization |
 
 Each story includes acceptance criteria that can be converted to test cases.
 
@@ -1682,6 +1683,40 @@ The tool description instructs ChatGPT to suggest this tool when:
 
 ---
 
+## Infrastructure (INFRA)
+
+### US-INFRA-01: Configurable Worker Polling
+**As a** platform operator (Amy)
+**I want to** control worker polling frequency via environment variables
+**So that** I can optimize database costs during low-traffic periods while maintaining fast processing when needed
+
+**Acceptance Criteria:**
+- [x] `WORKER_POLLING_SECONDS` env var controls polling interval (default: 2)
+- [x] `WORKER_TRIGGER_ON_SEND` env var enables on-demand triggering (default: false)
+- [x] When trigger enabled, letters/postcards process within seconds regardless of polling interval
+- [x] Credit expiration worker also respects polling interval
+- [x] Changes take effect on server restart without code changes
+
+**Error Cases:**
+- [x] Invalid polling seconds (non-numeric) → use default
+- [x] Missing env vars → use defaults (backward compatible)
+
+**Implementation Notes:**
+- Uses EventEmitter for in-process worker coordination
+- On-demand trigger emits 'trigger-poll' event when jobs are queued
+- Letter worker listens for event and immediately fetches pending jobs
+- Allows Neon compute to suspend during idle periods (cost savings)
+
+**Recommended Presets:**
+| Scenario | WORKER_POLLING_SECONDS | WORKER_TRIGGER_ON_SEND | Result |
+|----------|------------------------|------------------------|--------|
+| OpenAI review | `600` | `true` | Instant processing, Neon suspends when idle |
+| Low traffic | `600` | `true` | Best cost/UX balance |
+| High traffic | `10` | `false` | Fast polling, no trigger overhead |
+| Development | `2` | `false` | Immediate feedback for testing |
+
+---
+
 ## Priority Matrix
 
 | Priority | Category | Stories | Key Personas |
@@ -1708,6 +1743,7 @@ The tool description instructs ChatGPT to suggest this tool when:
 | P1 - High | OAuth Registration | US-DCR-01, US-DCR-02 | MCP Clients, Admin |
 | P1 - High | Letter Layouts | US-LAYOUT-01 - US-LAYOUT-06 | Sarah, David |
 | P2 - Medium | Feedback | US-FEEDBACK-01 | Sarah, Marcus, Morgan |
+| P2 - Medium | Infrastructure | US-INFRA-01 | Amy |
 
 ---
 
@@ -1729,7 +1765,8 @@ The tool description instructs ChatGPT to suggest this tool when:
 | OAuth Registration | US-DCR | 2 |
 | Letter Layouts | US-LAYOUT | 6 |
 | Feedback | US-FEEDBACK | 1 |
-| **Total** | | **71** |
+| Infrastructure | US-INFRA | 1 |
+| **Total** | | **72** |
 
 ---
 

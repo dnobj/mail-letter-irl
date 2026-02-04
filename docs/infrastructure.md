@@ -452,6 +452,10 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 # Server
 LETTER_IRL_PUBLIC_BASE_URL=https://api.letterirl.com
 ADMIN_ENABLED=false
+
+# Worker Configuration (US-INFRA-01)
+WORKER_POLLING_SECONDS=600      # Check for jobs every 10 minutes
+WORKER_TRIGGER_ON_SEND=true     # Trigger immediate processing when jobs are queued
 ```
 
 **Development:**
@@ -474,7 +478,30 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 # Server
 LETTER_IRL_PUBLIC_BASE_URL=https://[your-dev-url].up.railway.app
 ADMIN_ENABLED=false
+
+# Worker Configuration (US-INFRA-01)
+WORKER_POLLING_SECONDS=2        # Faster polling for development
+WORKER_TRIGGER_ON_SEND=false    # Use normal polling in dev
 ```
+
+### Worker Configuration Reference
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WORKER_POLLING_SECONDS` | `2` | How often pg-boss workers check for jobs (seconds) |
+| `WORKER_TRIGGER_ON_SEND` | `false` | If `true`, trigger immediate job processing when queued |
+| `DISABLE_WORKERS` | `false` | If `true`, skip starting all background workers |
+
+**Recommended Presets:**
+
+| Scenario | POLLING | TRIGGER | Result |
+|----------|---------|---------|--------|
+| OpenAI review | `600` | `true` | Instant processing, Neon can suspend when idle |
+| Low traffic | `600` | `true` | Best cost/UX balance |
+| High traffic | `10` | `false` | Fast polling, no trigger overhead |
+| Development | `2` | `false` | Immediate feedback for testing |
+
+**Cost Impact:** With `WORKER_POLLING_SECONDS=600` and `WORKER_TRIGGER_ON_SEND=true`, Neon compute can suspend during idle periods (5+ minutes without queries), potentially reducing database costs by 50% or more during low-traffic periods.
 
 ### Website (.env.local)
 

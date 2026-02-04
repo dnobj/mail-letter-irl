@@ -1,12 +1,18 @@
 /**
  * Letter Job Service
  *
- * Manages background jobs for printing and mailing letters
+ * Manages background jobs for printing and mailing letters.
+ *
+ * Configuration (environment variables):
+ * - WORKER_TRIGGER_ON_SEND: If 'true', emit event to trigger immediate processing
+ *
+ * @see US-INFRA-01: Configurable Worker Polling
  */
 
 import { randomUUID } from 'crypto';
 import { query } from '../db/index.js';
 import { getJobQueue } from './jobQueue.js';
+import { triggerPoll, isTriggerOnSendEnabled } from '../workers/workerEvents.js';
 import type { Letter, LetterJob } from './types.js';
 
 const LETTER_QUEUE = 'send-letter';
@@ -115,6 +121,12 @@ export async function createLetterJob(letter: Letter): Promise<LetterJob> {
   );
 
   console.log(`📝 Letter job created: ${jobId} for letter ${letter.letter_id}`);
+
+  // Trigger immediate processing if enabled (US-INFRA-01)
+  if (isTriggerOnSendEnabled()) {
+    console.log(`⚡ Triggering immediate worker poll for queue: ${LETTER_QUEUE}`);
+    triggerPoll(LETTER_QUEUE);
+  }
 
   return result.rows[0];
 }

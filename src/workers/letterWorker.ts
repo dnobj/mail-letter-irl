@@ -1,7 +1,13 @@
 /**
  * Letter Worker
  *
- * Background worker that processes letter printing and mailing jobs
+ * Background worker that processes letter printing and mailing jobs.
+ *
+ * Configuration (environment variables):
+ * - WORKER_POLLING_SECONDS: How often to poll for jobs (default: 2)
+ * - WORKER_TRIGGER_ON_SEND: If 'true', jobs can be triggered immediately via workerEvents
+ *
+ * @see US-INFRA-01: Configurable Worker Polling
  */
 
 import { getJobQueue } from '../services/jobQueue.js';
@@ -10,6 +16,7 @@ import { updateJobStatus, getJobByLetterId } from '../services/letterJobService.
 import type { LetterJobPayload } from '../services/letterJobService.js';
 import { getProviderForMailType, getLetterProvider, type MailType } from '../services/providers/index.js';
 import type { LetterParams, PostcardParams, PostcardSize } from '../services/providers/types.js';
+import { workerEvents, getPollingIntervalSeconds } from './workerEvents.js';
 
 const LETTER_QUEUE = 'send-letter';
 
@@ -248,16 +255,45 @@ export async function startLetterWorker(): Promise<void> {
   await boss.createQueue(LETTER_QUEUE);
   console.log(`📋 Queue "${LETTER_QUEUE}" created/verified`);
 
+  // Get configurable polling interval (US-INFRA-01)
+  const pollingIntervalSeconds = getPollingIntervalSeconds();
+
   await boss.work(
     LETTER_QUEUE,
     {
       teamSize: 5, // Process up to 5 jobs concurrently
-      teamConcurrency: 1 // Each worker handles 1 job at a time
+      teamConcurrency: 1, // Each worker handles 1 job at a time
+      pollingIntervalSeconds // Configurable via WORKER_POLLING_SECONDS env var
     },
     processLetterJob
   );
 
-  console.log('✅ Letter worker started, listening for jobs on queue:', LETTER_QUEUE);
+  // Listen for on-demand trigger events (US-INFRA-01)
+  // When WORKER_TRIGGER_ON_SEND=true, job producers emit 'trigger-poll' to wake worker immediately
+  workerEvents.on('trigger-poll', async ({ queue }) => {
+    if (queue === LETTER_QUEUE || queue === '*') {
+      try {
+        // Fetch and process any pending jobs immediately
+        const jobs = await boss.fetch(LETTER_QUEUE, { batchSize: 10 });
+        if (jobs && jobs.length > 0) {
+          console.log(`⚡ On-demand trigger: processing ${jobs.length} job(s)`);
+          for (const job of jobs) {
+            try {
+              await processLetterJob([job]);
+              await boss.complete(job.id);
+            } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+              await boss.fail(job.id, errorMessage);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error processing on-demand trigger:', error);
+      }
+    }
+  });
+
+  console.log(`✅ Letter worker started (polling: ${pollingIntervalSeconds}s), listening on queue: ${LETTER_QUEUE}`);
 }
 
 /**
