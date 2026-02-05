@@ -28,7 +28,7 @@ import { updateAllUserTiers, clearTierCache } from '../services/tierService.js';
 import { getPollingIntervalSeconds } from './workerEvents.js';
 
 const CREDIT_EXPIRATION_QUEUE = 'credit-expiration';
-const CREDIT_EXPIRATION_SCHEDULE = 'credit-expiration-daily';
+// Note: pg-boss v10 requires schedule name = queue name (foreign key constraint on pgboss.schedule)
 
 /**
  * Process credit expiration job
@@ -176,13 +176,17 @@ export async function startCreditExpirationWorker(): Promise<void> {
   const cronExpression = '0 3 * * *'; // 3:00 AM every day
 
   try {
-    await boss.schedule(CREDIT_EXPIRATION_SCHEDULE, cronExpression, {}, {
+    await boss.schedule(CREDIT_EXPIRATION_QUEUE, cronExpression, {}, {
       tz: 'UTC',
     });
     console.log(`📅 Scheduled daily credit expiration job: ${cronExpression} (UTC)`);
-  } catch (error) {
-    // Schedule might already exist, which is fine
-    console.log('   (Schedule may already exist, continuing...)');
+  } catch (error: any) {
+    if (error.code === '23505') {
+      // unique_violation = schedule already exists, which is fine
+      console.log('   (Schedule already exists, continuing...)');
+    } else {
+      console.error('   ⚠️ Failed to create schedule:', error.message);
+    }
   }
 }
 
