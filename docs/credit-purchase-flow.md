@@ -1,8 +1,8 @@
-# Letter IRL Credit Purchase Flow
+# Letter IRL Purchase Flow
 
 ## Overview
 
-This document describes the complete end-to-end flow for purchasing Letter IRL credits through ChatGPT using the Agentic Commerce Protocol (ACP).
+This document describes the complete end-to-end flow for purchasing Letter IRL letter packs through ChatGPT using the Agentic Commerce Protocol (ACP).
 
 ## User Experience Flow
 
@@ -18,35 +18,31 @@ Great! I can help you send a physical letter to your grandmother.
 
 Preview: [HTML preview of letter]
 
-Cost: 2 credits
-Current balance: 0 credits
+Current balance: 0 letters
 
-You don't have enough credits. Would you like to purchase some?
-I have packages available: 4, 10, or 100 credits.
+You don't have enough letters. Would you like to purchase some?
+I have packages available: 2, 5, or 50 letters.
 ```
 
 ### 2. Browse Products (ChatGPT retrieves product feed)
 
-**User:** "Show me the credit packages"
+**User:** "Show me the letter packages"
 
 **ChatGPT:** Fetches product feed from `/api/acp/v1/products.json`
 
 **Response:**
 ```
-Here are the available credit packages:
+Here are the available letter packages:
 
-📦 Starter Pack - 4 Credits - $5.00
+📦 Starter Pack - 2 Letters - $5.00
    Perfect for trying out Letter IRL
-   Send 2 letters
 
-📦 Regular Pack - 10 Credits - $10.00 ⭐ POPULAR
-   Simple $1 per credit pricing
-   Send 5 letters
+📦 Regular Pack - 5 Letters - $10.00 ⭐ POPULAR
+   Simple $2 per letter pricing
    Most popular choice
 
-📦 Power Pack - 100 Credits - $90.00 💎 BEST VALUE
+📦 Power Pack - 50 Letters - $90.00 💎 BEST VALUE
    Save 10% vs Regular Pack
-   Send 50 letters
    Best for businesses
 
 Which package would you like to purchase?
@@ -77,7 +73,7 @@ Which package would you like to purchase?
   "items": [
     {
       "product_id": "credit-pack-10",
-      "name": "Regular Pack - 10 Credits",
+      "name": "Regular Pack - 5 Letters",
       "quantity": 1,
       "unit_price": "USD 10.00",
       "total_price": "USD 10.00"
@@ -88,7 +84,7 @@ Which package would you like to purchase?
 
 **ChatGPT to User:**
 ```
-Added Regular Pack (10 credits) to your cart for $10.00.
+Added Regular Pack (5 letters) to your cart for $10.00.
 Ready to checkout?
 ```
 
@@ -105,7 +101,7 @@ Ready to checkout?
   "items": [
     {
       "product_id": "credit-pack-10",
-      "name": "Regular Pack - 10 Credits",
+      "name": "Regular Pack - 5 Letters",
       "quantity": 1,
       "unit_price": "USD 10.00",
       "total_price": "USD 10.00"
@@ -148,7 +144,7 @@ Ready to checkout?
 
 **ChatGPT to User:**
 ```
-Your total is $10.00 (no tax for digital credits).
+Your total is $10.00 (no tax for digital goods).
 Ready to complete your purchase?
 ```
 
@@ -198,7 +194,7 @@ Idempotency-Key: chatgpt_20250114_120500_abc123
 1. Validates JWT (user authentication)
 2. Validates cart and quote
 3. Calls Stripe API to charge SPT
-4. Adds credits to user account
+4. Adds letters to user account
 5. Creates order record
 
 **Server Response:**
@@ -209,9 +205,9 @@ Idempotency-Key: chatgpt_20250114_120500_abc123
   "total": "USD 10.00",
   "currency": "USD",
   "created_at": "2025-01-14T12:15:00Z",
-  "credits_added": 10,
-  "new_balance": 10,
-  "receipt_url": "https://amitotically-gubernacular-elise.ngrok-free.dev/receipts/order_abc123"
+  "letters_added": 5,
+  "new_balance": 5,
+  "receipt_url": "https://api.letterirl.com/receipts/order_abc123"
 }
 ```
 
@@ -219,22 +215,22 @@ Idempotency-Key: chatgpt_20250114_120500_abc123
 ```
 ✅ Purchase complete!
 
-You've successfully purchased 10 credits for $10.00.
-New balance: 10 credits
+You've successfully purchased 5 letters for $10.00.
+New balance: 5 letters
 
 Receipt: [link to receipt]
 
 Now you can send that letter to your grandmother!
 ```
 
-### 8. Send Letter (Using New Credits)
+### 8. Send Letter (Using New Letters)
 
 **User:** "Great, let's send the letter"
 
 **ChatGPT:** Calls `send_letter` tool with `confirm: true`
 
 **Server:**
-1. Deducts 2 credits from balance
+1. Deducts 1 letter from balance
 2. Creates print/mail order
 3. Returns confirmation
 
@@ -246,8 +242,7 @@ To: Grandma Smith
    123 Oak Street
    Springfield, IL 62701
 
-Credits used: 2
-Remaining balance: 8 credits
+Remaining balance: 4 letters
 
 Expected delivery: January 18, 2025
 
@@ -262,7 +257,7 @@ Tracking: [tracking link]
 │          │                 │          │                 │   IRL    │                 │         │
 └────┬─────┘                 └────┬─────┘                 └────┬─────┘                 └────┬────┘
      │                            │                            │                            │
-     │ "Buy credits"              │                            │                            │
+     │ "Buy letters"              │                            │                            │
      ├───────────────────────────>│                            │                            │
      │                            │                            │                            │
      │                            │  GET /products.json        │                            │

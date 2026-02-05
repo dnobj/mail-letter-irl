@@ -1,19 +1,17 @@
-# Letter IRL Credit Packages Specification
+# Letter IRL Letter Packages Specification
 
 ## Overview
 
-Letter IRL offers three credit packages for purchase through ChatGPT's Agentic Commerce Protocol (ACP). Credits are used to send physical letters, with each letter costing 2 credits (one page maximum).
+Letter IRL offers three letter packages for purchase through the website dashboard or ChatGPT. Users buy letter packs and use them to send physical letters.
 
-## Credit Pricing Model
+**Note:** Internally, the system uses "credits" (2 credits = 1 letter) for flexibility, but all user-facing messaging uses "letters".
 
-| Letter Pages | Credit Cost |
-|--------------|-------------|
-| 1 page (maximum) | 2 credits |
+## Pricing Model
 
 **Current Limitation:** All letters are limited to one page (~1,800 characters). Multi-page letters will be available in a future update.
 
-**Cost Components:**
-- Printing: Color or B&W
+**What's Included Per Letter:**
+- Printing: Black & white
 - Paper: Standard letter stock
 - Postage: USPS First Class Mail
 - Envelope: Standard #10 business envelope
@@ -21,44 +19,40 @@ Letter IRL offers three credit packages for purchase through ChatGPT's Agentic C
 
 ## Package Offerings
 
-### Starter Pack - 4 Credits
+### Starter Pack - 2 Letters
 
-**Product ID:** `credit-pack-4`
+**Product ID:** `credit-pack-4` (internal: 4 credits)
 
 **Pricing:** $5.00 USD
+
+**Stripe Description:** "Perfect for trying out Letter IRL. Send 2 physical letters through ChatGPT."
 
 **Value Proposition:**
 - Perfect for trying out the service
 - Send 2 letters
 - No commitment required
-- Instant delivery
 
 **Target Audience:**
 - First-time users
 - One-off letter senders
 - Users testing the service
 
-**Messaging:**
-- "Try Letter IRL risk-free"
-- "Send your first letters today"
-- "Perfect for a couple of thank you notes"
-
-**Cost per Credit:** $1.25
-
 **Cost per Letter:** $2.50
 
 ---
 
-### Regular Pack - 10 Credits
+### Regular Pack - 5 Letters
 
-**Product ID:** `credit-pack-10`
+**Product ID:** `credit-pack-10` (internal: 10 credits)
 
 **Pricing:** $10.00 USD
+
+**Stripe Description:** "Most popular choice! Send 5 physical letters. Simple $2 per letter pricing."
 
 **Value Proposition:**
 - Best for regular letter senders
 - Send 5 letters
-- Simple 1:1 pricing ($1 per credit)
+- Simple $2 per letter pricing
 - Most popular choice
 
 **Target Audience:**
@@ -67,25 +61,19 @@ Letter IRL offers three credit packages for purchase through ChatGPT's Agentic C
 - Personal correspondence
 - Thank you notes, invitations, announcements
 
-**Messaging:**
-- "Most popular choice"
-- "Simple $1 per credit pricing"
-- "Perfect for regular correspondence"
-- "Great for small businesses"
-
-**Cost per Credit:** $1.00
-
 **Cost per Letter:** $2.00
 
 **Badge:** "POPULAR"
 
 ---
 
-### Power Pack - 100 Credits
+### Power Pack - 50 Letters
 
-**Product ID:** `credit-pack-100`
+**Product ID:** `credit-pack-100` (internal: 100 credits)
 
 **Pricing:** $90.00 USD
+
+**Stripe Description:** "Best value for frequent senders. Send 50 physical letters."
 
 **Value Proposition:**
 - Maximum savings - 10% off per letter
@@ -99,14 +87,6 @@ Letter IRL offers three credit packages for purchase through ChatGPT's Agentic C
 - Frequent personal correspondence
 - Organizations and groups
 
-**Messaging:**
-- "Best value - Save 10%"
-- "Perfect for businesses and power users"
-- "Send up to 50 letters"
-- "Lowest per-letter cost"
-
-**Cost per Credit:** $0.90
-
 **Cost per Letter:** $1.80
 
 **Savings:** 10% per letter compared to Regular Pack
@@ -117,13 +97,11 @@ Letter IRL offers three credit packages for purchase through ChatGPT's Agentic C
 
 ## Comparison Table
 
-| Package | Credits | Price | Per Credit | Per Letter | Savings | Best For |
-|---------|---------|-------|------------|------------|---------|----------|
-| Starter | 4 | $5.00 | $1.25 | $2.50 | - | Trying out |
-| Regular | 10 | $10.00 | $1.00 | $2.00 | - | Regular use |
-| Power | 100 | $90.00 | $0.90 | $1.80 | 10% | Power users |
-
-All letters cost 2 credits (one page maximum)
+| Package | Letters | Price | Per Letter | Savings | Best For |
+|---------|---------|-------|------------|---------|----------|
+| Starter | 2 | $5.00 | $2.50 | - | Trying out |
+| Regular | 5 | $10.00 | $2.00 | - | Regular use |
+| Power | 50 | $90.00 | $1.80 | 10% | Power users |
 
 ## Product Feed JSON
 
@@ -132,26 +110,25 @@ Location: `public/products.json` or served at `/api/acp/v1/products.json`
 ```json
 {
   "version": "1.0",
-  "updated_at": "2025-01-14T00:00:00Z",
+  "updated_at": "2025-12-03T00:00:00Z",
   "currency": "USD",
   "products": [
     {
       "product_id": "credit-pack-4",
-      "name": "Starter Pack - 4 Credits",
+      "name": "Starter Pack - 2 Letters",
       "price": "USD 5.00",
-      "description": "Perfect for trying out Letter IRL. Send 2 physical letters through ChatGPT. Each letter costs 2 credits (one page).",
-      "category": "credit-packages",
-      "image_url": "https://amitotically-gubernacular-elise.ngrok-free.dev/images/products/credit-pack-4.png",
+      "description": "Perfect for trying out Letter IRL. Send 2 physical letters through ChatGPT.",
+      "category": "letter-packages",
+      "image_url": "https://api.letterirl.com/images/products/starter-pack.png",
       "availability": "in stock",
       "metadata": {
+        "letters": 2,
         "credits": 4,
-        "credits_per_dollar": 0.8,
         "best_for": "trying_out",
-        "typical_letters": "2 letters",
-        "value_per_credit": 1.25,
+        "price_per_letter": 2.50,
         "badge": null,
         "features": [
-          "Instant credit delivery",
+          "Send 2 letters",
           "No expiration",
           "Black & white printing",
           "USPS First Class Mail"
@@ -160,22 +137,21 @@ Location: `public/products.json` or served at `/api/acp/v1/products.json`
     },
     {
       "product_id": "credit-pack-10",
-      "name": "Regular Pack - 10 Credits",
+      "name": "Regular Pack - 5 Letters",
       "price": "USD 10.00",
-      "description": "Most popular choice! Great for regular letter senders. Send 5 physical letters. Simple $1 per credit pricing.",
-      "category": "credit-packages",
-      "image_url": "https://amitotically-gubernacular-elise.ngrok-free.dev/images/products/credit-pack-10.png",
+      "description": "Most popular choice! Send 5 physical letters. Simple $2 per letter pricing.",
+      "category": "letter-packages",
+      "image_url": "https://api.letterirl.com/images/products/regular-pack.png",
       "availability": "in stock",
       "metadata": {
+        "letters": 5,
         "credits": 10,
-        "credits_per_dollar": 1.00,
         "best_for": "regular_use",
-        "typical_letters": "5 letters",
-        "value_per_credit": 1.00,
+        "price_per_letter": 2.00,
         "badge": "POPULAR",
         "features": [
-          "Simple 1:1 pricing",
-          "Instant credit delivery",
+          "Send 5 letters",
+          "Simple $2 per letter",
           "No expiration",
           "Black & white printing",
           "USPS First Class Mail",
@@ -185,28 +161,25 @@ Location: `public/products.json` or served at `/api/acp/v1/products.json`
     },
     {
       "product_id": "credit-pack-100",
-      "name": "Power Pack - 100 Credits",
+      "name": "Power Pack - 50 Letters",
       "price": "USD 90.00",
-      "description": "Best value for frequent senders! Send 50 physical letters with 10% savings per letter. Perfect for businesses and power users.",
-      "category": "credit-packages",
-      "image_url": "https://amitotically-gubernacular-elise.ngrok-free.dev/images/products/credit-pack-100.png",
+      "description": "Best value for frequent senders. Send 50 physical letters.",
+      "category": "letter-packages",
+      "image_url": "https://api.letterirl.com/images/products/power-pack.png",
       "availability": "in stock",
       "metadata": {
+        "letters": 50,
         "credits": 100,
-        "credits_per_dollar": 1.11,
         "best_for": "power_users",
-        "typical_letters": "50 letters",
-        "value_per_credit": 0.90,
+        "price_per_letter": 1.80,
         "savings_percent": 10,
-        "savings_amount": 10.00,
         "badge": "BEST VALUE",
         "features": [
-          "10% savings - lowest price per letter",
-          "Instant credit delivery",
+          "Send 50 letters",
+          "10% savings per letter",
           "No expiration",
           "Black & white printing",
           "USPS First Class Mail",
-          "Priority support",
           "Perfect for marketing campaigns"
         ]
       }
@@ -229,9 +202,9 @@ Location: `public/products.json` or served at `/api/acp/v1/products.json`
 
 ```
 /mnt/c/letter-irl/public/images/products/
-├── credit-pack-5.png     (Starter Pack)
-├── credit-pack-20.png    (Regular Pack)
-└── credit-pack-100.png   (Power Pack)
+├── starter-pack.png     (Starter Pack - 2 Letters)
+├── regular-pack.png     (Regular Pack - 5 Letters)
+└── power-pack.png       (Power Pack - 50 Letters)
 ```
 
 ### Serve via HTTP
@@ -250,32 +223,32 @@ app.use('/images', express.static(path.join(__dirname, '../../public/images')));
 
 ### Image Design Suggestions
 
-**Starter Pack (4 Credits):**
+**Starter Pack (2 Letters):**
 - Icon: Single envelope or stamp
 - Color: Light blue (#3B82F6)
-- Text: "4 CREDITS" prominently displayed
+- Text: "2 LETTERS" prominently displayed
 - Subtitle: "Perfect for trying out"
 
-**Regular Pack (10 Credits):**
+**Regular Pack (5 Letters):**
 - Icon: Stack of 3-4 envelopes
 - Color: Green (#10B981)
-- Text: "10 CREDITS" prominently displayed
+- Text: "5 LETTERS" prominently displayed
 - Badge: "POPULAR" in corner
 - Subtitle: "Most popular choice"
 
-**Power Pack (100 Credits):**
+**Power Pack (50 Letters):**
 - Icon: Large stack of envelopes or mailbox
 - Color: Purple (#8B5CF6)
-- Text: "100 CREDITS" prominently displayed
+- Text: "50 LETTERS" prominently displayed
 - Badge: "BEST VALUE - SAVE 10%" in corner
 - Subtitle: "Maximum savings"
 
 ### Placeholder Images
 
 For initial testing, use placeholder images:
-- https://placehold.co/1200x1200/3B82F6/FFFFFF/png?text=4+Credits
-- https://placehold.co/1200x1200/10B981/FFFFFF/png?text=10+Credits
-- https://placehold.co/1200x1200/8B5CF6/FFFFFF/png?text=100+Credits
+- https://placehold.co/1200x1200/3B82F6/FFFFFF/png?text=2+Letters
+- https://placehold.co/1200x1200/10B981/FFFFFF/png?text=5+Letters
+- https://placehold.co/1200x1200/8B5CF6/FFFFFF/png?text=50+Letters
 
 ## Credit Management
 
@@ -399,14 +372,13 @@ async function validatePurchase(userId: string, credits: number) {
 
 Based on estimated costs and market positioning:
 
-| Package | Price | Per Credit | Per Letter | Margin** |
-|---------|-------|------------|------------|----------|
-| Starter | $5.00 | $1.25 | $2.50 | ~51% |
-| Regular | $10.00 | $1.00 | $2.00 | ~39% |
-| Power | $90.00 | $0.90 | $1.80 | ~32% |
+| Package | Letters | Price | Per Letter | Margin* |
+|---------|---------|-------|------------|---------|
+| Starter | 2 | $5.00 | $2.50 | ~51% |
+| Regular | 5 | $10.00 | $2.00 | ~39% |
+| Power | 50 | $90.00 | $1.80 | ~32% |
 
-All letters cost 2 credits (one page maximum)
-**Estimated margin after print/postage/processing costs (~$1.23 per letter)
+*Estimated margin after print/postage/processing costs (~$1.23 per letter)
 
 ### Competitor Comparison
 
@@ -428,10 +400,10 @@ Traditional mail services:
 
 Consider adding in future:
 
-1. **Micro Pack** - 1 credit for $0.99 (testing ultra-low commitment)
-2. **Mega Pack** - 500 credits for $149.99 (40% savings, enterprise tier)
-3. **Subscription** - 20 credits/month for $8.99/mo (monthly commitment, 10% discount)
-4. **Business Plans** - Custom pricing for >1,000 credits/month
+1. **Single Letter** - 1 letter for $2.99 (testing ultra-low commitment)
+2. **Mega Pack** - 250 letters for $399.99 (40% savings, enterprise tier)
+3. **Subscription** - 10 letters/month for $17.99/mo (monthly commitment, 10% discount)
+4. **Business Plans** - Custom pricing for >500 letters/month
 
 ## Promotional Strategy
 
@@ -499,20 +471,17 @@ Consider adding in future:
 
 ### Common Questions
 
-**Q: Do credits expire?**
-A: No, credits never expire.
+**Q: Do letters expire?**
+A: No, purchased letters never expire.
 
 **Q: Can I get a refund?**
-A: Yes, unused credits can be refunded within 30 days of purchase.
+A: Yes, unused letters can be refunded within 30 days of purchase.
 
-**Q: What if I run out of credits?**
+**Q: What if I run out of letters?**
 A: ChatGPT will notify you when your balance is low. You can purchase more anytime.
 
-**Q: How many credits does a letter cost?**
-A: 1-2 page letters cost 2 credits. 3-4 page letters cost 3 credits.
-
-**Q: Can I share credits with someone?**
-A: No, credits are tied to your account and non-transferable.
+**Q: Can I share letters with someone?**
+A: No, letters are tied to your account and non-transferable.
 
 **Q: What payment methods are accepted?**
 A: All major credit/debit cards via Stripe (Visa, Mastercard, Amex, Discover).

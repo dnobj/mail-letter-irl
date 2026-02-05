@@ -1,31 +1,32 @@
-# Letter IRL Pricing & Credits
+# Letter IRL Pricing & Packages
 
-**Last Updated:** November 19, 2025
+**Last Updated:** February 5, 2026
 
 ## Overview
 
-Letter IRL uses a credit-based pricing model. Users purchase credits and spend them to send physical letters.
+Letter IRL offers letter packages for purchase. Users buy letter packs and use them to send physical letters through ChatGPT.
+
+**Note:** Internally, the system uses "credits" (2 credits = 1 letter) for flexibility, but all user-facing messaging uses "letters".
 
 ---
 
-## Credit Packages
+## Letter Packages
 
-| Package | Credits | Price | Per Credit | Letters | Per Letter | Savings |
-|---------|---------|-------|------------|---------|------------|---------|
-| **Starter** | 4 | $5.00 | $1.25 | 2 | $2.50 | - |
-| **Regular** | 10 | $10.00 | $1.00 | 5 | $2.00 | - |
-| **Power** | 100 | $90.00 | $0.90 | 50 | $1.80 | 10% off |
+| Package | Letters | Price | Per Letter | Savings |
+|---------|---------|-------|------------|---------|
+| **Starter Pack** | 2 | $5.00 | $2.50 | - |
+| **Regular Pack** | 5 | $10.00 | $2.00 | - |
+| **Power Pack** | 50 | $90.00 | $1.80 | 10% off |
 
-**Recommended:** Regular pack - best balance of value and flexibility
+**Recommended:** Regular Pack - best balance of value and flexibility
 
-**Best Value:** Power pack - 10% discount per letter compared to Regular
+**Best Value:** Power Pack - 10% discount per letter compared to Regular
 
 ---
 
-## Letter Pricing (Current)
+## Letter Specifications
 
 ### Standard Letter
-- **Cost:** 2 credits per letter
 - **Page Limit:** One page maximum (~1,800 characters)
 - **Delivery:** Standard First Class Mail (USPS)
 - **Features:** Black & white, single-sided
@@ -38,22 +39,17 @@ Letter IRL uses a credit-based pricing model. Users purchase credits and spend t
 
 ---
 
-## Future Pricing Tiers (Planned)
+## Future Letter Options (Planned)
 
-We plan to introduce additional letter options:
+We plan to introduce additional letter types:
 
 ### Basic Letter (Planned)
-- **Cost:** 1 credit
+- **Price:** ~$1.50 per letter
 - **Features:** Plain text, standard delivery
 - **Use Case:** Simple messages, maximum value
 
-### Premium Letter (Current Offering)
-- **Cost:** 2 credits
-- **Features:** Current standard offering
-- **Use Case:** General purpose letters
-
-### Super Premium Letter (Planned)
-- **Cost:** 3+ credits
+### Premium Letter (Planned)
+- **Price:** ~$3.00+ per letter
 - **Features:** Multi-page, color printing, expedited delivery, special formatting
 - **Use Case:** Important communications, formal letters
 
@@ -67,7 +63,7 @@ We plan to introduce additional letter options:
 - **Accepted Cards:** Visa, Mastercard, American Express, Discover
 
 ### OpenAI Agentic Commerce (Coming Soon)
-- **In-ChatGPT Purchases:** Buy credits directly in conversation
+- **In-ChatGPT Purchases:** Buy letter packs directly in conversation
 - **Seamless:** No leaving ChatGPT
 - **Same Pricing:** Identical packages and rates
 
@@ -96,13 +92,13 @@ We plan to introduce additional letter options:
 
 ## Refund Policy
 
-### Credits Are Refundable If:
+### Letters Are Refundable If:
 - ✅ Letter fails to send due to provider error
 - ✅ Invalid address (after verification attempt)
 - ✅ Service outage or system issue on our end
 - ✅ Letter quality issue (misprinting, damage)
 
-### Credits Are Non-Refundable After:
+### Letters Are Non-Refundable After:
 - ❌ Letter successfully dispatched to USPS
 - ❌ Address was valid and deliverable
 - ❌ User error in letter content or recipient details
@@ -110,21 +106,21 @@ We plan to introduce additional letter options:
 ### Refund Process:
 1. Contact support with order ID
 2. Issue reviewed within 1 business day
-3. Credits restored to account (not cash refund)
+3. Letters restored to account (not cash refund)
 4. Notification sent via email
 
 ---
 
 ## Pricing Philosophy
 
-### Why Credits Instead of Per-Letter Billing?
+### Why Letter Packs?
 
 **Advantages:**
 1. **Predictable costs** - Know exactly what you'll pay
-2. **No hidden fees** - Credits never expire
+2. **No hidden fees** - Letters never expire
 3. **Volume discounts** - Save more with larger purchases
-4. **Flexibility** - Use credits when you need them
-5. **Future-ready** - Easy to add premium features
+4. **Flexibility** - Use letters when you need them
+5. **Future-ready** - Easy to add premium letter types
 
 ### Fair Pricing Commitment
 

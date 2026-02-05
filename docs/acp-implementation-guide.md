@@ -61,7 +61,7 @@ Product feeds can be TSV, CSV, or JSON. For Letter IRL, we'll use JSON for maxim
   "products": [
     {
       "product_id": "credit-pack-4",
-      "name": "Starter Pack - 4 Credits",
+      "name": "Starter Pack - 2 Letters",
       "price": "USD 5.00",
       "description": "Perfect for trying out Letter IRL. Send 2 physical letters. Each letter costs 2 credits (one page).",
       "category": "credit-packages",
@@ -76,7 +76,7 @@ Product feeds can be TSV, CSV, or JSON. For Letter IRL, we'll use JSON for maxim
     },
     {
       "product_id": "credit-pack-10",
-      "name": "Regular Pack - 10 Credits",
+      "name": "Regular Pack - 5 Letters",
       "price": "USD 10.00",
       "description": "Most popular choice! Great for regular letter senders. Send 5 physical letters. Simple $1 per credit pricing.",
       "category": "credit-packages",
@@ -92,7 +92,7 @@ Product feeds can be TSV, CSV, or JSON. For Letter IRL, we'll use JSON for maxim
     },
     {
       "product_id": "credit-pack-100",
-      "name": "Power Pack - 100 Credits",
+      "name": "Power Pack - 50 Letters",
       "price": "USD 90.00",
       "description": "Best value for frequent senders! Send 50 physical letters with 10% savings per letter. Perfect for businesses and power users.",
       "category": "credit-packages",
@@ -214,7 +214,7 @@ Content-Type: application/json
   "items": [
     {
       "product_id": "credit-pack-20",
-      "name": "Regular Pack - 20 Credits",
+      "name": "Regular Pack - 5 Letters",
       "quantity": 1,
       "unit_price": "USD 9.99",
       "total_price": "USD 9.99"
@@ -250,7 +250,7 @@ Authorization: Bearer <jwt_token>
   "items": [
     {
       "product_id": "credit-pack-20",
-      "name": "Regular Pack - 20 Credits",
+      "name": "Regular Pack - 5 Letters",
       "quantity": 1,
       "unit_price": "USD 9.99",
       "total_price": "USD 9.99"
@@ -303,7 +303,7 @@ Content-Type: application/json
   "line_items": [
     {
       "product_id": "credit-pack-20",
-      "name": "Regular Pack - 20 Credits",
+      "name": "Regular Pack - 5 Letters",
       "quantity": 1,
       "unit_price": "USD 9.99",
       "total_price": "USD 9.99"

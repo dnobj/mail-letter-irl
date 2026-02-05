@@ -113,7 +113,7 @@ export function getProducts(): Product[] {
   return [
     {
       product_id: "credit-pack-5",
-      name: "Starter Pack - 5 Credits",
+      name: "Starter Pack - 2 Letters",
       price: "USD 2.99",
       description: "Perfect for trying out Letter IRL. Send 1-2 letters.",
       category: "credit-packages",
@@ -126,7 +126,7 @@ export function getProducts(): Product[] {
     },
     {
       product_id: "credit-pack-20",
-      name: "Regular Pack - 20 Credits",
+      name: "Regular Pack - 5 Letters",
       price: "USD 9.99",
       description: "Most popular! Send 6-10 letters. Save 16%.",
       category: "credit-packages",
@@ -141,7 +141,7 @@ export function getProducts(): Product[] {
     },
     {
       product_id: "credit-pack-100",
-      name: "Power Pack - 100 Credits",
+      name: "Power Pack - 50 Letters",
       price: "USD 39.99",
       description: "Best value! Send 30-50 letters. Save 33%.",
       category: "credit-packages",
