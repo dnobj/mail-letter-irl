@@ -12,7 +12,7 @@
  * @see US-INFRA-01: Configurable Worker Polling
  */
 
-import { getJobQueue } from '../services/jobQueue.js';
+import { getJobQueue, runMaintenance } from '../services/jobQueue.js';
 import {
   markExpiredEntries,
   reconcileBalances,
@@ -28,7 +28,13 @@ import { updateAllUserTiers, clearTierCache } from '../services/tierService.js';
 import { getPollingIntervalSeconds } from './workerEvents.js';
 
 const CREDIT_EXPIRATION_QUEUE = 'credit-expiration';
-// Note: pg-boss v10 requires schedule name = queue name (foreign key constraint on pgboss.schedule)
+
+// Scheduling interval: check hourly whether daily tasks need to run
+const SCHEDULE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
+// Track last run date to ensure daily tasks run once per day
+let lastDailyRunDate: string | null = null;
+let scheduleTimer: NodeJS.Timeout | null = null;
 
 /**
  * Process credit expiration job
@@ -142,6 +148,44 @@ async function processCreditExpiration(jobs: any[]): Promise<void> {
 }
 
 /**
+ * Check if the daily credit expiration + maintenance should run.
+ * Runs once per day, targeting 3 AM UTC (but runs on first check after that hour).
+ */
+async function checkAndRunDaily(): Promise<void> {
+  const now = new Date();
+  const todayDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+  const currentHour = now.getUTCHours();
+
+  // Skip if already ran today
+  if (lastDailyRunDate === todayDate) {
+    return;
+  }
+
+  // Wait until at least 3 AM UTC
+  if (currentHour < 3) {
+    return;
+  }
+
+  lastDailyRunDate = todayDate;
+  console.log(`📅 [CreditExpiration] Running daily tasks for ${todayDate}`);
+
+  // 1. Queue a credit expiration job
+  try {
+    const boss = getJobQueue();
+    const jobId = await boss.send(CREDIT_EXPIRATION_QUEUE, {
+      triggeredAt: now.toISOString(),
+      scheduled: true,
+    });
+    console.log(`📅 [CreditExpiration] Queued daily job: ${jobId}`);
+  } catch (error) {
+    console.error('📅 [CreditExpiration] Failed to queue daily job:', error);
+  }
+
+  // 2. Run pg-boss maintenance (expire/archive/purge)
+  await runMaintenance();
+}
+
+/**
  * Start the credit expiration worker
  */
 export async function startCreditExpirationWorker(): Promise<void> {
@@ -171,22 +215,23 @@ export async function startCreditExpirationWorker(): Promise<void> {
 
   console.log(`✅ Credit expiration worker registered (polling: ${pollingIntervalSeconds}s) on queue: ${CREDIT_EXPIRATION_QUEUE}`);
 
-  // Schedule daily job at 3 AM UTC
-  // Using cron: minute hour day month day-of-week
-  const cronExpression = '0 3 * * *'; // 3:00 AM every day
+  // Schedule daily tasks via setInterval (replaces boss.schedule which requires Timekeeper)
+  // Check hourly whether the daily job needs to run (targets 3 AM UTC)
+  scheduleTimer = setInterval(checkAndRunDaily, SCHEDULE_CHECK_INTERVAL_MS);
+  console.log(`📅 Daily schedule check enabled (hourly interval, runs after 3 AM UTC)`);
 
-  try {
-    await boss.schedule(CREDIT_EXPIRATION_QUEUE, cronExpression, {}, {
-      tz: 'UTC',
-    });
-    console.log(`📅 Scheduled daily credit expiration job: ${cronExpression} (UTC)`);
-  } catch (error: any) {
-    if (error.code === '23505') {
-      // unique_violation = schedule already exists, which is fine
-      console.log('   (Schedule already exists, continuing...)');
-    } else {
-      console.error('   ⚠️ Failed to create schedule:', error.message);
-    }
+  // Run initial check on startup
+  await checkAndRunDaily();
+}
+
+/**
+ * Stop the credit expiration worker schedule timer
+ */
+export function stopCreditExpirationWorker(): void {
+  if (scheduleTimer) {
+    clearInterval(scheduleTimer);
+    scheduleTimer = null;
+    console.log('✅ Credit expiration schedule timer stopped');
   }
 }
 

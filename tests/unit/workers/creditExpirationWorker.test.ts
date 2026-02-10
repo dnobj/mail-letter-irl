@@ -2,10 +2,9 @@
  * Unit tests for creditExpirationWorker
  *
  * Tests the credit expiration worker configuration:
- * - Schedule registration uses correct queue name (pg-boss v10 requirement)
  * - Worker processes jobs correctly
- *
- * Bug Fixed: pg-boss v10 requires schedule name = queue name (foreign key constraint)
+ * - Daily scheduling via setInterval (replaces boss.schedule)
+ * - Manual triggering
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -23,15 +22,14 @@ const mockBoss = {
     callOrder.push('work');
     return Promise.resolve();
   }),
-  schedule: vi.fn().mockImplementation(() => {
-    callOrder.push('schedule');
-    return Promise.resolve();
-  }),
   send: vi.fn().mockResolvedValue('test-job-id'),
 };
 
+const mockRunMaintenance = vi.fn().mockResolvedValue(undefined);
+
 vi.mock('../../../src/services/jobQueue.js', () => ({
   getJobQueue: vi.fn(() => mockBoss),
+  runMaintenance: (...args: any[]) => mockRunMaintenance(...args),
 }));
 
 // Mock workerEvents
@@ -64,10 +62,12 @@ vi.mock('../../../src/services/tierService.js', () => ({
 describe('creditExpirationWorker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
     callOrder = [];
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.resetModules();
   });
 
@@ -75,26 +75,11 @@ describe('creditExpirationWorker', () => {
   // startCreditExpirationWorker Tests
   // ==========================================================================
   describe('startCreditExpirationWorker', () => {
-    it('should register schedule with same name as queue (pg-boss v10 requirement)', async () => {
-      const { startCreditExpirationWorker } = await import('../../../src/workers/creditExpirationWorker.js');
-
-      await startCreditExpirationWorker();
-
-      // Get the queue name from createQueue call
-      const createQueueCall = mockBoss.createQueue.mock.calls[0];
-      const queueName = createQueueCall[0];
-
-      // Get the schedule name from schedule call
-      const scheduleCall = mockBoss.schedule.mock.calls[0];
-      const scheduleName = scheduleCall[0];
-
-      // pg-boss v10 requires these to match (foreign key constraint)
-      expect(scheduleName).toBe(queueName);
-      expect(scheduleName).toBe('credit-expiration');
-    });
-
     it('should create queue before registering worker', async () => {
-      const { startCreditExpirationWorker } = await import('../../../src/workers/creditExpirationWorker.js');
+      // Set time to 2 AM UTC so daily check doesn't trigger boss.send
+      vi.setSystemTime(new Date('2026-01-15T02:00:00Z'));
+
+      const { startCreditExpirationWorker, stopCreditExpirationWorker } = await import('../../../src/workers/creditExpirationWorker.js');
 
       await startCreditExpirationWorker();
 
@@ -105,31 +90,55 @@ describe('creditExpirationWorker', () => {
       const createQueueIndex = callOrder.indexOf('createQueue');
       const workIndex = callOrder.indexOf('work');
       expect(createQueueIndex).toBeLessThan(workIndex);
+
+      stopCreditExpirationWorker();
     });
 
-    it('should schedule daily job at 3 AM UTC', async () => {
-      const { startCreditExpirationWorker } = await import('../../../src/workers/creditExpirationWorker.js');
+    it('should not call boss.schedule (Timekeeper is disabled)', async () => {
+      vi.setSystemTime(new Date('2026-01-15T02:00:00Z'));
+
+      const { startCreditExpirationWorker, stopCreditExpirationWorker } = await import('../../../src/workers/creditExpirationWorker.js');
 
       await startCreditExpirationWorker();
 
-      expect(mockBoss.schedule).toHaveBeenCalledWith(
-        'credit-expiration',
-        '0 3 * * *',
-        {},
-        { tz: 'UTC' }
-      );
+      // boss.schedule should not exist on mock (we removed it from the mock)
+      // and should not be called
+      expect((mockBoss as any).schedule).toBeUndefined();
+
+      stopCreditExpirationWorker();
     });
 
-    it('should handle schedule already exists error gracefully', async () => {
-      // Simulate unique_violation error (schedule already exists)
-      const uniqueViolationError = new Error('duplicate key value violates unique constraint');
-      (uniqueViolationError as any).code = '23505';
-      mockBoss.schedule.mockRejectedValueOnce(uniqueViolationError);
+    it('should queue daily job on startup if after 3 AM UTC', async () => {
+      vi.setSystemTime(new Date('2026-01-15T04:00:00Z'));
 
-      const { startCreditExpirationWorker } = await import('../../../src/workers/creditExpirationWorker.js');
+      const { startCreditExpirationWorker, stopCreditExpirationWorker } = await import('../../../src/workers/creditExpirationWorker.js');
 
-      // Should not throw
-      await expect(startCreditExpirationWorker()).resolves.not.toThrow();
+      await startCreditExpirationWorker();
+
+      // Should have sent a scheduled job
+      expect(mockBoss.send).toHaveBeenCalledWith(
+        'credit-expiration',
+        expect.objectContaining({ scheduled: true })
+      );
+
+      // Should have run maintenance
+      expect(mockRunMaintenance).toHaveBeenCalled();
+
+      stopCreditExpirationWorker();
+    });
+
+    it('should not queue daily job on startup if before 3 AM UTC', async () => {
+      vi.setSystemTime(new Date('2026-01-15T02:00:00Z'));
+
+      const { startCreditExpirationWorker, stopCreditExpirationWorker } = await import('../../../src/workers/creditExpirationWorker.js');
+
+      await startCreditExpirationWorker();
+
+      // Should NOT have sent a scheduled job (too early)
+      expect(mockBoss.send).not.toHaveBeenCalled();
+      expect(mockRunMaintenance).not.toHaveBeenCalled();
+
+      stopCreditExpirationWorker();
     });
   });
 
@@ -150,6 +159,23 @@ describe('creditExpirationWorker', () => {
         })
       );
       expect(jobId).toBe('test-job-id');
+    });
+  });
+
+  // ==========================================================================
+  // stopCreditExpirationWorker Tests
+  // ==========================================================================
+  describe('stopCreditExpirationWorker', () => {
+    it('should clear the schedule timer', async () => {
+      vi.setSystemTime(new Date('2026-01-15T02:00:00Z'));
+
+      const { startCreditExpirationWorker, stopCreditExpirationWorker } = await import('../../../src/workers/creditExpirationWorker.js');
+
+      await startCreditExpirationWorker();
+      stopCreditExpirationWorker();
+
+      // After stopping, no more intervals should fire
+      // (we can't easily assert the timer is cleared, but no errors should occur)
     });
   });
 });

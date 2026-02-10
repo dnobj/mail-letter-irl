@@ -28,6 +28,8 @@ export async function initializeJobQueue(): Promise<PgBoss> {
     connectionString: DATABASE_URL,
     schema: 'pgboss',
     max: 10, // Max pool connections
+    supervise: false, // Disable maintenance timer (queries every 120s) — we call maintain() manually
+    schedule: false, // Disable Timekeeper (queries every 5s/30s) — we use setInterval instead
     retryLimit: 3, // Max retries per job
     retryDelay: 60, // Seconds between retries
     retryBackoff: true, // Exponential backoff
@@ -63,6 +65,25 @@ export function getJobQueue(): PgBoss {
  */
 export function isJobQueueInitialized(): boolean {
   return boss !== null;
+}
+
+/**
+ * Run pg-boss maintenance manually (expire, archive, purge).
+ * Called periodically since supervise: false disables the automatic timer.
+ */
+export async function runMaintenance(): Promise<void> {
+  if (!boss) {
+    console.log('⚠️  Skipping maintenance — job queue not initialized');
+    return;
+  }
+
+  try {
+    console.log('🧹 Running pg-boss maintenance (expire/archive/purge)...');
+    await boss.maintain();
+    console.log('🧹 pg-boss maintenance complete');
+  } catch (error) {
+    console.error('🧹 pg-boss maintenance failed (non-fatal):', error);
+  }
 }
 
 /**
