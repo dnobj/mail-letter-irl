@@ -2,8 +2,8 @@
   "name": "Letter IRL",
   "version": "0.1.0",
   "description": "Draft, preview, and mail physical letters via the Letter IRL MCP server.",
-  "contactEmail": "support@letterirl.example",
-  "legalInfoUrl": "https://letterirl.example/legal",
+  "contactEmail": "support@letterirl.com",
+  "legalInfoUrl": "https://letterirl.com/terms",
   "tools": [
     {
       "name": "quote_and_preview_letter",
@@ -43,15 +43,15 @@
     {
       "type": "mcp",
       "name": "letter-irl",
-      "url": "https://amitotically-gubernacular-elise.ngrok-free.dev/mcp",
-      "healthUrl": "https://amitotically-gubernacular-elise.ngrok-free.dev/healthz",
+      "url": "https://api.letterirl.com/mcp",
+      "healthUrl": "https://api.letterirl.com/healthz",
       "transport": {
-        "type": "sse"
+        "type": "streamableHttp"
       },
       "auth": {
         "type": "oauth",
         "scopes": ["openid", "email", "profile"],
-        "authorizationServer": "https://amitotically-gubernacular-elise.ngrok-free.dev/.well-known/oauth-authorization-server"
+        "authorizationServer": "https://api.letterirl.com/.well-known/oauth-authorization-server"
       }
     }
   ],
