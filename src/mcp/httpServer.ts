@@ -605,6 +605,7 @@ export async function startHttpServer() {
         redirect_uris: [
           "https://chat.openai.com/aip/auth/callback",
           "https://chatgpt.com/connector_platform_oauth_redirect",
+          "https://platform.openai.com/apps-manage/oauth",
           "http://localhost:18883/oauth/callback"
         ]
       };

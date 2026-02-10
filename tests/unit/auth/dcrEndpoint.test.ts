@@ -37,11 +37,13 @@ describe('DCR Endpoint (US-DCR-01)', () => {
         client_id: mockStaticClientId,
         client_id_issued_at: Math.floor(Date.now() / 1000),
         token_endpoint_auth_method: 'none',
-        grant_types: ['authorization_code'],
+        grant_types: ['authorization_code', 'refresh_token'],
         response_types: ['code'],
         redirect_uris: [
           'https://chat.openai.com/aip/auth/callback',
           'https://chatgpt.com/connector_platform_oauth_redirect',
+          'https://platform.openai.com/apps-manage/oauth',
+          'http://localhost:18883/oauth/callback',
         ],
       };
 
@@ -54,20 +56,41 @@ describe('DCR Endpoint (US-DCR-01)', () => {
       const redirectUris = [
         'https://chat.openai.com/aip/auth/callback',
         'https://chatgpt.com/connector_platform_oauth_redirect',
+        'https://platform.openai.com/apps-manage/oauth',
+        'http://localhost:18883/oauth/callback',
       ];
 
       expect(redirectUris).toContain('https://chat.openai.com/aip/auth/callback');
       expect(redirectUris).toContain('https://chatgpt.com/connector_platform_oauth_redirect');
     });
 
+    it('should include OpenAI review redirect URI', () => {
+      const redirectUris = [
+        'https://chat.openai.com/aip/auth/callback',
+        'https://chatgpt.com/connector_platform_oauth_redirect',
+        'https://platform.openai.com/apps-manage/oauth',
+        'http://localhost:18883/oauth/callback',
+      ];
+
+      expect(redirectUris).toContain('https://platform.openai.com/apps-manage/oauth');
+    });
+
     it('should include Claude Desktop callback URI for mcp-remote', () => {
       const redirectUris = [
         'https://chat.openai.com/aip/auth/callback',
         'https://chatgpt.com/connector_platform_oauth_redirect',
+        'https://platform.openai.com/apps-manage/oauth',
         'http://localhost:18883/oauth/callback',
       ];
 
       expect(redirectUris).toContain('http://localhost:18883/oauth/callback');
+    });
+
+    it('should include refresh_token in grant_types', () => {
+      const grantTypes = ['authorization_code', 'refresh_token'];
+
+      expect(grantTypes).toContain('authorization_code');
+      expect(grantTypes).toContain('refresh_token');
     });
 
     it('should return 201 Created status code', () => {
