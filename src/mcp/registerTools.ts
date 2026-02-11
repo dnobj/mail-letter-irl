@@ -109,7 +109,7 @@ const WIDGET_DEFINITIONS = [
  *
  * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
  */
-const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? "https://chatgpt.com";
+const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? "https://api.letterirl.com";
 
 /**
  * Backend API URL for widget CSP.
