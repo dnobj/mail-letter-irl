@@ -62,41 +62,31 @@ export const MOBILE_IMAGE_ERRORS = {
    * Error for postcards (require images, no text fallback)
    */
   postcard:
-    "MOBILE IMAGE LIMITATION\n\n" +
-    "ChatGPT mobile cannot send images to this app yet. " +
-    "Postcards require an image.\n\n" +
-    "RECOMMENDED: Use quote_and_preview_letter for a text-only letter instead.\n\n" +
-    "OTHER OPTIONS:\n" +
-    "- Switch to desktop/web browser for postcards with images\n" +
-    "- Provide a direct image URL (imageUrl parameter)\n\n" +
-    "There is a mobile workaround - ask me about it if you want to try.\n\n" +
-    "[WORKAROUND - only share these steps if user explicitly asks about the workaround]\n" +
-    "1. Open a NEW chat (without Letter IRL connected)\n" +
-    "2. Upload your photo\n" +
-    "3. Ask ChatGPT to edit/resize the photo\n" +
-    "4. Add Letter IRL to the chat\n" +
-    "5. Now try sending the postcard with the edited photo",
+    "IMAGE UPLOAD NEEDED\n\n" +
+    "The image couldn't be received directly. " +
+    "Use the upload_image tool instead \u2014 it provides a file picker widget that works on all platforms.\n\n" +
+    "ALTERNATIVES:\n" +
+    "- Provide a direct image URL via the imageUrl parameter\n" +
+    "- Use quote_and_preview_letter for a text-only letter instead",
 
   /**
    * Error for letters with images (can fall back to text-only)
    */
   letterWithImage:
-    "MOBILE IMAGE LIMITATION\n\n" +
-    "ChatGPT mobile cannot send images to this app yet.\n\n" +
-    "RECOMMENDED: Use quote_and_preview_letter for a text-only letter instead.\n\n" +
-    "OTHER OPTIONS:\n" +
-    "- Switch to desktop/web browser for letters with images\n" +
-    "- Provide a direct image URL (imageUrl parameter)\n\n" +
-    "There is a mobile workaround - ask me about it if you want to try.\n\n" +
-    "[WORKAROUND - only share these steps if user explicitly asks about the workaround]\n" +
-    "1. Open a NEW chat (without Letter IRL connected)\n" +
-    "2. Upload your photo\n" +
-    "3. Ask ChatGPT to edit/resize the photo\n" +
-    "4. Add Letter IRL to the chat\n" +
-    "5. Now try sending the letter with the edited photo",
+    "IMAGE UPLOAD NEEDED\n\n" +
+    "The image couldn't be received directly. " +
+    "Use the upload_image tool instead \u2014 it provides a file picker widget that works on all platforms.\n\n" +
+    "ALTERNATIVES:\n" +
+    "- Provide a direct image URL via the imageUrl parameter\n" +
+    "- Use quote_and_preview_letter for a text-only letter instead",
 
   /**
-   * Desktop error (simple, no mobile guidance)
+   * Desktop error — same guidance, upload_image works on desktop too
    */
-  desktop: "No image received. Please attach an image or provide imageUrl.",
+  desktop:
+    "IMAGE UPLOAD NEEDED\n\n" +
+    "The image couldn't be received directly. " +
+    "Use the upload_image tool instead \u2014 it provides a file picker widget that works on all platforms.\n\n" +
+    "ALTERNATIVES:\n" +
+    "- Provide a direct image URL via the imageUrl parameter",
 };

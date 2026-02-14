@@ -497,3 +497,40 @@ export const submitFeatureRequestOutputSchema: JsonSchema = {
     }
   }
 };
+
+// ============================================================================
+// Upload Image Schemas (Widget-based image upload)
+// ============================================================================
+
+export const uploadImageInputSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    context: {
+      type: "string",
+      description: "Optional hint for widget guidance text: 'postcard', 'header_image', or 'inline_image'"
+    }
+  }
+};
+
+export const uploadImageOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["status", "message", "acceptedFormats", "maxSizeMB"],
+  properties: {
+    status: {
+      type: "string",
+      description: "Always 'awaiting_upload' — actual upload happens in widget"
+    },
+    message: {
+      type: "string",
+      description: "Guidance text for the user based on context"
+    },
+    acceptedFormats: {
+      type: "string",
+      description: "Accepted image formats (e.g., 'JPEG, PNG, WebP')"
+    },
+    maxSizeMB: {
+      type: "number",
+      description: "Maximum file size in megabytes"
+    }
+  }
+};

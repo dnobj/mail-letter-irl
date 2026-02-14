@@ -19,7 +19,8 @@ import {
   clearReturnAddressInputZ,
   quoteAndPreviewPostcardInputZ,
   sendPostcardInputZ,
-  submitFeatureRequestInputZ
+  submitFeatureRequestInputZ,
+  uploadImageInputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
@@ -99,6 +100,7 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
 const WIDGET_DEFINITIONS = [
   { name: "LetterPreviewCard", description: "Shows letter preview with cost, delivery info, and status" },
   { name: "PostcardPreviewCard", description: "Shows postcard front/back preview with cost, delivery info, and status" },
+  { name: "ImageUploadCard", description: "File picker widget for uploading photos to use in letters or postcards" },
 ];
 
 /**
@@ -215,7 +217,9 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   quote_and_preview_postcard: quoteAndPreviewPostcardInputZ,
   send_postcard: sendPostcardInputZ,
   // Feedback tools
-  submit_feature_request: submitFeatureRequestInputZ
+  submit_feature_request: submitFeatureRequestInputZ,
+  // Image upload tool
+  upload_image: uploadImageInputZ
 };
 
 function getZodShape(name: string) {
@@ -455,6 +459,10 @@ function summarizeToolResult(
     case "submit_feature_request": {
       const message = result.message as string;
       return message || "Feature request submitted.";
+    }
+    case "upload_image": {
+      const message = result.message as string;
+      return message || "Photo picker ready. Waiting for user to select a photo.";
     }
     default:
       return JSON.stringify(result);

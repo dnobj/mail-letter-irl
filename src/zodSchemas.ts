@@ -125,3 +125,11 @@ export const submitFeatureRequestInputZ = z.object({
   contactEmail: z.string().optional(),
   okToContact: z.boolean().optional()
 });
+
+// ============================================================================
+// Upload Image Schema (Widget-based image upload)
+// ============================================================================
+
+export const uploadImageInputZ = z.object({
+  context: z.string().optional()
+});

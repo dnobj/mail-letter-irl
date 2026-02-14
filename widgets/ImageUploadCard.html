@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ImageUploadCard</title>
+    <style>
+      :root {
+        --bg-primary: #ffffff;
+        --bg-secondary: #f8fafc;
+        --text-primary: #1f2933;
+        --text-secondary: #61748f;
+        --border-color: #e2e8f0;
+        --accent-success: #065f46;
+        --accent-success-bg: #d1fae5;
+        --accent-warning: #b91c1c;
+        --accent-warning-bg: #fee2e2;
+        --accent-primary: #2563eb;
+        --accent-primary-hover: #1d4ed8;
+        --accent-primary-disabled: #93c5fd;
+
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: transparent;
+        color: var(--text-primary);
+      }
+
+      .dark {
+        --bg-primary: #1e293b;
+        --bg-secondary: #0f172a;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --border-color: #334155;
+        --accent-success: #34d399;
+        --accent-success-bg: #064e3b;
+        --accent-warning: #f87171;
+        --accent-warning-bg: #7f1d1d;
+        --accent-primary: #3b82f6;
+        --accent-primary-hover: #60a5fa;
+        --accent-primary-disabled: #1e3a5f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 1rem;
+        background: transparent;
+      }
+
+      .card {
+        width: 100%;
+        border-radius: 12px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        overflow: hidden;
+      }
+
+      /* State: Select */
+      .select-state {
+        padding: 1.5rem;
+        text-align: center;
+      }
+
+      .select-icon {
+        font-size: 2.5rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .select-title {
+        font-size: 1rem;
+        font-weight: 600;
+        margin: 0 0 0.25rem;
+        color: var(--text-primary);
+      }
+
+      .select-guidance {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        margin: 0 0 1rem;
+      }
+
+      .select-formats {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        margin: 0.75rem 0 0;
+      }
+
+      /* Buttons */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        padding: 0.6rem 1.25rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        transition: background 0.15s ease;
+      }
+
+      .btn-primary {
+        background: var(--accent-primary);
+        color: #fff;
+      }
+
+      .btn-primary:hover {
+        background: var(--accent-primary-hover);
+      }
+
+      .btn-secondary {
+        background: transparent;
+        color: var(--accent-primary);
+        border: 1px solid var(--border-color);
+      }
+
+      .btn-secondary:hover {
+        background: var(--bg-secondary);
+      }
+
+      /* State: Preview */
+      .preview-state {
+        padding: 1rem;
+      }
+
+      .preview-image-container {
+        width: 100%;
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        margin-bottom: 0.75rem;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        max-height: 250px;
+      }
+
+      .preview-image-container img {
+        max-width: 100%;
+        max-height: 250px;
+        object-fit: contain;
+        display: block;
+      }
+
+      .preview-file-info {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        margin-bottom: 0.75rem;
+      }
+
+      .preview-actions {
+        display: flex;
+        gap: 0.5rem;
+      }
+
+      .preview-actions .btn {
+        flex: 1;
+      }
+
+      /* State: Uploading */
+      .uploading-state {
+        padding: 2rem 1.5rem;
+        text-align: center;
+      }
+
+      .spinner {
+        width: 32px;
+        height: 32px;
+        border: 3px solid var(--border-color);
+        border-top-color: var(--accent-primary);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin: 0 auto 0.75rem;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      .uploading-text {
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+        margin: 0;
+      }
+
+      /* State: Success */
+      .success-state {
+        padding: 1.5rem;
+        text-align: center;
+      }
+
+      .success-icon {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .success-text {
+        font-size: 0.9rem;
+        color: var(--accent-success);
+        margin: 0;
+        font-weight: 600;
+      }
+
+      /* State: Error */
+      .error-state {
+        padding: 1.5rem;
+        text-align: center;
+      }
+
+      .error-message {
+        font-size: 0.85rem;
+        color: var(--accent-warning);
+        background: var(--accent-warning-bg);
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        margin: 0 0 1rem;
+      }
+
+      /* Utility */
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <!-- Select State -->
+      <div id="state-select" class="select-state">
+        <div class="select-icon">📷</div>
+        <p class="select-title">Upload a Photo</p>
+        <p id="guidance-text" class="select-guidance">Select a photo to use in your letter or postcard.</p>
+        <button class="btn btn-primary" id="btn-select" type="button">Select Photo</button>
+        <p class="select-formats">JPEG, PNG, or WebP &middot; Max 10 MB</p>
+        <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp" class="hidden" />
+      </div>
+
+      <!-- Preview State -->
+      <div id="state-preview" class="preview-state hidden">
+        <div class="preview-image-container">
+          <img id="preview-img" src="" alt="Selected photo preview" />
+        </div>
+        <p id="file-info" class="preview-file-info"></p>
+        <div class="preview-actions">
+          <button class="btn btn-secondary" id="btn-change" type="button">Choose Different</button>
+          <button class="btn btn-primary" id="btn-use" type="button">Use This Photo</button>
+        </div>
+      </div>
+
+      <!-- Uploading State -->
+      <div id="state-uploading" class="uploading-state hidden">
+        <div class="spinner"></div>
+        <p class="uploading-text">Uploading...</p>
+      </div>
+
+      <!-- Success State -->
+      <div id="state-success" class="success-state hidden">
+        <div class="success-icon">&#x2705;</div>
+        <p id="success-text" class="success-text">Photo ready! ChatGPT will use it next.</p>
+      </div>
+
+      <!-- Error State -->
+      <div id="state-error" class="error-state hidden">
+        <p id="error-message" class="error-message"></p>
+        <button class="btn btn-primary" id="btn-retry" type="button">Try Again</button>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        // --- Dark mode detection ---
+        function applyTheme() {
+          var prefersDark =
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.classList.toggle("dark", prefersDark);
+        }
+        applyTheme();
+        if (window.matchMedia) {
+          window
+            .matchMedia("(prefers-color-scheme: dark)")
+            .addEventListener("change", applyTheme);
+        }
+
+        // --- DOM refs ---
+        var stateSelect = document.getElementById("state-select");
+        var statePreview = document.getElementById("state-preview");
+        var stateUploading = document.getElementById("state-uploading");
+        var stateSuccess = document.getElementById("state-success");
+        var stateError = document.getElementById("state-error");
+
+        var btnSelect = document.getElementById("btn-select");
+        var btnChange = document.getElementById("btn-change");
+        var btnUse = document.getElementById("btn-use");
+        var btnRetry = document.getElementById("btn-retry");
+        var fileInput = document.getElementById("file-input");
+        var previewImg = document.getElementById("preview-img");
+        var fileInfo = document.getElementById("file-info");
+        var guidanceText = document.getElementById("guidance-text");
+        var successText = document.getElementById("success-text");
+        var errorMessage = document.getElementById("error-message");
+
+        var selectedFile = null;
+        var previewObjectUrl = null;
+
+        var MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+        var ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+        // --- Read tool output for context ---
+        function initFromToolOutput() {
+          try {
+            if (window.openai && window.openai.toolOutput) {
+              var output = window.openai.toolOutput;
+              if (output.message) {
+                guidanceText.textContent = output.message;
+              }
+            }
+          } catch (e) {
+            // Silently ignore — guidance text has a sensible default
+          }
+        }
+
+        // --- State management ---
+        function showState(state) {
+          stateSelect.classList.toggle("hidden", state !== "select");
+          statePreview.classList.toggle("hidden", state !== "preview");
+          stateUploading.classList.toggle("hidden", state !== "uploading");
+          stateSuccess.classList.toggle("hidden", state !== "success");
+          stateError.classList.toggle("hidden", state !== "error");
+        }
+
+        function showError(msg) {
+          errorMessage.textContent = msg;
+          showState("error");
+        }
+
+        // --- File validation ---
+        function validateFile(file) {
+          if (!file) {
+            return "No file selected.";
+          }
+          if (ACCEPTED_TYPES.indexOf(file.type) === -1) {
+            return "Unsupported format. Please select a JPEG, PNG, or WebP image.";
+          }
+          if (file.size > MAX_SIZE_BYTES) {
+            var sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+            return "File is too large (" + sizeMB + " MB). Maximum size is 10 MB.";
+          }
+          return null; // valid
+        }
+
+        function formatFileSize(bytes) {
+          if (bytes < 1024) return bytes + " B";
+          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+          return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+        }
+
+        // --- File selection ---
+        function onFileSelected(file) {
+          var error = validateFile(file);
+          if (error) {
+            showError(error);
+            return;
+          }
+
+          selectedFile = file;
+
+          // Create preview
+          if (previewObjectUrl) {
+            URL.revokeObjectURL(previewObjectUrl);
+          }
+          previewObjectUrl = URL.createObjectURL(file);
+          previewImg.src = previewObjectUrl;
+          fileInfo.textContent = file.name + " \u00B7 " + formatFileSize(file.size);
+
+          showState("preview");
+        }
+
+        // --- Upload via OpenAI SDK ---
+        async function uploadAndSend() {
+          if (!selectedFile) {
+            showError("No file selected.");
+            return;
+          }
+
+          showState("uploading");
+
+          try {
+            // Step 1: Upload file via OpenAI SDK
+            var uploadResult = await window.openai.uploadFile(selectedFile);
+            var fileId = uploadResult.fileId || uploadResult.file_id;
+
+            if (!fileId) {
+              showError("Upload failed — no file ID returned.");
+              return;
+            }
+
+            // Step 2: Get download URL
+            var urlResult = await window.openai.getFileDownloadUrl({ fileId: fileId });
+            var downloadUrl = urlResult.downloadUrl || urlResult.download_url;
+
+            if (!downloadUrl) {
+              showError("Upload succeeded but could not get download URL.");
+              return;
+            }
+
+            // Step 3: Determine context for success message
+            var context = "";
+            try {
+              if (window.openai.toolOutput && window.openai.toolOutput.message) {
+                var msg = window.openai.toolOutput.message;
+                if (msg.indexOf("postcard") !== -1) context = "postcard";
+                else if (msg.indexOf("header") !== -1) context = "header image";
+                else if (msg.indexOf("letter") !== -1) context = "letter";
+              }
+            } catch (e) { /* ignore */ }
+
+            successText.textContent = context
+              ? "Photo ready! ChatGPT will use it for your " + context + "."
+              : "Photo ready! ChatGPT will use it next.";
+            showState("success");
+
+            // Step 4: Post download URL back to ChatGPT via ui/message
+            window.parent.postMessage(
+              {
+                jsonrpc: "2.0",
+                method: "ui/message",
+                params: {
+                  role: "user",
+                  content: [
+                    {
+                      type: "text",
+                      text: "Photo uploaded successfully. Image URL: " + downloadUrl
+                    }
+                  ]
+                }
+              },
+              "*"
+            );
+          } catch (err) {
+            var errMsg =
+              (err && err.message) ||
+              "Upload failed. Please try again.";
+            showError(errMsg);
+          }
+        }
+
+        // --- Event handlers ---
+        btnSelect.addEventListener("click", function () {
+          fileInput.click();
+        });
+
+        fileInput.addEventListener("change", function () {
+          if (fileInput.files && fileInput.files[0]) {
+            onFileSelected(fileInput.files[0]);
+          }
+        });
+
+        btnChange.addEventListener("click", function () {
+          fileInput.value = "";
+          selectedFile = null;
+          if (previewObjectUrl) {
+            URL.revokeObjectURL(previewObjectUrl);
+            previewObjectUrl = null;
+          }
+          showState("select");
+          fileInput.click();
+        });
+
+        btnUse.addEventListener("click", function () {
+          uploadAndSend();
+        });
+
+        btnRetry.addEventListener("click", function () {
+          fileInput.value = "";
+          selectedFile = null;
+          showState("select");
+        });
+
+        // --- Initialize ---
+        initFromToolOutput();
+        showState("select");
+      })();
+    </script>
+  </body>
+</html>

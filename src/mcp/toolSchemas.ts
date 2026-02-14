@@ -104,6 +104,10 @@ export const toolInputSchemas = {
     attemptedAction: z.string().optional(),
     contactEmail: z.string().optional(),
     okToContact: z.boolean().optional()
+  }),
+  // Image upload tool
+  upload_image: z.object({
+    context: z.string().optional()
   })
 };
 
