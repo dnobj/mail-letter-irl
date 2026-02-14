@@ -18,7 +18,9 @@ import {
   quoteAndPreviewPostcardTool,
   sendPostcardTool,
   // Feedback tools
-  submitFeatureRequestTool
+  submitFeatureRequestTool,
+  // Image upload tool
+  uploadImageTool
 } from "./tools/index.js";
 import {
   McpToolDefinition,
@@ -45,7 +47,9 @@ const tools: McpToolDefinition<unknown, unknown>[] = [
   quoteAndPreviewPostcardTool,
   sendPostcardTool,
   // Feedback tools
-  submitFeatureRequestTool
+  submitFeatureRequestTool,
+  // Image upload tool
+  uploadImageTool
 ];
 
 export interface ServerRequest<Input> {
