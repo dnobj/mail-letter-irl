@@ -465,23 +465,30 @@
             // Build explicit next-step message
             var nextStepMsg = buildNextStepMessage(uploadContext, downloadUrl);
 
-            // Post to ChatGPT with explicit instruction
-            window.parent.postMessage(
-              {
-                jsonrpc: "2.0",
-                method: "ui/message",
-                params: {
-                  role: "user",
-                  content: [
-                    {
-                      type: "text",
-                      text: "Photo uploaded successfully. " + nextStepMsg
-                    }
-                  ]
-                }
-              },
-              "*"
-            );
+            // Send follow-up message to ChatGPT via Apps SDK bridge
+            // NOTE: sendFollowUpMessage has a known re-rendering bug (Dec 2025)
+            // but it reliably delivers the message, unlike raw postMessage.
+            if (window.openai && window.openai.sendFollowUpMessage) {
+              window.openai.sendFollowUpMessage("Photo uploaded successfully. " + nextStepMsg);
+            } else {
+              // Fallback to raw postMessage for older SDK versions
+              window.parent.postMessage(
+                {
+                  jsonrpc: "2.0",
+                  method: "ui/message",
+                  params: {
+                    role: "user",
+                    content: [
+                      {
+                        type: "text",
+                        text: "Photo uploaded successfully. " + nextStepMsg
+                      }
+                    ]
+                  }
+                },
+                "*"
+              );
+            }
           } catch (err) {
             var errMsg = (err && err.message) || "Upload failed. Please try again.";
             showError(errMsg);
