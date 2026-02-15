@@ -89,7 +89,7 @@ Then re-call the appropriate preview tool (quote_and_preview_postcard, etc.) wit
   inputSchema: uploadImageInputSchema,
   outputSchema: uploadImageOutputSchema,
   meta: {
-    "openai/outputTemplate": "ui://widgets/ImageUploadCard.html?v=2",
+    "openai/outputTemplate": "ui://widgets/ImageUploadCard.html",
     "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Opening photo picker...",
     "openai/toolInvocation/invoked": "Photo picker ready",
