@@ -227,193 +227,164 @@
       </div>
     </div>
 
-    <script>
-      (function () {
-        // --- Dark mode detection ---
-        function applyTheme() {
-          var prefersDark =
-            window.matchMedia &&
-            window.matchMedia("(prefers-color-scheme: dark)").matches;
-          document.documentElement.classList.toggle("dark", prefersDark);
-        }
-        applyTheme();
-        if (window.matchMedia) {
-          window
-            .matchMedia("(prefers-color-scheme: dark)")
-            .addEventListener("change", applyTheme);
-        }
+    <script type="module">
+      // Per OpenAI docs, widget data may not be available immediately.
+      // Must listen for 'openai:set_globals' event to know when data is ready.
+      // This pattern matches the working LetterPreviewCard widget.
 
-        // --- DOM refs ---
-        var stateLoading = document.getElementById("state-loading");
-        var statePreview = document.getElementById("state-preview");
-        var stateSuccess = document.getElementById("state-success");
-        var stateError = document.getElementById("state-error");
+      let dataLoaded = false;
+      let imageUrl = null;
 
-        var btnUse = document.getElementById("btn-use");
-        var btnAnother = document.getElementById("btn-another");
-        var btnRetry = document.getElementById("btn-retry");
-        var previewImg = document.getElementById("preview-img");
-        var errorMessage = document.getElementById("error-message");
+      // --- DOM refs ---
+      const stateLoading = document.getElementById("state-loading");
+      const statePreview = document.getElementById("state-preview");
+      const stateSuccess = document.getElementById("state-success");
+      const stateError = document.getElementById("state-error");
 
-        var imageUrl = null;
+      const btnUse = document.getElementById("btn-use");
+      const btnAnother = document.getElementById("btn-another");
+      const btnRetry = document.getElementById("btn-retry");
+      const previewImg = document.getElementById("preview-img");
+      const errorMessageEl = document.getElementById("error-message");
 
-        // --- State management ---
-        function showState(state) {
-          stateLoading.classList.toggle("hidden", state !== "loading");
-          statePreview.classList.toggle("hidden", state !== "preview");
-          stateSuccess.classList.toggle("hidden", state !== "success");
-          stateError.classList.toggle("hidden", state !== "error");
-        }
+      // --- State management ---
+      function showState(state) {
+        stateLoading.classList.toggle("hidden", state !== "loading");
+        statePreview.classList.toggle("hidden", state !== "preview");
+        stateSuccess.classList.toggle("hidden", state !== "success");
+        stateError.classList.toggle("hidden", state !== "error");
+      }
 
-        function showError(msg) {
-          errorMessage.textContent = msg;
-          showState("error");
-        }
+      function showError(msg) {
+        errorMessageEl.textContent = msg;
+        showState("error");
+      }
 
-        // --- Initialize from tool output ---
-        function init() {
-          var output = window.openai && window.openai.toolOutput;
-          var meta = window.openai && window.openai.toolResponseMetadata;
+      // --- Render from tool output ---
+      function render() {
+        const output = window.openai?.toolOutput;
+        const meta = window.openai?.toolResponseMetadata;
 
-          // Try to get image URL from both sources (state can be null)
-          imageUrl = (output && output.generatedImageUrl) ||
-                     (meta && meta.generatedImageUrl);
+        // Try to get image URL from both sources
+        imageUrl = output?.generatedImageUrl ?? meta?.generatedImageUrl ?? null;
 
-          // Try to get preview base64 from both sources
-          var previewData = (meta && meta.generatedImagePreview) ||
-                            (output && output.generatedImagePreview);
+        // Try to get preview base64 from both sources
+        const previewData = meta?.generatedImagePreview ?? output?.generatedImagePreview;
 
-          // Strategy 1: Use base64 preview data
-          if (previewData) {
-            previewImg.src = "data:image/jpeg;base64," + previewData;
-            showState("preview");
-            return;
-          }
-
-          // Strategy 2: Load image directly from server URL
-          if (imageUrl) {
-            previewImg.src = imageUrl;
-            previewImg.onerror = function () {
-              showError("Could not load image preview from server.");
-            };
-            showState("preview");
-            return;
-          }
-
-          // Debug: show what data the widget actually received
-          var debugInfo = "DEBUG: ";
-          debugInfo += "openai=" + (window.openai ? "yes" : "no");
-          if (window.openai) {
-            debugInfo += " | output=" + (output ? JSON.stringify(Object.keys(output)) : "null");
-            debugInfo += " | meta=" + (meta ? JSON.stringify(Object.keys(meta)) : "null");
-          }
-          if (output && output.error) {
-            showError(output.error);
-          } else {
-            showError(debugInfo);
-          }
+        // Strategy 1: Use base64 preview data
+        if (previewData) {
+          dataLoaded = true;
+          previewImg.src = "data:image/jpeg;base64," + previewData;
+          showState("preview");
+          return;
         }
 
-        // --- Event handlers ---
-        btnUse.addEventListener("click", function () {
-          if (!imageUrl) {
-            showError("No image URL available.");
-            return;
-          }
-
-          showState("success");
-
-          // Post the server-hosted image URL back to ChatGPT
-          window.parent.postMessage(
-            {
-              jsonrpc: "2.0",
-              method: "ui/message",
-              params: {
-                role: "user",
-                content: [
-                  {
-                    type: "text",
-                    text: "Generated image ready. Image URL: " + imageUrl
-                  }
-                ]
-              }
-            },
-            "*"
-          );
-        });
-
-        btnAnother.addEventListener("click", function () {
-          window.parent.postMessage(
-            {
-              jsonrpc: "2.0",
-              method: "ui/message",
-              params: {
-                role: "user",
-                content: [
-                  {
-                    type: "text",
-                    text: "Please generate a different image with a new variation."
-                  }
-                ]
-              }
-            },
-            "*"
-          );
-        });
-
-        btnRetry.addEventListener("click", function () {
-          window.parent.postMessage(
-            {
-              jsonrpc: "2.0",
-              method: "ui/message",
-              params: {
-                role: "user",
-                content: [
-                  {
-                    type: "text",
-                    text: "Please try generating the image again."
-                  }
-                ]
-              }
-            },
-            "*"
-          );
-        });
-
-        // --- Initialize ---
-        showState("loading");
-
-        // Poll for data (tool output may arrive after widget renders)
-        var attempts = 0;
-        var maxAttempts = 50; // 10 seconds at 200ms intervals
-        var pollInterval = setInterval(function () {
-          attempts++;
-          var output = window.openai && window.openai.toolOutput;
-          var meta = window.openai && window.openai.toolResponseMetadata;
-          if ((meta && (meta.generatedImagePreview || meta.generatedImageUrl)) ||
-              (output && (output.generatedImagePreview || output.generatedImageUrl))) {
-            clearInterval(pollInterval);
-            init();
-          } else if (attempts >= maxAttempts) {
-            clearInterval(pollInterval);
-            init();
-          }
-        }, 200);
-
-        // Also try immediately
-        if (
-          window.openai &&
-          ((window.openai.toolResponseMetadata &&
-            (window.openai.toolResponseMetadata.generatedImagePreview ||
-             window.openai.toolResponseMetadata.generatedImageUrl)) ||
-           (window.openai.toolOutput &&
-            (window.openai.toolOutput.generatedImagePreview ||
-             window.openai.toolOutput.generatedImageUrl)))
-        ) {
-          clearInterval(pollInterval);
-          init();
+        // Strategy 2: Load image directly from server URL
+        if (imageUrl) {
+          dataLoaded = true;
+          previewImg.src = imageUrl;
+          previewImg.onerror = () => {
+            showError("Could not load image preview from server.");
+          };
+          showState("preview");
+          return;
         }
-      })();
+
+        // If neither output nor meta is available yet, stay in loading state
+        if (!dataLoaded && !output && !meta) {
+          return;
+        }
+
+        // Data arrived but no image — show error
+        dataLoaded = true;
+        if (output?.error) {
+          showError(output.error);
+        } else {
+          showError("No image was generated. Please try again.");
+        }
+      }
+
+      // --- Event handlers ---
+      btnUse.addEventListener("click", () => {
+        if (!imageUrl) {
+          showError("No image URL available.");
+          return;
+        }
+
+        showState("success");
+
+        // Post the server-hosted image URL back to ChatGPT
+        window.parent.postMessage(
+          {
+            jsonrpc: "2.0",
+            method: "ui/message",
+            params: {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Generated image ready. Image URL: " + imageUrl
+                }
+              ]
+            }
+          },
+          "*"
+        );
+      });
+
+      btnAnother.addEventListener("click", () => {
+        window.parent.postMessage(
+          {
+            jsonrpc: "2.0",
+            method: "ui/message",
+            params: {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Please generate a different image with a new variation."
+                }
+              ]
+            }
+          },
+          "*"
+        );
+      });
+
+      btnRetry.addEventListener("click", () => {
+        window.parent.postMessage(
+          {
+            jsonrpc: "2.0",
+            method: "ui/message",
+            params: {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Please try generating the image again."
+                }
+              ]
+            }
+          },
+          "*"
+        );
+      });
+
+      // --- Theme ---
+      const theme = window.openai?.theme ?? "light";
+      if (theme === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+
+      // --- Initialize ---
+      // Start in loading state, then try to render
+      showState("loading");
+      render();
+
+      // Listen for data updates (per OpenAI docs)
+      window.addEventListener("openai:set_globals", () => {
+        render();
+      });
     </script>
   </body>
 </html>
