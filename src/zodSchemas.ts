@@ -133,3 +133,12 @@ export const submitFeatureRequestInputZ = z.object({
 export const uploadImageInputZ = z.object({
   context: z.string().optional()
 });
+
+// ============================================================================
+// Generate Image Schema (AI image generation via OpenAI)
+// ============================================================================
+
+export const generateImageInputZ = z.object({
+  prompt: z.string(),
+  context: z.enum(["postcard", "header_image", "inline_image"]).optional()
+});

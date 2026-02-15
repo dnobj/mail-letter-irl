@@ -22,3 +22,6 @@ export { submitFeatureRequestTool } from "./submitFeatureRequest.js";
 // Image upload tool (US-POSTCARD-04: Widget-based upload)
 export { uploadImageTool } from "./uploadImage.js";
 
+// Image generation tool (AI-generated images via OpenAI)
+export { generateImageTool } from "./generateImage.js";
+

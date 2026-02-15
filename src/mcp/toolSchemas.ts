@@ -108,6 +108,11 @@ export const toolInputSchemas = {
   // Image upload tool
   upload_image: z.object({
     context: z.string().optional()
+  }),
+  // Image generation tool
+  generate_image: z.object({
+    prompt: z.string(),
+    context: z.enum(["postcard", "header_image", "inline_image"]).optional()
   })
 };
 

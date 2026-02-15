@@ -534,3 +534,42 @@ export const uploadImageOutputSchema: JsonSchema = {
     }
   }
 };
+
+// ============================================================================
+// Generate Image Schemas (AI image generation via OpenAI)
+// ============================================================================
+
+export const generateImageInputSchema: JsonSchema = {
+  type: "object",
+  required: ["prompt"],
+  properties: {
+    prompt: {
+      type: "string",
+      description: "Description of the image to generate (e.g., 'a sunset over mountains')"
+    },
+    context: {
+      type: "string",
+      enum: ["postcard", "header_image", "inline_image"],
+      description: "What the image will be used for. Determines optimal dimensions."
+    }
+  }
+};
+
+export const generateImageOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["message", "suggestedNextStep", "generatedImageBase64"],
+  properties: {
+    message: {
+      type: "string",
+      description: "Human-friendly summary message"
+    },
+    suggestedNextStep: {
+      type: "string",
+      description: "Guidance on what tool to call next with the imageUrl"
+    },
+    generatedImageBase64: {
+      type: "string",
+      description: "Base64-encoded JPEG image data (for widget preview)"
+    }
+  }
+};
