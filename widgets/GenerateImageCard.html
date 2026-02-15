@@ -292,11 +292,13 @@
 
         // --- Initialize from tool output ---
         function init() {
-          // Read generated image from _meta (toolResponseMetadata)
-          var meta = window.openai && window.openai.toolResponseMetadata;
+          // Read generated image from toolOutput (structuredContent)
+          // Falls back to toolResponseMetadata (_meta) for compatibility
           var output = window.openai && window.openai.toolOutput;
+          var meta = window.openai && window.openai.toolResponseMetadata;
 
-          base64Data = meta && meta.generatedImageBase64;
+          base64Data = (output && output.generatedImageBase64) ||
+                       (meta && meta.generatedImageBase64);
 
           if (!base64Data) {
             // Check if there's an error in the output
@@ -433,8 +435,9 @@
         var maxAttempts = 50; // 10 seconds at 200ms intervals
         var pollInterval = setInterval(function () {
           attempts++;
+          var output = window.openai && window.openai.toolOutput;
           var meta = window.openai && window.openai.toolResponseMetadata;
-          if (meta && meta.generatedImageBase64) {
+          if ((output && output.generatedImageBase64) || (meta && meta.generatedImageBase64)) {
             clearInterval(pollInterval);
             init();
           } else if (attempts >= maxAttempts) {
@@ -446,8 +449,8 @@
         // Also try immediately
         if (
           window.openai &&
-          window.openai.toolResponseMetadata &&
-          window.openai.toolResponseMetadata.generatedImageBase64
+          ((window.openai.toolOutput && window.openai.toolOutput.generatedImageBase64) ||
+           (window.openai.toolResponseMetadata && window.openai.toolResponseMetadata.generatedImageBase64))
         ) {
           clearInterval(pollInterval);
           init();
