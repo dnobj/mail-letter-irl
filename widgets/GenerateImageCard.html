@@ -234,6 +234,7 @@
 
       let dataLoaded = false;
       let imageUrl = null;
+      let suggestedNextStep = null;
 
       // --- DOM refs ---
       const stateLoading = document.getElementById("state-loading");
@@ -265,8 +266,9 @@
         const output = window.openai?.toolOutput;
         const meta = window.openai?.toolResponseMetadata;
 
-        // Try to get image URL from both sources
+        // Try to get image URL and next step instruction from both sources
         imageUrl = output?.generatedImageUrl ?? meta?.generatedImageUrl ?? null;
+        suggestedNextStep = output?.suggestedNextStep ?? meta?.suggestedNextStep ?? null;
 
         // Try to get preview base64 from both sources
         const previewData = meta?.generatedImagePreview ?? output?.generatedImagePreview;
@@ -313,7 +315,9 @@
 
         showState("success");
 
-        // Post the server-hosted image URL back to ChatGPT
+        // Post the server-hosted image URL back to ChatGPT with explicit next step
+        // The suggestedNextStep tells ChatGPT exactly which tool to call (e.g. quote_and_preview_postcard)
+        const nextStep = suggestedNextStep || "Pass this imageUrl to quote_and_preview_postcard or a letter preview tool.";
         window.parent.postMessage(
           {
             jsonrpc: "2.0",
@@ -323,7 +327,7 @@
               content: [
                 {
                   type: "text",
-                  text: "Generated image ready. Image URL: " + imageUrl
+                  text: "I want to use this generated image. imageUrl: " + imageUrl + "\n\n" + nextStep
                 }
               ]
             }
