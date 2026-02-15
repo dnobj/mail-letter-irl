@@ -20,7 +20,8 @@ import {
   quoteAndPreviewPostcardInputZ,
   sendPostcardInputZ,
   submitFeatureRequestInputZ,
-  uploadImageInputZ
+  uploadImageInputZ,
+  generateImageInputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
@@ -64,7 +65,8 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
     'quote_and_preview_postcard',
     'send_letter',
     'send_postcard',
-    'set_return_address'  // Validates address via PostGrid
+    'set_return_address',  // Validates address via PostGrid
+    'generate_image'       // Calls OpenAI Images API
   ];
 
   // Tools where repeated calls with same args have no additional effect
@@ -101,6 +103,7 @@ const WIDGET_DEFINITIONS = [
   { name: "LetterPreviewCard", description: "Shows letter preview with cost, delivery info, and status" },
   { name: "PostcardPreviewCard", description: "Shows postcard front/back preview with cost, delivery info, and status" },
   { name: "ImageUploadCard", description: "File picker widget for uploading photos to use in letters or postcards" },
+  { name: "GenerateImageCard", description: "Preview widget for AI-generated images with upload to use in letters or postcards" },
 ];
 
 /**
@@ -219,7 +222,9 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Feedback tools
   submit_feature_request: submitFeatureRequestInputZ,
   // Image upload tool
-  upload_image: uploadImageInputZ
+  upload_image: uploadImageInputZ,
+  // Image generation tool
+  generate_image: generateImageInputZ
 };
 
 function getZodShape(name: string) {
@@ -339,9 +344,10 @@ export async function registerLetterTools(
           previewHtml,
           previewFrontHtml,
           previewBackHtml,
-          inlineImageData,      // Letter inline image (base64)
-          headerImageData,      // Letter header image (base64)
-          frontImageData,       // Postcard front image (base64)
+          inlineImageData,        // Letter inline image (base64)
+          headerImageData,        // Letter header image (base64)
+          frontImageData,         // Postcard front image (base64)
+          generatedImageBase64,   // AI-generated image (base64)
           ...modelFacingData
         } = resultObj;
 
@@ -360,7 +366,9 @@ export async function registerLetterTools(
             ...(previewHtml !== undefined ? { previewHtml } : {}),
             // Postcard-specific preview fields
             ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
-            ...(previewBackHtml !== undefined ? { previewBackHtml } : {})
+            ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
+            // Generated image data for GenerateImageCard widget
+            ...(generatedImageBase64 !== undefined ? { generatedImageBase64 } : {})
           }
         };
 
@@ -463,6 +471,10 @@ function summarizeToolResult(
     case "upload_image": {
       const message = result.message as string;
       return message || "Photo picker ready. Waiting for user to select a photo.";
+    }
+    case "generate_image": {
+      const message = result.message as string;
+      return message || "Image generated. Use the imageUrl with a preview tool.";
     }
     default:
       return JSON.stringify(result);
