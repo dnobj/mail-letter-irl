@@ -348,6 +348,7 @@ export async function registerLetterTools(
           headerImageData,        // Letter header image (base64) - widget doesn't need
           frontImageData,         // Postcard front image (base64) - widget doesn't need
           generatedImagePreview,  // Tiny preview (~15KB) for GenerateImageCard widget
+          generatedImageUrl,      // Temp URL for full image download
           ...modelFacingData
         } = resultObj;
 
@@ -367,8 +368,9 @@ export async function registerLetterTools(
             // Postcard-specific preview fields
             ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
             ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
-            // Tiny preview for GenerateImageCard widget (~15KB, fits in _meta)
-            ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {})
+            // GenerateImageCard widget data (via _meta since structuredContent/state can be null)
+            ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
+            ...(generatedImageUrl !== undefined ? { generatedImageUrl } : {})
           }
         };
 

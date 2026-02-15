@@ -272,35 +272,46 @@
 
         // --- Initialize from tool output ---
         function init() {
-          // Preview image comes from _meta (tiny ~15KB base64)
-          // Image URL comes from toolOutput (small string)
           var output = window.openai && window.openai.toolOutput;
           var meta = window.openai && window.openai.toolResponseMetadata;
 
-          var previewData = (meta && meta.generatedImagePreview) ||
-                            (output && output.generatedImagePreview);
+          // Try to get image URL from both sources (state can be null)
           imageUrl = (output && output.generatedImageUrl) ||
                      (meta && meta.generatedImageUrl);
 
-          if (!previewData) {
-            // Debug: show what data the widget actually received
-            var debugInfo = "No image was generated. Debug info: ";
-            debugInfo += "openai=" + (window.openai ? "yes" : "no");
-            if (window.openai) {
-              debugInfo += ", toolOutput=" + (output ? JSON.stringify(Object.keys(output)) : "null");
-              debugInfo += ", toolResponseMetadata=" + (meta ? JSON.stringify(Object.keys(meta)) : "null");
-            }
-            if (output && output.error) {
-              showError(output.error);
-            } else {
-              showError(debugInfo);
-            }
+          // Try to get preview base64 from both sources
+          var previewData = (meta && meta.generatedImagePreview) ||
+                            (output && output.generatedImagePreview);
+
+          // Strategy 1: Use base64 preview data
+          if (previewData) {
+            previewImg.src = "data:image/jpeg;base64," + previewData;
+            showState("preview");
             return;
           }
 
-          // Show preview using tiny base64 data
-          previewImg.src = "data:image/jpeg;base64," + previewData;
-          showState("preview");
+          // Strategy 2: Load image directly from server URL
+          if (imageUrl) {
+            previewImg.src = imageUrl;
+            previewImg.onerror = function () {
+              showError("Could not load image preview from server.");
+            };
+            showState("preview");
+            return;
+          }
+
+          // Debug: show what data the widget actually received
+          var debugInfo = "DEBUG: ";
+          debugInfo += "openai=" + (window.openai ? "yes" : "no");
+          if (window.openai) {
+            debugInfo += " | output=" + (output ? JSON.stringify(Object.keys(output)) : "null");
+            debugInfo += " | meta=" + (meta ? JSON.stringify(Object.keys(meta)) : "null");
+          }
+          if (output && output.error) {
+            showError(output.error);
+          } else {
+            showError(debugInfo);
+          }
         }
 
         // --- Event handlers ---
@@ -379,7 +390,8 @@
           attempts++;
           var output = window.openai && window.openai.toolOutput;
           var meta = window.openai && window.openai.toolResponseMetadata;
-          if ((meta && meta.generatedImagePreview) || (output && output.generatedImagePreview)) {
+          if ((meta && (meta.generatedImagePreview || meta.generatedImageUrl)) ||
+              (output && (output.generatedImagePreview || output.generatedImageUrl))) {
             clearInterval(pollInterval);
             init();
           } else if (attempts >= maxAttempts) {
@@ -391,8 +403,12 @@
         // Also try immediately
         if (
           window.openai &&
-          ((window.openai.toolResponseMetadata && window.openai.toolResponseMetadata.generatedImagePreview) ||
-           (window.openai.toolOutput && window.openai.toolOutput.generatedImagePreview))
+          ((window.openai.toolResponseMetadata &&
+            (window.openai.toolResponseMetadata.generatedImagePreview ||
+             window.openai.toolResponseMetadata.generatedImageUrl)) ||
+           (window.openai.toolOutput &&
+            (window.openai.toolOutput.generatedImagePreview ||
+             window.openai.toolOutput.generatedImageUrl)))
         ) {
           clearInterval(pollInterval);
           init();
