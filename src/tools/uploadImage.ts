@@ -26,6 +26,7 @@ interface UploadImageOutput {
   message: string;
   acceptedFormats: string;
   maxSizeMB: number;
+  context: string;
 }
 
 const ACCEPTED_FORMATS = "JPEG, PNG, WebP";
@@ -59,7 +60,8 @@ async function handler(
     status: "awaiting_upload",
     message: guidanceMessage,
     acceptedFormats: ACCEPTED_FORMATS,
-    maxSizeMB: MAX_SIZE_MB
+    maxSizeMB: MAX_SIZE_MB,
+    context: hint
   };
 }
 

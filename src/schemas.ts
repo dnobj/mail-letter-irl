@@ -514,7 +514,7 @@ export const uploadImageInputSchema: JsonSchema = {
 
 export const uploadImageOutputSchema: JsonSchema = {
   type: "object",
-  required: ["status", "message", "acceptedFormats", "maxSizeMB"],
+  required: ["status", "message", "acceptedFormats", "maxSizeMB", "context"],
   properties: {
     status: {
       type: "string",
@@ -531,6 +531,10 @@ export const uploadImageOutputSchema: JsonSchema = {
     maxSizeMB: {
       type: "number",
       description: "Maximum file size in megabytes"
+    },
+    context: {
+      type: "string",
+      description: "Usage context passed through from input: 'postcard', 'header_image', 'inline_image', or empty string"
     }
   }
 };
