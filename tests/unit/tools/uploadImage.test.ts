@@ -55,6 +55,7 @@ describe("upload_image tool", () => {
       expect(result.message).toBe(
         "Select a photo to use in your letter or postcard."
       );
+      expect(result.context).toBe("");
     });
 
     it("should return postcard guidance when context is 'postcard'", async () => {
@@ -67,6 +68,7 @@ describe("upload_image tool", () => {
       expect(result.message).toBe(
         "Select a photo for the front of your postcard."
       );
+      expect(result.context).toBe("postcard");
     });
 
     it("should return header_image guidance when context is 'header_image'", async () => {
@@ -79,6 +81,7 @@ describe("upload_image tool", () => {
       expect(result.message).toBe(
         "Select a header image for the top of your letter."
       );
+      expect(result.context).toBe("header_image");
     });
 
     it("should return inline_image guidance when context is 'inline_image'", async () => {
@@ -91,6 +94,7 @@ describe("upload_image tool", () => {
       expect(result.message).toBe(
         "Select a photo to include in your letter."
       );
+      expect(result.context).toBe("inline_image");
     });
 
     it("should return default message for unknown context", async () => {
@@ -103,6 +107,7 @@ describe("upload_image tool", () => {
       expect(result.message).toBe(
         "Select a photo to use in your letter or postcard."
       );
+      expect(result.context).toBe("unknown_context");
     });
   });
 
