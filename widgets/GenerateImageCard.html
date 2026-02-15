@@ -155,6 +155,42 @@
         background: var(--bg-secondary);
       }
 
+      /* URL display */
+      .url-display {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        margin-top: 0.75rem;
+      }
+
+      .url-display code {
+        flex: 1;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        word-break: break-all;
+        font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
+      }
+
+      .btn-copy {
+        flex-shrink: 0;
+        background: transparent;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0.3rem 0.6rem;
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+
+      .btn-copy:hover {
+        background: var(--bg-primary);
+      }
+
       /* State: Success */
       .success-state {
         padding: 1.5rem;
@@ -208,6 +244,10 @@
         <div class="preview-image-container">
           <img id="preview-img" src="" alt="Generated image preview" />
         </div>
+        <div id="url-display-preview" class="url-display hidden">
+          <code id="url-text-preview"></code>
+          <button class="btn-copy" id="btn-copy-preview" type="button">Copy</button>
+        </div>
         <div class="preview-actions">
           <button class="btn btn-secondary" id="btn-another" type="button">Generate Another</button>
           <button class="btn btn-primary" id="btn-use" type="button">Use This Image</button>
@@ -217,7 +257,11 @@
       <!-- Success State -->
       <div id="state-success" class="success-state hidden">
         <div class="success-icon">&#x2705;</div>
-        <p class="success-text">Image ready! ChatGPT will use it next.</p>
+        <p class="success-text">Image URL sent to chat</p>
+        <div id="url-display-success" class="url-display hidden">
+          <code id="url-text-success"></code>
+          <button class="btn-copy" id="btn-copy-success" type="button">Copy</button>
+        </div>
       </div>
 
       <!-- Error State -->
@@ -234,7 +278,6 @@
 
       let dataLoaded = false;
       let imageUrl = null;
-      let suggestedNextStep = null;
 
       // --- DOM refs ---
       const stateLoading = document.getElementById("state-loading");
@@ -247,6 +290,12 @@
       const btnRetry = document.getElementById("btn-retry");
       const previewImg = document.getElementById("preview-img");
       const errorMessageEl = document.getElementById("error-message");
+      const urlDisplayPreview = document.getElementById("url-display-preview");
+      const urlTextPreview = document.getElementById("url-text-preview");
+      const urlDisplaySuccess = document.getElementById("url-display-success");
+      const urlTextSuccess = document.getElementById("url-text-success");
+      const btnCopyPreview = document.getElementById("btn-copy-preview");
+      const btnCopySuccess = document.getElementById("btn-copy-success");
 
       // --- State management ---
       function showState(state) {
@@ -266,9 +315,8 @@
         const output = window.openai?.toolOutput;
         const meta = window.openai?.toolResponseMetadata;
 
-        // Try to get image URL and next step instruction from both sources
+        // Try to get image URL from both sources
         imageUrl = output?.generatedImageUrl ?? meta?.generatedImageUrl ?? null;
-        suggestedNextStep = output?.suggestedNextStep ?? meta?.suggestedNextStep ?? null;
 
         // Try to get preview base64 from both sources
         const previewData = meta?.generatedImagePreview ?? output?.generatedImagePreview;
@@ -277,6 +325,7 @@
         if (previewData) {
           dataLoaded = true;
           previewImg.src = "data:image/jpeg;base64," + previewData;
+          showUrlDisplay(imageUrl);
           showState("preview");
           return;
         }
@@ -288,6 +337,7 @@
           previewImg.onerror = () => {
             showError("Could not load image preview from server.");
           };
+          showUrlDisplay(imageUrl);
           showState("preview");
           return;
         }
@@ -306,6 +356,26 @@
         }
       }
 
+      // --- URL display helpers ---
+      function showUrlDisplay(url) {
+        if (!url) return;
+        urlTextPreview.textContent = url;
+        urlDisplayPreview.classList.remove("hidden");
+        urlTextSuccess.textContent = url;
+        urlDisplaySuccess.classList.remove("hidden");
+      }
+
+      function handleCopy(btn, url) {
+        if (!url) return;
+        navigator.clipboard.writeText(url).then(() => {
+          btn.textContent = "Copied!";
+          setTimeout(() => { btn.textContent = "Copy"; }, 2000);
+        });
+      }
+
+      btnCopyPreview.addEventListener("click", () => handleCopy(btnCopyPreview, imageUrl));
+      btnCopySuccess.addEventListener("click", () => handleCopy(btnCopySuccess, imageUrl));
+
       // --- Event handlers ---
       btnUse.addEventListener("click", () => {
         if (!imageUrl) {
@@ -315,9 +385,7 @@
 
         showState("success");
 
-        // Post the server-hosted image URL back to ChatGPT with explicit next step
-        // The suggestedNextStep tells ChatGPT exactly which tool to call (e.g. quote_and_preview_postcard)
-        const nextStep = suggestedNextStep || "Pass this imageUrl to quote_and_preview_postcard or a letter preview tool.";
+        // Post the image URL back to ChatGPT — neutral message, no specific tool prescribed
         window.parent.postMessage(
           {
             jsonrpc: "2.0",
@@ -327,7 +395,7 @@
               content: [
                 {
                   type: "text",
-                  text: "I want to use this generated image. imageUrl: " + imageUrl + "\n\n" + nextStep
+                  text: "I want to use this generated image. Here is the image URL: " + imageUrl
                 }
               ]
             }
