@@ -344,12 +344,10 @@ export async function registerLetterTools(
           previewHtml,
           previewFrontHtml,
           previewBackHtml,
-          inlineImageData,        // Letter inline image (base64)
-          headerImageData,        // Letter header image (base64)
-          frontImageData,         // Postcard front image (base64)
-          // Note: generatedImageBase64 intentionally stays in modelFacingData
-          // so it reaches the widget via structuredContent (→ toolOutput).
-          // _meta/toolResponseMetadata has size limits that drop large payloads.
+          inlineImageData,        // Letter inline image (base64) - widget doesn't need
+          headerImageData,        // Letter header image (base64) - widget doesn't need
+          frontImageData,         // Postcard front image (base64) - widget doesn't need
+          generatedImagePreview,  // Tiny preview (~15KB) for GenerateImageCard widget
           ...modelFacingData
         } = resultObj;
 
@@ -369,8 +367,8 @@ export async function registerLetterTools(
             // Postcard-specific preview fields
             ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
             ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
-            // Note: generatedImageBase64 goes through structuredContent (toolOutput),
-            // not _meta, because _meta has size limits that drop large base64 payloads
+            // Tiny preview for GenerateImageCard widget (~15KB, fits in _meta)
+            ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {})
           }
         };
 

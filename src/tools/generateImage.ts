@@ -2,14 +2,21 @@
  * Generate Image Tool
  *
  * Generates images via the OpenAI Images API (gpt-image-1.5) server-side.
- * Returns base64 data that the GenerateImageCard widget displays as a preview.
- * When the user confirms, the widget uploads to OpenAI file storage and posts
- * the download URL back via ui/message for use with preview tools.
+ * Creates a tiny preview (~15KB) for the widget to display via _meta,
+ * and stores the full image server-side for later download via temp URL.
  *
- * This bypasses the ChatGPT limitation where GPT Image output
- * cannot be passed directly to MCP tools (GitHub #67).
+ * Flow:
+ * 1. Server calls OpenAI API → full base64 image
+ * 2. Server creates tiny preview via Sharp (~400px, quality 60)
+ * 3. Server stores full image in temp store → gets token
+ * 4. Returns preview (→ _meta for widget) + URL (→ structuredContent)
+ * 5. Widget shows preview, user clicks "Use This Image"
+ * 6. Widget posts the temp URL back via ui/message
+ * 7. ChatGPT calls preview tool with imageUrl = our temp URL
+ * 8. Preview tool downloads full image from our server
  */
 
+import sharp from "sharp";
 import { McpToolDefinition, ToolContext } from "../contracts/types.js";
 import {
   generateImageInputSchema,
@@ -20,6 +27,7 @@ import {
   ImageGenerationError,
   type ImageContext
 } from "../services/imageGenerationService.js";
+import { storeImage } from "../services/tempImageStore.js";
 
 // ============================================================================
 // Types
@@ -33,7 +41,8 @@ interface GenerateImageInput {
 interface GenerateImageOutput {
   message: string;
   suggestedNextStep: string;
-  generatedImageBase64: string;
+  generatedImagePreview: string;
+  generatedImageUrl: string;
 }
 
 // ============================================================================
@@ -51,6 +60,43 @@ const NEXT_STEP_MAP: Record<string, string> = {
 
 const DEFAULT_NEXT_STEP =
   "Pass this imageUrl to quote_and_preview_postcard or a letter preview tool.";
+
+/** Preview config matching the postcard preview pattern */
+const PREVIEW_CONFIG = {
+  maxWidth: 400,
+  jpegQuality: 60
+} as const;
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Create a tiny preview from full-resolution base64 image data.
+ * Uses the same Sharp + quality settings as postcard previews (~10-20KB).
+ */
+async function createPreview(base64Data: string): Promise<string> {
+  const buffer = Buffer.from(base64Data, "base64");
+  const preview = await sharp(buffer)
+    .resize(PREVIEW_CONFIG.maxWidth, undefined, {
+      fit: "inside",
+      withoutEnlargement: true
+    })
+    .jpeg({ quality: PREVIEW_CONFIG.jpegQuality })
+    .toBuffer();
+  return preview.toString("base64");
+}
+
+/**
+ * Build the temp image URL for the stored image.
+ */
+function buildTempImageUrl(token: string): string {
+  const baseUrl =
+    process.env.LETTER_IRL_API_URL ||
+    process.env.LETTER_IRL_PUBLIC_BASE_URL ||
+    "https://api.letterirl.com";
+  return `${baseUrl}/api/temp-image/${token}`;
+}
 
 // ============================================================================
 // Handler
@@ -75,11 +121,20 @@ async function handler(
       context: input.context
     });
 
+    // Create tiny preview for widget display (~10-20KB via _meta)
+    const previewBase64 = await createPreview(result.base64Data);
+
+    // Store full image for later download by preview tools
+    const token = storeImage(result.base64Data);
+    const imageUrl = buildTempImageUrl(token);
+
     context.logger.info(
       {
         correlationId: context.correlationId,
         event: "generate_image.success",
-        base64Length: result.base64Data.length
+        fullBase64Length: result.base64Data.length,
+        previewBase64Length: previewBase64.length,
+        imageUrl
       },
       "Image generated successfully"
     );
@@ -90,7 +145,8 @@ async function handler(
     return {
       message: `Image generated! ${suggestedNextStep}`,
       suggestedNextStep,
-      generatedImageBase64: result.base64Data
+      generatedImagePreview: previewBase64,
+      generatedImageUrl: imageUrl
     };
   } catch (error) {
     if (error instanceof ImageGenerationError) {

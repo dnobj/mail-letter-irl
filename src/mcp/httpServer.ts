@@ -21,6 +21,7 @@ import { handleAdminApiRequest } from "../api/adminApiHandler.js";
 import { isAdminEnabled } from "../api/middleware/adminAuth.js";
 import { handleLetterApiRequest } from "../api/letterApiHandler.js";
 import { handleReturnAddressApiRequest } from "../api/returnAddressApiHandler.js";
+import { handleTempImageRequest } from "../api/tempImageHandler.js";
 import {
   handleCreateCheckoutSession,
   handleStripeWebhook
@@ -630,6 +631,12 @@ export async function startHttpServer() {
         res.end("Widget not found");
       }
       return;
+    }
+
+    // Temp image serving (no auth - token is the capability)
+    if (url.pathname.startsWith('/api/temp-image/')) {
+      const tempImageHandled = await handleTempImageRequest(req, res, url.pathname);
+      if (tempImageHandled) return;
     }
 
     // Admin API routes (check first - more specific path)

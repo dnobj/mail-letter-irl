@@ -1,12 +1,12 @@
 /**
  * Unit tests for generate_image tool
  *
- * Tests the tool handler with mocked image generation service.
+ * Tests the tool handler with mocked image generation service and Sharp.
  * Verifies correct output shape, context-based next-step guidance,
- * and error handling for various failure scenarios.
+ * preview creation, temp URL generation, and error handling.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ToolContext } from "../../../src/contracts/types.js";
 
 // Mock the image generation service
@@ -24,13 +24,30 @@ vi.mock("../../../src/services/imageGenerationService.js", () => ({
   }
 }));
 
+// Mock sharp
+vi.mock("sharp", () => {
+  const mockSharp = vi.fn(() => ({
+    resize: vi.fn().mockReturnThis(),
+    jpeg: vi.fn().mockReturnThis(),
+    toBuffer: vi.fn().mockResolvedValue(Buffer.from("tinypreview"))
+  }));
+  return { default: mockSharp };
+});
+
+// Mock temp image store
+vi.mock("../../../src/services/tempImageStore.js", () => ({
+  storeImage: vi.fn().mockReturnValue("abc123def456abc123def456abc12345")
+}));
+
 import {
   generateImage,
   ImageGenerationError
 } from "../../../src/services/imageGenerationService.js";
+import { storeImage } from "../../../src/services/tempImageStore.js";
 import { generateImageTool } from "../../../src/tools/generateImage.js";
 
 const mockGenerateImage = generateImage as ReturnType<typeof vi.fn>;
+const mockStoreImage = storeImage as ReturnType<typeof vi.fn>;
 
 const createMockContext = (): ToolContext => ({
   user: {
@@ -51,8 +68,15 @@ const createMockContext = (): ToolContext => ({
 });
 
 describe("generate_image tool", () => {
+  const originalEnv = { ...process.env };
+
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.LETTER_IRL_API_URL = "https://api.letterirl.com";
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
   });
 
   describe("tool definition", () => {
@@ -76,7 +100,7 @@ describe("generate_image tool", () => {
   });
 
   describe("handler - success cases", () => {
-    it("should return base64 data and message", async () => {
+    it("should return preview and image URL", async () => {
       mockGenerateImage.mockResolvedValueOnce({
         base64Data: "fakeb64data"
       });
@@ -87,8 +111,51 @@ describe("generate_image tool", () => {
         context
       );
 
-      expect(result.generatedImageBase64).toBe("fakeb64data");
+      expect(result.generatedImagePreview).toBeDefined();
+      expect(result.generatedImageUrl).toContain("/api/temp-image/");
       expect(result.message).toContain("Image generated");
+    });
+
+    it("should create preview via Sharp", async () => {
+      mockGenerateImage.mockResolvedValueOnce({ base64Data: "fakeb64" });
+
+      const context = createMockContext();
+      const result = await generateImageTool.handler(
+        { prompt: "a sunset" },
+        context
+      );
+
+      // Preview should be the base64-encoded result from Sharp mock
+      expect(result.generatedImagePreview).toBe(
+        Buffer.from("tinypreview").toString("base64")
+      );
+    });
+
+    it("should store full image in temp store", async () => {
+      mockGenerateImage.mockResolvedValueOnce({ base64Data: "fullb64data" });
+
+      const context = createMockContext();
+      await generateImageTool.handler(
+        { prompt: "a sunset" },
+        context
+      );
+
+      expect(mockStoreImage).toHaveBeenCalledWith("fullb64data");
+    });
+
+    it("should build image URL from API URL env var", async () => {
+      process.env.LETTER_IRL_API_URL = "https://dev-api.letterirl.com";
+      mockGenerateImage.mockResolvedValueOnce({ base64Data: "fakeb64" });
+
+      const context = createMockContext();
+      const result = await generateImageTool.handler(
+        { prompt: "a sunset" },
+        context
+      );
+
+      expect(result.generatedImageUrl).toContain(
+        "https://dev-api.letterirl.com/api/temp-image/"
+      );
     });
 
     it("should suggest postcard preview for postcard context", async () => {
