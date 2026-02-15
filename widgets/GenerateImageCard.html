@@ -283,10 +283,17 @@
                      (meta && meta.generatedImageUrl);
 
           if (!previewData) {
+            // Debug: show what data the widget actually received
+            var debugInfo = "No image was generated. Debug info: ";
+            debugInfo += "openai=" + (window.openai ? "yes" : "no");
+            if (window.openai) {
+              debugInfo += ", toolOutput=" + (output ? JSON.stringify(Object.keys(output)) : "null");
+              debugInfo += ", toolResponseMetadata=" + (meta ? JSON.stringify(Object.keys(meta)) : "null");
+            }
             if (output && output.error) {
               showError(output.error);
             } else {
-              showError("No image was generated. Please try again.");
+              showError(debugInfo);
             }
             return;
           }
