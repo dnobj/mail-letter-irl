@@ -345,7 +345,7 @@
         var urlText = document.getElementById("url-text");
 
         var selectedFile = null;
-        var previewObjectUrl = null;
+        var previewDataUrl = null;
 
         var MAX_SIZE_BYTES = 10 * 1024 * 1024;
         var ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp"];
@@ -411,7 +411,7 @@
           return (bytes / (1024 * 1024)).toFixed(1) + " MB";
         }
 
-        // --- File selection ---
+        // --- File selection (uses FileReader data URL to avoid blob CSP issues in sandbox) ---
         function onFileSelected(file) {
           var error = validateFile(file);
           if (error) {
@@ -421,14 +421,17 @@
 
           selectedFile = file;
 
-          if (previewObjectUrl) {
-            URL.revokeObjectURL(previewObjectUrl);
-          }
-          previewObjectUrl = URL.createObjectURL(file);
-          previewImg.src = previewObjectUrl;
-          fileInfo.textContent = file.name + " \u00B7 " + formatFileSize(file.size);
-
-          showState("preview");
+          var reader = new FileReader();
+          reader.onload = function (e) {
+            previewDataUrl = e.target.result;
+            previewImg.src = previewDataUrl;
+            fileInfo.textContent = file.name + " \u00B7 " + formatFileSize(file.size);
+            showState("preview");
+          };
+          reader.onerror = function () {
+            showError("Could not read the selected file.");
+          };
+          reader.readAsDataURL(file);
         }
 
         // --- Upload via OpenAI SDK ---
@@ -458,7 +461,7 @@
             }
 
             // Show done state with image preview + URL
-            doneImg.src = previewObjectUrl || "";
+            doneImg.src = previewDataUrl || "";
             urlText.textContent = downloadUrl;
             showState("done");
 
@@ -509,10 +512,7 @@
         btnChange.addEventListener("click", function () {
           fileInput.value = "";
           selectedFile = null;
-          if (previewObjectUrl) {
-            URL.revokeObjectURL(previewObjectUrl);
-            previewObjectUrl = null;
-          }
+          previewDataUrl = null;
           showState("select");
           fileInput.click();
         });
