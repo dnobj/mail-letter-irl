@@ -349,7 +349,7 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
     },
     imageUrl: {
       type: "string",
-      description: "URL of image to use for postcard front (alternative to file attachment). Use this when you have generated an image and uploaded it somewhere accessible."
+      description: "REQUIRED when using a generated image: set this to the generatedImageUrl value returned by the generate_image tool. This is the URL of the image for the postcard front."
     }
   }
 };

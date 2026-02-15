@@ -49,17 +49,18 @@ interface GenerateImageOutput {
 // Constants
 // ============================================================================
 
-const NEXT_STEP_MAP: Record<string, string> = {
-  postcard:
-    "Now call quote_and_preview_postcard with this imageUrl to preview the postcard.",
-  header_image:
-    "Now call quote_and_preview_letter_with_header_image with this imageUrl to preview the letter.",
-  inline_image:
-    "Now call quote_and_preview_letter_with_image with this imageUrl to preview the letter."
-};
-
-const DEFAULT_NEXT_STEP =
-  "Pass this imageUrl to quote_and_preview_postcard or a letter preview tool.";
+function buildNextStep(context: string | undefined, imageUrl: string): string {
+  switch (context) {
+    case "postcard":
+      return `IMPORTANT: Now call quote_and_preview_postcard and set imageUrl to "${imageUrl}"`;
+    case "header_image":
+      return `IMPORTANT: Now call quote_and_preview_letter_with_header_image and set imageUrl to "${imageUrl}"`;
+    case "inline_image":
+      return `IMPORTANT: Now call quote_and_preview_letter_with_image and set imageUrl to "${imageUrl}"`;
+    default:
+      return `IMPORTANT: Pass imageUrl "${imageUrl}" to quote_and_preview_postcard or a letter preview tool.`;
+  }
+}
 
 /** Preview config matching the postcard preview pattern */
 const PREVIEW_CONFIG = {
@@ -139,8 +140,7 @@ async function handler(
       "Image generated successfully"
     );
 
-    const suggestedNextStep =
-      NEXT_STEP_MAP[input.context ?? ""] ?? DEFAULT_NEXT_STEP;
+    const suggestedNextStep = buildNextStep(input.context, imageUrl);
 
     return {
       message: `Image generated! ${suggestedNextStep}`,
