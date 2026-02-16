@@ -18,6 +18,7 @@ import {
   confirmUploadedImageInputSchema,
   confirmUploadedImageOutputSchema
 } from "../schemas.js";
+import { setRecentUploadedImage } from "../services/recentUploadStore.js";
 
 interface ConfirmUploadedImageInput {
   imageUrl: string;
@@ -48,6 +49,7 @@ async function handler(
   context: ToolContext
 ): Promise<ConfirmUploadedImageOutput> {
   const hint = input.context || "";
+  setRecentUploadedImage(context.user.userId, input.imageUrl, input.context);
 
   context.logger.info(
     {

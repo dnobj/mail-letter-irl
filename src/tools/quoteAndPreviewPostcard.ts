@@ -21,6 +21,7 @@ import { getReturnAddress } from "../services/returnAddressService.js";
 import { downloadAndProcessPostcardImageWithPreview, ImageProcessingError, type ImageInput } from "../services/imageService.js";
 import type { PostcardSize, ImageFileParam } from "../services/types.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
+import { getRecentUploadedImage } from "../services/recentUploadStore.js";
 
 // ============================================================================
 // Types
@@ -177,6 +178,22 @@ async function handler(
       },
       "Using image from direct URL"
     );
+  } else {
+    // Fallback: if ChatGPT drops imageUrl on the follow-up tool call,
+    // reuse the most recently confirmed upload for this user.
+    const recent = getRecentUploadedImage(context.user.userId, "postcard");
+    if (recent?.imageUrl) {
+      imageInput = { url: recent.imageUrl };
+      imageSourceUrl = recent.imageUrl;
+      context.logger.info(
+        {
+          correlationId: context.correlationId,
+          event: "quote.postcard.image_from_recent_upload",
+          imageAgeMs: recent.ageMs
+        },
+        "Using recent uploaded image fallback for postcard"
+      );
+    }
   }
 
   if (!imageInput) {

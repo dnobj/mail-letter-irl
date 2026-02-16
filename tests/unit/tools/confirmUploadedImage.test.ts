@@ -5,9 +5,13 @@
  * suggestedNextStep based on context.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { confirmUploadedImageTool } from "../../../src/tools/confirmUploadedImage.js";
 import type { ToolContext } from "../../../src/contracts/types.js";
+import {
+  clearRecentUploadedImages,
+  getRecentUploadedImage
+} from "../../../src/services/recentUploadStore.js";
 
 const createMockContext = (): ToolContext => ({
   user: {
@@ -32,6 +36,10 @@ const createMockContext = (): ToolContext => ({
 const TEST_URL = "https://files.oaiusercontent.com/file-abc123";
 
 describe("confirm_uploaded_image tool", () => {
+  beforeEach(() => {
+    clearRecentUploadedImages();
+  });
+
   describe("handler", () => {
     it("should return ready status with imageUrl", async () => {
       const context = createMockContext();
@@ -113,6 +121,18 @@ describe("confirm_uploaded_image tool", () => {
         }),
         "Confirm uploaded image invoked"
       );
+    });
+
+    it("should store the uploaded image URL for per-user fallback", async () => {
+      const context = createMockContext();
+      await confirmUploadedImageTool.handler(
+        { imageUrl: TEST_URL, context: "postcard" },
+        context
+      );
+
+      const recent = getRecentUploadedImage(context.user.userId, "postcard");
+      expect(recent).not.toBeNull();
+      expect(recent?.imageUrl).toBe(TEST_URL);
     });
   });
 
