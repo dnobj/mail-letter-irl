@@ -86,10 +86,15 @@ export const uploadImageTool: McpToolDefinition<
   description: `Upload a photo for use in letters or postcards. Provides a direct file picker widget.
 
 USE THIS TOOL WHEN:
+- User asks to upload, attach, pick, select, or use a photo/image in mail
 - User wants to include an image but direct file attachment didn't work
 - User explicitly asks about uploading photos
 - A previous image tool call failed with an image upload error
 - User is on mobile and wants to send a postcard or letter with image
+
+IMPORTANT BEHAVIOR:
+- If user asks to upload an image, CALL THIS TOOL IMMEDIATELY in the same turn.
+- Do NOT only describe the widget; actually call the tool so the widget appears.
 
 DO NOT USE THIS TOOL FOR:
 - When the user has already provided a direct image URL

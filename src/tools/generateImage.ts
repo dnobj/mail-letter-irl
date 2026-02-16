@@ -196,6 +196,9 @@ USE THIS TOOL WHEN:
 DO NOT USE THIS TOOL WHEN:
 - User has already provided their own image (file attachment or URL)
 - User wants to upload an existing photo (use upload_image instead)
+- The issue is "image not received" from ChatGPT upload (use upload_image fallback)
+- User is referring to an existing uploaded photo ("this photo", "the one I uploaded")
+  and wants that same photo used
 
 CONTEXT PARAMETER:
 - "postcard" — landscape image optimized for 6x9 postcard front
