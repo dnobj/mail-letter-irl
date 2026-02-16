@@ -16,6 +16,7 @@ import {
   uploadImageInputSchema,
   uploadImageOutputSchema
 } from "../schemas.js";
+import { isDebugEnabled } from "../utils/debug.js";
 
 interface UploadImageInput {
   context?: string;
@@ -27,6 +28,8 @@ interface UploadImageOutput {
   acceptedFormats: string;
   maxSizeMB: number;
   context: string;
+  debugEnabled: boolean;
+  debugEndpoint?: string;
 }
 
 const ACCEPTED_FORMATS = "JPEG, PNG, WebP";
@@ -37,6 +40,14 @@ const CONTEXT_MESSAGES: Record<string, string> = {
   header_image: "Select a header image for the top of your letter.",
   inline_image: "Select a photo to include in your letter."
 };
+
+function buildDebugEndpoint(): string {
+  const baseUrl =
+    process.env.LETTER_IRL_API_URL ||
+    process.env.LETTER_IRL_PUBLIC_BASE_URL ||
+    "https://api.letterirl.com";
+  return `${baseUrl}/api/widget-diagnostic`;
+}
 
 async function handler(
   input: UploadImageInput,
@@ -61,7 +72,9 @@ async function handler(
     message: guidanceMessage,
     acceptedFormats: ACCEPTED_FORMATS,
     maxSizeMB: MAX_SIZE_MB,
-    context: hint
+    context: hint,
+    debugEnabled: isDebugEnabled(),
+    debugEndpoint: buildDebugEndpoint()
   };
 }
 

@@ -514,7 +514,7 @@ export const uploadImageInputSchema: JsonSchema = {
 
 export const uploadImageOutputSchema: JsonSchema = {
   type: "object",
-  required: ["status", "message", "acceptedFormats", "maxSizeMB", "context"],
+  required: ["status", "message", "acceptedFormats", "maxSizeMB", "context", "debugEnabled"],
   properties: {
     status: {
       type: "string",
@@ -535,6 +535,14 @@ export const uploadImageOutputSchema: JsonSchema = {
     context: {
       type: "string",
       description: "Usage context passed through from input: 'postcard', 'header_image', 'inline_image', or empty string"
+    },
+    debugEnabled: {
+      type: "boolean",
+      description: "True when server-side DEBUG flag enables widget diagnostic logging"
+    },
+    debugEndpoint: {
+      type: "string",
+      description: "Optional absolute URL for debug beacon ingestion"
     }
   }
 };

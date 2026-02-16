@@ -33,6 +33,7 @@ import { startLetterWorker } from "../workers/letterWorker.js";
 import { startCreditExpirationWorker } from "../workers/creditExpirationWorker.js";
 import { startStatusSyncWorker, stopStatusSyncWorker } from "../workers/statusSyncWorker.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
+import { isDebugEnabled } from "../utils/debug.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,6 +63,7 @@ const FALLBACK_ORIGIN =
 const PUBLIC_BASE_URL =
   process.env.LETTER_IRL_PUBLIC_BASE_URL ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const REQUIRE_AUTH = process.env.LETTER_IRL_REQUIRE_AUTH !== "false";
+const DEBUG_ENABLED = isDebugEnabled();
 
 // Environment variable validation
 const REQUIRED_ENV_VARS = [
@@ -398,6 +400,11 @@ export async function startHttpServer() {
 
     // Debug endpoint to check widget registration (no auth required)
     if (url.pathname === "/debug/widgets") {
+      if (!DEBUG_ENABLED) {
+        res.statusCode = 404;
+        res.end("Not found");
+        return;
+      }
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.setHeader("Access-Control-Allow-Origin", "*");
@@ -424,6 +431,55 @@ export async function startHttpServer() {
       }
 
       res.end(JSON.stringify(status, null, 2));
+      return;
+    }
+
+    // Debug endpoint for widget diagnostic beacons (no auth required, DEBUG gated)
+    if (url.pathname === "/api/widget-diagnostic") {
+      if (!DEBUG_ENABLED) {
+        res.statusCode = 404;
+        res.end("Not found");
+        return;
+      }
+
+      const origin = resolveCorsOrigin(req.headers.origin);
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Content-Type", "application/json");
+
+      if (req.method === "OPTIONS") {
+        respondToCorsPreflight(res, origin);
+        return;
+      }
+
+      if (req.method !== "POST") {
+        res.writeHead(405, { Allow: "POST, OPTIONS" });
+        res.end(JSON.stringify({ ok: false, error: "Method not allowed" }));
+        return;
+      }
+
+      try {
+        const body = await parseRequestBody(req);
+        const payload = body ? JSON.parse(body) : {};
+        console.log(
+          JSON.stringify({
+            level: "debug",
+            timestamp: new Date().toISOString(),
+            event: "widget.diagnostic",
+            diagnostic: payload
+          })
+        );
+        res.statusCode = 204;
+        res.end();
+      } catch (error: any) {
+        res.statusCode = 400;
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Invalid diagnostic payload",
+            message: error?.message ?? "Unknown error"
+          })
+        );
+      }
       return;
     }
 

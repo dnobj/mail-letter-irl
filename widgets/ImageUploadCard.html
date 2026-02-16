@@ -346,6 +346,9 @@
 
         var selectedFile = null;
         var previewDataUrl = null;
+        var debugEnabled = false;
+        var debugEndpoint = "";
+        var debugSessionId = "upload-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
 
         var MAX_SIZE_BYTES = 10 * 1024 * 1024;
         var ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp"];
@@ -361,8 +364,44 @@
             if (output.message) {
               guidanceText.textContent = output.message;
             }
+            if (output.debugEnabled === true) {
+              debugEnabled = true;
+            }
+            if (typeof output.debugEndpoint === "string" && output.debugEndpoint) {
+              debugEndpoint = output.debugEndpoint;
+            }
           }
         } catch (e) { /* ignore */ }
+
+        function debugLog(message, data) {
+          if (!debugEnabled) return;
+          if (data !== undefined) {
+            console.log("[ImageUploadCard DEBUG] " + message, data);
+            return;
+          }
+          console.log("[ImageUploadCard DEBUG] " + message);
+        }
+
+        function debugBeacon(phase, data) {
+          if (!debugEnabled || !debugEndpoint) return;
+
+          var payload = {
+            source: "ImageUploadCard",
+            phase: phase,
+            sessionId: debugSessionId,
+            context: uploadContext || null,
+            timestamp: new Date().toISOString(),
+            data: data || {}
+          };
+
+          fetch(debugEndpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          }).catch(function () {
+            // Never fail widget UX on diagnostics
+          });
+        }
 
         // --- State management ---
         function showState(state) {
@@ -430,18 +469,30 @@
           showState("uploading");
 
           try {
+            debugLog("uploadFile.start", { context: uploadContext || "none" });
+            debugBeacon("uploadFile.start", { hasFile: !!selectedFile, fileName: selectedFile && selectedFile.name });
             var uploadResult = await window.openai.uploadFile(selectedFile);
             var fileId = uploadResult.fileId || uploadResult.file_id;
+            debugLog("uploadFile.success", { fileId: fileId || null });
+            debugBeacon("uploadFile.success", { fileId: fileId || null });
 
             if (!fileId) {
+              debugBeacon("uploadFile.missingFileId");
               showError("Upload failed — no file ID returned.");
               return;
             }
 
+            debugLog("getFileDownloadUrl.start", { fileId: fileId });
+            debugBeacon("getFileDownloadUrl.start", { fileId: fileId });
             var urlResult = await window.openai.getFileDownloadUrl({ fileId: fileId });
             var downloadUrl = urlResult.downloadUrl || urlResult.download_url;
+            debugLog("getFileDownloadUrl.success", {
+              hasDownloadUrl: !!downloadUrl
+            });
+            debugBeacon("getFileDownloadUrl.success", { hasDownloadUrl: !!downloadUrl });
 
             if (!downloadUrl) {
+              debugBeacon("getFileDownloadUrl.missingUrl", { fileId: fileId });
               showError("Upload succeeded but could not get download URL.");
               return;
             }
@@ -455,12 +506,25 @@
             // into a server-side tool response that ChatGPT can see and act on.
             // This is more reliable than sendFollowUpMessage which has known issues.
             if (window.openai && window.openai.callTool) {
+              debugLog("callTool.start", { toolName: "confirm_uploaded_image" });
+              debugBeacon("callTool.start", { toolName: "confirm_uploaded_image" });
               await window.openai.callTool("confirm_uploaded_image", {
                 imageUrl: downloadUrl,
                 context: uploadContext || undefined
               });
+              debugLog("callTool.success", { toolName: "confirm_uploaded_image" });
+              debugBeacon("callTool.success", { toolName: "confirm_uploaded_image" });
+            } else {
+              debugLog("callTool.unavailable");
+              debugBeacon("callTool.unavailable");
             }
           } catch (err) {
+            debugLog("uploadAndSend.error", {
+              message: (err && err.message) || "Unknown error"
+            });
+            debugBeacon("uploadAndSend.error", {
+              message: (err && err.message) || "Unknown error"
+            });
             var errMsg = (err && err.message) || "Upload failed. Please try again.";
             showError(errMsg);
           }
