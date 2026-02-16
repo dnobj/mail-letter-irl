@@ -113,6 +113,11 @@ export const toolInputSchemas = {
   generate_image: z.object({
     prompt: z.string(),
     context: z.enum(["postcard", "header_image", "inline_image"]).optional()
+  }),
+  // Confirm uploaded image tool (widget relay)
+  confirm_uploaded_image: z.object({
+    imageUrl: z.string(),
+    context: z.string().optional()
   })
 };
 

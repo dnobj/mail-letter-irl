@@ -364,20 +364,6 @@
           }
         } catch (e) { /* ignore */ }
 
-        // --- Build next-step message (mirrors generateImage.ts buildNextStep) ---
-        function buildNextStepMessage(ctx, url) {
-          switch (ctx) {
-            case "postcard":
-              return 'IMPORTANT: Now call quote_and_preview_postcard and set imageUrl to "' + url + '"';
-            case "header_image":
-              return 'IMPORTANT: Now call quote_and_preview_letter_with_header_image and set imageUrl to "' + url + '"';
-            case "inline_image":
-              return 'IMPORTANT: Now call quote_and_preview_letter_with_image and set imageUrl to "' + url + '"';
-            default:
-              return 'IMPORTANT: Pass imageUrl "' + url + '" to quote_and_preview_postcard or a letter preview tool.';
-          }
-        }
-
         // --- State management ---
         function showState(state) {
           stateSelect.classList.toggle("hidden", state !== "select");
@@ -465,32 +451,14 @@
             urlText.textContent = downloadUrl;
             showState("done");
 
-            // Build explicit next-step message
-            var nextStepMsg = buildNextStepMessage(uploadContext, downloadUrl);
-
-            // Send follow-up message to ChatGPT via Apps SDK bridge
-            // NOTE: sendFollowUpMessage has a known re-rendering bug (Dec 2025)
-            // but it reliably delivers the message, unlike raw postMessage.
-            if (window.openai && window.openai.sendFollowUpMessage) {
-              window.openai.sendFollowUpMessage("Photo uploaded successfully. " + nextStepMsg);
-            } else {
-              // Fallback to raw postMessage for older SDK versions
-              window.parent.postMessage(
-                {
-                  jsonrpc: "2.0",
-                  method: "ui/message",
-                  params: {
-                    role: "user",
-                    content: [
-                      {
-                        type: "text",
-                        text: "Photo uploaded successfully. " + nextStepMsg
-                      }
-                    ]
-                  }
-                },
-                "*"
-              );
+            // Call confirm_uploaded_image tool via callTool to put the URL
+            // into a server-side tool response that ChatGPT can see and act on.
+            // This is more reliable than sendFollowUpMessage which has known issues.
+            if (window.openai && window.openai.callTool) {
+              await window.openai.callTool("confirm_uploaded_image", {
+                imageUrl: downloadUrl,
+                context: uploadContext || undefined
+              });
             }
           } catch (err) {
             var errMsg = (err && err.message) || "Upload failed. Please try again.";

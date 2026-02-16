@@ -581,3 +581,41 @@ export const generateImageOutputSchema: JsonSchema = {
     }
   }
 };
+
+// ============================================================================
+// Confirm Uploaded Image Schemas (Widget relay for upload URL)
+// ============================================================================
+
+export const confirmUploadedImageInputSchema: JsonSchema = {
+  type: "object",
+  required: ["imageUrl"],
+  properties: {
+    imageUrl: {
+      type: "string",
+      description: "Download URL of the uploaded image"
+    },
+    context: {
+      type: "string",
+      description: "Usage context: 'postcard', 'header_image', or 'inline_image'"
+    }
+  }
+};
+
+export const confirmUploadedImageOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["status", "imageUrl", "suggestedNextStep"],
+  properties: {
+    status: {
+      type: "string",
+      description: "Always 'ready' — image has been uploaded and URL is available"
+    },
+    imageUrl: {
+      type: "string",
+      description: "Download URL of the uploaded image"
+    },
+    suggestedNextStep: {
+      type: "string",
+      description: "Instruction for which preview tool to call next with the imageUrl"
+    }
+  }
+};
