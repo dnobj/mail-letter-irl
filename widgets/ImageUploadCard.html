@@ -355,23 +355,26 @@
 
         // --- Read context from tool output ---
         var uploadContext = "";
-        try {
-          if (window.openai && window.openai.toolOutput) {
-            var output = window.openai.toolOutput;
-            if (output.context) {
-              uploadContext = output.context;
+        function hydrateFromToolOutput() {
+          try {
+            if (window.openai && window.openai.toolOutput) {
+              var output = window.openai.toolOutput;
+              if (output.context) {
+                uploadContext = output.context;
+              }
+              if (output.message) {
+                guidanceText.textContent = output.message;
+              }
+              if (output.debugEnabled === true) {
+                debugEnabled = true;
+              }
+              if (typeof output.debugEndpoint === "string" && output.debugEndpoint) {
+                debugEndpoint = output.debugEndpoint;
+              }
             }
-            if (output.message) {
-              guidanceText.textContent = output.message;
-            }
-            if (output.debugEnabled === true) {
-              debugEnabled = true;
-            }
-            if (typeof output.debugEndpoint === "string" && output.debugEndpoint) {
-              debugEndpoint = output.debugEndpoint;
-            }
-          }
-        } catch (e) { /* ignore */ }
+          } catch (e) { /* ignore */ }
+        }
+        hydrateFromToolOutput();
 
         function debugLog(message, data) {
           if (!debugEnabled) return;
@@ -393,14 +396,67 @@
             timestamp: new Date().toISOString(),
             data: data || {}
           };
+          var body = JSON.stringify(payload);
+
+          try {
+            // sendBeacon is more resilient if the iframe is about to unload
+            if (navigator.sendBeacon) {
+              var beaconOk = navigator.sendBeacon(
+                debugEndpoint,
+                new Blob([body], { type: "application/json" })
+              );
+              if (beaconOk) {
+                return;
+              }
+            }
+          } catch (e) { /* ignore */ }
 
           fetch(debugEndpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
+            body: body,
+            keepalive: true
           }).catch(function () {
             // Never fail widget UX on diagnostics
           });
+        }
+
+        function buildFollowUpPrompt(downloadUrl, reason) {
+          var nextStep;
+          if (uploadContext === "postcard") {
+            nextStep = 'call quote_and_preview_postcard with imageUrl "' + downloadUrl + '"';
+          } else if (uploadContext === "header_image") {
+            nextStep = 'call quote_and_preview_letter_with_header_image with imageUrl "' + downloadUrl + '"';
+          } else if (uploadContext === "inline_image") {
+            nextStep = 'call quote_and_preview_letter_with_image with imageUrl "' + downloadUrl + '"';
+          } else {
+            nextStep = 'call a preview tool with imageUrl "' + downloadUrl + '"';
+          }
+          return "Image upload completed. " + nextStep + ". Debug fallback reason: " + reason + ".";
+        }
+
+        async function sendFollowUpFallback(downloadUrl, reason) {
+          if (!debugEnabled) return;
+          if (!(window.openai && window.openai.sendFollowUpMessage)) {
+            debugLog("sendFollowUpMessage.unavailable");
+            debugBeacon("sendFollowUpMessage.unavailable", { reason: reason });
+            return;
+          }
+          var prompt = buildFollowUpPrompt(downloadUrl, reason);
+          debugLog("sendFollowUpMessage.start", { reason: reason });
+          debugBeacon("sendFollowUpMessage.start", { reason: reason });
+          try {
+            await window.openai.sendFollowUpMessage({ prompt: prompt });
+            debugLog("sendFollowUpMessage.success");
+            debugBeacon("sendFollowUpMessage.success");
+          } catch (e) {
+            debugLog("sendFollowUpMessage.error", {
+              message: (e && e.message) || "Unknown error"
+            });
+            debugBeacon("sendFollowUpMessage.error", {
+              message: (e && e.message) || "Unknown error"
+            });
+          }
         }
 
         // --- State management ---
@@ -506,17 +562,28 @@
             // into a server-side tool response that ChatGPT can see and act on.
             // This is more reliable than sendFollowUpMessage which has known issues.
             if (window.openai && window.openai.callTool) {
-              debugLog("callTool.start", { toolName: "confirm_uploaded_image" });
-              debugBeacon("callTool.start", { toolName: "confirm_uploaded_image" });
-              await window.openai.callTool("confirm_uploaded_image", {
-                imageUrl: downloadUrl,
-                context: uploadContext || undefined
-              });
-              debugLog("callTool.success", { toolName: "confirm_uploaded_image" });
-              debugBeacon("callTool.success", { toolName: "confirm_uploaded_image" });
+              try {
+                debugLog("callTool.start", { toolName: "confirm_uploaded_image" });
+                debugBeacon("callTool.start", { toolName: "confirm_uploaded_image" });
+                await window.openai.callTool("confirm_uploaded_image", {
+                  imageUrl: downloadUrl,
+                  context: uploadContext || undefined
+                });
+                debugLog("callTool.success", { toolName: "confirm_uploaded_image" });
+                debugBeacon("callTool.success", { toolName: "confirm_uploaded_image" });
+              } catch (callErr) {
+                debugLog("callTool.error", {
+                  message: (callErr && callErr.message) || "Unknown error"
+                });
+                debugBeacon("callTool.error", {
+                  message: (callErr && callErr.message) || "Unknown error"
+                });
+                await sendFollowUpFallback(downloadUrl, "callTool_error");
+              }
             } else {
               debugLog("callTool.unavailable");
               debugBeacon("callTool.unavailable");
+              await sendFollowUpFallback(downloadUrl, "callTool_unavailable");
             }
           } catch (err) {
             debugLog("uploadAndSend.error", {
@@ -564,6 +631,7 @@
 
         // --- Initialize ---
         showState("select");
+        window.addEventListener("openai:set_globals", hydrateFromToolOutput);
       })();
     </script>
   </body>
