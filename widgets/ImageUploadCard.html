@@ -557,9 +557,9 @@
             urlText.textContent = downloadUrl;
             showState("done");
 
-            // Call confirm_uploaded_image tool via callTool to put the URL
-            // into a server-side tool response that ChatGPT can see and act on.
-            // This is more reliable than sendFollowUpMessage which has known issues.
+            // callTool stores the URL server-side but does NOT create a new
+            // ChatGPT conversation turn. We always need sendFollowUpMessage
+            // to prompt ChatGPT to act on the uploaded image.
             if (window.openai && window.openai.callTool) {
               try {
                 debugLog("callTool.start", { toolName: "confirm_uploaded_image" });
@@ -577,13 +577,15 @@
                 debugBeacon("callTool.error", {
                   message: (callErr && callErr.message) || "Unknown error"
                 });
-                await sendFollowUpFallback(downloadUrl, "callTool_error");
               }
             } else {
               debugLog("callTool.unavailable");
               debugBeacon("callTool.unavailable");
-              await sendFollowUpFallback(downloadUrl, "callTool_unavailable");
             }
+
+            // Always send a follow-up message so ChatGPT knows the upload
+            // is complete and has the URL to act on.
+            await sendFollowUpFallback(downloadUrl, "upload_complete");
           } catch (err) {
             debugLog("uploadAndSend.error", {
               message: (err && err.message) || "Unknown error"
