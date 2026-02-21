@@ -21,7 +21,8 @@ import {
   sendPostcardInputZ,
   submitFeatureRequestInputZ,
   uploadImageInputZ,
-  generateImageInputZ
+  generateImageInputZ,
+  confirmUploadedImageInputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
@@ -54,7 +55,8 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
     'get_account_balance',
     'list_orders',
     'get_order_status',
-    'get_return_address'
+    'get_return_address',
+    'confirm_uploaded_image'
   ];
 
   // Tools that call external APIs (PostGrid for validation or mail fulfillment)
@@ -76,7 +78,8 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
     'send_letter',           // Draft consumption makes retries safe
     'send_postcard',         // Draft consumption makes retries safe
     'set_return_address',    // Setting same address twice = no change
-    'clear_return_address'   // Clearing twice = no additional effect
+    'clear_return_address',  // Clearing twice = no additional effect
+    'confirm_uploaded_image' // Stateless relay — same args = same result
   ];
 
   // Destructive tools that delete or overwrite user data
@@ -224,7 +227,9 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Image upload tool
   upload_image: uploadImageInputZ,
   // Image generation tool
-  generate_image: generateImageInputZ
+  generate_image: generateImageInputZ,
+  // Confirm uploaded image tool (widget relay)
+  confirm_uploaded_image: confirmUploadedImageInputZ
 };
 
 function getZodShape(name: string) {
@@ -344,10 +349,11 @@ export async function registerLetterTools(
           previewHtml,
           previewFrontHtml,
           previewBackHtml,
-          inlineImageData,        // Letter inline image (base64)
-          headerImageData,        // Letter header image (base64)
-          frontImageData,         // Postcard front image (base64)
-          generatedImageBase64,   // AI-generated image (base64)
+          inlineImageData,        // Letter inline image (base64) - widget doesn't need
+          headerImageData,        // Letter header image (base64) - widget doesn't need
+          frontImageData,         // Postcard front image (base64) - widget doesn't need
+          generatedImagePreview,  // Tiny preview (~15KB) for GenerateImageCard widget
+          generatedImageUrl,      // Temp URL for full image download
           ...modelFacingData
         } = resultObj;
 
@@ -367,8 +373,9 @@ export async function registerLetterTools(
             // Postcard-specific preview fields
             ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
             ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
-            // Generated image data for GenerateImageCard widget
-            ...(generatedImageBase64 !== undefined ? { generatedImageBase64 } : {})
+            // GenerateImageCard widget data (via _meta since structuredContent/state can be null)
+            ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
+            ...(generatedImageUrl !== undefined ? { generatedImageUrl } : {})
           }
         };
 
@@ -475,6 +482,10 @@ function summarizeToolResult(
     case "generate_image": {
       const message = result.message as string;
       return message || "Image generated. Use the imageUrl with a preview tool.";
+    }
+    case "confirm_uploaded_image": {
+      const suggestedNextStep = result.suggestedNextStep as string;
+      return suggestedNextStep || "Photo uploaded. Use the imageUrl with a preview tool.";
     }
     default:
       return JSON.stringify(result);

@@ -21,6 +21,7 @@ import { getReturnAddress } from "../services/returnAddressService.js";
 import { downloadAndProcessPostcardImageWithPreview, ImageProcessingError, type ImageInput } from "../services/imageService.js";
 import type { PostcardSize, ImageFileParam } from "../services/types.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
+import { getRecentUploadedImage } from "../services/recentUploadStore.js";
 
 // ============================================================================
 // Types
@@ -177,6 +178,22 @@ async function handler(
       },
       "Using image from direct URL"
     );
+  } else {
+    // Fallback: if ChatGPT drops imageUrl on the follow-up tool call,
+    // reuse the most recently confirmed upload for this user.
+    const recent = getRecentUploadedImage(context.user.userId, "postcard");
+    if (recent?.imageUrl) {
+      imageInput = { url: recent.imageUrl };
+      imageSourceUrl = recent.imageUrl;
+      context.logger.info(
+        {
+          correlationId: context.correlationId,
+          event: "quote.postcard.image_from_recent_upload",
+          imageAgeMs: recent.ageMs
+        },
+        "Using recent uploaded image fallback for postcard"
+      );
+    }
   }
 
   if (!imageInput) {
@@ -601,6 +618,9 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
     "1. Attach an image directly to your message\n" +
     "2. Use imageUrl parameter with a publicly accessible URL\n" +
     "- Supported: PNG, JPEG, WebP (max 10MB), any size (auto-resized for 6x9 print)\n\n" +
+    "If image is missing in the tool call even though user uploaded one:\n" +
+    "- Immediately call upload_image to open the widget in this same turn (do not only describe it)\n" +
+    "- Then retry quote_and_preview_postcard with imageUrl from the upload flow\n\n" +
     "Sender Address:\n" +
     "- If not provided, saved return address is used automatically.\n" +
     "- Use set_return_address to save one for all future postcards.\n\n" +

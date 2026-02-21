@@ -142,3 +142,12 @@ export const generateImageInputZ = z.object({
   prompt: z.string(),
   context: z.enum(["postcard", "header_image", "inline_image"]).optional()
 });
+
+// ============================================================================
+// Confirm Uploaded Image Schema (Widget relay for upload URL)
+// ============================================================================
+
+export const confirmUploadedImageInputZ = z.object({
+  imageUrl: z.string(),
+  context: z.string().optional()
+});

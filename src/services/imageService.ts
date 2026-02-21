@@ -19,6 +19,7 @@
 
 import sharp from 'sharp';
 import type { ImageFileParam, ProcessedImage, PostcardSize, LetterImageType } from './types.js';
+import { getImage as getTempImage } from './tempImageStore.js';
 
 // ============================================================================
 // Configuration
@@ -334,6 +335,9 @@ export async function downloadAndProcessLetterImageWithPreview(
  * Download image for letter layouts with appropriate size validation
  */
 async function downloadLetterImage(url: string, imageType: LetterImageType): Promise<Buffer> {
+  const localBuffer = tryGetFromTempStore(url);
+  if (localBuffer) return localBuffer;
+
   try {
     const response = await fetch(url);
 
@@ -400,9 +404,25 @@ function isAllowedLetterType(contentType: string): boolean {
 // ============================================================================
 
 /**
+ * Try to resolve a temp image URL from the local in-memory store.
+ * When generate_image and the postcard/letter tools run on the same server,
+ * this avoids an HTTP round-trip (server fetching from itself via public URL).
+ */
+function tryGetFromTempStore(url: string): Buffer | null {
+  const match = url.match(/\/api\/temp-image\/([a-f0-9]{32})$/);
+  if (!match) return null;
+  const base64Data = getTempImage(match[1]);
+  if (!base64Data) return null;
+  return Buffer.from(base64Data, 'base64');
+}
+
+/**
  * Download image from URL with validation
  */
 async function downloadImage(url: string): Promise<Buffer> {
+  const localBuffer = tryGetFromTempStore(url);
+  if (localBuffer) return localBuffer;
+
   try {
     const response = await fetch(url);
 

@@ -80,6 +80,7 @@ npm run dev:env
 - Stripe test mode keys (`sk_test_...`)
 - Dummy letter provider (no real mail sent)
 - Workers enabled
+- Optional `DEBUG=true` to enable extra diagnostics (defaults to false when unset)
 
 **Use case:** Local development with full functionality.
 

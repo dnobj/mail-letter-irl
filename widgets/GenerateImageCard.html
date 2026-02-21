@@ -10,13 +10,9 @@
         --text-primary: #1f2933;
         --text-secondary: #61748f;
         --border-color: #e2e8f0;
-        --accent-success: #065f46;
-        --accent-success-bg: #d1fae5;
         --accent-warning: #b91c1c;
         --accent-warning-bg: #fee2e2;
         --accent-primary: #2563eb;
-        --accent-primary-hover: #1d4ed8;
-        --accent-primary-disabled: #93c5fd;
 
         font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background: transparent;
@@ -29,13 +25,9 @@
         --text-primary: #f1f5f9;
         --text-secondary: #94a3b8;
         --border-color: #334155;
-        --accent-success: #34d399;
-        --accent-success-bg: #064e3b;
         --accent-warning: #f87171;
         --accent-warning-bg: #7f1d1d;
         --accent-primary: #3b82f6;
-        --accent-primary-hover: #60a5fa;
-        --accent-primary-disabled: #1e3a5f;
       }
 
       * {
@@ -93,7 +85,6 @@
         overflow: hidden;
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
-        margin-bottom: 0.75rem;
         display: flex;
         justify-content: center;
         align-items: center;
@@ -112,77 +103,40 @@
         margin: 0 0 0.5rem;
       }
 
-      .preview-actions {
+      /* URL display */
+      .url-display {
         display: flex;
-        gap: 0.5rem;
-      }
-
-      .preview-actions .btn {
-        flex: 1;
-      }
-
-      /* Buttons */
-      .btn {
-        display: inline-flex;
         align-items: center;
-        justify-content: center;
-        gap: 0.4rem;
-        padding: 0.6rem 1.25rem;
+        gap: 0.5rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
         border-radius: 8px;
-        font-size: 0.9rem;
-        font-weight: 600;
+        padding: 0.5rem 0.75rem;
+        margin-top: 0.75rem;
+      }
+
+      .url-display code {
+        flex: 1;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        word-break: break-all;
+        font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
+      }
+
+      .btn-copy {
+        flex-shrink: 0;
+        background: transparent;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0.3rem 0.6rem;
+        font-size: 0.7rem;
+        color: var(--text-secondary);
         cursor: pointer;
-        border: none;
         transition: background 0.15s ease;
       }
 
-      .btn-primary {
-        background: var(--accent-primary);
-        color: #fff;
-      }
-
-      .btn-primary:hover {
-        background: var(--accent-primary-hover);
-      }
-
-      .btn-secondary {
-        background: transparent;
-        color: var(--accent-primary);
-        border: 1px solid var(--border-color);
-      }
-
-      .btn-secondary:hover {
-        background: var(--bg-secondary);
-      }
-
-      /* State: Uploading */
-      .uploading-state {
-        padding: 2rem 1.5rem;
-        text-align: center;
-      }
-
-      .uploading-text {
-        font-size: 0.9rem;
-        color: var(--text-secondary);
-        margin: 0;
-      }
-
-      /* State: Success */
-      .success-state {
-        padding: 1.5rem;
-        text-align: center;
-      }
-
-      .success-icon {
-        font-size: 2rem;
-        margin-bottom: 0.5rem;
-      }
-
-      .success-text {
-        font-size: 0.9rem;
-        color: var(--accent-success);
-        margin: 0;
-        font-weight: 600;
+      .btn-copy:hover {
+        background: var(--bg-primary);
       }
 
       /* State: Error */
@@ -197,7 +151,7 @@
         background: var(--accent-warning-bg);
         padding: 0.75rem 1rem;
         border-radius: 8px;
-        margin: 0 0 1rem;
+        margin: 0;
       }
 
       /* Utility */
@@ -220,58 +174,34 @@
         <div class="preview-image-container">
           <img id="preview-img" src="" alt="Generated image preview" />
         </div>
-        <div class="preview-actions">
-          <button class="btn btn-secondary" id="btn-another" type="button">Generate Another</button>
-          <button class="btn btn-primary" id="btn-use" type="button">Use This Image</button>
+        <div id="url-display" class="url-display hidden">
+          <code id="url-text"></code>
+          <button class="btn-copy" id="btn-copy" type="button">Copy</button>
         </div>
-      </div>
-
-      <!-- Uploading State -->
-      <div id="state-uploading" class="uploading-state hidden">
-        <div class="spinner"></div>
-        <p class="uploading-text">Preparing image...</p>
-      </div>
-
-      <!-- Success State -->
-      <div id="state-success" class="success-state hidden">
-        <div class="success-icon">&#x2705;</div>
-        <p class="success-text">Image ready! ChatGPT will use it next.</p>
       </div>
 
       <!-- Error State -->
       <div id="state-error" class="error-state hidden">
         <p id="error-message" class="error-message"></p>
-        <button class="btn btn-primary" id="btn-retry" type="button">Try Again</button>
       </div>
     </div>
 
     <script type="module">
-      // Per OpenAI docs, data may not be available immediately.
-      // Must listen for 'openai:set_globals' event.
-      // Pattern matches the working LetterPreviewCard widget.
-
       let dataLoaded = false;
-      let base64Data = null;
+      let imageUrl = null;
 
-      // --- DOM refs ---
       const stateLoading = document.getElementById("state-loading");
       const statePreview = document.getElementById("state-preview");
-      const stateUploading = document.getElementById("state-uploading");
-      const stateSuccess = document.getElementById("state-success");
       const stateError = document.getElementById("state-error");
-
-      const btnUse = document.getElementById("btn-use");
-      const btnAnother = document.getElementById("btn-another");
-      const btnRetry = document.getElementById("btn-retry");
       const previewImg = document.getElementById("preview-img");
       const errorMessageEl = document.getElementById("error-message");
+      const urlDisplay = document.getElementById("url-display");
+      const urlText = document.getElementById("url-text");
+      const btnCopy = document.getElementById("btn-copy");
 
-      // --- State management ---
       function showState(state) {
         stateLoading.classList.toggle("hidden", state !== "loading");
         statePreview.classList.toggle("hidden", state !== "preview");
-        stateUploading.classList.toggle("hidden", state !== "uploading");
-        stateSuccess.classList.toggle("hidden", state !== "success");
         stateError.classList.toggle("hidden", state !== "error");
       }
 
@@ -280,157 +210,56 @@
         showState("error");
       }
 
-      // --- Render from tool output ---
       function render() {
-        const meta = window.openai?.toolResponseMetadata;
         const output = window.openai?.toolOutput;
+        const meta = window.openai?.toolResponseMetadata;
 
-        base64Data = meta?.generatedImageBase64;
+        imageUrl = output?.generatedImageUrl ?? meta?.generatedImageUrl ?? null;
+        const previewData = meta?.generatedImagePreview ?? output?.generatedImagePreview;
 
-        if (base64Data) {
+        if (previewData) {
           dataLoaded = true;
-          previewImg.src = "data:image/jpeg;base64," + base64Data;
+          previewImg.src = "data:image/jpeg;base64," + previewData;
+          if (imageUrl) {
+            urlText.textContent = imageUrl;
+            urlDisplay.classList.remove("hidden");
+          }
           showState("preview");
           return;
         }
 
-        // If neither meta nor output is available yet, stay in loading state
-        if (!dataLoaded && !output && !meta) {
+        if (imageUrl) {
+          dataLoaded = true;
+          previewImg.src = imageUrl;
+          previewImg.onerror = () => showError("Could not load image preview.");
+          urlText.textContent = imageUrl;
+          urlDisplay.classList.remove("hidden");
+          showState("preview");
           return;
         }
 
-        // Data arrived but no image — show error
+        if (!dataLoaded && !output && !meta) return;
+
         dataLoaded = true;
-        if (output?.error) {
-          showError(output.error);
-        } else {
-          showError("No image was generated. Please try again.");
-        }
+        showError(output?.error || "No image was generated. Please try again.");
       }
 
-      // --- Upload via OpenAI SDK and post URL back ---
-      async function uploadAndSend() {
-        if (!base64Data) {
-          showError("No image data available.");
-          return;
-        }
-
-        showState("uploading");
-
-        try {
-          // Convert base64 to File
-          const blobResponse = await fetch(
-            "data:image/jpeg;base64," + base64Data
-          );
-          const blob = await blobResponse.blob();
-          const file = new File([blob], "generated-image.jpg", {
-            type: "image/jpeg"
-          });
-
-          // Upload via OpenAI SDK
-          const uploadResult = await window.openai.uploadFile(file);
-          const fileId = uploadResult.fileId || uploadResult.file_id;
-
-          if (!fileId) {
-            showError("Upload failed \u2014 no file ID returned.");
-            return;
-          }
-
-          // Get download URL
-          const urlResult = await window.openai.getFileDownloadUrl({
-            fileId: fileId
-          });
-          const downloadUrl = urlResult.downloadUrl || urlResult.download_url;
-
-          if (!downloadUrl) {
-            showError(
-              "Upload succeeded but could not get download URL."
-            );
-            return;
-          }
-
-          showState("success");
-
-          // Post download URL back to ChatGPT
-          window.parent.postMessage(
-            {
-              jsonrpc: "2.0",
-              method: "ui/message",
-              params: {
-                role: "user",
-                content: [
-                  {
-                    type: "text",
-                    text:
-                      "Generated image ready. Image URL: " + downloadUrl
-                  }
-                ]
-              }
-            },
-            "*"
-          );
-        } catch (err) {
-          const errMsg =
-            (err && err.message) || "Failed to prepare image. Please try again.";
-          showError(errMsg);
-        }
-      }
-
-      // --- Event handlers ---
-      btnUse.addEventListener("click", () => {
-        uploadAndSend();
+      btnCopy.addEventListener("click", () => {
+        if (!imageUrl) return;
+        navigator.clipboard.writeText(imageUrl).then(() => {
+          btnCopy.textContent = "Copied!";
+          setTimeout(() => { btnCopy.textContent = "Copy"; }, 2000);
+        });
       });
 
-      btnAnother.addEventListener("click", () => {
-        window.parent.postMessage(
-          {
-            jsonrpc: "2.0",
-            method: "ui/message",
-            params: {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: "Please generate a different image with a new variation."
-                }
-              ]
-            }
-          },
-          "*"
-        );
-      });
-
-      btnRetry.addEventListener("click", () => {
-        window.parent.postMessage(
-          {
-            jsonrpc: "2.0",
-            method: "ui/message",
-            params: {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: "Please try generating the image again."
-                }
-              ]
-            }
-          },
-          "*"
-        );
-      });
-
-      // --- Theme ---
       const theme = window.openai?.theme ?? "light";
       if (theme === "dark") {
         document.documentElement.classList.add("dark");
       }
 
-      // --- Initialize ---
-      // Start in loading state, then try to render
       showState("loading");
       render();
 
-      // Listen for data updates (per OpenAI docs)
       window.addEventListener("openai:set_globals", () => {
         render();
       });

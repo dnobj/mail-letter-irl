@@ -32,6 +32,38 @@ const createMockContext = (): ToolContext => ({
 });
 
 describe("upload_image tool", () => {
+  describe("debug flag", () => {
+    it("should default debugEnabled to false when DEBUG is unset", async () => {
+      const oldDebug = process.env.DEBUG;
+      delete process.env.DEBUG;
+
+      const context = createMockContext();
+      const result = await uploadImageTool.handler({}, context);
+      expect(result.debugEnabled).toBe(false);
+
+      if (oldDebug === undefined) {
+        delete process.env.DEBUG;
+      } else {
+        process.env.DEBUG = oldDebug;
+      }
+    });
+
+    it("should set debugEnabled true when DEBUG=true", async () => {
+      const oldDebug = process.env.DEBUG;
+      process.env.DEBUG = "true";
+
+      const context = createMockContext();
+      const result = await uploadImageTool.handler({}, context);
+      expect(result.debugEnabled).toBe(true);
+
+      if (oldDebug === undefined) {
+        delete process.env.DEBUG;
+      } else {
+        process.env.DEBUG = oldDebug;
+      }
+    });
+  });
+
   describe("handler", () => {
     it("should return awaiting_upload status", async () => {
       const context = createMockContext();
@@ -46,6 +78,8 @@ describe("upload_image tool", () => {
 
       expect(result.acceptedFormats).toBe("JPEG, PNG, WebP");
       expect(result.maxSizeMB).toBe(10);
+      expect(typeof result.debugEnabled).toBe("boolean");
+      expect(result.debugEndpoint).toBeTypeOf("string");
     });
 
     it("should return default message when no context provided", async () => {
@@ -55,6 +89,8 @@ describe("upload_image tool", () => {
       expect(result.message).toBe(
         "Select a photo to use in your letter or postcard."
       );
+      expect(result.context).toBe("");
+      expect(result.debugEndpoint).toContain("/api/widget-diagnostic");
     });
 
     it("should return postcard guidance when context is 'postcard'", async () => {
@@ -67,6 +103,7 @@ describe("upload_image tool", () => {
       expect(result.message).toBe(
         "Select a photo for the front of your postcard."
       );
+      expect(result.context).toBe("postcard");
     });
 
     it("should return header_image guidance when context is 'header_image'", async () => {
@@ -79,6 +116,7 @@ describe("upload_image tool", () => {
       expect(result.message).toBe(
         "Select a header image for the top of your letter."
       );
+      expect(result.context).toBe("header_image");
     });
 
     it("should return inline_image guidance when context is 'inline_image'", async () => {
@@ -91,6 +129,7 @@ describe("upload_image tool", () => {
       expect(result.message).toBe(
         "Select a photo to include in your letter."
       );
+      expect(result.context).toBe("inline_image");
     });
 
     it("should return default message for unknown context", async () => {
@@ -103,6 +142,7 @@ describe("upload_image tool", () => {
       expect(result.message).toBe(
         "Select a photo to use in your letter or postcard."
       );
+      expect(result.context).toBe("unknown_context");
     });
   });
 

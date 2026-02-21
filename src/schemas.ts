@@ -349,7 +349,7 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
     },
     imageUrl: {
       type: "string",
-      description: "URL of image to use for postcard front (alternative to file attachment). Use this when you have generated an image and uploaded it somewhere accessible."
+      description: "REQUIRED when using a generated image: set this to the generatedImageUrl value returned by the generate_image tool. This is the URL of the image for the postcard front."
     }
   }
 };
@@ -514,7 +514,7 @@ export const uploadImageInputSchema: JsonSchema = {
 
 export const uploadImageOutputSchema: JsonSchema = {
   type: "object",
-  required: ["status", "message", "acceptedFormats", "maxSizeMB"],
+  required: ["status", "message", "acceptedFormats", "maxSizeMB", "context", "debugEnabled"],
   properties: {
     status: {
       type: "string",
@@ -531,6 +531,18 @@ export const uploadImageOutputSchema: JsonSchema = {
     maxSizeMB: {
       type: "number",
       description: "Maximum file size in megabytes"
+    },
+    context: {
+      type: "string",
+      description: "Usage context passed through from input: 'postcard', 'header_image', 'inline_image', or empty string"
+    },
+    debugEnabled: {
+      type: "boolean",
+      description: "True when server-side DEBUG flag enables widget diagnostic logging"
+    },
+    debugEndpoint: {
+      type: "string",
+      description: "Optional absolute URL for debug beacon ingestion"
     }
   }
 };
@@ -557,7 +569,7 @@ export const generateImageInputSchema: JsonSchema = {
 
 export const generateImageOutputSchema: JsonSchema = {
   type: "object",
-  required: ["message", "suggestedNextStep", "generatedImageBase64"],
+  required: ["message", "suggestedNextStep", "generatedImagePreview", "generatedImageUrl"],
   properties: {
     message: {
       type: "string",
@@ -567,9 +579,51 @@ export const generateImageOutputSchema: JsonSchema = {
       type: "string",
       description: "Guidance on what tool to call next with the imageUrl"
     },
-    generatedImageBase64: {
+    generatedImagePreview: {
       type: "string",
-      description: "Base64-encoded JPEG image data (for widget preview)"
+      description: "Tiny base64-encoded JPEG preview (~15KB, for widget display only)"
+    },
+    generatedImageUrl: {
+      type: "string",
+      description: "URL to download the full-resolution generated image"
+    }
+  }
+};
+
+// ============================================================================
+// Confirm Uploaded Image Schemas (Widget relay for upload URL)
+// ============================================================================
+
+export const confirmUploadedImageInputSchema: JsonSchema = {
+  type: "object",
+  required: ["imageUrl"],
+  properties: {
+    imageUrl: {
+      type: "string",
+      description: "Download URL of the uploaded image"
+    },
+    context: {
+      type: "string",
+      description: "Usage context: 'postcard', 'header_image', or 'inline_image'"
+    }
+  }
+};
+
+export const confirmUploadedImageOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["status", "imageUrl", "suggestedNextStep"],
+  properties: {
+    status: {
+      type: "string",
+      description: "Always 'ready' — image has been uploaded and URL is available"
+    },
+    imageUrl: {
+      type: "string",
+      description: "Download URL of the uploaded image"
+    },
+    suggestedNextStep: {
+      type: "string",
+      description: "Instruction for which preview tool to call next with the imageUrl"
     }
   }
 };

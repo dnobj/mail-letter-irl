@@ -10,13 +10,10 @@
         --text-primary: #1f2933;
         --text-secondary: #61748f;
         --border-color: #e2e8f0;
-        --accent-success: #065f46;
-        --accent-success-bg: #d1fae5;
         --accent-warning: #b91c1c;
         --accent-warning-bg: #fee2e2;
         --accent-primary: #2563eb;
         --accent-primary-hover: #1d4ed8;
-        --accent-primary-disabled: #93c5fd;
 
         font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background: transparent;
@@ -29,13 +26,10 @@
         --text-primary: #f1f5f9;
         --text-secondary: #94a3b8;
         --border-color: #334155;
-        --accent-success: #34d399;
-        --accent-success-bg: #064e3b;
         --accent-warning: #f87171;
         --accent-warning-bg: #7f1d1d;
         --accent-primary: #3b82f6;
         --accent-primary-hover: #60a5fa;
-        --accent-primary-disabled: #1e3a5f;
       }
 
       * {
@@ -120,7 +114,7 @@
         background: var(--bg-secondary);
       }
 
-      /* State: Preview */
+      /* State: Preview (before upload) */
       .preview-state {
         padding: 1rem;
       }
@@ -186,22 +180,72 @@
         margin: 0;
       }
 
-      /* State: Success */
-      .success-state {
-        padding: 1.5rem;
-        text-align: center;
+      /* State: Done (after upload) */
+      .done-state {
+        padding: 1rem;
       }
 
-      .success-icon {
-        font-size: 2rem;
-        margin-bottom: 0.5rem;
+      .done-label {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin: 0 0 0.5rem;
       }
 
-      .success-text {
-        font-size: 0.9rem;
-        color: var(--accent-success);
-        margin: 0;
-        font-weight: 600;
+      .done-image-container {
+        width: 100%;
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        max-height: 250px;
+      }
+
+      .done-image-container img {
+        max-width: 100%;
+        max-height: 250px;
+        object-fit: contain;
+        display: block;
+      }
+
+      /* URL display */
+      .url-display {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        margin-top: 0.75rem;
+      }
+
+      .url-display code {
+        flex: 1;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        word-break: break-all;
+        font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
+      }
+
+      .btn-copy {
+        flex-shrink: 0;
+        background: transparent;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0.3rem 0.6rem;
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+
+      .btn-copy:hover {
+        background: var(--bg-primary);
       }
 
       /* State: Error */
@@ -216,7 +260,7 @@
         background: var(--accent-warning-bg);
         padding: 0.75rem 1rem;
         border-radius: 8px;
-        margin: 0 0 1rem;
+        margin: 0;
       }
 
       /* Utility */
@@ -229,7 +273,7 @@
     <div class="card">
       <!-- Select State -->
       <div id="state-select" class="select-state">
-        <div class="select-icon">📷</div>
+        <div class="select-icon">&#x1F4F7;</div>
         <p class="select-title">Upload a Photo</p>
         <p id="guidance-text" class="select-guidance">Select a photo to use in your letter or postcard.</p>
         <button class="btn btn-primary" id="btn-select" type="button">Select Photo</button>
@@ -237,7 +281,7 @@
         <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp" class="hidden" />
       </div>
 
-      <!-- Preview State -->
+      <!-- Preview State (before upload) -->
       <div id="state-preview" class="preview-state hidden">
         <div class="preview-image-container">
           <img id="preview-img" src="" alt="Selected photo preview" />
@@ -255,70 +299,162 @@
         <p class="uploading-text">Uploading...</p>
       </div>
 
-      <!-- Success State -->
-      <div id="state-success" class="success-state hidden">
-        <div class="success-icon">&#x2705;</div>
-        <p id="success-text" class="success-text">Photo ready! ChatGPT will use it next.</p>
+      <!-- Done State (after upload) -->
+      <div id="state-done" class="done-state hidden">
+        <p class="done-label">Uploaded Photo</p>
+        <div class="done-image-container">
+          <img id="done-img" src="" alt="Uploaded photo" />
+        </div>
+        <div class="url-display">
+          <code id="url-text"></code>
+          <button class="btn-copy" id="btn-copy" type="button">Copy</button>
+        </div>
       </div>
 
       <!-- Error State -->
       <div id="state-error" class="error-state hidden">
         <p id="error-message" class="error-message"></p>
-        <button class="btn btn-primary" id="btn-retry" type="button">Try Again</button>
       </div>
     </div>
 
     <script>
       (function () {
-        // --- Dark mode detection ---
-        function applyTheme() {
-          var prefersDark =
-            window.matchMedia &&
-            window.matchMedia("(prefers-color-scheme: dark)").matches;
-          document.documentElement.classList.toggle("dark", prefersDark);
-        }
-        applyTheme();
-        if (window.matchMedia) {
-          window
-            .matchMedia("(prefers-color-scheme: dark)")
-            .addEventListener("change", applyTheme);
+        // --- Theme ---
+        var theme = (window.openai && window.openai.theme) ? window.openai.theme : "light";
+        if (theme === "dark") {
+          document.documentElement.classList.add("dark");
         }
 
         // --- DOM refs ---
         var stateSelect = document.getElementById("state-select");
         var statePreview = document.getElementById("state-preview");
         var stateUploading = document.getElementById("state-uploading");
-        var stateSuccess = document.getElementById("state-success");
+        var stateDone = document.getElementById("state-done");
         var stateError = document.getElementById("state-error");
 
         var btnSelect = document.getElementById("btn-select");
         var btnChange = document.getElementById("btn-change");
         var btnUse = document.getElementById("btn-use");
-        var btnRetry = document.getElementById("btn-retry");
+        var btnCopy = document.getElementById("btn-copy");
         var fileInput = document.getElementById("file-input");
         var previewImg = document.getElementById("preview-img");
+        var doneImg = document.getElementById("done-img");
         var fileInfo = document.getElementById("file-info");
         var guidanceText = document.getElementById("guidance-text");
-        var successText = document.getElementById("success-text");
         var errorMessage = document.getElementById("error-message");
+        var urlText = document.getElementById("url-text");
 
         var selectedFile = null;
-        var previewObjectUrl = null;
+        var previewDataUrl = null;
+        var debugEnabled = false;
+        var debugEndpoint = "";
+        var debugSessionId = "upload-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
 
-        var MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+        var MAX_SIZE_BYTES = 10 * 1024 * 1024;
         var ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
-        // --- Read tool output for context ---
-        function initFromToolOutput() {
+        // --- Read context from tool output ---
+        var uploadContext = "";
+        function hydrateFromToolOutput() {
           try {
             if (window.openai && window.openai.toolOutput) {
               var output = window.openai.toolOutput;
+              if (output.context) {
+                uploadContext = output.context;
+              }
               if (output.message) {
                 guidanceText.textContent = output.message;
               }
+              if (output.debugEnabled === true) {
+                debugEnabled = true;
+              }
+              if (typeof output.debugEndpoint === "string" && output.debugEndpoint) {
+                debugEndpoint = output.debugEndpoint;
+              }
             }
+          } catch (e) { /* ignore */ }
+        }
+        hydrateFromToolOutput();
+
+        function debugLog(message, data) {
+          if (!debugEnabled) return;
+          if (data !== undefined) {
+            console.log("[ImageUploadCard DEBUG] " + message, data);
+            return;
+          }
+          console.log("[ImageUploadCard DEBUG] " + message);
+        }
+
+        function debugBeacon(phase, data) {
+          if (!debugEnabled || !debugEndpoint) return;
+
+          var payload = {
+            source: "ImageUploadCard",
+            phase: phase,
+            sessionId: debugSessionId,
+            context: uploadContext || null,
+            timestamp: new Date().toISOString(),
+            data: data || {}
+          };
+          var body = JSON.stringify(payload);
+
+          try {
+            // sendBeacon is more resilient if the iframe is about to unload
+            if (navigator.sendBeacon) {
+              var beaconOk = navigator.sendBeacon(
+                debugEndpoint,
+                new Blob([body], { type: "application/json" })
+              );
+              if (beaconOk) {
+                return;
+              }
+            }
+          } catch (e) { /* ignore */ }
+
+          fetch(debugEndpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: body,
+            keepalive: true
+          }).catch(function () {
+            // Never fail widget UX on diagnostics
+          });
+        }
+
+        function buildFollowUpPrompt(downloadUrl, reason) {
+          var nextStep;
+          if (uploadContext === "postcard") {
+            nextStep = 'call quote_and_preview_postcard with imageUrl "' + downloadUrl + '"';
+          } else if (uploadContext === "header_image") {
+            nextStep = 'call quote_and_preview_letter_with_header_image with imageUrl "' + downloadUrl + '"';
+          } else if (uploadContext === "inline_image") {
+            nextStep = 'call quote_and_preview_letter_with_image with imageUrl "' + downloadUrl + '"';
+          } else {
+            nextStep = 'call a preview tool with imageUrl "' + downloadUrl + '"';
+          }
+          return "Image upload completed. Please " + nextStep + ".";
+        }
+
+        async function sendFollowUpFallback(downloadUrl, reason) {
+          if (!(window.openai && window.openai.sendFollowUpMessage)) {
+            debugLog("sendFollowUpMessage.unavailable");
+            debugBeacon("sendFollowUpMessage.unavailable", { reason: reason });
+            return;
+          }
+          var prompt = buildFollowUpPrompt(downloadUrl, reason);
+          debugLog("sendFollowUpMessage.start", { reason: reason });
+          debugBeacon("sendFollowUpMessage.start", { reason: reason });
+          try {
+            await window.openai.sendFollowUpMessage({ prompt: prompt });
+            debugLog("sendFollowUpMessage.success");
+            debugBeacon("sendFollowUpMessage.success");
           } catch (e) {
-            // Silently ignore — guidance text has a sensible default
+            debugLog("sendFollowUpMessage.error", {
+              message: (e && e.message) || "Unknown error"
+            });
+            debugBeacon("sendFollowUpMessage.error", {
+              message: (e && e.message) || "Unknown error"
+            });
           }
         }
 
@@ -327,7 +463,7 @@
           stateSelect.classList.toggle("hidden", state !== "select");
           statePreview.classList.toggle("hidden", state !== "preview");
           stateUploading.classList.toggle("hidden", state !== "uploading");
-          stateSuccess.classList.toggle("hidden", state !== "success");
+          stateDone.classList.toggle("hidden", state !== "done");
           stateError.classList.toggle("hidden", state !== "error");
         }
 
@@ -338,9 +474,7 @@
 
         // --- File validation ---
         function validateFile(file) {
-          if (!file) {
-            return "No file selected.";
-          }
+          if (!file) return "No file selected.";
           if (ACCEPTED_TYPES.indexOf(file.type) === -1) {
             return "Unsupported format. Please select a JPEG, PNG, or WebP image.";
           }
@@ -348,7 +482,7 @@
             var sizeMB = (file.size / (1024 * 1024)).toFixed(1);
             return "File is too large (" + sizeMB + " MB). Maximum size is 10 MB.";
           }
-          return null; // valid
+          return null;
         }
 
         function formatFileSize(bytes) {
@@ -357,7 +491,7 @@
           return (bytes / (1024 * 1024)).toFixed(1) + " MB";
         }
 
-        // --- File selection ---
+        // --- File selection (uses FileReader data URL to avoid blob CSP issues in sandbox) ---
         function onFileSelected(file) {
           var error = validateFile(file);
           if (error) {
@@ -367,15 +501,17 @@
 
           selectedFile = file;
 
-          // Create preview
-          if (previewObjectUrl) {
-            URL.revokeObjectURL(previewObjectUrl);
-          }
-          previewObjectUrl = URL.createObjectURL(file);
-          previewImg.src = previewObjectUrl;
-          fileInfo.textContent = file.name + " \u00B7 " + formatFileSize(file.size);
-
-          showState("preview");
+          var reader = new FileReader();
+          reader.onload = function (e) {
+            previewDataUrl = e.target.result;
+            previewImg.src = previewDataUrl;
+            fileInfo.textContent = file.name + " \u00B7 " + formatFileSize(file.size);
+            showState("preview");
+          };
+          reader.onerror = function () {
+            showError("Could not read the selected file.");
+          };
+          reader.readAsDataURL(file);
         }
 
         // --- Upload via OpenAI SDK ---
@@ -388,61 +524,74 @@
           showState("uploading");
 
           try {
-            // Step 1: Upload file via OpenAI SDK
+            debugLog("uploadFile.start", { context: uploadContext || "none" });
+            debugBeacon("uploadFile.start", { hasFile: !!selectedFile, fileName: selectedFile && selectedFile.name });
             var uploadResult = await window.openai.uploadFile(selectedFile);
             var fileId = uploadResult.fileId || uploadResult.file_id;
+            debugLog("uploadFile.success", { fileId: fileId || null });
+            debugBeacon("uploadFile.success", { fileId: fileId || null });
 
             if (!fileId) {
+              debugBeacon("uploadFile.missingFileId");
               showError("Upload failed — no file ID returned.");
               return;
             }
 
-            // Step 2: Get download URL
+            debugLog("getFileDownloadUrl.start", { fileId: fileId });
+            debugBeacon("getFileDownloadUrl.start", { fileId: fileId });
             var urlResult = await window.openai.getFileDownloadUrl({ fileId: fileId });
             var downloadUrl = urlResult.downloadUrl || urlResult.download_url;
+            debugLog("getFileDownloadUrl.success", {
+              hasDownloadUrl: !!downloadUrl
+            });
+            debugBeacon("getFileDownloadUrl.success", { hasDownloadUrl: !!downloadUrl });
 
             if (!downloadUrl) {
+              debugBeacon("getFileDownloadUrl.missingUrl", { fileId: fileId });
               showError("Upload succeeded but could not get download URL.");
               return;
             }
 
-            // Step 3: Determine context for success message
-            var context = "";
-            try {
-              if (window.openai.toolOutput && window.openai.toolOutput.message) {
-                var msg = window.openai.toolOutput.message;
-                if (msg.indexOf("postcard") !== -1) context = "postcard";
-                else if (msg.indexOf("header") !== -1) context = "header image";
-                else if (msg.indexOf("letter") !== -1) context = "letter";
+            // Show done state with image preview + URL
+            doneImg.src = previewDataUrl || "";
+            urlText.textContent = downloadUrl;
+            showState("done");
+
+            // Call confirm_uploaded_image tool via callTool to put the URL
+            // into a server-side tool response that ChatGPT can see and act on.
+            // This is more reliable than sendFollowUpMessage which has known issues.
+            if (window.openai && window.openai.callTool) {
+              try {
+                debugLog("callTool.start", { toolName: "confirm_uploaded_image" });
+                debugBeacon("callTool.start", { toolName: "confirm_uploaded_image" });
+                await window.openai.callTool("confirm_uploaded_image", {
+                  imageUrl: downloadUrl,
+                  context: uploadContext || undefined
+                });
+                debugLog("callTool.success", { toolName: "confirm_uploaded_image" });
+                debugBeacon("callTool.success", { toolName: "confirm_uploaded_image" });
+              } catch (callErr) {
+                debugLog("callTool.error", {
+                  message: (callErr && callErr.message) || "Unknown error"
+                });
+                debugBeacon("callTool.error", {
+                  message: (callErr && callErr.message) || "Unknown error"
+                });
+                await sendFollowUpFallback(downloadUrl, "callTool_error");
               }
-            } catch (e) { /* ignore */ }
-
-            successText.textContent = context
-              ? "Photo ready! ChatGPT will use it for your " + context + "."
-              : "Photo ready! ChatGPT will use it next.";
-            showState("success");
-
-            // Step 4: Post download URL back to ChatGPT via ui/message
-            window.parent.postMessage(
-              {
-                jsonrpc: "2.0",
-                method: "ui/message",
-                params: {
-                  role: "user",
-                  content: [
-                    {
-                      type: "text",
-                      text: "Photo uploaded successfully. Image URL: " + downloadUrl
-                    }
-                  ]
-                }
-              },
-              "*"
-            );
+            } else {
+              debugLog("callTool.unavailable");
+              debugBeacon("callTool.unavailable");
+              await sendFollowUpFallback(downloadUrl, "callTool_unavailable");
+            }
           } catch (err) {
-            var errMsg =
-              (err && err.message) ||
-              "Upload failed. Please try again.";
+            debugLog("uploadAndSend.error", {
+              message: (err && err.message) || "Unknown error"
+            });
+            debugBeacon("uploadAndSend.error", {
+              message: (err && err.message) || "Unknown error"
+            });
+            var errMsg = (err && err.message) || "Upload failed. Please try again.";
             showError(errMsg);
           }
         }
@@ -461,10 +610,7 @@
         btnChange.addEventListener("click", function () {
           fileInput.value = "";
           selectedFile = null;
-          if (previewObjectUrl) {
-            URL.revokeObjectURL(previewObjectUrl);
-            previewObjectUrl = null;
-          }
+          previewDataUrl = null;
           showState("select");
           fileInput.click();
         });
@@ -473,15 +619,18 @@
           uploadAndSend();
         });
 
-        btnRetry.addEventListener("click", function () {
-          fileInput.value = "";
-          selectedFile = null;
-          showState("select");
+        btnCopy.addEventListener("click", function () {
+          var url = urlText.textContent;
+          if (!url) return;
+          navigator.clipboard.writeText(url).then(function () {
+            btnCopy.textContent = "Copied!";
+            setTimeout(function () { btnCopy.textContent = "Copy"; }, 2000);
+          });
         });
 
         // --- Initialize ---
-        initFromToolOutput();
         showState("select");
+        window.addEventListener("openai:set_globals", hydrateFromToolOutput);
       })();
     </script>
   </body>

@@ -22,7 +22,9 @@ import {
   // Image upload tool
   uploadImageTool,
   // Image generation tool
-  generateImageTool
+  generateImageTool,
+  // Confirm uploaded image tool (widget relay)
+  confirmUploadedImageTool
 } from "./tools/index.js";
 import {
   McpToolDefinition,
@@ -53,7 +55,9 @@ const tools: McpToolDefinition<unknown, unknown>[] = [
   // Image upload tool
   uploadImageTool,
   // Image generation tool
-  generateImageTool
+  generateImageTool,
+  // Confirm uploaded image tool (widget relay)
+  confirmUploadedImageTool
 ];
 
 export interface ServerRequest<Input> {

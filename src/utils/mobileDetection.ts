@@ -65,6 +65,7 @@ export const MOBILE_IMAGE_ERRORS = {
     "IMAGE UPLOAD NEEDED\n\n" +
     "The image couldn't be received directly. " +
     "Use the upload_image tool instead \u2014 it provides a file picker widget that works on all platforms.\n\n" +
+    "IMPORTANT: Call upload_image immediately now so the widget opens in this turn.\n\n" +
     "ALTERNATIVES:\n" +
     "- Provide a direct image URL via the imageUrl parameter\n" +
     "- Use quote_and_preview_letter for a text-only letter instead",
@@ -76,6 +77,7 @@ export const MOBILE_IMAGE_ERRORS = {
     "IMAGE UPLOAD NEEDED\n\n" +
     "The image couldn't be received directly. " +
     "Use the upload_image tool instead \u2014 it provides a file picker widget that works on all platforms.\n\n" +
+    "IMPORTANT: Call upload_image immediately now so the widget opens in this turn.\n\n" +
     "ALTERNATIVES:\n" +
     "- Provide a direct image URL via the imageUrl parameter\n" +
     "- Use quote_and_preview_letter for a text-only letter instead",
@@ -87,6 +89,7 @@ export const MOBILE_IMAGE_ERRORS = {
     "IMAGE UPLOAD NEEDED\n\n" +
     "The image couldn't be received directly. " +
     "Use the upload_image tool instead \u2014 it provides a file picker widget that works on all platforms.\n\n" +
+    "IMPORTANT: Call upload_image immediately now so the widget opens in this turn.\n\n" +
     "ALTERNATIVES:\n" +
     "- Provide a direct image URL via the imageUrl parameter",
 };
