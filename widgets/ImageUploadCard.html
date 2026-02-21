@@ -432,11 +432,10 @@
           } else {
             nextStep = 'call a preview tool with imageUrl "' + downloadUrl + '"';
           }
-          return "Image upload completed. " + nextStep + ". Debug fallback reason: " + reason + ".";
+          return "Image upload completed. Please " + nextStep + ".";
         }
 
         async function sendFollowUpFallback(downloadUrl, reason) {
-          if (!debugEnabled) return;
           if (!(window.openai && window.openai.sendFollowUpMessage)) {
             debugLog("sendFollowUpMessage.unavailable");
             debugBeacon("sendFollowUpMessage.unavailable", { reason: reason });
