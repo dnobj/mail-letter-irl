@@ -13,6 +13,7 @@
 | [ChatGPT Integration](#chatgpt-integration) | After auth/MCP changes | ~10 min |
 | [Payment Flow](#payment-flow) | After Stripe changes | ~10 min |
 | [Full User Journey](#full-user-journey) | Before major releases | ~20 min |
+| [Image Generation](#image-generation) | After image generation changes | ~5 min |
 
 ---
 
@@ -169,6 +170,40 @@ Test the complete letter journey.
 - [ ] Job picked up by worker
 - [ ] Status updates: queued → processing → in_transit
 - [ ] PostGrid letter ID recorded (test mode)
+
+---
+
+## Image Generation
+
+Test server-side image generation via the `generate_image` tool.
+
+### Prerequisites
+- [ ] (DEV) Mail IRL app activated in ChatGPT chat (type `@` → select "(DEV) Mail IRL")
+- [ ] Authenticated / connected to the app
+
+### Basic Generation (US-IMG-01)
+1. [ ] Ask ChatGPT to generate an image (e.g. "Generate an image of a sunset over mountains for a postcard")
+2. [ ] `generate_image` tool is invoked
+3. [ ] GenerateImageCard widget appears in chat
+4. [ ] Widget shows a loading/spinner state initially
+5. [ ] Preview image renders in the widget
+6. [ ] Image matches the prompt description
+
+### Widget Interaction (US-IMG-02)
+- [ ] "Use This Image" button is visible on the widget
+- [ ] "Generate Another" button is visible on the widget
+- [ ] Clicking "Use This Image" triggers upload to OpenAI file storage
+- [ ] Widget transitions to success state after upload
+- [ ] ChatGPT receives the image URL for use in subsequent tools
+
+### Context-Specific Dimensions (US-IMG-03)
+- [ ] Postcard context → landscape image (1536×1024)
+- [ ] Header image context → landscape image (1536×1024)
+- [ ] Inline image context → square image (1024×1024)
+
+### Error Handling (US-IMG-04)
+- [ ] Empty prompt → clear error message
+- [ ] Content policy violation prompt → appropriate error
 
 ---
 
