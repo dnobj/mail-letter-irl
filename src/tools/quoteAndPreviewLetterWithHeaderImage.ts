@@ -23,6 +23,7 @@ import {
 import { downloadAndProcessLetterImageWithPreview, ImageProcessingError } from "../services/imageService.js";
 import type { ImageFileParam } from "../services/types.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
+import { getRecentUploadedImage } from "../services/recentUploadStore.js";
 
 // ============================================================================
 // Types
@@ -69,7 +70,42 @@ async function handler(
     typeof img === 'object' && img !== null && 'download_url' in img;
 
   // Get image source - REQUIRED
-  const imageSource = (isValidImageFileParam(input.image) ? input.image.download_url : null) || input.imageUrl;
+  let imageSource = (isValidImageFileParam(input.image) ? input.image.download_url : null) || input.imageUrl;
+
+  // Log image source
+  if (isValidImageFileParam(input.image)) {
+    context.logger.info(
+      {
+        correlationId: context.correlationId,
+        event: "quote.letter.header_image.from_fileParams"
+      },
+      "Using header image from OpenAI fileParams"
+    );
+  } else if (imageSource) {
+    context.logger.info(
+      {
+        correlationId: context.correlationId,
+        event: "quote.letter.header_image.from_url",
+        imageUrl: imageSource.substring(0, 100)
+      },
+      "Using header image from URL"
+    );
+  } else {
+    // Fallback: if ChatGPT drops imageUrl on the follow-up tool call,
+    // reuse the most recently confirmed upload for this user.
+    const recent = getRecentUploadedImage(context.user.userId, "header_image");
+    if (recent?.imageUrl) {
+      imageSource = recent.imageUrl;
+      context.logger.info(
+        {
+          correlationId: context.correlationId,
+          event: "quote.letter.header_image.from_recent_upload",
+          imageAgeMs: recent.ageMs
+        },
+        "Using recent uploaded image fallback for letter with header image"
+      );
+    }
+  }
 
   if (!imageSource) {
     context.logger.warn(
@@ -88,26 +124,6 @@ async function handler(
     } else {
       throw new Error(MOBILE_IMAGE_ERRORS.desktop);
     }
-  }
-
-  // Log image source
-  if (isValidImageFileParam(input.image)) {
-    context.logger.info(
-      {
-        correlationId: context.correlationId,
-        event: "quote.letter.header_image.from_fileParams"
-      },
-      "Using header image from OpenAI fileParams"
-    );
-  } else {
-    context.logger.info(
-      {
-        correlationId: context.correlationId,
-        event: "quote.letter.header_image.from_url",
-        imageUrl: imageSource.substring(0, 100)
-      },
-      "Using header image from URL"
-    );
   }
 
   // Process the image (generates both full-quality and preview versions)
@@ -201,6 +217,8 @@ export const quoteAndPreviewLetterWithHeaderImageTool: McpToolDefinition<
   description:
     "PREVIEW a letter with a HEADER IMAGE at the top (letterhead/branding). This does NOT send anything.\n\n" +
     "LIMITS: Must not exceed 1100 characters OR 17 lines. CRITICAL: Write as continuous paragraphs - do NOT put blank lines between sentences. US addresses only.\n\n" +
+    "RECIPIENT ADDRESS: You MUST have a real recipient address. NEVER fabricate or use placeholders. " +
+    "Ask the user, or look up the address if they name a person, business, or destination. Postal code is optional.\n\n" +
     "REQUIRES: An image attachment (recommended) or imageUrl parameter.\n\n" +
     "Creates a DRAFT for the user to review. Sending happens via send_letter.\n\n" +
     "Use cases: Business letters with logo, custom letterhead, branded correspondence.\n\n" +
