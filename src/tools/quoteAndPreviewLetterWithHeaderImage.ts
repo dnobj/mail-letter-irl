@@ -219,7 +219,10 @@ export const quoteAndPreviewLetterWithHeaderImageTool: McpToolDefinition<
     "LIMITS: Must not exceed 1100 characters OR 17 lines. CRITICAL: Write as continuous paragraphs - do NOT put blank lines between sentences. US addresses only.\n\n" +
     "RECIPIENT ADDRESS: You MUST have a real recipient address. NEVER fabricate or use placeholders. " +
     "Ask the user, or look up the address if they name a person, business, or destination. Postal code is optional.\n\n" +
-    "REQUIRES: An image attachment (recommended) or imageUrl parameter.\n\n" +
+    "IMAGE INPUT (in order of preference):\n" +
+    "1. BEST: Attach an image file directly to your message (native ChatGPT attachment)\n" +
+    "2. Use imageUrl parameter with a publicly accessible URL\n" +
+    "3. FALLBACK: If neither works, call upload_image to open the file picker widget, then retry with the imageUrl from the upload\n\n" +
     "Creates a DRAFT for the user to review. Sending happens via send_letter.\n\n" +
     "Use cases: Business letters with logo, custom letterhead, branded correspondence.\n\n" +
     "Alternative tools:\n" +

@@ -32,5 +32,7 @@ Use the following text in the ChatGPT App manifest so the assistant gathers comp
 > 5. After previewing, only call `send_letter` when the user explicitly approves; ensure `confirm: true` is set in the payload.  
 > 6. `get_order_status` and `get_account_balance` are read-only; never assume a letter was mailed without checking their responses.  
 > 7. If the user requests special formats (color printing, postcards), explain that v1 supports only standard First Class letters.
+> 8. When a user requests image generation for their mail, prefer ChatGPT's native image generation if available. The native image can then be attached directly to a preview tool call. Only use the generate_image tool as a fallback when native generation is unavailable or fails.
+> 9. When a user wants to include a photo, prefer receiving it as a direct file attachment. Only use the upload_image widget if the attachment wasn't received by the preview tool or if the user is experiencing upload issues.
 
 Embed or adapt this block in the manifest “App instructions” so the assistant consistently gathers the required address fields.

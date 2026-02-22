@@ -217,7 +217,15 @@ export const generateImageTool: McpToolDefinition<
   name: "generate_image",
   description: `Generate an image using AI for use in postcards or letters.
 
-USE THIS TOOL WHEN:
+PREFER NATIVE IMAGE GENERATION:
+When ChatGPT's built-in image generation is available, use it instead of this tool.
+The native image can then be attached directly to a preview tool call (quote_and_preview_postcard, etc.).
+Only call generate_image as a FALLBACK when:
+- Native image generation is unavailable or blocked (e.g., when apps are active)
+- Native generation failed or returned an error
+- The user explicitly asks to use Mail IRL's image generator
+
+USE THIS TOOL WHEN (and native generation is unavailable):
 - User wants a postcard or letter with an image but doesn't have their own photo
 - User describes an image they'd like (e.g., "a sunset over mountains")
 - User asks you to create, generate, or make an image for their mail

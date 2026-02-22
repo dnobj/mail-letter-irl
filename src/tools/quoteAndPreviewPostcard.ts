@@ -620,13 +620,11 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
     "2. Save as high-quality JPEG\n" +
     "3. Use the resulting file with this tool\n" +
     "This ensures optimal print quality and works reliably on all platforms including mobile.\n\n" +
-    "Image Input (provide ONE):\n" +
-    "1. Attach an image directly to your message\n" +
+    "Image Input (in order of preference):\n" +
+    "1. BEST: Attach an image file directly to your message (native ChatGPT attachment)\n" +
     "2. Use imageUrl parameter with a publicly accessible URL\n" +
+    "3. FALLBACK: If neither works, call upload_image to open the file picker widget, then retry with the imageUrl\n" +
     "- Supported: PNG, JPEG, WebP (max 10MB), any size (auto-resized for 6x9 print)\n\n" +
-    "If image is missing in the tool call even though user uploaded one:\n" +
-    "- Immediately call upload_image to open the widget in this same turn (do not only describe it)\n" +
-    "- Then retry quote_and_preview_postcard with imageUrl from the upload flow\n\n" +
     "Sender Address:\n" +
     "- If not provided, saved return address is used automatically.\n" +
     "- Use set_return_address to save one for all future postcards.\n\n" +
