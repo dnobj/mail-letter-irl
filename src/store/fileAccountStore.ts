@@ -1,6 +1,7 @@
 import { UserAccount, OrderRecord, LetterStatus } from "../contracts/types.js";
 import { query } from "../db/index.js";
 import { getBalance } from "../services/creditService.js";
+import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
 
 interface FileStoreOptions {
   initialCredits?: number;
@@ -159,12 +160,23 @@ export class FileAccountStore {
       console.warn(`Could not fetch credits for ${userId}, using default:`, error);
     }
 
+    // Fetch image generation quota
+    let imageGenerationsRemaining: number | undefined;
+    try {
+      const quota = await getGenerationQuota(userId);
+      imageGenerationsRemaining = quota.remaining;
+    } catch (error) {
+      // User not found or other error — leave undefined
+      console.warn(`Could not fetch image generation quota for ${userId}:`, error);
+    }
+
     // Fetch orders from database
     const orders = await this.fetchOrders(userId);
 
     return {
       userId,
       creditsRemaining,
+      imageGenerationsRemaining,
       orders
     };
   }

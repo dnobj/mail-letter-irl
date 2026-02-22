@@ -93,7 +93,7 @@ async function handler(
   } else {
     // Fallback: if ChatGPT drops imageUrl on the follow-up tool call,
     // reuse the most recently confirmed upload for this user.
-    const recent = getRecentUploadedImage(context.user.userId, "header_image");
+    const recent = await getRecentUploadedImage(context.user.userId, "header_image");
     if (recent?.imageUrl) {
       imageSource = recent.imageUrl;
       context.logger.info(

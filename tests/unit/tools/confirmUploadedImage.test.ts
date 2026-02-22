@@ -6,6 +6,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock the DB module so recentUploadStore doesn't hit a real database
+vi.mock("../../../src/db/index.js", () => ({
+  query: vi.fn().mockResolvedValue({ rows: [] })
+}));
+
 import { confirmUploadedImageTool } from "../../../src/tools/confirmUploadedImage.js";
 import type { ToolContext } from "../../../src/contracts/types.js";
 import {
@@ -130,7 +136,7 @@ describe("confirm_uploaded_image tool", () => {
         context
       );
 
-      const recent = getRecentUploadedImage(context.user.userId, "postcard");
+      const recent = await getRecentUploadedImage(context.user.userId, "postcard");
       expect(recent).not.toBeNull();
       expect(recent?.imageUrl).toBe(TEST_URL);
     });

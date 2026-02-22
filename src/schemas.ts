@@ -272,7 +272,9 @@ export const getAccountBalanceOutputSchema: JsonSchema = {
           daysUntilExpiry: { type: "number" }
         }
       }
-    }
+    },
+    imageGenerationsRemaining: { type: "integer", description: "Number of AI image generations remaining (5 per letter purchased)" },
+    imageGenerationsAllowance: { type: "integer", description: "Total AI image generations allowed based on letters purchased" }
   }
 };
 
@@ -569,7 +571,7 @@ export const generateImageInputSchema: JsonSchema = {
 
 export const generateImageOutputSchema: JsonSchema = {
   type: "object",
-  required: ["message", "suggestedNextStep", "generatedImagePreview", "generatedImageUrl"],
+  required: ["message", "suggestedNextStep", "generatedImagePreview", "generatedImageUrl", "generationsRemaining"],
   properties: {
     message: {
       type: "string",
@@ -586,6 +588,10 @@ export const generateImageOutputSchema: JsonSchema = {
     generatedImageUrl: {
       type: "string",
       description: "URL to download the full-resolution generated image"
+    },
+    generationsRemaining: {
+      type: "integer",
+      description: "Number of image generations remaining in quota (5 per letter purchased)"
     }
   }
 };

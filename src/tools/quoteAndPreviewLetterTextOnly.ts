@@ -99,6 +99,8 @@ export const quoteAndPreviewLetterTextOnlyTool: McpToolDefinition<
   description:
     "PREVIEW a text-only physical letter (no images). This does NOT send anything.\n\n" +
     "LIMITS: Must not exceed 1600 characters OR 24 lines. CRITICAL: Write as continuous paragraphs - do NOT put blank lines between sentences. US addresses only.\n\n" +
+    "RECIPIENT ADDRESS: You MUST have a real recipient address. NEVER fabricate or use placeholders. " +
+    "Ask the user, or look up the address if they name a person, business, or destination. Postal code is optional.\n\n" +
     "Creates a DRAFT for the user to review. Sending happens via send_letter.\n\n" +
     "Use cases: Thank you notes, formal correspondence, condolence letters, pen pal letters.\n\n" +
     "FOR LETTERS WITH IMAGES:\n" +

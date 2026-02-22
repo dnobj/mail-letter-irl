@@ -453,6 +453,12 @@ async function handleGetUser(res: ServerResponse, userId: string) {
       [userId]
     );
 
+    // Compute image generation quota
+    const lettersPurchased = Math.floor(user.credits_purchased / 2);
+    const generationsPerLetter = parseInt(process.env.IMAGE_GENERATION_LIMIT_PER_LETTER || '5', 10);
+    const imageGenerationsAllowance = lettersPurchased * generationsPerLetter;
+    const imageGenerationsRemaining = Math.max(0, imageGenerationsAllowance - user.image_generations_used);
+
     sendJson(res, 200, {
       user: {
         userId: user.user_id,
@@ -460,6 +466,9 @@ async function handleGetUser(res: ServerResponse, userId: string) {
         credits: user.credits,
         creditsPurchased: user.credits_purchased,
         creditsUsed: user.credits_used,
+        imageGenerationsUsed: user.image_generations_used,
+        imageGenerationsAllowance,
+        imageGenerationsRemaining,
         createdAt: user.created_at,
         updatedAt: user.updated_at
       },
@@ -497,6 +506,7 @@ async function handleGetAllUsers(res: ServerResponse, queryParams: URLSearchPara
       credits: u.credits,
       creditsPurchased: u.credits_purchased,
       creditsUsed: u.credits_used,
+      imageGenerationsUsed: u.image_generations_used,
       createdAt: u.created_at
     })),
     total: result.total,
@@ -1287,10 +1297,11 @@ async function handleSearchUsers(res: ServerResponse, queryParams: URLSearchPara
     credits: number;
     credits_purchased: number;
     credits_used: number;
+    image_generations_used: number;
     tier: string;
     created_at: Date;
   }>(
-    `SELECT user_id, email, credits, credits_purchased, credits_used, tier, created_at
+    `SELECT user_id, email, credits, credits_purchased, credits_used, image_generations_used, tier, created_at
      FROM users
      WHERE user_id ILIKE $1 OR email ILIKE $1
      ORDER BY created_at DESC
@@ -1307,6 +1318,7 @@ async function handleSearchUsers(res: ServerResponse, queryParams: URLSearchPara
       credits: u.credits,
       creditsPurchased: u.credits_purchased,
       creditsUsed: u.credits_used,
+      imageGenerationsUsed: u.image_generations_used,
       tier: u.tier,
       createdAt: u.created_at,
     })),

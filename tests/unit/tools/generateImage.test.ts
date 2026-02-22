@@ -3,7 +3,7 @@
  *
  * Tests the tool handler with mocked image generation service and Sharp.
  * Verifies correct output shape, context-based next-step guidance,
- * preview creation, temp URL generation, and error handling.
+ * preview creation, temp URL generation, generation limits, and error handling.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -39,15 +39,27 @@ vi.mock("../../../src/services/tempImageStore.js", () => ({
   storeImage: vi.fn().mockReturnValue("abc123def456abc123def456abc12345")
 }));
 
+// Mock image generation limit service
+vi.mock("../../../src/services/imageGenerationLimitService.js", () => ({
+  checkGenerationLimit: vi.fn(),
+  recordGeneration: vi.fn()
+}));
+
 import {
   generateImage,
   ImageGenerationError
 } from "../../../src/services/imageGenerationService.js";
 import { storeImage } from "../../../src/services/tempImageStore.js";
+import {
+  checkGenerationLimit,
+  recordGeneration
+} from "../../../src/services/imageGenerationLimitService.js";
 import { generateImageTool } from "../../../src/tools/generateImage.js";
 
 const mockGenerateImage = generateImage as ReturnType<typeof vi.fn>;
 const mockStoreImage = storeImage as ReturnType<typeof vi.fn>;
+const mockCheckLimit = checkGenerationLimit as ReturnType<typeof vi.fn>;
+const mockRecordGeneration = recordGeneration as ReturnType<typeof vi.fn>;
 
 const createMockContext = (): ToolContext => ({
   user: {
@@ -73,6 +85,14 @@ describe("generate_image tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.LETTER_IRL_API_URL = "https://api.letterirl.com";
+    // Default: allow generation with plenty remaining
+    mockCheckLimit.mockResolvedValue({
+      allowed: true,
+      used: 2,
+      allowance: 25,
+      remaining: 23
+    });
+    mockRecordGeneration.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -224,6 +244,111 @@ describe("generate_image tool", () => {
       expect(mockGenerateImage).toHaveBeenCalledWith("a sunset", {
         context: "postcard"
       });
+    });
+
+    it("should include generationsRemaining in output", async () => {
+      mockCheckLimit.mockResolvedValueOnce({
+        allowed: true,
+        used: 5,
+        allowance: 25,
+        remaining: 20
+      });
+      mockGenerateImage.mockResolvedValueOnce({ base64Data: "fakeb64" });
+
+      const context = createMockContext();
+      const result = await generateImageTool.handler(
+        { prompt: "a sunset" },
+        context
+      );
+
+      // remaining was 20 before generation, should be 19 after
+      expect(result.generationsRemaining).toBe(19);
+    });
+
+    it("should record generation after successful API call", async () => {
+      mockGenerateImage.mockResolvedValueOnce({ base64Data: "fakeb64" });
+
+      const context = createMockContext();
+      await generateImageTool.handler(
+        { prompt: "a sunset" },
+        context
+      );
+
+      expect(mockRecordGeneration).toHaveBeenCalledWith("test-user-id");
+    });
+  });
+
+  describe("handler - generation limits", () => {
+    it("should check generation limit before calling OpenAI", async () => {
+      mockCheckLimit.mockResolvedValueOnce({
+        allowed: false,
+        used: 10,
+        allowance: 10,
+        remaining: 0
+      });
+
+      const context = createMockContext();
+      await expect(
+        generateImageTool.handler({ prompt: "a sunset" }, context)
+      ).rejects.toThrow("used all your image generations");
+
+      // Should NOT have called generateImage
+      expect(mockGenerateImage).not.toHaveBeenCalled();
+    });
+
+    it("should not record generation when limit is exhausted", async () => {
+      mockCheckLimit.mockResolvedValueOnce({
+        allowed: false,
+        used: 10,
+        allowance: 10,
+        remaining: 0
+      });
+
+      const context = createMockContext();
+      try {
+        await generateImageTool.handler({ prompt: "a sunset" }, context);
+      } catch {
+        // expected
+      }
+
+      expect(mockRecordGeneration).not.toHaveBeenCalled();
+    });
+
+    it("should include purchase suggestion in limit error message", async () => {
+      mockCheckLimit.mockResolvedValueOnce({
+        allowed: false,
+        used: 5,
+        allowance: 5,
+        remaining: 0
+      });
+
+      const context = createMockContext();
+      await expect(
+        generateImageTool.handler({ prompt: "a sunset" }, context)
+      ).rejects.toThrow("Purchase more letters");
+    });
+
+    it("should log warning when limit is reached", async () => {
+      mockCheckLimit.mockResolvedValueOnce({
+        allowed: false,
+        used: 10,
+        allowance: 10,
+        remaining: 0
+      });
+
+      const context = createMockContext();
+      try {
+        await generateImageTool.handler({ prompt: "a sunset" }, context);
+      } catch {
+        // expected
+      }
+
+      expect(context.logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "generate_image.limit_reached"
+        }),
+        expect.any(String)
+      );
     });
   });
 

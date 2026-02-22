@@ -53,6 +53,7 @@ export interface OrderRecord {
 export interface UserAccount {
   userId: string;
   creditsRemaining: number;
+  imageGenerationsRemaining?: number;
   orders: OrderRecord[];
 }
 

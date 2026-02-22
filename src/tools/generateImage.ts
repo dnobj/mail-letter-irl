@@ -27,6 +27,10 @@ import {
   ImageGenerationError,
   type ImageContext
 } from "../services/imageGenerationService.js";
+import {
+  checkGenerationLimit,
+  recordGeneration
+} from "../services/imageGenerationLimitService.js";
 import { storeImage } from "../services/tempImageStore.js";
 
 // ============================================================================
@@ -43,6 +47,7 @@ interface GenerateImageOutput {
   suggestedNextStep: string;
   generatedImagePreview: string;
   generatedImageUrl: string;
+  generationsRemaining: number;
 }
 
 // ============================================================================
@@ -107,6 +112,8 @@ async function handler(
   input: GenerateImageInput,
   context: ToolContext
 ): Promise<GenerateImageOutput> {
+  const userId = context.user.userId || "default-user";
+
   context.logger.info(
     {
       correlationId: context.correlationId,
@@ -117,10 +124,31 @@ async function handler(
     "Generating image via OpenAI API"
   );
 
+  // Check generation limit before calling OpenAI
+  const limitCheck = await checkGenerationLimit(userId);
+  if (!limitCheck.allowed) {
+    context.logger.warn(
+      {
+        correlationId: context.correlationId,
+        event: "generate_image.limit_reached",
+        used: limitCheck.used,
+        allowance: limitCheck.allowance
+      },
+      "Image generation limit reached"
+    );
+    throw new Error(
+      "You've used all your image generations. Purchase more letters to get additional generations (5 per letter)."
+    );
+  }
+
   try {
     const result = await generateImage(input.prompt, {
       context: input.context
     });
+
+    // Record the generation after successful API call
+    await recordGeneration(userId);
+    const generationsRemaining = limitCheck.remaining - 1;
 
     // Create tiny preview for widget display (~10-20KB via _meta)
     const previewBase64 = await createPreview(result.base64Data);
@@ -135,7 +163,8 @@ async function handler(
         event: "generate_image.success",
         fullBase64Length: result.base64Data.length,
         previewBase64Length: previewBase64.length,
-        imageUrl
+        imageUrl,
+        generationsRemaining
       },
       "Image generated successfully"
     );
@@ -146,7 +175,8 @@ async function handler(
       message: `Image generated! ${suggestedNextStep}`,
       suggestedNextStep,
       generatedImagePreview: previewBase64,
-      generatedImageUrl: imageUrl
+      generatedImageUrl: imageUrl,
+      generationsRemaining
     };
   } catch (error) {
     if (error instanceof ImageGenerationError) {

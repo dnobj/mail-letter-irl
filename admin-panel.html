@@ -983,15 +983,20 @@
                 const data = await api('/api/admin/users?limit=20');
                 const html = `
                     <table>
-                        <tr><th>Email</th><th>Letters</th><th>Tier</th><th>Created</th></tr>
-                        ${data.users.map(u => `
+                        <tr><th>Email</th><th>Letters</th><th>Img Gens</th><th>Tier</th><th>Created</th></tr>
+                        ${data.users.map(u => {
+                            const lettersPurchased = Math.floor((u.creditsPurchased || 0) / 2);
+                            const genAllowance = lettersPurchased * 5;
+                            const genUsed = u.imageGenerationsUsed || 0;
+                            return `
                             <tr>
                                 <td>${u.email}</td>
                                 <td>${Math.floor(u.credits / 2)}</td>
+                                <td>${genUsed}/${genAllowance}</td>
                                 <td><span class="badge badge-${u.tier || 'standard'}">${u.tier || 'standard'}</span></td>
                                 <td>${formatDate(u.createdAt)}</td>
                             </tr>
-                        `).join('')}
+                        `}).join('')}
                     </table>
                     <p style="margin-top: 10px; color: #666; font-size: 12px;">Showing ${data.users.length} of ${data.total}</p>
                 `;
@@ -1013,15 +1018,20 @@
                 }
                 const html = `
                     <table>
-                        <tr><th>Email</th><th>User ID</th><th>Letters</th><th>Tier</th></tr>
-                        ${data.users.map(u => `
+                        <tr><th>Email</th><th>User ID</th><th>Letters</th><th>Img Gens</th><th>Tier</th></tr>
+                        ${data.users.map(u => {
+                            const lettersPurchased = Math.floor((u.creditsPurchased || 0) / 2);
+                            const genAllowance = lettersPurchased * 5;
+                            const genUsed = u.imageGenerationsUsed || 0;
+                            return `
                             <tr>
                                 <td>${u.email}</td>
                                 <td style="font-family: monospace; font-size: 11px;">${u.userId}</td>
                                 <td>${Math.floor(u.credits / 2)}</td>
+                                <td>${genUsed}/${genAllowance}</td>
                                 <td><span class="badge badge-${u.tier || 'standard'}">${u.tier || 'standard'}</span></td>
                             </tr>
-                        `).join('')}
+                        `}).join('')}
                     </table>
                 `;
                 document.getElementById('users-search-result').innerHTML = html;
@@ -1246,6 +1256,9 @@
                 const letterBalance = Math.floor(data.user.credits / 2);
                 const lettersPurchased = Math.floor(data.user.creditsPurchased / 2);
                 const lettersUsed = Math.floor(data.user.creditsUsed / 2);
+                const genUsed = data.user.imageGenerationsUsed || 0;
+                const genAllowance = data.user.imageGenerationsAllowance || 0;
+                const genRemaining = data.user.imageGenerationsRemaining || 0;
                 const html = `
                     <div class="result-box">
                         <p><strong>Email:</strong> ${data.user.email}</p>
@@ -1253,6 +1266,7 @@
                         <p><strong>Letters Purchased:</strong> ${lettersPurchased}</p>
                         <p><strong>Letters Used:</strong> ${lettersUsed}</p>
                         <p><strong>Total Letters Sent:</strong> ${data.stats.totalLetters}</p>
+                        <p><strong>Image Generations:</strong> ${genUsed} used / ${genAllowance} allowed (${genRemaining} remaining)</p>
                         <h4 style="margin-top: 15px; margin-bottom: 10px;">Recent Transactions</h4>
                         ${data.stats.recentTransactions.length === 0 ? '<p>No transactions</p>' : `
                             <table>

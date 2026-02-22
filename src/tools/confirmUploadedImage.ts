@@ -49,7 +49,7 @@ async function handler(
   context: ToolContext
 ): Promise<ConfirmUploadedImageOutput> {
   const hint = input.context || "";
-  setRecentUploadedImage(context.user.userId, input.imageUrl, input.context);
+  await setRecentUploadedImage(context.user.userId, input.imageUrl, input.context);
 
   context.logger.info(
     {

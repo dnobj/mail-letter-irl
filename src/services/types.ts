@@ -16,6 +16,7 @@ export interface User {
   credits: number;
   credits_purchased: number;
   credits_used: number;
+  image_generations_used: number;
   tier: UserTier;
   tier_override: UserTier | null;
   tier_calculated_at: Date;

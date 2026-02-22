@@ -665,6 +665,12 @@ export const quoteAndPreviewLetterTool: McpToolDefinition<
     "Use quote_and_preview_postcard when the IMAGE is the main focus (with short message on back).\n\n" +
     "PREVIEW IS FREE: Generating a preview costs nothing. " +
     "Feel free to create previews to show users what their letter would look like.\n\n" +
+    "RECIPIENT ADDRESS REQUIRED: You MUST have a real recipient mailing address before calling this tool. " +
+    "NEVER fabricate or use placeholder addresses (e.g. '123 Main St', 'Preview Recipient'). " +
+    "Either ask the user for the address, or if the user names a person, business, or destination, " +
+    "you may look up or provide the real address yourself. " +
+    "At minimum: name, street address, city, and state. " +
+    "Postal code is optional (address validation will suggest it).\n\n" +
     "Image Input (provide ONE if user has an image):\n" +
     "1. Attach an image directly to your message (recommended)\n" +
     "2. Use imageUrl parameter with a publicly accessible URL\n" +

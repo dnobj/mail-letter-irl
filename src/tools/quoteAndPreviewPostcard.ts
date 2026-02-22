@@ -181,7 +181,7 @@ async function handler(
   } else {
     // Fallback: if ChatGPT drops imageUrl on the follow-up tool call,
     // reuse the most recently confirmed upload for this user.
-    const recent = getRecentUploadedImage(context.user.userId, "postcard");
+    const recent = await getRecentUploadedImage(context.user.userId, "postcard");
     if (recent?.imageUrl) {
       imageInput = { url: recent.imageUrl };
       imageSourceUrl = recent.imageUrl;
@@ -606,6 +606,12 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
     "physically (vacation photos, holiday greetings, art projects, thank you cards with images).\n\n" +
     "PREVIEW IS FREE: Generating a preview costs nothing and does not use any pre-paid letters. " +
     "Feel free to create previews so users can see exactly what their postcard will look like.\n\n" +
+    "RECIPIENT ADDRESS REQUIRED: You MUST have a real recipient mailing address before calling this tool. " +
+    "NEVER fabricate or use placeholder addresses (e.g. '123 Main St', 'Preview Recipient'). " +
+    "Either ask the user for the address, or if the user names a person, business, or destination, " +
+    "you may look up or provide the real address yourself. " +
+    "At minimum: name, street address, city, and state. " +
+    "Postal code is optional (address validation will suggest it).\n\n" +
     "What it does: Takes an image for the front, a message for the back, validates addresses, " +
     "and creates a DRAFT. The user reviews the preview before deciding to send via send_postcard.\n\n" +
     "IMAGE OPTIMIZATION (Recommended for best print quality):\n" +

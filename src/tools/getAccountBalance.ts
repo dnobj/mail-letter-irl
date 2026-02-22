@@ -5,6 +5,7 @@ import {
 } from "../schemas.js";
 import { getBalance, getDetailedBalance } from "../services/creditService.js";
 import { findUser } from "../services/userService.js";
+import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
 
 interface ExpiringLettersInfo {
   letters: number;
@@ -20,6 +21,8 @@ interface GetAccountBalanceOutput {
   authProvider?: string;
   lettersExpiringSoon?: number;
   expiringLettersDetails?: ExpiringLettersInfo[];
+  imageGenerationsRemaining?: number;
+  imageGenerationsAllowance?: number;
 }
 
 
@@ -94,6 +97,17 @@ async function handler(
   const lettersExpiringSoon = Math.floor(internalCreditsExpiring / standardCost);
   const canSendStandardLetter = lettersRemaining >= 1;
 
+  // Fetch image generation quota
+  let imageGenerationsRemaining: number | undefined;
+  let imageGenerationsAllowance: number | undefined;
+  try {
+    const generationQuota = await getGenerationQuota(userId);
+    imageGenerationsRemaining = generationQuota.remaining;
+    imageGenerationsAllowance = generationQuota.allowance;
+  } catch {
+    // Ignore — user may not exist yet
+  }
+
   // Enhanced message with identity information
   const identityLine = `Account: ${email} (${authProvider})`;
   let balanceLine: string;
@@ -135,7 +149,9 @@ async function handler(
     userEmail: email,
     authProvider,
     lettersExpiringSoon: lettersExpiringSoon > 0 ? lettersExpiringSoon : undefined,
-    expiringLettersDetails: expiringLettersDetails.length > 0 ? expiringLettersDetails : undefined
+    expiringLettersDetails: expiringLettersDetails.length > 0 ? expiringLettersDetails : undefined,
+    imageGenerationsRemaining,
+    imageGenerationsAllowance
   };
 }
 
