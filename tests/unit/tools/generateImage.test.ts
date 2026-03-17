@@ -104,6 +104,11 @@ describe("generate_image tool", () => {
       expect(generateImageTool.name).toBe("generate_image");
     });
 
+    it("should describe reusing an existing image instead of regenerating", () => {
+      expect(generateImageTool.description).toContain("imageUrl to pass to the next preview call");
+      expect(generateImageTool.description).toContain("use that existing image instead of calling this tool again");
+    });
+
     it("should not be readOnly", () => {
       expect(generateImageTool.readOnly).toBe(false);
     });

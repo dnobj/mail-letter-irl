@@ -27,6 +27,7 @@ import {
   postcardErrors,
   imageProcessingConfig,
 } from '../../fixtures/postcards.js';
+import { quoteAndPreviewPostcardTool } from '../../../src/tools/quoteAndPreviewPostcard.js';
 
 describe('quote_and_preview_postcard Tool', () => {
   beforeEach(() => {
@@ -342,6 +343,12 @@ describe('quote_and_preview_postcard Tool', () => {
   // Widget Output Template
   // ==========================================================================
   describe('Widget Output Template', () => {
+    it('should describe imageUrl reuse and upload_image as fallback-only', () => {
+      expect(quoteAndPreviewPostcardTool.description).toContain('Use this when the user wants to make, create, design, or preview a postcard');
+      expect(quoteAndPreviewPostcardTool.description).toContain('pass imageUrl when a generated or hosted image is already available');
+      expect(quoteAndPreviewPostcardTool.description).toContain('use upload_image only if no attachment or usable imageUrl made it through');
+    });
+
     it('should specify PostcardPreviewCard widget in _meta', () => {
       // Tool should declare output template
       const toolMeta = {

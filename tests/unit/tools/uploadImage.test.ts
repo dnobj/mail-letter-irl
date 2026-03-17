@@ -151,6 +151,12 @@ describe("upload_image tool", () => {
       expect(uploadImageTool.name).toBe("upload_image");
     });
 
+    it("should describe the widget as a fallback-only path", () => {
+      expect(uploadImageTool.description).toContain("only as a fallback");
+      expect(uploadImageTool.description).toContain("Do not use this");
+      expect(uploadImageTool.description).toContain("generated imageUrl");
+    });
+
     it("should not be readOnly", () => {
       expect(uploadImageTool.readOnly).toBe(false);
     });

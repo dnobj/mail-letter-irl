@@ -608,7 +608,7 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_postcard",
   description:
-    "Preview a physical postcard draft with a front image and back message. This does not send mail. Requires a real U.S. recipient mailing address; prefer a direct file attachment for the image and use upload_image if attachment handoff fails. If sender is omitted, the saved return address is used automatically. Send later with send_postcard.",
+    "Create a preview of a physical postcard draft with a front image and back message. Use this when the user wants to make, create, design, or preview a postcard through Letter IRL. This does not send mail. Requires a real U.S. recipient mailing address; prefer a direct file attachment for the image, pass imageUrl when a generated or hosted image is already available, and use upload_image only if no attachment or usable imageUrl made it through. If sender is omitted, the saved return address is used automatically. Send later with send_postcard.",
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale
   readOnly: false,
