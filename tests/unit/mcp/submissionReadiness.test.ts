@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getOpenIdConfiguration } from "../../../src/auth/metadata.js";
 import { buildManifest, APP_DIRECTORY_DESCRIPTION } from "../../../src/mcp/manifest.js";
 import {
+  buildWidgetResourceMeta,
   WIDGET_DEFINITIONS,
   WIDGET_MIME_TYPE,
   buildToolMeta,
@@ -38,7 +39,13 @@ describe("Submission readiness checks", () => {
   });
 
   it("should copy securitySchemes into tool metadata", () => {
-    const meta = buildToolMeta({ "openai/widgetAccessible": true }, true);
+    const meta = buildToolMeta(
+      {
+        "openai/outputTemplate": "ui://widgets/LetterPreviewCard.html",
+        "openai/widgetAccessible": true
+      },
+      true
+    );
     expect(meta.securitySchemes).toEqual([
       {
         type: "oauth2",
@@ -46,6 +53,23 @@ describe("Submission readiness checks", () => {
       }
     ]);
     expect(meta["openai/widgetAccessible"]).toBe(true);
+    expect(meta.ui).toMatchObject({
+      resourceUri: "ui://widgets/LetterPreviewCard.html",
+      widgetAccessible: true
+    });
+  });
+
+  it("should expose canonical ui metadata for widget resources", () => {
+    const meta = buildWidgetResourceMeta("Test widget");
+    expect(meta.ui).toMatchObject({
+      description: "Test widget",
+      domain: "https://api.letterirl.com",
+      prefersBorder: true
+    });
+    expect(meta).toMatchObject({
+      "openai/widgetPrefersBorder": true,
+      "openai/widgetDescription": "Test widget"
+    });
   });
 
   it("should advertise CMID support in OIDC metadata", () => {
