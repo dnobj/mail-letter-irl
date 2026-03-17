@@ -110,6 +110,13 @@ describe('OAuth Authorization Server Metadata', () => {
     expect(metadata.grant_types_supported).toContain('authorization_code');
   });
 
+  it('should advertise client_id_metadata_document_supported', async () => {
+    const { getOpenIdConfiguration } = await import('../../../src/auth/metadata.js');
+    const metadata = getOpenIdConfiguration(mockBaseUrl);
+
+    expect(metadata.client_id_metadata_document_supported).toBe(true);
+  });
+
   it('should include registration_endpoint pointing to server /oauth/register', async () => {
     const { getOpenIdConfiguration } = await import('../../../src/auth/metadata.js');
     const metadata = getOpenIdConfiguration(mockBaseUrl);

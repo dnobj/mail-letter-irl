@@ -147,8 +147,8 @@ describe("confirm_uploaded_image tool", () => {
       expect(confirmUploadedImageTool.name).toBe("confirm_uploaded_image");
     });
 
-    it("should be readOnly", () => {
-      expect(confirmUploadedImageTool.readOnly).toBe(true);
+    it("should not be readOnly", () => {
+      expect(confirmUploadedImageTool.readOnly).toBe(false);
     });
 
     it("should be widget accessible", () => {

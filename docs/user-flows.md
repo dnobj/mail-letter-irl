@@ -132,18 +132,17 @@ This is the main flow for composing and sending a letter.
 
 Promo codes can be redeemed in two ways:
 
-### Option 1: Preview Gate (Pre-Auth)
-Used for beta access codes that unlock the website.
+### Option 1: Public Landing / Pre-Auth Promo Entry
+Used for public promo codes entered before login.
 
-1. User visits website and sees preview gate
+1. User visits website
 2. User enters promo code
 3. Server validates (public endpoint - no auth required):
    - Code exists and is active
    - Campaign within validity window
    - Total redemption limit not reached
-4. If valid: Cookie set, user gains preview access
-5. User signs up/logs in
-6. Credits (if any) added to account on first authenticated action
+4. User signs up/logs in
+5. Credits (if any) added to account on first authenticated action
 
 ### Option 2: Settings Page (Authenticated)
 Used for credit-granting promo codes by existing users.
@@ -164,7 +163,7 @@ Used for credit-granting promo codes by existing users.
 7. User sees success message with credits added
 
 ### Promo Code Types
-- **Preview-only codes** (0 credits): Unlock website access during beta
+- **Landing-page codes** (0 credits): Reserved for future marketing or access experiments
 - **Credit codes** (X credits): Grant bonus credits with optional expiration
 - **Welcome codes**: May be restricted to new users only
 

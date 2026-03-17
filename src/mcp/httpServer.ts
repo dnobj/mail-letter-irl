@@ -891,19 +891,44 @@ async function authenticateRequest(
     return await validateAuthorizationHeader(req.headers.authorization);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const challenge = buildWwwAuthenticateChallenge(message);
     const body = {
       jsonrpc: "2.0",
       error: {
         code: -32000,
-        message
+        message,
+        data: {
+          _meta: {
+            "mcp/www_authenticate": [challenge]
+          }
+        }
       },
       id: null
     };
     res.writeHead(401, {
-      "WWW-Authenticate": `Bearer realm="Letter IRL", error="invalid_token", error_description="${message}"`,
+      "WWW-Authenticate": challenge,
       "Content-Type": "application/json"
     });
     res.end(JSON.stringify(body));
     return null;
   }
+}
+
+export function buildWwwAuthenticateChallenge(message: string): string {
+  const scopes = (process.env.LETTER_IRL_OAUTH_SCOPES ?? "openid email profile")
+    .split(/[,\s]+/)
+    .map((scope) => scope.trim())
+    .filter(Boolean)
+    .join(" ");
+
+  return [
+    `Bearer realm="Letter IRL"`,
+    `resource_metadata="${PUBLIC_BASE_URL}${PROTECTED_RESOURCE_ROUTE}"`,
+    `authorization_uri="${PUBLIC_BASE_URL}${AUTHORIZATION_SERVER_ROUTE}"`,
+    scopes ? `scope="${scopes}"` : undefined,
+    `error="invalid_token"`,
+    `error_description="${message.replace(/"/g, "'")}"`
+  ]
+    .filter(Boolean)
+    .join(", ");
 }

@@ -27,6 +27,7 @@ import {
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
 import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
+import { ToolMeta } from "../contracts/types.js";
 
 /**
  * Build MCP tool annotations from tool definition.
@@ -47,7 +48,7 @@ import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
  * @see https://developers.openai.com/apps-sdk/plan/tools/
  * @see https://modelcontextprotocol.io/legacy/concepts/tools
  */
-function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnotations {
+export function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnotations {
   const name = tool.name;
 
   // Read-only tools: only retrieve data, no modifications
@@ -55,8 +56,7 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
     'get_account_balance',
     'list_orders',
     'get_order_status',
-    'get_return_address',
-    'confirm_uploaded_image'
+    'get_return_address'
   ];
 
   // Tools that call external APIs (PostGrid for validation or mail fulfillment)
@@ -79,7 +79,7 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
     'send_postcard',         // Draft consumption makes retries safe
     'set_return_address',    // Setting same address twice = no change
     'clear_return_address',  // Clearing twice = no additional effect
-    'confirm_uploaded_image' // Stateless relay — same args = same result
+    'confirm_uploaded_image' // Repeating the same relay overwrites with the same value
   ];
 
   // Destructive tools that delete or overwrite user data
@@ -102,7 +102,7 @@ function buildAnnotations(tool: { name: string; readOnly: boolean }): ToolAnnota
  * @see US-MCP-07: Widget Resources
  * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
  */
-const WIDGET_DEFINITIONS = [
+export const WIDGET_DEFINITIONS = [
   { name: "LetterPreviewCard", description: "Shows letter preview with cost, delivery info, and status" },
   { name: "PostcardPreviewCard", description: "Shows postcard front/back preview with cost, delivery info, and status" },
   { name: "ImageUploadCard", description: "File picker widget for uploading photos to use in letters or postcards" },
@@ -126,6 +126,7 @@ const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? "https://api.lette
  * @see US-MCP-07: Widget Resources
  */
 const WIDGET_API_URL = process.env.LETTER_IRL_API_URL ?? "https://api.letterirl.com";
+export const WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
 
 /**
  * Content Security Policy for widgets.
@@ -147,6 +148,36 @@ const WIDGET_CSP = {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_WIDGET_DIR = process.env.LETTER_IRL_WIDGET_DIR ?? path.resolve(__dirname, "../../widgets");
+
+function getOauthScopes(): string[] {
+  return (process.env.LETTER_IRL_OAUTH_SCOPES ?? "openid email profile")
+    .split(/[,\s]+/)
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+}
+
+export function buildToolSecuritySchemes(requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false") {
+  if (!requireAuth) {
+    return [{ type: "noauth" }];
+  }
+
+  return [
+    {
+      type: "oauth2",
+      scopes: getOauthScopes()
+    }
+  ];
+}
+
+export function buildToolMeta(
+  meta: ToolMeta,
+  requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false"
+): ToolMeta {
+  return {
+    securitySchemes: buildToolSecuritySchemes(requireAuth),
+    ...meta
+  };
+}
 
 /**
  * Register widget HTML files as MCP resources.
@@ -185,7 +216,7 @@ async function registerWidgetResources(mcpServer: McpServer) {
         return {
           contents: [{
             uri,
-            mimeType: "text/html+skybridge",
+            mimeType: WIDGET_MIME_TYPE,
             text: html,
             _meta: {
               "openai/widgetPrefersBorder": true,
@@ -311,7 +342,7 @@ export async function registerLetterTools(
         description: tool.description,
         inputSchema: shape,
         annotations,
-        _meta: tool.meta  // Contains openai/outputTemplate, widgetAccessible, etc.
+        _meta: buildToolMeta(tool.meta)  // Contains auth metadata and OpenAI widget/runtime hints
       },
       async (args, extra) => {
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)

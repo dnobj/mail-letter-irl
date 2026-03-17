@@ -1351,6 +1351,35 @@ ChatGPT offered "Track it until delivery" to a user after sending a postcard, bu
 
 ---
 
+### US-MCP-11: Tool-Level OAuth Metadata for ChatGPT Apps
+
+**As a** ChatGPT/OpenAI Apps client
+**I want** protected tools to advertise their auth requirements in metadata and auth challenges
+**So that** I can guide the user through linking/authentication without relying on undocumented behavior
+
+**Acceptance Criteria:**
+- [ ] Protected tools include auth metadata compatible with the current Apps SDK flow
+- [ ] Tool metadata includes declared security schemes in the OpenAI-compatible `_meta` payload
+- [ ] Auth failures include `mcp/www_authenticate` challenge metadata
+- [ ] Authorization server metadata advertises `client_id_metadata_document_supported`
+- [ ] OAuth metadata remains compatible with the existing static-client fallback
+
+---
+
+### US-MCP-12: Current Widget Resource MIME/Profile
+
+**As a** ChatGPT/OpenAI Apps client
+**I want** widget resources to use the current MIME/profile contract
+**So that** widgets load using the latest supported Apps SDK runtime path
+
+**Acceptance Criteria:**
+- [ ] Widget resources are registered with `ui://` URIs
+- [ ] Widget HTML resources use `text/html;profile=mcp-app`
+- [ ] Widget tests assert the current MIME/profile instead of legacy `skybridge` behavior
+- [ ] Widget registration docs and comments match the implemented contract
+
+---
+
 ## Development (DEV)
 
 ### US-DEV-01: Isolated Development Environment
@@ -1760,13 +1789,13 @@ The tool description instructs ChatGPT to suggest this tool when:
 | Edge Cases | US-EDGE | 8 |
 | Security | US-SEC | 6 |
 | Data Integrity | US-DATA | 3 |
-| MCP Access | US-MCP | 8 |
+| MCP Access | US-MCP | 10 |
 | Development | US-DEV | 3 |
 | OAuth Registration | US-DCR | 2 |
 | Letter Layouts | US-LAYOUT | 6 |
 | Feedback | US-FEEDBACK | 1 |
 | Infrastructure | US-INFRA | 1 |
-| **Total** | | **72** |
+| **Total** | | **74** |
 
 ---
 

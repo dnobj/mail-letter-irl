@@ -1,9 +1,9 @@
 /**
  * Unit tests for MCP Widget Resource Registration
  *
- * Tests that the LetterPreviewCard widget is registered as an MCP resource with:
+ * Tests that widgets are registered as MCP resources with:
  * - ui:// protocol URI
- * - text/html+skybridge MIME type
+ * - text/html;profile=mcp-app MIME type
  * - Proper content delivery
  *
  * User Stories Covered:
@@ -15,11 +15,10 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-
-// Only LetterPreviewCard widget is used - other tools use text responses
-const WIDGET_DEFINITIONS = [
-  { name: "LetterPreviewCard", description: "Shows letter preview with cost, delivery info, and status" },
-];
+import {
+  WIDGET_DEFINITIONS,
+  WIDGET_MIME_TYPE
+} from '../../../src/mcp/registerTools.js';
 
 describe('Widget Resource Registration (US-MCP-07)', () => {
   describe('widget URI format', () => {
@@ -33,16 +32,14 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
     );
 
-    it('should have 1 widget defined (LetterPreviewCard only)', () => {
-      expect(WIDGET_DEFINITIONS.length).toBe(1);
+    it('should have 4 widgets defined', () => {
+      expect(WIDGET_DEFINITIONS.length).toBe(4);
     });
   });
 
   describe('widget MIME type', () => {
-    it('should use text/html+skybridge MIME type', () => {
-      // The skybridge MIME type tells ChatGPT to inject window.openai runtime
-      const expectedMimeType = 'text/html+skybridge';
-      expect(expectedMimeType).toBe('text/html+skybridge');
+    it('should use text/html;profile=mcp-app MIME type', () => {
+      expect(WIDGET_MIME_TYPE).toBe('text/html;profile=mcp-app');
     });
   });
 
@@ -134,9 +131,14 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 });
 
 describe('registerWidgetResources implementation', () => {
-  it('should register 1 widget resource (LetterPreviewCard only)', () => {
-    expect(WIDGET_DEFINITIONS.length).toBe(1);
-    expect(WIDGET_DEFINITIONS[0].name).toBe('LetterPreviewCard');
+  it('should register all widget resources', () => {
+    expect(WIDGET_DEFINITIONS.length).toBe(4);
+    expect(WIDGET_DEFINITIONS.map((widget) => widget.name)).toEqual([
+      'LetterPreviewCard',
+      'PostcardPreviewCard',
+      'ImageUploadCard',
+      'GenerateImageCard'
+    ]);
   });
 
   it('should handle missing widget files gracefully', () => {
