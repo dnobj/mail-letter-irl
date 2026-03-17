@@ -14,58 +14,12 @@
  * @see https://developers.openai.com/apps-sdk/plan/tools/
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-
-/**
- * Build MCP tool annotations from tool definition.
- *
- * This mirrors the implementation in src/mcp/registerTools.ts
- * and serves as the authoritative test for annotation correctness.
- */
-function buildAnnotations(tool: { name: string; readOnly: boolean }) {
-  const name = tool.name;
-
-  // Read-only tools: only retrieve data, no modifications
-  const readOnlyTools = [
-    'get_account_balance',
-    'list_orders',
-    'get_order_status',
-    'get_return_address'
-  ];
-
-  // Tools that call external APIs (PostGrid for validation or mail fulfillment)
-  const openWorldTools = [
-    'quote_and_preview_letter',
-    'quote_and_preview_letter_with_header_image',
-    'quote_and_preview_letter_with_image',
-    'quote_and_preview_postcard',
-    'send_letter',
-    'send_postcard',
-    'set_return_address'  // Validates address via PostGrid
-  ];
-
-  // Tools where repeated calls with same args have no additional effect
-  // NOTE: Quote/preview tools are NOT idempotent - each call creates a new draft
-  // See US-MCP-09 and docs/learnings/tool-annotation-decision.md
-  const idempotentTools = [
-    'send_letter',           // Draft consumption makes retries safe
-    'send_postcard',         // Draft consumption makes retries safe
-    'set_return_address',    // Setting same address twice = no change
-    'clear_return_address'   // Clearing twice = no additional effect
-  ];
-
-  // Destructive tools that delete or overwrite user data
-  const destructiveTools = [
-    'clear_return_address'
-  ];
-
-  return {
-    readOnlyHint: readOnlyTools.includes(name),
-    destructiveHint: destructiveTools.includes(name),
-    openWorldHint: openWorldTools.includes(name),
-    idempotentHint: idempotentTools.includes(name)
-  };
-}
+import { describe, it, expect } from 'vitest';
+import {
+  buildAnnotations,
+  buildToolMeta,
+  buildToolSecuritySchemes
+} from '../../../src/mcp/registerTools.js';
 
 /**
  * Tool definitions matching the actual tools in the codebase.
@@ -102,6 +56,7 @@ const sendTools = [
 // Other write tools
 const otherWriteTools = [
   { name: 'set_return_address', readOnly: false },
+  { name: 'confirm_uploaded_image', readOnly: false },
 ];
 
 // Destructive tools: delete user data
@@ -239,6 +194,28 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
     });
   });
 
+  describe('confirm_uploaded_image Tool', () => {
+    it('should have readOnlyHint: false (persists recent upload state)', () => {
+      const annotations = buildAnnotations({ name: 'confirm_uploaded_image', readOnly: false });
+      expect(annotations.readOnlyHint).toBe(false);
+    });
+
+    it('should have destructiveHint: false (non-destructive)', () => {
+      const annotations = buildAnnotations({ name: 'confirm_uploaded_image', readOnly: false });
+      expect(annotations.destructiveHint).toBe(false);
+    });
+
+    it('should have openWorldHint: false (local state only)', () => {
+      const annotations = buildAnnotations({ name: 'confirm_uploaded_image', readOnly: false });
+      expect(annotations.openWorldHint).toBe(false);
+    });
+
+    it('should have idempotentHint: true (same relay can be safely repeated)', () => {
+      const annotations = buildAnnotations({ name: 'confirm_uploaded_image', readOnly: false });
+      expect(annotations.idempotentHint).toBe(true);
+    });
+  });
+
   describe('clear_return_address Tool (Destructive)', () => {
     it('should have readOnlyHint: false (deletes data)', () => {
       const annotations = buildAnnotations({ name: 'clear_return_address', readOnly: false });
@@ -262,8 +239,8 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
   });
 
   describe('Tool Classification Summary', () => {
-    it('should have 12 total tools', () => {
-      expect(allTools.length).toBe(12);
+    it('should have 13 total tools', () => {
+      expect(allTools.length).toBe(13);
     });
 
     it('should have 4 read-only tools', () => {
@@ -274,12 +251,12 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       expect(readOnlyCount).toBe(4);
     });
 
-    it('should have 8 write tools (non-read-only)', () => {
+    it('should have 9 write tools (non-read-only)', () => {
       const writeCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === false;
       }).length;
-      expect(writeCount).toBe(8);
+      expect(writeCount).toBe(9);
     });
 
     it('should have 7 open-world tools (call external APIs)', () => {
@@ -290,12 +267,12 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       expect(openWorldCount).toBe(7);
     });
 
-    it('should have 4 idempotent tools (send + address management)', () => {
+    it('should have 5 idempotent tools (send + address management + upload relay)', () => {
       const idempotentCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.idempotentHint === true;
       }).length;
-      expect(idempotentCount).toBe(4);
+      expect(idempotentCount).toBe(5);
     });
 
     it('should have 1 destructive tool', () => {
@@ -334,6 +311,33 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
         if (annotations.readOnlyHint) {
           expect(annotations.destructiveHint).toBe(false);
         }
+      });
+    });
+  });
+
+  describe('Tool Auth Metadata', () => {
+    it('should declare oauth2 security scheme when auth is required', () => {
+      expect(buildToolSecuritySchemes(true)).toEqual([
+        {
+          type: 'oauth2',
+          scopes: ['openid', 'email', 'profile']
+        }
+      ]);
+    });
+
+    it('should declare noauth security scheme when auth is disabled', () => {
+      expect(buildToolSecuritySchemes(false)).toEqual([{ type: 'noauth' }]);
+    });
+
+    it('should merge securitySchemes into tool metadata', () => {
+      expect(buildToolMeta({ 'openai/widgetAccessible': true }, true)).toMatchObject({
+        securitySchemes: [
+          {
+            type: 'oauth2',
+            scopes: ['openid', 'email', 'profile']
+          }
+        ],
+        'openai/widgetAccessible': true
       });
     });
   });

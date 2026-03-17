@@ -81,14 +81,14 @@ THIS TOOL IS CALLED AUTOMATICALLY by the ImageUploadCard widget after a successf
 DO NOT call this tool directly — it is for internal widget-to-assistant communication only.
 
 After this tool returns, follow the suggestedNextStep instructions to call the appropriate preview tool with the imageUrl.`,
-  readOnly: true,
+  readOnly: false,
   inputSchema: confirmUploadedImageInputSchema,
   outputSchema: confirmUploadedImageOutputSchema,
   meta: {
     "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Processing uploaded photo...",
     "openai/toolInvocation/invoked": "Photo ready",
-    readOnlyHint: true,
+    readOnlyHint: false,
     idempotentHint: true
   },
   handler
