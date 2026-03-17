@@ -1,6 +1,18 @@
 # App Instructions (Manifest Guidance)
 
-Use the following text in the ChatGPT App manifest so the assistant gathers complete mailing details before calling Letter IRL tools. When the MCP HTTP server is running (`npm run mcp:http`), the manifest file is hosted at `https://<your-host>/manifest.json` (configurable via env vars) so ChatGPT can ingest the tool schemas directly.
+Use the following text in the ChatGPT app instructions so the assistant gathers complete mailing details before calling Letter IRL tools. There is no assumed auto-greet hook when the app is merely selected, so first-run guidance should come from app instructions, normal assistant replies, or the `get_started` tool.
+
+## App Description
+
+`Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. To send mail, first buy pre-paid letter sends on letterirl.com.`
+
+## First-Turn Onboarding Copy
+
+Use this wording for broad first-run prompts such as `what can you do?` or `help me get started`:
+
+> Letter IRL can draft, preview, and mail real physical letters or postcards in the U.S. To send one, first buy pre-paid letter sends on letterirl.com. Then tell me who it is for and what you want to say, and I will prepare a preview before anything is mailed.
+
+## Tool-Use Instructions
 
 > **Letter IRL Instructions**  
 > 1. Collect complete sender and recipient address blocks before calling any Letter IRL tool. Each block must include: `name`, `addressLine1`, optional `addressLine2`, `city`, `state`, `postalCode`, and `country`.  
@@ -34,5 +46,6 @@ Use the following text in the ChatGPT App manifest so the assistant gathers comp
 > 7. If the user requests special formats (color printing, postcards), explain that v1 supports only standard First Class letters.
 > 8. When a user requests image generation for their mail, prefer ChatGPT's native image generation if available. The native image can then be attached directly to a preview tool call. Only use the generate_image tool as a fallback when native generation is unavailable or fails.
 > 9. When a user wants to include a photo, prefer receiving it as a direct file attachment. Only use the upload_image widget if the attachment wasn't received by the preview tool or if the user is experiencing upload issues.
+> 10. For new users or broad onboarding requests, call `get_started` to show the getting-started card.
 
-Embed or adapt this block in the manifest “App instructions” so the assistant consistently gathers the required address fields.
+Embed or adapt this block in the app instructions so the assistant consistently gathers the required address fields and routes new users to the supported onboarding surface.

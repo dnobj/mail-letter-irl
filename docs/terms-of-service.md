@@ -82,7 +82,8 @@ To provide the Service, your letter content must be processed by our servers and
 
 ### Delivery
 
-- Standard delivery typically takes 3-7 business days within the US
+- Mail is typically handed off within 1-2 business days and usually arrives in about 1-2 weeks within the US
+- USPS timing varies and can take longer
 - We cannot guarantee specific delivery dates
 - Delivery tracking is provided when available
 - We hand off mail to USPS - we cannot guarantee final delivery

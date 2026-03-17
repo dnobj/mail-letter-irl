@@ -1380,6 +1380,49 @@ ChatGPT offered "Track it until delivery" to a user after sending a postcard, bu
 
 ---
 
+### US-MCP-13: First-Run Onboarding for New ChatGPT Users
+
+**As a** new Letter IRL user in ChatGPT
+**I want** a short supported onboarding path
+**So that** I understand what the app does, how to buy pre-paid letter sends, and what to try first
+
+**Acceptance Criteria:**
+- [ ] App description explains drafting, previewing, and mailing real physical mail
+- [ ] App description clearly states the `letterirl.com` pre-purchase prerequisite
+- [ ] A supported onboarding surface exists for broad first-run prompts
+- [ ] Example prompts are available for first-time users
+- [ ] Onboarding does not assume an unsupported auto-greet hook
+
+---
+
+### US-MCP-14: Runtime-Derived Compatibility Manifest
+
+**As a** submission reviewer or integration client
+**I want** the compatibility manifest to match the real runtime surface
+**So that** tool and widget discovery do not drift from the codebase
+
+**Acceptance Criteria:**
+- [ ] `/manifest.json` is derived from the current runtime tool inventory
+- [ ] Widget names in the manifest match the registered widget resources
+- [ ] A checked-in manifest snapshot can be regenerated from code
+- [ ] Tests fail if the manifest drifts from the runtime registry
+
+---
+
+### US-MCP-15: Conservative Delivery Messaging
+
+**As a** user sending physical mail
+**I want** accurate delivery expectations
+**So that** the app does not over-promise mailing timelines
+
+**Acceptance Criteria:**
+- [ ] Preview responses expose a canonical delivery estimate message
+- [ ] Preview widgets show the same delivery estimate message
+- [ ] Legal and marketing copy use the same conservative expectation, or clearly explain any distinction
+- [ ] Delivery wording states that timing is estimated and may take longer
+
+---
+
 ## Development (DEV)
 
 ### US-DEV-01: Isolated Development Environment
@@ -1789,13 +1832,13 @@ The tool description instructs ChatGPT to suggest this tool when:
 | Edge Cases | US-EDGE | 8 |
 | Security | US-SEC | 6 |
 | Data Integrity | US-DATA | 3 |
-| MCP Access | US-MCP | 10 |
+| MCP Access | US-MCP | 13 |
 | Development | US-DEV | 3 |
 | OAuth Registration | US-DCR | 2 |
 | Letter Layouts | US-LAYOUT | 6 |
 | Feedback | US-FEEDBACK | 1 |
 | Infrastructure | US-INFRA | 1 |
-| **Total** | | **74** |
+| **Total** | | **77** |
 
 ---
 

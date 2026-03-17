@@ -18,6 +18,7 @@ export { sendPostcardTool } from "./sendPostcard.js";
 
 // Feedback tools (US-FEEDBACK-01)
 export { submitFeatureRequestTool } from "./submitFeatureRequest.js";
+export { getStartedTool } from "./getStarted.js";
 
 // Image upload tool (US-POSTCARD-04: Widget-based upload)
 export { uploadImageTool } from "./uploadImage.js";
@@ -27,4 +28,3 @@ export { generateImageTool } from "./generateImage.js";
 
 // Confirm uploaded image tool (widget relay for upload URL)
 export { confirmUploadedImageTool } from "./confirmUploadedImage.js";
-

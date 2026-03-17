@@ -19,6 +19,7 @@ import {
   sendPostcardTool,
   // Feedback tools
   submitFeatureRequestTool,
+  getStartedTool,
   // Image upload tool
   uploadImageTool,
   // Image generation tool
@@ -52,6 +53,7 @@ const tools: McpToolDefinition<unknown, unknown>[] = [
   sendPostcardTool,
   // Feedback tools
   submitFeatureRequestTool,
+  getStartedTool,
   // Image upload tool
   uploadImageTool,
   // Image generation tool

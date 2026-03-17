@@ -22,6 +22,11 @@ import { downloadAndProcessPostcardImageWithPreview, ImageProcessingError, type 
 import type { PostcardSize, ImageFileParam } from "../services/types.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
 import { getRecentUploadedImage } from "../services/recentUploadStore.js";
+import {
+  DELIVERY_CLASS,
+  DELIVERY_DISCLAIMER,
+  DELIVERY_ESTIMATE
+} from "../content/delivery.js";
 
 // ============================================================================
 // Types
@@ -47,6 +52,8 @@ interface QuoteAndPreviewPostcardOutput {
   reasonCannotSend?: string;
   deliveryClass?: string;
   estimatedDeliveryDays?: number;
+  deliveryEstimate?: string;
+  deliveryDisclaimer?: string;
   // Draft for idempotent send
   draftId: string;
   draftExpiresAt: string;  // ISO timestamp
@@ -527,8 +534,9 @@ async function handler(
     lettersRequired,
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
-    deliveryClass: "First Class Postcard",
-    estimatedDeliveryDays: 5,
+    deliveryClass: DELIVERY_CLASS,
+    deliveryEstimate: DELIVERY_ESTIMATE,
+    deliveryDisclaimer: DELIVERY_DISCLAIMER,
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
     message: input.message,
@@ -600,39 +608,7 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_postcard",
   description:
-    "WHEN TO USE: Call this tool to CREATE A PREVIEW of a physical postcard. This does NOT send " +
-    "anything - it only generates a draft for the user to review. Proactively offer previews when " +
-    "the user has created artwork, drawings, photos, or any image they might want to share " +
-    "physically (vacation photos, holiday greetings, art projects, thank you cards with images).\n\n" +
-    "PREVIEW IS FREE: Generating a preview costs nothing and does not use any pre-paid letters. " +
-    "Feel free to create previews so users can see exactly what their postcard will look like.\n\n" +
-    "RECIPIENT ADDRESS REQUIRED: You MUST have a real recipient mailing address before calling this tool. " +
-    "NEVER fabricate or use placeholder addresses (e.g. '123 Main St', 'Preview Recipient'). " +
-    "Either ask the user for the address, or if the user names a person, business, or destination, " +
-    "you may look up or provide the real address yourself. " +
-    "At minimum: name, street address, city, and state. " +
-    "Postal code is optional (address validation will suggest it).\n\n" +
-    "What it does: Takes an image for the front, a message for the back, validates addresses, " +
-    "and creates a DRAFT. The user reviews the preview before deciding to send via send_postcard.\n\n" +
-    "IMAGE OPTIMIZATION (Recommended for best print quality):\n" +
-    "For optimal results and reliable image transfer on all platforms:\n" +
-    "1. Use Code Interpreter to resize the image to 1872×1248 pixels (optimal for 6x9 postcard at 300dpi)\n" +
-    "2. Save as high-quality JPEG\n" +
-    "3. Use the resulting file with this tool\n" +
-    "This ensures optimal print quality and works reliably on all platforms including mobile.\n\n" +
-    "Image Input (in order of preference):\n" +
-    "1. BEST: Attach an image file directly to your message (native ChatGPT attachment)\n" +
-    "2. Use imageUrl parameter with a publicly accessible URL\n" +
-    "3. FALLBACK: If neither works, call upload_image to open the file picker widget, then retry with the imageUrl\n" +
-    "- Supported: PNG, JPEG, WebP (max 10MB), any size (auto-resized for 6x9 print)\n\n" +
-    "Sender Address:\n" +
-    "- If not provided, saved return address is used automatically.\n" +
-    "- Use set_return_address to save one for all future postcards.\n\n" +
-    "Draft Workflow:\n" +
-    "1. Creates a DRAFT with draftId (required for send_postcard).\n" +
-    "2. Drafts expire after 24 hours.\n" +
-    "3. Idempotent - retrying won't charge twice.\n\n" +
-    "Restrictions: US addresses only, max ~400 character message.",
+    "Preview a physical postcard draft with a front image and back message. This does not send mail. Requires a real U.S. recipient mailing address; prefer a direct file attachment for the image and use upload_image if attachment handoff fails. If sender is omitted, the saved return address is used automatically. Send later with send_postcard.",
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale
   readOnly: false,

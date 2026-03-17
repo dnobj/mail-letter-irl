@@ -101,36 +101,7 @@ export const submitFeatureRequestTool: McpToolDefinition<
   SubmitFeatureRequestOutput
 > = {
   name: "submit_feature_request",
-  description: `Submit a feature request to the Letter IRL team.
-
-USE THIS TOOL WHEN:
-- User asks about sending letters internationally (Canada, UK, etc.)
-- User asks about sending greeting cards, holiday cards, or other mail formats
-- User asks about features that don't exist (bulk mail, templates, address book, scheduling)
-- User asks about integrations with other services
-- User expresses frustration that something isn't possible
-- User says "I wish I could..." or "Can you add..."
-
-DO NOT USE THIS TOOL FOR:
-- Bug reports (direct user to support)
-- Billing or payment issues (direct user to support)
-- Questions about existing features (answer their question instead)
-- General feedback that isn't a feature request
-
-CATEGORIES:
-- new_feature: Brand new functionality
-- improvement: Enhancement to existing features
-- integration: Connecting with other services
-- mail_type: New mail formats (greeting cards, packages, etc.)
-- international: Sending mail outside the US
-- other: Anything else
-
-TIPS:
-- Include the attemptedAction field when the user was trying to do something specific
-- Summarize the user's request clearly in the title
-- Include context in the description about why this would be valuable
-- Ask if the user would like to be contacted about the feature (okToContact)
-- If they say yes, ask for their preferred email or use their account email`,
+  description: "Submit a feature request to the Letter IRL team for unsupported capabilities or product improvements. Use this for missing mail formats, workflows, or integrations, not for billing or bug support.",
   readOnly: false,
   inputSchema: submitFeatureRequestInputSchema,
   outputSchema: submitFeatureRequestOutputSchema,

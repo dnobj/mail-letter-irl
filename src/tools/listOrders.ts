@@ -77,7 +77,7 @@ export const listOrdersTool: McpToolDefinition<
   ListOrdersOutput
 > = {
   name: "list_orders",
-  description: "List the user's letter orders (most recent first). Returns order IDs that can be used with get_order_status.",
+  description: "List the user's recent letter and postcard orders. Returns order IDs that can be used with get_order_status.",
   readOnly: true,
   inputSchema: listOrdersInputSchema,
   outputSchema: listOrdersOutputSchema,

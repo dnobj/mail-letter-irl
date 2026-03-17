@@ -11,6 +11,7 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { LetterIrlServer } from "../server.js";
 import { registerLetterTools } from "./registerTools.js";
 import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
+import { stringifyManifest } from "./manifest.js";
 import {
   AuthenticatedUser,
   validateAuthorizationHeader
@@ -48,9 +49,6 @@ const SSE_MESSAGES_PATH =
   process.env.LETTER_IRL_SSE_MESSAGES_PATH ?? "/mcp/sse/messages";
 const WIDGET_PATH = process.env.LETTER_IRL_WIDGET_PATH ?? "/widgets";
 const MANIFEST_ROUTE = process.env.LETTER_IRL_MANIFEST_ROUTE ?? "/manifest.json";
-const MANIFEST_FILE_PATH =
-  process.env.LETTER_IRL_MANIFEST_FILE ??
-  path.resolve(__dirname, "..", "..", "manifest.json");
 const OPENID_CONFIG_ROUTE =
   process.env.LETTER_IRL_OPENID_ROUTE ?? "/.well-known/openid-configuration";
 const PROTECTED_RESOURCE_ROUTE =
@@ -379,14 +377,13 @@ export async function startHttpServer() {
 
     if (url.pathname === MANIFEST_ROUTE) {
       try {
-        const file = await fs.readFile(MANIFEST_FILE_PATH, "utf-8");
         res.statusCode = 200;
         res.setHeader("Content-Type", "application/json; charset=utf-8");
-        res.end(file);
+        res.end(stringifyManifest());
       } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        res.statusCode = code === "ENOENT" ? 404 : 500;
-        res.end(code === "ENOENT" ? "Manifest not found" : "Manifest read error");
+        console.error("Manifest generation failed", error);
+        res.statusCode = 500;
+        res.end("Manifest generation error");
       }
       return;
     }

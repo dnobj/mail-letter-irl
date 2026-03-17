@@ -20,6 +20,7 @@ import {
   quoteAndPreviewPostcardInputZ,
   sendPostcardInputZ,
   submitFeatureRequestInputZ,
+  getStartedInputZ,
   uploadImageInputZ,
   generateImageInputZ,
   confirmUploadedImageInputZ
@@ -53,6 +54,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
 
   // Read-only tools: only retrieve data, no modifications
   const readOnlyTools = [
+    'get_started',
     'get_account_balance',
     'list_orders',
     'get_order_status',
@@ -107,6 +109,7 @@ export const WIDGET_DEFINITIONS = [
   { name: "PostcardPreviewCard", description: "Shows postcard front/back preview with cost, delivery info, and status" },
   { name: "ImageUploadCard", description: "File picker widget for uploading photos to use in letters or postcards" },
   { name: "GenerateImageCard", description: "Preview widget for AI-generated images with upload to use in letters or postcards" },
+  { name: "GetStartedCard", description: "Getting-started guide for new users with setup steps and example prompts" },
 ];
 
 /**
@@ -255,6 +258,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   send_postcard: sendPostcardInputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestInputZ,
+  get_started: getStartedInputZ,
   // Image upload tool
   upload_image: uploadImageInputZ,
   // Image generation tool
@@ -505,6 +509,10 @@ function summarizeToolResult(
     case "submit_feature_request": {
       const message = result.message as string;
       return message || "Feature request submitted.";
+    }
+    case "get_started": {
+      const overview = result.overview as string | undefined;
+      return overview || "Letter IRL getting-started guide ready.";
     }
     case "upload_image": {
       const message = result.message as string;

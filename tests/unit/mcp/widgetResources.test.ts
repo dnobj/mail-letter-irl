@@ -32,8 +32,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
     );
 
-    it('should have 4 widgets defined', () => {
-      expect(WIDGET_DEFINITIONS.length).toBe(4);
+    it('should have 5 widgets defined', () => {
+      expect(WIDGET_DEFINITIONS.length).toBe(5);
     });
   });
 
@@ -132,12 +132,13 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 
 describe('registerWidgetResources implementation', () => {
   it('should register all widget resources', () => {
-    expect(WIDGET_DEFINITIONS.length).toBe(4);
+    expect(WIDGET_DEFINITIONS.length).toBe(5);
     expect(WIDGET_DEFINITIONS.map((widget) => widget.name)).toEqual([
       'LetterPreviewCard',
       'PostcardPreviewCard',
       'ImageUploadCard',
-      'GenerateImageCard'
+      'GenerateImageCard',
+      'GetStartedCard'
     ]);
   });
 

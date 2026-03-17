@@ -601,6 +601,8 @@
           reasonCannotSend,
           deliveryClass,
           estimatedDeliveryDays,
+          deliveryEstimate,
+          deliveryDisclaimer,
           savedReturnAddressNote,
           draftId,
           layoutType
@@ -628,7 +630,12 @@
         // Delivery info
         const deliveryText = [];
         if (deliveryClass) deliveryText.push(deliveryClass);
-        if (estimatedDeliveryDays) deliveryText.push(`~${estimatedDeliveryDays} days`);
+        if (deliveryEstimate) {
+          deliveryText.push(deliveryEstimate);
+        } else if (estimatedDeliveryDays) {
+          deliveryText.push(`~${estimatedDeliveryDays} days`);
+        }
+        if (deliveryDisclaimer) deliveryText.push(deliveryDisclaimer);
         document.getElementById("delivery").textContent =
           deliveryText.length > 0 ? deliveryText.join(" - ") : "Standard";
 

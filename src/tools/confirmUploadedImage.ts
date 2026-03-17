@@ -75,12 +75,7 @@ export const confirmUploadedImageTool: McpToolDefinition<
   ConfirmUploadedImageOutput
 > = {
   name: "confirm_uploaded_image",
-  description: `Confirms a photo was uploaded via the upload widget and provides the download URL.
-
-THIS TOOL IS CALLED AUTOMATICALLY by the ImageUploadCard widget after a successful upload.
-DO NOT call this tool directly — it is for internal widget-to-assistant communication only.
-
-After this tool returns, follow the suggestedNextStep instructions to call the appropriate preview tool with the imageUrl.`,
+  description: "Internal widget relay that confirms an uploaded image and returns the imageUrl plus next-step guidance. Not intended for direct user requests.",
   readOnly: false,
   inputSchema: confirmUploadedImageInputSchema,
   outputSchema: confirmUploadedImageOutputSchema,

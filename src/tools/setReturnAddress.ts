@@ -105,14 +105,7 @@ export const setReturnAddressTool: McpToolDefinition<
 > = {
   name: "set_return_address",
   description:
-    "Set your preferred return address for letters. This address will be validated and saved for future use.\n\n" +
-    "Once saved, this address will automatically be used as the sender/return address when you create letters " +
-    "without specifying a sender address.\n\n" +
-    "Address Validation:\n" +
-    "- The address will be validated for deliverability before saving\n" +
-    "- If the address is corrected (e.g., ZIP code standardized), the corrected version is saved\n" +
-    "- Only US addresses are currently supported\n\n" +
-    "You can update your return address at any time by calling this tool again.",
+    "Save your preferred return address for future letters and postcards. The address is validated before saving, corrected when possible, and used automatically when you omit a sender address. U.S. addresses only.",
   readOnly: false,
   inputSchema: {
     type: "object",
