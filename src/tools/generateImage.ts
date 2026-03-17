@@ -215,37 +215,7 @@ export const generateImageTool: McpToolDefinition<
   GenerateImageOutput
 > = {
   name: "generate_image",
-  description: `Generate an image using AI for use in postcards or letters.
-
-PREFER NATIVE IMAGE GENERATION:
-When ChatGPT's built-in image generation is available, use it instead of this tool.
-The native image can then be attached directly to a preview tool call (quote_and_preview_postcard, etc.).
-Only call generate_image as a FALLBACK when:
-- Native image generation is unavailable or blocked (e.g., when apps are active)
-- Native generation failed or returned an error
-- The user explicitly asks to use Mail IRL's image generator
-
-USE THIS TOOL WHEN (and native generation is unavailable):
-- User wants a postcard or letter with an image but doesn't have their own photo
-- User describes an image they'd like (e.g., "a sunset over mountains")
-- User asks you to create, generate, or make an image for their mail
-- User says "draw", "create", "design", or "generate" an image
-
-DO NOT USE THIS TOOL WHEN:
-- User has already provided their own image (file attachment or URL)
-- User wants to upload an existing photo (use upload_image instead)
-- The issue is "image not received" from ChatGPT upload (use upload_image fallback)
-- User is referring to an existing uploaded photo ("this photo", "the one I uploaded")
-  and wants that same photo used
-
-CONTEXT PARAMETER:
-- "postcard" — landscape image optimized for 6x9 postcard front
-- "header_image" — wide image for letter header/letterhead
-- "inline_image" — square image for inside a letter
-
-AFTER GENERATION:
-The user will see a preview in a widget and can choose to use the image.
-Once they confirm, use the imageUrl with the appropriate preview tool.`,
+  description: "Generate a new image for a postcard or letter when the user needs artwork and native ChatGPT image generation is unavailable or blocked. Returns a preview widget and an imageUrl to use in the next preview call. Context may be postcard, header_image, or inline_image.",
   readOnly: false,
   inputSchema: generateImageInputSchema,
   outputSchema: generateImageOutputSchema,

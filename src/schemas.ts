@@ -125,6 +125,8 @@ export const quoteAndPreviewOutputSchema: JsonSchema = {
     reasonCannotSend: { type: "string" },
     deliveryClass: { type: "string" },
     estimatedDeliveryDays: { type: "integer" },
+    deliveryEstimate: { type: "string" },
+    deliveryDisclaimer: { type: "string" },
     draftId: { type: "string", description: "Unique draft ID required for send_letter" },
     draftExpiresAt: { type: "string", description: "ISO timestamp when draft expires (24h)" },
     layoutType: {
@@ -367,6 +369,8 @@ export const quoteAndPreviewPostcardOutputSchema: JsonSchema = {
     reasonCannotSend: { type: "string" },
     deliveryClass: { type: "string" },
     estimatedDeliveryDays: { type: "integer" },
+    deliveryEstimate: { type: "string" },
+    deliveryDisclaimer: { type: "string" },
     draftId: { type: "string", description: "Unique draft ID required for send_postcard" },
     draftExpiresAt: { type: "string", description: "ISO timestamp when draft expires (24h)" },
     usedSavedReturnAddress: { type: "boolean" },

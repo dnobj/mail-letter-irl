@@ -83,30 +83,7 @@ export const uploadImageTool: McpToolDefinition<
   UploadImageOutput
 > = {
   name: "upload_image",
-  description: `Upload a photo for use in letters or postcards. Provides a direct file picker widget.
-
-PREFER DIRECT FILE ATTACHMENT:
-Users should first try attaching an image directly to their message (paperclip/attachment button).
-If the image was received as a file attachment, pass it directly to the preview tool — no need for this widget.
-
-USE THIS TOOL ONLY WHEN:
-- User's direct file attachment was NOT received by the preview tool
-- A previous preview tool call failed because no image was found
-- User is on mobile and image attachment isn't working
-- User explicitly asks to use the upload widget or photo picker
-
-IMPORTANT BEHAVIOR:
-- If this tool is needed, CALL IT IMMEDIATELY in the same turn.
-- Do NOT only describe the widget; actually call the tool so the widget appears.
-
-DO NOT USE THIS TOOL WHEN:
-- The user has already provided a direct image URL
-- The image was successfully received via file attachment
-- The user hasn't tried attaching an image yet (let them try first)
-
-The widget handles file selection, validation, and upload entirely client-side.
-After the user selects a photo, the download URL is communicated back automatically.
-Then re-call the appropriate preview tool (quote_and_preview_postcard, etc.) with the imageUrl parameter.`,
+  description: "Open the image upload widget for letters or postcards when a direct file attachment is unavailable or was not passed through to a preview tool. The widget uploads the file and returns an imageUrl to use in the next preview call.",
   readOnly: false,
   inputSchema: uploadImageInputSchema,
   outputSchema: uploadImageOutputSchema,

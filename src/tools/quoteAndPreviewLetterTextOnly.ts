@@ -97,15 +97,7 @@ export const quoteAndPreviewLetterTextOnlyTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter",
   description:
-    "PREVIEW a text-only physical letter (no images). This does NOT send anything.\n\n" +
-    "LIMITS: Must not exceed 1600 characters OR 24 lines. CRITICAL: Write as continuous paragraphs - do NOT put blank lines between sentences. US addresses only.\n\n" +
-    "RECIPIENT ADDRESS: You MUST have a real recipient address. NEVER fabricate or use placeholders. " +
-    "Ask the user, or look up the address if they name a person, business, or destination. Postal code is optional.\n\n" +
-    "Creates a DRAFT for the user to review. Sending happens via send_letter.\n\n" +
-    "Use cases: Thank you notes, formal correspondence, condolence letters, pen pal letters.\n\n" +
-    "FOR LETTERS WITH IMAGES:\n" +
-    "- quote_and_preview_letter_with_header_image: Logo at TOP (1100 chars, 17 lines)\n" +
-    "- quote_and_preview_letter_with_image: Image AFTER signature (800 chars, 12 lines)",
+    "Preview a text-only physical letter draft. This does not send mail. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. Send later with send_letter.",
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale
   readOnly: false,

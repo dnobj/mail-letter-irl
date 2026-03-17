@@ -160,7 +160,7 @@ export const getAccountBalanceTool: McpToolDefinition<
   GetAccountBalanceOutput
 > = {
   name: "get_account_balance",
-  description: "Check how many pre-paid letters you have remaining. Visit letterirl.com to purchase more.",
+  description: "Check how many pre-paid letter sends you have remaining. Visit letterirl.com to purchase more.",
   readOnly: true,
   inputSchema: getAccountBalanceInputSchema,
   outputSchema: getAccountBalanceOutputSchema,

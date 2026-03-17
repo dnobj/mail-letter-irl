@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Letter IRL Getting Started</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f0e6;
+        --card: #fffaf4;
+        --ink: #2b241d;
+        --muted: #6b5b4c;
+        --border: #dcc6ac;
+        --accent: #9f4f2b;
+      }
+
+      body {
+        margin: 0;
+        font-family: Georgia, "Times New Roman", serif;
+        background: linear-gradient(180deg, #f3e8d9 0%, var(--bg) 100%);
+        color: var(--ink);
+      }
+
+      .card {
+        margin: 0;
+        padding: 20px;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: var(--card);
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 24px;
+      }
+
+      p {
+        margin: 0 0 12px;
+        line-height: 1.5;
+      }
+
+      .step {
+        margin-top: 14px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: #f9f1e7;
+        border: 1px solid #ead8c2;
+      }
+
+      .label {
+        display: inline-block;
+        margin-bottom: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      ul {
+        margin: 10px 0 0 18px;
+        padding: 0;
+        color: var(--muted);
+      }
+
+      li + li {
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <article class="card">
+      <h1 id="title">Get Started with Letter IRL</h1>
+      <p id="overview"></p>
+      <div class="step">
+        <div class="label">Before You Send</div>
+        <p id="purchase-step"></p>
+      </div>
+      <div class="step">
+        <div class="label">Try One Of These</div>
+        <ul id="example-prompts"></ul>
+      </div>
+    </article>
+
+    <script>
+      function render() {
+        const output = window.openai?.toolOutput ?? {};
+        const responseMeta = window.openai?.toolResponseMetadata ?? {};
+        const state = { ...responseMeta, ...output };
+
+        document.getElementById("title").textContent =
+          state.title || "Get Started with Letter IRL";
+        document.getElementById("overview").textContent = state.overview || "";
+        document.getElementById("purchase-step").textContent = state.purchaseStep || "";
+
+        const list = document.getElementById("example-prompts");
+        list.innerHTML = "";
+        for (const prompt of state.examplePrompts || []) {
+          const item = document.createElement("li");
+          item.textContent = prompt;
+          list.appendChild(item);
+        }
+      }
+
+      window.addEventListener("openai:set_globals", render);
+      render();
+    </script>
+  </body>
+</html>

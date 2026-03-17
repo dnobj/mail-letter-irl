@@ -348,18 +348,7 @@ async function handler(
 export const sendLetterTool: McpToolDefinition<SendLetterInput, SendLetterOutput> = {
   name: "send_letter",
   description:
-    "Send a letter using a draft from quote_and_preview_letter.\n\n" +
-    "IMPORTANT - Draft Requirement:\n" +
-    "1. You MUST call quote_and_preview_letter first to get a draftId.\n" +
-    "2. Pass the draftId to this tool along with confirm: true.\n" +
-    "3. The draft contains all letter details (sender, recipient, content) - you don't need to pass them again.\n\n" +
-    "Return Address Suggestion:\n" +
-    "- If the user doesn't have a saved return address, the response will suggest saving the sender address used in this letter.\n" +
-    "- Check suggestSaveReturnAddress in the response to see if you should prompt the user to save their return address.\n\n" +
-    "Idempotency:\n" +
-    "- If you call this tool twice with the same draftId, the second call will return the existing order without charging again.\n" +
-    "- This protects against duplicate charges if the network request is retried.\n" +
-    "- If isRetry: true in the response, it means the letter was already sent previously.",
+    "Send a physical letter using a draft from a preview tool. Requires a draftId and confirm: true. Safe retries return the existing order instead of charging twice, and the response may suggest saving the sender as your return address.",
   readOnly: false,
   inputSchema: sendLetterInputSchema,
   outputSchema: sendLetterOutputSchema,

@@ -17,6 +17,11 @@ import {
   validateCharacterLimit,
 } from "../services/previewService.js";
 import { createDraft } from "../services/draftService.js";
+import {
+  DELIVERY_CLASS,
+  DELIVERY_DISCLAIMER,
+  DELIVERY_ESTIMATE
+} from "../content/delivery.js";
 
 // ============================================================================
 // Types
@@ -46,7 +51,9 @@ export interface LetterQuoteOutput {
   canSendNow: boolean;
   reasonCannotSend?: string;
   deliveryClass: string;
-  estimatedDeliveryDays: number;
+  estimatedDeliveryDays?: number;
+  deliveryEstimate?: string;
+  deliveryDisclaimer?: string;
   draftId: string;
   draftExpiresAt: string;
   layoutType: LetterLayoutType;
@@ -547,8 +554,9 @@ export async function createLetterDraftAndBuildOutput(
     lettersRequired,
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
-    deliveryClass: "First Class Letter",
-    estimatedDeliveryDays: 5,
+    deliveryClass: DELIVERY_CLASS,
+    deliveryEstimate: DELIVERY_ESTIMATE,
+    deliveryDisclaimer: DELIVERY_DISCLAIMER,
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
     layoutType,

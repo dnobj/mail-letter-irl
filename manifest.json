@@ -1,42 +1,707 @@
 {
   "name": "Letter IRL",
   "version": "0.1.0",
-  "description": "Draft, preview, and mail physical letters via the Letter IRL MCP server.",
+  "description": "Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. To send mail, first buy pre-paid letter sends on letterirl.com.",
   "contactEmail": "support@letterirl.com",
   "legalInfoUrl": "https://letterirl.com/terms",
   "tools": [
     {
       "name": "quote_and_preview_letter",
-      "description": "Generate a printable preview and required Letter IRL credits (requires full sender & recipient addresses).",
+      "description": "Preview a text-only physical letter draft. This does not send mail. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. Send later with send_letter.",
       "inputSchema": {
-        "$ref": "#/definitions/QuotePreviewInput"
+        "type": "object",
+        "required": [
+          "recipient",
+          "bodyText",
+          "signOff"
+        ],
+        "properties": {
+          "sender": {
+            "type": "object",
+            "required": [
+              "name",
+              "addressLine1",
+              "city",
+              "state",
+              "postalCode",
+              "country"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "addressLine1": {
+                "type": "string"
+              },
+              "addressLine2": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "postalCode": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string"
+              }
+            },
+            "description": "Return address (optional - will use saved return address if not provided)"
+          },
+          "recipient": {
+            "type": "object",
+            "required": [
+              "name",
+              "addressLine1",
+              "city",
+              "state",
+              "postalCode",
+              "country"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "addressLine1": {
+                "type": "string"
+              },
+              "addressLine2": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "postalCode": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string"
+              }
+            }
+          },
+          "bodyText": {
+            "type": "string",
+            "description": "Letter body. Must not exceed 1600 characters OR 24 lines. Write as continuous paragraphs - do NOT put blank lines between sentences."
+          },
+          "signOff": {
+            "type": "string",
+            "description": "Closing/signature (e.g., 'Sincerely, Name')"
+          }
+        }
+      }
+    },
+    {
+      "name": "quote_and_preview_letter_with_header_image",
+      "description": "Preview a physical letter draft with a header image at the top. This does not send mail. Requires a real U.S. recipient mailing address; prefer a direct file attachment for the image and use upload_image if attachment handoff fails. Send later with send_letter.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "recipient",
+          "bodyText",
+          "signOff"
+        ],
+        "properties": {
+          "sender": {
+            "type": "object",
+            "required": [
+              "name",
+              "addressLine1",
+              "city",
+              "state",
+              "postalCode",
+              "country"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "addressLine1": {
+                "type": "string"
+              },
+              "addressLine2": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "postalCode": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string"
+              }
+            },
+            "description": "Return address (optional - will use saved return address if not provided)"
+          },
+          "recipient": {
+            "type": "object",
+            "required": [
+              "name",
+              "addressLine1",
+              "city",
+              "state",
+              "postalCode",
+              "country"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "addressLine1": {
+                "type": "string"
+              },
+              "addressLine2": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "postalCode": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string"
+              }
+            }
+          },
+          "bodyText": {
+            "type": "string",
+            "description": "Letter body. Must not exceed 1100 characters OR 17 lines. Write as continuous paragraphs - do NOT put blank lines between sentences."
+          },
+          "signOff": {
+            "type": "string",
+            "description": "Closing/signature (e.g., 'Sincerely, Name')"
+          },
+          "image": {
+            "type": "object",
+            "description": "Header image file attachment (recommended method)",
+            "properties": {
+              "download_url": {
+                "type": "string"
+              },
+              "file_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "download_url",
+              "file_id"
+            ]
+          },
+          "imageUrl": {
+            "type": "string",
+            "description": "URL of header image (fallback if no file attached)"
+          }
+        }
+      }
+    },
+    {
+      "name": "quote_and_preview_letter_with_image",
+      "description": "Preview a physical letter draft with an enclosed image after the signature. This does not send mail. Requires a real U.S. recipient mailing address; prefer a direct file attachment for the image and use upload_image if attachment handoff fails. Send later with send_letter.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "recipient",
+          "bodyText",
+          "signOff"
+        ],
+        "properties": {
+          "sender": {
+            "type": "object",
+            "required": [
+              "name",
+              "addressLine1",
+              "city",
+              "state",
+              "postalCode",
+              "country"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "addressLine1": {
+                "type": "string"
+              },
+              "addressLine2": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "postalCode": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string"
+              }
+            },
+            "description": "Return address (optional - will use saved return address if not provided)"
+          },
+          "recipient": {
+            "type": "object",
+            "required": [
+              "name",
+              "addressLine1",
+              "city",
+              "state",
+              "postalCode",
+              "country"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "addressLine1": {
+                "type": "string"
+              },
+              "addressLine2": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "postalCode": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string"
+              }
+            }
+          },
+          "bodyText": {
+            "type": "string",
+            "description": "Letter body. Must not exceed 800 characters OR 12 lines. Write as continuous paragraphs - do NOT put blank lines between sentences."
+          },
+          "signOff": {
+            "type": "string",
+            "description": "Closing/signature (e.g., 'Sincerely, Name')"
+          },
+          "image": {
+            "type": "object",
+            "description": "Image file attachment (recommended method)",
+            "properties": {
+              "download_url": {
+                "type": "string"
+              },
+              "file_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "download_url",
+              "file_id"
+            ]
+          },
+          "imageUrl": {
+            "type": "string",
+            "description": "URL of image (fallback if no file attached)"
+          }
+        }
       }
     },
     {
       "name": "send_letter",
-      "description": "Deduct credits and queue a letter for printing/mailing.",
+      "description": "Send a physical letter using a draft from a preview tool. Requires a draftId and confirm: true. Safe retries return the existing order instead of charging twice, and the response may suggest saving the sender as your return address.",
       "inputSchema": {
-        "$ref": "#/definitions/SendLetterInput"
+        "type": "object",
+        "required": [
+          "draftId",
+          "confirm"
+        ],
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "description": "Draft ID from quote_and_preview_letter"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Must be true or request fails"
+          }
+        }
       }
     },
     {
       "name": "get_order_status",
-      "description": "Retrieve the latest status timeline for a letter order.",
+      "description": "Retrieve the latest status timeline for a letter order. If no orderId is provided, returns the most recent order.",
       "inputSchema": {
-        "$ref": "#/definitions/GetOrderStatusInput"
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          }
+        }
       }
     },
     {
       "name": "get_account_balance",
-      "description": "Return the user's balance of Letter IRL credits.",
+      "description": "Check how many pre-paid letter sends you have remaining. Visit letterirl.com to purchase more.",
       "inputSchema": {
-        "$ref": "#/definitions/GetAccountBalanceInput"
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_orders",
+      "description": "List the user's recent letter and postcard orders. Returns order IDs that can be used with get_order_status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of orders to return (default: 10)"
+          }
+        }
+      }
+    },
+    {
+      "name": "set_return_address",
+      "description": "Save your preferred return address for future letters and postcards. The address is validated before saving, corrected when possible, and used automatically when you omit a sender address. U.S. addresses only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Your name as it should appear on letters"
+          },
+          "addressLine1": {
+            "type": "string",
+            "description": "Street address (e.g., '123 Main Street')"
+          },
+          "addressLine2": {
+            "type": "string",
+            "description": "Apartment, suite, unit, etc. (optional)"
+          },
+          "city": {
+            "type": "string",
+            "description": "City name"
+          },
+          "state": {
+            "type": "string",
+            "description": "State (2-letter code, e.g., 'CA', 'NY')"
+          },
+          "postalCode": {
+            "type": "string",
+            "description": "ZIP code (5-digit or ZIP+4)"
+          },
+          "country": {
+            "type": "string",
+            "description": "Country (currently only 'US' is supported)",
+            "default": "US"
+          }
+        },
+        "required": [
+          "name",
+          "addressLine1",
+          "city",
+          "state",
+          "postalCode"
+        ]
+      }
+    },
+    {
+      "name": "get_return_address",
+      "description": "Get your saved return address. This is the default sender address used when you create mail without specifying one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "clear_return_address",
+      "description": "Clear your saved return address. After clearing it, you will need to provide a sender address when creating new mail.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "description": "Set to true to confirm clearing the return address"
+          }
+        },
+        "required": [
+          "confirm"
+        ]
+      }
+    },
+    {
+      "name": "quote_and_preview_postcard",
+      "description": "Preview a physical postcard draft with a front image and back message. This does not send mail. Requires a real U.S. recipient mailing address; prefer a direct file attachment for the image and use upload_image if attachment handoff fails. If sender is omitted, the saved return address is used automatically. Send later with send_postcard.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "recipient",
+          "message"
+        ],
+        "properties": {
+          "sender": {
+            "type": "object",
+            "required": [
+              "name",
+              "addressLine1",
+              "city",
+              "state",
+              "postalCode",
+              "country"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "addressLine1": {
+                "type": "string"
+              },
+              "addressLine2": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "postalCode": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string"
+              }
+            },
+            "description": "Return address (optional - will use saved return address if not provided)"
+          },
+          "recipient": {
+            "type": "object",
+            "required": [
+              "name",
+              "addressLine1",
+              "city",
+              "state",
+              "postalCode",
+              "country"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "addressLine1": {
+                "type": "string"
+              },
+              "addressLine2": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "postalCode": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string"
+              }
+            }
+          },
+          "message": {
+            "type": "string",
+            "description": "Message for back of postcard (max ~400 characters)",
+            "maxLength": 500
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "6x9"
+            ],
+            "default": "6x9",
+            "description": "Postcard size (currently only 6x9 is supported)"
+          },
+          "image": {
+            "type": "object",
+            "description": "Image file attachment for postcard front (recommended method)",
+            "properties": {
+              "download_url": {
+                "type": "string"
+              },
+              "file_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "download_url",
+              "file_id"
+            ]
+          },
+          "imageUrl": {
+            "type": "string",
+            "description": "REQUIRED when using a generated image: set this to the generatedImageUrl value returned by the generate_image tool. This is the URL of the image for the postcard front."
+          }
+        }
+      }
+    },
+    {
+      "name": "send_postcard",
+      "description": "Send a physical postcard using a draft from quote_and_preview_postcard. Requires a draftId and confirm: true. Safe retries return the existing order instead of charging twice, and the response may suggest saving the sender as your return address.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "draftId",
+          "confirm"
+        ],
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "description": "Draft ID from quote_and_preview_postcard"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Must be true or request fails"
+          }
+        }
+      }
+    },
+    {
+      "name": "submit_feature_request",
+      "description": "Submit a feature request to the Letter IRL team for unsupported capabilities or product improvements. Use this for missing mail formats, workflows, or integrations, not for billing or bug support.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "title",
+          "description"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Brief title for the feature request (max 200 characters)",
+            "maxLength": 200
+          },
+          "description": {
+            "type": "string",
+            "description": "Detailed description of the feature you'd like to see (max 2000 characters)",
+            "maxLength": 2000
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "new_feature",
+              "improvement",
+              "integration",
+              "mail_type",
+              "international",
+              "other"
+            ],
+            "description": "Category of the feature request. Defaults to 'other' if not specified."
+          },
+          "attemptedAction": {
+            "type": "string",
+            "description": "What you were trying to do when you realized this feature was needed (max 255 characters)",
+            "maxLength": 255
+          },
+          "contactEmail": {
+            "type": "string",
+            "description": "Email address to contact about this feature request (optional, uses account email if not provided)",
+            "maxLength": 255
+          },
+          "okToContact": {
+            "type": "boolean",
+            "description": "Whether the user consents to being contacted about this feature request"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_started",
+      "description": "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy pre-paid letter sends on letterirl.com, and example prompts to try next.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "upload_image",
+      "description": "Open the image upload widget for letters or postcards when a direct file attachment is unavailable or was not passed through to a preview tool. The widget uploads the file and returns an imageUrl to use in the next preview call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "string",
+            "description": "Optional hint for widget guidance text: 'postcard', 'header_image', or 'inline_image'"
+          }
+        }
+      }
+    },
+    {
+      "name": "generate_image",
+      "description": "Generate a new image for a postcard or letter when the user needs artwork and native ChatGPT image generation is unavailable or blocked. Returns a preview widget and an imageUrl to use in the next preview call. Context may be postcard, header_image, or inline_image.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Description of the image to generate (e.g., 'a sunset over mountains')"
+          },
+          "context": {
+            "type": "string",
+            "enum": [
+              "postcard",
+              "header_image",
+              "inline_image"
+            ],
+            "description": "What the image will be used for. Determines optimal dimensions."
+          }
+        }
+      }
+    },
+    {
+      "name": "confirm_uploaded_image",
+      "description": "Internal widget relay that confirms an uploaded image and returns the imageUrl plus next-step guidance. Not intended for direct user requests.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "imageUrl"
+        ],
+        "properties": {
+          "imageUrl": {
+            "type": "string",
+            "description": "Download URL of the uploaded image"
+          },
+          "context": {
+            "type": "string",
+            "description": "Usage context: 'postcard', 'header_image', or 'inline_image'"
+          }
+        }
       }
     }
   ],
   "ui": {
     "widgets": [
-      "LetterPreviewCard"
+      "LetterPreviewCard",
+      "PostcardPreviewCard",
+      "ImageUploadCard",
+      "GenerateImageCard",
+      "GetStartedCard"
     ]
   },
   "servers": [
@@ -50,52 +715,17 @@
       },
       "auth": {
         "type": "oauth",
-        "scopes": ["openid", "email", "profile"],
+        "scopes": [
+          "openid",
+          "email",
+          "profile"
+        ],
         "authorizationServer": "https://api.letterirl.com/.well-known/oauth-authorization-server"
       }
     }
   ],
-  "definitions": {
-    "Address": {
-      "type": "object",
-      "required": ["name", "addressLine1", "city", "state", "postalCode", "country"],
-      "properties": {
-        "name": { "type": "string" },
-        "addressLine1": { "type": "string" },
-        "addressLine2": { "type": "string" },
-        "city": { "type": "string" },
-        "state": { "type": "string" },
-        "postalCode": { "type": "string" },
-        "country": { "type": "string" }
-      }
-    },
-    "QuotePreviewInput": {
-      "type": "object",
-      "required": ["sender", "recipient", "bodyText", "signOff"],
-      "properties": {
-        "sender": { "$ref": "#/definitions/Address" },
-        "recipient": { "$ref": "#/definitions/Address" },
-        "bodyText": { "type": "string" },
-        "signOff": { "type": "string" }
-      }
-    },
-    "SendLetterInput": {
-      "type": "object",
-      "required": ["draftId", "confirm"],
-      "properties": {
-        "draftId": { "type": "string", "description": "Draft ID from quote_and_preview_letter" },
-        "confirm": { "type": "boolean", "description": "Must be true to send the letter" }
-      }
-    },
-    "GetOrderStatusInput": {
-      "type": "object",
-      "properties": {
-        "orderId": { "type": "string" }
-      }
-    },
-    "GetAccountBalanceInput": {
-      "type": "object",
-      "properties": {}
-    }
+  "compatibilityNotes": {
+    "sourceOfTruth": "Runtime MCP tool registry",
+    "generated": true
   }
 }

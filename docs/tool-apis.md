@@ -52,7 +52,8 @@ The Letter IRL MCP server exposes **13 tools** to the OpenAI Apps SDK. Tools are
       "canSendNow": { "type": "boolean" },
       "reasonCannotSend": { "type": "string" },
       "deliveryClass": { "type": "string" },
-      "estimatedDeliveryDays": { "type": "integer" }
+      "deliveryEstimate": { "type": "string" },
+      "deliveryDisclaimer": { "type": "string" }
     }
   }
   ```

@@ -126,6 +126,8 @@ export const submitFeatureRequestInputZ = z.object({
   okToContact: z.boolean().optional()
 });
 
+export const getStartedInputZ = z.object({});
+
 // ============================================================================
 // Upload Image Schema (Widget-based image upload)
 // ============================================================================

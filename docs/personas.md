@@ -116,6 +116,45 @@ Letter IRL serves users who want to send physical letters through conversational
 
 ---
 
+### Nina - The First-Time Connector
+`CONSUMER`
+
+**Demographics:**
+- Age: 24-45
+- Occupation: Any knowledge worker or student trying the app for the first time
+- Tech comfort: Moderate
+
+**Goals:**
+- Understand quickly what Letter IRL can actually do
+- Know whether it sends real physical mail
+- Learn the minimum setup needed before sending
+- Find a safe first prompt without guessing
+
+**Behaviors:**
+- Connects the app from ChatGPT and asks broad questions like `what can you do?`
+- Does not already know about pre-paid letter sends
+- Wants to preview before trusting the app with a paid action
+- May compare postcards vs letters before choosing
+
+**Pain Points:**
+- Unsure whether app selection should trigger anything automatically
+- Confused by payment prerequisites if not stated clearly
+- Hesitant to send physical mail without seeing a preview first
+
+**Key User Stories:**
+- US-MCP-13 (First-run onboarding)
+- US-MCP-14 (Runtime-derived compatibility manifest)
+- US-LETTER-01 (Preview a letter)
+- US-POSTCARD-01 (Preview a postcard)
+- US-CREDIT-01 (Check balance)
+
+**Test Scenarios:**
+- Broad first-run prompt routed to onboarding
+- User learns pre-purchase requirement before attempting send
+- User sees example prompts and successfully reaches a preview tool
+
+---
+
 ### Eleanor - The Legacy Connector
 `CONSUMER`
 

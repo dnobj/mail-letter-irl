@@ -365,18 +365,7 @@ async function handler(
 export const sendPostcardTool: McpToolDefinition<SendPostcardInput, SendPostcardOutput> = {
   name: "send_postcard",
   description:
-    "Send a postcard using a draft from quote_and_preview_postcard.\n\n" +
-    "IMPORTANT - Draft Requirement:\n" +
-    "1. You MUST call quote_and_preview_postcard first to get a draftId.\n" +
-    "2. Pass the draftId to this tool along with confirm: true.\n" +
-    "3. The draft contains all postcard details (image, message, addresses) - you don't need to pass them again.\n\n" +
-    "Return Address Suggestion:\n" +
-    "- If the user doesn't have a saved return address, the response will suggest saving the sender address.\n" +
-    "- Check suggestSaveReturnAddress in the response to see if you should prompt the user.\n\n" +
-    "Idempotency:\n" +
-    "- If you call this tool twice with the same draftId, the second call will return the existing order without charging again.\n" +
-    "- This protects against duplicate charges if the network request is retried.\n" +
-    "- If isRetry: true in the response, it means the postcard was already sent previously.",
+    "Send a physical postcard using a draft from quote_and_preview_postcard. Requires a draftId and confirm: true. Safe retries return the existing order instead of charging twice, and the response may suggest saving the sender as your return address.",
   readOnly: false,
   inputSchema: sendPostcardInputSchema,
   outputSchema: sendPostcardOutputSchema,

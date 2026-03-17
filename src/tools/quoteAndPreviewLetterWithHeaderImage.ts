@@ -215,19 +215,7 @@ export const quoteAndPreviewLetterWithHeaderImageTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter_with_header_image",
   description:
-    "PREVIEW a letter with a HEADER IMAGE at the top (letterhead/branding). This does NOT send anything.\n\n" +
-    "LIMITS: Must not exceed 1100 characters OR 17 lines. CRITICAL: Write as continuous paragraphs - do NOT put blank lines between sentences. US addresses only.\n\n" +
-    "RECIPIENT ADDRESS: You MUST have a real recipient address. NEVER fabricate or use placeholders. " +
-    "Ask the user, or look up the address if they name a person, business, or destination. Postal code is optional.\n\n" +
-    "IMAGE INPUT (in order of preference):\n" +
-    "1. BEST: Attach an image file directly to your message (native ChatGPT attachment)\n" +
-    "2. Use imageUrl parameter with a publicly accessible URL\n" +
-    "3. FALLBACK: If neither works, call upload_image to open the file picker widget, then retry with the imageUrl from the upload\n\n" +
-    "Creates a DRAFT for the user to review. Sending happens via send_letter.\n\n" +
-    "Use cases: Business letters with logo, custom letterhead, branded correspondence.\n\n" +
-    "Alternative tools:\n" +
-    "- quote_and_preview_letter: Text-only (1600 chars, 24 lines)\n" +
-    "- quote_and_preview_letter_with_image: Image AFTER signature (800 chars, 12 lines)",
+    "Preview a physical letter draft with a header image at the top. This does not send mail. Requires a real U.S. recipient mailing address; prefer a direct file attachment for the image and use upload_image if attachment handoff fails. Send later with send_letter.",
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale
   readOnly: false,

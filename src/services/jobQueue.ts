@@ -8,10 +8,6 @@ import PgBoss from 'pg-boss';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
-if (!DATABASE_URL) {
-  throw new Error('DATABASE_URL environment variable is required');
-}
-
 let boss: PgBoss | null = null;
 
 /**
@@ -20,6 +16,9 @@ let boss: PgBoss | null = null;
 export async function initializeJobQueue(): Promise<PgBoss> {
   if (boss) {
     return boss;
+  }
+  if (!DATABASE_URL) {
+    throw new Error('DATABASE_URL environment variable is required');
   }
 
   console.log('🔧 Initializing pg-boss job queue...');

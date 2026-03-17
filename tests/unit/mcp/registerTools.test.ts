@@ -33,6 +33,7 @@ import {
 
 // Read-only tools: only retrieve data, no database modifications
 const readOnlyTools = [
+  { name: 'get_started', readOnly: true },
   { name: 'get_account_balance', readOnly: true },
   { name: 'get_order_status', readOnly: true },
   { name: 'get_return_address', readOnly: true },
@@ -84,8 +85,8 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       }
     );
 
-    it('should have exactly 4 read-only tools', () => {
-      expect(readOnlyTools.length).toBe(4);
+    it('should have exactly 5 read-only tools', () => {
+      expect(readOnlyTools.length).toBe(5);
     });
   });
 
@@ -239,16 +240,16 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
   });
 
   describe('Tool Classification Summary', () => {
-    it('should have 13 total tools', () => {
-      expect(allTools.length).toBe(13);
+    it('should have 14 total tools covered by annotation checks', () => {
+      expect(allTools.length).toBe(14);
     });
 
-    it('should have 4 read-only tools', () => {
+    it('should have 5 read-only tools', () => {
       const readOnlyCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === true;
       }).length;
-      expect(readOnlyCount).toBe(4);
+      expect(readOnlyCount).toBe(5);
     });
 
     it('should have 9 write tools (non-read-only)', () => {
