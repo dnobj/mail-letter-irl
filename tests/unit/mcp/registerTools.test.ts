@@ -331,14 +331,26 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
     });
 
     it('should merge securitySchemes into tool metadata', () => {
-      expect(buildToolMeta({ 'openai/widgetAccessible': true }, true)).toMatchObject({
+      expect(
+        buildToolMeta(
+          {
+            'openai/outputTemplate': 'ui://widgets/LetterPreviewCard.html',
+            'openai/widgetAccessible': true
+          },
+          true
+        )
+      ).toMatchObject({
         securitySchemes: [
           {
             type: 'oauth2',
             scopes: ['openid', 'email', 'profile']
           }
         ],
-        'openai/widgetAccessible': true
+        'openai/widgetAccessible': true,
+        ui: {
+          resourceUri: 'ui://widgets/LetterPreviewCard.html',
+          widgetAccessible: true
+        }
       });
     });
   });

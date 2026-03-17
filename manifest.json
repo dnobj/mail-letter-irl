@@ -444,7 +444,7 @@
     },
     {
       "name": "quote_and_preview_postcard",
-      "description": "Preview a physical postcard draft with a front image and back message. This does not send mail. Requires a real U.S. recipient mailing address; prefer a direct file attachment for the image and use upload_image if attachment handoff fails. If sender is omitted, the saved return address is used automatically. Send later with send_postcard.",
+      "description": "Create a preview of a physical postcard draft with a front image and back message. Use this when the user wants to make, create, design, or preview a postcard through Letter IRL. This does not send mail. Requires a real U.S. recipient mailing address; prefer a direct file attachment for the image, pass imageUrl when a generated or hosted image is already available, and use upload_image only if no attachment or usable imageUrl made it through. If sender is omitted, the saved return address is used automatically. Send later with send_postcard.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -638,7 +638,7 @@
     },
     {
       "name": "upload_image",
-      "description": "Open the image upload widget for letters or postcards when a direct file attachment is unavailable or was not passed through to a preview tool. The widget uploads the file and returns an imageUrl to use in the next preview call.",
+      "description": "Open the image upload widget for letters or postcards only as a fallback when a direct file attachment is unavailable or was not passed through to a preview tool. Do not use this when a generated imageUrl, hosted imageUrl, or working file attachment is already available. The widget uploads the file and returns an imageUrl to use in the next preview call.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -651,7 +651,7 @@
     },
     {
       "name": "generate_image",
-      "description": "Generate a new image for a postcard or letter when the user needs artwork and native ChatGPT image generation is unavailable or blocked. Returns a preview widget and an imageUrl to use in the next preview call. Context may be postcard, header_image, or inline_image.",
+      "description": "Generate a new image for a postcard or letter when the user needs artwork and native ChatGPT image generation is unavailable or blocked. Returns a preview widget and an imageUrl to pass to the next preview call. If the user already has an uploaded, attached, or generated image to reuse, use that existing image instead of calling this tool again. Context may be postcard, header_image, or inline_image.",
       "inputSchema": {
         "type": "object",
         "required": [

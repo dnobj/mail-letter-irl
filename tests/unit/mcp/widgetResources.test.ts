@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
+  buildWidgetResourceMeta,
   WIDGET_DEFINITIONS,
   WIDGET_MIME_TYPE
 } from '../../../src/mcp/registerTools.js';
@@ -40,6 +41,21 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
   describe('widget MIME type', () => {
     it('should use text/html;profile=mcp-app MIME type', () => {
       expect(WIDGET_MIME_TYPE).toBe('text/html;profile=mcp-app');
+    });
+  });
+
+  describe('widget metadata aliases', () => {
+    it('should expose canonical ui metadata and OpenAI compatibility aliases', () => {
+      const meta = buildWidgetResourceMeta('Test widget');
+      expect(meta.ui).toMatchObject({
+        description: 'Test widget',
+        domain: 'https://api.letterirl.com',
+        prefersBorder: true
+      });
+      expect(meta).toMatchObject({
+        'openai/widgetPrefersBorder': true,
+        'openai/widgetDescription': 'Test widget'
+      });
     });
   });
 

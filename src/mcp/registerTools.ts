@@ -176,21 +176,45 @@ export function buildToolMeta(
   meta: ToolMeta,
   requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false"
 ): ToolMeta {
+  const outputTemplate = meta["openai/outputTemplate"] as string | undefined;
+  const widgetAccessible = meta["openai/widgetAccessible"] as boolean | undefined;
+  const existingUi = (meta.ui as Record<string, unknown> | undefined) ?? {};
+
   return {
     securitySchemes: buildToolSecuritySchemes(requireAuth),
-    ...meta
+    ...meta,
+    ui: {
+      ...existingUi,
+      ...(outputTemplate ? { resourceUri: outputTemplate } : {}),
+      ...(widgetAccessible !== undefined ? { widgetAccessible } : {})
+    }
+  };
+}
+
+export function buildWidgetResourceMeta(description: string) {
+  return {
+    ui: {
+      description,
+      domain: WIDGET_DOMAIN,
+      csp: WIDGET_CSP,
+      prefersBorder: true
+    },
+    "openai/widgetPrefersBorder": true,
+    "openai/widgetDomain": WIDGET_DOMAIN,
+    "openai/widgetCSP": WIDGET_CSP,
+    "openai/widgetDescription": description
   };
 }
 
 /**
  * Register widget HTML files as MCP resources.
  *
- * ChatGPT requires widgets to be:
+ * Current Apps SDK-style widgets are:
  * 1. Registered as MCP resources with ui:// protocol URIs
- * 2. Served with text/html+skybridge MIME type
- * 3. Referenced in tool _meta.openai/outputTemplate
+ * 2. Served with text/html;profile=mcp-app
+ * 3. Exposed with canonical ui.* metadata plus legacy openai/* aliases
  *
- * The skybridge MIME type signals ChatGPT to inject window.openai runtime.
+ * The widget HTML profile signals the client to inject the runtime bridge.
  */
 async function registerWidgetResources(mcpServer: McpServer) {
   for (const widget of WIDGET_DEFINITIONS) {
@@ -205,9 +229,8 @@ async function registerWidgetResources(mcpServer: McpServer) {
       continue;
     }
 
-    // Register widget resource per OpenAI docs:
-    // - Empty {} for options (NOT { mimeType: ... })
-    // - _meta on the content item with CSP, domain, and widgetPrefersBorder
+    // Register widget resource with canonical ui.* metadata and
+    // legacy openai/* aliases for compatibility.
     mcpServer.registerResource(
       widget.name,
       uri,
@@ -221,12 +244,7 @@ async function registerWidgetResources(mcpServer: McpServer) {
             uri,
             mimeType: WIDGET_MIME_TYPE,
             text: html,
-            _meta: {
-              "openai/widgetPrefersBorder": true,
-              "openai/widgetDomain": WIDGET_DOMAIN,
-              "openai/widgetCSP": WIDGET_CSP,
-              "openai/widgetDescription": widget.description
-            }
+            _meta: buildWidgetResourceMeta(widget.description)
           }]
         };
       }
