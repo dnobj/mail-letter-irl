@@ -4,6 +4,8 @@
 **Target Platform:** ChatGPT App Directory
 **Submission Status:** Pre-submission
 
+See also: [demo-scenarios.md](./demo-scenarios.md) for the recommended submission video flows and narration ideas.
+
 ---
 
 ## App Description

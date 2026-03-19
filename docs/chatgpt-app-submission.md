@@ -60,6 +60,26 @@ npm run build
 - Support email: `support@letterirl.com`
 - Country availability: U.S.
 
+## Remaining work before submission
+
+- [ ] Complete OpenAI Platform identity verification for the exact individual or business name you plan to publish under
+- [ ] Confirm your OpenAI Platform account has the `Owner` role for the submitting organization
+- [ ] Confirm the OpenAI project used for submission has global data residency (EU data residency projects cannot submit apps for review today)
+- [ ] Verify the production MCP server and OAuth endpoints are live on the public domains you will submit
+- [ ] Review the production widget CSP and confirm it allows only the exact required domains
+- [ ] Capture final submission assets: logo, screenshots, app description, company URL, privacy policy URL, support contact, and localization fields
+- [ ] Finalize reviewer test prompts and expected responses using `docs/app-submission/openai-test-cases.md`
+- [ ] Run the full pre-submission command checklist against production-ready code
+- [ ] Do one final manual ChatGPT pass for the highest-risk flows: onboarding, postcard preview, generated-image reuse, upload fallback, send confirmation, and OAuth linking
+- [ ] Decide whether any remaining known issues need a mitigation note in reviewer test instructions before submission
+
+## Notes from latest OpenAI guidance
+
+- All submissions must come from a verified individual or organization.
+- Only users with the `Owner` role can submit apps for review.
+- Submission currently requires a publicly accessible MCP server, a defined widget CSP, screenshots, test prompts/responses, company and privacy policy URLs, and localization information.
+- Review is tied to the exact submitted version. If you need to change it while under review, withdraw and resubmit the draft.
+
 ## Source links
 
 - OpenAI Apps SDK submission guidelines: `https://developers.openai.com/apps-sdk/app-submission-guidelines/`
