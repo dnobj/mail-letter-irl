@@ -174,7 +174,7 @@ async function handleListTokens(
   res: ServerResponse,
   authInfo: AuthenticatedUser
 ): Promise<void> {
-  const tokens = await listTokens(authInfo.userId);
+  const tokens = await listTokens(authInfo.userId, { includeRevoked: true });
 
   sendJson(res, 200, {
     tokens,
