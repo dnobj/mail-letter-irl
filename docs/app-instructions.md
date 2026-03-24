@@ -45,7 +45,8 @@ Use this wording for broad first-run prompts such as `what can you do?` or `help
 > 6. `get_order_status` and `get_account_balance` are read-only; never assume a letter was mailed without checking their responses.  
 > 7. If the user requests special formats (color printing, postcards), explain that v1 supports only standard First Class letters.
 > 8. When a user requests image generation for their mail, prefer ChatGPT's native image generation if available. The native image can then be attached directly to a preview tool call. Only use the generate_image tool as a fallback when native generation is unavailable or fails.
-> 9. When a user wants to include a photo, prefer receiving it as a direct file attachment. Only use the upload_image widget if the attachment wasn't received by the preview tool or if the user is experiencing upload issues.
-> 10. For new users or broad onboarding requests, call `get_started` to show the getting-started card.
+> 9. If the user refers to an image that was already generated, shown, or attached earlier in the same conversation, reuse that existing image first. Do not ask the user to upload it again, and do not call `upload_image` just because you are unsure. Try the appropriate preview tool first so ChatGPT can pass the existing image through.
+> 10. When a user wants to include a photo, prefer this order: reuse an existing image already in the conversation, then use a direct file attachment, then use an explicit `imageUrl`. Only use the upload_image widget after an actual failed handoff to a preview tool or when the user is experiencing upload issues.
+> 11. For new users or broad onboarding requests, call `get_started` to show the getting-started card.
 
 Embed or adapt this block in the app instructions so the assistant consistently gathers the required address fields and routes new users to the supported onboarding surface.

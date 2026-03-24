@@ -83,7 +83,7 @@ export const uploadImageTool: McpToolDefinition<
   UploadImageOutput
 > = {
   name: "upload_image",
-  description: "Open the image upload widget for letters or postcards only as a fallback when a direct file attachment is unavailable or was not passed through to a preview tool. Do not use this when a generated imageUrl, hosted imageUrl, or working file attachment is already available. The widget uploads the file and returns an imageUrl to use in the next preview call.",
+  description: "Open the image upload widget for letters or postcards only as a fallback when a direct file attachment is unavailable or was not passed through to a preview tool. Do not use this when a generated imageUrl, hosted imageUrl, or working file attachment is already available. Do not use this just because the user referenced an image generated earlier in the same conversation. Reuse that existing conversation image first. Only open this widget after an actual failed handoff or when the user explicitly needs upload help. The widget uploads the file and returns an imageUrl to use in the next preview call.",
   readOnly: false,
   inputSchema: uploadImageInputSchema,
   outputSchema: uploadImageOutputSchema,

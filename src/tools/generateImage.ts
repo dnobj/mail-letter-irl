@@ -215,7 +215,7 @@ export const generateImageTool: McpToolDefinition<
   GenerateImageOutput
 > = {
   name: "generate_image",
-  description: "Generate a new image for a postcard or letter when the user needs artwork and native ChatGPT image generation is unavailable or blocked. Returns a preview widget and an imageUrl to pass to the next preview call. If the user already has an uploaded, attached, or generated image to reuse, use that existing image instead of calling this tool again. Context may be postcard, header_image, or inline_image.",
+  description: "Generate a new image for a postcard or letter when the user needs artwork and native ChatGPT image generation is unavailable or blocked. Returns a preview widget and an imageUrl to pass to the next preview call. If the user already has an uploaded, attached, or previously generated image in this conversation, reuse that existing image instead of calling this tool again. Context may be postcard, header_image, or inline_image.",
   readOnly: false,
   inputSchema: generateImageInputSchema,
   outputSchema: generateImageOutputSchema,
