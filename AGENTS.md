@@ -19,3 +19,11 @@ Add lightweight integration scripts under `test/` (mirroring the existing `minim
 
 ## Commit & Pull Request Guidelines
 Follow the existing history: short, imperative summaries (e.g., “Add Auth0 sample MCP server”) without trailing punctuation, optionally prefixed with the subsystem (“Auth”, “Tools”). Each PR should include a brief description of the change, linked issue or ticket, testing evidence (commands run, snapshot diffs), and screenshots or logs when UX or protocol contracts shift. Highlight any new environment variables, manifest updates, or external dependencies so downstream agents can reproduce the setup confidently.
+
+## Infrastructure Truths
+Letter IRL runs separate production and development cloud environments. Treat `master` as the production backend branch and `dev` as the development backend branch. Railway auto-deploys from those branches to separate backend services, and the companion website repo auto-deploys from `main` (prod) and `dev` (dev) to separate Railway services.
+
+Neon is also split by environment: production uses the primary production database/branch, and development uses a separate dev database/branch isolated from production. When making deployment or data-impacting changes, preserve this dev/prod separation and verify assumptions against `docs/infrastructure.md` and `docs/deployment.md`.
+
+## Organization Context
+Use `docs/company-and-accounts.md` as the non-secret source of truth for Letter IRL's organization and account ownership context. The current organization identity is `objective.works` (`dnicholl@objective.works`) with `Letter IRL` as the DBA/product name; do not store credentials or private billing details in repo documentation.

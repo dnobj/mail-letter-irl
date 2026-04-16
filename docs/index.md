@@ -10,6 +10,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 ## Quick Start
 
 - [status.md](status.md) - **Start here** - Project overview, current state, architecture
+- [use-cases.md](use-cases.md) - Market-facing and workflow-facing use cases
 - [letter-send-flow.md](letter-send-flow.md) - How letters and postcards are sent (draft system, credits, jobs)
 - [status-labels.md](status-labels.md) - Letter status values across all layers (DB, API, Dashboard, PostGrid)
 - [database-schema.md](database-schema.md) - Complete database schema (13 tables)
@@ -23,6 +24,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 
 ### Architecture & Design
 - [Overview](overview.md) - Product goals, objectives, and business constraints
+- [Use Cases](use-cases.md) - Product, marketing, and integration use cases
 - [Functional Requirements](functional-requirements.md) - Identity, credits, order lifecycle, auditing
 - [Engineering Plan](engineering-plan.md) - Module boundaries, logging, testing strategy
 
@@ -101,6 +103,7 @@ Materials for submitting to app directories:
 ## Business
 
 - [Business Overview](business-overview.md) - Business context
+- [Company and Account Ownership](company-and-accounts.md) - Non-secret organization, DBA, and platform account context
 - [Future Roadmap](future-roadmap.md) - Out-of-scope features and future plans
 
 ---

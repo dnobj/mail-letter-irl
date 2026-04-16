@@ -54,6 +54,7 @@ npm run build
 ## Submission materials
 
 - App name: `Letter IRL`
+- Submitting organization: `objective.works` / DBA `Letter IRL` (see `docs/company-and-accounts.md`)
 - App description: `Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. To send mail, first buy pre-paid letter sends on letterirl.com.`
 - Privacy policy: `https://letterirl.com/privacy`
 - Terms: `https://letterirl.com/terms`
@@ -62,7 +63,7 @@ npm run build
 
 ## Remaining work before submission
 
-- [ ] Complete OpenAI Platform identity verification for the exact individual or business name you plan to publish under
+- [ ] Complete OpenAI Platform identity verification for `objective.works` as the registered organization / `Letter IRL` as the DBA. Submitted on April 16, 2026; waiting for OpenAI response.
 - [ ] Confirm your OpenAI Platform account has the `Owner` role for the submitting organization
 - [ ] Confirm the OpenAI project used for submission has global data residency (EU data residency projects cannot submit apps for review today)
 - [ ] Verify the production MCP server and OAuth endpoints are live on the public domains you will submit
