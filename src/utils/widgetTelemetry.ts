@@ -1,9 +1,24 @@
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
+const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
 
 export function isWidgetTelemetryEnabled(
-  raw = process.env.LETTER_IRL_WIDGET_TELEMETRY_ENABLED
+  raw = process.env.LETTER_IRL_WIDGET_TELEMETRY_ENABLED,
+  debugRaw = process.env.DEBUG
 ): boolean {
-  return raw ? TRUE_VALUES.has(raw.trim().toLowerCase()) : false;
+  if (raw) {
+    const value = raw.trim().toLowerCase();
+    if (FALSE_VALUES.has(value)) {
+      return false;
+    }
+    return TRUE_VALUES.has(value);
+  }
+
+  if (!debugRaw) {
+    return false;
+  }
+
+  const debugValue = debugRaw.trim().toLowerCase();
+  return TRUE_VALUES.has(debugValue) || debugValue.includes("letter-irl") || debugValue.includes("*");
 }
 
 export function getWidgetTelemetryEndpoint(apiUrl: string): string {
