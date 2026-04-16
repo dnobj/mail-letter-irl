@@ -29,6 +29,7 @@ import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
 import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
 import { ToolMeta } from "../contracts/types.js";
+import { injectWidgetTelemetry, logWidgetTelemetryEvent } from "../utils/widgetTelemetry.js";
 
 /**
  * Build MCP tool annotations from tool definition.
@@ -237,7 +238,11 @@ async function registerWidgetResources(mcpServer: McpServer) {
       {},  // Empty options per docs
       async () => {
         console.log(`🎨 Widget resource requested: ${uri}`);
-        const html = await fs.readFile(filePath, "utf-8");
+        const html = injectWidgetTelemetry(
+          await fs.readFile(filePath, "utf-8"),
+          widget.name,
+          WIDGET_API_URL
+        );
         console.log(`🎨 Returning widget HTML (${html.length} bytes)`);
         return {
           contents: [{
@@ -436,6 +441,23 @@ export async function registerLetterTools(
         console.log(`   structuredContent: ${JSON.stringify(modelFacingData)}`);
         if (previewHtml) {
           console.log(`   _meta.previewHtml: [${(previewHtml as string).length} bytes]`);
+        }
+
+        const outputTemplate = tool.meta["openai/outputTemplate"] as string | undefined;
+        if (outputTemplate) {
+          logWidgetTelemetryEvent("widget.tool_response_sent", {
+            toolName: tool.name,
+            outputTemplate,
+            userId,
+            userAgent: userAgent ?? null,
+            isMobile: isMobile ?? null,
+            draftId: typeof resultObj.draftId === "string" ? resultObj.draftId : null,
+            hasPreviewHtml: previewHtml !== undefined,
+            hasPreviewFrontHtml: previewFrontHtml !== undefined,
+            hasPreviewBackHtml: previewBackHtml !== undefined,
+            hasGeneratedImagePreview: generatedImagePreview !== undefined,
+            hasGeneratedImageUrl: generatedImageUrl !== undefined
+          });
         }
 
         return response;

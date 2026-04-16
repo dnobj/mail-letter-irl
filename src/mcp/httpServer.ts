@@ -35,6 +35,7 @@ import { startCreditExpirationWorker } from "../workers/creditExpirationWorker.j
 import { startStatusSyncWorker, stopStatusSyncWorker } from "../workers/statusSyncWorker.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
 import { isDebugEnabled } from "../utils/debug.js";
+import { injectWidgetTelemetry, isWidgetTelemetryEnabled } from "../utils/widgetTelemetry.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,8 +61,10 @@ const FALLBACK_ORIGIN =
   process.env.LETTER_IRL_DEFAULT_ORIGIN ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const PUBLIC_BASE_URL =
   process.env.LETTER_IRL_PUBLIC_BASE_URL ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
+const WIDGET_API_URL = process.env.LETTER_IRL_API_URL ?? PUBLIC_BASE_URL;
 const REQUIRE_AUTH = process.env.LETTER_IRL_REQUIRE_AUTH !== "false";
 const DEBUG_ENABLED = isDebugEnabled();
+const WIDGET_TELEMETRY_ENABLED = isWidgetTelemetryEnabled();
 
 // Environment variable validation
 const REQUIRED_ENV_VARS = [
@@ -169,7 +172,11 @@ async function serveWidget(
   const safeName = path.basename(widgetName);
   const filePath = path.join(DEFAULT_WIDGET_DIR, safeName);
   try {
-    const file = await fs.readFile(filePath, "utf-8");
+    const file = injectWidgetTelemetry(
+      await fs.readFile(filePath, "utf-8"),
+      safeName.replace(/\.html$/i, ""),
+      WIDGET_API_URL
+    );
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.end(file);
@@ -431,9 +438,9 @@ export async function startHttpServer() {
       return;
     }
 
-    // Debug endpoint for widget diagnostic beacons (no auth required, DEBUG gated)
+    // Diagnostic endpoint for widget lifecycle beacons (no auth required, telemetry gated).
     if (url.pathname === "/api/widget-diagnostic") {
-      if (!DEBUG_ENABLED) {
+      if (!WIDGET_TELEMETRY_ENABLED) {
         res.statusCode = 404;
         res.end("Not found");
         return;
