@@ -36,6 +36,9 @@ import {
 import { createLogger } from "./logging/index.js";
 
 const tools: McpToolDefinition<unknown, unknown>[] = [
+  // ChatGPT currently appears to expose only the first 12 registered actions
+  // for this dev app. Keep core preview/send/status and image generation
+  // inside that first page of tools; place auxiliary/internal tools later.
   // Letter tools - three separate tools for different layouts
   quoteAndPreviewLetterTextOnlyTool,
   quoteAndPreviewLetterWithHeaderImageTool,
@@ -45,19 +48,21 @@ const tools: McpToolDefinition<unknown, unknown>[] = [
   getOrderStatusTool,
   getAccountBalanceTool,
   listOrdersTool,
-  setReturnAddressTool,
-  getReturnAddressTool,
-  clearReturnAddressTool,
   // Postcard tools
   quoteAndPreviewPostcardTool,
   sendPostcardTool,
+  // Image generation tool
+  generateImageTool,
+  // Keep saved return address setup in the primary exposed set.
+  setReturnAddressTool,
+  getReturnAddressTool,
+  // Auxiliary tools after the likely ChatGPT exposed-action cutoff.
+  clearReturnAddressTool,
   // Feedback tools
   submitFeatureRequestTool,
   getStartedTool,
   // Image upload tool
   uploadImageTool,
-  // Image generation tool
-  generateImageTool,
   // Confirm uploaded image tool (widget relay)
   confirmUploadedImageTool
 ];

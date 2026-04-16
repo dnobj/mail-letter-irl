@@ -36,4 +36,13 @@ describe("Compatibility manifest", () => {
     expect(generateImageTool?.description).toContain("native ChatGPT image generation is unavailable");
     expect(generateImageTool?.description).toContain("Use this even if the user has not yet asked to mail it");
   });
+
+  it("should keep generate_image inside the first 12 registered tools for ChatGPT exposure", () => {
+    const firstTwelveToolNames = new LetterIrlServer()
+      .listTools()
+      .slice(0, 12)
+      .map((tool) => tool.name);
+
+    expect(firstTwelveToolNames).toContain("generate_image");
+  });
 });

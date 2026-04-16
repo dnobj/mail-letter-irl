@@ -373,76 +373,6 @@
       }
     },
     {
-      "name": "set_return_address",
-      "description": "Save your preferred return address for future letters and postcards. The address is validated before saving, corrected when possible, and used automatically when you omit a sender address. U.S. addresses only.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "Your name as it should appear on letters"
-          },
-          "addressLine1": {
-            "type": "string",
-            "description": "Street address (e.g., '123 Main Street')"
-          },
-          "addressLine2": {
-            "type": "string",
-            "description": "Apartment, suite, unit, etc. (optional)"
-          },
-          "city": {
-            "type": "string",
-            "description": "City name"
-          },
-          "state": {
-            "type": "string",
-            "description": "State (2-letter code, e.g., 'CA', 'NY')"
-          },
-          "postalCode": {
-            "type": "string",
-            "description": "ZIP code (5-digit or ZIP+4)"
-          },
-          "country": {
-            "type": "string",
-            "description": "Country (currently only 'US' is supported)",
-            "default": "US"
-          }
-        },
-        "required": [
-          "name",
-          "addressLine1",
-          "city",
-          "state",
-          "postalCode"
-        ]
-      }
-    },
-    {
-      "name": "get_return_address",
-      "description": "Get your saved return address. This is the default sender address used when you create mail without specifying one.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": []
-      }
-    },
-    {
-      "name": "clear_return_address",
-      "description": "Clear your saved return address. After clearing it, you will need to provide a sender address when creating new mail.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "confirm": {
-            "type": "boolean",
-            "description": "Set to true to confirm clearing the return address"
-          }
-        },
-        "required": [
-          "confirm"
-        ]
-      }
-    },
-    {
       "name": "quote_and_preview_postcard",
       "description": "Create a preview of a physical postcard draft with a front image and back message. Use this when the user wants to make, create, design, or preview a postcard through Letter IRL. This does not send mail. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first so ChatGPT can reuse that existing image. Otherwise prefer a direct file attachment for the image, pass imageUrl when a generated or hosted image is already available, and use upload_image only if no attachment or usable imageUrl made it through after a direct preview attempt. If sender is omitted, the saved return address is used automatically. Send later with send_postcard.",
       "inputSchema": {
@@ -579,6 +509,101 @@
       }
     },
     {
+      "name": "generate_image",
+      "description": "Generate a new image through Letter IRL when this app is selected and the user asks to create artwork, an illustration, or an image, especially when native ChatGPT image generation is unavailable or blocked. Use this even if the user has not yet asked to mail it; after generation, offer to use the image for a postcard or letter. Returns a preview widget and an imageUrl to pass to a preview tool. If the user already has an uploaded, attached, or previously generated image in this conversation, reuse that existing image instead of calling this tool again. Context may be postcard, header_image, or inline_image.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Description of the image to generate (e.g., 'a sunset over mountains')"
+          },
+          "context": {
+            "type": "string",
+            "enum": [
+              "postcard",
+              "header_image",
+              "inline_image"
+            ],
+            "description": "What the image will be used for. Determines optimal dimensions."
+          }
+        }
+      }
+    },
+    {
+      "name": "set_return_address",
+      "description": "Save your preferred return address for future letters and postcards. The address is validated before saving, corrected when possible, and used automatically when you omit a sender address. U.S. addresses only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Your name as it should appear on letters"
+          },
+          "addressLine1": {
+            "type": "string",
+            "description": "Street address (e.g., '123 Main Street')"
+          },
+          "addressLine2": {
+            "type": "string",
+            "description": "Apartment, suite, unit, etc. (optional)"
+          },
+          "city": {
+            "type": "string",
+            "description": "City name"
+          },
+          "state": {
+            "type": "string",
+            "description": "State (2-letter code, e.g., 'CA', 'NY')"
+          },
+          "postalCode": {
+            "type": "string",
+            "description": "ZIP code (5-digit or ZIP+4)"
+          },
+          "country": {
+            "type": "string",
+            "description": "Country (currently only 'US' is supported)",
+            "default": "US"
+          }
+        },
+        "required": [
+          "name",
+          "addressLine1",
+          "city",
+          "state",
+          "postalCode"
+        ]
+      }
+    },
+    {
+      "name": "get_return_address",
+      "description": "Get your saved return address. This is the default sender address used when you create mail without specifying one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "clear_return_address",
+      "description": "Clear your saved return address. After clearing it, you will need to provide a sender address when creating new mail.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "description": "Set to true to confirm clearing the return address"
+          }
+        },
+        "required": [
+          "confirm"
+        ]
+      }
+    },
+    {
       "name": "submit_feature_request",
       "description": "Submit a feature request to the Letter IRL team for unsupported capabilities or product improvements. Use this for missing mail formats, workflows, or integrations, not for billing or bug support.",
       "inputSchema": {
@@ -645,31 +670,6 @@
           "context": {
             "type": "string",
             "description": "Optional hint for widget guidance text: 'postcard', 'header_image', or 'inline_image'"
-          }
-        }
-      }
-    },
-    {
-      "name": "generate_image",
-      "description": "Generate a new image through Letter IRL when this app is selected and the user asks to create artwork, an illustration, or an image, especially when native ChatGPT image generation is unavailable or blocked. Use this even if the user has not yet asked to mail it; after generation, offer to use the image for a postcard or letter. Returns a preview widget and an imageUrl to pass to a preview tool. If the user already has an uploaded, attached, or previously generated image in this conversation, reuse that existing image instead of calling this tool again. Context may be postcard, header_image, or inline_image.",
-      "inputSchema": {
-        "type": "object",
-        "required": [
-          "prompt"
-        ],
-        "properties": {
-          "prompt": {
-            "type": "string",
-            "description": "Description of the image to generate (e.g., 'a sunset over mountains')"
-          },
-          "context": {
-            "type": "string",
-            "enum": [
-              "postcard",
-              "header_image",
-              "inline_image"
-            ],
-            "description": "What the image will be used for. Determines optimal dimensions."
           }
         }
       }
