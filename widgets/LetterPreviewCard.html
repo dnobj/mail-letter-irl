@@ -424,6 +424,8 @@
       let dataLoaded = false;
       let currentDraftId = null;
       let sendInProgress = false;
+      let telemetryWaitingSent = false;
+      let telemetryRenderedDraftId = null;
 
       function escapeHtml(text) {
         if (!text) return '';
@@ -587,6 +589,13 @@
         if (!state || state.draftId === undefined) {
           if (!dataLoaded) {
             showLoading();
+            if (!telemetryWaitingSent) {
+              telemetryWaitingSent = true;
+              window.letterIrlWidgetTelemetry?.waiting({
+                reason: "missing_tool_output",
+                hasOpenAi: Boolean(window.openai)
+              });
+            }
           }
           return;
         }
@@ -610,6 +619,18 @@
 
         // Store draftId for send button
         currentDraftId = draftId;
+        if (telemetryRenderedDraftId !== draftId) {
+          telemetryRenderedDraftId = draftId;
+          const previewHtml =
+            window.openai?.toolResponseMetadata?.previewHtml ?? state.previewHtml;
+          telemetryWaitingSent = true;
+          window.letterIrlWidgetTelemetry?.rendered({
+            draftId,
+            layoutType,
+            hasPreviewHtml: Boolean(previewHtml),
+            canSendNow: Boolean(canSendNow)
+          });
+        }
 
         // Render the letter mockup (US-LAYOUT-05)
         renderLetterMockup(state);

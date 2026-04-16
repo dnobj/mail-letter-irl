@@ -2,6 +2,42 @@
 
 This log captures short notes discovered while connecting Letter IRL to the ChatGPT Apps SDK in November 2025.
 
+## 2026-04-16 - Android Widget Render Delay Diagnostic
+
+On Android mobile testing, a postcard preview widget sometimes did not render immediately after the tool completed, but appeared after switching to another conversation and back. The same conversation showed the widget on desktop, and the mobile send flow still worked afterward, which suggests a ChatGPT Android client iframe/mount timing issue rather than a backend draft/tool failure.
+
+**Diagnostic approach:**
+- Compare server-side `widget.tool_response_sent` logs with widget-side lifecycle beacons.
+- If the server logs a widget-backed response but `widget.script_loaded` or `widget.rendered` arrives only after conversation switching, the iframe likely did not mount on the first mobile render.
+- If `widget.script_loaded` arrives immediately but `widget.rendered` does not, investigate widget JavaScript, bridge globals, CSP, layout, or mobile viewport behavior.
+
+**Temporary instrumentation:**
+- Enable `LETTER_IRL_WIDGET_TELEMETRY_ENABLED=true` in the Railway dev API environment while testing.
+- Disable it again after collecting enough Android reproduction data.
+- Do not log message text, addresses, image URLs, recipient names, or postcard content.
+
+## 2026-04-16 - ChatGPT Tool Inventory Caching During Dev Testing
+
+ChatGPT can keep showing a stale MCP action list for a connected dev app even after the backend has deployed new tool metadata and even after reconnecting the app.
+
+**Observed symptom:**
+- The dev app panel did not initially show the newly exposed `generate_image` tool.
+- The panel still showed older tool descriptions, which did not match the live `https://letter-irl-api-development.up.railway.app/manifest.json` response.
+- The live manifest already included `generate_image` in the first 12 registered tools, and `origin/dev` was at the expected commit.
+
+**Resolution:**
+- Clicking **Refresh** in the ChatGPT app management panel eventually reloaded the current tool inventory.
+- After refresh, ChatGPT showed the newer descriptions plus `generate_image`, `upload_image`, `get_started`, and other current tools.
+
+**Debugging pattern:**
+1. Compare the ChatGPT panel action list against the live dev manifest.
+2. Check for stale descriptions as well as missing tool names; stale wording is a strong cache signal.
+3. Confirm the deployed tool order when testing suspected action-count limits.
+4. If the panel is stale, try Refresh before changing code. If Refresh does not work, disconnect/reconnect or recreate the dev connector entry.
+
+**Follow-up consideration:**
+- `confirm_uploaded_image` is currently visible in the ChatGPT action list even though it is intended as a widget relay. Per current Apps SDK guidance, widget-callable/model-hidden tools should use `_meta.ui.visibility: ["app"]`.
+
 ## 2025-11-07 — Tool Content Type Validation
 - The MCP Inspector rejects tool responses whose `content` items have `type: "json"`; only the standard literal values (`text`, `image`, `audio`, `resource`, `resource_link`) are permitted.
 - Resolution: emit a brief textual summary in `content` (e.g., `"Balance: 5 credits"`) and keep the detailed data plus metadata inside `structuredContent`. Widgets still render from `structuredContent`.

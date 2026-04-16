@@ -189,6 +189,8 @@
     <script type="module">
       let dataLoaded = false;
       let imageUrl = null;
+      let telemetryWaitingSent = false;
+      let telemetryRenderedSent = false;
 
       const stateLoading = document.getElementById("state-loading");
       const statePreview = document.getElementById("state-preview");
@@ -225,6 +227,13 @@
             urlDisplay.classList.remove("hidden");
           }
           showState("preview");
+          if (!telemetryRenderedSent) {
+            telemetryRenderedSent = true;
+            window.letterIrlWidgetTelemetry?.rendered({
+              source: "previewData",
+              hasImageUrl: Boolean(imageUrl)
+            });
+          }
           return;
         }
 
@@ -235,10 +244,26 @@
           urlText.textContent = imageUrl;
           urlDisplay.classList.remove("hidden");
           showState("preview");
+          if (!telemetryRenderedSent) {
+            telemetryRenderedSent = true;
+            window.letterIrlWidgetTelemetry?.rendered({
+              source: "imageUrl",
+              hasImageUrl: true
+            });
+          }
           return;
         }
 
-        if (!dataLoaded && !output && !meta) return;
+        if (!dataLoaded && !output && !meta) {
+          if (!telemetryWaitingSent) {
+            telemetryWaitingSent = true;
+            window.letterIrlWidgetTelemetry?.waiting({
+              reason: "missing_tool_output",
+              hasOpenAi: Boolean(window.openai)
+            });
+          }
+          return;
+        }
 
         dataLoaded = true;
         showError(output?.error || "No image was generated. Please try again.");
