@@ -29,4 +29,11 @@ describe("Compatibility manifest", () => {
     const snapshot = fs.readFileSync(manifestPath, "utf-8");
     expect(snapshot).toBe(stringifyManifest());
   });
+
+  it("should advertise generate_image as a fallback when native image generation is unavailable", () => {
+    const generateImageTool = buildManifest().tools.find((tool) => tool.name === "generate_image");
+
+    expect(generateImageTool?.description).toContain("native ChatGPT image generation is unavailable");
+    expect(generateImageTool?.description).toContain("Use this even if the user has not yet asked to mail it");
+  });
 });
