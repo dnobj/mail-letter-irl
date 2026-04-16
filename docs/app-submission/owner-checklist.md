@@ -10,6 +10,8 @@ This checklist tracks the non-code items the project owner needs to gather, veri
 - Submitting organization: `objective.works`
 - DBA / product name: `Letter IRL`
 - Owner/contact account: `dnicholl@objective.works`
+- Dedicated ChatGPT testing account: `dnicholl@objective.works`
+- Primary personal ChatGPT account, kept separate: `openai@davidnicholl.com`
 - Organization verification: submitted to OpenAI on April 16, 2026; waiting for response
 - Primary submission docs: `docs/chatgpt-app-submission.md`, `docs/app-submission/openai-test-cases.md`, `docs/app-submission/demo-scenarios.md`
 
@@ -21,6 +23,8 @@ This checklist tracks the non-code items the project owner needs to gather, veri
 - [ ] Confirm the submitting account has the `Owner` role in the OpenAI organization.
 - [ ] Confirm the app will be submitted from the intended OpenAI organization/project.
 - [ ] Confirm the selected OpenAI project has global data residency and is eligible for app review.
+- [ ] Use the dedicated `dnicholl@objective.works` ChatGPT account for focused Letter IRL testing.
+- [ ] Keep the primary `openai@davidnicholl.com` ChatGPT account separate from app testing and review prep.
 - [ ] Record the final OpenAI organization/project names in `docs/company-and-accounts.md` once confirmed.
 
 ### Public Company and Support Information

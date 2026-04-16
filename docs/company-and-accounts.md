@@ -29,6 +29,13 @@ Current operational assumption:
 
 See `docs/chatgpt-app-submission.md` and `docs/app-submission/openai-test-cases.md` for app submission materials and reviewer test cases.
 
+## ChatGPT Testing Accounts
+
+- Dedicated Letter IRL testing ChatGPT account: `dnicholl@objective.works`
+- Primary personal ChatGPT account: `openai@davidnicholl.com`
+
+Use the `dnicholl@objective.works` ChatGPT account for focused Letter IRL app testing and submission prep. Keep it separate from the primary personal ChatGPT account to avoid mixing app-review state, OAuth connections, test conversations, and platform configuration.
+
 ## Related Accounts
 
 | Area | Production / Public Identity | Development / Admin Identity | Notes |
