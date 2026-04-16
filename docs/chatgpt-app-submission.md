@@ -4,6 +4,8 @@ Last verified: March 17, 2026
 
 This document is a derived checklist for Letter IRL's OpenAI submission. Official OpenAI and MCP docs are the source of truth; this file tracks how the current codebase lines up with them.
 
+For owner-managed submission tasks such as organization verification, screenshots, demo videos, reviewer promo codes, and final portal materials, see `docs/app-submission/owner-checklist.md`.
+
 ## Current submission posture
 
 - Transport: Streamable HTTP MCP server at `https://api.letterirl.com/mcp`
@@ -69,6 +71,7 @@ npm run build
 - [ ] Verify the production MCP server and OAuth endpoints are live on the public domains you will submit
 - [ ] Review the production widget CSP and confirm it allows only the exact required domains
 - [ ] Capture final submission assets: logo, screenshots, app description, company URL, privacy policy URL, support contact, and localization fields
+- [ ] Locate and review final demo videos using `docs/app-submission/owner-checklist.md`
 - [ ] Finalize reviewer test prompts and expected responses using `docs/app-submission/openai-test-cases.md`
 - [ ] Run the full pre-submission command checklist against production-ready code
 - [ ] Do one final manual ChatGPT pass for the highest-risk flows: onboarding, postcard preview, generated-image reuse, upload fallback, send confirmation, and OAuth linking

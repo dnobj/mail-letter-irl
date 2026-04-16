@@ -97,6 +97,7 @@ These documents were created during development and may be partially outdated:
 
 Materials for submitting to app directories:
 
+- [OpenAI Apps SDK Owner Checklist](app-submission/owner-checklist.md) - Owner-managed submission tasks, assets, and final readiness gate
 - [OpenAI Test Cases](app-submission/openai-test-cases.md) - App description, test cases, and pre-submission checklist
 - [Agent Platform Strategy](agent-platform-strategy.md) - Long-term platform support and packaging principles
 
