@@ -27,3 +27,6 @@ Neon is also split by environment: production uses the primary production databa
 
 ## Organization Context
 Use `docs/company-and-accounts.md` as the non-secret source of truth for Letter IRL's organization and account ownership context. The current organization identity is `objective.works` (`dnicholl@objective.works`) with `Letter IRL` as the DBA/product name; do not store credentials or private billing details in repo documentation.
+
+## Agent Platform Strategy
+When adding support for ChatGPT, Claude, Cursor, OpenClaw, Codex, Copilot, Zapier, or other agentic systems, keep core product behavior platform-neutral and add thin packaging/adapters around the stable MCP/API capability layer. See `docs/agent-platform-strategy.md`.

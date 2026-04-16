@@ -241,5 +241,6 @@ These themes recur across multiple use cases:
 - Add use cases here before turning them into user stories.
 - Cross-reference personas and user stories when the use case becomes concrete.
 - Add feature requests to `docs/user-stories.md` or the feedback system once they need acceptance criteria.
+- Keep platform-specific packaging ideas aligned with `docs/agent-platform-strategy.md`.
 - Keep anti-use-cases aligned with `docs/personas.md`, especially bulk spam, scams, or abusive mail.
 - Keep app-directory examples aligned with `docs/app-submission/openai-test-cases.md`.

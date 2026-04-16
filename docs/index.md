@@ -34,6 +34,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 
 ### API & Tools
 - [MCP Tool APIs](tool-apis.md) - JSON schemas and behaviors for MCP tools
+- [Agent Platform Strategy](agent-platform-strategy.md) - Cross-platform MCP and agent packaging strategy
 - [UI Widgets](ui-widgets.md) - Apps SDK template layouts and interactions
 
 ### Database & Data Model
@@ -97,6 +98,7 @@ These documents were created during development and may be partially outdated:
 Materials for submitting to app directories:
 
 - [OpenAI Test Cases](app-submission/openai-test-cases.md) - App description, test cases, and pre-submission checklist
+- [Agent Platform Strategy](agent-platform-strategy.md) - Long-term platform support and packaging principles
 
 ---
 
