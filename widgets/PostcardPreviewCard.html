@@ -459,8 +459,6 @@
       let currentDraftId = null;
       let sendInProgress = false;
       let currentTab = 'front';
-      let telemetryWaitingSent = false;
-      let telemetryRenderedDraftId = null;
 
       // Tab switching
       function switchTab(tab) {
@@ -510,13 +508,6 @@
         if (!state || state.draftId === undefined) {
           if (!dataLoaded) {
             showLoading();
-            if (!telemetryWaitingSent) {
-              telemetryWaitingSent = true;
-              window.letterIrlWidgetTelemetry?.waiting({
-                reason: "missing_tool_output",
-                hasOpenAi: Boolean(window.openai)
-              });
-            }
           }
           return;
         }
@@ -558,15 +549,6 @@
 
         // Store draftId for send button
         currentDraftId = draftId;
-        if (telemetryRenderedDraftId !== draftId) {
-          telemetryRenderedDraftId = draftId;
-          window.letterIrlWidgetTelemetry?.rendered({
-            draftId,
-            hasPreviewFrontHtml: Boolean(previewFrontHtml),
-            hasPreviewBackHtml: Boolean(previewBackHtml),
-            canSendNow: Boolean(canSendNow)
-          });
-        }
 
         // Render front preview (image)
         const previewFront = document.getElementById("preview-front");
