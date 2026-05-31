@@ -1,23 +1,33 @@
 import { LetterIrlServer } from "../server.js";
 import { WIDGET_DEFINITIONS } from "./registerTools.js";
 
-const DEFAULT_PUBLIC_BASE_URL =
-  process.env.LETTER_IRL_PUBLIC_BASE_URL ?? "https://api.letterirl.com";
-const DEFAULT_MCP_PATH = process.env.LETTER_IRL_MCP_PATH ?? "/mcp";
-const DEFAULT_HEALTH_PATH = process.env.LETTER_IRL_HEALTH_PATH ?? "/healthz";
-const DEFAULT_AUTH_SERVER_ROUTE =
-  process.env.LETTER_IRL_AUTH_SERVER_ROUTE ?? "/.well-known/oauth-authorization-server";
+function getManifestUrls(publicBaseUrlOverride?: string) {
+  const publicBaseUrl =
+    publicBaseUrlOverride ?? process.env.LETTER_IRL_PUBLIC_BASE_URL ?? "https://api.letterirl.com";
+  const mcpPath = process.env.LETTER_IRL_MCP_PATH ?? "/mcp";
+  const healthPath = process.env.LETTER_IRL_HEALTH_PATH ?? "/healthz";
+  const authServerRoute =
+    process.env.LETTER_IRL_AUTH_SERVER_ROUTE ?? "/.well-known/oauth-authorization-server";
+
+  return {
+    authServerUrl: `${publicBaseUrl}${authServerRoute}`,
+    healthUrl: `${publicBaseUrl}${healthPath}`,
+    mcpUrl: `${publicBaseUrl}${mcpPath}`
+  };
+}
 
 export const APP_DIRECTORY_DESCRIPTION =
   "Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. " +
   "To send mail, first buy pre-paid letter sends on letterirl.com.";
 
-export function buildManifest() {
+export function buildManifest(publicBaseUrl?: string) {
   const server = new LetterIrlServer();
+  const urls = getManifestUrls(publicBaseUrl);
   const tools = server.listTools().map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: tool.inputSchema
+    inputSchema: tool.inputSchema,
+    outputSchema: tool.outputSchema
   }));
 
   return {
@@ -34,15 +44,15 @@ export function buildManifest() {
       {
         type: "mcp",
         name: "letter-irl",
-        url: `${DEFAULT_PUBLIC_BASE_URL}${DEFAULT_MCP_PATH}`,
-        healthUrl: `${DEFAULT_PUBLIC_BASE_URL}${DEFAULT_HEALTH_PATH}`,
+        url: urls.mcpUrl,
+        healthUrl: urls.healthUrl,
         transport: {
           type: "streamableHttp"
         },
         auth: {
           type: "oauth",
           scopes: ["openid", "email", "profile"],
-          authorizationServer: `${DEFAULT_PUBLIC_BASE_URL}${DEFAULT_AUTH_SERVER_ROUTE}`
+          authorizationServer: urls.authServerUrl
         }
       }
     ],
@@ -53,6 +63,6 @@ export function buildManifest() {
   };
 }
 
-export function stringifyManifest(): string {
-  return `${JSON.stringify(buildManifest(), null, 2)}\n`;
+export function stringifyManifest(publicBaseUrl?: string): string {
+  return `${JSON.stringify(buildManifest(publicBaseUrl), null, 2)}\n`;
 }

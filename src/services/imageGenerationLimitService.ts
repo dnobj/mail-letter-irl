@@ -29,6 +29,10 @@ export interface GenerationLimitCheck extends GenerationQuota {
   allowed: boolean;
 }
 
+export interface GenerationReservation extends GenerationQuota {
+  reserved: boolean;
+}
+
 /**
  * Get the current generation quota for a user.
  *
@@ -63,11 +67,51 @@ export async function checkGenerationLimit(userId: string): Promise<GenerationLi
 }
 
 /**
- * Record one image generation for the user (increment counter by 1).
+ * Atomically reserve one image generation for the user.
+ *
+ * This is intentionally a single conditional UPDATE so concurrent requests
+ * cannot all pass a separate check before incrementing the counter.
  */
-export async function recordGeneration(userId: string): Promise<void> {
+export async function reserveGeneration(userId: string): Promise<GenerationReservation> {
+  const result = await query<{ credits_purchased: number; image_generations_used: number }>(
+    `
+      UPDATE users
+      SET image_generations_used = image_generations_used + 1
+      WHERE user_id = $1
+        AND image_generations_used < (FLOOR(credits_purchased::numeric / $2) * $3)
+      RETURNING credits_purchased, image_generations_used
+    `,
+    [userId, CREDITS_PER_LETTER, GENERATIONS_PER_LETTER]
+  );
+
+  if (result.rows.length === 0) {
+    const quota = await getGenerationQuota(userId);
+    return { ...quota, reserved: false };
+  }
+
+  const { credits_purchased, image_generations_used } = result.rows[0];
+  const lettersPurchased = Math.floor(credits_purchased / CREDITS_PER_LETTER);
+  const allowance = lettersPurchased * GENERATIONS_PER_LETTER;
+  const remaining = Math.max(0, allowance - image_generations_used);
+
+  return {
+    used: image_generations_used,
+    allowance,
+    remaining,
+    reserved: true
+  };
+}
+
+/**
+ * Release a previously reserved image generation after a failed attempt.
+ */
+export async function releaseGenerationReservation(userId: string): Promise<void> {
   await query(
-    'UPDATE users SET image_generations_used = image_generations_used + 1 WHERE user_id = $1',
+    `
+      UPDATE users
+      SET image_generations_used = GREATEST(image_generations_used - 1, 0)
+      WHERE user_id = $1
+    `,
     [userId]
   );
 }
