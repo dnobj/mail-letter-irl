@@ -30,7 +30,7 @@
     "dev:local": "env $(cat .env.local | grep -v '^#' | grep -v '^$' | xargs) tsx watch src/mcp/httpServer.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.5",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/bcrypt": "^6.0.0",
     "@types/cookie-parser": "^1.4.10",
     "bcrypt": "^6.0.0",

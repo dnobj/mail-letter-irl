@@ -28,8 +28,8 @@ import {
   type ImageContext
 } from "../services/imageGenerationService.js";
 import {
-  checkGenerationLimit,
-  recordGeneration
+  releaseGenerationReservation,
+  reserveGeneration
 } from "../services/imageGenerationLimitService.js";
 import { storeImage } from "../services/tempImageStore.js";
 
@@ -93,6 +93,25 @@ async function createPreview(base64Data: string): Promise<string> {
   return preview.toString("base64");
 }
 
+async function releaseReservedGeneration(
+  context: ToolContext,
+  userId: string
+): Promise<void> {
+  try {
+    await releaseGenerationReservation(userId);
+  } catch (releaseError) {
+    context.logger.error(
+      {
+        correlationId: context.correlationId,
+        event: "generate_image.reservation_release_failed",
+        errorMessage:
+          releaseError instanceof Error ? releaseError.message : "Unknown error"
+      },
+      "Failed to release image generation reservation"
+    );
+  }
+}
+
 /**
  * Build the temp image URL for the stored image.
  */
@@ -124,15 +143,15 @@ async function handler(
     "Generating image via OpenAI API"
   );
 
-  // Check generation limit before calling OpenAI
-  const limitCheck = await checkGenerationLimit(userId);
-  if (!limitCheck.allowed) {
+  // Reserve quota atomically before calling OpenAI so concurrent requests cannot overspend.
+  const reservation = await reserveGeneration(userId);
+  if (!reservation.reserved) {
     context.logger.warn(
       {
         correlationId: context.correlationId,
         event: "generate_image.limit_reached",
-        used: limitCheck.used,
-        allowance: limitCheck.allowance
+        used: reservation.used,
+        allowance: reservation.allowance
       },
       "Image generation limit reached"
     );
@@ -146,9 +165,7 @@ async function handler(
       context: input.context
     });
 
-    // Record the generation after successful API call
-    await recordGeneration(userId);
-    const generationsRemaining = limitCheck.remaining - 1;
+    const generationsRemaining = reservation.remaining;
 
     // Create tiny preview for widget display (~10-20KB via _meta)
     const previewBase64 = await createPreview(result.base64Data);
@@ -163,7 +180,7 @@ async function handler(
         event: "generate_image.success",
         fullBase64Length: result.base64Data.length,
         previewBase64Length: previewBase64.length,
-        imageUrl,
+        imageTokenSuffix: token.slice(-6),
         generationsRemaining
       },
       "Image generated successfully"
@@ -179,6 +196,8 @@ async function handler(
       generationsRemaining
     };
   } catch (error) {
+    await releaseReservedGeneration(context, userId);
+
     if (error instanceof ImageGenerationError) {
       context.logger.warn(
         {
