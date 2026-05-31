@@ -24,6 +24,7 @@ import {
   postcardErrors,
   imageProcessingConfig,
 } from '../../fixtures/postcards.js';
+import { _testing as imageServiceTesting } from '../../../src/services/imageService.js';
 
 // Mock fetch for downloading images
 const mockFetch = vi.fn();
@@ -54,6 +55,35 @@ describe('imageService', () => {
   // Image Download Validation
   // ==========================================================================
   describe('Image Download Validation', () => {
+    it('should reject non-HTTPS image URLs before fetching', async () => {
+      await expect(
+        imageServiceTesting.validateRemoteImageUrl('http://example.com/image.jpg')
+      ).rejects.toThrow("Couldn't download the image");
+    });
+
+    it('should reject localhost and private IP image URLs before fetching', async () => {
+      expect(imageServiceTesting.isUnsafeIpAddress('127.0.0.1')).toBe(true);
+      expect(imageServiceTesting.isUnsafeIpAddress('10.0.0.5')).toBe(true);
+      expect(imageServiceTesting.isUnsafeIpAddress('172.16.0.1')).toBe(true);
+      expect(imageServiceTesting.isUnsafeIpAddress('192.168.1.20')).toBe(true);
+      expect(imageServiceTesting.isUnsafeIpAddress('169.254.169.254')).toBe(true);
+      expect(imageServiceTesting.isUnsafeIpAddress('::1')).toBe(true);
+      expect(imageServiceTesting.isUnsafeIpAddress('::ffff:7f00:1')).toBe(true);
+
+      await expect(
+        imageServiceTesting.validateRemoteImageUrl('https://127.0.0.1/image.jpg')
+      ).rejects.toThrow("Couldn't download the image");
+      await expect(
+        imageServiceTesting.validateRemoteImageUrl('https://[::1]/image.jpg')
+      ).rejects.toThrow("Couldn't download the image");
+    });
+
+    it('should allow public HTTPS IP image URLs', async () => {
+      await expect(
+        imageServiceTesting.validateRemoteImageUrl('https://8.8.8.8/image.jpg')
+      ).resolves.toBeInstanceOf(URL);
+    });
+
     it('should reject images larger than 10MB based on Content-Length header', async () => {
       // Simulate a response with Content-Length > 10MB
       const largeFile = testImages.tooLargeFile;

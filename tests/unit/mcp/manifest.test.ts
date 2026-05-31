@@ -27,7 +27,28 @@ describe("Compatibility manifest", () => {
 
   it("should keep the checked-in manifest.json snapshot in sync", () => {
     const snapshot = fs.readFileSync(manifestPath, "utf-8");
-    expect(snapshot).toBe(stringifyManifest());
+    const previousPublicBaseUrl = process.env.LETTER_IRL_PUBLIC_BASE_URL;
+    process.env.LETTER_IRL_PUBLIC_BASE_URL = "https://api.letterirl.com";
+
+    try {
+      expect(snapshot).toBe(stringifyManifest());
+    } finally {
+      if (previousPublicBaseUrl === undefined) {
+        delete process.env.LETTER_IRL_PUBLIC_BASE_URL;
+      } else {
+        process.env.LETTER_IRL_PUBLIC_BASE_URL = previousPublicBaseUrl;
+      }
+    }
+  });
+
+  it("should allow runtime callers to advertise the request public base URL", () => {
+    const manifest = buildManifest("https://api.letterirl.com");
+
+    expect(manifest.servers[0].url).toBe("https://api.letterirl.com/mcp");
+    expect(manifest.servers[0].healthUrl).toBe("https://api.letterirl.com/healthz");
+    expect(manifest.servers[0].auth.authorizationServer).toBe(
+      "https://api.letterirl.com/.well-known/oauth-authorization-server"
+    );
   });
 
   it("should advertise generate_image as a fallback when native image generation is unavailable", () => {

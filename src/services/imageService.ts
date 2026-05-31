@@ -17,6 +17,8 @@
  * - US-LAYOUT-04: Letter Layout Image Processing
  */
 
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import sharp from 'sharp';
 import type { ImageFileParam, ProcessedImage, PostcardSize, LetterImageType } from './types.js';
 import { getImage as getTempImage } from './tempImageStore.js';
@@ -42,6 +44,11 @@ const CONFIG = {
     '6x11': { width: 3300, height: 1800 },  // 11x6 at 300 DPI (11" x 6") - landscape
   } as const,
 } as const;
+
+const REMOTE_IMAGE_FETCH_CONFIG = {
+  timeoutMs: 10_000,
+  maxRedirects: 3
+};
 
 // Letter image configuration (US-LAYOUT-04)
 const LETTER_IMAGE_CONFIG = {
@@ -72,6 +79,163 @@ export class ImageProcessingError extends Error {
       this.stack = `${this.stack}\nCaused by: ${originalError.stack}`;
     }
   }
+}
+
+async function validateRemoteImageUrl(url: string): Promise<URL> {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new ImageProcessingError(
+      'DOWNLOAD_FAILED',
+      "Couldn't download the image. Please try again."
+    );
+  }
+
+  if (parsed.protocol !== 'https:') {
+    throw new ImageProcessingError(
+      'DOWNLOAD_FAILED',
+      "Couldn't download the image. Please try again."
+    );
+  }
+
+  const host = parsed.hostname.replace(/^\[|\]$/g, '');
+  if (isUnsafeIpAddress(host)) {
+    throw new ImageProcessingError(
+      'DOWNLOAD_FAILED',
+      "Couldn't download the image. Please try again."
+    );
+  }
+
+  if (!isIP(host)) {
+    const addresses = await lookup(host, { all: true, verbatim: true });
+    if (addresses.length === 0 || addresses.some(({ address }) => isUnsafeIpAddress(address))) {
+      throw new ImageProcessingError(
+        'DOWNLOAD_FAILED',
+        "Couldn't download the image. Please try again."
+      );
+    }
+  }
+
+  return parsed;
+}
+
+function isUnsafeIpAddress(address: string): boolean {
+  const ipv4Mapped = address.toLowerCase().match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (ipv4Mapped) {
+    return isUnsafeIpv4Address(ipv4Mapped[1]);
+  }
+
+  const ipVersion = isIP(address);
+  if (ipVersion === 4) {
+    return isUnsafeIpv4Address(address);
+  }
+  if (ipVersion === 6) {
+    return isUnsafeIpv6Address(address);
+  }
+  return false;
+}
+
+function isUnsafeIpv4Address(address: string): boolean {
+  const parts = address.split('.').map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
+    return true;
+  }
+
+  const [a, b, c] = parts;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    a >= 224 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 192 && b === 0 && c === 0) ||
+    (a === 192 && b === 0 && c === 2) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    (a === 198 && b === 51 && c === 100) ||
+    (a === 203 && b === 0 && c === 113)
+  );
+}
+
+function isUnsafeIpv6Address(address: string): boolean {
+  const normalized = address.toLowerCase();
+  return (
+    normalized === '::' ||
+    normalized === '::1' ||
+    normalized.startsWith('::ffff:') ||
+    normalized.startsWith('fc') ||
+    normalized.startsWith('fd') ||
+    /^fe[89ab]/.test(normalized) ||
+    normalized.startsWith('ff') ||
+    normalized.startsWith('2001:db8')
+  );
+}
+
+async function fetchRemoteImage(url: string, redirectsRemaining = REMOTE_IMAGE_FETCH_CONFIG.maxRedirects): Promise<Response> {
+  const parsed = await validateRemoteImageUrl(url);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REMOTE_IMAGE_FETCH_CONFIG.timeoutMs);
+
+  try {
+    const response = await fetch(parsed.toString(), {
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location || redirectsRemaining <= 0) {
+        throw new ImageProcessingError(
+          'DOWNLOAD_FAILED',
+          "Couldn't download the image. Please try again."
+        );
+      }
+      return fetchRemoteImage(new URL(location, parsed).toString(), redirectsRemaining - 1);
+    }
+
+    return response;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function readResponseBufferWithLimit(
+  response: Response,
+  maxBytes: number,
+  tooLargeMessage: string
+): Promise<Buffer> {
+  if (!response.body) {
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        throw new ImageProcessingError(
+          'IMAGE_TOO_LARGE',
+          tooLargeMessage
+        );
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(chunks);
 }
 
 // ============================================================================
@@ -339,7 +503,7 @@ async function downloadLetterImage(url: string, imageType: LetterImageType): Pro
   if (localBuffer) return localBuffer;
 
   try {
-    const response = await fetch(url);
+    const response = await fetchRemoteImage(url);
 
     if (!response.ok) {
       throw new ImageProcessingError(
@@ -366,9 +530,13 @@ async function downloadLetterImage(url: string, imageType: LetterImageType): Pro
       );
     }
 
-    // Download full content
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    // Download full content with an enforced cap even when Content-Length is missing.
+    const tooLargeMessage = `${imageType === 'header' ? 'Header' : 'Inline'} image is too large. Please use an image under 5MB.`;
+    const buffer = await readResponseBufferWithLimit(
+      response,
+      LETTER_IMAGE_CONFIG.maxFileSize,
+      tooLargeMessage
+    );
 
     // Validate actual size
     if (buffer.length > LETTER_IMAGE_CONFIG.maxFileSize) {
@@ -424,7 +592,7 @@ async function downloadImage(url: string): Promise<Buffer> {
   if (localBuffer) return localBuffer;
 
   try {
-    const response = await fetch(url);
+    const response = await fetchRemoteImage(url);
 
     if (!response.ok) {
       throw new ImageProcessingError(
@@ -451,9 +619,12 @@ async function downloadImage(url: string): Promise<Buffer> {
       );
     }
 
-    // Download full content
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    // Download full content with an enforced cap even when Content-Length is missing.
+    const buffer = await readResponseBufferWithLimit(
+      response,
+      CONFIG.maxFileSize,
+      'Image is too large. Please use an image under 10MB.'
+    );
 
     // Validate actual size (in case Content-Length was missing)
     if (buffer.length > CONFIG.maxFileSize) {
@@ -541,4 +712,6 @@ export const _testing = {
   validateDimensions,
   isAllowedType,
   isAllowedLetterType,
+  validateRemoteImageUrl,
+  isUnsafeIpAddress,
 };

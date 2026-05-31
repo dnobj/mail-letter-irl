@@ -41,8 +41,8 @@ vi.mock("../../../src/services/tempImageStore.js", () => ({
 
 // Mock image generation limit service
 vi.mock("../../../src/services/imageGenerationLimitService.js", () => ({
-  checkGenerationLimit: vi.fn(),
-  recordGeneration: vi.fn()
+  releaseGenerationReservation: vi.fn(),
+  reserveGeneration: vi.fn()
 }));
 
 import {
@@ -51,15 +51,15 @@ import {
 } from "../../../src/services/imageGenerationService.js";
 import { storeImage } from "../../../src/services/tempImageStore.js";
 import {
-  checkGenerationLimit,
-  recordGeneration
+  releaseGenerationReservation,
+  reserveGeneration
 } from "../../../src/services/imageGenerationLimitService.js";
 import { generateImageTool } from "../../../src/tools/generateImage.js";
 
 const mockGenerateImage = generateImage as ReturnType<typeof vi.fn>;
 const mockStoreImage = storeImage as ReturnType<typeof vi.fn>;
-const mockCheckLimit = checkGenerationLimit as ReturnType<typeof vi.fn>;
-const mockRecordGeneration = recordGeneration as ReturnType<typeof vi.fn>;
+const mockReleaseReservation = releaseGenerationReservation as ReturnType<typeof vi.fn>;
+const mockReserveGeneration = reserveGeneration as ReturnType<typeof vi.fn>;
 
 const createMockContext = (): ToolContext => ({
   user: {
@@ -85,14 +85,14 @@ describe("generate_image tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.LETTER_IRL_API_URL = "https://api.letterirl.com";
-    // Default: allow generation with plenty remaining
-    mockCheckLimit.mockResolvedValue({
-      allowed: true,
-      used: 2,
+    // Default: reserve generation with plenty remaining
+    mockReserveGeneration.mockResolvedValue({
+      reserved: true,
+      used: 3,
       allowance: 25,
-      remaining: 23
+      remaining: 22
     });
-    mockRecordGeneration.mockResolvedValue(undefined);
+    mockReleaseReservation.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -105,7 +105,7 @@ describe("generate_image tool", () => {
     });
 
     it("should describe reusing an existing image instead of regenerating", () => {
-      expect(generateImageTool.description).toContain("imageUrl to pass to the next preview call");
+      expect(generateImageTool.description).toContain("imageUrl to pass to a preview tool");
       expect(generateImageTool.description).toContain("use that existing image instead of calling this tool again");
     });
 
@@ -252,11 +252,11 @@ describe("generate_image tool", () => {
     });
 
     it("should include generationsRemaining in output", async () => {
-      mockCheckLimit.mockResolvedValueOnce({
-        allowed: true,
-        used: 5,
+      mockReserveGeneration.mockResolvedValueOnce({
+        reserved: true,
+        used: 6,
         allowance: 25,
-        remaining: 20
+        remaining: 19
       });
       mockGenerateImage.mockResolvedValueOnce({ base64Data: "fakeb64" });
 
@@ -266,11 +266,10 @@ describe("generate_image tool", () => {
         context
       );
 
-      // remaining was 20 before generation, should be 19 after
       expect(result.generationsRemaining).toBe(19);
     });
 
-    it("should record generation after successful API call", async () => {
+    it("should reserve generation before API call", async () => {
       mockGenerateImage.mockResolvedValueOnce({ base64Data: "fakeb64" });
 
       const context = createMockContext();
@@ -279,14 +278,16 @@ describe("generate_image tool", () => {
         context
       );
 
-      expect(mockRecordGeneration).toHaveBeenCalledWith("test-user-id");
+      expect(mockReserveGeneration).toHaveBeenCalledWith("test-user-id");
+      expect(mockGenerateImage).toHaveBeenCalled();
+      expect(mockReleaseReservation).not.toHaveBeenCalled();
     });
   });
 
   describe("handler - generation limits", () => {
-    it("should check generation limit before calling OpenAI", async () => {
-      mockCheckLimit.mockResolvedValueOnce({
-        allowed: false,
+    it("should reserve generation before calling OpenAI", async () => {
+      mockReserveGeneration.mockResolvedValueOnce({
+        reserved: false,
         used: 10,
         allowance: 10,
         remaining: 0
@@ -301,9 +302,9 @@ describe("generate_image tool", () => {
       expect(mockGenerateImage).not.toHaveBeenCalled();
     });
 
-    it("should not record generation when limit is exhausted", async () => {
-      mockCheckLimit.mockResolvedValueOnce({
-        allowed: false,
+    it("should not release reservation when limit is exhausted", async () => {
+      mockReserveGeneration.mockResolvedValueOnce({
+        reserved: false,
         used: 10,
         allowance: 10,
         remaining: 0
@@ -316,12 +317,12 @@ describe("generate_image tool", () => {
         // expected
       }
 
-      expect(mockRecordGeneration).not.toHaveBeenCalled();
+      expect(mockReleaseReservation).not.toHaveBeenCalled();
     });
 
     it("should include purchase suggestion in limit error message", async () => {
-      mockCheckLimit.mockResolvedValueOnce({
-        allowed: false,
+      mockReserveGeneration.mockResolvedValueOnce({
+        reserved: false,
         used: 5,
         allowance: 5,
         remaining: 0
@@ -334,8 +335,8 @@ describe("generate_image tool", () => {
     });
 
     it("should log warning when limit is reached", async () => {
-      mockCheckLimit.mockResolvedValueOnce({
-        allowed: false,
+      mockReserveGeneration.mockResolvedValueOnce({
+        reserved: false,
         used: 10,
         allowance: 10,
         remaining: 0
@@ -372,6 +373,7 @@ describe("generate_image tool", () => {
           context
         )
       ).rejects.toThrow("content policy");
+      expect(mockReleaseReservation).toHaveBeenCalledWith("test-user-id");
     });
 
     it("should throw user-friendly error for missing API key", async () => {

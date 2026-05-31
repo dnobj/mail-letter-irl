@@ -15,7 +15,8 @@ import { query } from "../../../src/db/index.js";
 import {
   getGenerationQuota,
   checkGenerationLimit,
-  recordGeneration
+  releaseGenerationReservation,
+  reserveGeneration
 } from "../../../src/services/imageGenerationLimitService.js";
 
 const mockQuery = query as ReturnType<typeof vi.fn>;
@@ -182,14 +183,48 @@ describe("imageGenerationLimitService", () => {
     });
   });
 
-  describe("recordGeneration", () => {
-    it("should increment image_generations_used by 1", async () => {
-      mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+  describe("reserveGeneration", () => {
+    it("should atomically increment image_generations_used when quota remains", async () => {
+      mockQuery.mockResolvedValueOnce({
+        rows: [{ credits_purchased: 4, image_generations_used: 1 }],
+        rowCount: 1
+      });
 
-      await recordGeneration("user-1");
+      const reservation = await reserveGeneration("user-1");
 
       expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining("image_generations_used = image_generations_used + 1"),
+        expect.stringContaining("image_generations_used <"),
+        ["user-1", 2, 5]
+      );
+      expect(reservation.reserved).toBe(true);
+      expect(reservation.used).toBe(1);
+      expect(reservation.allowance).toBe(10);
+      expect(reservation.remaining).toBe(9);
+    });
+
+    it("should return current quota when reservation cannot be made", async () => {
+      mockQuery
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+        .mockResolvedValueOnce({
+          rows: [{ credits_purchased: 4, image_generations_used: 10 }],
+          rowCount: 1
+        });
+
+      const reservation = await reserveGeneration("user-1");
+
+      expect(reservation.reserved).toBe(false);
+      expect(reservation.remaining).toBe(0);
+    });
+  });
+
+  describe("releaseGenerationReservation", () => {
+    it("should decrement image_generations_used without going below zero", async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+
+      await releaseGenerationReservation("user-1");
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining("GREATEST(image_generations_used - 1, 0)"),
         ["user-1"]
       );
     });
