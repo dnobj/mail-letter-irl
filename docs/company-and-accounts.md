@@ -1,40 +1,46 @@
 # Company and Account Ownership
 
-Last updated: April 16, 2026
+Last updated: May 31, 2026
 
 This document is the non-secret source of truth for the organization and account ownership context behind Letter IRL. Keep credentials, API keys, passwords, recovery codes, private tax IDs, and private billing details out of this file.
 
 ## Organization Identity
 
-- Registered organization for platform/vendor accounts: `objective.works`
+- Registered organization for platform/vendor accounts: `Objective Works`
 - Primary organization account email: `dnicholl@objective.works`
 - Public product / DBA: `Letter IRL`
 - Public website: `https://letterirl.com`
 - Support contact: `support@letterirl.com`
 
-Use `objective.works` as the organization/company identity where a vendor platform asks for the registered organization, with `Letter IRL` as the DBA/product name.
+Use `Objective Works` as the organization/company identity where a vendor platform asks for the registered organization, with `Letter IRL` as the DBA/product name.
 
 ## OpenAI Registration
 
-Letter IRL should be submitted and managed under the OpenAI organization associated with `objective.works` / `dnicholl@objective.works`, using `Letter IRL` as the app/product name.
+Letter IRL should be submitted and managed under the OpenAI organization associated with `Objective Works` / `dnicholl@objective.works`, using `Letter IRL` as the app/product name.
 
 Track the exact OpenAI organization, project, owner account, and identity verification status here when confirmed. Do not store secret keys or sensitive account recovery details in documentation.
 
 Current operational assumption:
 
-- OpenAI registered organization: `objective.works`
+- OpenAI registered organization name: `Objective Works`
+- OpenAI organization ID: `org-sGKDRRMOeTxvkxhnsvnCRa6J`
+- OpenAI submission project name: `Mail Letter IRL`
+- OpenAI submission project ID: `proj_6tiqBTLBrGtxtdVz6ms1Acdd`
 - OpenAI owner/contact account: `dnicholl@objective.works`
 - OpenAI app/product name: `Letter IRL`
-- OpenAI identity verification status: submitted for organization verification on April 16, 2026; waiting for OpenAI response
+- OpenAI identity verification status: completed on May 31, 2026
 
 See `docs/chatgpt-app-submission.md` and `docs/app-submission/openai-test-cases.md` for app submission materials and reviewer test cases.
 
 ## ChatGPT Testing Accounts
 
-- Dedicated Letter IRL testing ChatGPT account: `dnicholl@objective.works`
+- Dedicated Letter IRL testing ChatGPT account: `dnicholl@letterirl.com`
+- Previous testing ChatGPT account: `dnicholl@objective.works`
 - Primary personal ChatGPT account: `openai@davidnicholl.com`
 
-Use the `dnicholl@objective.works` ChatGPT account for focused Letter IRL app testing and submission prep. Keep it separate from the primary personal ChatGPT account to avoid mixing app-review state, OAuth connections, test conversations, and platform configuration.
+Use the `dnicholl@letterirl.com` ChatGPT account for focused Letter IRL app testing and submission prep. Keep it separate from the primary personal ChatGPT account to avoid mixing app-review state, OAuth connections, test conversations, and platform configuration.
+
+ChatGPT account identity and Letter IRL/Auth0 OAuth identity can differ during testing. When debugging quotas, credits, or account-specific behavior, verify the OAuth account returned by app tools such as `get_account_balance` rather than assuming it matches the visible ChatGPT account.
 
 ## Related Accounts
 

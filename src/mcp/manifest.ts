@@ -2,12 +2,19 @@ import { LetterIrlServer } from "../server.js";
 import { WIDGET_DEFINITIONS } from "./registerTools.js";
 import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
 
-const DEFAULT_PUBLIC_BASE_URL =
-  process.env.LETTER_IRL_PUBLIC_BASE_URL ?? "https://api.letterirl.com";
-const DEFAULT_MCP_PATH = process.env.LETTER_IRL_MCP_PATH ?? "/mcp";
-const DEFAULT_HEALTH_PATH = process.env.LETTER_IRL_HEALTH_PATH ?? "/healthz";
-const DEFAULT_AUTH_SERVER_ROUTE =
-  process.env.LETTER_IRL_AUTH_SERVER_ROUTE ?? "/.well-known/oauth-authorization-server";
+function getManifestUrls() {
+  const publicBaseUrl = process.env.LETTER_IRL_PUBLIC_BASE_URL ?? "https://api.letterirl.com";
+  const mcpPath = process.env.LETTER_IRL_MCP_PATH ?? "/mcp";
+  const healthPath = process.env.LETTER_IRL_HEALTH_PATH ?? "/healthz";
+  const authServerRoute =
+    process.env.LETTER_IRL_AUTH_SERVER_ROUTE ?? "/.well-known/oauth-authorization-server";
+
+  return {
+    authServerUrl: `${publicBaseUrl}${authServerRoute}`,
+    healthUrl: `${publicBaseUrl}${healthPath}`,
+    mcpUrl: `${publicBaseUrl}${mcpPath}`
+  };
+}
 
 export const APP_DIRECTORY_DESCRIPTION =
   "Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. " +
@@ -15,6 +22,7 @@ export const APP_DIRECTORY_DESCRIPTION =
 
 export function buildManifest() {
   const server = new LetterIrlServer();
+  const urls = getManifestUrls();
   const tools = server.listTools().map((tool) => ({
     name: tool.name,
     description: tool.description,
@@ -37,15 +45,15 @@ export function buildManifest() {
       {
         type: "mcp",
         name: "letter-irl",
-        url: `${DEFAULT_PUBLIC_BASE_URL}${DEFAULT_MCP_PATH}`,
-        healthUrl: `${DEFAULT_PUBLIC_BASE_URL}${DEFAULT_HEALTH_PATH}`,
+        url: urls.mcpUrl,
+        healthUrl: urls.healthUrl,
         transport: {
           type: "streamableHttp"
         },
         auth: {
           type: "oauth",
           scopes: ["openid", "email", "profile"],
-          authorizationServer: `${DEFAULT_PUBLIC_BASE_URL}${DEFAULT_AUTH_SERVER_ROUTE}`
+          authorizationServer: urls.authServerUrl
         }
       }
     ],

@@ -1,41 +1,52 @@
 # OpenAI Apps SDK Owner Checklist
 
-Last updated: April 16, 2026
+Last updated: May 31, 2026
 
 This checklist tracks the non-code items the project owner needs to gather, verify, or decide before submitting Letter IRL for OpenAI Apps SDK review. Keep secrets, private billing details, private tax IDs, and passwords out of this file.
 
 ## Current Status
 
 - Submission status: pre-submission
-- Submitting organization: `objective.works`
+- Submitting organization: `Objective Works`
+- OpenAI organization ID: `org-sGKDRRMOeTxvkxhnsvnCRa6J`
+- OpenAI submission project: `Mail Letter IRL` (`proj_6tiqBTLBrGtxtdVz6ms1Acdd`)
 - DBA / product name: `Letter IRL`
 - Owner/contact account: `dnicholl@objective.works`
-- Dedicated ChatGPT testing account: `dnicholl@objective.works`
+- Dedicated ChatGPT testing account: `dnicholl@letterirl.com`
+- Previous ChatGPT testing account: `dnicholl@objective.works`
 - Primary personal ChatGPT account, kept separate: `openai@davidnicholl.com`
-- Organization verification: submitted to OpenAI on April 16, 2026; waiting for response
+- Organization verification: completed on May 31, 2026
 - Primary submission docs: `docs/chatgpt-app-submission.md`, `docs/app-submission/openai-test-cases.md`, `docs/app-submission/demo-scenarios.md`
 
 ## Owner Tasks
 
 ### OpenAI Platform Access
 
-- [ ] Confirm `objective.works` organization verification is approved by OpenAI.
-- [ ] Confirm the submitting account has the `Owner` role in the OpenAI organization.
-- [ ] Confirm the app will be submitted from the intended OpenAI organization/project.
-- [ ] Confirm the selected OpenAI project has global data residency and is eligible for app review.
-- [ ] Use the dedicated `dnicholl@objective.works` ChatGPT account for focused Letter IRL testing.
+- [x] Confirm `Objective Works` organization verification is approved by OpenAI.
+- [x] Confirm the submitting account has the `Owner` role in the OpenAI organization. `dnicholl@objective.works` is listed as Organization Owner.
+- [x] Confirm the app will be submitted from the intended OpenAI organization/project: `Objective Works` / `Mail Letter IRL` (`proj_6tiqBTLBrGtxtdVz6ms1Acdd`).
+- [x] Confirm the selected OpenAI project has global data residency and is eligible for app review. Dashboard `GEOGRAPHY` column shows `Global`.
+- [ ] Use the dedicated `dnicholl@letterirl.com` ChatGPT account for focused Letter IRL testing.
 - [ ] Keep the primary `openai@davidnicholl.com` ChatGPT account separate from app testing and review prep.
-- [ ] Record the final OpenAI organization/project names in `docs/company-and-accounts.md` once confirmed.
+- [x] Record the final OpenAI organization/project names in `docs/company-and-accounts.md` once confirmed.
 
 ### Public Company and Support Information
 
-- [ ] Confirm company / organization name: `objective.works`.
+- [x] Confirm company / organization name: `Objective Works`.
 - [ ] Confirm DBA / product name: `Letter IRL`.
 - [ ] Confirm company URL: `https://letterirl.com`.
 - [ ] Confirm support email: `support@letterirl.com`.
 - [ ] Confirm privacy policy URL: `https://letterirl.com/privacy`.
 - [ ] Confirm terms of service URL: `https://letterirl.com/terms`.
 - [ ] Confirm country availability: U.S. only.
+
+### Product and Commerce Framing
+
+- [ ] Use user-facing language: `Letter Packs`, `pre-paid letter sends`, or `letters remaining`.
+- [ ] Avoid user-facing submission language that frames the product as generic digital `credits`, `tokens`, or a subscription.
+- [ ] Confirm submission materials explain that Letter Packs are prepaid physical mail sends for real USPS letters/postcards.
+- [ ] Confirm checkout occurs externally on `letterirl.com`, not embedded inside the ChatGPT app experience.
+- [ ] Confirm reviewer materials describe purchases as simulated/test-mode when using development, or provide a reviewer account with preloaded letter sends.
 
 ### Submission Assets
 
@@ -53,7 +64,7 @@ This checklist tracks the non-code items the project owner needs to gather, veri
 
 - [ ] Finalize reviewer test prompts and expected responses in `docs/app-submission/openai-test-cases.md`.
 - [ ] Prepare a reviewer test account or reviewer-friendly login path, if OpenAI requests one.
-- [ ] Prepare a reviewer promo code or credit path so reviewers can test send flows without paying.
+- [ ] Prepare a reviewer Letter Pack, promo code, or preloaded letter-send path so reviewers can test send flows without paying.
 - [ ] Confirm reviewer instructions clearly state that Letter IRL sends real physical USPS mail.
 - [ ] Confirm reviewer instructions explain that users must buy pre-paid letter sends before mailing.
 - [ ] Confirm reviewer instructions explain preview-before-send and explicit confirmation behavior.
@@ -66,11 +77,11 @@ This checklist tracks the non-code items the project owner needs to gather, veri
 - [ ] Test letter with generated or reused image.
 - [ ] Test postcard preview.
 - [ ] Test upload fallback path.
-- [ ] Test insufficient credits flow.
+- [ ] Test insufficient letter balance flow.
 - [ ] Test explicit send confirmation in a controlled environment.
 - [ ] Test account balance and order status.
 - [ ] Test OAuth linking with a fresh account.
-- [ ] Verify production MCP endpoint and OAuth endpoints are live.
+- [ ] Verify production MCP endpoint and OAuth endpoints are live. May 31, 2026 check: endpoints are reachable, but production manifest/widget metadata appears stale and needs remediation before submission.
 
 ## Demo Video Tracking
 
@@ -87,11 +98,12 @@ Use this section to track existing or newly recorded demo assets.
 
 Do not submit until all are true:
 
-- [ ] OpenAI organization verification is approved.
-- [ ] Owner role and project eligibility are confirmed.
+- [x] OpenAI organization verification is approved.
+- [x] Owner role and project eligibility are confirmed.
 - [ ] Production app, MCP server, OAuth, widget CSP, privacy policy, and terms are verified.
 - [ ] Final screenshots and demo/video assets are ready.
 - [ ] Reviewer prompts and instructions are final.
+- [ ] Submission language consistently uses Letter Packs / pre-paid letter sends for user-facing commerce.
 - [ ] Known limitations are documented honestly.
 - [ ] A final manual ChatGPT smoke test has passed.
 

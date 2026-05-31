@@ -18,6 +18,7 @@ For owner-managed submission tasks such as organization verification, screenshot
 
 - Letter IRL drafts, previews, and mails real physical letters and postcards through USPS.
 - Users must buy pre-paid letter sends on `letterirl.com` before sending mail.
+- For OpenAI submission and user-facing commerce copy, use `Letter Packs`, `pre-paid letter sends`, or `letters remaining`; avoid framing the product as generic digital credits or tokens.
 - There is no assumed auto-greet hook when the app is merely selected; onboarding must happen through supported conversational/tool surfaces.
 - Delivery timing is estimated, not guaranteed.
 
@@ -56,7 +57,7 @@ npm run build
 ## Submission materials
 
 - App name: `Letter IRL`
-- Submitting organization: `objective.works` / DBA `Letter IRL` (see `docs/company-and-accounts.md`)
+- Submitting organization: `Objective Works` / DBA `Letter IRL` (see `docs/company-and-accounts.md`)
 - App description: `Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. To send mail, first buy pre-paid letter sends on letterirl.com.`
 - Privacy policy: `https://letterirl.com/privacy`
 - Terms: `https://letterirl.com/terms`
@@ -65,11 +66,12 @@ npm run build
 
 ## Remaining work before submission
 
-- [ ] Complete OpenAI Platform identity verification for `objective.works` as the registered organization / `Letter IRL` as the DBA. Submitted on April 16, 2026; waiting for OpenAI response.
-- [ ] Confirm your OpenAI Platform account has the `Owner` role for the submitting organization
-- [ ] Confirm the OpenAI project used for submission has global data residency (EU data residency projects cannot submit apps for review today)
-- [ ] Verify the production MCP server and OAuth endpoints are live on the public domains you will submit
+- [x] Complete OpenAI Platform identity verification for `Objective Works` as the registered organization / `Letter IRL` as the DBA. Completed on May 31, 2026.
+- [x] Confirm your OpenAI Platform account has the `Owner` role for the submitting organization. `dnicholl@objective.works` is listed as Organization Owner.
+- [x] Confirm the OpenAI project used for submission has global data residency. Dashboard `GEOGRAPHY` column shows `Global`.
+- [ ] Verify the production MCP server and OAuth endpoints are live on the public domains you will submit. May 31, 2026 check: public endpoints are reachable, but production manifest/widget metadata appears stale and needs remediation before submission.
 - [ ] Review the production widget CSP and confirm it allows only the exact required domains
+- [ ] Review submission copy for Letter Packs / pre-paid letter sends wording and remove generic credit/token framing from user-facing materials
 - [ ] Capture final submission assets: logo, screenshots, app description, company URL, privacy policy URL, support contact, and localization fields
 - [ ] Locate and review final demo videos using `docs/app-submission/owner-checklist.md`
 - [ ] Finalize reviewer test prompts and expected responses using `docs/app-submission/openai-test-cases.md`
