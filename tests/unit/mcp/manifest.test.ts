@@ -41,6 +41,16 @@ describe("Compatibility manifest", () => {
     }
   });
 
+  it("should allow runtime callers to advertise the request public base URL", () => {
+    const manifest = buildManifest("https://api.letterirl.com");
+
+    expect(manifest.servers[0].url).toBe("https://api.letterirl.com/mcp");
+    expect(manifest.servers[0].healthUrl).toBe("https://api.letterirl.com/healthz");
+    expect(manifest.servers[0].auth.authorizationServer).toBe(
+      "https://api.letterirl.com/.well-known/oauth-authorization-server"
+    );
+  });
+
   it("should advertise generate_image as a fallback when native image generation is unavailable", () => {
     const generateImageTool = buildManifest().tools.find((tool) => tool.name === "generate_image");
 

@@ -2,8 +2,9 @@ import { LetterIrlServer } from "../server.js";
 import { WIDGET_DEFINITIONS } from "./registerTools.js";
 import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
 
-function getManifestUrls() {
-  const publicBaseUrl = process.env.LETTER_IRL_PUBLIC_BASE_URL ?? "https://api.letterirl.com";
+function getManifestUrls(publicBaseUrlOverride?: string) {
+  const publicBaseUrl =
+    publicBaseUrlOverride ?? process.env.LETTER_IRL_PUBLIC_BASE_URL ?? "https://api.letterirl.com";
   const mcpPath = process.env.LETTER_IRL_MCP_PATH ?? "/mcp";
   const healthPath = process.env.LETTER_IRL_HEALTH_PATH ?? "/healthz";
   const authServerRoute =
@@ -20,9 +21,9 @@ export const APP_DIRECTORY_DESCRIPTION =
   "Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. " +
   "To send mail, first buy pre-paid letter sends on letterirl.com.";
 
-export function buildManifest() {
+export function buildManifest(publicBaseUrl?: string) {
   const server = new LetterIrlServer();
-  const urls = getManifestUrls();
+  const urls = getManifestUrls(publicBaseUrl);
   const tools = server.listTools().map((tool) => ({
     name: tool.name,
     description: tool.description,
@@ -64,6 +65,6 @@ export function buildManifest() {
   };
 }
 
-export function stringifyManifest(): string {
-  return `${JSON.stringify(buildManifest(), null, 2)}\n`;
+export function stringifyManifest(publicBaseUrl?: string): string {
+  return `${JSON.stringify(buildManifest(publicBaseUrl), null, 2)}\n`;
 }

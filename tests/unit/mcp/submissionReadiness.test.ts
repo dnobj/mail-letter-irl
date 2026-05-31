@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { getOpenIdConfiguration } from "../../../src/auth/metadata.js";
+import {
+  buildWwwAuthenticateChallenge,
+  getPublicBaseUrl
+} from "../../../src/mcp/httpServer.js";
 import { buildManifest, APP_DIRECTORY_DESCRIPTION } from "../../../src/mcp/manifest.js";
 import {
   buildWidgetResourceMeta,
@@ -75,5 +79,21 @@ describe("Submission readiness checks", () => {
   it("should advertise CMID support in OIDC metadata", () => {
     const metadata = getOpenIdConfiguration("https://api.letterirl.com");
     expect(metadata.client_id_metadata_document_supported).toBe(true);
+  });
+
+  it("should derive public metadata URLs from the forwarded custom domain", () => {
+    const publicBaseUrl = getPublicBaseUrl({
+      headers: {
+        "x-forwarded-host": "api.letterirl.com",
+        "x-forwarded-proto": "https",
+        host: "letter-irl-api-production.up.railway.app"
+      }
+    });
+
+    expect(publicBaseUrl).toBe("https://api.letterirl.com");
+    expect(buildManifest(publicBaseUrl).servers[0].url).toBe("https://api.letterirl.com/mcp");
+    expect(buildWwwAuthenticateChallenge("Missing Authorization header", publicBaseUrl)).toContain(
+      'resource_metadata="https://api.letterirl.com/.well-known/oauth-protected-resource"'
+    );
   });
 });

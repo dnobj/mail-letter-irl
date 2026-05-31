@@ -163,6 +163,24 @@ function matchesWellKnownRoute(pathname: string, baseRoute: string) {
   return pathname === baseRoute || pathname === `${baseRoute}${MCP_PATH}`;
 }
 
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw?.split(",")[0]?.trim();
+}
+
+export function getPublicBaseUrl(req: Pick<http.IncomingMessage, "headers">): string {
+  const host = firstHeaderValue(req.headers["x-forwarded-host"]) ?? firstHeaderValue(req.headers.host);
+  if (!host) {
+    return PUBLIC_BASE_URL;
+  }
+
+  const proto =
+    firstHeaderValue(req.headers["x-forwarded-proto"]) ??
+    (host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : "https");
+
+  return `${proto}://${host}`;
+}
+
 async function serveWidget(
   widgetName: string,
   res: http.ServerResponse
@@ -250,7 +268,7 @@ export async function startHttpServer() {
       return;
     }
 
-    const authInfo = await authenticateRequest(req, res);
+    const authInfo = await authenticateRequest(req, res, getPublicBaseUrl(req));
     if (authInfo === null) {
       return;
     }
@@ -382,7 +400,7 @@ export async function startHttpServer() {
       try {
         res.statusCode = 200;
         res.setHeader("Content-Type", "application/json; charset=utf-8");
-        res.end(stringifyManifest());
+        res.end(stringifyManifest(getPublicBaseUrl(req)));
       } catch (error) {
         console.error("Manifest generation failed", error);
         res.statusCode = 500;
@@ -611,7 +629,7 @@ export async function startHttpServer() {
     }
 
     if (matchesWellKnownRoute(url.pathname, OPENID_CONFIG_ROUTE)) {
-      const payload = getOpenIdConfiguration(PUBLIC_BASE_URL);
+      const payload = getOpenIdConfiguration(getPublicBaseUrl(req));
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(payload));
@@ -619,7 +637,7 @@ export async function startHttpServer() {
     }
 
     if (matchesWellKnownRoute(url.pathname, PROTECTED_RESOURCE_ROUTE)) {
-      const payload = getProtectedResourceMetadata(PUBLIC_BASE_URL);
+      const payload = getProtectedResourceMetadata(getPublicBaseUrl(req));
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(payload));
@@ -627,7 +645,7 @@ export async function startHttpServer() {
     }
 
     if (matchesWellKnownRoute(url.pathname, AUTHORIZATION_SERVER_ROUTE)) {
-      const payload = getOpenIdConfiguration(PUBLIC_BASE_URL);
+      const payload = getOpenIdConfiguration(getPublicBaseUrl(req));
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(payload));
@@ -760,7 +778,7 @@ export async function startHttpServer() {
         req.headers.origin = FALLBACK_ORIGIN;
       }
 
-      const authInfo = await authenticateRequest(req, res);
+      const authInfo = await authenticateRequest(req, res, getPublicBaseUrl(req));
       if (authInfo === null) {
         return;
       }
@@ -873,7 +891,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
 async function authenticateRequest(
   req: http.IncomingMessage,
-  res: http.ServerResponse
+  res: http.ServerResponse,
+  publicBaseUrl = PUBLIC_BASE_URL
 ): Promise<AuthenticatedUser | null> {
   if (!REQUIRE_AUTH) {
     if (!req.headers.authorization) {
@@ -891,7 +910,7 @@ async function authenticateRequest(
     return await validateAuthorizationHeader(req.headers.authorization);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const challenge = buildWwwAuthenticateChallenge(message);
+    const challenge = buildWwwAuthenticateChallenge(message, publicBaseUrl);
     const body = {
       jsonrpc: "2.0",
       error: {
@@ -914,7 +933,7 @@ async function authenticateRequest(
   }
 }
 
-export function buildWwwAuthenticateChallenge(message: string): string {
+export function buildWwwAuthenticateChallenge(message: string, publicBaseUrl = PUBLIC_BASE_URL): string {
   const scopes = (process.env.LETTER_IRL_OAUTH_SCOPES ?? "openid email profile")
     .split(/[,\s]+/)
     .map((scope) => scope.trim())
@@ -923,8 +942,8 @@ export function buildWwwAuthenticateChallenge(message: string): string {
 
   return [
     `Bearer realm="Letter IRL"`,
-    `resource_metadata="${PUBLIC_BASE_URL}${PROTECTED_RESOURCE_ROUTE}"`,
-    `authorization_uri="${PUBLIC_BASE_URL}${AUTHORIZATION_SERVER_ROUTE}"`,
+    `resource_metadata="${publicBaseUrl}${PROTECTED_RESOURCE_ROUTE}"`,
+    `authorization_uri="${publicBaseUrl}${AUTHORIZATION_SERVER_ROUTE}"`,
     scopes ? `scope="${scopes}"` : undefined,
     `error="invalid_token"`,
     `error_description="${message.replace(/"/g, "'")}"`
