@@ -81,7 +81,7 @@ This checklist tracks the non-code items the project owner needs to gather, veri
 - [ ] Test explicit send confirmation in a controlled environment.
 - [ ] Test account balance and order status.
 - [ ] Test OAuth linking with a fresh account.
-- [ ] Verify production MCP endpoint and OAuth endpoints are live. May 31, 2026 check: endpoints are reachable, but production manifest/widget metadata appears stale and needs remediation before submission.
+- [x] Verify production MCP endpoint and OAuth endpoints are live. May 31, 2026 check: `api.letterirl.com` manifest, OAuth metadata, MCP CORS preflight, and unauthenticated auth challenge all advertise the canonical production domain.
 
 ## Demo Video Tracking
 
@@ -100,7 +100,7 @@ Do not submit until all are true:
 
 - [x] OpenAI organization verification is approved.
 - [x] Owner role and project eligibility are confirmed.
-- [ ] Production app, MCP server, OAuth, widget CSP, privacy policy, and terms are verified.
+- [ ] Production app, MCP server, OAuth, widget CSP, privacy policy, and terms are verified. MCP server and OAuth endpoints passed canonical-domain checks on May 31, 2026.
 - [ ] Final screenshots and demo/video assets are ready.
 - [ ] Reviewer prompts and instructions are final.
 - [ ] Submission language consistently uses Letter Packs / pre-paid letter sends for user-facing commerce.

@@ -69,7 +69,7 @@ npm run build
 - [x] Complete OpenAI Platform identity verification for `Objective Works` as the registered organization / `Letter IRL` as the DBA. Completed on May 31, 2026.
 - [x] Confirm your OpenAI Platform account has the `Owner` role for the submitting organization. `dnicholl@objective.works` is listed as Organization Owner.
 - [x] Confirm the OpenAI project used for submission has global data residency. Dashboard `GEOGRAPHY` column shows `Global`.
-- [ ] Verify the production MCP server and OAuth endpoints are live on the public domains you will submit. May 31, 2026 check: public endpoints are reachable, but production manifest/widget metadata appears stale and needs remediation before submission.
+- [x] Verify the production MCP server and OAuth endpoints are live on the public domains you will submit. May 31, 2026 check: `api.letterirl.com` manifest, OAuth metadata, MCP CORS preflight, and unauthenticated auth challenge all advertise the canonical production domain.
 - [ ] Review the production widget CSP and confirm it allows only the exact required domains
 - [ ] Review submission copy for Letter Packs / pre-paid letter sends wording and remove generic credit/token framing from user-facing materials
 - [ ] Capture final submission assets: logo, screenshots, app description, company URL, privacy policy URL, support contact, and localization fields
