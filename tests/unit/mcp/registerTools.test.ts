@@ -15,10 +15,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { LetterIrlServer } from '../../../src/server.js';
 import {
   buildAnnotations,
   buildToolMeta,
-  buildToolSecuritySchemes
+  buildToolSecuritySchemes,
+  getZodInputShape,
+  getZodOutputShape
 } from '../../../src/mcp/registerTools.js';
 
 /**
@@ -58,6 +61,9 @@ const sendTools = [
 const otherWriteTools = [
   { name: 'set_return_address', readOnly: false },
   { name: 'confirm_uploaded_image', readOnly: false },
+  { name: 'submit_feature_request', readOnly: false },
+  { name: 'upload_image', readOnly: false },
+  { name: 'generate_image', readOnly: false },
 ];
 
 // Destructive tools: delete user data
@@ -240,8 +246,12 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
   });
 
   describe('Tool Classification Summary', () => {
-    it('should have 14 total tools covered by annotation checks', () => {
-      expect(allTools.length).toBe(14);
+    it('should cover all 17 registered tools in annotation checks', () => {
+      const runtimeToolNames = new LetterIrlServer().listTools().map((tool) => tool.name).sort();
+      const checkedToolNames = allTools.map((tool) => tool.name).sort();
+
+      expect(allTools.length).toBe(17);
+      expect(checkedToolNames).toEqual(runtimeToolNames);
     });
 
     it('should have 5 read-only tools', () => {
@@ -252,20 +262,20 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       expect(readOnlyCount).toBe(5);
     });
 
-    it('should have 9 write tools (non-read-only)', () => {
+    it('should have 12 write tools (non-read-only)', () => {
       const writeCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === false;
       }).length;
-      expect(writeCount).toBe(9);
+      expect(writeCount).toBe(12);
     });
 
-    it('should have 7 open-world tools (call external APIs)', () => {
+    it('should have 8 open-world tools (call external APIs)', () => {
       const openWorldCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.openWorldHint === true;
       }).length;
-      expect(openWorldCount).toBe(7);
+      expect(openWorldCount).toBe(8);
     });
 
     it('should have 5 idempotent tools (send + address management + upload relay)', () => {
@@ -282,6 +292,17 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
         return annotations.destructiveHint === true;
       }).length;
       expect(destructiveCount).toBe(1);
+    });
+  });
+
+  describe('Runtime Zod Schema Coverage', () => {
+    it('should register input and output Zod shapes for every runtime tool', () => {
+      const tools = new LetterIrlServer().listTools();
+
+      for (const tool of tools) {
+        expect(getZodInputShape(tool.name), `${tool.name} input shape`).toBeDefined();
+        expect(getZodOutputShape(tool.name), `${tool.name} output shape`).toBeDefined();
+      }
     });
   });
 

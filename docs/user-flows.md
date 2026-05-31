@@ -68,7 +68,7 @@ This is the main flow for composing and sending a letter.
     - `currentStatus: "queued_for_print"`
     - `creditsRemaining`
 
-15. ChatGPT displays `LetterConfirmationCard`
+15. ChatGPT confirms the sent order in chat and may continue with status follow-up
 
 ### Step 3: Background Processing
 16. pg-boss worker picks up job
@@ -91,8 +91,8 @@ This is the main flow for composing and sending a letter.
    - Status timeline
    - Recipient summary
    - Tracking info (if available)
-   - Preview thumbnail
-4. ChatGPT displays `LetterStatusCard`
+   - Tracking support level
+4. ChatGPT summarizes the current order status
 5. Optional: User can request follow-up letter (loops to Flow A)
 
 ---
@@ -102,11 +102,11 @@ This is the main flow for composing and sending a letter.
 1. User asks about remaining credits
 2. ChatGPT calls `get_account_balance`
 3. Server returns:
-   - Total available credits
-   - Credits expiring soon
-   - Recent transactions
+   - Remaining pre-paid letter sends
+   - Letters expiring soon
+   - Image-generation quota metadata
    - `canSendStandardLetter` flag
-4. ChatGPT displays `BalanceCard`
+4. ChatGPT summarizes the balance and can point the user to `letterirl.com` to buy more
 
 ---
 

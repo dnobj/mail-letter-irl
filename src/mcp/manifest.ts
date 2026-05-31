@@ -1,5 +1,6 @@
 import { LetterIrlServer } from "../server.js";
 import { WIDGET_DEFINITIONS } from "./registerTools.js";
+import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
 
 const DEFAULT_PUBLIC_BASE_URL =
   process.env.LETTER_IRL_PUBLIC_BASE_URL ?? "https://api.letterirl.com";
@@ -17,13 +18,15 @@ export function buildManifest() {
   const tools = server.listTools().map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: tool.inputSchema
+    inputSchema: tool.inputSchema,
+    outputSchema: tool.outputSchema
   }));
 
   return {
     name: "Letter IRL",
     version: "0.1.0",
     description: APP_DIRECTORY_DESCRIPTION,
+    instructions: LETTER_IRL_SERVER_INSTRUCTIONS,
     contactEmail: "support@letterirl.com",
     legalInfoUrl: "https://letterirl.com/terms",
     tools,

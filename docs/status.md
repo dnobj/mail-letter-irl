@@ -160,12 +160,12 @@ See [database-schema.md](database-schema.md) for full schema details.
 
 ---
 
-## MCP Tools (13 Total)
+## MCP Tools (17 Total)
 
 ### Letter Tools (3 variants)
 | Tool | Purpose |
 |------|---------|
-| `quote_and_preview_letter_text_only` | Text-only letters (max ~1600 chars) |
+| `quote_and_preview_letter` | Text-only letters (max ~1600 chars) |
 | `quote_and_preview_letter_with_header_image` | Letters with header/letterhead image (max ~1100 chars) |
 | `quote_and_preview_letter_with_image` | Letters with inline image after signature (max ~800 chars) |
 | `send_letter` | Consumes draft, deducts credits, queues job |
@@ -189,6 +189,15 @@ See [database-schema.md](database-schema.md) for full schema details.
 | `set_return_address` | Save default return address for future mailings |
 | `get_return_address` | View saved return address |
 | `clear_return_address` | Remove saved return address |
+
+### Image and Onboarding Tools
+| Tool | Purpose |
+|------|---------|
+| `get_started` | Show getting-started guidance |
+| `generate_image` | Generate fallback artwork through Letter IRL |
+| `upload_image` | Open image upload fallback widget |
+| `confirm_uploaded_image` | Relay uploaded image URLs from the widget |
+| `submit_feature_request` | Capture unsupported workflows and product ideas |
 
 See [letter-send-flow.md](letter-send-flow.md) for the complete send flow.
 

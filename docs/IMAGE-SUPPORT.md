@@ -127,7 +127,7 @@ Same as header images, but with different output dimensions (1950×900) and plac
 
 ### 4. Text-Only Letters
 
-**Tool**: `quote_and_preview_letter_text_only`
+**Tool**: `quote_and_preview_letter`
 
 **Text Specifications**:
 - Body text limit: 1600 characters OR 24 lines
@@ -347,7 +347,7 @@ Quick reference for text limits per layout:
 
 | Layout Type | Tool | Max Characters | Max Lines |
 |-------------|------|----------------|-----------|
-| Text-only letter | `quote_and_preview_letter_text_only` | 1600 | 24 |
+| Text-only letter | `quote_and_preview_letter` | 1600 | 24 |
 | Header image letter | `quote_and_preview_letter_with_header_image` | 1100 | 17 |
 | Inline image letter | `quote_and_preview_letter_with_image` | 800 | 12 |
 | Postcard message | `quote_and_preview_postcard` | 500 | N/A |

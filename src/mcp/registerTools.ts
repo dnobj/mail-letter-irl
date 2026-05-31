@@ -23,7 +23,22 @@ import {
   getStartedInputZ,
   uploadImageInputZ,
   generateImageInputZ,
-  confirmUploadedImageInputZ
+  confirmUploadedImageInputZ,
+  quoteAndPreviewOutputZ,
+  sendLetterOutputZ,
+  getOrderStatusOutputZ,
+  getAccountBalanceOutputZ,
+  listOrdersOutputZ,
+  setReturnAddressOutputZ,
+  getReturnAddressOutputZ,
+  clearReturnAddressOutputZ,
+  quoteAndPreviewPostcardOutputZ,
+  sendPostcardOutputZ,
+  submitFeatureRequestOutputZ,
+  getStartedOutputZ,
+  uploadImageOutputZ,
+  generateImageOutputZ,
+  confirmUploadedImageOutputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { getOrCreateUser } from "../services/userService.js";
@@ -285,8 +300,40 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   confirm_uploaded_image: confirmUploadedImageInputZ
 };
 
-function getZodShape(name: string) {
+const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
+  // Letter tools - three separate tools for different layouts
+  quote_and_preview_letter: quoteAndPreviewOutputZ,
+  quote_and_preview_letter_with_header_image: quoteAndPreviewOutputZ,
+  quote_and_preview_letter_with_image: quoteAndPreviewOutputZ,
+  send_letter: sendLetterOutputZ,
+  // Account and order management tools
+  get_order_status: getOrderStatusOutputZ,
+  get_account_balance: getAccountBalanceOutputZ,
+  list_orders: listOrdersOutputZ,
+  set_return_address: setReturnAddressOutputZ,
+  get_return_address: getReturnAddressOutputZ,
+  clear_return_address: clearReturnAddressOutputZ,
+  // Postcard tools
+  quote_and_preview_postcard: quoteAndPreviewPostcardOutputZ,
+  send_postcard: sendPostcardOutputZ,
+  // Feedback tools
+  submit_feature_request: submitFeatureRequestOutputZ,
+  get_started: getStartedOutputZ,
+  // Image upload tool
+  upload_image: uploadImageOutputZ,
+  // Image generation tool
+  generate_image: generateImageOutputZ,
+  // Confirm uploaded image tool (widget relay)
+  confirm_uploaded_image: confirmUploadedImageOutputZ
+};
+
+export function getZodInputShape(name: string) {
   const schema = zodInputSchemas[name as ToolName];
+  return schema?.shape;
+}
+
+export function getZodOutputShape(name: string) {
+  const schema = zodOutputSchemas[name as ToolName];
   return schema?.shape;
 }
 
@@ -334,7 +381,7 @@ export async function registerLetterTools(
     }
 
     try {
-      await getOrCreateUser(userId, email);
+      await getOrCreateUser(userId, email ?? "unknown@example.com");
       console.log(`✅ User ready: ${userId} (${email})`);
     } catch (error) {
       console.error(`⚠️  Failed to create user ${userId}:`, error);
@@ -346,8 +393,9 @@ export async function registerLetterTools(
 
   const toolDefs = appServer.listTools();
   for (const tool of toolDefs) {
-    const shape = getZodShape(tool.name);
-    if (!shape) {
+    const inputShape = getZodInputShape(tool.name);
+    const outputShape = getZodOutputShape(tool.name);
+    if (!inputShape || !outputShape) {
       continue;
     }
 
@@ -362,7 +410,8 @@ export async function registerLetterTools(
       {
         title: tool.description,  // Use description as title
         description: tool.description,
-        inputSchema: shape,
+        inputSchema: inputShape,
+        outputSchema: outputShape,
         annotations,
         _meta: buildToolMeta(tool.meta)  // Contains auth metadata and OpenAI widget/runtime hints
       },

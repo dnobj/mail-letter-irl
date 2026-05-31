@@ -1,41 +1,26 @@
 # UI Widgets
 
-Letter IRL relies on four Apps SDK widgets rendered through `_meta.openai/outputTemplate`. Each widget is responsible for presenting server output and gating user actions that trigger additional tool calls.
+**Last Updated:** May 30, 2026
 
-## LetterPreviewCard
-- **Inputs:** `previewHtml`, `requiredCredits`, `canSendNow`, optional masked address summaries, optional current balance.
-- **Layout:**
-  - Scrollable preview pane rendering `previewHtml` safely.
-  - Cost summary showing required credits in Letter IRL credits.
-  - Conditional messaging if `canSendNow` is false (e.g., "Not enough credits").
-- **Primary action:** Button labeled “Send this letter.” On click, call `window.openai.callTool("send_letter", {..., "confirm": true})` with the same inputs used for the preview.
-- **Safety:** Disable or hide the send button when `canSendNow` is false.
+Letter IRL registers five OpenAI Apps SDK widgets as MCP resources with `ui://` URIs and `text/html;profile=mcp-app`. Tool results keep model-facing data in `structuredContent` and send large render payloads, such as preview HTML and generated image thumbnails, through widget-only `_meta`.
 
-## LetterConfirmationCard
-- **Inputs:** `orderId`, `currentStatus`, `recipientSummary`, `creditsRemaining`, optional `previewFirstPageHtml`.
-- **Layout:**
-  - Confirmation icon/text (e.g., “Your letter is queued for print”).
-  - Recipient summary showing name and city/state.
-  - Remaining credits display.
-- **Primary action:** “Track status” button invoking `get_order_status` via `window.openai.callTool` for the returned `orderId`.
+## Registered Widgets
 
-## LetterStatusCard
-- **Inputs:** `orderId`, `currentStatus`, `statusTimeline`, `previewThumbnailHtml`, `canSendFollowUp`, `followUpSuggestedPrompt`.
-- **Layout:**
-  - Timeline component listing status entries in chronological order.
-  - Thumbnail preview of page one of the letter.
-  - CTA for follow-up when `canSendFollowUp` is true.
-- **Primary action:** “Send follow-up letter” button calls `window.openai.sendFollowUpMessage` with `followUpSuggestedPrompt`, then re-enters the preview flow.
+- `LetterPreviewCard`: Shows text-only, header-image, and enclosed-image letter drafts. Reads letter preview HTML from `_meta.previewHtml`, displays delivery/cost context, and can call `send_letter` only after the user explicitly confirms.
+- `PostcardPreviewCard`: Shows postcard front and back previews from `_meta.previewFrontHtml` and `_meta.previewBackHtml`, then can call `send_postcard` only after explicit user confirmation.
+- `GenerateImageCard`: Shows a lightweight generated-image preview from `_meta.generatedImagePreview` and relays the generated image URL for use with postcard or letter preview tools.
+- `ImageUploadCard`: Opens a file picker fallback for image handoff problems, uploads a photo, and calls `confirm_uploaded_image` with the resulting `imageUrl`.
+- `GetStartedCard`: Presents onboarding guidance, purchase prerequisite messaging, and example prompts for new users.
 
-## BalanceCard
-- **Inputs:** `creditsRemaining`, `canSendStandardLetter`, `standardLetterCostCredits`, `message`.
-- **Layout:**
-  - Prominent display of current credits.
-  - Statement of standard letter cost.
-  - Friendly guidance or nudges from the `message` field.
-- **Future considerations:** Placeholder for “Add credits” remains out-of-scope for v1 but should be easy to activate later.
+## Runtime Bridge Notes
 
-## General UX Guidelines
-- Maintain mobile-friendly, accessible styling.
-- Never auto-send letters; every irreversible action must be behind an explicit user click.
-- Clearly show destination city and state prior to confirmation to reinforce transparency.
+- Widgets currently use the `window.openai` compatibility bridge, including `toolOutput`, `toolResponseMetadata`, `callTool`, and `sendFollowUpMessage` where needed.
+- Current OpenAI guidance prefers MCP Apps bridge notifications for new widget work, including tool-result and tool-input notifications. Treat a future bridge migration as a focused widget task, not as part of routine tool changes.
+- Widget resource metadata includes canonical `ui` metadata plus legacy `openai/*` aliases for compatibility.
+
+## UX and Safety Guidelines
+
+- Never auto-send mail from a widget. Irreversible actions must stay behind explicit confirmation.
+- Keep previews mobile-friendly and resilient to delayed or repeated render lifecycle events.
+- Clearly show recipient context before confirmation when available.
+- Prefer direct conversation image reuse or `imageUrl` handoff before opening the upload widget.

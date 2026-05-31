@@ -10,6 +10,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { LetterIrlServer } from "../server.js";
 import { registerLetterTools } from "./registerTools.js";
+import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
 import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
 import { stringifyManifest } from "./manifest.js";
 import {
@@ -188,6 +189,8 @@ async function createMcpServer(letterServer: LetterIrlServer, authInfo: Authenti
   const mcpServer = new McpServer({
     name: "letter-irl",
     version: "0.1.0"
+  }, {
+    instructions: LETTER_IRL_SERVER_INSTRUCTIONS
   });
   await registerLetterTools(mcpServer, letterServer, authInfo);
   return mcpServer;

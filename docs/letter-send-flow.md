@@ -1,6 +1,6 @@
 # Letter Send Flow - Technical Reference
 
-**Last Updated:** December 29, 2025
+**Last Updated:** May 30, 2026
 **Purpose:** Technical reference for letter and postcard send flows, including draft-based idempotency
 
 This document describes the complete flow for sending letters and postcards, including the draft-based idempotency system, credit deduction, job queuing, and delivery.
@@ -12,7 +12,7 @@ This document describes the complete flow for sending letters and postcards, inc
 The letter and postcard sending process uses a **two-phase commit** pattern with drafts:
 
 1. **Quote Phase** (quote tools) - Creates a draft, locks in pricing
-   - `quote_and_preview_letter_text_only`
+   - `quote_and_preview_letter`
    - `quote_and_preview_letter_with_header_image`
    - `quote_and_preview_letter_with_image`
    - `quote_and_preview_postcard`

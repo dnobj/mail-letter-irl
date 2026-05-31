@@ -153,3 +153,188 @@ export const confirmUploadedImageInputZ = z.object({
   imageUrl: z.string(),
   context: z.string().optional()
 });
+
+// ============================================================================
+// Output Schemas
+// ============================================================================
+//
+// These Zod schemas are used by the MCP SDK for runtime output validation.
+// They intentionally describe structuredContent, not widget-only _meta fields.
+// Large HTML previews and generated image blobs are moved into _meta by
+// registerTools.ts so they do not inflate the model context.
+
+const addressValidationZ = z.object({
+  status: z.enum(["verified", "corrected", "failed"]).optional(),
+  errors: z.array(z.string()).optional(),
+  suggestions: z.string().optional()
+});
+
+const recipientSummaryZ = z.object({
+  name: z.string(),
+  city: z.string(),
+  state: z.string()
+});
+
+const statusTimelineEntryZ = z.object({
+  timestampISO: z.string(),
+  statusText: z.string()
+});
+
+const trackingSupportZ = z.enum(["none", "estimated_only", "carrier_tracking"]);
+
+export const quoteAndPreviewOutputZ = z.object({
+  lettersRequired: z.number(),
+  canSendNow: z.boolean(),
+  reasonCannotSend: z.string().optional(),
+  deliveryClass: z.string().optional(),
+  estimatedDeliveryDays: z.number().int().optional(),
+  deliveryEstimate: z.string().optional(),
+  deliveryDisclaimer: z.string().optional(),
+  draftId: z.string(),
+  draftExpiresAt: z.string(),
+  layoutType: z.enum(["text_only", "header_image", "inline_image"]),
+  usedSavedReturnAddress: z.boolean().optional(),
+  savedReturnAddressNote: z.string().optional(),
+  senderName: z.string().optional(),
+  recipientName: z.string().optional(),
+  senderAddressValidation: addressValidationZ.optional(),
+  recipientAddressValidation: addressValidationZ.optional()
+});
+
+export const sendLetterOutputZ = z.object({
+  orderId: z.string(),
+  currentStatus: z.string(),
+  statusTimeline: z.array(statusTimelineEntryZ),
+  recipientSummary: recipientSummaryZ,
+  lettersRemaining: z.number(),
+  isRetry: z.boolean().optional(),
+  trackingSupport: trackingSupportZ.optional(),
+  saveReturnAddressNote: z.string().optional(),
+  suggestSaveReturnAddress: z.boolean().optional()
+});
+
+export const getOrderStatusOutputZ = z.object({
+  orderId: z.string(),
+  currentStatus: z.string(),
+  statusTimeline: z.array(statusTimelineEntryZ),
+  recipientSummary: recipientSummaryZ,
+  canSendFollowUp: z.boolean().optional(),
+  followUpSuggestedPrompt: z.string().optional(),
+  trackingSupport: trackingSupportZ.optional()
+});
+
+export const getAccountBalanceOutputZ = z.object({
+  lettersRemaining: z.number(),
+  canSendStandardLetter: z.boolean(),
+  message: z.string().optional(),
+  lettersExpiringSoon: z.number().optional(),
+  expiringLettersDetails: z.array(z.object({
+    letters: z.number().optional(),
+    expiresAt: z.string().optional(),
+    daysUntilExpiry: z.number().optional()
+  })).optional(),
+  imageGenerationsRemaining: z.number().int().optional(),
+  imageGenerationsAllowance: z.number().int().optional()
+});
+
+export const listOrdersOutputZ = z.object({
+  orders: z.array(z.object({
+    orderId: z.string(),
+    recipient: recipientSummaryZ.optional(),
+    recipientName: z.string().optional(),
+    mailType: z.string().optional(),
+    status: z.string().optional(),
+    currentStatus: z.string().optional(),
+    sentAt: z.string().optional(),
+    createdAt: z.string().optional()
+  })),
+  total: z.number()
+});
+
+export const setReturnAddressOutputZ = z.object({
+  success: z.boolean(),
+  message: z.string(),
+  address: addressZ.optional(),
+  wasAutoCorrected: z.boolean(),
+  correctionDetails: z.string().optional(),
+  errors: z.array(z.string()).optional()
+});
+
+export const getReturnAddressOutputZ = z.object({
+  hasAddress: z.boolean(),
+  message: z.string(),
+  address: addressZ.optional()
+});
+
+export const clearReturnAddressOutputZ = z.object({
+  success: z.boolean(),
+  message: z.string()
+});
+
+export const quoteAndPreviewPostcardOutputZ = z.object({
+  lettersRequired: z.number(),
+  canSendNow: z.boolean(),
+  reasonCannotSend: z.string().optional(),
+  deliveryClass: z.string().optional(),
+  estimatedDeliveryDays: z.number().int().optional(),
+  deliveryEstimate: z.string().optional(),
+  deliveryDisclaimer: z.string().optional(),
+  draftId: z.string(),
+  draftExpiresAt: z.string(),
+  message: z.string().optional(),
+  recipientName: z.string().optional(),
+  senderName: z.string().optional(),
+  usedSavedReturnAddress: z.boolean().optional(),
+  savedReturnAddressNote: z.string().optional(),
+  senderAddressValidation: addressValidationZ.optional(),
+  recipientAddressValidation: addressValidationZ.optional()
+});
+
+export const sendPostcardOutputZ = z.object({
+  orderId: z.string(),
+  currentStatus: z.string(),
+  statusTimeline: z.array(statusTimelineEntryZ),
+  recipientSummary: recipientSummaryZ,
+  lettersRemaining: z.number(),
+  isRetry: z.boolean().optional(),
+  trackingSupport: trackingSupportZ.optional(),
+  saveReturnAddressNote: z.string().optional(),
+  suggestSaveReturnAddress: z.boolean().optional()
+});
+
+export const submitFeatureRequestOutputZ = z.object({
+  success: z.boolean(),
+  requestId: z.string(),
+  message: z.string(),
+  category: z.string()
+});
+
+export const getStartedOutputZ = z.object({
+  title: z.string(),
+  overview: z.string(),
+  purchaseStep: z.string(),
+  examplePrompts: z.array(z.string())
+});
+
+export const uploadImageOutputZ = z.object({
+  status: z.string(),
+  message: z.string(),
+  acceptedFormats: z.string(),
+  maxSizeMB: z.number(),
+  context: z.string(),
+  debugEnabled: z.boolean(),
+  debugEndpoint: z.string().optional()
+});
+
+export const generateImageOutputZ = z.object({
+  message: z.string(),
+  suggestedNextStep: z.string(),
+  generationsRemaining: z.number().int(),
+  generatedImageUrl: z.string().optional()
+});
+
+export const confirmUploadedImageOutputZ = z.object({
+  status: z.string(),
+  imageUrl: z.string(),
+  suggestedNextStep: z.string()
+});

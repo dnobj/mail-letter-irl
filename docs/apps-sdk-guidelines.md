@@ -1,57 +1,66 @@
 # OpenAI Apps SDK Guidelines
 
-Last verified: March 17, 2026
+Last verified: May 30, 2026
 
-This file records the subset of current Apps SDK guidance that materially affects Letter IRL. Treat it as a derived engineering reference, not the normative spec.
+This file records the subset of current Apps SDK guidance that materially affects Letter IRL. Treat official OpenAI documentation as the normative source.
+
+## May 2026 Updates to Track
+
+- ChatGPT reads MCP server `instructions` from the initialization result. Letter IRL now provides concise server-level instructions that reinforce preview-before-send, confirmation, U.S.-only addresses, image handoff order, and feature-request fallback behavior.
+- Tool registrations should include `outputSchema` for structured responses. Letter IRL now passes runtime Zod output schemas to `mcpServer.registerTool`, matching the compact `structuredContent` returned to ChatGPT.
+- Apps widgets can receive tool result metadata and approved tool input through newer MCP Apps bridge notifications. Letter IRL widgets still use the `window.openai` compatibility bridge, which is acceptable for current behavior but should be revisited before a major widget rewrite.
+- ChatGPT now provides standardized host CSS variables through host context. Letter IRL widgets should adopt these variables opportunistically when doing substantial UI refresh work.
 
 ## Metadata
 
 - Keep app and tool descriptions concise and capability-focused.
-- Include operationally necessary prerequisites, such as pre-purchased letter sends on `letterirl.com`.
-- Avoid long planner instructions, decision trees, or promotional copy in tool descriptions.
-- Prefer a small number of clear example prompts over large blocks of instructional prose.
+- Include operationally necessary prerequisites, such as pre-paid letter sends from `letterirl.com`.
+- Avoid long planner instructions, decision trees, or promotional copy in individual tool descriptions.
+- Use server instructions and app instructions for durable behavior rules.
 
 ## Auth
 
 - Expose protected resource metadata and authorization server metadata.
-- Prefer Client ID Metadata Documents; keep DCR only as fallback.
 - Add `securitySchemes` to tool metadata.
-- Return `_meta["mcp/www_authenticate"]` on auth-required tool errors so ChatGPT can trigger linking flows.
+- Return `_meta["mcp/www_authenticate"]` on auth-required tool errors so ChatGPT can trigger account-linking flows.
+- Keep OAuth config non-secret in docs; never commit credentials, private keys, or billing details.
 
 ## UI
 
 - Register widgets as MCP resources with `ui://` URIs.
 - Use `text/html;profile=mcp-app`.
 - Keep inline UI lightweight and purpose-built.
+- Put large render artifacts in `_meta`, not `structuredContent`.
 - Do not assume an automatic greeting hook when the app is selected.
 
-## Onboarding
+## Tool Responses
 
-- Use supported surfaces only:
-  - app description
-  - app instructions
-  - conversational responses
-  - optional onboarding tool/widget
-- Letter IRL uses the `get_started` tool for first-run help and broad prompts like `what can you do?`
+- Return all three response surfaces where useful:
+  - `structuredContent`: compact, schema-validated data for the model and widget.
+  - `content`: short narration for the model.
+  - `_meta`: widget-only payloads such as preview HTML or image preview data.
+- Preview tools are write tools because they create draft records, even though they do not send mail.
+- Send tools must require explicit confirmation and must be idempotent for retry safety.
 
-## Delivery messaging
+## Delivery Messaging
 
 - Use conservative, estimated delivery guidance.
 - Preferred wording for Letter IRL:
   - `Mailed in 1-2 business days; usually arrives in 1-2 weeks. USPS timing varies and can take longer.`
 - Do not imply guaranteed delivery dates or confirmed carrier tracking where only estimated status is available.
 
-## Verification surfaces
+## Verification Surfaces
 
 - `npm run lint`
 - `npm run test:submission`
 - `npm run test:run`
 - `npm run manifest:generate`
 
-## Source links
+## Source Links
 
-- OpenAI metadata guidance: `https://developers.openai.com/apps-sdk/build/optimize-metadata/`
-- OpenAI auth guidance: `https://developers.openai.com/apps-sdk/build/auth/`
-- OpenAI UI guidance: `https://developers.openai.com/apps-sdk/build/chatgpt-ui/`
-- OpenAI connect guide: `https://developers.openai.com/apps-sdk/guides/connect-from-chatgpt/`
-- OpenAI submission guidelines: `https://developers.openai.com/apps-sdk/app-submission-guidelines/`
+- Apps SDK changelog: `https://developers.openai.com/apps-sdk/changelog`
+- MCP server guide: `https://developers.openai.com/apps-sdk/build/mcp-server`
+- ChatGPT UI guide: `https://developers.openai.com/apps-sdk/build/chatgpt-ui`
+- Auth guide: `https://developers.openai.com/apps-sdk/build/auth/`
+- Connect guide: `https://developers.openai.com/apps-sdk/guides/connect-from-chatgpt/`
+- Submission guidelines: `https://developers.openai.com/apps-sdk/app-submission-guidelines/`

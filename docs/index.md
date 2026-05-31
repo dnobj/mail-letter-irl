@@ -1,6 +1,6 @@
 # Letter IRL Documentation Index
 
-**Last Updated:** December 29, 2025
+**Last Updated:** May 30, 2026
 **Purpose:** Central navigation hub for all Letter IRL documentation
 
 Welcome to the Letter IRL documentation. This is a physical letter mailing service integrated with ChatGPT via MCP (Model Context Protocol).
@@ -36,6 +36,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 - [MCP Tool APIs](tool-apis.md) - JSON schemas and behaviors for MCP tools
 - [Agent Platform Strategy](agent-platform-strategy.md) - Cross-platform MCP and agent packaging strategy
 - [UI Widgets](ui-widgets.md) - Apps SDK template layouts and interactions
+- [OpenAI Apps SDK Guidelines](apps-sdk-guidelines.md) - Current Apps SDK implementation notes for Letter IRL
 
 ### Database & Data Model
 - [database-schema.md](database-schema.md) - Complete table definitions, indexes, triggers
@@ -78,7 +79,7 @@ These documents were created during development and may be partially outdated:
 - [OAuth Plan](oauth-plan.md) - Original OAuth design
 - [MCP SSE Plan](mcp-sse-plan.md) - SSE transport implementation
 - [MCP Debugging](mcp-debugging.md) - Transport troubleshooting
-- [App Integration Learnings](app-integration-learnings.md) - Integration quirks
+- [App Integration Learnings](learnings/app-integration-learnings.md) - Integration quirks
 - [ChatGPT Auth0 Learnings](learnings/chatgpt-auth0-oauth-learnings.md) - OAuth debugging notes
 - [OpenAI App SDK Notes](learnings/openai-app-sdk-notes.md) - SDK observations
 - [Tool Annotation Decision](learnings/tool-annotation-decision.md) - MCP tool annotation correctness
