@@ -17,7 +17,7 @@ Letter IRL uses one Railway project with two isolated Railway environments and o
 | Auth0 | production tenant | development tenant |
 | Stripe | live mode | test mode |
 | PostGrid | live mode | test/dummy mode |
-| Runtime policy | API and website stay warm | API and website use Railway Serverless |
+| Runtime policy | API and website stay warm | API and website use Railway Serverless (acceptance in progress) |
 
 Railway project ID: `b31314d8-fd09-4582-9c0d-52a36f879228`
 
@@ -83,9 +83,11 @@ The backend executes compiled JavaScript with Node. The website uses Next.js sta
 | Railway | Email alert at `$7`; hard usage limit at `$20` |
 | Neon | Email spending limit at `$10`; do not automatically suspend production |
 | Production services | Keep warm until measurements show a meaningful benefit with acceptable latency |
-| Development services | Enable Serverless after deployment verification |
+| Development services | Serverless enabled; retain only if wake-up acceptance passes |
 | Temporary images | Private bucket with 15-minute application TTL and hourly cleanup |
 
 Idle target: Railway near its Hobby minimum and Neon approximately `$2-4/month`, with less than `1 CU-hour/day` combined during a seven-day idle observation.
+
+The July 16, 2026 development rollout has the Railway `$7` alert and `$20` hard limit, the Neon `$10` email-only limit, and Serverless for both development web services enabled. Production still uses the temporary ten-minute polling safeguard until the accepted `dev` release is promoted.
 
 See [deployment.md](deployment.md), [railway-setup.md](railway-setup.md), and [idle-cost-operations.md](idle-cost-operations.md).

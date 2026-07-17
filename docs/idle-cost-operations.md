@@ -14,6 +14,30 @@ This runbook keeps idle infrastructure inexpensive without adding production col
 
 Do not record invoice screenshots, payment methods, account recovery data, or credentials in Git.
 
+## Rollout Checkpoint
+
+Verified in development on July 16, 2026:
+
+- the transactional-outbox migration is applied;
+- normal API and website health checks pass;
+- the one-shot maintenance service completes successfully and exits with its database pool closed;
+- the API and maintenance service use the Neon pooled development hostname;
+- the Railway `$7` email alert and `$20` hard limit are active;
+- the Neon `$10` email-only spending limit is active;
+- both Neon computes use `0.25-0.5 CU` and five-minute scale-to-zero;
+- the development Neon compute has suspended while idle;
+- Railway Serverless is enabled for the development API and website only.
+
+Still required before production promotion:
+
+- prove a generated image remains available through an API restart;
+- observe both development Railway services sleeping for more than ten minutes and measure their first responses;
+- render an MCP widget and generate or reuse an image after wake-up;
+- complete the zero-balance, simulated-purchase, send, and status manual flow;
+- observe combined Neon usage for seven idle days.
+
+Production still runs the pre-outbox release with a temporary ten-minute polling safeguard. Its compute can suspend between polls but will continue to wake periodically until the accepted development release is promoted.
+
 ## Why the Previous Idle Cost Was High
 
 The API previously ran a PostgreSQL-backed queue poll every two seconds. That traffic prevented Neon from reaching its scale-to-zero window. The API now performs normal mail submission during the confirmed request and relies on an hourly, one-shot maintenance process only for recovery and periodic tasks.
@@ -61,7 +85,7 @@ Cloud deployments must use the private bucket. Verify that:
 
 ## Serverless Acceptance
 
-Development API and website may use Railway Serverless only after the outbox and bucket checks pass.
+Development API and website use Railway Serverless. Keep it enabled only while the following acceptance checks pass:
 
 1. Leave both services without traffic for more than ten minutes.
 2. Confirm Railway reports them asleep.

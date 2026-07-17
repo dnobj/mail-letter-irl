@@ -13,7 +13,7 @@ Letter IRL uses one Railway project with `production` and `development` environm
 | `letter-irl-maintenance` | backend repo | `master` | `dev` | hourly cron |
 | `letter-irl-images` | Railway bucket | environment-owned | environment-owned | private S3-compatible storage |
 
-Production API and website remain warm. Development API and website use Railway Serverless after verification. The cron service is scheduled, not continuously running.
+Production API and website remain warm. Development API and website use Railway Serverless, with wake-up acceptance still required. The cron service is scheduled, not continuously running.
 
 ## API Settings
 
@@ -22,7 +22,8 @@ Build command: npm run build
 Pre-deploy command: npm run db:migrate:prod
 Start command: npm start
 Healthcheck path: /healthz
-Region: US East
+Production region: US East
+Development region: US West (current; review separately before changing)
 ```
 
 Important API variables:
@@ -80,8 +81,8 @@ Keep automatic deploys enabled. A feature branch must reach `dev` through a PR b
 
 - Production API: disabled
 - Production website: disabled
-- Development API: enabled after outbox and bucket verification
-- Development website: enabled after standalone verification
+- Development API: enabled July 16, 2026; restart and wake-up acceptance pending
+- Development website: enabled July 16, 2026; wake-up acceptance pending
 
 After enabling, leave development idle for more than ten minutes. Confirm Railway reports both services asleep, then test MCP connect, image/widget rendering, login, and dashboard access. Disable Serverless if first-use recovery exceeds three seconds or any flow fails.
 
@@ -95,6 +96,10 @@ At the Railway workspace/project billing level:
 - expect idle spend to stay close to the Hobby plan minimum.
 
 The July 2026 local API benchmark measured approximately `106.7 MB` RSS for compiled Node versus `219.3 MB` for the prior `tsx` runtime. Railway measurements can differ, but a sustained return toward the earlier 300+ MB API baseline should be investigated.
+
+The `$7` email alert and `$20` hard limit were verified active on July 16, 2026.
+
+Current development placement is API and website in Railway US West, maintenance in Railway US East, and Neon in AWS US East 1. This is documented configuration, not a recommendation; measure database latency and bucket-transfer behavior before consolidating regions.
 
 ## Verification
 
