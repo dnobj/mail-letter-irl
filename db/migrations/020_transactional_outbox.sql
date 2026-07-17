@@ -8,15 +8,18 @@ ALTER TABLE letter_jobs
   ADD COLUMN IF NOT EXISTS last_error TEXT,
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
-UPDATE letter_jobs
-SET idempotency_key = letter_id::text,
-    next_attempt_at = COALESCE(scheduled_at, created_at, NOW()),
-    locked_at = CASE WHEN status = 'processing' THEN COALESCE(started_at, NOW()) ELSE NULL END,
-    provider_order_id = COALESCE(provider_order_id, letters.tracking_id),
-    last_error = COALESCE(last_error, error_message),
+UPDATE letter_jobs AS jobs
+SET idempotency_key = jobs.letter_id::text,
+    next_attempt_at = COALESCE(jobs.scheduled_at, jobs.created_at, NOW()),
+    locked_at = CASE
+      WHEN jobs.status = 'processing' THEN COALESCE(jobs.started_at, NOW())
+      ELSE NULL
+    END,
+    provider_order_id = COALESCE(jobs.provider_order_id, provider_letters.tracking_id),
+    last_error = COALESCE(jobs.last_error, jobs.error_message),
     updated_at = NOW()
-FROM letters
-WHERE letters.letter_id = letter_jobs.letter_id;
+FROM letters AS provider_letters
+WHERE provider_letters.letter_id = jobs.letter_id;
 
 -- Older pg-boss-backed sends could create more than one audit row. Keep the
 -- most useful record before enforcing one outbox item per letter.
