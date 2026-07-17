@@ -327,10 +327,10 @@ Rollout note (July 16, 2026): the outbox migration, pooled development database 
 - [ ] Verify expired images are removed by hourly maintenance
 
 ### Development Sleep and Wake
-- [ ] Leave development API and website idle for more than ten minutes
-- [ ] Confirm both Railway services report sleeping
-- [ ] Measure first API and website response after sleep
-- [ ] Confirm first-use recovery is at most three seconds
+- [x] Leave development API and website idle for more than ten minutes
+- [x] Confirm both Railway services report sleeping
+- [x] Measure first API and website response after sleep (`1.34s` API, `1.38s` website on July 16, 2026)
+- [x] Confirm first-use recovery is at most three seconds
 - [ ] Connect the ChatGPT app and render a widget after wake-up
 - [ ] Generate or reuse an image after wake-up
 - [ ] Disable Serverless if latency exceeds three seconds or any flow fails

@@ -13,7 +13,7 @@ Letter IRL uses one Railway project with `production` and `development` environm
 | `letter-irl-maintenance` | backend repo | `master` | `dev` | hourly cron |
 | `letter-irl-images` | Railway bucket | environment-owned | environment-owned | private S3-compatible storage |
 
-Production API and website remain warm. Development API and website use Railway Serverless, with wake-up acceptance still required. The cron service is scheduled, not continuously running.
+Production API and website remain warm. Development API and website use Railway Serverless; cold health acceptance passed, while authenticated ChatGPT acceptance remains. The cron service is scheduled, not continuously running.
 
 ## API Settings
 
@@ -81,10 +81,12 @@ Keep automatic deploys enabled. A feature branch must reach `dev` through a PR b
 
 - Production API: disabled
 - Production website: disabled
-- Development API: enabled July 16, 2026; restart and wake-up acceptance pending
-- Development website: enabled July 16, 2026; wake-up acceptance pending
+- Development API: enabled July 16, 2026; `1.34s` cold health response accepted
+- Development website: enabled July 16, 2026; `1.38s` cold health response accepted
 
 After enabling, leave development idle for more than ten minutes. Confirm Railway reports both services asleep, then test MCP connect, image/widget rendering, login, and dashboard access. Disable Serverless if first-use recovery exceeds three seconds or any flow fails.
+
+The public post-wake health, manifest, OAuth metadata, CORS, and homepage checks pass. Authenticated ChatGPT widget and image checks remain required before production promotion.
 
 ## Budget Controls
 
