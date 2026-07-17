@@ -1,365 +1,209 @@
-import { randomUUID } from "node:crypto";
 import {
-  McpToolDefinition,
-  ToolContext,
-  LetterSnapshot,
-  OrderRecord,
-  Address
-} from "../contracts/types.js";
-import { sendLetterInputSchema, sendLetterOutputSchema } from "../schemas.js";
-import { deductCredits as deductCreditsFromDatabase } from "../services/creditService.js";
-import { createOrderRecord } from "../services/orderService.js";
-import { createLetterJob } from "../services/letterJobService.js";
-import { query } from "../db/index.js";
-import { consumeDraft, getDraft, linkDraftToLetter } from "../services/draftService.js";
-import type { Letter, LetterDraft } from "../services/types.js";
-import { hasReturnAddress } from "../services/returnAddressService.js";
+  type Address,
+  type LetterSnapshot,
+  type McpToolDefinition,
+  type OrderRecord,
+  type ToolContext,
+} from '../contracts/types.js';
+import { sendLetterInputSchema, sendLetterOutputSchema } from '../schemas.js';
+import { createOrderRecord } from '../services/orderService.js';
+import { processLetterJob } from '../services/letterJobService.js';
+import { createMailOrderFromDraft } from '../services/mailSendService.js';
+import { hasReturnAddress } from '../services/returnAddressService.js';
+import type { LetterStatus } from '../services/types.js';
 
-// New simplified input: just draftId and confirm
 interface SendLetterInput {
   draftId: string;
   confirm: boolean;
 }
 
+type PublicStatus =
+  | 'pending'
+  | 'accepted'
+  | 'printing'
+  | 'in_transit'
+  | 'delivered'
+  | 'returned'
+  | 'failed'
+  | 'cancelled';
+
 interface SendLetterOutput {
   orderId: string;
-  currentStatus: "pending" | "accepted" | "printing" | "in_transit" | "delivered" | "returned" | "failed" | "cancelled";
+  currentStatus: PublicStatus;
   statusTimeline: { timestampISO: string; statusText: string }[];
   recipientSummary: { name: string; city: string; state: string };
-  lettersRemaining: number;  // User-facing: number of letters remaining
+  lettersRemaining: number;
   previewFirstPageHtml?: string;
-  isRetry?: boolean;  // true if this was an idempotent retry (draft already consumed)
-  // Suggestion to save return address (only shown if user has no saved address)
+  isRetry?: boolean;
   suggestSaveReturnAddress?: boolean;
   saveReturnAddressNote?: string;
-  // Tracking capability (US-MCP-10) - tells AI what tracking is available
-  trackingSupport: "none" | "estimated_only" | "carrier_tracking";
+  trackingSupport: 'none' | 'estimated_only' | 'carrier_tracking';
 }
 
+function publicStatus(status: LetterStatus): PublicStatus {
+  if (status === 'queued' || status === 'processing' || status === 'draft') return 'pending';
+  if (status === 'sent') return 'accepted';
+  return status;
+}
+
+function friendlyDraftError(error: unknown, draftId: string): Error {
+  const code = (error as { code?: string })?.code;
+  if (code === 'DRAFT_NOT_FOUND') {
+    return new Error(`Draft not found: ${draftId}. Please call quote_and_preview_letter to create a new draft.`);
+  }
+  if (code === 'DRAFT_NOT_OWNED') {
+    return new Error('This draft does not belong to your account. Please create a new letter draft.');
+  }
+  if (code === 'DRAFT_EXPIRED') {
+    return new Error('Draft has expired (drafts are valid for 24 hours). Please create a new letter draft.');
+  }
+  if (code === 'DRAFT_CANCELLED') {
+    return new Error('This draft was cancelled. Please create a new letter draft.');
+  }
+  if (code === 'DRAFT_WRONG_MAIL_TYPE') {
+    return new Error('This is a postcard draft. Please use send_postcard instead.');
+  }
+  if (code === 'DRAFT_INCOMPLETE') {
+    return new Error('This draft is in an incomplete state. Please contact Letter IRL support before retrying.');
+  }
+  return error instanceof Error ? error : new Error('Unable to send letter');
+}
 
 async function handler(
   input: SendLetterInput,
   context: ToolContext
 ): Promise<SendLetterOutput> {
   context.logger.info(
-    {
-      correlationId: context.correlationId,
-      event: "send.letter.start",
-      draftId: input.draftId
-    },
-    "Processing send_letter"
+    { correlationId: context.correlationId, event: 'send.letter.start', draftId: input.draftId },
+    'Processing send_letter'
   );
 
-  // Validate confirm flag
-  if (!input.confirm) {
-    context.logger.warn(
-      {
-        correlationId: context.correlationId,
-        event: "send.letter.confirmation_missing"
-      },
-      "send_letter called without confirm flag"
-    );
-    throw new Error("send_letter requires confirm: true");
-  }
-
-  // Validate draftId is provided
+  if (!input.confirm) throw new Error('send_letter requires confirm: true');
   if (!input.draftId) {
-    throw new Error(
-      "send_letter requires a draftId from quote_and_preview_letter. " +
-      "Please call quote_and_preview_letter first to get a draftId."
-    );
+    throw new Error('send_letter requires a draftId from a letter preview tool.');
   }
 
-  const userId = context.user.userId;
   const now = context.now().toISOString();
-  const orderId = randomUUID();
-
-  // Try to consume the draft (idempotent operation)
-  let consumeResult;
+  let created;
   try {
-    consumeResult = await consumeDraft({
+    created = await createMailOrderFromDraft({
       draftId: input.draftId,
-      userId
+      userId: context.user.userId,
+      mailType: 'letter',
     });
-  } catch (error: any) {
-    // Handle specific draft errors with user-friendly messages
-    if (error.code === 'DRAFT_NOT_FOUND') {
-      throw new Error(
-        `Draft not found: ${input.draftId}. ` +
-        "Please call quote_and_preview_letter to create a new draft."
-      );
-    }
-    if (error.code === 'DRAFT_NOT_OWNED') {
-      throw new Error(
-        `This draft does not belong to your account. ` +
-        "Please call quote_and_preview_letter to create a new draft."
-      );
-    }
-    if (error.code === 'DRAFT_EXPIRED') {
-      throw new Error(
-        `Draft has expired (drafts are valid for 24 hours). ` +
-        "Please call quote_and_preview_letter to create a new draft."
-      );
-    }
-    if (error.code === 'DRAFT_CANCELLED') {
-      throw new Error(
-        `This draft was cancelled. ` +
-        "Please call quote_and_preview_letter to create a new draft."
-      );
-    }
-    throw error;
+  } catch (error) {
+    throw friendlyDraftError(error, input.draftId);
   }
 
-  const { draft, alreadyConsumed, existingLetterId } = consumeResult;
+  const sender = created.draft.sender as unknown as Address;
+  const recipient = created.draft.recipient as unknown as Address;
+  context.user.creditsRemaining = created.creditsRemaining;
 
-  // If draft was already consumed, return the existing order (idempotent retry)
-  if (alreadyConsumed && existingLetterId) {
+  if (created.alreadyConsumed) {
     context.logger.info(
       {
         correlationId: context.correlationId,
-        event: "send.letter.idempotent_retry",
+        event: 'send.letter.idempotent_retry',
         draftId: input.draftId,
-        existingLetterId
+        existingLetterId: created.letter.letter_id,
       },
-      "Idempotent retry - draft already consumed, returning existing order"
+      'Returning the existing order for a consumed draft'
     );
-
-    // Fetch the existing letter to return its details
-    const existingLetterResult = await query<Letter>(
-      `SELECT * FROM letters WHERE letter_id = $1`,
-      [existingLetterId]
-    );
-
-    if (existingLetterResult.rows.length > 0) {
-      const existingLetter = existingLetterResult.rows[0];
-      const recipient = existingLetter.recipient as Address;
-
-      return {
-        orderId: existingLetterId,
-        currentStatus: "pending" as const,
-        statusTimeline: [
-          { timestampISO: now, statusText: "Letter already sent (duplicate request)" }
-        ],
-        recipientSummary: {
-          name: recipient.name,
-          city: recipient.city,
-          state: recipient.state
-        },
-        lettersRemaining: Math.floor(context.user.creditsRemaining / 2),
-        isRetry: true,
-        trackingSupport: "estimated_only"
-      };
-    }
+    return {
+      orderId: created.letter.letter_id,
+      currentStatus: publicStatus(created.letter.status),
+      statusTimeline: [{ timestampISO: now, statusText: 'Existing order returned (duplicate request)' }],
+      recipientSummary: { name: recipient.name, city: recipient.city, state: recipient.state },
+      lettersRemaining: Math.floor(created.creditsRemaining / 2),
+      isRetry: true,
+      trackingSupport: 'estimated_only',
+    };
   }
 
-  // Extract letter content from the draft
-  const sender = draft.sender as unknown as Address;
-  const recipient = draft.recipient as unknown as Address;
-  const bodyText = draft.body_text;
-  const signOff = draft.sign_off;
-  const requiredCredits = draft.required_credits;
-  // Extract layout and image fields (US-LAYOUT-01 through US-LAYOUT-06)
-  const layoutType = draft.layout_type || 'text_only';
-  const headerImageData = draft.header_image_data;
-  const headerImageUrl = draft.header_image_url;
-  const inlineImageData = draft.inline_image_data;
-  const inlineImageUrl = draft.inline_image_url;
-
-  context.logger.info(
-    {
-      correlationId: context.correlationId,
-      event: "send.letter.draft_consumed",
-      draftId: input.draftId,
-      requiredCredits,
-      layoutType,
-      hasHeaderImage: !!headerImageData,
-      hasInlineImage: !!inlineImageData
-    },
-    `Draft consumed, proceeding with send (layout: ${layoutType})`
-  );
-
-  // Deduct credits from database
-  let creditsRemaining: number;
-  try {
-    const result = await deductCreditsFromDatabase({
-      userId,
-      credits: requiredCredits,
-      letterId: orderId,
-      description: `Letter to ${recipient.name} in ${recipient.city}, ${recipient.state}`
-    });
-
-    creditsRemaining = result.user.credits;
-
-    context.logger.info(
-      {
-        correlationId: context.correlationId,
-        event: "send.letter.credits_deducted",
-        creditsDeducted: requiredCredits,
-        creditsRemaining
-      },
-      "Credits deducted from database"
-    );
-  } catch (error: any) {
-    context.logger.warn(
-      {
-        correlationId: context.correlationId,
-        event: "send.letter.insufficient_credits",
-        requiredCredits,
-        error: error.message
-      },
-      "Insufficient credits for send_letter"
-    );
-    throw error;
+  if (!created.job) {
+    throw new Error('Letter was created without an outbox record');
   }
 
-  // Create letter in database
-  // Include layout and image fields in content for the letter worker (US-LAYOUT-06)
-  const letterId = orderId;
-  const letterContent = {
-    bodyText,
-    signOff,
-    sender,
-    // Layout fields for PostGrid HTML generation
-    layoutType,
-    headerImageData,
-    headerImageUrl,
-    inlineImageData,
-    inlineImageUrl,
-  };
-  const letterResult = await query<Letter>(
-    `INSERT INTO letters (
-      letter_id, user_id, content, recipient, credits_cost, status, preview_html
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-    RETURNING *`,
-    [
-      letterId,
-      userId,
-      JSON.stringify(letterContent),
-      JSON.stringify(recipient),
-      requiredCredits,
-      'draft',
-      draft.preview_html
-    ]
-  );
-
-  const letter = letterResult.rows[0];
-
-  // Link the draft to the letter now that the letter exists (satisfies FK constraint)
-  await linkDraftToLetter(input.draftId, letterId);
-
-  context.logger.info(
-    {
-      correlationId: context.correlationId,
-      event: "send.letter.created",
-      letterId,
-      status: letter.status
-    },
-    "Letter created in database"
-  );
-
-  // Queue the letter for background processing
-  const letterJob = await createLetterJob(letter);
-
-  context.logger.info(
-    {
-      correlationId: context.correlationId,
-      event: "send.letter.queued",
-      letterId,
-      jobId: letterJob.job_id,
-      status: letterJob.status
-    },
-    "Letter queued for processing"
-  );
-
-  // Create snapshot for order record (backward compatibility)
   const snapshot: LetterSnapshot = {
     sender,
     recipient,
-    bodyText,
-    signOff,
-    requiredCredits
+    bodyText: created.draft.body_text,
+    signOff: created.draft.sign_off,
+    requiredCredits: created.draft.required_credits,
   };
-
-  // Create order record for tracking (still using old system for backward compatibility)
   const orderRecord: OrderRecord = createOrderRecord({
-    orderId,
+    orderId: created.letter.letter_id,
     snapshot,
-    timestampISO: now
+    timestampISO: now,
   });
 
-  // Update context.user for backward compatibility
   context.user.orders.push(orderRecord);
-  context.user.creditsRemaining = creditsRemaining;
   await context.persist(context.user);
+
+  const submission = await processLetterJob(created.job.job_id);
+  const currentStatus: PublicStatus = submission.completed
+    ? 'accepted'
+    : submission.retryScheduled
+      ? 'pending'
+      : 'failed';
+  const submissionText = submission.completed
+    ? 'Accepted by print provider'
+    : submission.retryScheduled
+      ? 'Provider temporarily unavailable; retry scheduled'
+      : 'Provider submission failed';
+
+  let suggestSaveReturnAddress: boolean | undefined;
+  let saveReturnAddressNote: string | undefined;
+  if (!(await hasReturnAddress(context.user.userId))) {
+    suggestSaveReturnAddress = true;
+    saveReturnAddressNote =
+      `Tip: You don't have a saved return address. Would you like to save "${sender.name}, ${sender.addressLine1}, ${sender.city}, ${sender.state}" ` +
+      'as your default return address? Use set_return_address to save it for future letters.';
+  }
 
   context.logger.info(
     {
       correlationId: context.correlationId,
-      event: "send.letter.success",
-      orderId,
-      letterId,
-      jobId: letterJob.job_id,
-      draftId: input.draftId,
-      creditsRemaining: context.user.creditsRemaining
+      event: 'send.letter.committed',
+      orderId: created.letter.letter_id,
+      jobId: created.job.job_id,
+      submissionCompleted: submission.completed,
+      retryScheduled: submission.retryScheduled,
     },
-    "Letter queued for print and mail"
+    'Letter transaction committed and provider submission attempted'
   );
 
-  // Check if user has a saved return address - if not, suggest saving the one they just used
-  let suggestSaveReturnAddress: boolean | undefined;
-  let saveReturnAddressNote: string | undefined;
-
-  const userHasReturnAddress = await hasReturnAddress(userId);
-  if (!userHasReturnAddress) {
-    suggestSaveReturnAddress = true;
-    saveReturnAddressNote =
-      `Tip: You don't have a saved return address. Would you like to save "${sender.name}, ${sender.addressLine1}, ${sender.city}, ${sender.state}" ` +
-      `as your default return address? Use the set_return_address tool to save it for future letters.`;
-
-    context.logger.info(
-      {
-        correlationId: context.correlationId,
-        event: "send.letter.suggest_save_return_address",
-        senderCity: sender.city,
-        senderState: sender.state
-      },
-      "Suggesting user save return address"
-    );
-  }
-
   return {
-    orderId,
-    currentStatus: "pending" as const,
+    orderId: created.letter.letter_id,
+    currentStatus,
     statusTimeline: [
-      { timestampISO: now, statusText: "Order placed" },
-      { timestampISO: now, statusText: "Letter deducted from balance" },
-      { timestampISO: now, statusText: "Processing" }
+      { timestampISO: now, statusText: 'Order placed' },
+      { timestampISO: now, statusText: 'Letter deducted from balance' },
+      { timestampISO: now, statusText: submissionText },
     ],
     recipientSummary: orderRecord.recipientSummary,
-    lettersRemaining: Math.floor(context.user.creditsRemaining / 2),
+    lettersRemaining: Math.floor(created.creditsRemaining / 2),
     previewFirstPageHtml: orderRecord.previewFirstPageHtml,
     isRetry: false,
     suggestSaveReturnAddress,
     saveReturnAddressNote,
-    trackingSupport: "estimated_only"
+    trackingSupport: 'estimated_only',
   };
 }
 
 export const sendLetterTool: McpToolDefinition<SendLetterInput, SendLetterOutput> = {
-  name: "send_letter",
+  name: 'send_letter',
   description:
-    "Send a physical letter using a draft from a preview tool. Requires a draftId and confirm: true. Safe retries return the existing order instead of charging twice, and the response may suggest saving the sender as your return address.",
+    'Send a physical letter using a draft from a preview tool. Requires a draftId and confirm: true. Safe retries return the existing order instead of charging twice, and the response may suggest saving the sender as your return address.',
   readOnly: false,
   inputSchema: sendLetterInputSchema,
   outputSchema: sendLetterOutputSchema,
   meta: {
-    "openai/toolInvocation/invoking": "Sending letter…",
-    "openai/toolInvocation/invoked": "Letter sent",
-    // US-MCP-08: Allow widget to call send_letter via window.openai.callTool
-    "openai/widgetAccessible": true,
-    // OpenAI Apps SDK annotations
-    openWorldHint: true,    // Sends physical mail via PostGrid/USPS
-    idempotentHint: true    // Draft consumption makes retries safe
+    'openai/toolInvocation/invoking': 'Sending letter...',
+    'openai/toolInvocation/invoked': 'Letter sent',
+    'openai/widgetAccessible': true,
+    openWorldHint: true,
+    idempotentHint: true,
   },
-  handler
+  handler,
 };

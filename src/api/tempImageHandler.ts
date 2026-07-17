@@ -1,7 +1,7 @@
 /**
  * Temporary Image Handler
  *
- * Serves generated images from the in-memory temp store.
+ * Serves generated images from the private temporary image store.
  * Images are stored when the generate_image tool runs and served here
  * so the preview tools can download them via imageUrl.
  *
@@ -27,7 +27,7 @@ export async function handleTempImageRequest(
   }
 
   const token = match[1];
-  const base64Data = getImage(token);
+  const base64Data = await getImage(token);
 
   if (!base64Data) {
     res.writeHead(404, { "Content-Type": "application/json" });

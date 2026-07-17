@@ -15,10 +15,8 @@ import {
   clearReturnAddress
 } from '../services/returnAddressService.js';
 
-// Create JWKS client for Auth0
-const JWKS = createRemoteJWKSet(
-  new URL(process.env.LETTER_IRL_OAUTH_JWKS_URI!)
-);
+const jwksUri = process.env.LETTER_IRL_OAUTH_JWKS_URI;
+const JWKS = jwksUri ? createRemoteJWKSet(new URL(jwksUri)) : null;
 
 interface AuthInfo {
   userId: string;
@@ -29,6 +27,7 @@ interface AuthInfo {
  * Authenticate request and extract user info from JWT
  */
 async function authenticateRequest(req: IncomingMessage): Promise<AuthInfo | null> {
+  if (!JWKS) return null;
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {

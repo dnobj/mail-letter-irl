@@ -35,7 +35,7 @@ import {
 } from "./contracts/types.js";
 import { createLogger } from "./logging/index.js";
 
-const tools: McpToolDefinition<unknown, unknown>[] = [
+const tools: McpToolDefinition<any, any>[] = [
   // ChatGPT currently appears to expose only the first 12 registered actions
   // for this dev app. Keep core preview/send/status and image generation
   // inside that first page of tools; place auxiliary/internal tools later.

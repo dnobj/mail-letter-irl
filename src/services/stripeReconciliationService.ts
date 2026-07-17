@@ -13,10 +13,14 @@
 import Stripe from 'stripe';
 import { query } from '../db/index.js';
 
-// Initialize Stripe client
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2024-11-20.acacia' as any,
-});
+let stripeClient: Stripe | null = null;
+
+function getStripeClient(): Stripe {
+  const apiKey = process.env.STRIPE_SECRET_KEY;
+  if (!apiKey) throw new Error('STRIPE_SECRET_KEY is not configured');
+  stripeClient ??= new Stripe(apiKey, { apiVersion: '2025-11-17.clover' });
+  return stripeClient;
+}
 
 // Credit amounts by product ID (must match stripeService.ts)
 const PRODUCT_CREDITS: Record<string, number> = {
@@ -90,7 +94,7 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
   let startingAfter: string | undefined;
 
   while (hasMore) {
-    const sessions = await stripe.checkout.sessions.list({
+    const sessions = await getStripeClient().checkout.sessions.list({
       created: {
         gte: Math.floor(startDate.getTime() / 1000),
         lte: Math.floor(endDate.getTime() / 1000),
@@ -223,7 +227,7 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
   }
 
   // 5. Check for refunds in Stripe that weren't processed
-  const refunds = await stripe.refunds.list({
+  const refunds = await getStripeClient().refunds.list({
     created: {
       gte: Math.floor(startDate.getTime() / 1000),
       lte: Math.floor(endDate.getTime() / 1000),

@@ -1,6 +1,6 @@
 # Letter IRL Documentation Index
 
-**Last Updated:** May 30, 2026
+**Last Updated:** July 16, 2026
 **Purpose:** Central navigation hub for all Letter IRL documentation
 
 Welcome to the Letter IRL documentation. This is a physical letter mailing service integrated with ChatGPT via MCP (Model Context Protocol).
@@ -13,7 +13,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 - [use-cases.md](use-cases.md) - Market-facing and workflow-facing use cases
 - [letter-send-flow.md](letter-send-flow.md) - How letters and postcards are sent (draft system, credits, jobs)
 - [status-labels.md](status-labels.md) - Letter status values across all layers (DB, API, Dashboard, PostGrid)
-- [database-schema.md](database-schema.md) - Complete database schema (13 tables)
+- [database-schema.md](database-schema.md) - Schema narrative; SQL migrations remain authoritative
 - [user-stories.md](user-stories.md) - User stories for test coverage and acceptance criteria
 - [personas.md](personas.md) - User personas for product design and testing
 - [testing.md](testing.md) - Testing strategy and guide
@@ -51,6 +51,8 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 - [Database Setup](database-setup.md) - Neon PostgreSQL configuration
 - [deployment.md](deployment.md) - Railway deployment guide
 - [infrastructure.md](infrastructure.md) - Infrastructure overview
+- [Railway Setup](railway-setup.md) - Exact services, commands, branches, and Serverless policy
+- [Idle-Cost Operations](idle-cost-operations.md) - Cost controls, observation targets, and rollback runbook
 
 ### Integrations
 - [Auth0 Configuration](auth0-tenant-configuration.md) - OAuth setup with 5 identity providers
@@ -74,7 +76,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 These documents were created during development and may be partially outdated:
 
 - [Implementation Roadmap](implementation-roadmap.md) - Original development phases
-- [Job Queue Implementation](job-queue-implementation.md) - pg-boss setup guide
+- [Job Queue Implementation](job-queue-implementation.md) - Historical pg-boss design, superseded by the transactional outbox
 - [Service Providers](service-providers.md) - Provider architecture (Dummy, PostGrid)
 - [OAuth Plan](oauth-plan.md) - Original OAuth design
 - [MCP SSE Plan](mcp-sse-plan.md) - SSE transport implementation

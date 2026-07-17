@@ -1,201 +1,109 @@
 # Railway Setup Guide
 
-**Last Updated:** December 19, 2025
+Last updated: July 16, 2026
 
-This guide documents the Railway configuration for Letter IRL.
+Letter IRL uses one Railway project with `production` and `development` environments. Environment isolation is achieved with per-environment variables and branch deployment settings, not separate Railway projects.
 
----
+## Service Matrix
 
-## Overview
+| Service | Source | Production branch | Development branch | Runtime |
+| --- | --- | --- | --- | --- |
+| `letter-irl-api` | backend repo | `master` | `dev` | HTTP API/MCP |
+| `mail-letter-irl-website` | website repo | `main` | `dev` | Next standalone server |
+| `letter-irl-maintenance` | backend repo | `master` | `dev` | hourly cron |
+| `letter-irl-images` | Railway bucket | environment-owned | environment-owned | private S3-compatible storage |
 
-Letter IRL uses **two Railway environments** in a single project for both repositories:
+Production API and website remain warm. Development API and website use Railway Serverless after verification. The cron service is scheduled, not continuously running.
 
-| Repository | Environment | Branch | URL | Purpose |
-|------------|-------------|--------|-----|---------|
-| **letter-irl (API)** | production | `master` | `letter-irl-api-production.up.railway.app` | Live production |
-| **letter-irl (API)** | development | `dev` | `letter-irl-api-development.up.railway.app` | Testing & development |
-| **letter-irl-website** | production | `main` | `letterirl.com` | Live production |
-| **letter-irl-website** | development | `dev` | Obscure URL | Testing & development |
+## API Settings
 
-Each environment has its own set of environment variables pointing to isolated services. Both repositories use the same branching strategy: feature branches → `dev` → `main/master`.
+```text
+Build command: npm run build
+Pre-deploy command: npm run db:migrate:prod
+Start command: npm start
+Healthcheck path: /healthz
+Region: US East
+```
 
----
-
-## Services
-
-Each environment contains two services:
-
-| Service | Purpose |
-|---------|---------|
-| `letter-irl-api` | MCP server and REST API |
-| `mail-letter-irl-website` | Next.js marketing site and dashboard |
-
----
-
-## Environment Variables
-
-### Production Environment
+Important API variables:
 
 ```env
-# Auth0 - Production Tenant
-LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
-LETTER_IRL_OAUTH_AUTH_ENDPOINT=https://dev-njmdyqf8n25rqgy7.us.auth0.com/authorize
-LETTER_IRL_OAUTH_TOKEN_ENDPOINT=https://dev-njmdyqf8n25rqgy7.us.auth0.com/oauth/token
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_REGISTRATION_ENDPOINT=https://dev-njmdyqf8n25rqgy7.us.auth0.com/oidc/register
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
-
-# Database - Neon Production Branch
-DATABASE_URL=<production connection string>
-
-# Stripe - Live Mode
-STRIPE_SECRET_KEY=sk_live_...
-STRIPE_PUBLISHABLE_KEY=pk_live_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_PRICE_STARTER=<live price ID>
-STRIPE_PRICE_REGULAR=<live price ID>
-STRIPE_PRICE_POWER=<live price ID>
-
-# PostGrid - Live Mode
-LETTER_PROVIDER=postgrid
-LETTER_PROVIDER_API_KEY=live_sk_...
-LETTER_PROVIDER_CONFIG={"mode":"live","verbose":true}
-
-# Admin
-ADMIN_ENABLED=false
+NODE_ENV=production
+DATABASE_URL=<environment-specific Neon pooled URL>
+TEMP_IMAGE_STORE=bucket
+TEMP_IMAGE_BUCKET_NAME=<reference to bucket name>
+TEMP_IMAGE_BUCKET_ENDPOINT=<reference to S3 endpoint>
+TEMP_IMAGE_BUCKET_REGION=<reference to S3 region>
+TEMP_IMAGE_BUCKET_ACCESS_KEY_ID=<reference to bucket access key>
+TEMP_IMAGE_BUCKET_SECRET_ACCESS_KEY=<reference to bucket secret>
 ```
 
-### Development Environment
+Use Railway variable references to the bucket service. Do not copy bucket credentials into Git, screenshots, logs, or documentation. The application also accepts Railway's standard `BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` names.
 
-```env
-# Auth0 - Development Tenant
-LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
-LETTER_IRL_OAUTH_AUTH_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/authorize
-LETTER_IRL_OAUTH_TOKEN_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oauth/token
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_REGISTRATION_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oidc/register
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+## Maintenance Settings
 
-# Database - Neon Dev Branch
-DATABASE_URL=postgresql://neondb_owner:***@ep-billowing-wave-adu9jf3h.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require
+Create `letter-irl-maintenance` from the backend repository in both environments:
 
-# Stripe - Sandbox/Test Mode
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_PUBLISHABLE_KEY=pk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_ZFEmSGoHqdpEkiDVDo18A0acj6QD4S93
-STRIPE_PRICE_STARTER=price_1SZmazLHkgDI6iWLowuAfUYV
-STRIPE_PRICE_REGULAR=price_1SZmb1LHkgDI6iWLMeFx3l04
-STRIPE_PRICE_POWER=price_1SZmb3LHkgDI6iWLi5CEiqcl
-
-# PostGrid - Test Mode
-LETTER_PROVIDER=postgrid
-LETTER_PROVIDER_API_KEY=test_sk_...
-LETTER_PROVIDER_CONFIG={"mode":"test","verbose":true}
-
-# Admin
-ADMIN_ENABLED=false
-
-# URLs (auto-set by Railway, but can override)
-LETTER_IRL_PUBLIC_BASE_URL=https://letter-irl-api-development.up.railway.app
-LETTER_IRL_ALLOWED_HOSTS=letter-irl-api-development.up.railway.app,localhost,127.0.0.1
-LETTER_IRL_ALLOWED_ORIGINS=https://chat.openai.com,https://chatgpt.com,https://letter-irl-api-development.up.railway.app
+```text
+Build command: npm run build
+Start command: npm run maintenance
+Cron schedule: 0 * * * *
+Restart policy: never/on failure only as supported for cron
+Public domain: none
 ```
 
----
+Reference the same backend variables used by the API, including the environment-specific database and bucket references. The command closes all clients and exits. Investigate any run that is still active near the next hour.
 
-## Creating a New Environment
+## Website Settings
 
-Using Railway CLI:
-
-```bash
-# Login
-railway login
-
-# Link to project
-railway link
-
-# Create new environment (duplicating from existing)
-railway environment new <name> --duplicate production
-
-# Switch to environment
-railway environment <name>
-
-# Link to service
-railway service link letter-irl-api
-
-# Set variables
-railway variables --set "KEY=value" --skip-deploys
-
-# View variables
-railway variables
+```text
+Build command: npm run build
+Start command: npm start
+Healthcheck path: /api/health
+NEXT_TELEMETRY_DISABLED=1
 ```
 
----
+The website package starts `.next/standalone/server.js`; do not override it with `next start`.
 
-## External Service Mapping
+## Branch Deployment
 
-| Service | Production | Development |
-|---------|------------|-------------|
-| **Auth0** | dev-njmdyqf8n25rqgy7.us.auth0.com | dev-ky21dxn3qmi71hjl.us.auth0.com |
-| **Neon** | `production` branch | `dev` branch |
-| **Stripe** | Live mode | Sandbox/Test mode |
-| **PostGrid** | Live mode | Test mode |
+For each service and environment, set the source branch explicitly:
 
----
+- backend production: `master`
+- backend development: `dev`
+- website production: `main`
+- website development: `dev`
 
-## Webhook Endpoints
+Keep automatic deploys enabled. A feature branch must reach `dev` through a PR before it can deploy to development.
 
-### Stripe Webhooks
+## Serverless Policy
 
-| Environment | Endpoint | Events |
-|-------------|----------|--------|
-| Production | `https://letter-irl-api-production.up.railway.app/webhooks/stripe` | checkout.session.completed, charge.dispute.* |
-| Development | `https://letter-irl-api-development.up.railway.app/webhooks/stripe` | * (all events) |
+- Production API: disabled
+- Production website: disabled
+- Development API: enabled after outbox and bucket verification
+- Development website: enabled after standalone verification
 
----
+After enabling, leave development idle for more than ten minutes. Confirm Railway reports both services asleep, then test MCP connect, image/widget rendering, login, and dashboard access. Disable Serverless if first-use recovery exceeds three seconds or any flow fails.
 
-## Deployment
+## Budget Controls
 
-### API Repository (letter-irl)
-- **Production**: Auto-deploys from `master` branch
-- **Development**: Auto-deploys from `dev` branch
+At the Railway workspace/project billing level:
 
-### Website Repository (letter-irl-website)
-- **Production**: Auto-deploys from `main` branch
-- **Development**: Auto-deploys from `dev` branch
+- configure an email usage alert at `$7`;
+- configure a hard usage limit at `$20`;
+- review per-service memory after each runtime upgrade;
+- expect idle spend to stay close to the Hobby plan minimum.
 
-To configure branch tracking:
-1. Go to Railway Dashboard → Project → Environment
-2. Click on the service
-3. Settings → Source → Branch
-4. Set to appropriate branch (`master`/`main` for production, `dev` for development)
+The July 2026 local API benchmark measured approximately `106.7 MB` RSS for compiled Node versus `219.3 MB` for the prior `tsx` runtime. Railway measurements can differ, but a sustained return toward the earlier 300+ MB API baseline should be investigated.
 
----
+## Verification
 
-## CLI Quick Reference
+- Deploy status is successful in both environments.
+- `/healthz` and `/api/health` return successfully.
+- Migrations show `020_transactional_outbox.sql` as executed.
+- Maintenance logs show one short run and clean process exit.
+- An image remains retrievable after API restart for its documented 15 minutes.
+- Development sleeps after ten idle minutes.
+- Neon suspends after five database-idle minutes.
 
-```bash
-# Check current environment
-railway status
-
-# List environments
-railway environment
-
-# Switch environment
-railway environment production
-railway environment development
-
-# View logs
-railway logs
-
-# View variables
-railway variables
-railway variables --kv
-
-# Set variables
-railway variables --set "KEY=value"
-railway variables --set "KEY1=value1" --set "KEY2=value2" --skip-deploys
-
-# Redeploy
-railway redeploy
-```
+See [idle-cost-operations.md](idle-cost-operations.md) for observation and rollback procedures.

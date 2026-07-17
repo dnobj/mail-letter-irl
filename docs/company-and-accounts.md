@@ -1,6 +1,6 @@
 # Company and Account Ownership
 
-Last updated: May 31, 2026
+Last updated: July 16, 2026
 
 This document is the non-secret source of truth for the organization and account ownership context behind Letter IRL. Keep credentials, API keys, passwords, recovery codes, private tax IDs, and private billing details out of this file.
 
@@ -47,8 +47,8 @@ ChatGPT account identity and Letter IRL/Auth0 OAuth identity can differ during t
 | Area | Production / Public Identity | Development / Admin Identity | Notes |
 | --- | --- | --- | --- |
 | Auth0 | `dnicholl@letterirl.com` | `dnicholl@objective.works` | Separate production and development tenants. See `docs/auth0-tenant-configuration.md`. |
-| Railway | Letter IRL production services | Letter IRL development services | Separate backend and website services for prod/dev. See `docs/infrastructure.md`. |
-| Neon | Production database/branch | Development database/branch | Keep prod and dev isolated. See `docs/infrastructure.md` and `docs/deployment.md`. |
+| Railway | `dnicholl@letterirl.com` | Same account, isolated `production` and `development` environments | One Railway project contains separate API, website, maintenance, and bucket resources per environment. |
+| Neon | `dnicholl@objective.works` | Same account/project, isolated production and `dev` branches | Keep the two database branches and pooled connection strings isolated. |
 | Stripe / ACP | Letter IRL merchant/product identity | Stripe test mode for development | Keep live/test payment contexts separate. See `docs/acp-stripe-integration.md`. |
 | PostGrid | Live mail provider configuration | Dummy/test provider configuration | Avoid sending real mail from dev/test flows unless explicitly intended. |
 

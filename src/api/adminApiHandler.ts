@@ -173,9 +173,13 @@ export async function handleAdminApiRequest(
       }
     }
 
-    // GET /api/admin/pgboss/jobs - View pg-boss jobs directly
-    if (pathname === '/api/admin/pgboss/jobs' && req.method === 'GET') {
-      await handleGetPgBossJobs(res);
+    // GET /api/admin/outbox/jobs - View durable mail outbox jobs
+    // Keep the old path as a temporary admin-only compatibility alias.
+    if (
+      (pathname === '/api/admin/outbox/jobs' || pathname === '/api/admin/pgboss/jobs') &&
+      req.method === 'GET'
+    ) {
+      await handleGetOutboxJobs(res);
       return true;
     }
 
@@ -366,7 +370,7 @@ export async function handleAdminApiRequest(
     console.error('Admin API error:', error);
     sendJson(res, 500, {
       error: 'Internal server error',
-      message: error.message
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
     return true;
   }
@@ -478,7 +482,7 @@ async function handleGetUser(res: ServerResponse, userId: string) {
       }
     });
   } catch (error) {
-    if (error.message.includes('User not found')) {
+    if (error instanceof Error && error.message.includes('User not found')) {
       sendJson(res, 404, {
         error: 'User not found',
         userId
@@ -680,22 +684,21 @@ async function handleGetJobsByUser(
 }
 
 /**
- * GET /api/admin/pgboss/jobs
- * View pg-boss jobs directly (for debugging)
+ * GET /api/admin/outbox/jobs
+ * View transactional outbox jobs directly (for debugging)
  */
-async function handleGetPgBossJobs(res: ServerResponse) {
+async function handleGetOutboxJobs(res: ServerResponse) {
   const result = await query(`
-    SELECT
-      id, name, state, priority,
-      retry_limit, retry_count, start_after,
-      created_on, started_on, completed_on
-    FROM pgboss.job
-    ORDER BY created_on DESC
+    SELECT job_id, letter_id, status, attempts, max_attempts,
+           next_attempt_at, locked_at, provider_order_id,
+           last_error, created_at, updated_at, completed_at
+    FROM letter_jobs
+    ORDER BY created_at DESC
     LIMIT 50
   `);
 
   const countResult = await query<{ count: string }>(
-    'SELECT COUNT(*) as count FROM pgboss.job'
+    'SELECT COUNT(*) as count FROM letter_jobs'
   );
 
   sendJson(res, 200, {
@@ -1534,9 +1537,13 @@ async function handleRetryJob(
      SET status = 'pending',
          attempts = 0,
          error_message = NULL,
+         last_error = NULL,
          scheduled_at = NOW(),
+         next_attempt_at = NOW(),
          started_at = NULL,
          completed_at = NULL,
+         locked_at = NULL,
+         updated_at = NOW(),
          metadata = jsonb_set(
            COALESCE(metadata, '{}'::jsonb),
            '{retried_by}',

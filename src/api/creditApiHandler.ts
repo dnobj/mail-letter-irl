@@ -11,10 +11,8 @@ import { getUser } from '../services/userService.js';
 import { validatePromoCode, redeemPromoCode, getUserRedemptions } from '../services/promoService.js';
 import { getLedgerEntries } from '../services/creditLedgerService.js';
 
-// Create JWKS client for Auth0
-const JWKS = createRemoteJWKSet(
-  new URL(process.env.LETTER_IRL_OAUTH_JWKS_URI!)
-);
+const jwksUri = process.env.LETTER_IRL_OAUTH_JWKS_URI;
+const JWKS = jwksUri ? createRemoteJWKSet(new URL(jwksUri)) : null;
 
 interface AuthInfo {
   userId: string;
@@ -32,6 +30,11 @@ async function authenticateRequest(req: IncomingMessage): Promise<AuthInfo | nul
   }
 
   const token = authHeader.substring(7);
+
+  if (!JWKS) {
+    console.error('LETTER_IRL_OAUTH_JWKS_URI is not configured');
+    return null;
+  }
 
   try {
     const { payload } = await jwtVerify(token, JWKS, {

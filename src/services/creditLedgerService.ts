@@ -12,6 +12,7 @@
  */
 
 import { transaction, query } from '../db/index.js';
+import type pg from 'pg';
 import {
   User,
   CreditTransaction,
@@ -172,13 +173,25 @@ export async function addCreditsToLedger(
 export async function deductCreditsFromLedger(
   params: DeductCreditsFromLedgerParams
 ): Promise<CreditLedgerOperationResult> {
-  const { userId, credits, letterId, description } = params;
+  return transaction((client) => deductCreditsFromLedgerWithClient(client, params));
+}
 
-  if (credits <= 0) {
-    throw new Error('Credits must be positive');
-  }
+/**
+ * Deduct credits as part of a caller-owned transaction.
+ *
+ * The send flow uses this so draft consumption, credit deduction, letter
+ * creation, and outbox insertion either all commit or all roll back.
+ */
+export async function deductCreditsFromLedgerWithClient(
+  client: pg.PoolClient,
+  params: DeductCreditsFromLedgerParams
+): Promise<CreditLedgerOperationResult> {
+    const { userId, credits, letterId, description } = params;
 
-  return await transaction(async (client) => {
+    if (credits <= 0) {
+      throw new Error('Credits must be positive');
+    }
+
     // Lock user row
     const userResult = await client.query<User>(
       'SELECT * FROM users WHERE user_id = $1 FOR UPDATE',
@@ -289,7 +302,6 @@ export async function deductCreditsFromLedger(
       transaction: txn,
       consumedFrom: consumptions,
     };
-  });
 }
 
 /**

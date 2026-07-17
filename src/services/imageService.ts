@@ -499,7 +499,7 @@ export async function downloadAndProcessLetterImageWithPreview(
  * Download image for letter layouts with appropriate size validation
  */
 async function downloadLetterImage(url: string, imageType: LetterImageType): Promise<Buffer> {
-  const localBuffer = tryGetFromTempStore(url);
+  const localBuffer = await tryGetFromTempStore(url);
   if (localBuffer) return localBuffer;
 
   try {
@@ -572,14 +572,13 @@ function isAllowedLetterType(contentType: string): boolean {
 // ============================================================================
 
 /**
- * Try to resolve a temp image URL from the local in-memory store.
- * When generate_image and the postcard/letter tools run on the same server,
- * this avoids an HTTP round-trip (server fetching from itself via public URL).
+ * Resolve a Letter IRL temp image URL directly from the configured store.
+ * This avoids an HTTP round-trip through the public API.
  */
-function tryGetFromTempStore(url: string): Buffer | null {
+async function tryGetFromTempStore(url: string): Promise<Buffer | null> {
   const match = url.match(/\/api\/temp-image\/([a-f0-9]{32})$/);
   if (!match) return null;
-  const base64Data = getTempImage(match[1]);
+  const base64Data = await getTempImage(match[1]);
   if (!base64Data) return null;
   return Buffer.from(base64Data, 'base64');
 }
@@ -588,7 +587,7 @@ function tryGetFromTempStore(url: string): Buffer | null {
  * Download image from URL with validation
  */
 async function downloadImage(url: string): Promise<Buffer> {
-  const localBuffer = tryGetFromTempStore(url);
+  const localBuffer = await tryGetFromTempStore(url);
   if (localBuffer) return localBuffer;
 
   try {

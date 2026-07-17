@@ -415,16 +415,14 @@ export async function registerLetterTools(
         annotations,
         _meta: buildToolMeta(tool.meta)  // Contains auth metadata and OpenAI widget/runtime hints
       },
-      async (args, extra) => {
+      async (args: Record<string, unknown>, extra: any) => {
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
         const extraMeta = extra._meta as Record<string, unknown> | undefined;
         const userAgent = extractUserAgent(argsMeta, extraMeta);
         const isMobile = userAgent ? isMobileClient(userAgent) : undefined;
 
-        console.log(
-          `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId} (mobile: ${isMobile ?? 'unknown'})`
-        );
+        console.log(`Tool request ${tool.name} (mobile: ${isMobile ?? 'unknown'})`);
 
         const { result, meta } = await appServer.execute({
           toolName: tool.name,
