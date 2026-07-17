@@ -2,19 +2,9 @@
 
 import pg from 'pg';
 
+import { isWakeConnectionError } from './wakeRetry.js';
+
 const { Pool } = pg;
-
-const WAKE_RETRY_CODES = new Set([
-  '57P03',
-  '08001',
-  'ECONNREFUSED',
-  'ETIMEDOUT',
-]);
-
-function isWakeConnectionError(error: unknown): boolean {
-  const code = (error as { code?: string })?.code;
-  return Boolean(code && WAKE_RETRY_CODES.has(code));
-}
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));

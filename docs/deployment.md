@@ -55,6 +55,8 @@ Before every deployment, verify without printing secret values:
 
 `WORKER_POLLING_SECONDS` and `WORKER_TRIGGER_ON_SEND` are legacy rollout safeguards. The compiled API ignores them after the transactional-outbox release; remove them after the new maintenance service is verified.
 
+As of July 16, 2026, development has the transactional-outbox release and hourly maintenance service deployed. Production remains on the previous release with `WORKER_POLLING_SECONDS=600` and `WORKER_TRIGGER_ON_SEND=true` until the remaining manual acceptance checks pass.
+
 ## Development Release Procedure
 
 1. Merge backend and website feature PRs into their `dev` branches.
@@ -63,7 +65,7 @@ Before every deployment, verify without printing secret values:
 4. Check `/healthz`, OAuth metadata, manifest, MCP connection, and website `/api/health`.
 5. Run the automated suites in both repositories.
 6. Run the manual checks in [manual-tests.md](manual-tests.md), including zero balance, simulated purchase, confirmed send, status retrieval, image generation, and restart persistence.
-7. Leave development idle for more than ten minutes and confirm both API and website sleep.
+7. Confirm Serverless is enabled, leave development idle for more than ten minutes, and confirm both API and website sleep.
 8. Measure first-use recovery. Roll back Serverless if it exceeds three seconds or a widget/MCP flow fails.
 9. Leave Neon idle for more than five minutes and confirm the development compute suspends.
 

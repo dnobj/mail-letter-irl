@@ -32,7 +32,7 @@ Railway uses one project with separate production and development environments. 
 - Recovery: one-shot hourly Railway maintenance cron.
 - Temporary generated images: private Railway S3-compatible bucket with a 15-minute TTL.
 - Production availability: API and website stay warm.
-- Development cost control: API and website use Railway Serverless after acceptance testing.
+- Development cost control: API and website use Railway Serverless; sleep/wake acceptance testing is in progress.
 
 The API process starts no queue polling, status-sync, credit-cleanup, or image-cleanup timers. `pg-boss` has been removed from the deployed architecture.
 
@@ -48,7 +48,7 @@ The API process starts no queue polling, status-sync, credit-cleanup, or image-c
 
 ## Verification Status
 
-For the idle-cost branch as of July 16, 2026:
+For the idle-cost release as of July 16, 2026:
 
 - strict backend TypeScript: passing;
 - backend source/test lint: passing;
@@ -58,7 +58,17 @@ For the idle-cost branch as of July 16, 2026:
 - website dependency audit: zero known vulnerabilities;
 - local API RSS: approximately `106.7 MB` compiled versus `219.3 MB` under `tsx`.
 
-Cloud deployment, restart persistence, Serverless wake latency, Neon idle observation, and ChatGPT manual checks must still pass before production promotion. Track those in [manual-tests.md](manual-tests.md) and [idle-cost-operations.md](idle-cost-operations.md).
+Development rollout status:
+
+- migration `020_transactional_outbox.sql` is applied;
+- the API, website, OAuth metadata, manifest, unauthenticated MCP challenge, and ChatGPT CORS preflight respond correctly;
+- the hourly maintenance command has completed multiple short runs and closed its database pool cleanly;
+- the development API and maintenance service use the pooled Neon development hostname;
+- Railway has a `$7` email alert and `$20` hard limit, and Neon has a `$10` email-only spending limit;
+- both development Railway web services have Serverless enabled;
+- the Neon development compute has been observed suspended with its `0.25-0.5 CU` and five-minute scale-to-zero policy active.
+
+Image restart persistence, Serverless wake latency, the post-wake ChatGPT widget/image flows, and the seven-day Neon idle observation must still pass before production promotion. Production remains on the previous release with a temporary ten-minute polling safeguard until that acceptance gate is complete. Track the remaining work in [manual-tests.md](manual-tests.md) and [idle-cost-operations.md](idle-cost-operations.md).
 
 ## Release Path
 

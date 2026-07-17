@@ -23,7 +23,7 @@ Add Vitest specs under `tests/unit/**` named `*.test.ts`, grouped by subsystem. 
 Use short imperative commit summaries without trailing punctuation. PRs should describe behavior, link the issue when one exists, include test evidence, and call out migrations, environment variables, manifest changes, or external dependencies. Include screenshots or logs when a widget or protocol contract changes.
 
 ## Infrastructure Truths
-Letter IRL uses one Railway project with separate `production` and `development` environments. The backend auto-deploys from `master` (production) and `dev` (development); the companion website auto-deploys from `main` (production) and `dev` (development). Production stays warm; development may use Railway Serverless after verification.
+Letter IRL uses one Railway project with separate `production` and `development` environments. The backend auto-deploys from `master` (production) and `dev` (development); the companion website auto-deploys from `main` (production) and `dev` (development). Production stays warm; development uses Railway Serverless and must retain it only while the documented wake-up acceptance checks pass.
 
 Neon uses one project with isolated production and development database branches. Both environments use pooled Neon URLs and five-minute scale-to-zero. The API starts no database polling workers: confirmed sends use a transactional outbox and an hourly Railway cron runs recovery and maintenance. Temporary generated images use a private Railway bucket in cloud environments.
 

@@ -308,6 +308,8 @@ End-to-end test of complete user experience.
 
 ## Idle and Recovery Verification
 
+Rollout note (July 16, 2026): the outbox migration, pooled development database connection, hourly maintenance, public endpoint checks, cost limits, and development Serverless settings are deployed. The unchecked items below remain the acceptance record; do not promote to production until they pass.
+
 ### Zero Balance and Simulated Purchase
 - [ ] Confirm the dedicated test account has zero available sends
 - [ ] Preview a letter or postcard and verify the UI clearly says it cannot be sent yet
