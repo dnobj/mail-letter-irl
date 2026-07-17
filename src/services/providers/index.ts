@@ -256,7 +256,8 @@ function initializeProviders(): void {
       apiKey: config.credentials.apiKey,
       mode: config.config?.mode ?? 'test',
       verbose: config.config?.verbose ?? true,
-      baseUrl: config.config?.baseUrl
+      baseUrl: config.config?.baseUrl,
+      timeoutMs: config.config?.timeoutMs
     };
 
     return new PostGridProvider(config, options);

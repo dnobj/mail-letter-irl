@@ -10,10 +10,8 @@ import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { AuthenticatedUser } from '../../services/types.js';
 import { parseCookies } from '../../utils/cookies.js';
 
-// Create JWKS client for Auth0
-const JWKS = createRemoteJWKSet(
-  new URL(process.env.LETTER_IRL_OAUTH_JWKS_URI!)
-);
+const jwksUri = process.env.LETTER_IRL_OAUTH_JWKS_URI;
+const JWKS = jwksUri ? createRemoteJWKSet(new URL(jwksUri)) : null;
 
 /**
  * Authenticate HTTP request - works with both Bearer tokens and cookies
@@ -28,6 +26,14 @@ export async function authenticateHttpRequest(
   res?: http.ServerResponse
 ): Promise<AuthenticatedUser | null> {
   try {
+    if (!JWKS) {
+      if (res) {
+        res.statusCode = 503;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'Authentication is not configured' }));
+      }
+      return null;
+    }
     let token: string | null = null;
 
     // Try to get token from Authorization header first

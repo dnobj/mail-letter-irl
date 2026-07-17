@@ -144,11 +144,17 @@ export interface LetterJob {
   attempts: number;
   max_attempts: number;
   scheduled_at: Date;
+  idempotency_key: string;
+  next_attempt_at: Date;
+  locked_at?: Date;
+  provider_order_id?: string;
+  last_error?: string;
   started_at?: Date;
   completed_at?: Date;
   error_message?: string;
   metadata?: any; // JSON
   created_at: Date;
+  updated_at: Date;
 }
 
 // ============================================================================
@@ -406,6 +412,7 @@ export type DraftStatus = 'pending' | 'consumed' | 'expired' | 'cancelled';
 export interface LetterDraft {
   draft_id: string;
   user_id: string;
+  mail_type?: MailType;
   sender: Record<string, unknown>;       // Address JSON
   recipient: Record<string, unknown>;    // Address JSON
   body_text: string;

@@ -30,11 +30,7 @@ export default defineConfig({
 
     // Pool configuration
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        singleFork: true,  // Better for database tests
-      },
-    },
+    singleFork: true,  // Better for database tests
   },
 
   resolve: {

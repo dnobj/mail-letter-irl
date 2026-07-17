@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 dotenv.config({ override: false });
 import http from "node:http";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promises as fs } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -29,11 +29,7 @@ import {
   handleStripeWebhook
 } from "../api/dashboardApiHandler.js";
 import { validatePromoCodePublic } from "../services/promoService.js";
-import { initializeJobQueue, stopJobQueue } from "../services/jobQueue.js";
 import { closePool } from "../db/index.js";
-import { startLetterWorker } from "../workers/letterWorker.js";
-import { startCreditExpirationWorker } from "../workers/creditExpirationWorker.js";
-import { startStatusSyncWorker, stopStatusSyncWorker } from "../workers/statusSyncWorker.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
 import { isDebugEnabled } from "../utils/debug.js";
 
@@ -280,17 +276,6 @@ export async function startHttpServer() {
       allowedOrigins,
       enableDnsRebindingProtection: true
     });
-
-    const validationError = sseTransport.validateRequestHeaders(req);
-    if (validationError) {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          error: validationError
-        })
-      );
-      return;
-    }
 
     sseTransport.onclose = async () => {
       sseSessions.delete(sseTransport.sessionId);
@@ -787,8 +772,7 @@ export async function startHttpServer() {
         `MCP request ${new Date().toISOString()} method=${req.method} host=${req.headers.host} origin=${req.headers.origin} user=${authInfo?.userId ?? "anonymous"}`
       );
 
-      // Create transport first (passes res directly to constructor)
-      const sessionTransport = new StreamableHTTPServerTransport(res, {
+      const sessionTransport = new StreamableHTTPServerTransport({
         allowedHosts,
         allowedOrigins,
         enableDnsRebindingProtection: true
@@ -812,7 +796,6 @@ export async function startHttpServer() {
         // For Streamable HTTP POST, parse body and handle request with timeout
         const body = await parseRequestBody(req);
 
-        console.log(`Received POST body: ${body.substring(0, 200)}`);
         const parsedBody = body ? JSON.parse(body) : undefined;
         console.log(`Parsed request: method=${parsedBody?.method || 'unknown'}`);
 
@@ -846,31 +829,11 @@ export async function startHttpServer() {
     });
   });
 
-  // Initialize job queue and start workers (unless DISABLE_WORKERS is set)
-  if (process.env.DISABLE_WORKERS === 'true') {
-    console.log('');
-    console.log('⚠️  Workers disabled (DISABLE_WORKERS=true)');
-    console.log('   Admin-only mode - no job processing');
-    console.log('');
-  } else {
-    try {
-      console.log('');
-      await initializeJobQueue();
-      await startLetterWorker();
-      await startCreditExpirationWorker();
-      await startStatusSyncWorker();
-      console.log('');
-    } catch (error) {
-      console.error('❌ Failed to initialize job queue:', error);
-      console.error('⚠️  Server will continue without background job processing');
-    }
-  }
+  console.log('Background maintenance is disabled in the API process; use npm run maintenance.');
 
   const close = async () => {
     console.log('\n🛑 Shutting down gracefully...');
     try {
-      stopStatusSyncWorker();
-      await stopJobQueue();
       await closePool();
     } catch (error) {
       console.error('Error during shutdown:', error);
@@ -882,7 +845,7 @@ export async function startHttpServer() {
   process.on("SIGTERM", close);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   startHttpServer().catch((error) => {
     console.error("Failed to start HTTP MCP server", error);
     process.exit(1);

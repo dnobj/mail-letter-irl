@@ -4,21 +4,23 @@
  * Handles Stripe Checkout sessions and webhook processing for credit purchases
  */
 
-import Stripe from 'stripe';
+import Stripe from "stripe";
 
-// Initialize Stripe with secret key
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2024-11-20.acacia'
-});
+let stripeClient: Stripe | null = null;
 
+export function getStripeClient(): Stripe {
+  const apiKey = process.env.STRIPE_SECRET_KEY;
+  if (!apiKey) throw new Error("STRIPE_SECRET_KEY is not configured");
+  stripeClient ??= new Stripe(apiKey, { apiVersion: "2025-11-17.clover" });
+  return stripeClient;
+}
 export interface CheckoutSessionParams {
   userId: string;
   userEmail: string;
-  productId: 'credit-pack-4' | 'credit-pack-10' | 'credit-pack-100';
+  productId: "credit-pack-4" | "credit-pack-10" | "credit-pack-100";
   successUrl: string;
   cancelUrl: string;
 }
-
 export interface CheckoutSessionResult {
   success: boolean;
   sessionId?: string;
@@ -35,31 +37,31 @@ export interface CheckoutSessionResult {
  * 2 credits = 1 letter
  */
 const PRODUCTS = {
-  'credit-pack-4': {
-    credits: 4,  // Internal: 4 credits = 2 letters
-    priceId: process.env.STRIPE_PRICE_STARTER || '',
-    name: 'Starter Pack - 2 Letters',
-    description: 'Perfect for trying out Letter IRL'
+  "credit-pack-4": {
+    credits: 4, // Internal: 4 credits = 2 letters
+    priceId: process.env.STRIPE_PRICE_STARTER || "",
+    name: "Starter Pack - 2 Letters",
+    description: "Perfect for trying out Letter IRL",
   },
-  'credit-pack-10': {
-    credits: 10,  // Internal: 10 credits = 5 letters
-    priceId: process.env.STRIPE_PRICE_REGULAR || '',
-    name: 'Regular Pack - 5 Letters',
-    description: 'Most popular choice for regular letter senders'
+  "credit-pack-10": {
+    credits: 10, // Internal: 10 credits = 5 letters
+    priceId: process.env.STRIPE_PRICE_REGULAR || "",
+    name: "Regular Pack - 5 Letters",
+    description: "Most popular choice for regular letter senders",
   },
-  'credit-pack-100': {
-    credits: 100,  // Internal: 100 credits = 50 letters
-    priceId: process.env.STRIPE_PRICE_POWER || '',
-    name: 'Power Pack - 50 Letters',
-    description: 'Best value - 10% savings for power users'
-  }
+  "credit-pack-100": {
+    credits: 100, // Internal: 100 credits = 50 letters
+    priceId: process.env.STRIPE_PRICE_POWER || "",
+    name: "Power Pack - 50 Letters",
+    description: "Best value - 10% savings for power users",
+  },
 };
 
 /**
  * Create a Stripe Checkout session for purchasing credits
  */
 export async function createCheckoutSession(
-  params: CheckoutSessionParams
+  params: CheckoutSessionParams,
 ): Promise<CheckoutSessionResult> {
   try {
     const product = PRODUCTS[params.productId];
@@ -67,7 +69,7 @@ export async function createCheckoutSession(
     if (!product) {
       return {
         success: false,
-        error: `Invalid product ID: ${params.productId}`
+        error: `Invalid product ID: ${params.productId}`,
       };
     }
 
@@ -75,43 +77,43 @@ export async function createCheckoutSession(
     if (!product.priceId) {
       return {
         success: false,
-        error: `Price ID not configured for product: ${params.productId}. Set STRIPE_PRICE_* environment variables.`
+        error: `Price ID not configured for product: ${params.productId}. Set STRIPE_PRICE_* environment variables.`,
       };
     }
 
     // Create Checkout Session using pre-created Stripe Price ID
     // Only include customer_email if it's a valid email address
-    const isValidEmail = params.userEmail && params.userEmail.includes('@');
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      mode: 'payment',
+    const isValidEmail = params.userEmail && params.userEmail.includes("@");
+    const session = await getStripeClient().checkout.sessions.create({
+      payment_method_types: ["card"],
+      mode: "payment",
       ...(isValidEmail && { customer_email: params.userEmail }),
       client_reference_id: params.userId,
       line_items: [
         {
           price: product.priceId,
-          quantity: 1
-        }
+          quantity: 1,
+        },
       ],
       metadata: {
         userId: params.userId,
         productId: params.productId,
-        credits: product.credits.toString()
+        credits: product.credits.toString(),
       },
       success_url: params.successUrl,
-      cancel_url: params.cancelUrl
+      cancel_url: params.cancelUrl,
     });
 
     return {
       success: true,
       sessionId: session.id,
-      sessionUrl: session.url || undefined
+      sessionUrl: session.url || undefined,
     };
   } catch (error: any) {
-    console.error('Failed to create Stripe Checkout session:', error);
+    console.error("Failed to create Stripe Checkout session:", error);
     return {
       success: false,
-      error: error.message || 'Failed to create checkout session'
+      error: error.message || "Failed to create checkout session",
     };
   }
 }
@@ -121,25 +123,25 @@ export async function createCheckoutSession(
  */
 export function verifyWebhookSignature(
   payload: string | Buffer,
-  signature: string
+  signature: string,
 ): Stripe.Event | null {
   try {
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
 
     if (!webhookSecret) {
-      console.error('STRIPE_WEBHOOK_SECRET not configured');
+      console.error("STRIPE_WEBHOOK_SECRET not configured");
       return null;
     }
 
-    const event = stripe.webhooks.constructEvent(
+    const event = getStripeClient().webhooks.constructEvent(
       payload,
       signature,
-      webhookSecret
+      webhookSecret,
     );
 
     return event;
   } catch (error: any) {
-    console.error('Webhook signature verification failed:', error.message);
+    console.error("Webhook signature verification failed:", error.message);
     return null;
   }
 }
@@ -157,20 +159,21 @@ export interface CheckoutCompletedData {
 }
 
 export async function extractCheckoutData(
-  session: Stripe.Checkout.Session
+  session: Stripe.Checkout.Session,
 ): Promise<CheckoutCompletedData | null> {
   try {
     const userId = session.client_reference_id || session.metadata?.userId;
-    const credits = parseInt(session.metadata?.credits || '0', 10);
-    const productId = session.metadata?.productId || '';
+    const credits = parseInt(session.metadata?.credits || "0", 10);
+    const productId = session.metadata?.productId || "";
     const amountPaid = (session.amount_total || 0) / 100; // Convert from cents
-    const customerEmail = session.customer_email || session.customer_details?.email || '';
+    const customerEmail =
+      session.customer_email || session.customer_details?.email || "";
 
     if (!userId || !credits || !productId) {
-      console.error('Missing required metadata in checkout session:', {
+      console.error("Missing required metadata in checkout session:", {
         userId,
         credits,
-        productId
+        productId,
       });
       return null;
     }
@@ -181,17 +184,10 @@ export async function extractCheckoutData(
       productId,
       sessionId: session.id,
       amountPaid,
-      customerEmail
+      customerEmail,
     };
   } catch (error: any) {
-    console.error('Failed to extract checkout data:', error);
+    console.error("Failed to extract checkout data:", error);
     return null;
   }
-}
-
-/**
- * Get Stripe instance for advanced operations
- */
-export function getStripeClient(): Stripe {
-  return stripe;
 }

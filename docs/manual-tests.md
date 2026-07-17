@@ -1,7 +1,7 @@
 # Manual Test Checklist
 
 **Purpose:** Integration and end-to-end tests that require manual verification
-**Last Updated:** December 2025
+**Last Updated:** July 16, 2026
 
 ---
 
@@ -14,6 +14,7 @@
 | [Payment Flow](#payment-flow) | After Stripe changes | ~10 min |
 | [Full User Journey](#full-user-journey) | Before major releases | ~20 min |
 | [Image Generation](#image-generation) | After image generation changes | ~5 min |
+| [Idle and Recovery](#idle-and-recovery-verification) | After runtime/infrastructure changes | 20+ min idle time |
 
 ---
 
@@ -22,12 +23,12 @@
 Quick checks after every deployment. All should pass before considering deployment successful.
 
 ### API Health
-- [ ] `GET https://api.letterirl.com/` returns 200
+- [ ] `GET https://api.letterirl.com/healthz` returns 200
 - [ ] `GET https://api.letterirl.com/.well-known/openid-configuration` returns valid JSON
 - [ ] `GET https://api.letterirl.com/oauth/register` (POST) returns 201 with static client_id
 
 ### MCP Endpoint
-- [ ] `GET https://api.letterirl.com/mcp` responds (SSE connection)
+- [ ] ChatGPT developer-mode refresh discovers the current MCP tools
 - [ ] MCP manifest accessible at `/manifest.json`
 
 ### Website
@@ -136,7 +137,7 @@ Test the complete letter journey.
 
 ### Preview (US-LETTER-01)
 - [ ] Provide valid US addresses (sender + recipient)
-- [ ] Provide letter body (< 1800 chars)
+- [ ] Provide text-only letter body (at most 1,600 characters and 24 lines)
 - [ ] Preview returns HTML
 - [ ] Draft ID returned
 - [ ] `canSendNow` reflects actual balance
@@ -144,7 +145,7 @@ Test the complete letter journey.
 ### Validation Errors
 - [ ] Missing address fields → clear error
 - [ ] Non-US address → "Only supports US" error
-- [ ] Body > 1800 chars → character limit error
+- [ ] Text-only body over 1,600 characters or 24 lines returns a clear limit error
 - [ ] Invalid address → suggestions returned
 
 ### Send (US-LETTER-02)
@@ -152,7 +153,7 @@ Test the complete letter journey.
 - [ ] Set `confirm: true`
 - [ ] Credits deducted
 - [ ] Order ID returned
-- [ ] Status is "queued"
+- [ ] Status is `accepted`, or `pending` with recovery explicitly scheduled
 
 ### Idempotency (US-LETTER-03)
 - [ ] Call send again with same draft ID
@@ -165,11 +166,14 @@ Test the complete letter journey.
 - [ ] Status timeline shows history
 - [ ] Recipient info shown (redacted appropriately)
 
-### Background Processing (US-LETTER-06)
-- [ ] Check pg-boss job queue
-- [ ] Job picked up by worker
-- [ ] Status updates: queued → processing → in_transit
-- [ ] PostGrid letter ID recorded (test mode)
+### Outbox and Recovery (US-LETTER-06)
+- [ ] A normal confirmed send is submitted immediately
+- [ ] Exactly one `letter_jobs` row exists for the letter
+- [ ] PostGrid/test-provider order ID is recorded once
+- [ ] Repeating the same send returns the original order and does not deduct credits again
+- [ ] A simulated transient provider failure leaves a due/pending outbox row
+- [ ] `npm run maintenance` processes the due row and exits cleanly
+- [ ] A stale processing lock is recovered after the configured lock timeout
 
 ---
 
@@ -299,6 +303,42 @@ End-to-end test of complete user experience.
 4. [ ] Login with GitHub
 5. [ ] Different user ID (separate account)
 6. [ ] Each account has own credits/letters
+
+---
+
+## Idle and Recovery Verification
+
+### Zero Balance and Simulated Purchase
+- [ ] Confirm the dedicated test account has zero available sends
+- [ ] Preview a letter or postcard and verify the UI clearly says it cannot be sent yet
+- [ ] Attempt a confirmed send and verify no order or credit deduction is created
+- [ ] Open the development website letter-pack checkout
+- [ ] Complete a simulated Stripe purchase with `4242 4242 4242 4242`
+- [ ] Return to ChatGPT and verify the updated balance
+- [ ] Confirm the original or a fresh draft can now be sent exactly once
+
+### Image Restart Persistence
+- [ ] Generate an image through the development app
+- [ ] Verify the temporary image URL works
+- [ ] Restart the development API service
+- [ ] Verify the same image URL still works before 15 minutes expires
+- [ ] Verify expired images are removed by hourly maintenance
+
+### Development Sleep and Wake
+- [ ] Leave development API and website idle for more than ten minutes
+- [ ] Confirm both Railway services report sleeping
+- [ ] Measure first API and website response after sleep
+- [ ] Confirm first-use recovery is at most three seconds
+- [ ] Connect the ChatGPT app and render a widget after wake-up
+- [ ] Generate or reuse an image after wake-up
+- [ ] Disable Serverless if latency exceeds three seconds or any flow fails
+
+### Neon Scale to Zero
+- [ ] Close manual Neon SQL/editor sessions
+- [ ] Wait more than five minutes after the final application query
+- [ ] Confirm both Neon computes suspend when their environments are idle
+- [ ] Confirm no two-second polling queries or pg-boss connections appear
+- [ ] Track combined usage for seven idle days; target less than `1 CU-hour/day`
 
 ---
 

@@ -1,82 +1,140 @@
-/**
- * Database connection and query utilities
- */
+/** Database connection and query utilities. */
 
 import pg from 'pg';
 
 const { Pool } = pg;
 
-// Create connection pool
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
-  max: 5, // Maximum number of clients in the pool (low-traffic app)
-  idleTimeoutMillis: 10000, // Close idle clients after 10 seconds (helps Neon suspend)
-  connectionTimeoutMillis: 2000, // Return error if connection takes > 2 seconds
-});
+const WAKE_RETRY_CODES = new Set([
+  '57P03',
+  '08001',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+]);
 
-// Log connection events
-pool.on('connect', () => {
-  console.log('📊 Database client connected');
-});
+function isWakeConnectionError(error: unknown): boolean {
+  const code = (error as { code?: string })?.code;
+  return Boolean(code && WAKE_RETRY_CODES.has(code));
+}
 
-pool.on('error', (err) => {
-  console.error('📊 Unexpected database error:', err);
-});
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
-// Test connection
-export async function testConnection(): Promise<boolean> {
+export function isPooledConnectionString(connectionString?: string): boolean {
+  if (!connectionString) return false;
   try {
-    const result = await pool.query('SELECT NOW() as now, version() as version');
-    console.log('📊 Database connected successfully');
-    console.log(`   Time: ${result.rows[0].now}`);
-    console.log(`   Version: ${result.rows[0].version.split(' ').slice(0, 2).join(' ')}`);
-    return true;
-  } catch (error) {
-    console.error('📊 Database connection failed:', error);
+    const hostname = new URL(connectionString).hostname.toLowerCase();
+    return hostname.includes('-pooler') || hostname.startsWith('pooler.');
+  } catch {
     return false;
   }
 }
 
-// Graceful shutdown
-export async function closePool(): Promise<void> {
-  await pool.end();
-  console.log('📊 Database connection pool closed');
+if (process.env.NODE_ENV === 'production' && !isPooledConnectionString(process.env.DATABASE_URL)) {
+  console.warn('DATABASE_URL does not appear to use a Neon pooled hostname');
 }
 
-// Query helper with logging
-export async function query<T = any>(
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+  max: 5,
+  idleTimeoutMillis: 10_000,
+  connectionTimeoutMillis: 5_000,
+  allowExitOnIdle: true,
+});
+
+pool.on('connect', () => {
+  console.log('Database client connected');
+});
+
+pool.on('error', (error) => {
+  console.error('Unexpected database error:', error);
+});
+
+export async function testConnection(): Promise<boolean> {
+  try {
+    const result = await query<{ now: Date; version: string }>(
+      'SELECT NOW() as now, version() as version'
+    );
+    console.log('Database connected successfully');
+    console.log(`   Time: ${result.rows[0].now}`);
+    console.log(`   Version: ${result.rows[0].version.split(' ').slice(0, 2).join(' ')}`);
+    return true;
+  } catch (error) {
+    console.error('Database connection failed:', error);
+    return false;
+  }
+}
+
+export async function closePool(): Promise<void> {
+  await pool.end();
+  console.log('Database connection pool closed');
+}
+
+/**
+ * Retry once only when Neon reports that a suspended compute cannot accept a
+ * connection yet. Other failures are not retried because a write may have an
+ * ambiguous outcome.
+ */
+export async function query<T extends pg.QueryResultRow = any>(
   text: string,
   params?: any[]
 ): Promise<pg.QueryResult<T>> {
   const start = Date.now();
-  try {
-    const result = await pool.query<T>(text, params);
-    const duration = Date.now() - start;
-    if (duration > 100) {
-      console.log(`📊 Slow query (${duration}ms):`, text.substring(0, 100));
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const result = await pool.query<T>(text, params);
+      const duration = Date.now() - start;
+      if (duration > 100) {
+        console.log(`Slow query (${duration}ms):`, text.substring(0, 100));
+      }
+      return result;
+    } catch (error) {
+      if (attempt === 0 && isWakeConnectionError(error)) {
+        await wait(250);
+        continue;
+      }
+      console.error('Query error:', error);
+      console.error('   SQL:', text);
+      throw error;
     }
-    return result;
-  } catch (error) {
-    console.error('📊 Query error:', error);
-    console.error('   SQL:', text);
-    console.error('   Params:', params);
-    throw error;
   }
+  throw new Error('Database query retry exhausted');
 }
 
-// Transaction helper
+async function connectForTransaction(): Promise<pg.PoolClient> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let client: pg.PoolClient | undefined;
+    try {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      return client;
+    } catch (error) {
+      client?.release(true);
+      if (attempt === 0 && isWakeConnectionError(error)) {
+        await wait(250);
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error('Database transaction connection retry exhausted');
+}
+
 export async function transaction<T>(
   callback: (client: pg.PoolClient) => Promise<T>
 ): Promise<T> {
-  const client = await pool.connect();
+  const client = await connectForTransaction();
   try {
-    await client.query('BEGIN');
     const result = await callback(client);
     await client.query('COMMIT');
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('Database rollback failed:', rollbackError);
+    }
     throw error;
   } finally {
     client.release();

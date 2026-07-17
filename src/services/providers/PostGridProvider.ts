@@ -40,6 +40,20 @@ export interface PostGridProviderOptions {
 
   /** Whether to log operations (default: true) */
   verbose?: boolean;
+
+  /** Per-request timeout in milliseconds (default: 10 seconds) */
+  timeoutMs?: number;
+}
+
+class PostGridRequestError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode?: number,
+    readonly retryable = false
+  ) {
+    super(message);
+    this.name = 'PostGridRequestError';
+  }
 }
 
 /**
@@ -94,7 +108,7 @@ interface PostGridPostcardRequest {
   from: PostGridContact;
   frontHTML: string;
   backHTML: string;
-  size: '6x4' | '6x9' | '6x11';
+  size: '6x4' | '9x6' | '11x6';
   description?: string;
 }
 
@@ -154,7 +168,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       apiKey: options.apiKey,
       baseUrl: options.baseUrl ?? 'https://api.postgrid.com/print-mail/v1',
       mode: options.mode ?? 'test',
-      verbose: options.verbose ?? true
+      verbose: options.verbose ?? true,
+      timeoutMs: options.timeoutMs ?? 10_000
     };
 
     if (this.options.verbose) {
@@ -193,7 +208,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       };
 
       // Make API request
-      const response = await this.apiRequest<PostGridLetterResponse>('POST', '/letters', request);
+      const response = await this.apiRequest<PostGridLetterResponse>(
+        'POST',
+        '/letters',
+        request,
+        params.idempotencyKey
+      );
 
       if (this.options.verbose) {
         console.log(`✅ [PostGrid] Letter created successfully`);
@@ -231,7 +251,13 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       return {
         success: false,
         trackingId: '',
-        error: errorMessage
+        error: errorMessage,
+        metadata: {
+          statusCode: error instanceof PostGridRequestError ? error.statusCode : undefined,
+          retryable: error instanceof PostGridRequestError
+            ? error.retryable
+            : /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
+        }
       };
     }
   }
@@ -513,7 +539,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   private async apiRequest<T>(
     method: 'GET' | 'POST' | 'DELETE',
     endpoint: string,
-    body?: any
+    body?: any,
+    idempotencyKey?: string
   ): Promise<T> {
     const url = `${this.options.baseUrl}${endpoint}`;
 
@@ -521,10 +548,17 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'x-api-key': this.options.apiKey,
       'Content-Type': 'application/json'
     };
+    if (idempotencyKey) {
+      headers['Idempotency-Key'] = idempotencyKey;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
 
     const requestOptions: RequestInit = {
       method,
       headers,
+      signal: controller.signal,
       ...(body && { body: JSON.stringify(body) })
     };
 
@@ -532,14 +566,34 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       console.log(`🌐 [PostGrid] ${method} ${endpoint}`);
     }
 
-    const response = await fetch(url, requestOptions);
+    try {
+      const response = await fetch(url, requestOptions);
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: { message: response.statusText } })) as PostGridError;
-      throw new Error(errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: { message: response.statusText } })) as PostGridError;
+        const message = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+        throw new PostGridRequestError(
+          `HTTP ${response.status}: ${message}`,
+          response.status,
+          response.status === 429 || response.status >= 500
+        );
+      }
+
+      return response.json() as Promise<T>;
+    } catch (error) {
+      if (error instanceof PostGridRequestError) throw error;
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new PostGridRequestError(
+          `PostGrid request timed out after ${this.options.timeoutMs}ms`,
+          undefined,
+          true
+        );
+      }
+      const message = error instanceof Error ? error.message : 'PostGrid network error';
+      throw new PostGridRequestError(message, undefined, true);
+    } finally {
+      clearTimeout(timeout);
     }
-
-    return response.json() as Promise<T>;
   }
 
   /**
@@ -798,7 +852,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
 
       // PostGrid uses width x height format (e.g., '9x6' for a 6x9 postcard)
       // Our internal format is height x width, so we need to map them
-      const postGridSizeMap: Record<PostcardSize, string> = {
+      const postGridSizeMap: Record<PostcardSize, PostGridPostcardRequest['size']> = {
         '6x4': '6x4',   // 4" tall x 6" wide - same format
         '6x9': '9x6',   // 9" tall x 6" wide -> PostGrid wants 9x6
         '6x11': '11x6'  // 11" tall x 6" wide -> PostGrid wants 11x6
@@ -823,7 +877,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       };
 
       // Make API request
-      const response = await this.apiRequest<PostGridPostcardResponse>('POST', '/postcards', request);
+      const response = await this.apiRequest<PostGridPostcardResponse>(
+        'POST',
+        '/postcards',
+        request,
+        params.idempotencyKey
+      );
 
       if (this.options.verbose) {
         console.log(`✅ [PostGrid] Postcard created successfully`);
@@ -861,7 +920,13 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       return {
         success: false,
         trackingId: '',
-        error: errorMessage
+        error: errorMessage,
+        metadata: {
+          statusCode: error instanceof PostGridRequestError ? error.statusCode : undefined,
+          retryable: error instanceof PostGridRequestError
+            ? error.retryable
+            : /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
+        }
       };
     }
   }

@@ -54,7 +54,7 @@ export class DIYProvider implements LetterFulfillmentProvider {
       success: true,
       trackingId: `DIY-${letterId}`,
       expectedDeliveryDate: expectedDelivery,
-      costCents: this.estimateCost(params),
+      costCents: this.calculateCost(params),
       metadata: {
         provider: 'diy',
         letterId,
