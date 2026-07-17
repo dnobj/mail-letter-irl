@@ -32,7 +32,7 @@ Railway uses one project with separate production and development environments. 
 - Recovery: one-shot hourly Railway maintenance cron.
 - Temporary generated images: private Railway S3-compatible bucket with a 15-minute TTL.
 - Production availability: API and website stay warm.
-- Development cost control: API and website use Railway Serverless; sleep/wake acceptance testing is in progress.
+- Development cost control: API and website use Railway Serverless; public health wake-up acceptance passed, with authenticated ChatGPT acceptance still pending.
 
 The API process starts no queue polling, status-sync, credit-cleanup, or image-cleanup timers. `pg-boss` has been removed from the deployed architecture.
 
@@ -67,8 +67,11 @@ Development rollout status:
 - Railway has a `$7` email alert and `$20` hard limit, and Neon has a `$10` email-only spending limit;
 - both development Railway web services have Serverless enabled;
 - the Neon development compute has been observed suspended with its `0.25-0.5 CU` and five-minute scale-to-zero policy active.
+- both development web services have been observed sleeping; their first health responses completed in `1.34s` (API) and `1.38s` (website), below the three-second limit;
+- post-wake manifest, OAuth metadata, ChatGPT CORS preflight, and website homepage checks pass;
+- an hourly maintenance run from a suspended Neon compute completed in about one second and closed its pool cleanly.
 
-Image restart persistence, Serverless wake latency, the post-wake ChatGPT widget/image flows, and the seven-day Neon idle observation must still pass before production promotion. Production remains on the previous release with a temporary ten-minute polling safeguard until that acceptance gate is complete. Track the remaining work in [manual-tests.md](manual-tests.md) and [idle-cost-operations.md](idle-cost-operations.md).
+Image restart persistence, the authenticated post-wake ChatGPT widget/image flows, and the seven-day Neon idle observation must still pass before production promotion. Production remains on the previous release with a temporary ten-minute polling safeguard until that acceptance gate is complete. Track the remaining work in [manual-tests.md](manual-tests.md) and [idle-cost-operations.md](idle-cost-operations.md).
 
 ## Release Path
 

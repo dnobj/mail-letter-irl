@@ -27,16 +27,19 @@ Verified in development on July 16, 2026:
 - both Neon computes use `0.25-0.5 CU` and five-minute scale-to-zero;
 - the development Neon compute has suspended while idle;
 - Railway Serverless is enabled for the development API and website only.
+- both development web services have slept and returned their first health responses in under `1.4s`;
+- a maintenance run against a suspended Neon compute completed in about one second and closed all clients.
 
 Still required before production promotion:
 
 - prove a generated image remains available through an API restart;
-- observe both development Railway services sleeping for more than ten minutes and measure their first responses;
 - render an MCP widget and generate or reuse an image after wake-up;
 - complete the zero-balance, simulated-purchase, send, and status manual flow;
 - observe combined Neon usage for seven idle days.
 
 Production still runs the pre-outbox release with a temporary ten-minute polling safeguard. Its compute can suspend between polls but will continue to wake periodically until the accepted development release is promoted.
+
+Serverless health acceptance result (July 16, 2026): after both web services reported `Sleeping`, the first API health response completed in `1.34s` and the first website health response in `1.38s`. Manifest, OAuth metadata, ChatGPT CORS preflight, and the website homepage passed immediately after wake-up. Keep Serverless enabled while the authenticated ChatGPT checks remain pending.
 
 ## Why the Previous Idle Cost Was High
 
