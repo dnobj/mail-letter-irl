@@ -1,6 +1,6 @@
 # Letter IRL Documentation Index
 
-**Last Updated:** July 16, 2026
+**Last Updated:** July 18, 2026
 **Purpose:** Central navigation hub for all Letter IRL documentation
 
 Welcome to the Letter IRL documentation. This is a physical letter mailing service integrated with ChatGPT via MCP (Model Context Protocol).
@@ -31,6 +31,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 ### User Flows
 - [User Flows](user-flows.md) - Step-by-step flows for sending letters, checking status, buying credits
 - [letter-send-flow.md](letter-send-flow.md) - Technical implementation of the send flow (letters and postcards)
+- [Just-in-Time Purchase Plan](just-in-time-purchase-plan.md) - Implementation plan for Pay & Send checkout, fulfillment, refunds, and image entitlements
 
 ### API & Tools
 - [MCP Tool APIs](tool-apis.md) - JSON schemas and behaviors for MCP tools

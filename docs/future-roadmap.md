@@ -16,23 +16,10 @@
 - Handling undeliverable mail, return-to-sender workflows, or mailbox services are deferred.
 - Prototype assumes undeliverable items are unmanaged at this stage.
 
-## Just-In-Time Billing (Saved Payment Methods)
-- Allow users to save billing information (credit card via Stripe) or use Stripe Link for seamless checkout.
-- Enables sending letters without pre-purchasing letter packs - charge at time of send.
-- User flow: "Send now, pay now" instead of "Buy letter pack, then send."
-- **Recommended approach: Stripe Link**
-  - Universal wallet managed by Stripe (we never store payment info)
-  - One-click checkout for returning users (SMS verification)
-  - Already works with Stripe Checkout (may just need dashboard toggle)
-  - No additional PCI compliance burden
-- Implementation phases:
-  1. **Quick win**: Enable Stripe Link in Stripe Dashboard for faster repeat checkout
-  2. **JIT billing**: Add "Pay & Send" option that skips letter pack purchase
-  3. **Optional**: Store Stripe Customer ID for true one-click (charge saved method directly)
-- Considerations:
-  - Failed payment handling (letter queued but payment fails)
-  - Price transparency at preview time
-  - Refund handling for failed deliveries
-- **OpenAI compliance note**: Current letter-pack model is likely compliant (prepaid physical goods, not virtual currency). JIT billing is primarily a UX improvement.
-- Related: See "Credit Purchase and Top-Up" above for pre-purchase flow.
-- Tracking: GitHub issue #69
+## Just-in-Time Pay & Send
+- Add a hosted checkout that purchases and sends one exact physical letter or postcard without requiring a letter pack.
+- Keep packs as the discounted prepaid option; do not expose internal credits as stand-alone digital goods.
+- Treat successful payment as explicit send authorization, then fulfill from verified Stripe webhooks through the transactional outbox.
+- Keep Letter IRL-funded image generation purchase-gated initially, with explicit entitlements and a disabled-by-default trial flag.
+- Detailed design and acceptance criteria: [Just-in-Time Purchase Implementation Plan](just-in-time-purchase-plan.md)
+- Tracking: [GitHub issue #69](https://github.com/dnobj/mail-letter-irl/issues/69)
