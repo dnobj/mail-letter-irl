@@ -67,8 +67,9 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 - [Pricing and Credits](pricing-and-credits.md) - Pricing strategy
 
 ### Admin
-- [Admin Panel Guide](admin-panel-guide.md) - Local-only admin dashboard
-- [Dashboard Implementation](dashboard-implementation.md) - Dashboard API details
+- [Admin Interface Modernization Plan](admin-interface-modernization-plan.md) - Planning comparison, current-state audit, conditional reference architecture, approval gates, tests, and rollout
+- [Admin Panel Guide](admin-panel-guide.md) - Current legacy local-only behavior; superseded for implementation direction by the modernization plan
+- [Archived Dashboard Implementation](archive/dashboard-implementation.md) - Historical customer-dashboard design, not the current admin panel
 
 ---
 
@@ -123,13 +124,13 @@ npm run dev          # Development with watch
 npm run start        # Production mode
 ```
 
-### Run Admin Dashboard (Local Only)
-```bash
-cp .env.admin.example .env.admin
-# Edit .env.admin with production DATABASE_URL
-npm run admin
-# Visit http://localhost:8788/admin
-```
+### Admin Operations
+
+The current localhost admin flow is legacy and must not be enabled remotely or treated as a secure
+production operating procedure. Keep cloud admin routes disabled and use the
+[Admin Interface Modernization Plan](admin-interface-modernization-plan.md) to select an architecture
+before implementation. Architecture selection and every production activation stage require explicit
+owner approval.
 
 ### Run Migrations
 ```bash
