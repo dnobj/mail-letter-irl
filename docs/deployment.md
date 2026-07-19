@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Last updated: July 16, 2026
+Last updated: July 19, 2026
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
 
@@ -67,7 +67,11 @@ Before every deployment, verify without printing secret values:
 - Public base URLs, Auth0 issuer/audience, CORS origins, and Stripe webhook URLs match the environment.
 - `LETTER_IRL_OAUTH_CIMD_ENFORCEMENT=true` only after all exact CIMD values are
   present in that environment.
-- `ADMIN_ENABLED=false` in cloud environments.
+- `ADMIN_ENABLED` is unset or `false` in cloud environments; `true` is a startup error and cannot
+  enable legacy public routes. While this is in force the issue #69 ambiguous-image operator
+  recovery routes under `/api/admin/image-generation/*` are unreachable, so `JIT_PURCHASE_ENABLED`
+  and `IMAGE_TRIAL_ENABLED` must stay `false` until a later issue #162 slice ships the replacement
+  operator control.
 
 `WORKER_POLLING_SECONDS` and `WORKER_TRIGGER_ON_SEND` are legacy rollout safeguards. The compiled API ignores them after the transactional-outbox release; remove them after the new maintenance service is verified.
 
@@ -77,7 +81,8 @@ As of July 16, 2026, development has the transactional-outbox release and hourly
 
 1. Merge backend and website feature PRs into their `dev` branches.
 2. Confirm Railway deploys the development API, maintenance service, and website successfully.
-3. Confirm migration `020_transactional_outbox.sql` applied to the Neon development branch.
+3. Confirm `021_jit_commerce_foundation.sql` is recorded before `022_admin_audit.sql` on the Neon
+   development branch. Do not apply 022 as a substitute for or copy of issue #69's migration 021.
 4. Check `/healthz`, OAuth metadata, manifest, MCP connection, and website `/api/health`.
 5. Run the automated suites in both repositories.
 6. Run the manual checks in [manual-tests.md](manual-tests.md), including zero balance, simulated purchase, confirmed send, status retrieval, image generation, and restart persistence.
@@ -100,6 +105,8 @@ As of July 16, 2026, development has the transactional-outbox release and hourly
 - Application rollback: redeploy the previous successful Railway deployment.
 - Serverless rollback: disable Serverless for the affected development service.
 - Database rollback: migrations are forward-only by default; do not drop outbox data. Deploy a corrective migration.
+- Admin foundation rollback: retain migration 022 plus marker, command, operation, and audit evidence; revoke
+  environment-specific role access separately if access was provisioned.
 - Mail safety: retain `letter_jobs` rows and stable idempotency keys during every rollback.
 - Image safety: keep the bucket and credentials in place while any 15-minute image URL may still be active.
 

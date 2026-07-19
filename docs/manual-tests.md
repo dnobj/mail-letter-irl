@@ -343,37 +343,45 @@ Test promotional code redemption.
 
 ---
 
-## Admin Panel
+## Admin Operator Interface
 
-Test admin functionality (local only).
+The legacy public page and API are disabled while the hardened local operator application is delivered in
+issue #162 slices. Do not set `ADMIN_ENABLED=true`, open `admin-panel.html` directly, or place an admin
+database URL in `.env`.
 
-### Access Control (US-SEC-03)
-- [ ] Admin panel only accessible on localhost
-- [ ] `ADMIN_ENABLED=true` required
-- [ ] Non-admin user rejected
+### ADMIN-FOUNDATION-022 — Slice 1 public denial and regression case
 
-### Dashboard (US-ADMIN-01)
-- [ ] Metrics load correctly
-- [ ] User counts accurate
-- [ ] Credit totals match database
+**Status:** Awaiting execution by `LIRL · Test · Browser`; this checklist does not claim a result.
 
-### User Investigation (US-ADMIN-04)
-- [ ] Search user by email
-- [ ] View user's credit ledger
-- [ ] View user's letters
-- [ ] View user's transactions
+**Preconditions:**
 
-### Credit Adjustment (US-ADMIN-05)
-- [ ] Add credits to user
-- [ ] Reason/description required
-- [ ] Ledger entry created
-- [ ] Balance updated
+- Use the deployed development public API only; do not connect to production or provision a role.
+- Confirm the candidate build contains `022_admin_audit.sql` and that the migration record shows the
+  separate `021_jit_commerce_foundation.sql` before `022_admin_audit.sql`.
+- Record the candidate commit and development public API origin without recording any credential.
 
-### Promo Management (US-ADMIN-07)
-- [ ] Create new campaign
-- [ ] Set limits (per user, total)
-- [ ] Activate/pause campaign
-- [ ] View redemption count
+**Steps:**
+
+1. [ ] Open `/admin`, `/admin/`, `/admin.html`, `/admin-panel.html`, and `/admin/example`; verify each
+   returns `404`, does not render the legacy HTML, and is not cacheable.
+2. [ ] Request `/api/admin`, `/api/admin/`, `/api/admin/users`, and an `OPTIONS` request to
+   `/api/admin/users`; verify each returns `404`, contains no user/admin data, and sends no CORS allow
+   header.
+3. [ ] Open `/healthz`; verify `200` and body `ok`.
+4. [ ] Open `/`; verify the existing public service status response remains successful.
+5. [ ] Open the manifest and OAuth metadata routes used by the development deployment; verify their
+   existing public behavior remains successful and contains no admin route advertisement.
+6. [ ] Confirm no new local admin browser server or UI is expected in this slice and no production access,
+   provider call, charge, mail order, Railway mutation, or role provisioning was performed.
+7. [ ] Attach status/header evidence for every route, the migration ordering evidence, browser console
+   observations, and the tested commit to the PR. Redact origins only if required; never attach secrets.
+
+**Pass criteria:** Every legacy path is a no-store `404` with no CORS/data leakage, and the public health,
+root, manifest, and OAuth metadata regressions remain healthy. Any non-404 legacy response is a release
+blocker.
+
+The authenticated session, read models, UI, and command cases will be added by later slices before their
+corresponding functionality is enabled.
 
 ---
 

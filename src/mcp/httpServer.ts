@@ -43,6 +43,8 @@ import {
   writeDiagnostic
 } from "../utils/diagnosticLog.js";
 import { buildWwwAuthenticateChallenge } from "../auth/oauthChallenge.js";
+import { validatePublicServerAdminConfiguration } from "../admin/config.js";
+import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,6 +85,8 @@ const PRODUCTION_ENV_VARS = [
 ];
 
 export function validateEnvironment() {
+  validatePublicServerAdminConfiguration(process.env);
+
   const missing: string[] = [];
 
   for (const envVar of REQUIRED_ENV_VARS) {
@@ -371,6 +375,10 @@ export async function startHttpServer() {
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? `${DEFAULT_HOST}:${DEFAULT_PORT}`}`);
+
+    if (denyLegacyPublicAdminRoute(url.pathname, res)) {
+      return;
+    }
 
     if (url.pathname === "/healthz") {
       res.statusCode = 200;

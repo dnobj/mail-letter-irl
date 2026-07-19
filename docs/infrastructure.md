@@ -1,6 +1,6 @@
 # Infrastructure Overview
 
-Last updated: July 16, 2026
+Last updated: July 19, 2026
 
 This file is the source of truth for Letter IRL's cloud topology. Keep secrets and private billing records out of Git.
 
@@ -70,6 +70,11 @@ Generated images are stored in a private Railway bucket for 15 minutes. Producti
 - The application retries a recognized Neon wake-up connection error once.
 - Neon computes remain at `0.25-0.5 CU` with five-minute scale-to-zero enabled.
 - There is no separate pg-boss pool and no two-second polling connection.
+
+The admin operator interface is not a Railway web service. Public API/MCP processes return 404 for every
+legacy `/admin*` and `/api/admin*` path. Migration 022 adds only the environment/audit/command/operation
+database foundation after issue #69's migration 021; it provisions no production role, credential,
+connection, worker, or local browser runtime.
 
 ## Runtime Commands
 

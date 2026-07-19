@@ -544,7 +544,7 @@ npm run dev  # Logs to stdout
 ## Security Notes
 
 - Never commit `.env` files
-- Admin routes are disabled in production (`ADMIN_ENABLED=false`)
+- Legacy public admin routes are forced off in every environment; `ADMIN_ENABLED=true` fails startup
 - All MCP tools require authentication
 - Stripe webhooks verified via signature
 - PostGrid API key is test mode in development

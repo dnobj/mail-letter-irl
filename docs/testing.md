@@ -298,6 +298,19 @@ integration-tests:
     POSTGRID_API_KEY: ${{ secrets.POSTGRID_TEST_KEY }}
 ```
 
+The admin foundation database integration spec is opt-in and refuses non-loopback databases or database
+names that do not contain `test`. Set `LETTER_IRL_ADMIN_TEST_DATABASE_URL` to an isolated local PostgreSQL
+test database. Until issue #69's migration is merged into the branch under test, also set
+`LETTER_IRL_JIT_MIGRATION_PATH` to that worktree's read-only
+`021_jit_commerce_foundation.sql`; the test always applies it immediately before `022_admin_audit.sql`.
+Never point this test at Neon.
+
+```powershell
+$env:LETTER_IRL_ADMIN_TEST_DATABASE_URL='postgresql://postgres:test-only@127.0.0.1:55432/letter_irl_admin_test'
+$env:LETTER_IRL_JIT_MIGRATION_PATH='C:\path\to\021_jit_commerce_foundation.sql'
+npx vitest run tests/integration/admin/adminFoundationDatabase.test.ts
+```
+
 ---
 
 ## Current Coverage

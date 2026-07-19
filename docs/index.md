@@ -78,7 +78,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 ### Admin
 
 - [Admin Interface Modernization Plan](admin-interface-modernization-plan.md) - Approved hardened-local architecture, current-state audit, security model, implementation slices, tests, and rollout gates
-- [Admin Panel Guide](admin-panel-guide.md) - Current legacy local-only behavior; superseded for implementation direction by the modernization plan
+- [Admin Operator Guide](admin-panel-guide.md) - Disabled legacy routes and the current hardened-local delivery status
 - [Archived Dashboard Implementation](archive/dashboard-implementation.md) - Historical customer-dashboard design, not the current admin panel
 
 ---
