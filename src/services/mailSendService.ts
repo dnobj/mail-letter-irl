@@ -108,8 +108,19 @@ export async function createMailOrderFromDraftWithClient(
     if (!letterResult.rows[0]) {
       throw draftError('DRAFT_INCOMPLETE', `Draft ${params.draftId} links to missing mail`);
     }
+    const existingLetter = letterResult.rows[0];
+    if (
+      funding.type === 'jit_order' &&
+      (existingLetter.funding_type !== 'jit_order' ||
+        existingLetter.funding_order_id !== funding.orderId)
+    ) {
+      throw draftError(
+        'DRAFT_FUNDING_CONFLICT',
+        `Draft ${params.draftId} was already consumed by different funding`
+      );
+    }
     return {
-      letter: letterResult.rows[0],
+      letter: existingLetter,
       draft,
       creditsRemaining: await loadCreditsRemaining(client, params.userId),
       alreadyConsumed: true

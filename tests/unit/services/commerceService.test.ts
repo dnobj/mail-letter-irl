@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   createJitSession: vi.fn(),
   createPackSession: vi.fn(),
   createRefund: vi.fn(),
+  findRefund: vi.fn(),
   retrieveRefund: vi.fn(),
   retrieveSession: vi.fn(),
   jitEnabled: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock('../../../src/services/stripeService.js', () => ({
   createJitCheckoutSession: mocks.createJitSession,
   createPackCheckoutSession: mocks.createPackSession,
   createPaymentRefund: mocks.createRefund,
+  findPaymentRefund: mocks.findRefund,
   retrieveRefund: mocks.retrieveRefund,
   retrieveCheckoutSession: mocks.retrieveSession,
   isJitPurchaseEnabled: mocks.jitEnabled,
@@ -115,6 +117,7 @@ describe('commerceService', () => {
     });
     mocks.createMail.mockResolvedValue({});
     mocks.grantEntitlement.mockResolvedValue({ entitlement_id: 'ent-1' });
+    mocks.findRefund.mockResolvedValue(null);
   });
 
   it('claims a Stripe event transactionally so a replay cannot double-send or double-grant', async () => {
@@ -222,6 +225,25 @@ describe('commerceService', () => {
     });
     expect(mocks.createMail).not.toHaveBeenCalled();
     expect(mocks.grantEntitlement).not.toHaveBeenCalled();
+  });
+
+  it('claims and ignores an unrelated Checkout session without retrying forever', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-unrelated' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) return { rows: [] };
+      return { rows: [] };
+    });
+
+    const result = await processStripeWebhookEvent({
+      ...checkoutEvent({ client_reference_id: null, metadata: {} }),
+      id: 'evt-unrelated'
+    });
+
+    expect(result).toEqual({ duplicate: false });
+    expect(mocks.createMail).not.toHaveBeenCalled();
+    expect(mocks.addCredits).not.toHaveBeenCalled();
   });
 
   it('moves a paid amount mismatch to refund_pending without fulfillment', async () => {
@@ -370,6 +392,73 @@ describe('commerceService', () => {
     expect(mocks.createMail).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps a completed asynchronous Checkout session pending while payment is unpaid', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("order_type = 'jit_mail' AND status = 'paid'")) return { rows: [] };
+      if (sql.includes("status = 'checkout_pending' AND stripe_checkout_session_id")) {
+        return { rows: [{ order_id: 'order-1', stripe_checkout_session_id: 'cs-1' }] };
+      }
+      if (sql.includes("UPDATE orders SET status = 'cancelled'")) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (sql.includes("WHERE status = 'refund_pending'")) return { rows: [] };
+      if (sql.includes('SELECT COUNT(*) AS count FROM orders')) return { rows: [{ count: '0' }] };
+      return { rows: [] };
+    });
+    mocks.retrieveSession.mockResolvedValue({
+      ...checkoutEvent().data.object,
+      status: 'complete',
+      payment_status: 'unpaid',
+      payment_intent: null
+    });
+
+    await expect(runCommerceMaintenance()).resolves.toMatchObject({ expiredCheckouts: 0 });
+
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("WHERE order_id = $1 AND status = 'checkout_pending'"),
+      ['order-1']
+    );
+  });
+
+  it.each(['pending', 'succeeded'])(
+    'does not start full-refund recovery or revoke entitlements for a %s partial refund',
+    async refundStatus => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) {
+          return { rows: [{ event_id: 'evt-partial-refund' }] };
+        }
+        if (sql.includes('SELECT * FROM orders')) {
+          return { rows: [{ ...baseOrder, status: 'fulfillment_pending' }] };
+        }
+        return { rows: [] };
+      });
+
+      const result = await processStripeWebhookEvent({
+        id: 'evt-partial-refund',
+        type: 'refund.updated',
+        data: {
+          object: {
+            id: 're-partial',
+            payment_intent: 'pi-1',
+            metadata: { orderId: 'order-1' },
+            status: refundStatus,
+            amount: 100
+          }
+        }
+      } as any);
+
+      expect(result).toMatchObject({ status: 'fulfillment_pending' });
+      expect(mocks.query).not.toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE image_entitlements'),
+        expect.anything()
+      );
+      expect(mocks.query).not.toHaveBeenCalledWith(
+        expect.stringContaining('SET status = $2'),
+        expect.anything()
+      );
+    }
+  );
+
   it('retrieves an existing pending refund instead of creating another refund', async () => {
     mocks.query.mockResolvedValueOnce({
       rows: [
@@ -386,6 +475,48 @@ describe('commerceService', () => {
     await expect(requestRefund('order-1', 'retry')).resolves.toBe(true);
 
     expect(mocks.retrieveRefund).toHaveBeenCalledWith('re-1');
+    expect(mocks.findRefund).not.toHaveBeenCalled();
     expect(mocks.createRefund).not.toHaveBeenCalled();
+  });
+
+  it('finds a previously created refund before retrying after a persistence failure', async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [
+        {
+          ...baseOrder,
+          status: 'refund_pending',
+          refund_attempts: 2,
+          stripe_payment_intent_id: 'pi-1',
+          stripe_refund_id: null
+        }
+      ]
+    });
+    mocks.findRefund.mockResolvedValue({ id: 're-recovered', status: 'pending' });
+
+    await expect(requestRefund('order-1', 'retry')).resolves.toBe(true);
+
+    expect(mocks.findRefund).toHaveBeenCalledWith('pi-1', 'order-1');
+    expect(mocks.createRefund).not.toHaveBeenCalled();
+  });
+
+  it('uses a new idempotency attempt after a known refund failure', async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [
+        {
+          ...baseOrder,
+          status: 'refund_pending',
+          refund_attempts: 2,
+          stripe_payment_intent_id: 'pi-1',
+          stripe_refund_id: 're-failed'
+        }
+      ]
+    });
+    mocks.retrieveRefund.mockResolvedValue({ id: 're-failed', status: 'failed' });
+    mocks.createRefund.mockResolvedValue({ id: 're-retry', status: 'pending' });
+
+    await expect(requestRefund('order-1', 'retry')).resolves.toBe(true);
+
+    expect(mocks.findRefund).toHaveBeenCalledWith('pi-1', 'order-1');
+    expect(mocks.createRefund).toHaveBeenCalledWith('pi-1', 'order-1', 2);
   });
 });

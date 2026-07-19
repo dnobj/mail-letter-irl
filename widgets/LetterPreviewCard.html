@@ -752,14 +752,16 @@
 
           const payAndSend = sendEligibility?.payAndSend;
           const letterPack = sendEligibility?.letterPack;
-          purchaseActions.style.display = canSendNow ? "none" : "grid";
+          purchaseActions.style.display =
+            !canSendNow || payAndSend?.available ? "grid" : "none";
           paySendButton.style.display = payAndSend?.available ? "flex" : "none";
           paySendButton.disabled = !payAndSend?.available;
           if (payAndSend?.available && payAndSend.amountCents) {
             const amount = (payAndSend.amountCents / 100).toFixed(2);
             paySendButtonText.textContent = `Pay & Send (${String(payAndSend.currency || "usd").toUpperCase()} ${amount})`;
           }
-          buyPackButton.style.display = letterPack?.available ? "flex" : "none";
+          buyPackButton.style.display =
+            !canSendNow && letterPack?.available ? "flex" : "none";
         }
       }
 
@@ -835,7 +837,7 @@
 
       async function pollPurchaseStatus(orderId) {
         const statusPill = document.getElementById("status-pill");
-        for (let attempt = 0; attempt < 12; attempt += 1) {
+        for (let attempt = 0; attempt < 24; attempt += 1) {
           await new Promise((resolve) => setTimeout(resolve, 2500));
           const statusResult = await window.openai.callTool(
             "get_purchase_status",
@@ -846,7 +848,7 @@
             statusPill.classList.remove("alert");
             statusPill.classList.add("ok");
             statusPill.textContent = "Paid - preparing mail";
-            return;
+            continue;
           }
           if (status.purchaseStatus === "sent") {
             statusPill.classList.remove("alert");

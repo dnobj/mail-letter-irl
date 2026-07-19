@@ -420,24 +420,45 @@ Check admin panel or database for active test campaigns.
 - Document any issues found in GitHub Issues
 - Update this checklist as features change
 
-# Pay & Send manual matrix
+## LIRL · Test · Browser — Issue #69 Pay & Send
 
-Run in the isolated development Railway/Neon environment with Stripe test mode
-and the non-production mail provider:
+**Execution status:** Not executed as part of the implementation PR. The test
+coordinator must record the date, tester, client versions, order IDs, Stripe
+session/payment/refund IDs, screenshots, and pass/fail results here or in the
+linked PR before enabling Pay & Send.
 
-1. Desktop and Android: preview with zero balance, choose Pay & Send, verify the
-   exact item/amount, pay, return, observe processing, and reach sent status.
-2. Repeat for one letter and one 6x9 postcard.
-3. Abandon and expire checkout; confirm the draft remains unsent and prepaid
-   send becomes available after expiry.
-4. Deliver completed and asynchronous-success events twice; confirm one order,
-   letter, outbox job, provider submission, and image grant.
-5. Attempt a prepaid send while checkout is active; confirm it is rejected.
-6. Attempt cross-user draft checkout and purchase-status access; confirm both
-   are rejected without revealing whether the other object exists.
-7. Simulate a terminal pre-provider failure; confirm `refund_pending`, one
-   idempotent Stripe refund, and eventual `refunded` status.
-8. Buy a test letter pack and send from balance to regression-test the original
-   path.
-9. Verify a zero-entitlement account cannot use Letter IRL-funded generation but
-   can still upload or reuse an external/conversation-generated image.
+### Preconditions
+
+- [ ] Use only the Railway **development** services and isolated Neon development database.
+- [ ] Confirm migration `021_jit_commerce_foundation.sql` is recorded in development.
+- [ ] Confirm Stripe is in sandbox/test mode and both JIT prices are active at USD 4.99.
+- [ ] Confirm the non-production mail provider is selected; no real mail may be submitted.
+- [ ] Start with `JIT_PURCHASE_ENABLED=false`; the test coordinator may enable it in development only for this test and must restore it afterward.
+- [ ] Prepare separate owner and non-owner test users, one zero-balance account, and one account with sufficient prepaid balance.
+
+### Browser acceptance
+
+1. [ ] In the desktop ChatGPT client, create and preview a letter with the zero-balance user. Choose **Pay & Send**, verify the checkout describes that exact letter and charges USD 4.99, complete sandbox payment, return to the conversation, observe **Paid - preparing mail**, and then observe **Sent**.
+2. [ ] Repeat the complete path for a 6x9 postcard and verify the checkout describes that exact postcard at USD 4.99.
+3. [ ] Repeat the letter or postcard happy path on Android, including return from Stripe to ChatGPT and the processing-to-sent status transition.
+4. [ ] When `JIT_ALLOW_WITH_PREPAID_BALANCE=true`, confirm a funded user can see both the normal prepaid send action and Pay & Send; confirm the pack purchase action is not redundantly shown beside an already-available prepaid send.
+5. [ ] Open Pay & Send and abandon the checkout. After Stripe reports the session expired, confirm the draft remains unsent and a new checkout or prepaid send can be started.
+6. [ ] While a JIT checkout is active, attempt prepaid send for the same draft and confirm it is rejected. After a prepaid send wins, attempt to fulfill a late paid JIT session for that draft and confirm no second mail item is created and the paid order enters refund handling.
+7. [ ] As the non-owner, attempt checkout and purchase-status access for the owner's draft/order. Confirm both are rejected without revealing whether the target exists.
+8. [ ] Buy a sandbox letter pack and send from its balance to regression-test the existing prepaid path.
+
+### Stripe, database, and recovery evidence
+
+- [ ] For each successful JIT purchase, verify one authoritative `orders` row, one consumed draft, one funded `letters` row, one outbox job, one provider submission, and the configured image entitlement grant.
+- [ ] Replay both completed-payment and asynchronous-payment-success events. Verify webhook-event deduplication and no duplicate fulfillment, provider submission, credit, or entitlement.
+- [ ] Leave an asynchronous Checkout session in `complete`/`unpaid`; run maintenance and confirm it remains `checkout_pending` until Stripe reports success, failure, or expiry.
+- [ ] Simulate a terminal failure before provider acceptance. Confirm `refund_pending`, at most one active Stripe refund for the order, retry recovery after a failed refund, and eventual `refunded` status.
+- [ ] Issue a partial sandbox refund and confirm the whole order and all entitlements are not marked refunded/revoked; then complete the full refund and verify terminal state.
+- [ ] Confirm provider acceptance changes the JIT order to `fulfilled`; failures before acceptance use refund handling and never resubmit an already accepted mail item.
+- [ ] Confirm a zero-entitlement account cannot use Letter IRL-funded generation but can upload or reuse an external/conversation-generated image. After provider generation succeeds, simulate temporary-image storage failure and confirm the entitlement is still consumed.
+
+### Teardown
+
+- [ ] Restore `JIT_PURCHASE_ENABLED=false` in Railway development.
+- [ ] Confirm production configuration, Stripe live mode, production Neon, and production mail-provider state were never changed.
+- [ ] Attach the collected browser, Stripe, provider, and database evidence to the draft PR and record any deviations as linked issues.

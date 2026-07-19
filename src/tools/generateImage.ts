@@ -162,10 +162,19 @@ async function handler(
     );
   }
 
+  let providerSucceeded = false;
   try {
     const result = await generateImage(input.prompt, {
       context: input.context
     });
+    providerSucceeded = true;
+
+    // Provider usage is billable once generation succeeds, even if local
+    // previewing or temporary storage later fails. Consume the reservation
+    // immediately so those downstream failures cannot be retried for free.
+    if (reservation.reservationId) {
+      await commitGenerationReservation(reservation.reservationId);
+    }
 
     const generationsRemaining = reservation.remaining;
 
@@ -175,9 +184,6 @@ async function handler(
     // Store full image for later download by preview tools
     const token = await storeImage(result.base64Data);
     const imageUrl = buildTempImageUrl(token);
-    if (reservation.reservationId) {
-      await commitGenerationReservation(reservation.reservationId);
-    }
 
     context.logger.info(
       {
@@ -201,7 +207,9 @@ async function handler(
       generationsRemaining
     };
   } catch (error) {
-    await releaseReservedGeneration(context, userId, reservation.reservationId);
+    if (!providerSucceeded) {
+      await releaseReservedGeneration(context, userId, reservation.reservationId);
+    }
 
     if (error instanceof ImageGenerationError) {
       context.logger.warn(

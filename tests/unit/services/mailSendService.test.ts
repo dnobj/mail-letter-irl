@@ -207,6 +207,61 @@ describe('createMailOrderFromDraft', () => {
     });
   });
 
+  it('rejects late JIT funding when prepaid funding already consumed the draft', async () => {
+    draft = {
+      ...draft,
+      status: 'consumed',
+      consumed_letter_id: 'letter-prepaid'
+    };
+    savedLetter = {
+      letter_id: 'letter-prepaid',
+      user_id: 'user-1',
+      funding_type: 'prepaid_balance',
+      funding_order_id: null
+    };
+
+    await expect(
+      createMailOrderFromDraft({
+        draftId: 'draft-1',
+        userId: 'user-1',
+        mailType: 'letter',
+        funding: { type: 'jit_order', orderId: 'order-jit' }
+      })
+    ).rejects.toMatchObject({ code: 'DRAFT_FUNDING_CONFLICT' });
+
+    expect(deductCredits).not.toHaveBeenCalled();
+    expect(createOutboxJob).not.toHaveBeenCalled();
+  });
+
+  it('returns the existing mail item for an idempotent retry of the same JIT order', async () => {
+    draft = {
+      ...draft,
+      status: 'consumed',
+      consumed_letter_id: 'letter-jit'
+    };
+    savedLetter = {
+      letter_id: 'letter-jit',
+      user_id: 'user-1',
+      funding_type: 'jit_order',
+      funding_order_id: 'order-jit'
+    };
+
+    await expect(
+      createMailOrderFromDraft({
+        draftId: 'draft-1',
+        userId: 'user-1',
+        mailType: 'letter',
+        funding: { type: 'jit_order', orderId: 'order-jit' }
+      })
+    ).resolves.toMatchObject({
+      alreadyConsumed: true,
+      letter: { letter_id: 'letter-jit' }
+    });
+
+    expect(deductCredits).not.toHaveBeenCalled();
+    expect(createOutboxJob).not.toHaveBeenCalled();
+  });
+
   it('blocks prepaid consumption while a JIT checkout is active', async () => {
     activeCheckout = true;
     await expect(

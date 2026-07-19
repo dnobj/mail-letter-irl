@@ -151,6 +151,17 @@ const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? "https://api.lette
  * @see US-MCP-07: Widget Resources
  */
 const WIDGET_API_URL = process.env.LETTER_IRL_API_URL ?? "https://api.letterirl.com";
+function configuredOrigin(value: string | undefined, fallback: string): string {
+  try {
+    return new URL(value ?? fallback).origin;
+  } catch {
+    return fallback;
+  }
+}
+const WIDGET_PACKS_ORIGIN = configuredOrigin(
+  process.env.LETTER_IRL_PACKS_URL ?? process.env.LETTER_IRL_PUBLIC_BASE_URL,
+  "https://letterirl.com"
+);
 export const WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
 
 /**
@@ -166,7 +177,9 @@ const WIDGET_CSP = {
   connect_domains: ["https://chatgpt.com", WIDGET_API_URL],
   resource_domains: ["https://*.oaistatic.com"],
   // frame_domains not included - we don't use iframes
-  redirect_domains: ["https://checkout.stripe.com", WIDGET_API_URL]
+  redirect_domains: Array.from(
+    new Set(["https://checkout.stripe.com", WIDGET_API_URL, WIDGET_PACKS_ORIGIN])
+  )
 };
 
 // Resolve widget directory relative to this module

@@ -11,6 +11,7 @@ import {
   createJitCheckoutSession,
   createPackCheckoutSession,
   createPaymentRefund,
+  findPaymentRefund,
   getJitProductConfig,
   getPackProductConfig,
   isJitPurchaseEnabled,
@@ -385,7 +386,8 @@ async function prepareJitOrder(
       if (
         existing.status === 'checkout_pending' &&
         existing.checkout_expires_at &&
-        new Date(existing.checkout_expires_at).getTime() <= Date.now()
+        new Date(existing.checkout_expires_at).getTime() <= Date.now() &&
+        !existing.stripe_checkout_session_id
       ) {
         await client.query(
           `UPDATE orders SET status = 'cancelled', updated_at = NOW()
@@ -520,12 +522,12 @@ async function findCheckoutOrder(
 async function createLegacyPackOrder(
   client: Pick<pg.PoolClient, 'query'>,
   session: Stripe.Checkout.Session
-): Promise<Order> {
+): Promise<Order | null> {
   const userId = session.metadata?.userId || session.metadata?.user_id;
   const productCode = session.metadata?.productId || session.metadata?.product_id;
   const product = productCode ? getPackProductConfig(productCode as PackProductId) : null;
   if (!userId || !product) {
-    throw new Error(`Checkout session ${session.id} is not bound to a known commerce order`);
+    return null;
   }
   const orderId = `stripe-${session.id}`;
   const inserted = await client.query<Order>(
@@ -733,6 +735,7 @@ async function processCheckoutSessionEvent(
     }
     let order = await findCheckoutOrder(client, session);
     if (!order) order = await createLegacyPackOrder(client, session);
+    if (!order) return { duplicate: false };
     await client.query('UPDATE stripe_webhook_events SET order_id = $2 WHERE event_id = $1', [
       eventId,
       order.order_id
@@ -859,6 +862,17 @@ async function processRefundEvent(
 
     const isRefund = eventType.startsWith('refund.');
     const refundStatus = isRefund ? (refundOrCharge as Stripe.Refund).status : 'succeeded';
+    const refundedAmount = isRefund
+      ? (refundOrCharge as Stripe.Refund).amount
+      : (refundOrCharge as Stripe.Charge).amount_refunded;
+    if (refundedAmount < order.amount_cents) {
+      await recordOrderEvent(client, order.order_id, eventType, order.status, order.status, {
+        ignored: true,
+        reason: 'partial_refund',
+        refundedAmount
+      });
+      return { duplicate: false, orderId: order.order_id, status: order.status };
+    }
     const nextStatus: OrderStatus = refundStatus === 'succeeded' ? 'refunded' : 'refund_pending';
     if (nextStatus === 'refunded' && order.order_type === 'letter_pack') {
       await revokePackCredits(client, order);
@@ -1056,9 +1070,22 @@ export async function requestRefund(orderId: string, reason: string): Promise<bo
   const order = claimed.rows[0];
   if (!order?.stripe_payment_intent_id) return false;
   try {
-    const refund = order.stripe_refund_id
-      ? await retrieveRefund(order.stripe_refund_id)
-      : await createPaymentRefund(order.stripe_payment_intent_id, order.order_id);
+    let refund: Stripe.Refund | null = null;
+    if (order.stripe_refund_id) {
+      try {
+        const existingRefund = await retrieveRefund(order.stripe_refund_id);
+        if (existingRefund.status !== 'failed') refund = existingRefund;
+      } catch {
+        // Confirm by payment intent below before creating another refund. This
+        // covers a persisted stale ID without risking a duplicate refund.
+      }
+    }
+    refund ??= await findPaymentRefund(order.stripe_payment_intent_id, order.order_id);
+    refund ??= await createPaymentRefund(
+      order.stripe_payment_intent_id,
+      order.order_id,
+      order.refund_attempts
+    );
     const nextStatus: OrderStatus = refund.status === 'succeeded' ? 'refunded' : 'refund_pending';
     await transaction(async client => {
       await client.query(
@@ -1108,6 +1135,7 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
   }
 
   let reconciledPayments = 0;
+  let expiredCheckouts = 0;
   const pending = await query<{
     order_id: string;
     stripe_checkout_session_id: string;
@@ -1127,19 +1155,29 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
           session
         );
         if (!result.duplicate) reconciledPayments += 1;
+      } else if (session.status === 'expired') {
+        const result = await processCheckoutSessionEvent(
+          `reconcile:${session.id}:expired`,
+          'checkout.session.expired',
+          session
+        );
+        if (!result.duplicate && result.status === 'cancelled') expiredCheckouts += 1;
       }
     } catch (error) {
       console.error(`[Commerce] Failed to reconcile order ${order.order_id}:`, error);
     }
   }
 
-  // Reconcile paid sessions before cancelling locally expired rows. A payment
-  // may have succeeded just before expiry while its webhook was unavailable.
-  const expired = await query<{ order_id: string }>(
+  // Only cancel checkout-creation orphans locally. Attached Stripe sessions
+  // are cancelled above only after Stripe reports them expired; a completed
+  // asynchronous payment may remain unpaid beyond its original expires_at.
+  const orphaned = await query<{ order_id: string }>(
     `UPDATE orders SET status = 'cancelled', updated_at = NOW()
      WHERE status = 'checkout_pending' AND checkout_expires_at <= NOW()
+       AND stripe_checkout_session_id IS NULL
      RETURNING order_id`
   );
+  expiredCheckouts += orphaned.rowCount || 0;
 
   let refundAttempts = 0;
   const refunds = await query<{ order_id: string; last_error: string | null }>(
@@ -1172,7 +1210,7 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
   }
 
   return {
-    expiredCheckouts: expired.rowCount || 0,
+    expiredCheckouts,
     recoveredFulfillments,
     reconciledPayments,
     refundAttempts,

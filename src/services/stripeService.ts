@@ -260,17 +260,33 @@ export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe
 
 export async function createPaymentRefund(
   paymentIntentId: string,
-  orderId: string
+  orderId: string,
+  attempt = 1
 ): Promise<Stripe.Refund> {
   return getStripeClient().refunds.create(
     {
       payment_intent: paymentIntentId,
       metadata: { orderId }
     },
-    { idempotencyKey: `jit-refund:${orderId}` }
+    { idempotencyKey: `jit-refund:${orderId}:attempt:${attempt}` }
   );
 }
 
 export async function retrieveRefund(refundId: string): Promise<Stripe.Refund> {
   return getStripeClient().refunds.retrieve(refundId);
+}
+
+export async function findPaymentRefund(
+  paymentIntentId: string,
+  orderId: string
+): Promise<Stripe.Refund | null> {
+  const refunds = await getStripeClient().refunds.list({
+    payment_intent: paymentIntentId,
+    limit: 100
+  });
+  return (
+    refunds.data.find(
+      refund => refund.metadata?.orderId === orderId && refund.status !== 'failed'
+    ) || null
+  );
 }

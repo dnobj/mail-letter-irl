@@ -407,6 +407,19 @@ describe("generate_image tool", () => {
       ).rejects.toThrow("Please try again");
     });
 
+    it("should consume the entitlement when storage fails after provider success", async () => {
+      mockGenerateImage.mockResolvedValueOnce({ base64Data: "billable-image" });
+      mockStoreImage.mockRejectedValueOnce(new Error("Storage unavailable"));
+
+      const context = createMockContext();
+      await expect(
+        generateImageTool.handler({ prompt: "a sunset" }, context)
+      ).rejects.toThrow("Please try again");
+
+      expect(mockCommitReservation).toHaveBeenCalledWith("reservation-1");
+      expect(mockReleaseReservation).not.toHaveBeenCalled();
+    });
+
     it("should log ImageGenerationError as warning", async () => {
       const error = new (ImageGenerationError as any)(
         "RATE_LIMITED",
