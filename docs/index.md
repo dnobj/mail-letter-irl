@@ -67,7 +67,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 - [Pricing and Credits](pricing-and-credits.md) - Pricing strategy
 
 ### Admin
-- [Admin Interface Modernization Plan](admin-interface-modernization-plan.md) - Planning comparison, current-state audit, conditional reference architecture, approval gates, tests, and rollout
+- [Admin Interface Modernization Plan](admin-interface-modernization-plan.md) - Approved hardened-local architecture, current-state audit, security model, implementation slices, tests, and rollout gates
 - [Admin Panel Guide](admin-panel-guide.md) - Current legacy local-only behavior; superseded for implementation direction by the modernization plan
 - [Archived Dashboard Implementation](archive/dashboard-implementation.md) - Historical customer-dashboard design, not the current admin panel
 
@@ -127,10 +127,10 @@ npm run start        # Production mode
 ### Admin Operations
 
 The current localhost admin flow is legacy and must not be enabled remotely or treated as a secure
-production operating procedure. Keep cloud admin routes disabled and use the
-[Admin Interface Modernization Plan](admin-interface-modernization-plan.md) to select an architecture
-before implementation. Architecture selection and every production activation stage require explicit
-owner approval.
+production operating procedure. Keep cloud admin routes disabled and follow the approved
+[Admin Interface Modernization Plan](admin-interface-modernization-plan.md) to replace it with a
+hardened local-only operator application. Production credential provisioning, the first production
+connection, and full mutation mode each require explicit owner approval.
 
 ### Run Migrations
 ```bash
