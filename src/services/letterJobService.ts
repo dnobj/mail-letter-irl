@@ -343,6 +343,29 @@ async function completeJob(
        WHERE job_id = $2`,
       [result.trackingId, job.job_id]
     );
+    const fulfilledOrder = await client.query<{ order_id: string }>(
+      `UPDATE orders
+       SET status = 'fulfilled', fulfilled_at = NOW(), completed_at = NOW(),
+           last_error_code = NULL, last_error = NULL, updated_at = NOW()
+       WHERE order_type = 'jit_mail' AND letter_id = $1
+         AND status = 'fulfillment_pending'
+       RETURNING order_id`,
+      [letter.letter_id]
+    );
+    if (fulfilledOrder.rows[0]) {
+      await client.query(
+        `INSERT INTO commerce_order_events (
+           order_id, event_type, from_status, to_status, metadata
+         ) VALUES ($1, 'provider.accepted', 'fulfillment_pending', 'fulfilled', $2)`,
+        [
+          fulfilledOrder.rows[0].order_id,
+          JSON.stringify({
+            provider: providerName,
+            providerOrderId: result.trackingId
+          })
+        ]
+      );
+    }
   });
 }
 
@@ -372,6 +395,26 @@ async function failOrRescheduleJob(
       `UPDATE letters SET status = $1, updated_at = NOW() WHERE letter_id = $2`,
       [terminal ? 'failed' : 'queued', job.letter_id]
     );
+    if (terminal) {
+      const refundOrder = await client.query<{ order_id: string }>(
+        `UPDATE orders
+         SET status = 'refund_pending', refund_pending_at = NOW(),
+             last_error_code = 'PROVIDER_SUBMISSION_FAILED', last_error = $2,
+             updated_at = NOW()
+         WHERE order_type = 'jit_mail' AND letter_id = $1
+           AND status = 'fulfillment_pending'
+         RETURNING order_id`,
+        [job.letter_id, error]
+      );
+      if (refundOrder.rows[0]) {
+        await client.query(
+          `INSERT INTO commerce_order_events (
+             order_id, event_type, from_status, to_status, metadata
+           ) VALUES ($1, 'provider.terminal_failure', 'fulfillment_pending', 'refund_pending', $2)`,
+          [refundOrder.rows[0].order_id, JSON.stringify({ error })]
+        );
+      }
+    }
   });
 
   return !terminal;

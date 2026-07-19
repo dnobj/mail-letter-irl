@@ -102,6 +102,7 @@
           "previewHtml",
           "lettersRequired",
           "canSendNow",
+          "sendEligibility",
           "draftId",
           "draftExpiresAt",
           "layoutType"
@@ -119,6 +120,73 @@
           },
           "reasonCannotSend": {
             "type": "string"
+          },
+          "sendEligibility": {
+            "type": "object",
+            "required": [
+              "prepaid",
+              "payAndSend",
+              "letterPack"
+            ],
+            "properties": {
+              "prepaid": {
+                "type": "object",
+                "required": [
+                  "eligible",
+                  "requiredCredits",
+                  "availableCredits"
+                ],
+                "properties": {
+                  "eligible": {
+                    "type": "boolean"
+                  },
+                  "requiredCredits": {
+                    "type": "integer"
+                  },
+                  "availableCredits": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "payAndSend": {
+                "type": "object",
+                "required": [
+                  "available"
+                ],
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "amountCents": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "productDescription": {
+                    "type": "string"
+                  },
+                  "unavailableReason": {
+                    "type": "string"
+                  }
+                }
+              },
+              "letterPack": {
+                "type": "object",
+                "required": [
+                  "available",
+                  "purchaseUrl"
+                ],
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "purchaseUrl": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           },
           "deliveryClass": {
             "type": "string"
@@ -320,6 +388,7 @@
           "previewHtml",
           "lettersRequired",
           "canSendNow",
+          "sendEligibility",
           "draftId",
           "draftExpiresAt",
           "layoutType"
@@ -337,6 +406,73 @@
           },
           "reasonCannotSend": {
             "type": "string"
+          },
+          "sendEligibility": {
+            "type": "object",
+            "required": [
+              "prepaid",
+              "payAndSend",
+              "letterPack"
+            ],
+            "properties": {
+              "prepaid": {
+                "type": "object",
+                "required": [
+                  "eligible",
+                  "requiredCredits",
+                  "availableCredits"
+                ],
+                "properties": {
+                  "eligible": {
+                    "type": "boolean"
+                  },
+                  "requiredCredits": {
+                    "type": "integer"
+                  },
+                  "availableCredits": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "payAndSend": {
+                "type": "object",
+                "required": [
+                  "available"
+                ],
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "amountCents": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "productDescription": {
+                    "type": "string"
+                  },
+                  "unavailableReason": {
+                    "type": "string"
+                  }
+                }
+              },
+              "letterPack": {
+                "type": "object",
+                "required": [
+                  "available",
+                  "purchaseUrl"
+                ],
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "purchaseUrl": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           },
           "deliveryClass": {
             "type": "string"
@@ -538,6 +674,7 @@
           "previewHtml",
           "lettersRequired",
           "canSendNow",
+          "sendEligibility",
           "draftId",
           "draftExpiresAt",
           "layoutType"
@@ -555,6 +692,73 @@
           },
           "reasonCannotSend": {
             "type": "string"
+          },
+          "sendEligibility": {
+            "type": "object",
+            "required": [
+              "prepaid",
+              "payAndSend",
+              "letterPack"
+            ],
+            "properties": {
+              "prepaid": {
+                "type": "object",
+                "required": [
+                  "eligible",
+                  "requiredCredits",
+                  "availableCredits"
+                ],
+                "properties": {
+                  "eligible": {
+                    "type": "boolean"
+                  },
+                  "requiredCredits": {
+                    "type": "integer"
+                  },
+                  "availableCredits": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "payAndSend": {
+                "type": "object",
+                "required": [
+                  "available"
+                ],
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "amountCents": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "productDescription": {
+                    "type": "string"
+                  },
+                  "unavailableReason": {
+                    "type": "string"
+                  }
+                }
+              },
+              "letterPack": {
+                "type": "object",
+                "required": [
+                  "available",
+                  "purchaseUrl"
+                ],
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "purchaseUrl": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           },
           "deliveryClass": {
             "type": "string"
@@ -747,6 +951,141 @@
       }
     },
     {
+      "name": "create_mail_checkout",
+      "description": "Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "draftId"
+        ],
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "description": "Owned pending draft ID from a letter or postcard preview"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "orderId",
+          "amountCents",
+          "currency",
+          "productDescription",
+          "status",
+          "reused",
+          "message"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "checkoutUrl": {
+            "type": "string",
+            "description": "Stripe-hosted checkout URL"
+          },
+          "amountCents": {
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "productDescription": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "reused": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_purchase_status",
+      "description": "Get the payment, fulfillment, or refund status of an owned Pay & Send or letter-pack purchase. Returns sanitized commerce state only and never exposes payment-card details.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "orderId"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "description": "Commerce order ID returned by checkout"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "orderId",
+          "purchaseStatus",
+          "orderStatus",
+          "productDescription",
+          "amountCents",
+          "currency",
+          "updatedAt",
+          "message"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "purchaseStatus": {
+            "type": "string",
+            "enum": [
+              "pending_payment",
+              "processing",
+              "sent",
+              "payment_failed",
+              "refund_pending",
+              "refunded",
+              "cancelled"
+            ]
+          },
+          "orderStatus": {
+            "type": "string"
+          },
+          "productDescription": {
+            "type": "string"
+          },
+          "amountCents": {
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "mailType": {
+            "type": "string",
+            "enum": [
+              "letter",
+              "postcard"
+            ]
+          },
+          "letterId": {
+            "type": "string"
+          },
+          "checkoutExpiresAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
       "name": "get_order_status",
       "description": "Retrieve the latest status timeline for a letter order. If no orderId is provided, returns the most recent order.",
       "inputSchema": {
@@ -875,11 +1214,11 @@
           },
           "imageGenerationsRemaining": {
             "type": "integer",
-            "description": "Number of AI image generations remaining (5 per letter purchased)"
+            "description": "Number of explicit image-entitlement units remaining"
           },
           "imageGenerationsAllowance": {
             "type": "integer",
-            "description": "Total AI image generations allowed based on letters purchased"
+            "description": "Total image-entitlement units granted by qualifying purchases"
           }
         }
       }
@@ -1073,6 +1412,7 @@
           "previewBackHtml",
           "lettersRequired",
           "canSendNow",
+          "sendEligibility",
           "draftId",
           "draftExpiresAt"
         ],
@@ -1094,6 +1434,73 @@
           },
           "reasonCannotSend": {
             "type": "string"
+          },
+          "sendEligibility": {
+            "type": "object",
+            "required": [
+              "prepaid",
+              "payAndSend",
+              "letterPack"
+            ],
+            "properties": {
+              "prepaid": {
+                "type": "object",
+                "required": [
+                  "eligible",
+                  "requiredCredits",
+                  "availableCredits"
+                ],
+                "properties": {
+                  "eligible": {
+                    "type": "boolean"
+                  },
+                  "requiredCredits": {
+                    "type": "integer"
+                  },
+                  "availableCredits": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "payAndSend": {
+                "type": "object",
+                "required": [
+                  "available"
+                ],
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "amountCents": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "productDescription": {
+                    "type": "string"
+                  },
+                  "unavailableReason": {
+                    "type": "string"
+                  }
+                }
+              },
+              "letterPack": {
+                "type": "object",
+                "required": [
+                  "available",
+                  "purchaseUrl"
+                ],
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "purchaseUrl": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           },
           "deliveryClass": {
             "type": "string"
@@ -1329,7 +1736,7 @@
           },
           "generationsRemaining": {
             "type": "integer",
-            "description": "Number of image generations remaining in quota (5 per letter purchased)"
+            "description": "Number of explicit image-entitlement units remaining"
           }
         }
       }

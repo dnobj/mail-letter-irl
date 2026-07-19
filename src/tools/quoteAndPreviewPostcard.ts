@@ -20,6 +20,7 @@ import { createPostcardDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
 import { downloadAndProcessPostcardImageWithPreview, ImageProcessingError, type ImageInput } from "../services/imageService.js";
 import type { PostcardSize, ImageFileParam } from "../services/types.js";
+import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
 import { getRecentUploadedImage } from "../services/recentUploadStore.js";
 import {
@@ -50,6 +51,7 @@ interface QuoteAndPreviewPostcardOutput {
   lettersRequired: number;  // Number of letters from balance (always 1 for postcard)
   canSendNow: boolean;
   reasonCannotSend?: string;
+  sendEligibility: SendEligibility;
   deliveryClass?: string;
   estimatedDeliveryDays?: number;
   deliveryEstimate?: string;
@@ -483,6 +485,7 @@ async function handler(
   const requiredCredits = POSTCARD_CREDITS_COST;
   const available = context.user.creditsRemaining;
   const canSendNow = available >= requiredCredits;
+  const sendEligibility = getSendEligibility(available, requiredCredits, "postcard");
   const lettersRequired = 1; // User-facing: 1 letter = 1 postcard
 
   context.logger.info(
@@ -534,6 +537,7 @@ async function handler(
     lettersRequired,
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
+    sendEligibility,
     deliveryClass: DELIVERY_CLASS,
     deliveryEstimate: DELIVERY_ESTIMATE,
     deliveryDisclaimer: DELIVERY_DISCLAIMER,

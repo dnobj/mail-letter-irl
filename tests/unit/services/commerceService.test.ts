@@ -1,0 +1,391 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  query: vi.fn(),
+  transaction: vi.fn(),
+  addCredits: vi.fn(),
+  grantEntitlement: vi.fn(),
+  createMail: vi.fn(),
+  createJitSession: vi.fn(),
+  createPackSession: vi.fn(),
+  createRefund: vi.fn(),
+  retrieveRefund: vi.fn(),
+  retrieveSession: vi.fn(),
+  jitEnabled: vi.fn(),
+  getJitProduct: vi.fn(),
+  getPackProduct: vi.fn()
+}));
+
+vi.mock('../../../src/db/index.js', () => ({
+  query: mocks.query,
+  transaction: mocks.transaction
+}));
+vi.mock('../../../src/services/creditLedgerService.js', () => ({
+  addCreditsToLedgerWithClient: mocks.addCredits
+}));
+vi.mock('../../../src/services/imageGenerationLimitService.js', () => ({
+  grantImageEntitlementWithClient: mocks.grantEntitlement
+}));
+vi.mock('../../../src/services/mailSendService.js', () => ({
+  createMailOrderFromDraftWithClient: mocks.createMail
+}));
+vi.mock('../../../src/services/stripeService.js', () => ({
+  createJitCheckoutSession: mocks.createJitSession,
+  createPackCheckoutSession: mocks.createPackSession,
+  createPaymentRefund: mocks.createRefund,
+  retrieveRefund: mocks.retrieveRefund,
+  retrieveCheckoutSession: mocks.retrieveSession,
+  isJitPurchaseEnabled: mocks.jitEnabled,
+  getJitProductConfig: mocks.getJitProduct,
+  getPackProductConfig: mocks.getPackProduct
+}));
+
+import {
+  createPackCheckout,
+  createJitCheckout,
+  getSendEligibility,
+  processStripeWebhookEvent,
+  requestRefund,
+  runCommerceMaintenance
+} from '../../../src/services/commerceService.js';
+
+const baseOrder = {
+  order_id: 'order-1',
+  user_id: 'user-1',
+  order_type: 'jit_mail',
+  draft_id: 'draft-1',
+  product_code: 'jit-letter',
+  product_snapshot: {
+    name: 'Pay & Send One Physical Letter',
+    mailType: 'letter'
+  },
+  amount_cents: 499,
+  currency: 'usd',
+  payment_provider: 'stripe',
+  idempotency_key: 'jit-checkout:order-1',
+  status: 'checkout_pending',
+  refund_attempts: 0,
+  created_at: new Date(),
+  updated_at: new Date()
+};
+
+function checkoutEvent(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'evt-1',
+    type: 'checkout.session.completed',
+    data: {
+      object: {
+        id: 'cs-1',
+        client_reference_id: 'order-1',
+        metadata: { orderId: 'order-1' },
+        payment_status: 'paid',
+        payment_intent: 'pi-1',
+        amount_total: 499,
+        currency: 'usd',
+        expires_at: Math.floor(Date.now() / 1000) + 1800,
+        ...overrides
+      }
+    }
+  } as any;
+}
+
+describe('commerceService', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', '1');
+    mocks.transaction.mockImplementation(async callback => callback({ query: mocks.query }));
+    mocks.jitEnabled.mockReturnValue(true);
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter',
+      priceId: 'price-jit-letter',
+      amountCents: 499,
+      currency: 'usd',
+      name: 'Pay & Send One Physical Letter',
+      description: 'Payment authorizes mailing this exact item.',
+      mailType: 'letter'
+    });
+    mocks.getPackProduct.mockReturnValue({
+      productCode: 'credit-pack-4',
+      priceId: 'price-pack',
+      amountCents: 500,
+      currency: 'usd',
+      name: 'Starter Pack - 2 Letters',
+      description: 'Two prepaid physical letters',
+      credits: 4
+    });
+    mocks.createMail.mockResolvedValue({});
+    mocks.grantEntitlement.mockResolvedValue({ entitlement_id: 'ent-1' });
+  });
+
+  it('claims a Stripe event transactionally so a replay cannot double-send or double-grant', async () => {
+    let claimed = false;
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        if (claimed) return { rows: [] };
+        claimed = true;
+        return { rows: [{ event_id: 'evt-1' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) return { rows: [baseOrder] };
+      return { rows: [] };
+    });
+
+    const first = await processStripeWebhookEvent(checkoutEvent());
+    const replay = await processStripeWebhookEvent(checkoutEvent());
+
+    expect(first).toMatchObject({
+      duplicate: false,
+      status: 'fulfillment_pending'
+    });
+    expect(replay).toEqual({ duplicate: true });
+    expect(mocks.createMail).toHaveBeenCalledTimes(1);
+    expect(mocks.createMail).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        draftId: 'draft-1',
+        funding: { type: 'jit_order', orderId: 'order-1' }
+      })
+    );
+    expect(mocks.grantEntitlement).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists an authoritative pack order before creating its Stripe session', async () => {
+    const pendingPack = {
+      ...baseOrder,
+      order_id: 'pack-order',
+      order_type: 'letter_pack',
+      draft_id: undefined,
+      credits: 4,
+      product_code: 'credit-pack-4',
+      product_snapshot: { name: 'Starter Pack - 2 Letters' },
+      amount_cents: 500,
+      idempotency_key: 'pack-checkout:pack-order'
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [pendingPack] })
+      .mockResolvedValueOnce({ rows: [pendingPack] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            ...pendingPack,
+            stripe_checkout_session_id: 'cs-pack',
+            checkout_url: 'https://checkout.stripe.com/c/pay/pack'
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ rows: [] });
+    mocks.createPackSession.mockResolvedValueOnce({
+      success: true,
+      sessionId: 'cs-pack',
+      sessionUrl: 'https://checkout.stripe.com/c/pay/pack'
+    });
+
+    const result = await createPackCheckout({
+      userId: 'user-1',
+      userEmail: 'person@example.com',
+      productId: 'credit-pack-4',
+      successUrl: 'https://letterirl.com/success',
+      cancelUrl: 'https://letterirl.com/cancel'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      sessionId: 'cs-pack',
+      orderId: 'pack-order'
+    });
+    expect(mocks.query.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.createPackSession.mock.invocationCallOrder[0]
+    );
+    expect(mocks.createPackSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        product: expect.objectContaining({ amountCents: 500, credits: 4 })
+      })
+    );
+  });
+
+  it('does not fulfill checkout.session.completed until payment_status is paid', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-unpaid' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) return { rows: [baseOrder] };
+      return { rows: [] };
+    });
+
+    const result = await processStripeWebhookEvent({
+      ...checkoutEvent({ payment_status: 'unpaid', payment_intent: null }),
+      id: 'evt-unpaid'
+    });
+
+    expect(result).toMatchObject({
+      duplicate: false,
+      status: 'checkout_pending'
+    });
+    expect(mocks.createMail).not.toHaveBeenCalled();
+    expect(mocks.grantEntitlement).not.toHaveBeenCalled();
+  });
+
+  it('moves a paid amount mismatch to refund_pending without fulfillment', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-mismatch' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) return { rows: [baseOrder] };
+      return { rows: [] };
+    });
+
+    const result = await processStripeWebhookEvent({
+      ...checkoutEvent({ amount_total: 1 }),
+      id: 'evt-mismatch'
+    });
+
+    expect(result).toMatchObject({ status: 'refund_pending' });
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'refund_pending'"),
+      ['order-1', expect.stringContaining('Expected 499 usd; received 1 usd')]
+    );
+    expect(mocks.createMail).not.toHaveBeenCalled();
+  });
+
+  it('ignores a late failure event after an order has already been fulfilled', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-late-failure' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) {
+        return { rows: [{ ...baseOrder, status: 'fulfilled' }] };
+      }
+      return { rows: [] };
+    });
+
+    const result = await processStripeWebhookEvent({
+      ...checkoutEvent({ payment_status: 'unpaid' }),
+      id: 'evt-late-failure',
+      type: 'checkout.session.async_payment_failed'
+    });
+
+    expect(result).toMatchObject({ status: 'fulfilled' });
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'payment_failed'"),
+      expect.anything()
+    );
+  });
+
+  it('rejects cross-user draft checkout before calling Stripe', async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [
+        {
+          draft_id: 'draft-1',
+          user_id: 'other-user',
+          status: 'pending',
+          expires_at: new Date(Date.now() + 60 * 60_000)
+        }
+      ]
+    });
+
+    await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject(
+      { code: 'DRAFT_NOT_OWNED' }
+    );
+    expect(mocks.createJitSession).not.toHaveBeenCalled();
+  });
+
+  it('reuses the one active checkout for a draft', async () => {
+    const existing = {
+      ...baseOrder,
+      stripe_checkout_session_id: 'cs-1',
+      checkout_url: 'https://checkout.stripe.com/c/pay/test',
+      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            draft_id: 'draft-1',
+            user_id: 'user-1',
+            mail_type: 'letter',
+            required_credits: 2,
+            status: 'pending',
+            expires_at: new Date(Date.now() + 60 * 60_000)
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ rows: [existing] });
+
+    const result = await createJitCheckout({
+      userId: 'user-1',
+      draftId: 'draft-1'
+    });
+    expect(result).toMatchObject({
+      orderId: 'order-1',
+      checkoutUrl: existing.checkout_url,
+      reused: true
+    });
+    expect(mocks.createJitSession).not.toHaveBeenCalled();
+  });
+
+  it('reports exact server-configured Pay & Send eligibility only when enabled', () => {
+    expect(getSendEligibility(0, 2, 'letter')).toMatchObject({
+      prepaid: { eligible: false },
+      payAndSend: {
+        available: true,
+        amountCents: 499,
+        currency: 'usd'
+      }
+    });
+    mocks.jitEnabled.mockReturnValue(false);
+    expect(getSendEligibility(0, 2, 'letter').payAndSend).toMatchObject({
+      available: false,
+      unavailableReason: 'Pay & Send is not enabled.'
+    });
+  });
+
+  it('reconciles a missed paid session before expiring pending checkouts', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("order_type = 'jit_mail' AND status = 'paid'")) return { rows: [] };
+      if (sql.includes("status = 'checkout_pending' AND stripe_checkout_session_id")) {
+        return { rows: [{ order_id: 'order-1', stripe_checkout_session_id: 'cs-1' }] };
+      }
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'reconcile-event' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) return { rows: [baseOrder] };
+      if (sql.includes("UPDATE orders SET status = 'cancelled'")) return { rows: [], rowCount: 0 };
+      if (sql.includes("WHERE status = 'refund_pending'")) return { rows: [] };
+      if (sql.includes('SELECT COUNT(*) AS count FROM orders')) return { rows: [{ count: '0' }] };
+      return { rows: [] };
+    });
+    mocks.retrieveSession.mockResolvedValue({
+      ...checkoutEvent().data.object,
+      payment_status: 'paid'
+    });
+
+    await runCommerceMaintenance();
+
+    const expiryCall = mocks.query.mock.calls.findIndex(([sql]) =>
+      String(sql).includes("UPDATE orders SET status = 'cancelled'")
+    );
+    expect(expiryCall).toBeGreaterThan(-1);
+    expect(mocks.retrieveSession.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.query.mock.invocationCallOrder[expiryCall]
+    );
+    expect(mocks.createMail).toHaveBeenCalledTimes(1);
+  });
+
+  it('retrieves an existing pending refund instead of creating another refund', async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [
+        {
+          ...baseOrder,
+          status: 'refund_pending',
+          stripe_payment_intent_id: 'pi-1',
+          stripe_refund_id: 're-1'
+        }
+      ]
+    });
+    mocks.retrieveRefund.mockResolvedValue({ id: 're-1', status: 'succeeded' });
+
+    await expect(requestRefund('order-1', 'retry')).resolves.toBe(true);
+
+    expect(mocks.retrieveRefund).toHaveBeenCalledWith('re-1');
+    expect(mocks.createRefund).not.toHaveBeenCalled();
+  });
+});

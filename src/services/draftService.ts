@@ -297,6 +297,9 @@ export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<numbe
     `DELETE FROM letter_drafts
      WHERE status IN ('consumed', 'expired', 'cancelled')
        AND updated_at < $1
+       AND NOT EXISTS (
+         SELECT 1 FROM orders WHERE orders.draft_id = letter_drafts.draft_id
+       )
      RETURNING draft_id`,
     [cutoffDate]
   );

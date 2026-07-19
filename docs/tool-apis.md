@@ -61,3 +61,30 @@ Run these after tool, schema, or widget changes:
 npm run manifest:generate
 npm run test:submission
 ```
+
+# Pay & Send tools
+
+## `create_mail_checkout`
+
+Input: `{ draftId: string }`.
+
+Creates or reuses the one active hosted checkout for an authenticated user's
+pending letter or postcard draft. The tool never accepts a price, currency,
+Stripe Price ID, recipient, or mail content. It returns the commerce `orderId`,
+hosted `checkoutUrl`, exact server-configured amount/currency, product
+description, expiry, and current order status. Payment is authorization to mail
+the immutable draft; the model must not call `send_letter` or `send_postcard`
+after payment.
+
+## `get_purchase_status`
+
+Input: `{ orderId: string }`.
+
+Returns sanitized, owner-scoped purchase state:
+`pending_payment`, `processing`, `sent`, `payment_failed`, `refund_pending`,
+`refunded`, or `cancelled`. It exposes no card, billing, address, content, or raw
+Stripe data.
+
+Preview tools retain `canSendNow` for compatibility and now also return
+`sendEligibility`, containing prepaid eligibility, Pay & Send availability and
+exact price, and the configured letter-pack destination.

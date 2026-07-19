@@ -1,232 +1,149 @@
-/**
- * Unit tests for imageGenerationLimitService
- *
- * Tests allowance calculation, limit checking, and generation recording.
- */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// Mock the database module
-vi.mock("../../../src/db/index.js", () => ({
-  query: vi.fn()
+const mocks = vi.hoisted(() => ({
+  query: vi.fn(),
+  transaction: vi.fn()
 }));
 
-import { query } from "../../../src/db/index.js";
+vi.mock('../../../src/db/index.js', () => ({
+  query: mocks.query,
+  transaction: mocks.transaction
+}));
+
 import {
-  getGenerationQuota,
   checkGenerationLimit,
+  commitGenerationReservation,
+  getGenerationQuota,
+  grantImageEntitlement,
   releaseGenerationReservation,
   reserveGeneration
-} from "../../../src/services/imageGenerationLimitService.js";
+} from '../../../src/services/imageGenerationLimitService.js';
 
-const mockQuery = query as ReturnType<typeof vi.fn>;
-
-describe("imageGenerationLimitService", () => {
+describe('imageGenerationLimitService explicit entitlements', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.transaction.mockImplementation(async callback => callback({ query: mocks.query }));
   });
 
-  describe("getGenerationQuota", () => {
-    it("should compute allowance from credits_purchased", async () => {
-      // 10 credits_purchased = 5 letters = 25 generations
-      mockQuery.mockResolvedValueOnce({
-        rows: [{ credits_purchased: 10, image_generations_used: 0 }],
-        rowCount: 1
-      });
-
-      const quota = await getGenerationQuota("user-1");
-
-      expect(quota.allowance).toBe(25);
-      expect(quota.used).toBe(0);
-      expect(quota.remaining).toBe(25);
+  it('computes quota from explicit grants rather than lifetime purchases', async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [{ allowance: '8', used: '3', remaining: '5' }]
     });
 
-    it("should handle odd credits_purchased (floor division)", async () => {
-      // 7 credits = floor(7/2) = 3 letters = 15 generations
-      mockQuery.mockResolvedValueOnce({
-        rows: [{ credits_purchased: 7, image_generations_used: 0 }],
-        rowCount: 1
-      });
-
-      const quota = await getGenerationQuota("user-1");
-
-      expect(quota.allowance).toBe(15);
-      expect(quota.remaining).toBe(15);
+    await expect(getGenerationQuota('user-1')).resolves.toEqual({
+      allowance: 8,
+      used: 3,
+      remaining: 5
     });
+    expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining('FROM image_entitlements'), [
+      'user-1'
+    ]);
+  });
 
-    it("should subtract used from allowance", async () => {
-      // 4 credits = 2 letters = 10 allowed, 3 used → 7 remaining
-      mockQuery.mockResolvedValueOnce({
-        rows: [{ credits_purchased: 4, image_generations_used: 3 }],
-        rowCount: 1
-      });
-
-      const quota = await getGenerationQuota("user-1");
-
-      expect(quota.allowance).toBe(10);
-      expect(quota.used).toBe(3);
-      expect(quota.remaining).toBe(7);
+  it('reports generation eligibility from remaining entitlement quantity', async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [{ allowance: '1', used: '1', remaining: '0' }]
     });
-
-    it("should return 0 remaining when used exceeds allowance (e.g. after refund)", async () => {
-      // credits_purchased dropped to 2 (1 letter = 5 allowed), but 8 already used
-      mockQuery.mockResolvedValueOnce({
-        rows: [{ credits_purchased: 2, image_generations_used: 8 }],
-        rowCount: 1
-      });
-
-      const quota = await getGenerationQuota("user-1");
-
-      expect(quota.allowance).toBe(5);
-      expect(quota.used).toBe(8);
-      expect(quota.remaining).toBe(0);
-    });
-
-    it("should return 0 allowance for user with 0 credits_purchased", async () => {
-      mockQuery.mockResolvedValueOnce({
-        rows: [{ credits_purchased: 0, image_generations_used: 0 }],
-        rowCount: 1
-      });
-
-      const quota = await getGenerationQuota("user-1");
-
-      expect(quota.allowance).toBe(0);
-      expect(quota.remaining).toBe(0);
-    });
-
-    it("should return 0s for non-existent user", async () => {
-      mockQuery.mockResolvedValueOnce({
-        rows: [],
-        rowCount: 0
-      });
-
-      const quota = await getGenerationQuota("nonexistent");
-
-      expect(quota.used).toBe(0);
-      expect(quota.allowance).toBe(0);
-      expect(quota.remaining).toBe(0);
-    });
-
-    it("should return 0 allowance for 1 credit_purchased (not enough for a letter)", async () => {
-      // 1 credit = floor(1/2) = 0 letters = 0 generations
-      mockQuery.mockResolvedValueOnce({
-        rows: [{ credits_purchased: 1, image_generations_used: 0 }],
-        rowCount: 1
-      });
-
-      const quota = await getGenerationQuota("user-1");
-
-      expect(quota.allowance).toBe(0);
-      expect(quota.remaining).toBe(0);
-    });
-
-    it("should compute correctly for large credit amounts", async () => {
-      // 100 credits = 50 letters = 250 generations, 50 used → 200 remaining
-      mockQuery.mockResolvedValueOnce({
-        rows: [{ credits_purchased: 100, image_generations_used: 50 }],
-        rowCount: 1
-      });
-
-      const quota = await getGenerationQuota("user-1");
-
-      expect(quota.allowance).toBe(250);
-      expect(quota.remaining).toBe(200);
+    await expect(checkGenerationLimit('user-1')).resolves.toMatchObject({
+      allowed: false,
+      remaining: 0
     });
   });
 
-  describe("checkGenerationLimit", () => {
-    it("should return allowed=true when remaining > 0", async () => {
-      mockQuery.mockResolvedValueOnce({
-        rows: [{ credits_purchased: 4, image_generations_used: 0 }],
-        rowCount: 1
-      });
-
-      const check = await checkGenerationLimit("user-1");
-
-      expect(check.allowed).toBe(true);
-      expect(check.remaining).toBe(10);
+  it('grants by a unique source reference so payment replays cannot duplicate it', async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [{ entitlement_id: 'ent-1', quantity: 1 }]
+    });
+    const grant = await grantImageEntitlement({
+      userId: 'user-1',
+      sourceType: 'jit_order',
+      sourceReferenceId: 'order-1',
+      sourceOrderId: 'order-1',
+      quantity: 1
     });
 
-    it("should return allowed=false when remaining = 0", async () => {
-      mockQuery.mockResolvedValueOnce({
-        rows: [{ credits_purchased: 4, image_generations_used: 10 }],
-        rowCount: 1
+    expect(grant).toMatchObject({ entitlement_id: 'ent-1' });
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('ON CONFLICT (source_type, source_reference_id) DO NOTHING'),
+      ['user-1', 'jit_order', 'order-1', 'order-1', 1, null]
+    );
+  });
+
+  it('atomically reserves the oldest available entitlement', async () => {
+    mocks.query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{ entitlement_id: 'ent-1', quantity: 2, consumed_quantity: 0 }]
+      })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ reservation_id: 'reservation-1' }] })
+      .mockResolvedValueOnce({
+        rows: [{ allowance: '2', used: '1', remaining: '1' }]
       });
 
-      const check = await checkGenerationLimit("user-1");
-
-      expect(check.allowed).toBe(false);
-      expect(check.remaining).toBe(0);
+    await expect(reserveGeneration('user-1')).resolves.toEqual({
+      reserved: true,
+      reservationId: 'reservation-1',
+      allowance: 2,
+      used: 1,
+      remaining: 1
     });
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('LIMIT 1\n       FOR UPDATE'),
+      ['user-1']
+    );
+  });
 
-    it("should return allowed=false for user with no purchases", async () => {
-      mockQuery.mockResolvedValueOnce({
-        rows: [{ credits_purchased: 0, image_generations_used: 0 }],
-        rowCount: 1
+  it('returns current quota when no entitlement can be reserved', async () => {
+    mocks.query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{ allowance: '4', used: '4', remaining: '0' }]
       });
 
-      const check = await checkGenerationLimit("user-1");
-
-      expect(check.allowed).toBe(false);
-      expect(check.allowance).toBe(0);
-    });
-
-    it("should return allowed=false for non-existent user", async () => {
-      mockQuery.mockResolvedValueOnce({
-        rows: [],
-        rowCount: 0
-      });
-
-      const check = await checkGenerationLimit("nonexistent");
-
-      expect(check.allowed).toBe(false);
+    await expect(reserveGeneration('user-1')).resolves.toEqual({
+      reserved: false,
+      allowance: 4,
+      used: 4,
+      remaining: 0
     });
   });
 
-  describe("reserveGeneration", () => {
-    it("should atomically increment image_generations_used when quota remains", async () => {
-      mockQuery.mockResolvedValueOnce({
-        rows: [{ credits_purchased: 4, image_generations_used: 1 }],
-        rowCount: 1
-      });
-
-      const reservation = await reserveGeneration("user-1");
-
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining("image_generations_used <"),
-        ["user-1", 2, 5]
-      );
-      expect(reservation.reserved).toBe(true);
-      expect(reservation.used).toBe(1);
-      expect(reservation.allowance).toBe(10);
-      expect(reservation.remaining).toBe(9);
-    });
-
-    it("should return current quota when reservation cannot be made", async () => {
-      mockQuery
-        .mockResolvedValueOnce({ rows: [], rowCount: 0 })
-        .mockResolvedValueOnce({
-          rows: [{ credits_purchased: 4, image_generations_used: 10 }],
-          rowCount: 1
-        });
-
-      const reservation = await reserveGeneration("user-1");
-
-      expect(reservation.reserved).toBe(false);
-      expect(reservation.remaining).toBe(0);
-    });
+  it('commits a successful reservation', async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    await commitGenerationReservation('reservation-1');
+    expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining("SET status = 'consumed'"), [
+      'reservation-1'
+    ]);
   });
 
-  describe("releaseGenerationReservation", () => {
-    it("should decrement image_generations_used without going below zero", async () => {
-      mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+  it('releases the exact reserved entitlement after provider failure', async () => {
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            reservation_id: 'reservation-1',
+            entitlement_id: 'ent-1',
+            status: 'reserved'
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
 
-      await releaseGenerationReservation("user-1");
-
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.stringContaining("GREATEST(image_generations_used - 1, 0)"),
-        ["user-1"]
-      );
-    });
+    await releaseGenerationReservation('user-1', 'reservation-1');
+    expect(mocks.query).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('consumed_quantity = GREATEST(consumed_quantity - 1, 0)'),
+      ['ent-1']
+    );
+    expect(mocks.query).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining("SET status = 'released'"),
+      ['reservation-1']
+    );
   });
 });

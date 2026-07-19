@@ -28,6 +28,7 @@ import {
   type ImageContext
 } from "../services/imageGenerationService.js";
 import {
+  commitGenerationReservation,
   releaseGenerationReservation,
   reserveGeneration
 } from "../services/imageGenerationLimitService.js";
@@ -95,10 +96,11 @@ async function createPreview(base64Data: string): Promise<string> {
 
 async function releaseReservedGeneration(
   context: ToolContext,
-  userId: string
+  userId: string,
+  reservationId?: string
 ): Promise<void> {
   try {
-    await releaseGenerationReservation(userId);
+    await releaseGenerationReservation(userId, reservationId);
   } catch (releaseError) {
     context.logger.error(
       {
@@ -156,7 +158,7 @@ async function handler(
       "Image generation limit reached"
     );
     throw new Error(
-      "You've used all your image generations. Purchase more letters to get additional generations (5 per letter)."
+      "You've used all your Letter IRL image generations. Complete a qualifying physical-mail purchase to receive another entitlement, or reuse an uploaded or conversation-generated image."
     );
   }
 
@@ -173,6 +175,9 @@ async function handler(
     // Store full image for later download by preview tools
     const token = await storeImage(result.base64Data);
     const imageUrl = buildTempImageUrl(token);
+    if (reservation.reservationId) {
+      await commitGenerationReservation(reservation.reservationId);
+    }
 
     context.logger.info(
       {
@@ -196,7 +201,7 @@ async function handler(
       generationsRemaining
     };
   } catch (error) {
-    await releaseReservedGeneration(context, userId);
+    await releaseReservedGeneration(context, userId, reservation.reservationId);
 
     if (error instanceof ImageGenerationError) {
       context.logger.warn(

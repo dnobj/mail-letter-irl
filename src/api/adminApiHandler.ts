@@ -33,6 +33,7 @@ import {
 } from '../services/statusSyncService.js';
 import { getTokenStats } from '../services/patService.js';
 import { getRateLimitStats, getBlockedRequestCounts, RATE_LIMITS } from './middleware/rateLimit.js';
+import { getGenerationQuota } from '../services/imageGenerationLimitService.js';
 
 /**
  * Send JSON response
@@ -457,11 +458,7 @@ async function handleGetUser(res: ServerResponse, userId: string) {
       [userId]
     );
 
-    // Compute image generation quota
-    const lettersPurchased = Math.floor(user.credits_purchased / 2);
-    const generationsPerLetter = parseInt(process.env.IMAGE_GENERATION_LIMIT_PER_LETTER || '5', 10);
-    const imageGenerationsAllowance = lettersPurchased * generationsPerLetter;
-    const imageGenerationsRemaining = Math.max(0, imageGenerationsAllowance - user.image_generations_used);
+    const imageQuota = await getGenerationQuota(userId);
 
     sendJson(res, 200, {
       user: {
@@ -470,9 +467,9 @@ async function handleGetUser(res: ServerResponse, userId: string) {
         credits: user.credits,
         creditsPurchased: user.credits_purchased,
         creditsUsed: user.credits_used,
-        imageGenerationsUsed: user.image_generations_used,
-        imageGenerationsAllowance,
-        imageGenerationsRemaining,
+        imageGenerationsUsed: imageQuota.used,
+        imageGenerationsAllowance: imageQuota.allowance,
+        imageGenerationsRemaining: imageQuota.remaining,
         createdAt: user.created_at,
         updatedAt: user.updated_at
       },
@@ -545,8 +542,12 @@ async function handleGetStats(res: ServerResponse) {
   }>(
     `SELECT
        COUNT(*) as count,
-       SUM(amount_cents) as total_revenue,
-       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count
+       SUM(CASE
+         WHEN paid_at IS NOT NULL AND status NOT IN ('refunded', 'cancelled', 'payment_failed')
+           THEN amount_cents
+         ELSE 0
+       END) as total_revenue,
+       SUM(CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END) as completed_count
      FROM orders`
   );
 
@@ -1116,14 +1117,15 @@ async function handleGetDashboard(res: ServerResponse) {
       `SELECT
         COALESCE(SUM(amount_cents), 0) as total_cents,
         COUNT(*) as total_orders
-      FROM orders WHERE status = 'completed'`
+      FROM orders
+      WHERE paid_at IS NOT NULL AND status NOT IN ('refunded', 'cancelled', 'payment_failed')`
     ),
     // Revenue today
-    query<{ total_cents: string }>('SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE status = $1 AND completed_at >= $2', ['completed', today]),
+    query<{ total_cents: string }>("SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE paid_at >= $1 AND status NOT IN ('refunded', 'cancelled', 'payment_failed')", [today]),
     // Revenue 7d
-    query<{ total_cents: string }>('SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE status = $1 AND completed_at >= $2', ['completed', sevenDaysAgo]),
+    query<{ total_cents: string }>("SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE paid_at >= $1 AND status NOT IN ('refunded', 'cancelled', 'payment_failed')", [sevenDaysAgo]),
     // Revenue 30d
-    query<{ total_cents: string }>('SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE status = $1 AND completed_at >= $2', ['completed', thirtyDaysAgo]),
+    query<{ total_cents: string }>("SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE paid_at >= $1 AND status NOT IN ('refunded', 'cancelled', 'payment_failed')", [thirtyDaysAgo]),
     // Job stats
     query<{ status: string; count: string }>(
       `SELECT status, COUNT(*) as count FROM letter_jobs GROUP BY status`

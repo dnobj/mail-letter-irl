@@ -419,3 +419,25 @@ Check admin panel or database for active test campaigns.
 - PostGrid test mode or dummy provider for letter tests
 - Document any issues found in GitHub Issues
 - Update this checklist as features change
+
+# Pay & Send manual matrix
+
+Run in the isolated development Railway/Neon environment with Stripe test mode
+and the non-production mail provider:
+
+1. Desktop and Android: preview with zero balance, choose Pay & Send, verify the
+   exact item/amount, pay, return, observe processing, and reach sent status.
+2. Repeat for one letter and one 6x9 postcard.
+3. Abandon and expire checkout; confirm the draft remains unsent and prepaid
+   send becomes available after expiry.
+4. Deliver completed and asynchronous-success events twice; confirm one order,
+   letter, outbox job, provider submission, and image grant.
+5. Attempt a prepaid send while checkout is active; confirm it is rejected.
+6. Attempt cross-user draft checkout and purchase-status access; confirm both
+   are rejected without revealing whether the other object exists.
+7. Simulate a terminal pre-provider failure; confirm `refund_pending`, one
+   idempotent Stripe refund, and eventual `refunded` status.
+8. Buy a test letter pack and send from balance to regression-test the original
+   path.
+9. Verify a zero-entitlement account cannot use Letter IRL-funded generation but
+   can still upload or reuse an external/conversation-generated image.

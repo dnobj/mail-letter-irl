@@ -492,3 +492,23 @@ All tables with `updated_at` columns have triggers calling `update_updated_at_co
 - promo_campaigns
 - letter_drafts
 - stripe_disputes
+
+# Commerce and image entitlements (migration 021)
+
+`orders` is authoritative for both `letter_pack` and `jit_mail` purchases. It
+stores the server-selected product snapshot, exact amount/currency, unique
+Stripe Checkout Session and PaymentIntent IDs, an application idempotency key,
+the bound draft/letter for JIT mail, and payment/fulfillment/refund timestamps.
+A partial unique index permits only one active JIT order per draft.
+
+`stripe_webhook_events` claims each verified Stripe event ID in the same
+transaction as its order transition. `commerce_order_events` provides a
+sanitized transition audit trail. `letters.funding_type` records either
+`prepaid_balance` or `jit_order`, and JIT-funded letters reference exactly one
+commerce order.
+
+`image_entitlements` replaces the lifetime `credits_purchased` formula with
+explicit replay-safe grants. `image_generation_reservations` binds each atomic
+generation reservation to its exact grant so failed provider calls can release
+the correct unit. Migration 021 preserves previously earned allowances as a
+`legacy_migration` grant.

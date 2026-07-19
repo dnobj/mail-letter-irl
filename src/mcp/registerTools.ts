@@ -11,6 +11,8 @@ import {
   quoteAndPreviewLetterWithHeaderImageInputZ,
   quoteAndPreviewLetterWithImageInputZ,
   sendLetterInputZ,
+  createMailCheckoutInputZ,
+  getPurchaseStatusInputZ,
   getOrderStatusInputZ,
   getAccountBalanceInputZ,
   listOrdersInputZ,
@@ -26,6 +28,8 @@ import {
   confirmUploadedImageInputZ,
   quoteAndPreviewOutputZ,
   sendLetterOutputZ,
+  createMailCheckoutOutputZ,
+  getPurchaseStatusOutputZ,
   getOrderStatusOutputZ,
   getAccountBalanceOutputZ,
   listOrdersOutputZ,
@@ -73,6 +77,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'get_account_balance',
     'list_orders',
     'get_order_status',
+    'get_purchase_status',
     'get_return_address'
   ];
 
@@ -84,6 +89,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'quote_and_preview_postcard',
     'send_letter',
     'send_postcard',
+    'create_mail_checkout',
     'set_return_address',  // Validates address via PostGrid
     'generate_image'       // Calls OpenAI Images API
   ];
@@ -94,6 +100,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
   const idempotentTools = [
     'send_letter',           // Draft consumption makes retries safe
     'send_postcard',         // Draft consumption makes retries safe
+    'create_mail_checkout',  // Reuses the active checkout for a draft
     'set_return_address',    // Setting same address twice = no change
     'clear_return_address',  // Clearing twice = no additional effect
     'confirm_uploaded_image' // Repeating the same relay overwrites with the same value
@@ -159,7 +166,7 @@ const WIDGET_CSP = {
   connect_domains: ["https://chatgpt.com", WIDGET_API_URL],
   resource_domains: ["https://*.oaistatic.com"],
   // frame_domains not included - we don't use iframes
-  // redirect_domains not included - we don't use openExternal
+  redirect_domains: ["https://checkout.stripe.com", WIDGET_API_URL]
 };
 
 // Resolve widget directory relative to this module
@@ -279,6 +286,8 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   quote_and_preview_letter_with_header_image: quoteAndPreviewLetterWithHeaderImageInputZ,
   quote_and_preview_letter_with_image: quoteAndPreviewLetterWithImageInputZ,
   send_letter: sendLetterInputZ,
+  create_mail_checkout: createMailCheckoutInputZ,
+  get_purchase_status: getPurchaseStatusInputZ,
   // Account and order management tools
   get_order_status: getOrderStatusInputZ,
   get_account_balance: getAccountBalanceInputZ,
@@ -306,6 +315,8 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   quote_and_preview_letter_with_header_image: quoteAndPreviewOutputZ,
   quote_and_preview_letter_with_image: quoteAndPreviewOutputZ,
   send_letter: sendLetterOutputZ,
+  create_mail_checkout: createMailCheckoutOutputZ,
+  get_purchase_status: getPurchaseStatusOutputZ,
   // Account and order management tools
   get_order_status: getOrderStatusOutputZ,
   get_account_balance: getAccountBalanceOutputZ,

@@ -19,7 +19,13 @@
         --accent-primary-disabled: #93c5fd;
         --preview-bg: #fefefe;
 
-        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family:
+          "Inter",
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
         background: transparent;
         color: var(--text-primary);
       }
@@ -74,7 +80,7 @@
         margin: 0;
         padding: 1rem;
         background: transparent;
-        overflow: hidden;  /* Prevent scrollbars */
+        overflow: hidden; /* Prevent scrollbars */
       }
 
       /* Override injected postcard-front styles (which have fixed pixel dimensions) */
@@ -132,14 +138,14 @@
       /* Preview panes */
       .preview-container {
         position: relative;
-        overflow: hidden;  /* Prevent scrollbars on preview area */
+        overflow: hidden; /* Prevent scrollbars on preview area */
       }
 
       .preview-pane {
         padding: 0.75rem;
         background: var(--preview-bg);
         border-bottom: 1px solid var(--border-color);
-        overflow: hidden;  /* Prevent scrollbars */
+        overflow: hidden; /* Prevent scrollbars */
       }
 
       .preview-pane.hidden {
@@ -351,8 +357,25 @@
         animation: spin 0.8s linear infinite;
       }
 
+      .purchase-actions {
+        display: grid;
+        gap: 0.6rem;
+      }
+
+      .send-button.secondary {
+        color: var(--accent-primary);
+        background: transparent;
+        border: 1px solid var(--accent-primary);
+      }
+
+      .send-button.secondary:hover:not(:disabled) {
+        background: var(--bg-secondary);
+      }
+
       @keyframes spin {
-        to { transform: rotate(360deg); }
+        to {
+          transform: rotate(360deg);
+        }
       }
 
       /* Success/Error states */
@@ -376,7 +399,12 @@
       /* Loading state */
       .loading .info-value,
       .loading .status-pill {
-        background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border-color) 50%, var(--bg-secondary) 75%);
+        background: linear-gradient(
+          90deg,
+          var(--bg-secondary) 25%,
+          var(--border-color) 50%,
+          var(--bg-secondary) 75%
+        );
         background-size: 200% 100%;
         animation: shimmer 1.5s infinite;
         color: transparent;
@@ -389,8 +417,12 @@
       }
 
       @keyframes shimmer {
-        0% { background-position: 200% 0; }
-        100% { background-position: -200% 0; }
+        0% {
+          background-position: 200% 0;
+        }
+        100% {
+          background-position: -200% 0;
+        }
       }
 
       .preview-loading {
@@ -406,8 +438,12 @@
   <body>
     <div class="card" id="card">
       <div class="preview-tabs">
-        <button class="preview-tab active" id="tab-front" data-tab="front">Front (Image)</button>
-        <button class="preview-tab" id="tab-back" data-tab="back">Back (Message)</button>
+        <button class="preview-tab active" id="tab-front" data-tab="front">
+          Front (Image)
+        </button>
+        <button class="preview-tab" id="tab-back" data-tab="back">
+          Back (Message)
+        </button>
       </div>
       <div class="preview-container">
         <div class="preview-pane front-preview" id="preview-front">
@@ -434,20 +470,36 @@
           <span class="info-label" id="id-label">Draft</span>
           <span class="info-value" id="id-value"></span>
         </div>
-        <div class="info-row" id="recipient-row" style="display: none;">
+        <div class="info-row" id="recipient-row" style="display: none">
           <span class="info-label">To</span>
           <span class="info-value" id="recipient-name"></span>
         </div>
-        <div class="message-box" id="message-box" style="display: none;">
-          <div class="info-label" style="margin-bottom: 0.5rem;">Message</div>
+        <div class="message-box" id="message-box" style="display: none">
+          <div class="info-label" style="margin-bottom: 0.5rem">Message</div>
           <div class="message-text" id="message-text"></div>
         </div>
-        <div class="note" id="note" style="display: none;"></div>
+        <div class="note" id="note" style="display: none"></div>
         <!-- Send button -->
         <button class="send-button" id="send-button" disabled>
           <span id="send-button-text">Send Postcard</span>
         </button>
-        <div id="error-message" class="send-result error" style="display: none;"></div>
+        <div
+          class="purchase-actions"
+          id="purchase-actions"
+          style="display: none"
+        >
+          <button class="send-button" id="pay-send-button">
+            <span id="pay-send-button-text">Pay &amp; Send</span>
+          </button>
+          <button class="send-button secondary" id="buy-pack-button">
+            Buy a Letter Pack
+          </button>
+        </div>
+        <div
+          id="error-message"
+          class="send-result error"
+          style="display: none"
+        ></div>
       </div>
     </div>
 
@@ -457,20 +509,34 @@
 
       let dataLoaded = false;
       let currentDraftId = null;
+      let currentEligibility = null;
       let sendInProgress = false;
-      let currentTab = 'front';
+      let checkoutInProgress = false;
+      let currentTab = "front";
 
       // Tab switching
       function switchTab(tab) {
         currentTab = tab;
-        document.getElementById("tab-front").classList.toggle("active", tab === "front");
-        document.getElementById("tab-back").classList.toggle("active", tab === "back");
-        document.getElementById("preview-front").classList.toggle("hidden", tab !== "front");
-        document.getElementById("preview-back").classList.toggle("hidden", tab !== "back");
+        document
+          .getElementById("tab-front")
+          .classList.toggle("active", tab === "front");
+        document
+          .getElementById("tab-back")
+          .classList.toggle("active", tab === "back");
+        document
+          .getElementById("preview-front")
+          .classList.toggle("hidden", tab !== "front");
+        document
+          .getElementById("preview-back")
+          .classList.toggle("hidden", tab !== "back");
       }
 
-      document.getElementById("tab-front").addEventListener("click", () => switchTab("front"));
-      document.getElementById("tab-back").addEventListener("click", () => switchTab("back"));
+      document
+        .getElementById("tab-front")
+        .addEventListener("click", () => switchTab("front"));
+      document
+        .getElementById("tab-back")
+        .addEventListener("click", () => switchTab("back"));
 
       function showLoading() {
         const card = document.getElementById("card");
@@ -528,6 +594,7 @@
           lettersRequired,
           canSendNow,
           reasonCannotSend,
+          sendEligibility,
           deliveryClass,
           estimatedDeliveryDays,
           deliveryEstimate,
@@ -544,11 +611,12 @@
           senderAddressLine1,
           senderCity,
           senderState,
-          senderPostalCode
+          senderPostalCode,
         } = state;
 
         // Store draftId for send button
         currentDraftId = draftId;
+        currentEligibility = sendEligibility || null;
 
         // Render front preview (image)
         const previewFront = document.getElementById("preview-front");
@@ -563,25 +631,34 @@
         const previewBack = document.getElementById("preview-back");
         if (message) {
           // Escape HTML helper
-          const escapeHtml = (str) => (str || '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
+          const escapeHtml = (str) =>
+            (str || "")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
 
           const escapedMessage = escapeHtml(message);
 
           // Build full recipient address
-          const escapedRecipientName = escapeHtml(recipientName || 'Recipient');
-          const escapedRecipientStreet = escapeHtml(recipientAddressLine1 || '');
+          const escapedRecipientName = escapeHtml(recipientName || "Recipient");
+          const escapedRecipientStreet = escapeHtml(
+            recipientAddressLine1 || "",
+          );
           const escapedRecipientCityLine = escapeHtml(
-            [recipientCity, recipientState, recipientPostalCode].filter(Boolean).join(', ').replace(/, (\d)/, ' $1')
+            [recipientCity, recipientState, recipientPostalCode]
+              .filter(Boolean)
+              .join(", ")
+              .replace(/, (\d)/, " $1"),
           );
 
           // Build full sender address
           const escapedSenderName = escapeHtml(senderName);
-          const escapedSenderStreet = escapeHtml(senderAddressLine1 || '');
+          const escapedSenderStreet = escapeHtml(senderAddressLine1 || "");
           const escapedSenderCityLine = escapeHtml(
-            [senderCity, senderState, senderPostalCode].filter(Boolean).join(', ').replace(/, (\d)/, ' $1')
+            [senderCity, senderState, senderPostalCode]
+              .filter(Boolean)
+              .join(", ")
+              .replace(/, (\d)/, " $1"),
           );
 
           previewBack.innerHTML = `
@@ -591,13 +668,17 @@
               </div>
               <div class="postcard-address-side">
                 <div class="postcard-stamp">STAMP</div>
-                ${escapedSenderName ? `
+                ${
+                  escapedSenderName
+                    ? `
                 <div class="postcard-return-address">
                   <div>${escapedSenderName}</div>
                   <div>${escapedSenderStreet}</div>
                   <div>${escapedSenderCityLine}</div>
                 </div>
-                ` : ''}
+                `
+                    : ""
+                }
                 <div class="postcard-recipient">
                   <div class="name">${escapedRecipientName}</div>
                   <div>${escapedRecipientStreet}</div>
@@ -668,10 +749,28 @@
         // Update send button state
         const sendButton = document.getElementById("send-button");
         const sendButtonText = document.getElementById("send-button-text");
+        const purchaseActions = document.getElementById("purchase-actions");
+        const paySendButton = document.getElementById("pay-send-button");
+        const paySendButtonText = document.getElementById(
+          "pay-send-button-text",
+        );
+        const buyPackButton = document.getElementById("buy-pack-button");
 
-        if (!sendInProgress) {
+        if (!sendInProgress && !checkoutInProgress) {
+          sendButton.style.display = canSendNow ? "flex" : "none";
           sendButton.disabled = !canSendNow;
-          sendButtonText.textContent = canSendNow ? "Send Postcard" : (reasonCannotSend ?? "Cannot Send");
+          sendButtonText.textContent = "Send Postcard";
+
+          const payAndSend = sendEligibility?.payAndSend;
+          const letterPack = sendEligibility?.letterPack;
+          purchaseActions.style.display = canSendNow ? "none" : "grid";
+          paySendButton.style.display = payAndSend?.available ? "flex" : "none";
+          paySendButton.disabled = !payAndSend?.available;
+          if (payAndSend?.available && payAndSend.amountCents) {
+            const amount = (payAndSend.amountCents / 100).toFixed(2);
+            paySendButtonText.textContent = `Pay & Send (${String(payAndSend.currency || "usd").toUpperCase()} ${amount})`;
+          }
+          buyPackButton.style.display = letterPack?.available ? "flex" : "none";
         }
       }
 
@@ -704,14 +803,15 @@
           // Call send_postcard via OpenAI callTool
           const result = await window.openai.callTool("send_postcard", {
             draftId: currentDraftId,
-            confirm: true
+            confirm: true,
           });
 
           // Extract orderId
-          const orderId = result?.orderId
-            || result?.structuredContent?.orderId
-            || result?.content?.[0]?.text?.match(/Order ID: ([a-f0-9-]+)/i)?.[1]
-            || null;
+          const orderId =
+            result?.orderId ||
+            result?.structuredContent?.orderId ||
+            result?.content?.[0]?.text?.match(/Order ID: ([a-f0-9-]+)/i)?.[1] ||
+            null;
 
           // Update status pill to show sent
           statusPill.classList.remove("ok", "alert");
@@ -728,7 +828,7 @@
           // Keep button disabled
         } catch (error) {
           // Show error message
-          errorMessage.textContent = `Failed to send: ${error.message || 'Unknown error'}`;
+          errorMessage.textContent = `Failed to send: ${error.message || "Unknown error"}`;
           errorMessage.style.display = "block";
 
           // Reset button for retry
@@ -745,8 +845,100 @@
         }
       }
 
+      function toolData(result) {
+        return result?.structuredContent || result || {};
+      }
+
+      async function pollPurchaseStatus(orderId) {
+        const statusPill = document.getElementById("status-pill");
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+          const status = toolData(
+            await window.openai.callTool("get_purchase_status", { orderId }),
+          );
+          if (status.purchaseStatus === "processing") {
+            statusPill.classList.remove("alert");
+            statusPill.classList.add("ok");
+            statusPill.textContent = "Paid - preparing mail";
+            return;
+          }
+          if (status.purchaseStatus === "sent") {
+            statusPill.classList.remove("alert");
+            statusPill.classList.add("ok");
+            statusPill.textContent = "Sent!";
+            return;
+          }
+          if (
+            [
+              "payment_failed",
+              "refund_pending",
+              "refunded",
+              "cancelled",
+            ].includes(status.purchaseStatus)
+          ) {
+            statusPill.classList.remove("ok");
+            statusPill.classList.add("alert");
+            statusPill.textContent = status.message || status.purchaseStatus;
+            return;
+          }
+        }
+        statusPill.textContent = "Checkout open - status may take a moment";
+      }
+
+      async function handlePayAndSend() {
+        if (checkoutInProgress || !currentDraftId) return;
+        const button = document.getElementById("pay-send-button");
+        const buttonText = document.getElementById("pay-send-button-text");
+        const errorMessage = document.getElementById("error-message");
+        const idLabel = document.getElementById("id-label");
+        const idValue = document.getElementById("id-value");
+        checkoutInProgress = true;
+        errorMessage.style.display = "none";
+        button.disabled = true;
+        button.classList.add("loading");
+        buttonText.innerHTML =
+          '<span class="spinner"></span> Preparing checkout...';
+        try {
+          const result = toolData(
+            await window.openai.callTool("create_mail_checkout", {
+              draftId: currentDraftId,
+            }),
+          );
+          if (!result.checkoutUrl) {
+            throw new Error(result.message || "Checkout URL was not returned");
+          }
+          idLabel.textContent = "Purchase";
+          idValue.textContent = result.orderId;
+          button.classList.remove("loading");
+          buttonText.textContent = "Checkout Opened";
+          await window.openai.openExternal({ href: result.checkoutUrl });
+          void pollPurchaseStatus(result.orderId).catch(() => undefined);
+        } catch (error) {
+          errorMessage.textContent = `Unable to open checkout: ${error.message || "Unknown error"}`;
+          errorMessage.style.display = "block";
+          button.classList.remove("loading");
+          button.disabled = false;
+          buttonText.textContent = "Retry Pay & Send";
+          checkoutInProgress = false;
+        }
+      }
+
+      async function handleBuyPack() {
+        const purchaseUrl = currentEligibility?.letterPack?.purchaseUrl;
+        if (!purchaseUrl) return;
+        await window.openai.openExternal({ href: purchaseUrl });
+      }
+
       // Attach click handler
-      document.getElementById("send-button").addEventListener("click", handleSend);
+      document
+        .getElementById("send-button")
+        .addEventListener("click", handleSend);
+      document
+        .getElementById("pay-send-button")
+        .addEventListener("click", handlePayAndSend);
+      document
+        .getElementById("buy-pack-button")
+        .addEventListener("click", handleBuyPack);
 
       // Apply theme
       const theme = window.openai?.theme ?? "light";

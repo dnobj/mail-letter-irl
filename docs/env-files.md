@@ -84,6 +84,15 @@ npm run dev:env
 
 **Use case:** Local development with full functionality.
 
+`.env.dev` is a local-development file, not the source of truth for deployed
+development credentials. It may still contain template or stale values. For
+operations against the deployed development environment (including database
+migrations), use the `letter-irl-api` variables from Railway's `development`
+environment. Verify the Railway environment, pooled Neon hostname, and current
+migration ledger before making changes. If `.env.dev` fails validation, never
+fall back to `.env` or any production credential, and never persist a retrieved
+Railway secret into the repository.
+
 ---
 
 ### `.env.local` - Local Overrides

@@ -60,6 +60,11 @@ function friendlyDraftError(error: unknown, draftId: string): Error {
   if (code === 'DRAFT_CANCELLED') {
     return new Error('This draft was cancelled. Please create a new letter draft.');
   }
+  if (code === 'DRAFT_CHECKOUT_PENDING') {
+    return new Error(
+      'This draft has an active Pay & Send checkout. Complete or wait for that checkout to expire before using prepaid balance.'
+    );
+  }
   if (code === 'DRAFT_WRONG_MAIL_TYPE') {
     return new Error('This is a postcard draft. Please use send_postcard instead.');
   }

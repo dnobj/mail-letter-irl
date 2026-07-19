@@ -59,6 +59,14 @@ export const sendLetterInputZ = z.object({
   confirm: z.boolean()
 });
 
+export const createMailCheckoutInputZ = z.object({
+  draftId: z.string()
+});
+
+export const getPurchaseStatusInputZ = z.object({
+  orderId: z.string()
+});
+
 export const getOrderStatusInputZ = z.object({
   orderId: z.string().optional()
 });
@@ -182,10 +190,30 @@ const statusTimelineEntryZ = z.object({
 
 const trackingSupportZ = z.enum(["none", "estimated_only", "carrier_tracking"]);
 
+const sendEligibilityZ = z.object({
+  prepaid: z.object({
+    eligible: z.boolean(),
+    requiredCredits: z.number().int(),
+    availableCredits: z.number().int()
+  }),
+  payAndSend: z.object({
+    available: z.boolean(),
+    amountCents: z.number().int().optional(),
+    currency: z.string().optional(),
+    productDescription: z.string().optional(),
+    unavailableReason: z.string().optional()
+  }),
+  letterPack: z.object({
+    available: z.boolean(),
+    purchaseUrl: z.string()
+  })
+});
+
 export const quoteAndPreviewOutputZ = z.object({
   lettersRequired: z.number(),
   canSendNow: z.boolean(),
   reasonCannotSend: z.string().optional(),
+  sendEligibility: sendEligibilityZ,
   deliveryClass: z.string().optional(),
   estimatedDeliveryDays: z.number().int().optional(),
   deliveryEstimate: z.string().optional(),
@@ -211,6 +239,40 @@ export const sendLetterOutputZ = z.object({
   trackingSupport: trackingSupportZ.optional(),
   saveReturnAddressNote: z.string().optional(),
   suggestSaveReturnAddress: z.boolean().optional()
+});
+
+export const createMailCheckoutOutputZ = z.object({
+  orderId: z.string(),
+  checkoutUrl: z.string().url().optional(),
+  amountCents: z.number().int().positive(),
+  currency: z.string(),
+  productDescription: z.string(),
+  expiresAt: z.string().optional(),
+  status: z.string(),
+  reused: z.boolean(),
+  message: z.string()
+});
+
+export const getPurchaseStatusOutputZ = z.object({
+  orderId: z.string(),
+  purchaseStatus: z.enum([
+    "pending_payment",
+    "processing",
+    "sent",
+    "payment_failed",
+    "refund_pending",
+    "refunded",
+    "cancelled"
+  ]),
+  orderStatus: z.string(),
+  productDescription: z.string(),
+  amountCents: z.number().int(),
+  currency: z.string(),
+  mailType: z.enum(["letter", "postcard"]).optional(),
+  letterId: z.string().optional(),
+  checkoutExpiresAt: z.string().optional(),
+  updatedAt: z.string(),
+  message: z.string()
 });
 
 export const getOrderStatusOutputZ = z.object({
@@ -275,6 +337,7 @@ export const quoteAndPreviewPostcardOutputZ = z.object({
   lettersRequired: z.number(),
   canSendNow: z.boolean(),
   reasonCannotSend: z.string().optional(),
+  sendEligibility: sendEligibilityZ,
   deliveryClass: z.string().optional(),
   estimatedDeliveryDays: z.number().int().optional(),
   deliveryEstimate: z.string().optional(),

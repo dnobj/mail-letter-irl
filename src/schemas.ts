@@ -115,14 +115,50 @@ export const quoteAndPreviewInputSchema: JsonSchema = {
   }
 };
 
+const sendEligibilitySchema: JsonSchema = {
+  type: "object",
+  required: ["prepaid", "payAndSend", "letterPack"],
+  properties: {
+    prepaid: {
+      type: "object",
+      required: ["eligible", "requiredCredits", "availableCredits"],
+      properties: {
+        eligible: { type: "boolean" },
+        requiredCredits: { type: "integer" },
+        availableCredits: { type: "integer" }
+      }
+    },
+    payAndSend: {
+      type: "object",
+      required: ["available"],
+      properties: {
+        available: { type: "boolean" },
+        amountCents: { type: "integer" },
+        currency: { type: "string" },
+        productDescription: { type: "string" },
+        unavailableReason: { type: "string" }
+      }
+    },
+    letterPack: {
+      type: "object",
+      required: ["available", "purchaseUrl"],
+      properties: {
+        available: { type: "boolean" },
+        purchaseUrl: { type: "string" }
+      }
+    }
+  }
+};
+
 export const quoteAndPreviewOutputSchema: JsonSchema = {
   type: "object",
-  required: ["previewHtml", "lettersRequired", "canSendNow", "draftId", "draftExpiresAt", "layoutType"],
+  required: ["previewHtml", "lettersRequired", "canSendNow", "sendEligibility", "draftId", "draftExpiresAt", "layoutType"],
   properties: {
     previewHtml: { type: "string" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for standard letter)" },
     canSendNow: { type: "boolean" },
     reasonCannotSend: { type: "string" },
+    sendEligibility: sendEligibilitySchema,
     deliveryClass: { type: "string" },
     estimatedDeliveryDays: { type: "integer" },
     deliveryEstimate: { type: "string" },
@@ -207,6 +243,65 @@ export const sendLetterOutputSchema: JsonSchema = {
   }
 };
 
+export const createMailCheckoutInputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId"],
+  properties: {
+    draftId: {
+      type: "string",
+      description: "Owned pending draft ID from a letter or postcard preview"
+    }
+  }
+};
+
+export const createMailCheckoutOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["orderId", "amountCents", "currency", "productDescription", "status", "reused", "message"],
+  properties: {
+    orderId: { type: "string" },
+    checkoutUrl: { type: "string", description: "Stripe-hosted checkout URL" },
+    amountCents: { type: "integer" },
+    currency: { type: "string" },
+    productDescription: { type: "string" },
+    expiresAt: { type: "string" },
+    status: { type: "string" },
+    reused: { type: "boolean" },
+    message: { type: "string" }
+  }
+};
+
+export const getPurchaseStatusInputSchema: JsonSchema = {
+  type: "object",
+  required: ["orderId"],
+  properties: {
+    orderId: {
+      type: "string",
+      description: "Commerce order ID returned by checkout"
+    }
+  }
+};
+
+export const getPurchaseStatusOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["orderId", "purchaseStatus", "orderStatus", "productDescription", "amountCents", "currency", "updatedAt", "message"],
+  properties: {
+    orderId: { type: "string" },
+    purchaseStatus: {
+      type: "string",
+      enum: ["pending_payment", "processing", "sent", "payment_failed", "refund_pending", "refunded", "cancelled"]
+    },
+    orderStatus: { type: "string" },
+    productDescription: { type: "string" },
+    amountCents: { type: "integer" },
+    currency: { type: "string" },
+    mailType: { type: "string", enum: ["letter", "postcard"] },
+    letterId: { type: "string" },
+    checkoutExpiresAt: { type: "string" },
+    updatedAt: { type: "string" },
+    message: { type: "string" }
+  }
+};
+
 export const getOrderStatusInputSchema: JsonSchema = {
   type: "object",
   properties: {
@@ -275,8 +370,8 @@ export const getAccountBalanceOutputSchema: JsonSchema = {
         }
       }
     },
-    imageGenerationsRemaining: { type: "integer", description: "Number of AI image generations remaining (5 per letter purchased)" },
-    imageGenerationsAllowance: { type: "integer", description: "Total AI image generations allowed based on letters purchased" }
+    imageGenerationsRemaining: { type: "integer", description: "Number of explicit image-entitlement units remaining" },
+    imageGenerationsAllowance: { type: "integer", description: "Total image-entitlement units granted by qualifying purchases" }
   }
 };
 
@@ -360,13 +455,14 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
 
 export const quoteAndPreviewPostcardOutputSchema: JsonSchema = {
   type: "object",
-  required: ["previewFrontHtml", "previewBackHtml", "lettersRequired", "canSendNow", "draftId", "draftExpiresAt"],
+  required: ["previewFrontHtml", "previewBackHtml", "lettersRequired", "canSendNow", "sendEligibility", "draftId", "draftExpiresAt"],
   properties: {
     previewFrontHtml: { type: "string", description: "HTML preview of postcard front (image)" },
     previewBackHtml: { type: "string", description: "HTML preview of postcard back (message)" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for 6x9 postcard)" },
     canSendNow: { type: "boolean" },
     reasonCannotSend: { type: "string" },
+    sendEligibility: sendEligibilitySchema,
     deliveryClass: { type: "string" },
     estimatedDeliveryDays: { type: "integer" },
     deliveryEstimate: { type: "string" },
@@ -595,7 +691,7 @@ export const generateImageOutputSchema: JsonSchema = {
     },
     generationsRemaining: {
       type: "integer",
-      description: "Number of image generations remaining in quota (5 per letter purchased)"
+      description: "Number of explicit image-entitlement units remaining"
     }
   }
 };

@@ -3,12 +3,10 @@ import { pathToFileURL } from 'node:url';
 import { closePool } from '../db/index.js';
 import { processDueLetterJobs } from '../services/letterJobService.js';
 import { runMaintenanceTaskIfDue } from '../services/maintenanceTaskService.js';
-import {
-  cleanupExpiredImages,
-  closeTempImageStore,
-} from '../services/tempImageStore.js';
+import { cleanupExpiredImages, closeTempImageStore } from '../services/tempImageStore.js';
 import { runDailyMaintenance } from '../workers/creditExpirationWorker.js';
 import { runStatusSync } from '../workers/statusSyncWorker.js';
+import { runCommerceMaintenance } from '../services/commerceService.js';
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -23,14 +21,13 @@ export async function runMaintenance(): Promise<void> {
   const outbox = await processDueLetterJobs(batchLimit);
   console.log('[Maintenance] Outbox summary:', outbox);
 
+  const commerce = await runCommerceMaintenance();
+  console.log('[Maintenance] Commerce summary:', commerce);
+
   const expiredImages = await cleanupExpiredImages();
   console.log(`[Maintenance] Removed ${expiredImages} expired temporary images`);
 
-  const status = await runMaintenanceTaskIfDue(
-    'provider-status-sync',
-    SIX_HOURS_MS,
-    runStatusSync
-  );
+  const status = await runMaintenanceTaskIfDue('provider-status-sync', SIX_HOURS_MS, runStatusSync);
   console.log(`[Maintenance] Provider status sync ${status.ran ? 'completed' : 'not due'}`);
 
   const daily = await runMaintenanceTaskIfDue(
@@ -52,7 +49,7 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => {
+  main().catch(error => {
     console.error('[Maintenance] Run failed:', error);
     process.exitCode = 1;
   });

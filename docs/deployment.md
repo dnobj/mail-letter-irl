@@ -88,3 +88,29 @@ As of July 16, 2026, development has the transactional-outbox release and hourly
 - Image safety: keep the bucket and credentials in place while any 15-minute image URL may still be active.
 
 Never point development at production Neon to work around a deployment problem.
+
+# Pay & Send rollout (issue #69)
+
+Apply migration `021_jit_commerce_foundation.sql` before deploying code that can
+receive the new Stripe events. Deploy with `JIT_PURCHASE_ENABLED=false` first.
+The migration is backward compatible with prepaid sends and migrates recoverable
+historical pack purchases into the authoritative `orders` model.
+
+Configure development and production independently:
+
+- `STRIPE_JIT_LETTER_PRICE_ID` and `STRIPE_JIT_POSTCARD_PRICE_ID`
+- `JIT_LETTER_AMOUNT_CENTS`, `JIT_POSTCARD_AMOUNT_CENTS`, and `JIT_CURRENCY`
+- `JIT_CHECKOUT_EXPIRY_MINUTES` and `JIT_REFUND_RETRY_LIMIT`
+- `IMAGE_ENTITLEMENTS_PER_PACK_LETTER` and `IMAGE_ENTITLEMENTS_PER_JIT_ORDER`
+- `LETTER_IRL_PACKS_URL`
+
+The configured cent amounts must exactly match their Stripe Prices. A paid
+amount or currency mismatch is quarantined as `refund_pending`; it is never
+fulfilled. Keep Stripe test/live keys, Price IDs, webhook secrets, Railway URLs,
+Neon databases, and PostGrid environments separated as described in
+`docs/infrastructure.md`.
+
+After the migration and disabled deployment are healthy, validate both mail
+types in Stripe test mode, enable only internal development accounts, and then
+set `JIT_PURCHASE_ENABLED=true` for the intended environment. Do not enable the
+production flag until the manual Pay & Send matrix passes on desktop and Android.

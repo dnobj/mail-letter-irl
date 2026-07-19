@@ -9,20 +9,11 @@
 
 import http from 'node:http';
 import { randomBytes } from 'node:crypto';
-import {
-  createCheckoutSession,
-  verifyWebhookSignature,
-  extractCheckoutData,
-  getStripeClient
-} from '../services/stripeService.js';
-import { addCreditsWithOptions, deductCredits } from '../services/creditService.js';
+import { verifyWebhookSignature } from '../services/stripeService.js';
+import { createPackCheckout, processStripeWebhookEvent } from '../services/commerceService.js';
 import { authenticateHttpRequest } from './middleware/auth.js';
 import { parseCookies, serializeCookie } from '../utils/cookies.js';
 import { query } from '../db/index.js';
-import { updateUserTier, invalidateTierCache } from '../services/tierService.js';
-
-// Default expiration for purchased credits (2 years)
-const DEFAULT_PURCHASE_EXPIRATION_DAYS = 730;
 import Stripe from 'stripe';
 
 // Extended request/response types with cookie support
@@ -122,7 +113,7 @@ export async function handleCreateCheckoutSession(
     }
 
     // Create checkout session
-    const result = await createCheckoutSession({
+    const result = await createPackCheckout({
       userId: authInfo.userId,
       userEmail: userEmail || '',
       productId: productId as any,
@@ -135,6 +126,7 @@ export async function handleCreateCheckoutSession(
 
       res.json({
         success: true,
+        orderId: result.orderId,
         sessionId: result.sessionId,
         sessionUrl: result.sessionUrl
       });
@@ -143,7 +135,10 @@ export async function handleCreateCheckoutSession(
 
       // Distinguish between configuration errors and other failures
       const errorMessage = result.error || 'Failed to create checkout session';
-      if (errorMessage.includes('not configured') || errorMessage.includes('environment variable')) {
+      if (
+        errorMessage.includes('not configured') ||
+        errorMessage.includes('environment variable')
+      ) {
         // Configuration error - service temporarily unavailable
         res.statusCode = 503;
         res.json({
@@ -210,266 +205,22 @@ export async function handleStripeWebhook(
 
     console.log(`📥 Webhook received: ${event.type}`);
 
-    // Handle different event types
-    switch (event.type) {
-      case 'checkout.session.completed':
-        await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session);
-        break;
-
-      case 'checkout.session.async_payment_succeeded':
-        await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session);
-        break;
-
-      case 'checkout.session.async_payment_failed':
-        console.log(`❌ Async payment failed for session: ${event.data.object.id}`);
-        break;
-
-      case 'charge.refunded':
-        await handleChargeRefunded(event.data.object as Stripe.Charge);
-        break;
-
-      case 'refund.created':
-        await handleRefundCreated(event.data.object as Stripe.Refund);
-        break;
-
-      case 'charge.dispute.created':
+    // The commerce service claims the Stripe event and applies its state
+    // transition in one database transaction.
+    const processed = await processStripeWebhookEvent(event);
+    if (!processed.duplicate) {
+      if (event.type === 'charge.dispute.created') {
         await handleDisputeCreated(event.data.object as Stripe.Dispute);
-        break;
-
-      case 'charge.dispute.closed':
+      } else if (event.type === 'charge.dispute.closed') {
         await handleDisputeClosed(event.data.object as Stripe.Dispute);
-        break;
-
-      default:
-        console.log(`ℹ️  Unhandled event type: ${event.type}`);
+      }
     }
-
-    res.json({ received: true });
+    res.json({ received: true, duplicate: processed.duplicate });
+    return;
   } catch (error: any) {
     console.error('Error in handleStripeWebhook:', error);
     res.statusCode = 500;
     res.json({ error: 'Webhook processing failed' });
-  }
-}
-
-/**
- * Process successful checkout session
- * Implements idempotency to prevent duplicate credit additions from webhook retries
- */
-async function handleCheckoutSessionCompleted(
-  session: Stripe.Checkout.Session
-): Promise<void> {
-  try {
-    console.log(`✅ Checkout completed: ${session.id}`);
-
-    // Extract checkout data
-    const checkoutData = await extractCheckoutData(session);
-
-    if (!checkoutData) {
-      console.error('❌ Failed to extract checkout data');
-      return;
-    }
-
-    // Idempotency check: verify this session hasn't already been processed
-    const existingEntry = await query<{ ledger_id: string }>(
-      `SELECT ledger_id FROM credit_ledger
-       WHERE source_reference_id = $1 AND source_type = 'purchase'
-       LIMIT 1`,
-      [session.id]
-    );
-
-    if (existingEntry.rows.length > 0) {
-      console.log(`⚠️ Webhook already processed for session ${session.id}, skipping (idempotent)`);
-      return;
-    }
-
-    console.log(`💳 Adding ${checkoutData.credits} credits to user ${checkoutData.userId}`);
-
-    // Add credits to user account with expiration tracking
-    await addCreditsWithOptions({
-      userId: checkoutData.userId,
-      email: checkoutData.customerEmail,
-      credits: checkoutData.credits,
-      sourceType: 'purchase',
-      sourceReferenceId: checkoutData.sessionId,
-      expirationDays: DEFAULT_PURCHASE_EXPIRATION_DAYS,
-      description: `Purchased ${checkoutData.productId} via Stripe Checkout`,
-      sourceMetadata: {
-        stripe_session_id: checkoutData.sessionId,
-        product_id: checkoutData.productId,
-        amount_paid: checkoutData.amountPaid,
-        customer_email: checkoutData.customerEmail
-      }
-    });
-
-    console.log(`✅ Credits added successfully to user ${checkoutData.userId}`);
-  } catch (error: any) {
-    console.error('Error processing checkout completion:', error);
-    throw error;
-  }
-}
-
-/**
- * Handle charge.refunded event
- * Revokes credits from the refunded purchase and recalculates user tier
- */
-async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
-  try {
-    console.log(`💸 Refund webhook: charge ${charge.id}, amount refunded: ${charge.amount_refunded}`);
-
-    // Get the payment intent to find the checkout session
-    const paymentIntentId = typeof charge.payment_intent === 'string'
-      ? charge.payment_intent
-      : charge.payment_intent?.id;
-
-    if (!paymentIntentId) {
-      console.error('❌ Refund webhook: No payment intent ID on charge');
-      return;
-    }
-
-    // Use Stripe API to find checkout session from payment intent
-    const stripe = getStripeClient();
-    let checkoutSessionId: string | null = null;
-
-    try {
-      // Search for checkout sessions with this payment intent
-      const sessions = await stripe.checkout.sessions.list({
-        payment_intent: paymentIntentId,
-        limit: 1
-      });
-
-      if (sessions.data.length > 0) {
-        checkoutSessionId = sessions.data[0].id;
-        console.log(`   Found checkout session: ${checkoutSessionId}`);
-      }
-    } catch (stripeError) {
-      console.warn(`   Could not look up checkout session from Stripe:`, stripeError);
-    }
-
-    // Find the original purchase ledger entry by session ID or payment intent
-    let ledgerResult;
-    if (checkoutSessionId) {
-      // Look up by session ID (most reliable)
-      ledgerResult = await query<{
-        ledger_id: string;
-        user_id: string;
-        initial_amount: number;
-        remaining_amount: number;
-        source_metadata: any;
-      }>(
-        `SELECT ledger_id, user_id, initial_amount, remaining_amount, source_metadata
-         FROM credit_ledger
-         WHERE source_type = 'purchase'
-           AND (source_reference_id = $1 OR source_metadata->>'stripe_session_id' = $1)
-         LIMIT 1`,
-        [checkoutSessionId]
-      );
-    } else {
-      // Fallback: try to find by metadata containing the payment intent
-      ledgerResult = await query<{
-        ledger_id: string;
-        user_id: string;
-        initial_amount: number;
-        remaining_amount: number;
-        source_metadata: any;
-      }>(
-        `SELECT ledger_id, user_id, initial_amount, remaining_amount, source_metadata
-         FROM credit_ledger
-         WHERE source_type = 'purchase'
-           AND source_metadata->>'stripe_payment_intent' = $1
-         LIMIT 1`,
-        [paymentIntentId]
-      );
-    }
-
-    if (ledgerResult.rows.length === 0) {
-      console.warn(`⚠️ Refund webhook: Could not find matching purchase for charge ${charge.id}`);
-      console.log('   This may be a refund for a purchase before ledger tracking was enabled.');
-      return;
-    }
-
-    const entry = ledgerResult.rows[0];
-    const userId = entry.user_id;
-
-    // Check if we've already processed this refund (idempotency)
-    const existingRefund = await query<{ ledger_id: string }>(
-      `SELECT ledger_id FROM credit_ledger
-       WHERE source_type = 'refund'
-         AND related_ledger_id = $1
-       LIMIT 1`,
-      [entry.ledger_id]
-    );
-
-    if (existingRefund.rows.length > 0) {
-      console.log(`⚠️ Refund already processed for ledger entry ${entry.ledger_id}, skipping`);
-      return;
-    }
-
-    // Create a refund ledger entry (negative credits)
-    // This marks the original purchase as having a matching refund
-    await query(
-      `INSERT INTO credit_ledger (
-        user_id, initial_amount, remaining_amount, source_type,
-        source_reference_id, source_metadata, status, description,
-        related_ledger_id, activated_at
-      ) VALUES (
-        $1, $2, 0, 'refund', $3, $4, 'active', $5, $6, NOW()
-      )`,
-      [
-        userId,
-        -entry.initial_amount, // Negative amount for refund
-        charge.id,
-        JSON.stringify({
-          stripe_charge_id: charge.id,
-          stripe_refund_amount: charge.amount_refunded,
-          original_purchase_ledger_id: entry.ledger_id,
-        }),
-        `Refund for charge ${charge.id}`,
-        entry.ledger_id, // Link to original purchase
-      ]
-    );
-
-    console.log(`✅ Refund recorded for user ${userId}, ledger ${entry.ledger_id}`);
-
-    // Recalculate user tier immediately (don't wait for daily job)
-    try {
-      const updatedUser = await updateUserTier(userId);
-      invalidateTierCache(userId);
-      console.log(`🔄 Tier recalculated for user ${userId}: ${updatedUser.tier}`);
-    } catch (tierError) {
-      console.error(`⚠️ Failed to recalculate tier for user ${userId}:`, tierError);
-      // Don't fail the webhook - tier will be recalculated in daily job
-    }
-  } catch (error: any) {
-    console.error('Error processing refund:', error);
-    throw error;
-  }
-}
-
-/**
- * Handle refund.created event
- * This provides more detailed refund information than charge.refunded
- */
-async function handleRefundCreated(refund: Stripe.Refund): Promise<void> {
-  try {
-    const chargeId = typeof refund.charge === 'string' ? refund.charge : refund.charge?.id;
-    const paymentIntentId = typeof refund.payment_intent === 'string'
-      ? refund.payment_intent
-      : refund.payment_intent?.id;
-
-    console.log(`💸 Refund created: ${refund.id}`);
-    console.log(`   Amount: ${refund.amount / 100} ${refund.currency.toUpperCase()}`);
-    console.log(`   Reason: ${refund.reason || 'not specified'}`);
-    console.log(`   Charge: ${chargeId}`);
-    console.log(`   Payment Intent: ${paymentIntentId}`);
-    console.log(`   Status: ${refund.status}`);
-
-    // The actual processing is done in handleChargeRefunded
-    // This event is for logging/monitoring purposes
-    // Both events fire for the same refund, so we avoid duplicate processing
-  } catch (error: any) {
-    console.error('Error processing refund.created:', error);
-    throw error;
   }
 }
 
@@ -479,26 +230,17 @@ async function handleRefundCreated(refund: Stripe.Refund): Promise<void> {
  */
 async function handleDisputeCreated(dispute: Stripe.Dispute): Promise<void> {
   try {
-    console.log(`⚠️ Dispute created: ${dispute.id}, amount: ${dispute.amount}, reason: ${dispute.reason}`);
+    console.log(
+      `⚠️ Dispute created: ${dispute.id}, amount: ${dispute.amount}, reason: ${dispute.reason}`
+    );
 
     // Get the charge to find the user
-    const chargeId = typeof dispute.charge === 'string'
-      ? dispute.charge
-      : dispute.charge?.id;
+    const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
 
     if (!chargeId) {
       console.error('❌ Dispute webhook: No charge ID on dispute');
       return;
     }
-
-    // Try to find the user from our purchase records
-    // Note: We may not be able to find the user if the purchase predates ledger tracking
-    const ledgerResult = await query<{ user_id: string; ledger_id: string }>(
-      `SELECT user_id, ledger_id FROM credit_ledger
-       WHERE source_type = 'purchase'
-       ORDER BY created_at DESC
-       LIMIT 100`
-    );
 
     // Log the dispute for monitoring (we may need manual investigation)
     console.log(`🚨 DISPUTE ALERT: ${dispute.id}`);
@@ -525,9 +267,7 @@ async function handleDisputeClosed(dispute: Stripe.Dispute): Promise<void> {
   try {
     console.log(`📋 Dispute closed: ${dispute.id}, status: ${dispute.status}`);
 
-    const chargeId = typeof dispute.charge === 'string'
-      ? dispute.charge
-      : dispute.charge?.id;
+    const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
 
     if (dispute.status === 'lost') {
       // Customer won the dispute - this is like a refund

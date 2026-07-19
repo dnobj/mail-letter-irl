@@ -41,6 +41,7 @@ vi.mock("../../../src/services/tempImageStore.js", () => ({
 
 // Mock image generation limit service
 vi.mock("../../../src/services/imageGenerationLimitService.js", () => ({
+  commitGenerationReservation: vi.fn(),
   releaseGenerationReservation: vi.fn(),
   reserveGeneration: vi.fn()
 }));
@@ -51,6 +52,7 @@ import {
 } from "../../../src/services/imageGenerationService.js";
 import { storeImage } from "../../../src/services/tempImageStore.js";
 import {
+  commitGenerationReservation,
   releaseGenerationReservation,
   reserveGeneration
 } from "../../../src/services/imageGenerationLimitService.js";
@@ -58,6 +60,7 @@ import { generateImageTool } from "../../../src/tools/generateImage.js";
 
 const mockGenerateImage = generateImage as ReturnType<typeof vi.fn>;
 const mockStoreImage = storeImage as ReturnType<typeof vi.fn>;
+const mockCommitReservation = commitGenerationReservation as ReturnType<typeof vi.fn>;
 const mockReleaseReservation = releaseGenerationReservation as ReturnType<typeof vi.fn>;
 const mockReserveGeneration = reserveGeneration as ReturnType<typeof vi.fn>;
 
@@ -88,10 +91,12 @@ describe("generate_image tool", () => {
     // Default: reserve generation with plenty remaining
     mockReserveGeneration.mockResolvedValue({
       reserved: true,
+      reservationId: "reservation-1",
       used: 3,
       allowance: 25,
       remaining: 22
     });
+    mockCommitReservation.mockResolvedValue(undefined);
     mockReleaseReservation.mockResolvedValue(undefined);
   });
 
@@ -280,6 +285,7 @@ describe("generate_image tool", () => {
 
       expect(mockReserveGeneration).toHaveBeenCalledWith("test-user-id");
       expect(mockGenerateImage).toHaveBeenCalled();
+      expect(mockCommitReservation).toHaveBeenCalledWith("reservation-1");
       expect(mockReleaseReservation).not.toHaveBeenCalled();
     });
   });
@@ -296,7 +302,7 @@ describe("generate_image tool", () => {
       const context = createMockContext();
       await expect(
         generateImageTool.handler({ prompt: "a sunset" }, context)
-      ).rejects.toThrow("used all your image generations");
+      ).rejects.toThrow("used all your Letter IRL image generations");
 
       // Should NOT have called generateImage
       expect(mockGenerateImage).not.toHaveBeenCalled();
@@ -331,7 +337,7 @@ describe("generate_image tool", () => {
       const context = createMockContext();
       await expect(
         generateImageTool.handler({ prompt: "a sunset" }, context)
-      ).rejects.toThrow("Purchase more letters");
+      ).rejects.toThrow("qualifying physical-mail purchase");
     });
 
     it("should log warning when limit is reached", async () => {
@@ -373,7 +379,10 @@ describe("generate_image tool", () => {
           context
         )
       ).rejects.toThrow("content policy");
-      expect(mockReleaseReservation).toHaveBeenCalledWith("test-user-id");
+      expect(mockReleaseReservation).toHaveBeenCalledWith(
+        "test-user-id",
+        "reservation-1"
+      );
     });
 
     it("should throw user-friendly error for missing API key", async () => {

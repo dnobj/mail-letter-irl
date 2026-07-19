@@ -17,6 +17,7 @@ import { createDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
 import { downloadAndProcessLetterImage, ImageProcessingError } from "../services/imageService.js";
 import type { ImageFileParam } from "../services/types.js";
+import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 
 interface QuoteAndPreviewInput {
   sender?: Address;  // Optional - will use saved return address if not provided
@@ -41,6 +42,7 @@ interface QuoteAndPreviewOutput {
   lettersRequired: number;  // Letters required from balance (always 1 for standard)
   canSendNow: boolean;
   reasonCannotSend?: string;
+  sendEligibility: SendEligibility;
   deliveryClass?: string;
   estimatedDeliveryDays?: number;
   // Draft for idempotent send
@@ -531,6 +533,7 @@ async function handler(
   const requiredCredits = estimateRequiredCredits(input.bodyText, input.signOff);
   const available = context.user.creditsRemaining;
   const canSendNow = available >= requiredCredits;
+  const sendEligibility = getSendEligibility(available, requiredCredits, "letter");
   // User-facing: lettersRequired is always 1 for standard letters (2 internal credits)
   const lettersRequired = Math.max(1, Math.ceil(requiredCredits / 2));
 
@@ -593,6 +596,7 @@ async function handler(
     lettersRequired,  // User-facing: 1 letter = 2 internal credits
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
+    sendEligibility,
     deliveryClass: "First Class Letter",
     estimatedDeliveryDays: 5,
     draftId: draftResult.draftId,

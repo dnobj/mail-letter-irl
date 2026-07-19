@@ -20,7 +20,13 @@
         --letter-bg: #fffef8;
         --address-window-bg: #f0f0f0;
 
-        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family:
+          "Inter",
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
         background: transparent;
         color: var(--text-primary);
       }
@@ -121,7 +127,7 @@
       }
 
       .return-address {
-        font-family: 'Times New Roman', Georgia, serif;
+        font-family: "Times New Roman", Georgia, serif;
         font-size: 0.45rem;
         line-height: 1.3;
         color: var(--text-primary);
@@ -129,7 +135,7 @@
       }
 
       .recipient-address {
-        font-family: 'Times New Roman', Georgia, serif;
+        font-family: "Times New Roman", Georgia, serif;
         font-size: 0.5rem;
         line-height: 1.3;
         color: var(--text-primary);
@@ -156,7 +162,7 @@
         flex-direction: column;
         font-family: "Times New Roman", Georgia, serif;
         font-size: 0.55rem;
-        line-height: 1.6;  /* Match PostGrid line-height */
+        line-height: 1.6; /* Match PostGrid line-height */
         color: var(--text-primary);
       }
 
@@ -181,7 +187,7 @@
         white-space: pre-wrap;
         word-wrap: break-word;
         display: -webkit-box;
-        -webkit-line-clamp: 20;  /* Show more lines - content is already validated */
+        -webkit-line-clamp: 20; /* Show more lines - content is already validated */
         -webkit-box-orient: vertical;
       }
 
@@ -327,8 +333,25 @@
         animation: spin 0.8s linear infinite;
       }
 
+      .purchase-actions {
+        display: grid;
+        gap: 0.6rem;
+      }
+
+      .send-button.secondary {
+        color: var(--accent-primary);
+        background: transparent;
+        border: 1px solid var(--accent-primary);
+      }
+
+      .send-button.secondary:hover:not(:disabled) {
+        background: var(--bg-secondary);
+      }
+
       @keyframes spin {
-        to { transform: rotate(360deg); }
+        to {
+          transform: rotate(360deg);
+        }
       }
 
       /* Success/Error states */
@@ -352,7 +375,12 @@
       /* Loading state */
       .loading .info-value,
       .loading .status-pill {
-        background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border-color) 50%, var(--bg-secondary) 75%);
+        background: linear-gradient(
+          90deg,
+          var(--bg-secondary) 25%,
+          var(--border-color) 50%,
+          var(--bg-secondary) 75%
+        );
         background-size: 200% 100%;
         animation: shimmer 1.5s infinite;
         color: transparent;
@@ -365,8 +393,12 @@
       }
 
       @keyframes shimmer {
-        0% { background-position: 200% 0; }
-        100% { background-position: -200% 0; }
+        0% {
+          background-position: 200% 0;
+        }
+        100% {
+          background-position: -200% 0;
+        }
       }
 
       .preview-loading {
@@ -405,12 +437,28 @@
           <span class="info-label" id="id-label">Draft</span>
           <span class="info-value" id="id-value">—</span>
         </div>
-        <div class="note" id="note" style="display: none;"></div>
+        <div class="note" id="note" style="display: none"></div>
         <!-- Send button - US-MCP-08 -->
         <button class="send-button" id="send-button" disabled>
           <span id="send-button-text">Send Letter</span>
         </button>
-        <div id="error-message" class="send-result error" style="display: none;"></div>
+        <div
+          class="purchase-actions"
+          id="purchase-actions"
+          style="display: none"
+        >
+          <button class="send-button" id="pay-send-button">
+            <span id="pay-send-button-text">Pay &amp; Send</span>
+          </button>
+          <button class="send-button secondary" id="buy-pack-button">
+            Buy a Letter Pack
+          </button>
+        </div>
+        <div
+          id="error-message"
+          class="send-result error"
+          style="display: none"
+        ></div>
       </div>
     </div>
 
@@ -423,36 +471,44 @@
 
       let dataLoaded = false;
       let currentDraftId = null;
+      let currentEligibility = null;
       let sendInProgress = false;
+      let checkoutInProgress = false;
 
       function escapeHtml(text) {
-        if (!text) return '';
+        if (!text) return "";
         return text
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;')
-          .replace(/'/g, '&#039;');
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
       }
 
       function truncateText(text, maxLength) {
         if (!text || text.length <= maxLength) return text;
-        return text.substring(0, maxLength) + '...';
+        return text.substring(0, maxLength) + "...";
       }
 
       function getLayoutBadgeClass(layoutType) {
         switch (layoutType) {
-          case 'header_image': return 'header-image';
-          case 'inline_image': return 'inline-image';
-          default: return 'text-only';
+          case "header_image":
+            return "header-image";
+          case "inline_image":
+            return "inline-image";
+          default:
+            return "text-only";
         }
       }
 
       function getLayoutLabel(layoutType) {
         switch (layoutType) {
-          case 'header_image': return 'Header';
-          case 'inline_image': return 'Inline';
-          default: return 'Text';
+          case "header_image":
+            return "Header";
+          case "inline_image":
+            return "Inline";
+          default:
+            return "Text";
         }
       }
 
@@ -462,36 +518,45 @@
         if (addr.name) lines.push(addr.name);
         if (addr.addressLine1) lines.push(addr.addressLine1);
         if (addr.addressLine2) lines.push(addr.addressLine2);
-        const cityLine = [addr.city, addr.state, addr.postalCode].filter(Boolean).join(', ').replace(', ', ', ').replace(/,([^,]*)$/, ' $1');
+        const cityLine = [addr.city, addr.state, addr.postalCode]
+          .filter(Boolean)
+          .join(", ")
+          .replace(", ", ", ")
+          .replace(/,([^,]*)$/, " $1");
         if (cityLine) lines.push(cityLine);
-        return lines.join('<br>');
+        return lines.join("<br>");
       }
 
       function renderLetterMockup(state) {
-        const container = document.getElementById('mockup-container');
-        const layoutType = state.layoutType || 'text_only';
+        const container = document.getElementById("mockup-container");
+        const layoutType = state.layoutType || "text_only";
 
         // Get addresses from validation objects (already in output)
         const senderAddr = state.senderAddressValidation?.originalAddress;
         const recipientAddr = state.recipientAddressValidation?.originalAddress;
 
         // Get content from previewHtml fallback or direct fields
-        let bodyText = '';
-        let signOff = '';
+        let bodyText = "";
+        let signOff = "";
 
         // Attempt to parse from previewHtml if direct fields not available
-        const previewHtml = window.openai?.toolResponseMetadata?.previewHtml ?? state.previewHtml;
+        const previewHtml =
+          window.openai?.toolResponseMetadata?.previewHtml ?? state.previewHtml;
         if (previewHtml) {
           // Try to extract body
-          const bodyMatch = previewHtml.match(/<div class="letter-body">([\s\S]*?)<\/div>/);
+          const bodyMatch = previewHtml.match(
+            /<div class="letter-body">([\s\S]*?)<\/div>/,
+          );
           if (bodyMatch) {
-            bodyText = bodyMatch[1].replace(/<[^>]+>/g, '').trim();
+            bodyText = bodyMatch[1].replace(/<[^>]+>/g, "").trim();
           }
 
           // Try to extract sign-off
-          const signOffMatch = previewHtml.match(/<div class="sign-off">([\s\S]*?)<\/div>/);
+          const signOffMatch = previewHtml.match(
+            /<div class="sign-off">([\s\S]*?)<\/div>/,
+          );
           if (signOffMatch) {
-            signOff = signOffMatch[1].replace(/<[^>]+>/g, '').trim();
+            signOff = signOffMatch[1].replace(/<[^>]+>/g, "").trim();
           }
         }
 
@@ -501,8 +566,8 @@
         }
 
         // Build address window content
-        const senderHtml = senderAddr ? formatAddress(senderAddr) : '';
-        const recipientHtml = recipientAddr ? formatAddress(recipientAddr) : '';
+        const senderHtml = senderAddr ? formatAddress(senderAddr) : "";
+        const recipientHtml = recipientAddr ? formatAddress(recipientAddr) : "";
         const hasAddresses = senderHtml || recipientHtml;
 
         // Build the mockup HTML
@@ -510,10 +575,14 @@
           <div class="letter-mockup">
             <div class="layout-badge ${getLayoutBadgeClass(layoutType)}">${getLayoutLabel(layoutType)}</div>
             <div class="address-window">
-              ${hasAddresses ? `
-                ${senderHtml ? `<div class="return-address">${senderHtml}</div>` : ''}
-                ${recipientHtml ? `<div class="recipient-address">${recipientHtml}</div>` : ''}
-              ` : `<span class="address-window-label">Address Window</span>`}
+              ${
+                hasAddresses
+                  ? `
+                ${senderHtml ? `<div class="return-address">${senderHtml}</div>` : ""}
+                ${recipientHtml ? `<div class="recipient-address">${recipientHtml}</div>` : ""}
+              `
+                  : `<span class="address-window-label">Address Window</span>`
+              }
             </div>
             <div class="letter-content">
         `;
@@ -522,7 +591,7 @@
         // Prefer the small preview image (headerImagePreview) for faster widget loading
         // Fall back to full-quality headerImageData if preview not available
         const headerImage = state.headerImagePreview || state.headerImageData;
-        if (layoutType === 'header_image' && headerImage) {
+        if (layoutType === "header_image" && headerImage) {
           mockupHtml += `
             <div class="header-image-wrapper">
               <img src="${headerImage}" alt="Header">
@@ -542,7 +611,7 @@
         // Prefer the small preview image (inlineImagePreview) for faster widget loading
         // Fall back to full-quality inlineImageData if preview not available
         const inlineImage = state.inlineImagePreview || state.inlineImageData;
-        if (layoutType === 'inline_image' && inlineImage) {
+        if (layoutType === "inline_image" && inlineImage) {
           mockupHtml += `
             <div class="inline-image-wrapper">
               <img src="${inlineImage}" alt="Photo">
@@ -599,28 +668,31 @@
           lettersRequired,
           canSendNow,
           reasonCannotSend,
+          sendEligibility,
           deliveryClass,
           estimatedDeliveryDays,
           deliveryEstimate,
           deliveryDisclaimer,
           savedReturnAddressNote,
           draftId,
-          layoutType
+          layoutType,
         } = state;
 
         // Store draftId for send button
         currentDraftId = draftId;
+        currentEligibility = sendEligibility || null;
 
         // Render the letter mockup (US-LAYOUT-05)
         renderLetterMockup(state);
 
         // Layout type
         const layoutLabels = {
-          'text_only': 'Text Only',
-          'header_image': 'Header Image',
-          'inline_image': 'Inline Image'
+          text_only: "Text Only",
+          header_image: "Header Image",
+          inline_image: "Inline Image",
         };
-        document.getElementById("layout-type").textContent = layoutLabels[layoutType] || 'Text Only';
+        document.getElementById("layout-type").textContent =
+          layoutLabels[layoutType] || "Text Only";
 
         // Cost - lettersRequired is already in letters (1 letter = 1 standard letter)
         const letters = lettersRequired ?? 1;
@@ -666,10 +738,28 @@
         // Update send button state
         const sendButton = document.getElementById("send-button");
         const sendButtonText = document.getElementById("send-button-text");
+        const purchaseActions = document.getElementById("purchase-actions");
+        const paySendButton = document.getElementById("pay-send-button");
+        const paySendButtonText = document.getElementById(
+          "pay-send-button-text",
+        );
+        const buyPackButton = document.getElementById("buy-pack-button");
 
-        if (!sendInProgress) {
+        if (!sendInProgress && !checkoutInProgress) {
+          sendButton.style.display = canSendNow ? "flex" : "none";
           sendButton.disabled = !canSendNow;
-          sendButtonText.textContent = canSendNow ? "Send Letter" : (reasonCannotSend ?? "Cannot Send");
+          sendButtonText.textContent = "Send Letter";
+
+          const payAndSend = sendEligibility?.payAndSend;
+          const letterPack = sendEligibility?.letterPack;
+          purchaseActions.style.display = canSendNow ? "none" : "grid";
+          paySendButton.style.display = payAndSend?.available ? "flex" : "none";
+          paySendButton.disabled = !payAndSend?.available;
+          if (payAndSend?.available && payAndSend.amountCents) {
+            const amount = (payAndSend.amountCents / 100).toFixed(2);
+            paySendButtonText.textContent = `Pay & Send (${String(payAndSend.currency || "usd").toUpperCase()} ${amount})`;
+          }
+          buyPackButton.style.display = letterPack?.available ? "flex" : "none";
         }
       }
 
@@ -697,14 +787,15 @@
           // Call send_letter via OpenAI callTool
           const result = await window.openai.callTool("send_letter", {
             draftId: currentDraftId,
-            confirm: true
+            confirm: true,
           });
 
           // Extract orderId - callTool may return different structures
-          const orderId = result?.orderId
-            || result?.structuredContent?.orderId
-            || result?.content?.[0]?.text?.match(/Order ID: ([a-f0-9-]+)/i)?.[1]
-            || null;
+          const orderId =
+            result?.orderId ||
+            result?.structuredContent?.orderId ||
+            result?.content?.[0]?.text?.match(/Order ID: ([a-f0-9-]+)/i)?.[1] ||
+            null;
 
           // Update status pill to show sent
           statusPill.classList.remove("ok", "alert");
@@ -721,7 +812,7 @@
           // Keep button disabled
         } catch (error) {
           // Show error message
-          errorMessage.textContent = `Failed to send: ${error.message || 'Unknown error'}`;
+          errorMessage.textContent = `Failed to send: ${error.message || "Unknown error"}`;
           errorMessage.style.display = "block";
 
           // Reset button for retry
@@ -738,8 +829,102 @@
         }
       }
 
+      function toolData(result) {
+        return result?.structuredContent || result || {};
+      }
+
+      async function pollPurchaseStatus(orderId) {
+        const statusPill = document.getElementById("status-pill");
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+          const statusResult = await window.openai.callTool(
+            "get_purchase_status",
+            { orderId },
+          );
+          const status = toolData(statusResult);
+          if (status.purchaseStatus === "processing") {
+            statusPill.classList.remove("alert");
+            statusPill.classList.add("ok");
+            statusPill.textContent = "Paid - preparing mail";
+            return;
+          }
+          if (status.purchaseStatus === "sent") {
+            statusPill.classList.remove("alert");
+            statusPill.classList.add("ok");
+            statusPill.textContent = "Sent!";
+            return;
+          }
+          if (
+            [
+              "payment_failed",
+              "refund_pending",
+              "refunded",
+              "cancelled",
+            ].includes(status.purchaseStatus)
+          ) {
+            statusPill.classList.remove("ok");
+            statusPill.classList.add("alert");
+            statusPill.textContent = status.message || status.purchaseStatus;
+            return;
+          }
+        }
+        statusPill.textContent = "Checkout open - status may take a moment";
+      }
+
+      async function handlePayAndSend() {
+        if (checkoutInProgress || !currentDraftId) return;
+        const button = document.getElementById("pay-send-button");
+        const buttonText = document.getElementById("pay-send-button-text");
+        const errorMessage = document.getElementById("error-message");
+        const idLabel = document.getElementById("id-label");
+        const idValue = document.getElementById("id-value");
+        checkoutInProgress = true;
+        errorMessage.style.display = "none";
+        button.disabled = true;
+        button.classList.add("loading");
+        buttonText.innerHTML =
+          '<span class="spinner"></span> Preparing checkout...';
+        try {
+          const result = toolData(
+            await window.openai.callTool("create_mail_checkout", {
+              draftId: currentDraftId,
+            }),
+          );
+          if (!result.checkoutUrl) {
+            throw new Error(result.message || "Checkout URL was not returned");
+          }
+          idLabel.textContent = "Purchase";
+          idValue.textContent = result.orderId;
+          button.classList.remove("loading");
+          buttonText.textContent = "Checkout Opened";
+          await window.openai.openExternal({ href: result.checkoutUrl });
+          void pollPurchaseStatus(result.orderId).catch(() => undefined);
+        } catch (error) {
+          errorMessage.textContent = `Unable to open checkout: ${error.message || "Unknown error"}`;
+          errorMessage.style.display = "block";
+          button.classList.remove("loading");
+          button.disabled = false;
+          buttonText.textContent = "Retry Pay & Send";
+          checkoutInProgress = false;
+        }
+      }
+
+      async function handleBuyPack() {
+        const purchaseUrl = currentEligibility?.letterPack?.purchaseUrl;
+        if (!purchaseUrl) return;
+        await window.openai.openExternal({ href: purchaseUrl });
+      }
+
       // Attach click handler
-      document.getElementById("send-button").addEventListener("click", handleSend);
+      document
+        .getElementById("send-button")
+        .addEventListener("click", handleSend);
+      document
+        .getElementById("pay-send-button")
+        .addEventListener("click", handlePayAndSend);
+      document
+        .getElementById("buy-pack-button")
+        .addEventListener("click", handleBuyPack);
 
       // Apply theme
       const theme = window.openai?.theme ?? "light";
