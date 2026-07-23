@@ -81,22 +81,27 @@ Implementation must make one canonical resource/audience decision instead of sil
 
 Current configurations may use https://letter-irl/api while the protected resource is served from https://api.letterirl.com. Before changing either value, record the live DEV and production values and their consumers.
 
-Preferred end state:
+Selected end state:
 
-- protected resource: the canonical Letter IRL API origin;
-- token audience: one explicit Auth0 API identifier;
+- protected resource: the exact canonical MCP endpoint, including /mcp;
+- production resource: https://api.letterirl.com/mcp;
+- development resource: the exact public DEV MCP endpoint, also including /mcp;
+- MCP token audience: a dedicated Auth0 API identifier equal to that environment's canonical MCP resource;
+- website and REST tokens: retain their existing audience and authentication path;
 - validation: exact issuer and audience allowlists per environment;
 - no acceptance of arbitrary audiences.
 
-If changing the established Auth0 API identifier would disrupt existing tokens, use a documented compatibility phase in DEV, then converge through a separately reviewed production change. Never change the production audience implicitly.
+Create a dedicated MCP API identifier rather than changing the existing website/REST audience in place. If a compatibility phase is needed, implement and test it only in DEV first. Never change the production audience implicitly.
 
 ### Scopes
 
-OIDC identity scopes such as openid, profile, and email are not sufficient authorization for mail actions. Define and enforce minimal product scopes, with a documented tool-to-scope mapping. The implementation may refine names, but the model should distinguish at least:
+OIDC identity scopes such as openid, profile, and email are not sufficient authorization for mail actions. Define and enforce minimal product scopes, with a documented tool-to-scope mapping. Use this initial scope model unless implementation discovers a concrete incompatibility:
 
-- read account/status capabilities;
-- create or update draft/preview capabilities;
-- send or purchase-impacting capabilities.
+- mail:read for balance, order, status, and saved-return-address reads;
+- mail:draft for previews, generated images, and draft or address writes;
+- mail:send for physical send operations.
+
+Keep openid, profile, and email for identity. Add offline_access only if refresh-token behavior is deliberately enabled and tested.
 
 Sensitive tools must fail closed when the required scope is absent. The WWW-Authenticate challenge, protected-resource metadata, Auth0 API permissions, and server-side checks must agree.
 
@@ -159,7 +164,7 @@ This phase is owner-gated because it changes Auth0 and ChatGPT configuration.
 3. Enable the Resource Parameter Compatibility Profile if required for the selected Auth0 configuration.
 4. Import the ChatGPT CIMD URL through Auth0's manual CIMD registration flow.
 5. Confirm the resulting application is a public strict third-party application with token_endpoint_auth_method set to none and PKCE required.
-6. Grant only the DEV Letter IRL API and the approved delegated scopes.
+6. Create or select the dedicated DEV MCP API whose identifier exactly equals the DEV /mcp resource, then grant only mail:read, mail:draft, and mail:send to the imported application.
 7. Configure the identity connections Auth0 requires for a strict third-party app. Audit domain-level connections rather than disabling them blindly, because Auth0 CIMD relies on eligible domain-level connections.
 8. Verify the actual Auth0 discovery response advertises CIMD support.
 9. Confirm the client ID used by ChatGPT is the CIMD URL, not an opaque static Auth0 client ID.
@@ -178,7 +183,7 @@ Required coverage:
 - Unauthorized MCP initialization returns the correct WWW-Authenticate challenge.
 - Token validation accepts a valid Auth0 RS256 token for the configured issuer, audience, and scopes.
 - Token validation rejects wrong issuer, wrong audience, expired token, not-yet-valid token, missing scope, malformed subject, none, and unexpected algorithms.
-- Scope enforcement includes a happy path and failure path for read, draft/preview, and send/purchase-impacting tools.
+- Scope enforcement includes a happy path and failure path for mail:read, mail:draft, and mail:send, with tool metadata matching runtime enforcement.
 - The identity fallback cannot replace a known email with a placeholder.
 - Personal-access-token handling does not call Auth0 userinfo.
 - Startup validation rejects cross-environment issuers, missing endpoints, missing resource/audience, and unsafe production values.
