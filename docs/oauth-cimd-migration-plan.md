@@ -311,3 +311,10 @@ Track separately rather than expanding this issue:
 - Add automated synthetic OAuth monitoring with a dedicated non-production principal.
 - Standardize OAuth adapter requirements for additional MCP hosts.
 - Review the entire production-readiness backlog, including retention, request logging, health checks, and security headers.
+
+
+## Primary references
+
+- OpenAI Apps SDK authentication: https://developers.openai.com/apps-sdk/build/auth/
+- OpenAI authenticated MCP server scaffold for Auth0: https://github.com/openai/openai-mcpkit/tree/main/python-authenticated-mcp-server-scaffold
+- Auth0 manual CIMD registration: https://auth0.com/docs/get-started/auth0-overview/create-applications/register-applications-with-cimd
