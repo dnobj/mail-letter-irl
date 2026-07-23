@@ -47,7 +47,8 @@ describe("Compatibility manifest", () => {
     expect(manifest.servers[0].url).toBe("https://api.letterirl.com/mcp");
     expect(manifest.servers[0].healthUrl).toBe("https://api.letterirl.com/healthz");
     expect(manifest.servers[0].auth.authorizationServer).toBe(
-      "https://api.letterirl.com/.well-known/oauth-authorization-server"
+      process.env.LETTER_IRL_OAUTH_ISSUER ??
+        "https://dev-njmdyqf8n25rqgy7.us.auth0.com/"
     );
   });
 

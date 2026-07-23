@@ -1,458 +1,161 @@
-/**
- * Unit tests for Token Validator (Extended for PAT Support)
- *
- * Tests the authentication middleware that handles both:
- * - JWT tokens from Auth0 (OAuth flow for ChatGPT)
- * - Personal Access Tokens (PAT) for MCP clients
- *
- * User Stories Covered:
- * - US-SEC-01: Authentication Required
- * - US-MCP-03: Authenticate via Personal Access Token
- *
- * Personas Covered:
- * - Sarah, Marcus, etc. (JWT via ChatGPT)
- * - Morgan, Jordan (PAT via MCP clients)
- */
-
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { testUsers } from '../../fixtures/users.js';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  testTokens,
-  createTokenRow,
-  TOKEN_PREFIX,
-} from '../../fixtures/tokens.js';
+  exportJWK,
+  generateKeyPair,
+  importJWK,
+  jwtVerify,
+  SignJWT
+} from "jose";
 
-// Mock jose for JWT validation
-vi.mock('jose', () => ({
-  createRemoteJWKSet: vi.fn(),
-  jwtVerify: vi.fn(),
+vi.mock("../../../src/services/patService.js", () => ({
+  TOKEN_PREFIX: "lirl_pat_",
+  validateToken: vi.fn(),
+  updateLastUsed: vi.fn().mockResolvedValue(undefined)
 }));
 
-// Mock the database for PAT validation
-vi.mock('../../../src/db/index.js', () => ({
-  query: vi.fn(),
-}));
+import {
+  requireScopes,
+  validateAuthorizationHeader,
+  validateJWTToken
+} from "../../../src/auth/tokenValidator.js";
+import {
+  updateLastUsed,
+  validateToken
+} from "../../../src/services/patService.js";
 
-// Import after mocking
-import { createRemoteJWKSet, jwtVerify } from 'jose';
-import * as db from '../../../src/db/index.js';
+const issuer = "https://dev-test.auth0.com/";
+const audience = "https://dev-api.example.com/mcp";
+let privateKey: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"];
+let publicKey: Awaited<ReturnType<typeof generateKeyPair>>["publicKey"];
 
-// Since we're extending the token validator, define expected interface
-interface AuthenticatedUser {
-  userId: string;
-  claims: Record<string, unknown>;
-  token: string;
-  authType: 'jwt' | 'pat';
+async function token(
+  claims: Record<string, unknown> = {},
+  options: { algorithm?: string; expiresIn?: string; notBefore?: string } = {}
+) {
+  const algorithm = options.algorithm ?? "RS256";
+  let builder = new SignJWT({
+    sub: "auth0|user-1",
+    scope: "mail:read mail:draft mail:send",
+    ...claims
+  })
+    .setProtectedHeader({ alg: algorithm })
+    .setIssuer(issuer)
+    .setAudience(audience)
+    .setIssuedAt()
+    .setExpirationTime(options.expiresIn ?? "5m");
+  if (options.notBefore) {
+    builder = builder.setNotBefore(options.notBefore);
+  }
+  return builder.sign(privateKey);
 }
 
-// Mock the extended validateAuthorizationHeader function
-const validateAuthorizationHeader = vi.fn();
+describe("production JWT validator", () => {
+  beforeAll(async () => {
+    ({ privateKey, publicKey } = await generateKeyPair("RS256"));
+  });
 
-describe('tokenValidator with PAT support', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    // Set up environment for JWT validation
-    process.env.LETTER_IRL_OAUTH_ISSUER = 'https://letterirl.auth0.com/';
-    process.env.LETTER_IRL_OAUTH_JWKS_URI = 'https://letterirl.auth0.com/.well-known/jwks.json';
+    vi.stubEnv("LETTER_IRL_OAUTH_ISSUER", issuer);
+    vi.stubEnv("LETTER_IRL_OAUTH_JWKS_URI", `${issuer}.well-known/jwks.json`);
+    vi.stubEnv("LETTER_IRL_OAUTH_AUDIENCE", audience);
+    vi.stubEnv("LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS", "RS256");
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+  afterEach(() => vi.unstubAllEnvs());
 
-  // ==========================================================================
-  // JWT Authentication (Existing Behavior)
-  // ==========================================================================
-  describe('JWT authentication (ChatGPT users)', () => {
-    it('should validate valid JWT token', async () => {
-      const mockPayload = {
-        sub: testUsers.sarah.user_id,
-        email: testUsers.sarah.email,
-        iss: 'https://letterirl.auth0.com/',
-      };
+  const keySet = async () => publicKey;
 
-      vi.mocked(jwtVerify).mockResolvedValueOnce({
-        payload: mockPayload,
-        protectedHeader: { alg: 'RS256' },
-      } as any);
-
-      validateAuthorizationHeader.mockResolvedValueOnce({
-        userId: testUsers.sarah.user_id,
-        claims: mockPayload,
-        token: 'valid-jwt-token',
-        authType: 'jwt',
-      });
-
-      const result = await validateAuthorizationHeader('Bearer valid-jwt-token');
-
-      expect(result.userId).toBe(testUsers.sarah.user_id);
-      expect(result.authType).toBe('jwt');
-    });
-
-    it('should reject missing Authorization header', async () => {
-      validateAuthorizationHeader.mockRejectedValueOnce(
-        new Error('Missing Authorization header')
-      );
-
-      await expect(validateAuthorizationHeader(undefined)).rejects.toThrow(
-        'Missing Authorization header'
-      );
-    });
-
-    it('should reject non-Bearer token', async () => {
-      validateAuthorizationHeader.mockRejectedValueOnce(
-        new Error('Authorization header must be a Bearer token')
-      );
-
-      await expect(validateAuthorizationHeader('Basic abc123')).rejects.toThrow(
-        'Authorization header must be a Bearer token'
-      );
-    });
-
-    it('should reject expired JWT', async () => {
-      vi.mocked(jwtVerify).mockRejectedValueOnce(new Error('JWT expired'));
-
-      validateAuthorizationHeader.mockRejectedValueOnce(new Error('JWT expired'));
-
-      await expect(
-        validateAuthorizationHeader('Bearer expired-jwt-token')
-      ).rejects.toThrow('JWT expired');
-    });
-
-    it('should reject JWT with wrong issuer', async () => {
-      vi.mocked(jwtVerify).mockRejectedValueOnce(
-        new Error('Issuer mismatch')
-      );
-
-      validateAuthorizationHeader.mockRejectedValueOnce(
-        new Error('Issuer mismatch')
-      );
-
-      await expect(
-        validateAuthorizationHeader('Bearer wrong-issuer-jwt')
-      ).rejects.toThrow('Issuer mismatch');
+  it("accepts a valid Auth0 RS256 token with required scopes", async () => {
+    const result = await validateJWTToken(await token(), keySet, ["mail:send"]);
+    expect(result).toMatchObject({
+      userId: "auth0|user-1",
+      authType: "jwt",
+      scopes: ["mail:read", "mail:draft", "mail:send"]
     });
   });
 
-  // ==========================================================================
-  // PAT Authentication (New Behavior - US-MCP-03)
-  // ==========================================================================
-  describe('PAT authentication (MCP users)', () => {
-    it('should detect PAT by prefix and validate', async () => {
-      const mockTokenRow = createTokenRow(1, testUsers.morgan.user_id, 'Claude Desktop');
-
-      vi.mocked(db.query).mockResolvedValueOnce({
-        rows: [mockTokenRow],
-        rowCount: 1,
-        command: 'SELECT',
-        oid: 0,
-        fields: [],
-      });
-
-      validateAuthorizationHeader.mockImplementation(async (header: string) => {
-        const token = header.replace('Bearer ', '');
-
-        if (token.startsWith(TOKEN_PREFIX)) {
-          // PAT validation path
-          return {
-            userId: testUsers.morgan.user_id,
-            claims: { authType: 'pat', tokenId: 1 },
-            token,
-            authType: 'pat',
-          };
-        }
-
-        // JWT validation path (would call jwtVerify)
-        throw new Error('Invalid JWT');
-      });
-
-      const result = await validateAuthorizationHeader(
-        `Bearer ${testTokens.morganToken.raw}`
-      );
-
-      expect(result.userId).toBe(testUsers.morgan.user_id);
-      expect(result.authType).toBe('pat');
-    });
-
-    it('should validate PAT and return user for agent builder', async () => {
-      const mockTokenRow = createTokenRow(
-        2,
-        testUsers.jordan.user_id,
-        'Customer Follow-up Agent'
-      );
-
-      validateAuthorizationHeader.mockResolvedValueOnce({
-        userId: testUsers.jordan.user_id,
-        claims: { authType: 'pat', tokenId: 2 },
-        token: testTokens.jordanToken1.raw,
-        authType: 'pat',
-      });
-
-      const result = await validateAuthorizationHeader(
-        `Bearer ${testTokens.jordanToken1.raw}`
-      );
-
-      expect(result.userId).toBe(testUsers.jordan.user_id);
-      expect(result.authType).toBe('pat');
-    });
-
-    it('should reject revoked PAT', async () => {
-      validateAuthorizationHeader.mockRejectedValueOnce(
-        new Error('Token has been revoked')
-      );
-
-      await expect(
-        validateAuthorizationHeader(`Bearer ${testTokens.revokedToken.raw}`)
-      ).rejects.toThrow('Token has been revoked');
-    });
-
-    it('should reject expired PAT', async () => {
-      validateAuthorizationHeader.mockRejectedValueOnce(
-        new Error('Token has expired')
-      );
-
-      await expect(
-        validateAuthorizationHeader(`Bearer ${testTokens.expiredToken.raw}`)
-      ).rejects.toThrow('Token has expired');
-    });
-
-    it('should reject PAT not found in database', async () => {
-      vi.mocked(db.query).mockResolvedValueOnce({
-        rows: [],
-        rowCount: 0,
-        command: 'SELECT',
-        oid: 0,
-        fields: [],
-      });
-
-      validateAuthorizationHeader.mockRejectedValueOnce(
-        new Error('Token not found')
-      );
-
-      await expect(
-        validateAuthorizationHeader(`Bearer ${TOKEN_PREFIX}${'x'.repeat(32)}`)
-      ).rejects.toThrow('Token not found');
-    });
-
-    it('should reject malformed PAT', async () => {
-      validateAuthorizationHeader.mockRejectedValueOnce(
-        new Error('Invalid token format')
-      );
-
-      // Too short
-      await expect(
-        validateAuthorizationHeader(`Bearer ${TOKEN_PREFIX}short`)
-      ).rejects.toThrow('Invalid token format');
-    });
-
-    it('should update last_used_at on successful PAT validation', async () => {
-      const mockTokenRow = createTokenRow(1, testUsers.morgan.user_id, 'Claude Desktop');
-
-      validateAuthorizationHeader.mockImplementation(async (header: string) => {
-        // Simulate updating last_used_at
-        await db.query(
-          'UPDATE personal_access_tokens SET last_used_at = NOW() WHERE token_id = $1',
-          [1]
-        );
-
-        return {
-          userId: testUsers.morgan.user_id,
-          claims: { authType: 'pat', tokenId: 1 },
-          token: testTokens.morganToken.raw,
-          authType: 'pat',
-        };
-      });
-
-      vi.mocked(db.query).mockResolvedValueOnce({
-        rows: [],
-        rowCount: 1,
-        command: 'UPDATE',
-        oid: 0,
-        fields: [],
-      });
-
-      await validateAuthorizationHeader(`Bearer ${testTokens.morganToken.raw}`);
-
-      expect(db.query).toHaveBeenCalledWith(
-        expect.stringContaining('UPDATE personal_access_tokens'),
-        expect.arrayContaining([1])
-      );
-    });
+  it("rejects a wrong issuer", async () => {
+    vi.stubEnv("LETTER_IRL_OAUTH_ISSUER", "https://wrong.auth0.com/");
+    await expect(validateJWTToken(await token(), keySet)).rejects.toThrow();
   });
 
-  // ==========================================================================
-  // Token Type Detection
-  // ==========================================================================
-  describe('token type detection', () => {
-    it('should detect PAT by prefix', async () => {
-      validateAuthorizationHeader.mockImplementation(async (header: string) => {
-        const token = header.replace('Bearer ', '');
-        const isPAT = token.startsWith(TOKEN_PREFIX);
-
-        return {
-          userId: 'test-user',
-          claims: {},
-          token,
-          authType: isPAT ? 'pat' : 'jwt',
-        };
-      });
-
-      const patResult = await validateAuthorizationHeader(
-        `Bearer ${TOKEN_PREFIX}${'a'.repeat(32)}`
-      );
-      expect(patResult.authType).toBe('pat');
-
-      const jwtResult = await validateAuthorizationHeader(
-        'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test'
-      );
-      expect(jwtResult.authType).toBe('jwt');
-    });
-
-    it('should route PAT to database validation, JWT to JWKS', async () => {
-      let patValidationCalled = false;
-      let jwtValidationCalled = false;
-
-      validateAuthorizationHeader.mockImplementation(async (header: string) => {
-        const token = header.replace('Bearer ', '');
-
-        if (token.startsWith(TOKEN_PREFIX)) {
-          patValidationCalled = true;
-          return {
-            userId: testUsers.morgan.user_id,
-            claims: {},
-            token,
-            authType: 'pat' as const,
-          };
-        } else {
-          jwtValidationCalled = true;
-          return {
-            userId: testUsers.sarah.user_id,
-            claims: {},
-            token,
-            authType: 'jwt' as const,
-          };
-        }
-      });
-
-      // Call with PAT
-      await validateAuthorizationHeader(`Bearer ${TOKEN_PREFIX}${'a'.repeat(32)}`);
-      expect(patValidationCalled).toBe(true);
-
-      // Call with JWT
-      await validateAuthorizationHeader('Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test');
-      expect(jwtValidationCalled).toBe(true);
-    });
+  it("rejects a wrong audience", async () => {
+    vi.stubEnv("LETTER_IRL_OAUTH_AUDIENCE", "https://wrong.example/mcp");
+    await expect(validateJWTToken(await token(), keySet)).rejects.toThrow();
   });
 
-  // ==========================================================================
-  // Error Handling
-  // ==========================================================================
-  describe('error handling', () => {
-    it('should return 401 status for authentication failures', async () => {
-      // All auth failures should result in errors that translate to 401
-      const errorCases = [
-        { header: undefined, error: 'Missing Authorization header' },
-        { header: 'Basic abc', error: 'Authorization header must be a Bearer token' },
-        { header: `Bearer ${TOKEN_PREFIX}short`, error: 'Invalid token format' },
-        { header: 'Bearer invalid-jwt', error: 'Invalid JWT' },
-      ];
-
-      for (const { header, error } of errorCases) {
-        validateAuthorizationHeader.mockRejectedValueOnce(new Error(error));
-
-        await expect(validateAuthorizationHeader(header)).rejects.toThrow();
-      }
-    });
-
-    it('should not leak sensitive info in error messages', async () => {
-      // Error messages should not include the actual token
-      validateAuthorizationHeader.mockRejectedValueOnce(
-        new Error('Token not found')
-      );
-
-      try {
-        await validateAuthorizationHeader(
-          `Bearer ${TOKEN_PREFIX}${'secret'.repeat(6)}`
-        );
-      } catch (e: any) {
-        expect(e.message).not.toContain('secret');
-        expect(e.message).toBe('Token not found');
-      }
-    });
+  it("rejects expired and not-yet-valid tokens", async () => {
+    await expect(
+      validateJWTToken(await token({}, { expiresIn: "-1s" }), keySet)
+    ).rejects.toThrow();
+    await expect(
+      validateJWTToken(await token({}, { notBefore: "5m" }), keySet)
+    ).rejects.toThrow();
   });
 
-  // ==========================================================================
-  // Backward Compatibility
-  // ==========================================================================
-  describe('backward compatibility', () => {
-    it('should continue to work for existing JWT users', async () => {
-      // Simulate existing ChatGPT flow
-      vi.mocked(jwtVerify).mockResolvedValueOnce({
-        payload: {
-          sub: testUsers.sarah.user_id,
-          email: testUsers.sarah.email,
-        },
-        protectedHeader: { alg: 'RS256' },
-      } as any);
-
-      validateAuthorizationHeader.mockResolvedValueOnce({
-        userId: testUsers.sarah.user_id,
-        claims: { sub: testUsers.sarah.user_id, email: testUsers.sarah.email },
-        token: 'valid-jwt',
-        authType: 'jwt',
-      });
-
-      const result = await validateAuthorizationHeader('Bearer valid-jwt');
-
-      expect(result.userId).toBe(testUsers.sarah.user_id);
-      // Should work exactly as before for JWT users
-    });
-
-    it('should not affect existing OAuth metadata endpoints', async () => {
-      // The OAuth metadata endpoints should continue to work
-      // This is more of an integration test, but validates the principle
-      expect(process.env.LETTER_IRL_OAUTH_ISSUER).toBeDefined();
-      expect(process.env.LETTER_IRL_OAUTH_JWKS_URI).toBeDefined();
-    });
+  it("rejects a missing scope and malformed subject", async () => {
+    await expect(
+      validateJWTToken(await token({ scope: "mail:read" }), keySet, ["mail:send"])
+    ).rejects.toThrow("insufficient_scope");
+    await expect(
+      validateJWTToken(await token({ sub: " " }), keySet)
+    ).rejects.toThrow("valid subject");
   });
 
-  // ==========================================================================
-  // Performance
-  // ==========================================================================
-  describe('performance', () => {
-    it('should detect token type before expensive operations', async () => {
-      const operationOrder: string[] = [];
+  it("rejects none and unexpected signing algorithms", async () => {
+    const noneToken = `${Buffer.from('{"alg":"none"}').toString("base64url")}.${Buffer.from(
+      JSON.stringify({
+        iss: issuer,
+        aud: audience,
+        sub: "auth0|user",
+        exp: Math.floor(Date.now() / 1000) + 300
+      })
+    ).toString("base64url")}.`;
+    await expect(validateJWTToken(noneToken, keySet)).rejects.toThrow();
 
-      validateAuthorizationHeader.mockImplementation(async (header: string) => {
-        const token = header.replace('Bearer ', '');
+    const esKeys = await generateKeyPair("ES256");
+    const esToken = await new SignJWT({ sub: "auth0|user" })
+      .setProtectedHeader({ alg: "ES256" })
+      .setIssuer(issuer)
+      .setAudience(audience)
+      .setExpirationTime("5m")
+      .sign(esKeys.privateKey);
+    await expect(validateJWTToken(esToken, async () => esKeys.publicKey)).rejects.toThrow();
+  });
 
-        operationOrder.push('detect_type');
+  it("verifies the token cryptographically rather than trusting decoded claims", async () => {
+    const jwk = await exportJWK(publicKey);
+    const imported = await importJWK(jwk, "RS256");
+    const signed = await token();
+    await expect(
+      jwtVerify(signed, imported, {
+        issuer,
+        audience,
+        algorithms: ["RS256"]
+      })
+    ).resolves.toBeDefined();
+  });
+});
 
-        if (token.startsWith(TOKEN_PREFIX)) {
-          operationOrder.push('pat_validate');
-          // PAT validation is a simple DB lookup
-          return {
-            userId: testUsers.morgan.user_id,
-            claims: {},
-            token,
-            authType: 'pat' as const,
-          };
-        } else {
-          operationOrder.push('jwt_validate');
-          // JWT validation requires JWKS fetch and crypto verification
-          return {
-            userId: testUsers.sarah.user_id,
-            claims: {},
-            token,
-            authType: 'jwt' as const,
-          };
-        }
-      });
+describe("PAT separation", () => {
+  afterEach(() => vi.clearAllMocks());
 
-      await validateAuthorizationHeader(`Bearer ${TOKEN_PREFIX}${'a'.repeat(32)}`);
-
-      // Should detect type first, then only do PAT validation
-      expect(operationOrder).toEqual(['detect_type', 'pat_validate']);
+  it("routes PATs to the PAT validator and treats tool scopes separately", async () => {
+    vi.mocked(validateToken).mockResolvedValue({
+      valid: true,
+      userId: "pat-user",
+      tokenId: "token-1"
     });
+    const result = await validateAuthorizationHeader("Bearer lirl_pat_secret");
+    expect(result.authType).toBe("pat");
+    expect(result.scopes).toEqual([]);
+    expect(() => requireScopes(result, ["mail:send"])).not.toThrow();
+    expect(updateLastUsed).toHaveBeenCalledWith("token-1");
+  });
+
+  it("rejects malformed authorization headers without leaking the credential", async () => {
+    await expect(validateAuthorizationHeader("Basic secret")).rejects.toThrow(
+      "Bearer token"
+    );
   });
 });

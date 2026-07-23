@@ -57,8 +57,12 @@ Letter IRL reads the following environment variables at runtime:
 - `LETTER_IRL_WIDGET_PATH`, `LETTER_IRL_MANIFEST_ROUTE`, `LETTER_IRL_OPENID_ROUTE`, `LETTER_IRL_PROTECTED_RESOURCE_ROUTE` — override default asset and metadata routes (`/widgets`, `/manifest.json`, `/.well-known/openid-configuration`, `/.well-known/oauth-protected-resource`).
 - `LETTER_IRL_PUBLIC_BASE_URL` — external HTTPS base URL (e.g., your ngrok domain) used in manifest and OAuth metadata.
 - `LETTER_IRL_REQUIRE_AUTH` — set to `false` to disable OAuth enforcement during local testing (default `true`).
-- `LETTER_IRL_OAUTH_ISSUER`, `LETTER_IRL_OAUTH_JWKS_URI`, `LETTER_IRL_OAUTH_AUTH_ENDPOINT`, `LETTER_IRL_OAUTH_TOKEN_ENDPOINT`, `LETTER_IRL_OAUTH_SCOPES`, `LETTER_IRL_OAUTH_AUDIENCE` — OAuth metadata used to verify Google Identity Platform tokens and publish `.well-known` documents for ChatGPT Apps. Scopes default to `openid email profile`.
-- `LETTER_IRL_OAUTH_CLIENT_ID`, `LETTER_IRL_OAUTH_CLIENT_SECRET` — static OAuth client credentials returned via the dynamic client registration stub (`/oauth/register`).
+- `LETTER_IRL_OAUTH_ISSUER`, `LETTER_IRL_OAUTH_JWKS_URI`, `LETTER_IRL_OAUTH_AUTH_ENDPOINT`, and `LETTER_IRL_OAUTH_TOKEN_ENDPOINT` — the real Auth0 authorization server. Letter IRL publishes only protected-resource metadata in normal CIMD mode.
+- `LETTER_IRL_MCP_RESOURCE` / `LETTER_IRL_OAUTH_AUDIENCE` — the same exact environment-specific HTTPS `/mcp` URL for the dedicated Auth0 MCP API.
+- `LETTER_IRL_OAUTH_SCOPES` — identity scopes plus `mail:read`, `mail:draft`, and `mail:send`; tools advertise and enforce the minimum product scope.
+- `LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS` — must be `RS256`.
+- `LETTER_IRL_DEPLOYMENT_ENVIRONMENT` and the matching issuer allowlist variable — prevent development/production tenant crossover at startup.
+- `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY` / `CHATGPT_STATIC_CLIENT_ID` — temporary environment-specific rollback only; disabled for Auth0 public CIMD.
 - `LETTER_IRL_DEFAULT_USER_ID` — fallback user ID when auth is disabled.
 
-See `docs/oauth-plan.md` for the full Google Cloud + Firestore setup.
+See `docs/oauth-cimd-migration-plan.md` for the approved ChatGPT/Auth0 architecture.

@@ -1,8 +1,20 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** December 29, 2025
+**Last Updated:** July 23, 2026
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
+
+## Current configuration contract
+
+Development and production each use a dedicated Auth0 MCP API whose identifier
+is the exact canonical environment `/mcp` URL. ChatGPT is a manually imported,
+strict third-party public CIMD application using authorization code + PKCE S256
+and no token endpoint authentication. Grant only `mail:read`, `mail:draft`, and
+`mail:send`. Keep website/REST applications and Claude/PAT paths separate.
+
+The DCR/static-client sections below document the temporary rollback baseline,
+not the desired configuration. Do not enable them in a normal CIMD rollout.
+`private_key_jwt`/Auth0 Enterprise is not part of this design.
 
 ## Tenants Overview
 
@@ -36,14 +48,15 @@ Use this table to verify each application has the correct settings:
 |-------------|------|-------------------|---------------------|-------------------|
 | **Mail Letter IRL** | SPA | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect`<br>`https://platform.openai.com/apps-manage/oauth` | `https://chat.openai.com`<br>`https://chatgpt.com`<br>`https://platform.openai.com` | N/A |
 | **Letter IRL API** | M2M | None | None | N/A |
-| **ChatGPT (DCR)** | Generic | `https://chatgpt.com/connector_platform_oauth_redirect` | N/A | Uses domain-level |
+| **ChatGPT public CIMD** | Strict third-party public client | Exact current `https://chatgpt.com/connector/oauth/{callback_id}` from CIMD | N/A | Audited eligible connections |
 
 ### Tenant-Level Settings Checklist
 
 | Setting | Location | Required Value |
 |---------|----------|----------------|
-| DCR Enabled | Settings → Advanced | ✅ Enabled |
-| Default Audience | Settings → General → API Authorization | `https://letter-irl/api` |
+| CIMD registration | Settings → Advanced | Enabled for the target environment |
+| MCP API identifier | Applications → APIs | Exact canonical environment `/mcp` URL |
+| DCR Enabled | Settings → Advanced | Rollback inventory only |
 | Friendly Name | Settings → General | `Letter IRL` |
 | Google Connection | Connections | `is_domain_connection: true` |
 | Microsoft Connection | Connections | `is_domain_connection: true` |
@@ -69,9 +82,9 @@ Use this table to verify each application has the correct settings:
 
 This Auth0 tenant is configured to support:
 - **ChatGPT MCP Server** with OAuth 2.1 + PKCE authentication
-- **Dynamic Client Registration (RFC 7591)** for ChatGPT apps
+- **Manual public CIMD registration** for ChatGPT apps
 - **5 Authentication Methods**: Google, Microsoft, Apple, GitHub, Email/Password
-- **Domain-level connections** to support third-party dynamically registered clients
+- **Audited eligible connections** for strict third-party CIMD clients
 
 ---
 
@@ -82,7 +95,7 @@ This Auth0 tenant is configured to support:
 | **Domain** | `dev-ky21dxn3qmi71hjl.us.auth0.com` |
 | **Region** | US (dev) |
 | **Default Audience** | `https://letter-irl/api` |
-| **OIDC DCR Enabled** | ✅ Yes (required for ChatGPT) |
+| **OIDC DCR Enabled** | Rollback inventory only; not required by ChatGPT CIMD |
 
 ### Important Endpoints
 
@@ -290,7 +303,7 @@ Dynamically registered via RFC 7591 when ChatGPT connects to the MCP server. Mul
 
 Auth0's Management API with 200+ scopes for programmatic tenant administration.
 
-### 2. Letter IRL API
+### 2. Legacy website/REST Letter IRL API
 
 | Property | Value |
 |----------|-------|
@@ -298,23 +311,25 @@ Auth0's Management API with 200+ scopes for programmatic tenant administration.
 | **Name** | Letter IRL API |
 | **Scopes** | None configured |
 
-**Critical:** This identifier is set as the **Default Audience** in tenant settings (Settings → General → API Authorization Settings). This is required because ChatGPT does not send the `audience` parameter during OAuth flows.
+This identifier remains for website/REST compatibility. Do not repurpose it for
+ChatGPT. The dedicated MCP API identifier exactly equals the environment's
+canonical `/mcp` resource.
 
 ---
 
 ## Key Settings for ChatGPT MCP
 
-### Required Auth0 Configuration
+### Required Auth0 CIMD Configuration
 
-1. **Dynamic Client Registration (DCR)**
-   - **Location:** Settings → Advanced → OIDC Dynamic Application Registration
-   - **Status:** ✅ Enabled
-   - **Why:** ChatGPT requires RFC 7591 for automatic client registration
+1. **Client ID Metadata Document registration**
+   - Import the current OpenAI-hosted HTTPS CIMD URL manually.
+   - Verify public client, authorization code, PKCE S256, and no token endpoint
+     authentication.
 
-2. **Default Audience**
-   - **Location:** Settings → General → API Authorization Settings
-   - **Value:** `https://letter-irl/api`
-   - **Why:** ChatGPT doesn't send `audience` parameter; this provides default
+2. **Dedicated MCP resource/API**
+   - Identifier: exact canonical environment `/mcp` URL.
+   - Permissions: `mail:read`, `mail:draft`, and `mail:send`.
+   - Enable the resource-parameter compatibility profile when Auth0 requires it.
 
 3. **Domain-Level Connections**
    - **All 5 connections** must have `is_domain_connection: true`

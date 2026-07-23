@@ -1,5 +1,6 @@
 import { LetterIrlServer } from "../server.js";
 import { WIDGET_DEFINITIONS } from "./registerTools.js";
+import { DEFAULT_OAUTH_SCOPES } from "../auth/oauthConfig.js";
 import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
 
 function getManifestUrls(publicBaseUrlOverride?: string) {
@@ -7,11 +8,12 @@ function getManifestUrls(publicBaseUrlOverride?: string) {
     publicBaseUrlOverride ?? process.env.LETTER_IRL_PUBLIC_BASE_URL ?? "https://api.letterirl.com";
   const mcpPath = process.env.LETTER_IRL_MCP_PATH ?? "/mcp";
   const healthPath = process.env.LETTER_IRL_HEALTH_PATH ?? "/healthz";
-  const authServerRoute =
-    process.env.LETTER_IRL_AUTH_SERVER_ROUTE ?? "/.well-known/oauth-authorization-server";
+  const authorizationServer =
+    process.env.LETTER_IRL_OAUTH_ISSUER ??
+    "https://dev-njmdyqf8n25rqgy7.us.auth0.com/";
 
   return {
-    authServerUrl: `${publicBaseUrl}${authServerRoute}`,
+    authorizationServer,
     healthUrl: `${publicBaseUrl}${healthPath}`,
     mcpUrl: `${publicBaseUrl}${mcpPath}`
   };
@@ -53,8 +55,8 @@ export function buildManifest(publicBaseUrl?: string) {
         },
         auth: {
           type: "oauth",
-          scopes: ["openid", "email", "profile"],
-          authorizationServer: urls.authServerUrl
+          scopes: DEFAULT_OAUTH_SCOPES,
+          authorizationServer: urls.authorizationServer
         }
       }
     ],

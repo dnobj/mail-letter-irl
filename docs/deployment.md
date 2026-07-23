@@ -4,6 +4,13 @@ Last updated: July 16, 2026
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
 
+For the Auth0 CIMD migration, code deployment and tenant/app configuration are
+separate gates. The owner first configures only DEV: exact DEV `/mcp` API
+identifier, three product scopes, public CIMD import, eligible connections, and
+resource compatibility. Browser validation and rollback then run in DEV.
+Production Auth0, OpenAI, Railway, and the `master` branch remain unchanged
+until the soak is clean and the owner explicitly approves promotion.
+
 ## Branch and Environment Mapping
 
 | Repository | Development | Production |

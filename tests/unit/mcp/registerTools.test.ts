@@ -339,21 +339,22 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
 
   describe('Tool Auth Metadata', () => {
     it('should declare oauth2 security scheme when auth is required', () => {
-      expect(buildToolSecuritySchemes(true)).toEqual([
+      expect(buildToolSecuritySchemes('get_account_balance', true)).toEqual([
         {
           type: 'oauth2',
-          scopes: ['openid', 'email', 'profile']
+          scopes: ['mail:read']
         }
       ]);
     });
 
     it('should declare noauth security scheme when auth is disabled', () => {
-      expect(buildToolSecuritySchemes(false)).toEqual([{ type: 'noauth' }]);
+      expect(buildToolSecuritySchemes('send_letter', false)).toEqual([{ type: 'noauth' }]);
     });
 
     it('should merge securitySchemes into tool metadata', () => {
       expect(
         buildToolMeta(
+          'quote_and_preview_letter',
           {
             'openai/outputTemplate': 'ui://widgets/LetterPreviewCard.html',
             'openai/widgetAccessible': true
@@ -364,7 +365,7 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
         securitySchemes: [
           {
             type: 'oauth2',
-            scopes: ['openid', 'email', 'profile']
+              scopes: ['mail:draft']
           }
         ],
         'openai/widgetAccessible': true,
