@@ -45,6 +45,10 @@ import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
 import { ToolMeta } from "../contracts/types.js";
 import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
 import { prepareAuthenticatedUser } from "../auth/identity.js";
+import {
+  buildInsufficientScopeToolResult,
+  InsufficientScopeError
+} from "../auth/oauthChallenge.js";
 
 /**
  * Build MCP tool annotations from tool definition.
@@ -379,7 +383,14 @@ export async function registerLetterTools(
         _meta: buildToolMeta(tool.name, tool.meta)
       },
       async (args: Record<string, unknown>, extra: any) => {
-        authorizeTool(tool.name, authInfo);
+        try {
+          authorizeTool(tool.name, authInfo);
+        } catch (error) {
+          if (error instanceof InsufficientScopeError) {
+            return buildInsufficientScopeToolResult(error);
+          }
+          throw error;
+        }
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
         const extraMeta = extra._meta as Record<string, unknown> | undefined;

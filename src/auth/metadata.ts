@@ -3,7 +3,7 @@ import { getOAuthConfig } from "./oauthConfig.js";
 export function getOpenIdConfiguration(baseUrl: string) {
   const config = getOAuthConfig();
   return {
-    issuer: config.issuer,
+    issuer: config.staticDcrCompatibility ? baseUrl : config.issuer,
     authorization_endpoint: config.authorizationEndpoint,
     token_endpoint: config.tokenEndpoint,
     jwks_uri: config.jwksUri,
@@ -20,11 +20,13 @@ export function getOpenIdConfiguration(baseUrl: string) {
   };
 }
 
-export function getProtectedResourceMetadata(_baseUrl?: string) {
+export function getProtectedResourceMetadata(baseUrl?: string) {
   const config = getOAuthConfig();
   return {
     resource: config.resource,
-    authorization_servers: [config.issuer],
+    authorization_servers: [
+      config.staticDcrCompatibility && baseUrl ? baseUrl : config.issuer
+    ],
     scopes_supported: config.scopes
   };
 }

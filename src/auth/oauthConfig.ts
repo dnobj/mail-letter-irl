@@ -13,6 +13,7 @@ export interface OAuthConfig {
   scopes: string[];
   staticDcrCompatibility: boolean;
   staticClientId?: string;
+  staticRedirectUris: string[];
 }
 
 function parseList(value: string | undefined, fallback: readonly string[] = []): string[] {
@@ -47,7 +48,8 @@ export function getOAuthConfig(env: NodeJS.ProcessEnv = process.env): OAuthConfi
     algorithms: parseList(env.LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS, ["RS256"]),
     scopes: parseList(env.LETTER_IRL_OAUTH_SCOPES, DEFAULT_OAUTH_SCOPES),
     staticDcrCompatibility,
-    staticClientId: env.CHATGPT_STATIC_CLIENT_ID
+    staticClientId: env.CHATGPT_STATIC_CLIENT_ID,
+    staticRedirectUris: parseList(env.CHATGPT_STATIC_REDIRECT_URIS)
   };
 }
 
@@ -124,6 +126,11 @@ export function validateOAuthConfig(
   if (config.staticDcrCompatibility && !config.staticClientId) {
     errors.push("CHATGPT_STATIC_CLIENT_ID is required when static DCR compatibility is enabled");
   }
+  if (config.staticDcrCompatibility && config.staticRedirectUris.length === 0) {
+    errors.push(
+      "CHATGPT_STATIC_REDIRECT_URIS is required when static DCR compatibility is enabled"
+    );
+  }
 
   const deploymentEnvironment = env.LETTER_IRL_DEPLOYMENT_ENVIRONMENT;
   const expectedIssuer =
@@ -150,6 +157,12 @@ export function validateOAuthConfig(
   }
 
   return errors;
+}
+
+export function isCimdEnforcementEnabled(
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  return env.LETTER_IRL_OAUTH_CIMD_ENFORCEMENT === "true";
 }
 
 export function assertValidOAuthConfig(

@@ -61,5 +61,12 @@ describe("OAuth metadata", () => {
     expect(
       getOpenIdConfiguration("https://dev-api.example.com").registration_endpoint
     ).toBe("https://dev-api.example.com/oauth/register");
+    expect(
+      getOpenIdConfiguration("https://dev-api.example.com").issuer
+    ).toBe("https://dev-api.example.com");
+    expect(
+      getProtectedResourceMetadata("https://dev-api.example.com")
+        .authorization_servers
+    ).toEqual(["https://dev-api.example.com"]);
   });
 });

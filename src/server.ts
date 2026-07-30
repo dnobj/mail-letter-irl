@@ -83,6 +83,20 @@ export interface ServerResponse<Output> {
   meta: Record<string, unknown>;
 }
 
+export function summarizeToolInput(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== "object") {
+    return { type: typeof input };
+  }
+  const entries = Object.entries(input as Record<string, unknown>).slice(0, 8);
+  return {
+    fieldCount: Object.keys(input as Record<string, unknown>).length,
+    fields: entries.map(([name, value]) => ({
+      name,
+      type: Array.isArray(value) ? "array" : value === null ? "null" : typeof value
+    }))
+  };
+}
+
 export class LetterIrlServer {
   private store = new FileAccountStore();
 
@@ -116,21 +130,6 @@ export class LetterIrlServer {
     return createHash("sha256").update(userId).digest("hex").slice(0, 12);
   }
 
-  private summarizeInput(input: unknown): Record<string, unknown> {
-    if (!input || typeof input !== "object") {
-      return { type: typeof input };
-    }
-    const entries = Object.entries(input as Record<string, unknown>)
-      .slice(0, 8)
-      .map(([key, value]) => {
-        if (typeof value === "object" && value !== null) {
-          return [key, "[object]"];
-        }
-        return [key, value];
-      });
-    return Object.fromEntries(entries);
-  }
-
   async execute<Input, Output>(
     request: ServerRequest<Input>
   ): Promise<ServerResponse<Output>> {
@@ -151,7 +150,7 @@ export class LetterIrlServer {
       {
         correlationId,
         event: "tool.invocation.start",
-        inputSummary: this.summarizeInput(request.input)
+        inputSummary: summarizeToolInput(request.input)
       },
       "Tool invocation started"
     );

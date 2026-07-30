@@ -145,6 +145,15 @@ AUTH0_AUDIENCE=https://letter-irl/api
 2. Find "Dynamic Client Registration (DCR)"
 3. Enable the toggle only when the rollback owner approves it
 4. Save
+5. Set `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY=true`,
+   `CHATGPT_STATIC_CLIENT_ID` to the inventoried rollback client, and
+   `CHATGPT_STATIC_REDIRECT_URIS` to the space-separated exact callback URLs
+   already configured on that Auth0 client. Never use a wildcard or infer a
+   per-app callback.
+6. Verify protected-resource discovery names the Letter IRL origin as the
+   authorization server, its authorization metadata advertises
+   `/oauth/register`, and the registration response returns the exact callback
+   inventory.
 
 ---
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getOAuthConfig,
+  isCimdEnforcementEnabled,
   validateOAuthConfig
 } from "../../../src/auth/oauthConfig.js";
 
@@ -72,5 +73,12 @@ describe("OAuth startup validation", () => {
     expect(validateOAuthConfig(getOAuthConfig(env), env)).toContain(
       "Production MCP resource must not use a Railway development hostname"
     );
+  });
+
+  it("activates strict startup enforcement only with an explicit cutover flag", () => {
+    expect(isCimdEnforcementEnabled({})).toBe(false);
+    expect(
+      isCimdEnforcementEnabled({ LETTER_IRL_OAUTH_CIMD_ENFORCEMENT: "true" })
+    ).toBe(true);
   });
 });

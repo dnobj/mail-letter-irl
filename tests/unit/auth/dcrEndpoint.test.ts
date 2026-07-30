@@ -16,6 +16,23 @@ describe("temporary static-registration rollback", () => {
     expect(validateOAuthConfig(config)).toContain(
       "CHATGPT_STATIC_CLIENT_ID is required when static DCR compatibility is enabled"
     );
+    expect(validateOAuthConfig(config)).toContain(
+      "CHATGPT_STATIC_REDIRECT_URIS is required when static DCR compatibility is enabled"
+    );
+  });
+
+  it("uses an explicit rollback redirect inventory", () => {
+    vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "true");
+    vi.stubEnv("CHATGPT_STATIC_CLIENT_ID", "legacy-client");
+    vi.stubEnv(
+      "CHATGPT_STATIC_REDIRECT_URIS",
+      "https://chatgpt.com/connector/oauth/current-callback http://localhost:18883/oauth/callback"
+    );
+
+    expect(getOAuthConfig().staticRedirectUris).toEqual([
+      "https://chatgpt.com/connector/oauth/current-callback",
+      "http://localhost:18883/oauth/callback"
+    ]);
   });
 
   it("accepts legacy audiences only while rollback mode is enabled", () => {

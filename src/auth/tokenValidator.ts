@@ -10,6 +10,7 @@ import {
   TOKEN_PREFIX as PAT_PREFIX
 } from "../services/patService.js";
 import { getOAuthConfig } from "./oauthConfig.js";
+import { InsufficientScopeError } from "./oauthChallenge.js";
 
 export interface AuthenticatedUser {
   userId: string;
@@ -51,7 +52,7 @@ export function requireScopes(
   }
   const missing = requiredScopes.filter((scope) => !user.scopes.includes(scope));
   if (missing.length > 0) {
-    throw new Error(`insufficient_scope: missing ${missing.join(" ")}`);
+    throw new InsufficientScopeError(missing);
   }
 }
 

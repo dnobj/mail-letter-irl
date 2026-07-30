@@ -32,8 +32,13 @@ import { validatePromoCodePublic } from "../services/promoService.js";
 import { closePool } from "../db/index.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
 import { isDebugEnabled } from "../utils/debug.js";
-import { assertValidOAuthConfig, getOAuthConfig } from "../auth/oauthConfig.js";
+import {
+  assertValidOAuthConfig,
+  getOAuthConfig,
+  isCimdEnforcementEnabled
+} from "../auth/oauthConfig.js";
 import { classifyOAuthRoute } from "../auth/oauthRoutes.js";
+import { buildWwwAuthenticateChallenge } from "../auth/oauthChallenge.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -97,8 +102,12 @@ export function validateEnvironment() {
     throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
   }
 
-  if (REQUIRE_AUTH) {
+  if (REQUIRE_AUTH && isCimdEnforcementEnabled()) {
     assertValidOAuthConfig();
+  } else if (REQUIRE_AUTH) {
+    console.warn(
+      "[auth] Strict CIMD startup enforcement is disabled; enable LETTER_IRL_OAUTH_CIMD_ENFORCEMENT only at the coordinated cutover"
+    );
   }
 }
 
@@ -665,12 +674,7 @@ export async function startHttpServer() {
         token_endpoint_auth_method: "none",
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
-        redirect_uris: [
-          "https://chat.openai.com/aip/auth/callback",
-          "https://chatgpt.com/connector_platform_oauth_redirect",
-          "https://platform.openai.com/apps-manage/oauth",
-          "http://localhost:18883/oauth/callback"
-        ]
+        redirect_uris: oauthConfig.staticRedirectUris
       };
 
       console.log(`[DCR] Returning static client_id: ${staticClientId.substring(0, 8)}...`);
@@ -899,16 +903,4 @@ async function authenticateRequest(
   }
 }
 
-export function buildWwwAuthenticateChallenge(message: string, publicBaseUrl = PUBLIC_BASE_URL): string {
-  const scopes = getOAuthConfig().scopes.join(" ");
-
-  return [
-    `Bearer realm="Letter IRL"`,
-    `resource_metadata="${publicBaseUrl}${PROTECTED_RESOURCE_ROUTE}"`,
-    scopes ? `scope="${scopes}"` : undefined,
-    `error="${message.startsWith("insufficient_scope") ? "insufficient_scope" : "invalid_token"}"`,
-    `error_description="${message.replace(/"/g, "'")}"`
-  ]
-    .filter(Boolean)
-    .join(", ");
-}
+export { buildWwwAuthenticateChallenge };
