@@ -4,6 +4,20 @@ Last updated: July 16, 2026
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
 
+For the Auth0 CIMD migration, code deployment and tenant/app configuration are
+separate gates. The owner first configures only DEV: exact DEV `/mcp` API
+identifier, three product scopes, public CIMD import, eligible connections, and
+resource compatibility. Browser validation and rollback then run in DEV.
+Production Auth0, OpenAI, Railway, and the `master` branch remain unchanged
+until the soak is clean and the owner explicitly approves promotion.
+
+The code may be deployed before the tenant cutover with
+`LETTER_IRL_OAUTH_CIMD_ENFORCEMENT=false` (or unset). This is a staging state,
+not migration acceptance. At the coordinated DEV cutover, set the exact issuer,
+endpoints, resource/audience, RS256 algorithm, scopes, and environment issuer
+allowlist first; then set `LETTER_IRL_OAUTH_CIMD_ENFORCEMENT=true` in the same
+Railway change. A process with enforcement enabled fails startup on a mismatch.
+
 ## Branch and Environment Mapping
 
 | Repository | Development | Production |
@@ -51,6 +65,8 @@ Before every deployment, verify without printing secret values:
 - `TEMP_IMAGE_STORE=bucket` is set in deployed environments.
 - Bucket variables reference the private `letter-irl-images` service.
 - Public base URLs, Auth0 issuer/audience, CORS origins, and Stripe webhook URLs match the environment.
+- `LETTER_IRL_OAUTH_CIMD_ENFORCEMENT=true` only after all exact CIMD values are
+  present in that environment.
 - `ADMIN_ENABLED=false` in cloud environments.
 
 `WORKER_POLLING_SECONDS` and `WORKER_TRIGGER_ON_SEND` are legacy rollout safeguards. The compiled API ignores them after the transactional-outbox release; remove them after the new maintenance service is verified.

@@ -30,6 +30,12 @@ Railway project ID: `b31314d8-fd09-4582-9c0d-52a36f879228`
 
 Neon project ID: `summer-band-85969681`. Both Railway environments must use the Neon pooled hostname for their own database branch. Production and development data must never share a connection string.
 
+Each environment also has a dedicated Auth0 MCP API identifier equal to its
+canonical `/mcp` endpoint and a separate ChatGPT public CIMD application.
+Website/REST audiences are not changed in place. Startup issuer allowlists and
+exact audience/resource validation prevent development/production crossover.
+Claude and PAT authentication remain separate from ChatGPT CIMD.
+
 ## Runtime Architecture
 
 The API is request-driven. It starts no mail worker, status-sync loop, credit-cleanup loop, or other database polling schedule.

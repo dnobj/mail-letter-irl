@@ -187,6 +187,10 @@ Required coverage:
 - The identity fallback cannot replace a known email with a placeholder.
 - Personal-access-token handling does not call Auth0 userinfo.
 - Startup validation rejects cross-environment issuers, missing endpoints, missing resource/audience, and unsafe production values.
+- Strict startup validation is activated by
+  `LETTER_IRL_OAUTH_CIMD_ENFORCEMENT=true` only in the coordinated environment
+  cutover, so merging to the auto-deployed DEV branch cannot accidentally apply
+  a half-configured migration.
 - The legacy registration shim is unavailable when its temporary compatibility flag is off.
 - A live-contract check or release script compares expected DEV discovery fields with the actual Auth0 documents without storing credentials.
 
@@ -277,6 +281,11 @@ If DEV or production linking fails:
 
 1. Stop promotion and preserve diagnostic evidence without tokens.
 2. Re-enable the temporary static-registration compatibility flag only in the affected environment.
+   Set `CHATGPT_STATIC_REDIRECT_URIS` to the exact callback inventory already
+   configured on the rollback Auth0 client. In compatibility mode, protected
+   resource discovery points to Letter IRL's authorization-server proxy, which
+   advertises `/oauth/register`; the static registration response returns only
+   that explicit inventory.
 3. Restore the previously recorded Auth0 application, API access, connection, and discovery settings.
 4. Re-enable DCR only if the prior working state required it and the security impact is understood.
 5. Restore the previous deployment version if server metadata or validation caused the failure.

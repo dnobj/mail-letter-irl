@@ -1685,10 +1685,13 @@
         "type": "oauth",
         "scopes": [
           "openid",
+          "profile",
           "email",
-          "profile"
+          "mail:read",
+          "mail:draft",
+          "mail:send"
         ],
-        "authorizationServer": "https://api.letterirl.com/.well-known/oauth-authorization-server"
+        "authorizationServer": "https://dev-njmdyqf8n25rqgy7.us.auth0.com/"
       }
     }
   ],

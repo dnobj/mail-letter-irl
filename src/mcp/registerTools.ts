@@ -41,9 +41,14 @@ import {
   confirmUploadedImageOutputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
-import { getOrCreateUser } from "../services/userService.js";
 import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
 import { ToolMeta } from "../contracts/types.js";
+import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
+import { prepareAuthenticatedUser } from "../auth/identity.js";
+import {
+  buildInsufficientScopeToolResult,
+  InsufficientScopeError
+} from "../auth/oauthChallenge.js";
 
 /**
  * Build MCP tool annotations from tool definition.
@@ -167,14 +172,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_WIDGET_DIR = process.env.LETTER_IRL_WIDGET_DIR ?? path.resolve(__dirname, "../../widgets");
 
-function getOauthScopes(): string[] {
-  return (process.env.LETTER_IRL_OAUTH_SCOPES ?? "openid email profile")
-    .split(/[,\s]+/)
-    .map((scope) => scope.trim())
-    .filter(Boolean);
-}
-
-export function buildToolSecuritySchemes(requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false") {
+export function buildToolSecuritySchemes(
+  toolName: string,
+  requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false"
+) {
   if (!requireAuth) {
     return [{ type: "noauth" }];
   }
@@ -182,12 +183,13 @@ export function buildToolSecuritySchemes(requireAuth = process.env.LETTER_IRL_RE
   return [
     {
       type: "oauth2",
-      scopes: getOauthScopes()
+      scopes: getRequiredToolScopes(toolName)
     }
   ];
 }
 
 export function buildToolMeta(
+  toolName: string,
   meta: ToolMeta,
   requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false"
 ): ToolMeta {
@@ -196,7 +198,7 @@ export function buildToolMeta(
   const existingUi = (meta.ui as Record<string, unknown> | undefined) ?? {};
 
   return {
-    securitySchemes: buildToolSecuritySchemes(requireAuth),
+    securitySchemes: buildToolSecuritySchemes(toolName, requireAuth),
     ...meta,
     ui: {
       ...existingUi,
@@ -345,46 +347,11 @@ export async function registerLetterTools(
   const userId = authInfo?.userId ?? DEFAULT_USER_ID;
   console.log(`Registering Letter IRL tools for user: ${userId}`);
 
-  // Auto-create user if they don't exist (with email from Auth0 userinfo endpoint)
   if (authInfo) {
-    let email = (authInfo.claims.email as string) || null;
-
-    // If email not in JWT claims, fetch it from Auth0 userinfo endpoint
-    if (!email) {
-      try {
-        const issuer = process.env.LETTER_IRL_OAUTH_ISSUER;
-        if (issuer) {
-          const userinfoUrl = `${issuer}userinfo`;
-          console.log(`🔍 Fetching user info from: ${userinfoUrl}`);
-
-          const response = await fetch(userinfoUrl, {
-            headers: {
-              'Authorization': `Bearer ${authInfo.token}`
-            }
-          });
-
-          if (response.ok) {
-            const userInfo = await response.json();
-            email = userInfo.email || userInfo.sub || 'unknown@example.com';
-            console.log(`✅ Retrieved email from userinfo: ${email}`);
-          } else {
-            console.warn(`⚠️  Failed to fetch userinfo: ${response.status} ${response.statusText}`);
-            email = 'unknown@example.com';
-          }
-        } else {
-          email = 'unknown@example.com';
-        }
-      } catch (error) {
-        console.error(`⚠️  Error fetching userinfo:`, error);
-        email = 'unknown@example.com';
-      }
-    }
-
     try {
-      await getOrCreateUser(userId, email ?? "unknown@example.com");
-      console.log(`✅ User ready: ${userId} (${email})`);
+      await prepareAuthenticatedUser(authInfo);
     } catch (error) {
-      console.error(`⚠️  Failed to create user ${userId}:`, error);
+      console.error(`[auth] Failed to prepare user ${userId}`, error);
     }
   }
 
@@ -413,9 +380,17 @@ export async function registerLetterTools(
         inputSchema: inputShape,
         outputSchema: outputShape,
         annotations,
-        _meta: buildToolMeta(tool.meta)  // Contains auth metadata and OpenAI widget/runtime hints
+        _meta: buildToolMeta(tool.name, tool.meta)
       },
       async (args: Record<string, unknown>, extra: any) => {
+        try {
+          authorizeTool(tool.name, authInfo);
+        } catch (error) {
+          if (error instanceof InsufficientScopeError) {
+            return buildInsufficientScopeToolResult(error);
+          }
+          throw error;
+        }
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
         const extraMeta = extra._meta as Record<string, unknown> | undefined;

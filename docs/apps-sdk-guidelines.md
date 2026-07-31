@@ -20,9 +20,15 @@ This file records the subset of current Apps SDK guidance that materially affect
 
 ## Auth
 
-- Expose protected resource metadata and authorization server metadata.
+- Expose protected-resource metadata with the exact `/mcp` resource, real Auth0
+  issuer, and product scopes. Clients discover authorization-server and CIMD
+  capabilities from Auth0 itself; Letter IRL must not synthesize them.
+- Use the OpenAI-hosted CIMD URL as the public client ID with authorization code,
+  PKCE S256, and `token_endpoint_auth_method: none`.
 - Add `securitySchemes` to tool metadata.
 - Return `_meta["mcp/www_authenticate"]` on auth-required tool errors so ChatGPT can trigger account-linking flows.
+- Keep ChatGPT CIMD separate from Claude/PAT authentication. The static DCR shim
+  is an explicitly flagged rollback only.
 - Keep OAuth config non-secret in docs; never commit credentials, private keys, or billing details.
 
 ## UI

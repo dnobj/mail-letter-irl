@@ -1,5 +1,97 @@
 # Manual Test Checklist
 
+## Issue #160 — Auth0 public CIMD DEV acceptance
+
+Execution owner: `LIRL · Test · Browser`, after the implementation is deployed
+and the owner completes the DEV Auth0/OpenAI configuration gate. These are
+durable test definitions, not evidence that browser execution occurred.
+
+Record the deployment/version, ChatGPT app/version IDs, redacted Auth0 client
+count before and after, browser/mobile platform, result, and evidence link for
+each case. Never capture tokens, authorization codes, addresses, letter content,
+or raw request bodies.
+
+### CIMD-01 — Fresh link
+
+- [ ] Unlink the DEV app, revoke its stale Auth0 grant, and use a fresh/clean
+      test account.
+- [ ] Click **Sign in with (DEV) Letter IRL** and confirm Auth0 opens.
+- [ ] Confirm the OAuth client ID is the current HTTPS CIMD URL, the exact
+      `https://chatgpt.com/connector/oauth/{callback_id}` callback is accepted,
+      authorization code + PKCE S256 is used, and no client secret is sent.
+- [ ] Confirm consent identifies Letter IRL and requests only the expected
+      identity and `mail:read`, `mail:draft`, `mail:send` scopes.
+
+### CIMD-02 — Reconnect, revoke, and client-count/DCR
+
+- [ ] Record the Auth0 application/client count before testing.
+- [ ] Disconnect, reconnect, and re-consent twice.
+- [ ] Revoke the Auth0 grant and verify the next tool call requires linking.
+- [ ] Confirm the client count did not increase and no DCR registration request
+      or new Auth0 application was created.
+
+### CIMD-03 — Tool exposure and `get_started`
+
+- [ ] Start a fresh ChatGPT conversation, select **(DEV) Letter IRL**, and run:
+      `Use the selected DEV app's get_started tool and show me its onboarding card.`
+- [ ] Confirm the Letter IRL `get_started` tool is invoked and `GetStartedCard`
+      renders; record the tool evidence.
+
+### CIMD-04 — Letter IRL image generation and widget
+
+- [ ] Run: `Use Letter IRL to generate an image of a vivid sunset over mountain peaks for a postcard.`
+- [ ] Confirm Letter IRL's `generate_image` tool is invoked and
+      `GenerateImageCard` renders.
+- [ ] Confirm ChatGPT does not fall back to native image generation.
+- [ ] Continue into a postcard preview/edit and confirm `mail:draft` behavior.
+
+### CIMD-05 — Scope enforcement
+
+- [ ] Use a controlled DEV token/grant missing each product scope in turn.
+- [ ] Verify read tools require `mail:read`, previews/images/address writes
+      require `mail:draft`, and physical sends require `mail:send`.
+- [ ] Confirm failures return `insufficient_scope` and a consistent
+      `WWW-Authenticate` challenge without exposing credentials.
+
+### CIMD-06 — Account switch and identity integrity
+
+- [ ] Link account A, inspect its balance/order identity, then disconnect.
+- [ ] Use the account-switch flow and link account B.
+- [ ] Confirm account A data/email is not shown or overwritten for account B.
+- [ ] Repeat after a userinfo failure and confirm a known email is not replaced
+      by a placeholder.
+
+### CIMD-07 — Web and mobile
+
+- [ ] Repeat fresh link, `get_started`, and image/widget flow on ChatGPT web.
+- [ ] Repeat the same core flow on each supported ChatGPT mobile client.
+- [ ] Record platform/version and any mobile widget degradation separately.
+
+### CIMD-08 — Sensitive logging
+
+- [ ] Review Railway/Auth0 DEV logs for the test interval.
+- [ ] Confirm logs contain no bearer tokens, authorization codes, CIMD document
+      bodies, addresses, letter/postcard content, generated image payloads, or
+      raw request bodies.
+- [ ] Confirm validation diagnostics identify only non-sensitive error classes
+      such as issuer, audience, algorithm, expiry, subject, or scope failure.
+
+### CIMD-09 — Claude/PAT regression
+
+- [ ] Connect the supported Claude/non-ChatGPT MCP path with a PAT.
+- [ ] Confirm PAT tool calls work and never call Auth0 userinfo.
+- [ ] Confirm the Claude/PAT path does not use or mutate the ChatGPT CIMD app.
+
+### CIMD-10 — DEV rollback
+
+- [ ] Save the accepted CIMD configuration and deployment identifiers.
+- [ ] Enable `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY=true` in DEV only with
+      the recorded legacy client/audience and deploy the rollback configuration.
+- [ ] Run a fresh-link smoke test and record behavior/client count.
+- [ ] Restore CIMD mode (`false`), restore the dedicated exact `/mcp` audience,
+      redeploy DEV, and rerun CIMD-01, CIMD-03, and CIMD-04.
+- [ ] Confirm production was unchanged throughout.
+
 **Purpose:** Integration and end-to-end tests that require manual verification
 **Last Updated:** July 16, 2026
 
@@ -24,8 +116,10 @@ Quick checks after every deployment. All should pass before considering deployme
 
 ### API Health
 - [ ] `GET https://api.letterirl.com/healthz` returns 200
-- [ ] `GET https://api.letterirl.com/.well-known/openid-configuration` returns valid JSON
-- [ ] `GET https://api.letterirl.com/oauth/register` (POST) returns 201 with static client_id
+- [ ] `GET https://api.letterirl.com/.well-known/oauth-protected-resource` returns
+      the exact resource, Auth0 issuer, and product scopes
+- [ ] Auth0's own discovery returns valid JSON; Letter IRL's authorization-server
+      proxy and `POST /oauth/register` return 404 in normal CIMD mode
 
 ### MCP Endpoint
 - [ ] ChatGPT developer-mode refresh discovers the current MCP tools
@@ -53,10 +147,10 @@ Test the full ChatGPT connector flow.
 - [ ] After login, redirected back to ChatGPT
 - [ ] ChatGPT shows "Connected" status
 
-### DCR Behavior (US-DCR-02)
+### CIMD client-count behavior
 - [ ] After connecting, check Auth0 dashboard
-- [ ] **No new "ChatGPT" client created** (uses static client)
-- [ ] Only "ChatGPT MCP" first-party client exists
+- [ ] No new client or DCR call is created during connect/reconnect
+- [ ] ChatGPT uses the manually imported public CIMD application
 
 ### MCP Tools in ChatGPT
 - [ ] Ask "What's my credit balance?" → `get_account_balance` works
@@ -82,10 +176,11 @@ Test Claude Desktop via mcp-remote.
 - [ ] Login completes successfully
 - [ ] Claude Desktop shows Letter IRL tools available
 
-### DCR Behavior
+### Client separation
 - [ ] After connecting, check Auth0 dashboard
 - [ ] **No new "MCP CLI Proxy" client created**
-- [ ] Uses same static "ChatGPT MCP" client
+- [ ] Does not use the ChatGPT CIMD application; use the supported separate
+      OAuth adapter or PAT path
 
 ### MCP Tools in Claude Desktop
 - [ ] Tools list shows Letter IRL tools
