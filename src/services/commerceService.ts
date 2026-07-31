@@ -741,6 +741,21 @@ async function processCheckoutSessionEvent(
       order.order_id
     ]);
 
+    // Once a Checkout Session has been attached, never let a different
+    // server-signed Session reuse metadata to authorize this order. The
+    // metadata lookup is needed only for the legitimate webhook-before-attach
+    // race immediately after Session creation.
+    if (
+      order.stripe_checkout_session_id &&
+      order.stripe_checkout_session_id !== session.id
+    ) {
+      await recordOrderEvent(client, order.order_id, eventType, order.status, order.status, {
+        ignored: true,
+        reason: 'checkout_session_mismatch'
+      });
+      return { duplicate: false, orderId: order.order_id, status: order.status };
+    }
+
     if (eventType === 'checkout.session.async_payment_failed') {
       if (order.status !== 'checkout_pending') {
         await recordOrderEvent(client, order.order_id, eventType, order.status, order.status, {
@@ -788,9 +803,10 @@ async function revokePackCredits(
 ): Promise<void> {
   const entries = await client.query<{
     ledger_id: string;
+    initial_amount: number;
     remaining_amount: number;
   }>(
-    `SELECT ledger_id, remaining_amount FROM credit_ledger
+    `SELECT ledger_id, initial_amount, remaining_amount FROM credit_ledger
      WHERE user_id = $1 AND source_type = 'purchase'
        AND (source_reference_id = $2 OR source_metadata->>'stripe_session_id' = $3)
        AND status <> 'revoked'
@@ -798,12 +814,30 @@ async function revokePackCredits(
     [order.user_id, order.order_id, order.stripe_checkout_session_id || null]
   );
   const remaining = entries.rows.reduce((sum, entry) => sum + entry.remaining_amount, 0);
-  if (entries.rows.length > 0) {
+  // Separate Stripe events can report the same completed refund. No
+  // non-revoked purchase rows means this pack grant was already reversed.
+  if (entries.rows.length === 0) return;
+  await client.query(
+    `UPDATE credit_ledger
+     SET remaining_amount = 0, status = 'revoked', updated_at = NOW()
+     WHERE ledger_id = ANY($1::uuid[])`,
+    [entries.rows.map(entry => entry.ledger_id)]
+  );
+  for (const entry of entries.rows) {
     await client.query(
-      `UPDATE credit_ledger
-       SET remaining_amount = 0, status = 'revoked', updated_at = NOW()
-       WHERE ledger_id = ANY($1::uuid[])`,
-      [entries.rows.map(entry => entry.ledger_id)]
+      `INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, source_metadata, activated_at,
+         expiration_policy, status, description, related_ledger_id
+       ) VALUES ($1, $2, 0, 'refund', $3, $4, NOW(), 'never', 'revoked', $5, $6)`,
+      [
+        order.user_id,
+        entry.initial_amount,
+        order.order_id,
+        JSON.stringify({ reason: 'payment_refunded', order_id: order.order_id }),
+        `Payment refund for ${order.order_id}`,
+        entry.ledger_id
+      ]
     );
   }
   const user = await client.query<{ credits: number }>(
@@ -874,6 +908,13 @@ async function processRefundEvent(
       return { duplicate: false, orderId: order.order_id, status: order.status };
     }
     const nextStatus: OrderStatus = refundStatus === 'succeeded' ? 'refunded' : 'refund_pending';
+    if (order.status === 'refunded') {
+      await recordOrderEvent(client, order.order_id, eventType, order.status, order.status, {
+        ignored: true,
+        reason: 'already_refunded'
+      });
+      return { duplicate: false, orderId: order.order_id, status: order.status };
+    }
     if (nextStatus === 'refunded' && order.order_type === 'letter_pack') {
       await revokePackCredits(client, order);
     }
@@ -1074,7 +1115,9 @@ export async function requestRefund(orderId: string, reason: string): Promise<bo
     if (order.stripe_refund_id) {
       try {
         const existingRefund = await retrieveRefund(order.stripe_refund_id);
-        if (existingRefund.status !== 'failed') refund = existingRefund;
+        if (!['failed', 'canceled'].includes(existingRefund.status || '')) {
+          refund = existingRefund;
+        }
       } catch {
         // Confirm by payment intent below before creating another refund. This
         // covers a persisted stale ID without risking a duplicate refund.

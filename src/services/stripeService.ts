@@ -286,7 +286,9 @@ export async function findPaymentRefund(
   });
   return (
     refunds.data.find(
-      refund => refund.metadata?.orderId === orderId && refund.status !== 'failed'
+      refund =>
+        refund.metadata?.orderId === orderId &&
+        !['failed', 'canceled'].includes(refund.status || '')
     ) || null
   );
 }

@@ -51,7 +51,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
         description: 'Test widget',
         domain: 'https://api.letterirl.com',
         csp: {
-          redirect_domains: expect.arrayContaining([
+          redirectDomains: expect.arrayContaining([
             'https://checkout.stripe.com',
             'https://letterirl.com'
           ])
@@ -60,7 +60,13 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       });
       expect(meta).toMatchObject({
         'openai/widgetPrefersBorder': true,
-        'openai/widgetDescription': 'Test widget'
+        'openai/widgetDescription': 'Test widget',
+        'openai/widgetCSP': {
+          redirect_domains: expect.arrayContaining([
+            'https://checkout.stripe.com',
+            'https://letterirl.com'
+          ])
+        }
       });
     });
   });

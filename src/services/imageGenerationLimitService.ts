@@ -190,7 +190,7 @@ export async function commitGenerationReservation(reservationId: string): Promis
 /** Return a reservation to its exact entitlement after a failed provider call. */
 export async function releaseGenerationReservation(
   userId: string,
-  reservationId?: string
+  reservationId: string
 ): Promise<void> {
   await transaction(async client => {
     const reservation = await client.query<{
@@ -198,18 +198,11 @@ export async function releaseGenerationReservation(
       entitlement_id: string;
       status: string;
     }>(
-      reservationId
-        ? `SELECT reservation_id, entitlement_id, status
-           FROM image_generation_reservations
-           WHERE reservation_id = $1 AND user_id = $2
-           FOR UPDATE`
-        : `SELECT reservation_id, entitlement_id, status
-           FROM image_generation_reservations
-           WHERE user_id = $2 AND status = 'reserved'
-           ORDER BY created_at DESC
-           LIMIT 1
-           FOR UPDATE`,
-      [reservationId || null, userId]
+      `SELECT reservation_id, entitlement_id, status
+       FROM image_generation_reservations
+       WHERE reservation_id = $1 AND user_id = $2
+       FOR UPDATE`,
+      [reservationId, userId]
     );
     const row = reservation.rows[0];
     if (!row || row.status !== 'reserved') return;

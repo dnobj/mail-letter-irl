@@ -23,10 +23,11 @@ function friendlyCheckoutError(error: unknown): Error {
   switch (code) {
     case 'JIT_DISABLED':
       return new Error('Pay & Send is not currently available. You can still buy a letter pack.');
-    case 'DRAFT_NOT_FOUND':
-      return new Error('Draft not found. Please create a new letter or postcard preview.');
     case 'DRAFT_NOT_OWNED':
-      return new Error('This draft does not belong to your account.');
+    case 'DRAFT_NOT_FOUND':
+      return new Error(
+        'Draft not found for your account. Please create a new letter or postcard preview.'
+      );
     case 'DRAFT_EXPIRED':
     case 'DRAFT_TOO_CLOSE_TO_EXPIRY':
       return new Error(

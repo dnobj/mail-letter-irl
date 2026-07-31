@@ -99,6 +99,9 @@ async function releaseReservedGeneration(
   userId: string,
   reservationId?: string
 ): Promise<void> {
+  if (!reservationId) {
+    return;
+  }
   try {
     await releaseGenerationReservation(userId, reservationId);
   } catch (releaseError) {

@@ -18,7 +18,9 @@ function jwt(scopes: string[]): AuthenticatedUser {
 describe("tool scope enforcement", () => {
   it.each([
     ["get_account_balance", "mail:read"],
+    ["get_purchase_status", "mail:read"],
     ["generate_image", "mail:draft"],
+    ["create_mail_checkout", "mail:send"],
     ["send_letter", "mail:send"]
   ])("maps %s to %s in metadata and runtime", (toolName, scope) => {
     expect(getRequiredToolScopes(toolName)).toEqual([scope]);
