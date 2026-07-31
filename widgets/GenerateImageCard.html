@@ -189,6 +189,7 @@
     <script type="module">
       let dataLoaded = false;
       let imageUrl = null;
+      let notificationResult = null;
 
       const stateLoading = document.getElementById("state-loading");
       const statePreview = document.getElementById("state-preview");
@@ -210,12 +211,46 @@
         showState("error");
       }
 
-      function render() {
-        const output = window.openai?.toolOutput;
-        const meta = window.openai?.toolResponseMetadata;
+      function isRecord(value) {
+        return value !== null && typeof value === "object";
+      }
 
-        imageUrl = output?.generatedImageUrl ?? meta?.generatedImageUrl ?? null;
-        const previewData = meta?.generatedImagePreview ?? output?.generatedImagePreview;
+      function nonEmptyString(value) {
+        return typeof value === "string" && value.trim() ? value : null;
+      }
+
+      function unwrapToolResult(value) {
+        if (!isRecord(value)) return null;
+        if (isRecord(value.mcp_tool_result)) return unwrapToolResult(value.mcp_tool_result);
+        if (isRecord(value.call_tool_result)) return unwrapToolResult(value.call_tool_result);
+        if (isRecord(value.result)) return unwrapToolResult(value.result);
+        return value;
+      }
+
+      function resolveWidgetData() {
+        const responseMetadata = window.openai?.toolResponseMetadata;
+        const metadataResult = unwrapToolResult(responseMetadata);
+        const notifiedResult = unwrapToolResult(notificationResult);
+        const output = window.openai?.toolOutput
+          ?? metadataResult?.structuredContent
+          ?? notifiedResult?.structuredContent
+          ?? null;
+        const hiddenMeta = metadataResult?._meta
+          ?? notifiedResult?._meta
+          ?? (isRecord(responseMetadata) ? responseMetadata : null);
+
+        return {
+          output,
+          previewData: nonEmptyString(hiddenMeta?.generatedImagePreview),
+          generatedImageUrl: nonEmptyString(output?.generatedImageUrl)
+            ?? nonEmptyString(hiddenMeta?.generatedImageUrl),
+          resultArrived: Boolean(output || responseMetadata || notificationResult)
+        };
+      }
+
+      function render() {
+        const { output, previewData, generatedImageUrl, resultArrived } = resolveWidgetData();
+        imageUrl = generatedImageUrl;
 
         if (previewData) {
           dataLoaded = true;
@@ -238,7 +273,7 @@
           return;
         }
 
-        if (!dataLoaded && !output && !meta) return;
+        if (!dataLoaded && !resultArrived) return;
 
         dataLoaded = true;
         showError(output?.error || "No image was generated. Please try again.");
@@ -261,6 +296,15 @@
       render();
 
       window.addEventListener("openai:set_globals", () => {
+        render();
+      });
+
+      window.addEventListener("message", (event) => {
+        if (event.source !== window.parent) return;
+        const message = event.data;
+        if (!isRecord(message) || message.jsonrpc !== "2.0") return;
+        if (message.method !== "ui/notifications/tool-result") return;
+        notificationResult = message.params;
         render();
       });
     </script>

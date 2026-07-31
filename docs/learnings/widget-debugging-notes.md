@@ -243,7 +243,10 @@ window.addEventListener("openai:set_globals", () => {
 5. **Response format:**
    - `structuredContent` → becomes `window.openai.toolOutput`
    - `content` → narration for model
-   - `_meta` → becomes `window.openai.toolResponseMetadata`
+   - `_meta` remains widget-only and may appear at `window.openai.toolResponseMetadata.mcp_tool_result._meta`; retain the legacy flat fallback while older hosts are supported
+   - Standard MCP Apps hosts can also deliver the complete result through the JSON-RPC `ui/notifications/tool-result` message
+
+6. **Generated images need a deliberate split:** keep the small temporary image URL in `structuredContent` for model chaining, but keep the base64 thumbnail only in result `_meta`. Logging only result keys avoids leaking either capability tokens or image bodies.
 
 ### UX Consideration:
 Show a loading state initially since data takes a few seconds to arrive. Don't show misleading defaults like "0 credits".

@@ -32,6 +32,13 @@ import { validatePromoCodePublic } from "../services/promoService.js";
 import { closePool } from "../db/index.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
 import { isDebugEnabled } from "../utils/debug.js";
+import {
+  assertValidOAuthConfig,
+  getOAuthConfig,
+  isCimdEnforcementEnabled
+} from "../auth/oauthConfig.js";
+import { classifyOAuthRoute } from "../auth/oauthRoutes.js";
+import { buildWwwAuthenticateChallenge } from "../auth/oauthChallenge.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,9 +70,6 @@ const DEBUG_ENABLED = isDebugEnabled();
 // Environment variable validation
 const REQUIRED_ENV_VARS = [
   'DATABASE_URL',
-  'LETTER_IRL_OAUTH_JWKS_URI',
-  'LETTER_IRL_OAUTH_ISSUER',
-  'LETTER_IRL_OAUTH_AUDIENCE',
 ];
 
 // Only require these in production (not for local admin mode)
@@ -74,7 +78,7 @@ const PRODUCTION_ENV_VARS = [
   'STRIPE_WEBHOOK_SECRET',
 ];
 
-function validateEnvironment() {
+export function validateEnvironment() {
   const missing: string[] = [];
 
   for (const envVar of REQUIRED_ENV_VARS) {
@@ -95,7 +99,15 @@ function validateEnvironment() {
   if (missing.length > 0) {
     console.error('❌ Missing required environment variables:');
     missing.forEach(v => console.error(`   - ${v}`));
-    process.exit(1);
+    throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
+  }
+
+  if (REQUIRE_AUTH && isCimdEnforcementEnabled()) {
+    assertValidOAuthConfig();
+  } else if (REQUIRE_AUTH) {
+    console.warn(
+      "[auth] Strict CIMD startup enforcement is disabled; enable LETTER_IRL_OAUTH_CIMD_ENFORCEMENT only at the coordinated cutover"
+    );
   }
 }
 
@@ -626,7 +638,10 @@ export async function startHttpServer() {
       return;
     }
 
-    if (matchesWellKnownRoute(url.pathname, OPENID_CONFIG_ROUTE)) {
+    if (
+      classifyOAuthRoute(url.pathname, req.method ?? "GET") ===
+      "authorization-server-proxy"
+    ) {
       const payload = getOpenIdConfiguration(getPublicBaseUrl(req));
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
@@ -634,16 +649,11 @@ export async function startHttpServer() {
       return;
     }
 
-    if (matchesWellKnownRoute(url.pathname, PROTECTED_RESOURCE_ROUTE)) {
+    if (
+      classifyOAuthRoute(url.pathname, req.method ?? "GET") ===
+      "protected-resource"
+    ) {
       const payload = getProtectedResourceMetadata(getPublicBaseUrl(req));
-      res.statusCode = 200;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify(payload));
-      return;
-    }
-
-    if (matchesWellKnownRoute(url.pathname, AUTHORIZATION_SERVER_ROUTE)) {
-      const payload = getOpenIdConfiguration(getPublicBaseUrl(req));
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(payload));
@@ -655,15 +665,17 @@ export async function startHttpServer() {
     // Aligned with MCP Nov 2025 spec direction (CIMD replacing DCR)
     // GitHub Issue: #20
     if (url.pathname === "/oauth/register" && req.method === "POST") {
-      const staticClientId = process.env.CHATGPT_STATIC_CLIENT_ID;
+      const oauthConfig = getOAuthConfig();
+      const staticClientId = oauthConfig.staticClientId;
 
-      if (!staticClientId) {
-        console.error("[DCR] CHATGPT_STATIC_CLIENT_ID not configured");
-        res.statusCode = 503;
+      if (
+        classifyOAuthRoute(url.pathname, req.method) !== "static-registration" ||
+        !staticClientId
+      ) {
+        res.statusCode = 404;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({
-          error: "server_error",
-          error_description: "OAuth client registration is not configured"
+          error: "not_found"
         }));
         return;
       }
@@ -675,12 +687,7 @@ export async function startHttpServer() {
         token_endpoint_auth_method: "none",
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
-        redirect_uris: [
-          "https://chat.openai.com/aip/auth/callback",
-          "https://chatgpt.com/connector_platform_oauth_redirect",
-          "https://platform.openai.com/apps-manage/oauth",
-          "http://localhost:18883/oauth/callback"
-        ]
+        redirect_uris: oauthConfig.staticRedirectUris
       };
 
       console.log(`[DCR] Returning static client_id: ${staticClientId.substring(0, 8)}...`);
@@ -909,21 +916,4 @@ async function authenticateRequest(
   }
 }
 
-export function buildWwwAuthenticateChallenge(message: string, publicBaseUrl = PUBLIC_BASE_URL): string {
-  const scopes = (process.env.LETTER_IRL_OAUTH_SCOPES ?? "openid email profile")
-    .split(/[,\s]+/)
-    .map((scope) => scope.trim())
-    .filter(Boolean)
-    .join(" ");
-
-  return [
-    `Bearer realm="Letter IRL"`,
-    `resource_metadata="${publicBaseUrl}${PROTECTED_RESOURCE_ROUTE}"`,
-    `authorization_uri="${publicBaseUrl}${AUTHORIZATION_SERVER_ROUTE}"`,
-    scopes ? `scope="${scopes}"` : undefined,
-    `error="invalid_token"`,
-    `error_description="${message.replace(/"/g, "'")}"`
-  ]
-    .filter(Boolean)
-    .join(", ");
-}
+export { buildWwwAuthenticateChallenge };

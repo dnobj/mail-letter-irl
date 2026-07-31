@@ -671,7 +671,7 @@ export const generateImageInputSchema: JsonSchema = {
 
 export const generateImageOutputSchema: JsonSchema = {
   type: "object",
-  required: ["message", "suggestedNextStep", "generatedImagePreview", "generatedImageUrl", "generationsRemaining"],
+  required: ["message", "suggestedNextStep", "generatedImageUrl", "generationsRemaining"],
   properties: {
     message: {
       type: "string",
@@ -681,13 +681,9 @@ export const generateImageOutputSchema: JsonSchema = {
       type: "string",
       description: "Guidance on what tool to call next with the imageUrl"
     },
-    generatedImagePreview: {
-      type: "string",
-      description: "Tiny base64-encoded JPEG preview (~15KB, for widget display only)"
-    },
     generatedImageUrl: {
       type: "string",
-      description: "URL to download the full-resolution generated image"
+      description: "Model-visible capability URL for the full-resolution generated image. The widget-only base64 thumbnail is returned separately in tool-result _meta."
     },
     generationsRemaining: {
       type: "integer",

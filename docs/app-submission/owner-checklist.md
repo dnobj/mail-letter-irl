@@ -20,6 +20,23 @@ This checklist tracks the non-code items the project owner needs to gather, veri
 
 ## Owner Tasks
 
+### DEV Auth0 public CIMD gate
+
+- [ ] Copy the current DEV ChatGPT CIMD URL and exact callback.
+- [ ] Export or screenshot the existing DEV Auth0 application/API/connection
+      settings for rollback; record client count without secrets.
+- [ ] Enable Auth0 CIMD registration and the required resource compatibility
+      profile in DEV only.
+- [ ] Import the CIMD URL as a public strict third-party app; verify
+      authorization code, PKCE S256, and `token_endpoint_auth_method: none`.
+- [ ] Create/grant the dedicated DEV `/mcp` API with only `mail:read`,
+      `mail:draft`, and `mail:send`.
+- [ ] Configure the accepted code/environment variables and deploy to Railway
+      DEV only. Do not change production.
+- [ ] Hand off to LIRL · Test · Browser for the versioned cases in
+      `docs/manual-tests.md`; do not disable DCR until dependency inventory,
+      rollback exercise, and acceptance pass.
+
 ### OpenAI Platform Access
 
 - [x] Confirm `Objective Works` organization verification is approved by OpenAI.

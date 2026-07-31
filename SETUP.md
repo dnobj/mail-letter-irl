@@ -4,6 +4,12 @@
 
 The Auth0 OAuth authentication has been successfully integrated with the main Letter IRL MCP server.
 
+> Current ChatGPT target: Auth0 manual CIMD registration for a public client,
+> authorization code + PKCE S256, and `token_endpoint_auth_method=none`.
+> Auth0 discovery is authoritative. Letter IRL's authorization-server proxy and
+> `/oauth/register` exist only behind the temporary rollback flag. Claude and
+> other non-ChatGPT clients use a separate OAuth adapter or PAT.
+
 ## What's Working
 
 ✅ **Auth0 OAuth 2.1 + PKCE** with 5 identity providers
@@ -95,16 +101,19 @@ curl http://localhost:8788/
 ### Test OAuth Discovery
 
 ```bash
-curl http://localhost:8788/.well-known/oauth-authorization-server | jq
+curl http://localhost:8788/.well-known/oauth-protected-resource | jq
+curl https://YOUR_AUTH0_TENANT/.well-known/openid-configuration | jq
 ```
 
-Expected response includes:
+The first response must name the exact `/mcp` resource, Auth0 issuer, and three
+product scopes. Auth0's response—not a Letter IRL proxy—must describe CIMD and
+authorization-server capabilities. The imported ChatGPT application must use:
+
 ```json
 {
-  "issuer": "https://dev-ky21dxn3qmi71hjl.us.auth0.com/",
-  "authorization_endpoint": "https://dev-ky21dxn3qmi71hjl.us.auth0.com/authorize",
-  "token_endpoint": "https://dev-ky21dxn3qmi71hjl.us.auth0.com/oauth/token",
-  ...
+  "grant_types": ["authorization_code"],
+  "token_endpoint_auth_method": "none",
+  "code_challenge_method": "S256"
 }
 ```
 
@@ -198,7 +207,9 @@ LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
 LETTER_IRL_OAUTH_AUTH_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/authorize
 LETTER_IRL_OAUTH_TOKEN_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oauth/token
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_REGISTRATION_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oidc/register
+LETTER_IRL_MCP_RESOURCE=https://YOUR_PUBLIC_HOST/mcp
+LETTER_IRL_OAUTH_AUDIENCE=https://YOUR_PUBLIC_HOST/mcp
+LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS=RS256
 LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
 LETTER_IRL_OAUTH_SCOPES=openid,email,profile
 

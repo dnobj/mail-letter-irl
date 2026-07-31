@@ -393,7 +393,7 @@ export const generateImageOutputZ = z.object({
   message: z.string(),
   suggestedNextStep: z.string(),
   generationsRemaining: z.number().int(),
-  generatedImageUrl: z.string().optional()
+  generatedImageUrl: z.string().url()
 });
 
 export const confirmUploadedImageOutputZ = z.object({

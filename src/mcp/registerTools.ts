@@ -45,9 +45,14 @@ import {
   confirmUploadedImageOutputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
-import { getOrCreateUser } from "../services/userService.js";
 import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
 import { ToolMeta } from "../contracts/types.js";
+import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
+import { prepareAuthenticatedUser } from "../auth/identity.js";
+import {
+  buildInsufficientScopeToolResult,
+  InsufficientScopeError
+} from "../auth/oauthChallenge.js";
 
 /**
  * Build MCP tool annotations from tool definition.
@@ -150,19 +155,37 @@ const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? "https://api.lette
  *
  * @see US-MCP-07: Widget Resources
  */
-const WIDGET_API_URL = process.env.LETTER_IRL_API_URL ?? "https://api.letterirl.com";
-function configuredOrigin(value: string | undefined, fallback: string): string {
+const WIDGET_API_URL =
+  process.env.LETTER_IRL_API_URL ??
+  process.env.LETTER_IRL_PUBLIC_BASE_URL ??
+  "https://api.letterirl.com";
+export const WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
+
+export function normalizeHttpsOrigin(
+  value: string,
+  fallback = "https://api.letterirl.com"
+): string {
   try {
-    return new URL(value ?? fallback).origin;
+    const url = new URL(value);
+    if (url.protocol !== "https:") {
+      throw new Error("Widget API URL must use HTTPS");
+    }
+    return url.origin;
   } catch {
     return fallback;
   }
 }
-const WIDGET_PACKS_ORIGIN = configuredOrigin(
-  process.env.LETTER_IRL_PACKS_URL ?? process.env.LETTER_IRL_PUBLIC_BASE_URL,
+
+const WIDGET_API_ORIGIN = normalizeHttpsOrigin(WIDGET_API_URL);
+const WIDGET_PACKS_ORIGIN = normalizeHttpsOrigin(
+  process.env.LETTER_IRL_PACKS_URL ??
+    process.env.LETTER_IRL_PUBLIC_BASE_URL ??
+    "https://letterirl.com",
   "https://letterirl.com"
 );
-export const WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
+const WIDGET_REDIRECT_ORIGINS = Array.from(
+  new Set(["https://checkout.stripe.com", WIDGET_PACKS_ORIGIN])
+);
 
 /**
  * Content Security Policy for widgets.
@@ -173,13 +196,17 @@ export const WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
  * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
  * @see US-MCP-07: Widget Resources
  */
-const WIDGET_CSP = {
-  connect_domains: ["https://chatgpt.com", WIDGET_API_URL],
-  resource_domains: ["https://*.oaistatic.com"],
+export const WIDGET_CSP_CANONICAL = {
+  connectDomains: ["https://chatgpt.com", WIDGET_API_ORIGIN],
+  resourceDomains: ["https://*.oaistatic.com", WIDGET_API_ORIGIN],
+  redirectDomains: WIDGET_REDIRECT_ORIGINS
+};
+
+export const WIDGET_CSP_LEGACY = {
+  connect_domains: ["https://chatgpt.com", WIDGET_API_ORIGIN],
+  resource_domains: ["https://*.oaistatic.com", WIDGET_API_ORIGIN],
   // frame_domains not included - we don't use iframes
-  redirect_domains: Array.from(
-    new Set(["https://checkout.stripe.com", WIDGET_API_URL, WIDGET_PACKS_ORIGIN])
-  )
+  redirect_domains: WIDGET_REDIRECT_ORIGINS
 };
 
 // Resolve widget directory relative to this module
@@ -187,14 +214,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_WIDGET_DIR = process.env.LETTER_IRL_WIDGET_DIR ?? path.resolve(__dirname, "../../widgets");
 
-function getOauthScopes(): string[] {
-  return (process.env.LETTER_IRL_OAUTH_SCOPES ?? "openid email profile")
-    .split(/[,\s]+/)
-    .map((scope) => scope.trim())
-    .filter(Boolean);
-}
-
-export function buildToolSecuritySchemes(requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false") {
+export function buildToolSecuritySchemes(
+  toolName: string,
+  requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false"
+) {
   if (!requireAuth) {
     return [{ type: "noauth" }];
   }
@@ -202,12 +225,13 @@ export function buildToolSecuritySchemes(requireAuth = process.env.LETTER_IRL_RE
   return [
     {
       type: "oauth2",
-      scopes: getOauthScopes()
+      scopes: getRequiredToolScopes(toolName)
     }
   ];
 }
 
 export function buildToolMeta(
+  toolName: string,
   meta: ToolMeta,
   requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false"
 ): ToolMeta {
@@ -216,7 +240,7 @@ export function buildToolMeta(
   const existingUi = (meta.ui as Record<string, unknown> | undefined) ?? {};
 
   return {
-    securitySchemes: buildToolSecuritySchemes(requireAuth),
+    securitySchemes: buildToolSecuritySchemes(toolName, requireAuth),
     ...meta,
     ui: {
       ...existingUi,
@@ -231,12 +255,12 @@ export function buildWidgetResourceMeta(description: string) {
     ui: {
       description,
       domain: WIDGET_DOMAIN,
-      csp: WIDGET_CSP,
+      csp: WIDGET_CSP_CANONICAL,
       prefersBorder: true
     },
     "openai/widgetPrefersBorder": true,
     "openai/widgetDomain": WIDGET_DOMAIN,
-    "openai/widgetCSP": WIDGET_CSP,
+    "openai/widgetCSP": WIDGET_CSP_LEGACY,
     "openai/widgetDescription": description
   };
 }
@@ -361,6 +385,42 @@ export function getZodOutputShape(name: string) {
   return schema?.shape;
 }
 
+type PartitionedToolResult = {
+  structuredContent: Record<string, unknown>;
+  _meta: Record<string, unknown>;
+};
+
+/** Keep widget-only previews out of model context while retaining chainable URLs. */
+export function partitionToolResult(
+  result: Record<string, unknown>,
+  meta: Record<string, unknown> = {}
+): PartitionedToolResult {
+  const {
+    previewHtml,
+    previewFrontHtml,
+    previewBackHtml,
+    inlineImageData,
+    headerImageData,
+    frontImageData,
+    generatedImagePreview,
+    ...modelFacingData
+  } = result;
+
+  return {
+    structuredContent: modelFacingData,
+    _meta: {
+      ...meta,
+      ...(previewHtml !== undefined ? { previewHtml } : {}),
+      ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
+      ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
+      ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
+      ...(modelFacingData.generatedImageUrl !== undefined
+        ? { generatedImageUrl: modelFacingData.generatedImageUrl }
+        : {})
+    }
+  };
+}
+
 export async function registerLetterTools(
   mcpServer: McpServer,
   appServer: LetterIrlServer,
@@ -369,46 +429,11 @@ export async function registerLetterTools(
   const userId = authInfo?.userId ?? DEFAULT_USER_ID;
   console.log(`Registering Letter IRL tools for user: ${userId}`);
 
-  // Auto-create user if they don't exist (with email from Auth0 userinfo endpoint)
   if (authInfo) {
-    let email = (authInfo.claims.email as string) || null;
-
-    // If email not in JWT claims, fetch it from Auth0 userinfo endpoint
-    if (!email) {
-      try {
-        const issuer = process.env.LETTER_IRL_OAUTH_ISSUER;
-        if (issuer) {
-          const userinfoUrl = `${issuer}userinfo`;
-          console.log(`🔍 Fetching user info from: ${userinfoUrl}`);
-
-          const response = await fetch(userinfoUrl, {
-            headers: {
-              'Authorization': `Bearer ${authInfo.token}`
-            }
-          });
-
-          if (response.ok) {
-            const userInfo = await response.json();
-            email = userInfo.email || userInfo.sub || 'unknown@example.com';
-            console.log(`✅ Retrieved email from userinfo: ${email}`);
-          } else {
-            console.warn(`⚠️  Failed to fetch userinfo: ${response.status} ${response.statusText}`);
-            email = 'unknown@example.com';
-          }
-        } else {
-          email = 'unknown@example.com';
-        }
-      } catch (error) {
-        console.error(`⚠️  Error fetching userinfo:`, error);
-        email = 'unknown@example.com';
-      }
-    }
-
     try {
-      await getOrCreateUser(userId, email ?? "unknown@example.com");
-      console.log(`✅ User ready: ${userId} (${email})`);
+      await prepareAuthenticatedUser(authInfo);
     } catch (error) {
-      console.error(`⚠️  Failed to create user ${userId}:`, error);
+      console.error(`[auth] Failed to prepare user ${userId}`, error);
     }
   }
 
@@ -437,9 +462,17 @@ export async function registerLetterTools(
         inputSchema: inputShape,
         outputSchema: outputShape,
         annotations,
-        _meta: buildToolMeta(tool.meta)  // Contains auth metadata and OpenAI widget/runtime hints
+        _meta: buildToolMeta(tool.name, tool.meta)
       },
       async (args: Record<string, unknown>, extra: any) => {
+        try {
+          authorizeTool(tool.name, authInfo);
+        } catch (error) {
+          if (error instanceof InsufficientScopeError) {
+            return buildInsufficientScopeToolResult(error);
+          }
+          throw error;
+        }
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
         const extraMeta = extra._meta as Record<string, unknown> | undefined;
@@ -464,50 +497,28 @@ export async function registerLetterTools(
         //
         // US-MCP-07: Separate heavy data (previewHtml) into _meta to reduce model context bloat.
         // The model doesn't need raw HTML; it gets the summaryText narration instead.
-        const resultObj = result as Record<string, unknown>;
-        // Extract heavy data that the model doesn't need - only the widget uses it
-        // Letters have previewHtml, postcards have previewFrontHtml/previewBackHtml
-        // Image data (base64) should ONLY go to the widget, not to the model
-        // This prevents 60K+ token responses from confusing ChatGPT
-        const {
-          previewHtml,
-          previewFrontHtml,
-          previewBackHtml,
-          inlineImageData,        // Letter inline image (base64) - widget doesn't need
-          headerImageData,        // Letter header image (base64) - widget doesn't need
-          frontImageData,         // Postcard front image (base64) - widget doesn't need
-          generatedImagePreview,  // Tiny preview (~15KB) for GenerateImageCard widget
-          generatedImageUrl,      // Temp URL for full image download
-          ...modelFacingData
-        } = resultObj;
+        const { structuredContent, _meta } = partitionToolResult(
+          result as Record<string, unknown>,
+          meta
+        );
+
+        if (tool.name === "generate_image") {
+          generateImageOutputZ.parse(structuredContent);
+        }
 
         const response = {
-          structuredContent: modelFacingData,  // Lean data for model (no HTML)
+          structuredContent,
           content: [
             {
               type: "text" as const,
               text: summaryText
             }
           ],
-          _meta: {
-            ...meta,
-            // Heavy data for widget only (→ window.openai.toolResponseMetadata)
-            // Widget reads this via window.openai.toolResponseMetadata.previewHtml
-            ...(previewHtml !== undefined ? { previewHtml } : {}),
-            // Postcard-specific preview fields
-            ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
-            ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
-            // GenerateImageCard widget data (via _meta since structuredContent/state can be null)
-            ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
-            ...(generatedImageUrl !== undefined ? { generatedImageUrl } : {})
-          }
+          _meta
         };
 
         console.log(`📤 Tool response ${tool.name}:`);
-        console.log(`   structuredContent: ${JSON.stringify(modelFacingData)}`);
-        if (previewHtml) {
-          console.log(`   _meta.previewHtml: [${(previewHtml as string).length} bytes]`);
-        }
+        console.log(`   structuredContent keys: ${Object.keys(structuredContent).join(", ")}`);
 
         return response;
       }

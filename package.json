@@ -16,6 +16,7 @@
     "manifest:generate": "tsx scripts/write-manifest.ts",
     "test:submission": "vitest run tests/unit/auth/oauthMetadata.test.ts tests/unit/mcp/manifest.test.ts tests/unit/mcp/registerTools.test.ts tests/unit/mcp/widgetResources.test.ts tests/unit/mcp/submissionReadiness.test.ts",
     "check:submission": "npm run lint && npm run test:submission",
+    "check:oauth-discovery": "tsx scripts/check-oauth-discovery.ts",
     "flow": "tsx src/cli/flowHarness.ts",
     "mcp:stdio": "tsx src/mcp/stdioServer.ts",
     "mcp:http": "tsx src/mcp/httpServer.ts",

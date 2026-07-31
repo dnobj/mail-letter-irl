@@ -30,20 +30,21 @@ describe("Submission readiness checks", () => {
   });
 
   it("should include OAuth security schemes when auth is required", () => {
-    expect(buildToolSecuritySchemes(true)).toEqual([
+    expect(buildToolSecuritySchemes("send_letter", true)).toEqual([
       {
         type: "oauth2",
-        scopes: ["openid", "email", "profile"]
+        scopes: ["mail:send"]
       }
     ]);
   });
 
   it("should expose noauth security schemes when auth is disabled", () => {
-    expect(buildToolSecuritySchemes(false)).toEqual([{ type: "noauth" }]);
+    expect(buildToolSecuritySchemes("send_letter", false)).toEqual([{ type: "noauth" }]);
   });
 
   it("should copy securitySchemes into tool metadata", () => {
     const meta = buildToolMeta(
+      "generate_image",
       {
         "openai/outputTemplate": "ui://widgets/LetterPreviewCard.html",
         "openai/widgetAccessible": true
@@ -53,7 +54,7 @@ describe("Submission readiness checks", () => {
     expect(meta.securitySchemes).toEqual([
       {
         type: "oauth2",
-        scopes: ["openid", "email", "profile"]
+        scopes: ["mail:draft"]
       }
     ]);
     expect(meta["openai/widgetAccessible"]).toBe(true);
@@ -76,9 +77,12 @@ describe("Submission readiness checks", () => {
     });
   });
 
-  it("should advertise CMID support in OIDC metadata", () => {
-    const metadata = getOpenIdConfiguration("https://api.letterirl.com");
-    expect(metadata.client_id_metadata_document_supported).toBe(true);
+  it("should not synthesize Auth0 CIMD support", () => {
+    const metadata = getOpenIdConfiguration("https://api.letterirl.com") as Record<
+      string,
+      unknown
+    >;
+    expect(metadata).not.toHaveProperty("client_id_metadata_document_supported");
   });
 
   it("should derive public metadata URLs from the forwarded custom domain", () => {
@@ -95,5 +99,17 @@ describe("Submission readiness checks", () => {
     expect(buildWwwAuthenticateChallenge("Missing Authorization header", publicBaseUrl)).toContain(
       'resource_metadata="https://api.letterirl.com/.well-known/oauth-protected-resource"'
     );
+  });
+
+  it("should return a standards-aligned insufficient-scope challenge", () => {
+    const challenge = buildWwwAuthenticateChallenge(
+      "insufficient_scope: missing mail:send",
+      "https://api.letterirl.com"
+    );
+    expect(challenge).toContain('error="insufficient_scope"');
+    expect(challenge).toContain("mail:read");
+    expect(challenge).toContain("mail:draft");
+    expect(challenge).toContain("mail:send");
+    expect(challenge).not.toContain("authorization_uri=");
   });
 });
