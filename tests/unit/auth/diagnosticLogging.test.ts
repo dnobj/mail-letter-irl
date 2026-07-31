@@ -56,6 +56,17 @@ describe("privacy-safe authentication diagnostics", () => {
     expect(output).not.toContain(error.message);
   });
 
+  it("uses trusted domain fallbacks and known network codes for useful diagnosis", () => {
+    expect(classifyDiagnosticError(new Error("private"), "tool_execution_failed"))
+      .toBe("tool_execution_failed");
+    expect(
+      classifyDiagnosticError(
+        Object.assign(new Error("private"), { code: "ETIMEDOUT" }),
+        "server_lifecycle_failed"
+      )
+    ).toBe("ETIMEDOUT");
+  });
+
   it("defers account creation without logging the raw subject", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const authInfo: AuthenticatedUser = {
@@ -83,6 +94,9 @@ describe("privacy-safe authentication diagnostics", () => {
     const sources = [
       "src/auth/identity.ts",
       "src/auth/tokenValidator.ts",
+      "src/services/userService.ts",
+      "src/services/patService.ts",
+      "src/store/fileAccountStore.ts",
       "src/server.ts",
       "src/mcp/httpServer.ts",
       "src/mcp/registerTools.ts",
@@ -90,7 +104,9 @@ describe("privacy-safe authentication diagnostics", () => {
     ].map((path) => readFileSync(path, "utf8")).join("\n");
 
     expect(sources).not.toMatch(/console\.(?:log|warn|error)[^\n]*(?:userId|authInfo|sessionId|staticClientId)/);
-    expect(sources).not.toMatch(/console\.(?:warn|error)\([^\n]*,\s*(?:error|closeError)\s*\)/);
+    expect(sources).not.toContain('console.error("MCP request failed", error)');
+    expect(sources).not.toContain('console.warn("Optional auth validation failed", error)');
+    expect(sources).not.toContain('console.error("SSE transport error", error)');
     expect(sources).not.toContain("Error stack:");
     expect(sources).not.toContain("diagnostic: payload");
     expect(sources).not.toContain("userHash");

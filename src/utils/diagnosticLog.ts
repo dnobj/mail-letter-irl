@@ -3,33 +3,44 @@ type DiagnosticLevel = "info" | "warn" | "error";
 type DiagnosticValue = string | number | boolean;
 
 const SAFE_CLASS_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
-const SAFE_ERROR_CLASSES = new Set([
-  "Error",
-  "TypeError",
-  "SyntaxError",
-  "AggregateError",
+const SAFE_ERROR_CODES = new Set([
   "ERR_JWT_EXPIRED",
   "ERR_JWT_CLAIM_VALIDATION_FAILED",
   "ERR_JWS_SIGNATURE_VERIFICATION_FAILED",
   "ERR_JOSE_ALG_NOT_ALLOWED",
   "ERR_JWKS_NO_MATCHING_KEY",
   "ERR_JWKS_MULTIPLE_MATCHING_KEYS",
-  "ERR_JWKS_TIMEOUT"
+  "ERR_JWKS_TIMEOUT",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOTFOUND",
+  "ETIMEDOUT"
 ]);
 
-export function classifyDiagnosticError(error: unknown): string {
+export type DiagnosticErrorFallback =
+  | "account_persistence_failed"
+  | "auth_validation_failed"
+  | "identity_persistence_failed"
+  | "mcp_request_failed"
+  | "mcp_session_failed"
+  | "pat_persistence_failed"
+  | "server_lifecycle_failed"
+  | "tool_execution_failed"
+  | "unknown_error";
+
+export function classifyDiagnosticError(
+  error: unknown,
+  fallback: DiagnosticErrorFallback = "unknown_error"
+): string {
   if (!error || typeof error !== "object") {
     return "unknown_error";
   }
 
-  const candidate =
-    "code" in error && typeof error.code === "string"
-      ? error.code
-      : error instanceof Error
-        ? error.name
-        : "unknown_error";
+  const candidate = "code" in error && typeof error.code === "string"
+    ? error.code
+    : undefined;
 
-  return SAFE_ERROR_CLASSES.has(candidate) ? candidate : "unknown_error";
+  return candidate && SAFE_ERROR_CODES.has(candidate) ? candidate : fallback;
 }
 
 export function writeDiagnostic(

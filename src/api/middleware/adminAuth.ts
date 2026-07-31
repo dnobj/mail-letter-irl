@@ -11,6 +11,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'http';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { classifyDiagnosticError, writeDiagnostic } from '../../utils/diagnosticLog.js';
 
 // Admin feature flags
 // ADMIN_ENABLED: Must be 'true' to enable admin routes (disabled by default)
@@ -117,7 +118,9 @@ export async function authenticateAdmin(
     userId = payload.sub!;
     email = payload.email as string | undefined;
   } catch (error) {
-    console.error('Admin auth - JWT validation failed:', error);
+    writeDiagnostic('error', 'auth.admin_validation_failed', {
+      errorClass: classifyDiagnosticError(error, 'auth_validation_failed')
+    });
     sendJson(res, 401, {
       error: 'Unauthorized',
       message: 'Invalid or expired token'
@@ -129,7 +132,7 @@ export async function authenticateAdmin(
   const isAdmin = ADMIN_USER_IDS.includes(userId);
 
   if (!isAdmin) {
-    console.warn(`Admin access denied for user: ${userId}`);
+    writeDiagnostic('warn', 'auth.admin_access_denied');
     sendJson(res, 403, {
       error: 'Forbidden',
       message: 'Admin access required. Contact administrator for access.'
@@ -137,7 +140,7 @@ export async function authenticateAdmin(
     return null;
   }
 
-  console.log(`✅ Admin authenticated: ${userId} (${email})`);
+  writeDiagnostic('info', 'auth.admin_authenticated');
 
   return {
     userId,
