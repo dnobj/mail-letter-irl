@@ -277,7 +277,7 @@ Test the complete letter journey.
 Test server-side image generation via the `generate_image` tool.
 
 ### Prerequisites
-- [ ] (DEV) Mail IRL app activated in ChatGPT chat (type `@` → select "(DEV) Mail IRL")
+- [ ] (DEV) Letter IRL app activated in ChatGPT chat (type `@` → select "(DEV) Letter IRL")
 - [ ] Authenticated / connected to the app
 
 ### Basic Generation (US-IMG-01)
@@ -288,12 +288,14 @@ Test server-side image generation via the `generate_image` tool.
 5. [ ] Preview image renders in the widget
 6. [ ] Image matches the prompt description
 
-### Widget Interaction (US-IMG-02)
-- [ ] "Use This Image" button is visible on the widget
-- [ ] "Generate Another" button is visible on the widget
-- [ ] Clicking "Use This Image" triggers upload to OpenAI file storage
-- [ ] Widget transitions to success state after upload
-- [ ] ChatGPT receives the image URL for use in subsequent tools
+### Result Bridge and Chaining (Issue #169)
+1. [ ] Confirm Letter IRL's `generate_image` tool is used, not native ChatGPT image generation
+2. [ ] Confirm the widget displays the generated preview without exposing base64 data in the conversation
+3. [ ] Ask ChatGPT to use the image in `quote_and_preview_postcard` without copying or re-entering its URL
+4. [ ] Confirm the postcard front renders the same generated image
+5. [ ] Reconnect or refresh the DEV app and repeat the generate-to-postcard flow to guard against cached widget resources
+6. [ ] Repeat at a narrow mobile viewport and in dark mode; loading, preview, URL, and error states must remain readable without overflow
+7. [ ] Confirm server and browser logs contain no bearer tokens, complete temporary image URLs, capability tokens, or base64 image bodies
 
 ### Context-Specific Dimensions (US-IMG-03)
 - [ ] Postcard context → landscape image (1536×1024)

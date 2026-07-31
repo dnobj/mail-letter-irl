@@ -148,8 +148,25 @@ const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? "https://api.lette
  *
  * @see US-MCP-07: Widget Resources
  */
-const WIDGET_API_URL = process.env.LETTER_IRL_API_URL ?? "https://api.letterirl.com";
+const WIDGET_API_URL =
+  process.env.LETTER_IRL_API_URL ??
+  process.env.LETTER_IRL_PUBLIC_BASE_URL ??
+  "https://api.letterirl.com";
 export const WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
+
+export function normalizeHttpsOrigin(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") {
+      throw new Error("Widget API URL must use HTTPS");
+    }
+    return url.origin;
+  } catch {
+    return "https://api.letterirl.com";
+  }
+}
+
+const WIDGET_API_ORIGIN = normalizeHttpsOrigin(WIDGET_API_URL);
 
 /**
  * Content Security Policy for widgets.
@@ -160,9 +177,14 @@ export const WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
  * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
  * @see US-MCP-07: Widget Resources
  */
-const WIDGET_CSP = {
-  connect_domains: ["https://chatgpt.com", WIDGET_API_URL],
-  resource_domains: ["https://*.oaistatic.com"],
+export const WIDGET_CSP_CANONICAL = {
+  connectDomains: ["https://chatgpt.com", WIDGET_API_ORIGIN],
+  resourceDomains: ["https://*.oaistatic.com", WIDGET_API_ORIGIN]
+};
+
+export const WIDGET_CSP_LEGACY = {
+  connect_domains: ["https://chatgpt.com", WIDGET_API_ORIGIN],
+  resource_domains: ["https://*.oaistatic.com", WIDGET_API_ORIGIN],
   // frame_domains not included - we don't use iframes
   // redirect_domains not included - we don't use openExternal
 };
@@ -213,12 +235,12 @@ export function buildWidgetResourceMeta(description: string) {
     ui: {
       description,
       domain: WIDGET_DOMAIN,
-      csp: WIDGET_CSP,
+      csp: WIDGET_CSP_CANONICAL,
       prefersBorder: true
     },
     "openai/widgetPrefersBorder": true,
     "openai/widgetDomain": WIDGET_DOMAIN,
-    "openai/widgetCSP": WIDGET_CSP,
+    "openai/widgetCSP": WIDGET_CSP_LEGACY,
     "openai/widgetDescription": description
   };
 }
@@ -339,6 +361,42 @@ export function getZodOutputShape(name: string) {
   return schema?.shape;
 }
 
+type PartitionedToolResult = {
+  structuredContent: Record<string, unknown>;
+  _meta: Record<string, unknown>;
+};
+
+/** Keep widget-only previews out of model context while retaining chainable URLs. */
+export function partitionToolResult(
+  result: Record<string, unknown>,
+  meta: Record<string, unknown> = {}
+): PartitionedToolResult {
+  const {
+    previewHtml,
+    previewFrontHtml,
+    previewBackHtml,
+    inlineImageData,
+    headerImageData,
+    frontImageData,
+    generatedImagePreview,
+    ...modelFacingData
+  } = result;
+
+  return {
+    structuredContent: modelFacingData,
+    _meta: {
+      ...meta,
+      ...(previewHtml !== undefined ? { previewHtml } : {}),
+      ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
+      ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
+      ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
+      ...(modelFacingData.generatedImageUrl !== undefined
+        ? { generatedImageUrl: modelFacingData.generatedImageUrl }
+        : {})
+    }
+  };
+}
+
 export async function registerLetterTools(
   mcpServer: McpServer,
   appServer: LetterIrlServer,
@@ -415,50 +473,28 @@ export async function registerLetterTools(
         //
         // US-MCP-07: Separate heavy data (previewHtml) into _meta to reduce model context bloat.
         // The model doesn't need raw HTML; it gets the summaryText narration instead.
-        const resultObj = result as Record<string, unknown>;
-        // Extract heavy data that the model doesn't need - only the widget uses it
-        // Letters have previewHtml, postcards have previewFrontHtml/previewBackHtml
-        // Image data (base64) should ONLY go to the widget, not to the model
-        // This prevents 60K+ token responses from confusing ChatGPT
-        const {
-          previewHtml,
-          previewFrontHtml,
-          previewBackHtml,
-          inlineImageData,        // Letter inline image (base64) - widget doesn't need
-          headerImageData,        // Letter header image (base64) - widget doesn't need
-          frontImageData,         // Postcard front image (base64) - widget doesn't need
-          generatedImagePreview,  // Tiny preview (~15KB) for GenerateImageCard widget
-          generatedImageUrl,      // Temp URL for full image download
-          ...modelFacingData
-        } = resultObj;
+        const { structuredContent, _meta } = partitionToolResult(
+          result as Record<string, unknown>,
+          meta
+        );
+
+        if (tool.name === "generate_image") {
+          generateImageOutputZ.parse(structuredContent);
+        }
 
         const response = {
-          structuredContent: modelFacingData,  // Lean data for model (no HTML)
+          structuredContent,
           content: [
             {
               type: "text" as const,
               text: summaryText
             }
           ],
-          _meta: {
-            ...meta,
-            // Heavy data for widget only (→ window.openai.toolResponseMetadata)
-            // Widget reads this via window.openai.toolResponseMetadata.previewHtml
-            ...(previewHtml !== undefined ? { previewHtml } : {}),
-            // Postcard-specific preview fields
-            ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
-            ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
-            // GenerateImageCard widget data (via _meta since structuredContent/state can be null)
-            ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
-            ...(generatedImageUrl !== undefined ? { generatedImageUrl } : {})
-          }
+          _meta
         };
 
         console.log(`📤 Tool response ${tool.name}:`);
-        console.log(`   structuredContent: ${JSON.stringify(modelFacingData)}`);
-        if (previewHtml) {
-          console.log(`   _meta.previewHtml: [${(previewHtml as string).length} bytes]`);
-        }
+        console.log(`   structuredContent keys: ${Object.keys(structuredContent).join(", ")}`);
 
         return response;
       }
