@@ -31,6 +31,14 @@ ACID—Atomicity, Consistency, Isolation, and Durability—is the guiding engine
 
 Use short imperative commit summaries without trailing punctuation. PRs should describe behavior, link the issue when one exists, include test evidence, and call out migrations, environment variables, manifest changes, or external dependencies. Include screenshots or logs when a widget or protocol contract changes.
 
+## Work Management & Agent Coordination
+Follow `docs/agent-workflow.md` for backlog classification, planning, delegation, handoffs, and
+manual-test gates. Frame non-trivial work with a goal, relevant context, constraints, and explicit
+done criteria before implementation. Keep one task/chat focused on one coherent outcome; continue in
+the same task when its context remains useful, and use separate worktrees for independent parallel
+changes. Delegate only bounded work with a clear owner and deliverable, and never have multiple agents
+edit the same files or branch concurrently.
+
 ## Infrastructure Truths
 
 Letter IRL uses one Railway project with separate `production` and `development` environments. The backend auto-deploys from `master` (production) and `dev` (development); the companion website auto-deploys from `main` (production) and `dev` (development). Production stays warm; development uses Railway Serverless and must retain it only while the documented wake-up acceptance checks pass.
