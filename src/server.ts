@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { FileAccountStore } from "./store/fileAccountStore.js";
 import {
   // Letter tools - three separate tools for different layouts
@@ -34,6 +34,7 @@ import {
   Logger
 } from "./contracts/types.js";
 import { createLogger } from "./logging/index.js";
+import { classifyDiagnosticError } from "./utils/diagnosticLog.js";
 
 const tools: McpToolDefinition<any, any>[] = [
   // ChatGPT currently appears to expose only the first 12 registered actions
@@ -126,10 +127,6 @@ export class LetterIrlServer {
     };
   }
 
-  private obfuscateUserId(userId: string): string {
-    return createHash("sha256").update(userId).digest("hex").slice(0, 12);
-  }
-
   async execute<Input, Output>(
     request: ServerRequest<Input>
   ): Promise<ServerResponse<Output>> {
@@ -139,11 +136,9 @@ export class LetterIrlServer {
     }
 
     const correlationId = randomUUID();
-    const userHash = this.obfuscateUserId(request.userId);
     const requestLogger = this.logger.child({
       correlationId,
-      toolName: request.toolName,
-      userHash
+      toolName: request.toolName
     });
 
     requestLogger.info(
@@ -183,7 +178,7 @@ export class LetterIrlServer {
         {
           correlationId,
           event: "tool.invocation.failure",
-          errorMessage: error instanceof Error ? error.message : "Unknown error"
+          errorClass: classifyDiagnosticError(error)
         },
         "Tool invocation failed"
       );

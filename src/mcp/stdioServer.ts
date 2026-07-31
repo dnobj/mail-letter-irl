@@ -1,6 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { LetterIrlServer } from "../server.js";
+import {
+  classifyDiagnosticError,
+  writeDiagnostic
+} from "../utils/diagnosticLog.js";
 import { registerLetterTools } from "./registerTools.js";
 
 export async function startStdioServer() {
@@ -18,7 +22,9 @@ export async function startStdioServer() {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   startStdioServer().catch((error) => {
-    console.error("Failed to start Letter IRL MCP server", error);
+    writeDiagnostic("error", "mcp.stdio_start_failed", {
+      errorClass: classifyDiagnosticError(error)
+    });
     process.exit(1);
   });
 }

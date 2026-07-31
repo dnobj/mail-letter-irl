@@ -10,6 +10,10 @@ import {
   TOKEN_PREFIX as PAT_PREFIX
 } from "../services/patService.js";
 import { getOAuthConfig } from "./oauthConfig.js";
+import {
+  classifyDiagnosticError,
+  writeDiagnostic
+} from "../utils/diagnosticLog.js";
 import { InsufficientScopeError } from "./oauthChallenge.js";
 
 export interface AuthenticatedUser {
@@ -82,9 +86,11 @@ async function validatePATToken(token: string): Promise<AuthenticatedUser> {
   }
 
   if (result.tokenId) {
-    updateLastUsed(result.tokenId).catch((error) =>
-      console.error("[auth] Failed to update PAT last-used timestamp", error)
-    );
+    updateLastUsed(result.tokenId).catch((error) => {
+      writeDiagnostic("error", "auth.pat_last_used_update_failed", {
+        errorClass: classifyDiagnosticError(error)
+      });
+    });
   }
 
   return {
@@ -138,11 +144,9 @@ export async function validateJWTToken(
     requireScopes(user, requiredScopes);
     return user;
   } catch (error) {
-    const code =
-      error && typeof error === "object" && "code" in error
-        ? String(error.code)
-        : "token_validation_failed";
-    console.warn(`[auth] JWT rejected code=${code}`);
+    writeDiagnostic("warn", "auth.jwt_rejected", {
+      errorClass: classifyDiagnosticError(error)
+    });
     throw error;
   }
 }

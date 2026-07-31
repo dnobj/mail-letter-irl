@@ -71,10 +71,12 @@ or raw request bodies.
 
 - [ ] Review Railway/Auth0 DEV logs for the test interval.
 - [ ] Confirm logs contain no bearer tokens, authorization codes, CIMD document
-      bodies, addresses, letter/postcard content, generated image payloads, or
-      raw request bodies.
+      bodies, raw OAuth subject/user IDs, email addresses, MCP session IDs,
+      addresses, letter/postcard content, generated image payloads or URLs,
+      widget diagnostic payloads, or raw request bodies.
 - [ ] Confirm validation diagnostics identify only non-sensitive error classes
-      such as issuer, audience, algorithm, expiry, subject, or scope failure.
+      and stable event names while preserving no arbitrary exception messages or
+      stack traces.
 
 ### CIMD-09 — Claude/PAT regression
 

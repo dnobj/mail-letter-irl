@@ -38,6 +38,10 @@ import {
   isCimdEnforcementEnabled
 } from "../auth/oauthConfig.js";
 import { classifyOAuthRoute } from "../auth/oauthRoutes.js";
+import {
+  classifyDiagnosticError,
+  writeDiagnostic
+} from "../utils/diagnosticLog.js";
 import { buildWwwAuthenticateChallenge } from "../auth/oauthChallenge.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -294,7 +298,9 @@ export async function startHttpServer() {
       await sessionServer.close();
     };
     sseTransport.onerror = (error) => {
-      console.error("SSE transport error", error);
+      writeDiagnostic("error", "mcp.sse_transport_error", {
+        errorClass: classifyDiagnosticError(error)
+      });
     };
 
     try {
@@ -304,15 +310,19 @@ export async function startHttpServer() {
         transport: sseTransport,
         authInfo
       });
-      console.log(
-        `SSE session established id=${sseTransport.sessionId} user=${authInfo?.userId ?? "anonymous"}`
-      );
+      writeDiagnostic("info", "mcp.sse_session_established", {
+        authType: authInfo?.authType ?? "disabled"
+      });
     } catch (error) {
-      console.error("Failed to start SSE session", error);
+      writeDiagnostic("error", "mcp.sse_session_start_failed", {
+        errorClass: classifyDiagnosticError(error)
+      });
       try {
         await sessionServer.close();
       } catch (closeError) {
-        console.warn("Failed to close SSE session server", closeError);
+        writeDiagnostic("warn", "mcp.sse_session_close_failed", {
+          errorClass: classifyDiagnosticError(closeError)
+        });
       }
       if (!res.headersSent) {
         res.writeHead(500, { "Content-Type": "application/json" });
@@ -350,7 +360,9 @@ export async function startHttpServer() {
     try {
       await session.transport.handlePostMessage(req, res);
     } catch (error) {
-      console.error("Failed to process SSE message", error);
+      writeDiagnostic("error", "mcp.sse_message_failed", {
+        errorClass: classifyDiagnosticError(error)
+      });
       if (!res.headersSent) {
         res.writeHead(500).end("Failed to process message");
       }
@@ -399,7 +411,9 @@ export async function startHttpServer() {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.end(stringifyManifest(getPublicBaseUrl(req)));
       } catch (error) {
-        console.error("Manifest generation failed", error);
+        writeDiagnostic("error", "mcp.manifest_generation_failed", {
+          errorClass: classifyDiagnosticError(error)
+        });
         res.statusCode = 500;
         res.end("Manifest generation error");
       }
@@ -474,15 +488,10 @@ export async function startHttpServer() {
 
       try {
         const body = await parseRequestBody(req);
-        const payload = body ? JSON.parse(body) : {};
-        console.log(
-          JSON.stringify({
-            level: "debug",
-            timestamp: new Date().toISOString(),
-            event: "widget.diagnostic",
-            diagnostic: payload
-          })
-        );
+        if (body) {
+          JSON.parse(body);
+        }
+        writeDiagnostic("info", "widget.diagnostic_received");
         res.statusCode = 204;
         res.end();
       } catch (error: any) {
@@ -551,7 +560,9 @@ export async function startHttpServer() {
         (req as any).body = body ? JSON.parse(body) : {};
         await handleCreateCheckoutSession(req as any, res as any);
       } catch (error) {
-        console.error('Error parsing checkout request body:', error);
+        writeDiagnostic("error", "api.checkout_request_parse_failed", {
+          errorClass: classifyDiagnosticError(error)
+        });
         res.statusCode = 408;
         res.end('Request timeout or error');
       }
@@ -566,7 +577,9 @@ export async function startHttpServer() {
         (req as any).body = body; // Raw string for Stripe signature verification
         await handleStripeWebhook(req as any, res as any);
       } catch (error) {
-        console.error('Error parsing Stripe webhook body:', error);
+        writeDiagnostic("error", "api.stripe_webhook_parse_failed", {
+          errorClass: classifyDiagnosticError(error)
+        });
         res.statusCode = 408;
         res.end('Request timeout or error');
       }
@@ -600,7 +613,9 @@ export async function startHttpServer() {
           campaignName: result.campaign?.name,
         }));
       } catch (error) {
-        console.error('Error validating promo code:', error);
+        writeDiagnostic("error", "api.promo_validation_failed", {
+          errorClass: classifyDiagnosticError(error)
+        });
         res.statusCode = 500;
         res.end(JSON.stringify({ valid: false, reason: 'Internal error' }));
       }
@@ -677,7 +692,7 @@ export async function startHttpServer() {
         redirect_uris: oauthConfig.staticRedirectUris
       };
 
-      console.log(`[DCR] Returning static client_id: ${staticClientId.substring(0, 8)}...`);
+      writeDiagnostic("info", "auth.static_registration_returned");
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(response));
@@ -775,9 +790,10 @@ export async function startHttpServer() {
         return;
       }
 
-      console.log(
-        `MCP request ${new Date().toISOString()} method=${req.method} host=${req.headers.host} origin=${req.headers.origin} user=${authInfo?.userId ?? "anonymous"}`
-      );
+      writeDiagnostic("info", "mcp.request_received", {
+        method: req.method ?? "unknown",
+        authType: authInfo?.authType ?? "disabled"
+      });
 
       const sessionTransport = new StreamableHTTPServerTransport({
         allowedHosts,
@@ -790,7 +806,7 @@ export async function startHttpServer() {
 
       // Clean up when response closes
       res.on('close', async () => {
-        console.log(`Streamable HTTP connection closed, session=${sessionTransport.sessionId}`);
+        writeDiagnostic("info", "mcp.connection_closed");
         await sessionServer.close();
       });
 
@@ -798,19 +814,20 @@ export async function startHttpServer() {
         // Connect the MCP server to the transport
         console.log('Connecting MCP server to Streamable HTTP transport...');
         await sessionServer.connect(sessionTransport);
-        console.log(`MCP server connected, session=${sessionTransport.sessionId}`);
+        writeDiagnostic("info", "mcp.server_connected");
 
         // For Streamable HTTP POST, parse body and handle request with timeout
         const body = await parseRequestBody(req);
 
         const parsedBody = body ? JSON.parse(body) : undefined;
-        console.log(`Parsed request: method=${parsedBody?.method || 'unknown'}`);
+        writeDiagnostic("info", "mcp.request_parsed");
 
         await sessionTransport.handleRequest(req, res, parsedBody);
         console.log(`Request handled successfully`);
       } catch (error) {
-        console.error("MCP request failed", error);
-        console.error("Error stack:", error instanceof Error ? error.stack : 'no stack');
+        writeDiagnostic("error", "mcp.request_failed", {
+          errorClass: classifyDiagnosticError(error)
+        });
         if (!res.headersSent) {
           res.statusCode = 500;
           res.end("Internal Server Error");
@@ -843,7 +860,9 @@ export async function startHttpServer() {
     try {
       await closePool();
     } catch (error) {
-      console.error('Error during shutdown:', error);
+      writeDiagnostic("error", "server.shutdown_failed", {
+        errorClass: classifyDiagnosticError(error)
+      });
     }
     server.close(() => process.exit(0));
   };
@@ -854,7 +873,9 @@ export async function startHttpServer() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   startHttpServer().catch((error) => {
-    console.error("Failed to start HTTP MCP server", error);
+    writeDiagnostic("error", "server.start_failed", {
+      errorClass: classifyDiagnosticError(error)
+    });
     process.exit(1);
   });
 }
@@ -871,7 +892,9 @@ async function authenticateRequest(
     try {
       return await validateAuthorizationHeader(req.headers.authorization);
     } catch (error) {
-      console.warn("Optional auth validation failed", error);
+      writeDiagnostic("warn", "auth.optional_validation_failed", {
+        errorClass: classifyDiagnosticError(error)
+      });
       return null;
     }
   }
