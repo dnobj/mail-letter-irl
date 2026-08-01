@@ -37,6 +37,50 @@ export type AmbiguousGenerationResolution =
   | 'provider_confirmed_failed'
   | 'customer_compensation';
 
+export type AmbiguousGenerationDecision = 'consume' | 'release';
+
+export interface AmbiguousGenerationReservation {
+  reservationId: string;
+  userId: string;
+  providerRequestId: string | null;
+  resolutionReason: string;
+  dispatchStartedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ResolveAmbiguousGenerationReservationParams {
+  reservationId: string;
+  expectedUserId: string;
+  actorId: string;
+  idempotencyKey: string;
+  decision: AmbiguousGenerationDecision;
+  resolution: AmbiguousGenerationResolution;
+}
+
+export interface AmbiguousGenerationResolutionResult {
+  reservationId: string;
+  userId: string;
+  decision: AmbiguousGenerationDecision;
+  resolution: AmbiguousGenerationResolution;
+  resultingStatus: 'consumed' | 'released';
+  replayed: boolean;
+}
+
+export type ImageGenerationResolutionErrorCode =
+  | 'idempotency_conflict'
+  | 'invalid_request'
+  | 'invalid_resolution'
+  | 'invalid_state'
+  | 'not_found';
+
+export class ImageGenerationResolutionError extends Error {
+  constructor(readonly code: ImageGenerationResolutionErrorCode) {
+    super(code);
+    this.name = 'ImageGenerationResolutionError';
+  }
+}
+
 export interface GrantImageEntitlementParams {
   userId: string;
   sourceType: string;
@@ -57,6 +101,16 @@ interface ReservationRow {
   entitlement_id: string;
   user_id: string;
   status: ImageGenerationReservationStatus;
+}
+
+interface ResolutionAuditRow {
+  reservation_id: string;
+  user_id: string;
+  actor_id: string;
+  idempotency_key: string;
+  decision: AmbiguousGenerationDecision;
+  resolution_reason: AmbiguousGenerationResolution;
+  resulting_status: 'consumed' | 'released';
 }
 
 function positiveIntegerSetting(name: string, fallback: number, minimum: number): number {
@@ -355,37 +409,150 @@ export async function markGenerationReservationAmbiguous(
   return Boolean(result.rows[0]);
 }
 
+export async function listAmbiguousGenerationReservations(
+  limit = 50
+): Promise<AmbiguousGenerationReservation[]> {
+  const normalizedLimit = Number.isFinite(limit) ? Math.trunc(limit) : 50;
+  const boundedLimit = Math.min(100, Math.max(1, normalizedLimit));
+  const result = await query<AmbiguousGenerationReservation>(
+    `SELECT reservation_id AS "reservationId",
+            user_id AS "userId",
+            provider_request_id AS "providerRequestId",
+            resolution_reason AS "resolutionReason",
+            dispatch_started_at AS "dispatchStartedAt",
+            created_at AS "createdAt",
+            updated_at AS "updatedAt"
+     FROM image_generation_reservations
+     WHERE status = 'ambiguous'
+     ORDER BY updated_at, reservation_id
+     LIMIT $1`,
+    [boundedLimit]
+  );
+  return result.rows;
+}
+
+function isValidResolutionPair(
+  decision: AmbiguousGenerationDecision,
+  resolution: AmbiguousGenerationResolution
+): boolean {
+  return decision === 'consume'
+    ? resolution === 'provider_confirmed_succeeded'
+    : resolution === 'provider_confirmed_failed' || resolution === 'customer_compensation';
+}
+
+function replayResolution(
+  existing: ResolutionAuditRow,
+  params: ResolveAmbiguousGenerationReservationParams
+): AmbiguousGenerationResolutionResult {
+  if (
+    existing.reservation_id !== params.reservationId ||
+    existing.user_id !== params.expectedUserId ||
+    existing.actor_id !== params.actorId ||
+    existing.decision !== params.decision ||
+    existing.resolution_reason !== params.resolution
+  ) {
+    throw new ImageGenerationResolutionError('idempotency_conflict');
+  }
+  return {
+    reservationId: existing.reservation_id,
+    userId: existing.user_id,
+    decision: existing.decision,
+    resolution: existing.resolution_reason,
+    resultingStatus: existing.resulting_status,
+    replayed: true
+  };
+}
+
 /**
- * Resolve a quarantined provider outcome only after operator/provider review.
- * A confirmed success consumes the held quota. A confirmed failure or an
- * explicit customer-compensation decision restores the exact entitlement.
+ * Resolve a quarantined provider outcome only after authenticated operator
+ * review. The state transition, any quota restoration, and the durable audit
+ * record commit in one transaction. The user binding prevents a reservation ID
+ * from being used to mutate another account.
  */
 export async function resolveAmbiguousGenerationReservation(
-  reservationId: string,
-  resolution: AmbiguousGenerationResolution
-): Promise<boolean> {
+  params: ResolveAmbiguousGenerationReservationParams
+): Promise<AmbiguousGenerationResolutionResult> {
+  if (
+    !params.reservationId ||
+    params.reservationId.length > 64 ||
+    !params.expectedUserId ||
+    params.expectedUserId.length > 255 ||
+    !params.actorId ||
+    params.actorId.length > 255 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(params.idempotencyKey)
+  ) {
+    throw new ImageGenerationResolutionError('invalid_request');
+  }
+  if (!isValidResolutionPair(params.decision, params.resolution)) {
+    throw new ImageGenerationResolutionError('invalid_resolution');
+  }
   return transaction(async client => {
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [params.idempotencyKey]
+    );
+    const replay = await client.query<ResolutionAuditRow>(
+      `SELECT reservation_id, user_id, actor_id, idempotency_key, decision,
+              resolution_reason, resulting_status
+       FROM image_generation_resolution_audit
+       WHERE idempotency_key = $1`,
+      [params.idempotencyKey]
+    );
+    if (replay.rows[0]) return replayResolution(replay.rows[0], params);
+
     const reservation = await client.query<ReservationRow>(
       `SELECT reservation_id, entitlement_id, user_id, status
        FROM image_generation_reservations
-       WHERE reservation_id = $1
+       WHERE reservation_id = $1 AND user_id = $2
        FOR UPDATE`,
-      [reservationId]
+      [params.reservationId, params.expectedUserId]
     );
     const row = reservation.rows[0];
-    if (!row || row.status !== 'ambiguous') return false;
-    if (resolution === 'provider_confirmed_succeeded') {
-      await client.query(
+    if (!row) throw new ImageGenerationResolutionError('not_found');
+    if (row.status !== 'ambiguous') {
+      throw new ImageGenerationResolutionError('invalid_state');
+    }
+
+    const resultingStatus = params.decision === 'consume' ? 'consumed' : 'released';
+    if (params.decision === 'consume') {
+      const consumed = await client.query<{ reservation_id: string }>(
         `UPDATE image_generation_reservations
          SET status = 'consumed', completed_at = COALESCE(completed_at, NOW()),
-             provider_completed_at = COALESCE(provider_completed_at, NOW()),
-             resolution_reason = $2, updated_at = NOW()
-         WHERE reservation_id = $1 AND status = 'ambiguous'`,
-        [reservationId, resolution]
+              provider_completed_at = COALESCE(provider_completed_at, NOW()),
+              resolution_reason = $2, updated_at = NOW()
+         WHERE reservation_id = $1 AND status = 'ambiguous'
+         RETURNING reservation_id`,
+        [params.reservationId, params.resolution]
       );
-      return true;
+      if (!consumed.rows[0]) throw new ImageGenerationResolutionError('invalid_state');
+    } else {
+      await releaseReservationWithClient(client, row, params.resolution, ['ambiguous']);
     }
-    return releaseReservationWithClient(client, row, resolution, ['ambiguous']);
+
+    await client.query(
+      `INSERT INTO image_generation_resolution_audit (
+         idempotency_key, reservation_id, user_id, actor_id, decision,
+         resolution_reason, prior_status, resulting_status
+       ) VALUES ($1, $2, $3, $4, $5, $6, 'ambiguous', $7)`,
+      [
+        params.idempotencyKey,
+        params.reservationId,
+        params.expectedUserId,
+        params.actorId,
+        params.decision,
+        params.resolution,
+        resultingStatus
+      ]
+    );
+
+    return {
+      reservationId: params.reservationId,
+      userId: params.expectedUserId,
+      decision: params.decision,
+      resolution: params.resolution,
+      resultingStatus,
+      replayed: false
+    };
   });
 }
 

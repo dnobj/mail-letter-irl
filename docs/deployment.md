@@ -116,9 +116,13 @@ Apply forward migration `023_jit_recovery_state_machines.sql` before running
 the issue #69 application revision. Migration 021 is already applied in
 development, and issue #162 owns migration 022. The repository migration runner
 records filenames and applies every unrecorded file, including a lower-numbered
-file that arrives later. Disposable-PostgreSQL tests must continue to prove that
-both `021 -> 023 -> 022` and `021 -> 022 -> 023` produce identical schema and
-migration ledgers. Migration 023 must remain independent of migration 022.
+file that arrives later. The current disposable-PostgreSQL test uses a synthetic
+022 probe because the real `022_admin_audit.sql` is not present on this branch;
+that proves runner ordering only, not compatibility with issue #162. Before both
+changes integrate or deploy, rerun the test with the real 022 in both
+`021 -> 023 -> 022` and `021 -> 022 -> 023` order and require identical schema
+fingerprints and migration ledgers. Do not apply 023 ahead of that gate if the
+real migrations fail to converge.
 
 Configure development and production independently:
 
@@ -136,6 +140,41 @@ amount or currency mismatch is quarantined as `refund_pending`; it is never
 fulfilled. Keep Stripe test/live keys, Price IDs, webhook secrets, Railway URLs,
 Neon databases, and PostGrid environments separated as described in
 `docs/infrastructure.md`.
+
+## Ambiguous image-reservation operator procedure
+
+Keep `JIT_PURCHASE_ENABLED=false` and `IMAGE_TRIAL_ENABLED=false` while validating
+this recovery path. The routes below use the existing `/api/admin` authentication
+and authorization boundary; never expose them through a public or user token.
+This change does not enable cloud admin access. If `ADMIN_ENABLED` remains false,
+the route correctly returns not found and JIT/image-funded generation must remain
+disabled until the owner approves an environment-specific authenticated operator
+control (including the eventual issue #162 admin integration).
+
+1. With an authenticated admin token, request
+   `GET /api/admin/image-generation/ambiguous?limit=50`. Record the reservation,
+   bound account, provider request reference, and timestamps in the restricted
+   incident record. These identifiers are intentionally returned to the operator
+   but must never be pasted into application logs.
+2. Reconcile the provider request reference with authoritative provider evidence.
+   Choose `consume` only with `provider_confirmed_succeeded`. Choose `release`
+   only with `provider_confirmed_failed`, or with `customer_compensation` after an
+   explicit owner-approved fairness decision. Never release an unknown outcome
+   merely because it is old.
+3. Submit
+   `POST /api/admin/image-generation/ambiguous/{reservationId}/resolve` with a
+   JSON body containing the exact `userId`, a unique operator-controlled
+   `idempotencyKey`, the `decision`, and the matching `resolution` classification.
+   The server derives the actor from the authenticated identity; an actor in the
+   request body is ignored.
+4. Require HTTP 200 and verify `resultingStatus` plus `replayed`. Retry only with
+   the exact same body and idempotency key; an exact retry returns
+   `replayed: true`, while a reused key with changed inputs returns a conflict.
+   A mismatched account returns not found and cannot mutate another user's row.
+5. Verify exactly one matching `image_generation_resolution_audit` row and the
+   corresponding reservation/entitlement counters. Confirm application logs
+   contain only the stable decision/status classifications and no reservation,
+   account, provider, address, or image identifiers.
 
 After the migration and disabled deployment are healthy, validate both mail
 types in Stripe test mode, enable only internal development accounts, and then

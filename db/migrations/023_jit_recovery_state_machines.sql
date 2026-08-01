@@ -107,6 +107,57 @@ CREATE TRIGGER update_image_generation_reservations_updated_at
 COMMENT ON TABLE image_generation_reservations IS
   'Durable image budget state: reserved before dispatch, dispatched before provider I/O, consumed/released for definite outcomes, and ambiguous for manual reconciliation without automatic quota release.';
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_image_generation_reservations_identity
+  ON image_generation_reservations(reservation_id, user_id);
+
+CREATE TABLE image_generation_resolution_audit (
+  resolution_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  idempotency_key VARCHAR(128) NOT NULL UNIQUE,
+  reservation_id UUID NOT NULL UNIQUE,
+  user_id VARCHAR(255) NOT NULL,
+  actor_id VARCHAR(255) NOT NULL,
+  decision VARCHAR(20) NOT NULL,
+  resolution_reason VARCHAR(60) NOT NULL,
+  prior_status VARCHAR(20) NOT NULL,
+  resulting_status VARCHAR(20) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT image_generation_resolution_reservation_fk
+    FOREIGN KEY (reservation_id, user_id)
+    REFERENCES image_generation_reservations(reservation_id, user_id)
+    ON DELETE RESTRICT,
+  CONSTRAINT valid_image_generation_resolution_decision CHECK (
+    decision IN ('consume', 'release')
+  ),
+  CONSTRAINT valid_image_generation_resolution_reason CHECK (
+    resolution_reason IN (
+      'provider_confirmed_succeeded',
+      'provider_confirmed_failed',
+      'customer_compensation'
+    )
+  ),
+  CONSTRAINT valid_image_generation_resolution_transition CHECK (
+    prior_status = 'ambiguous'
+    AND (
+      (
+        decision = 'consume'
+        AND resolution_reason = 'provider_confirmed_succeeded'
+        AND resulting_status = 'consumed'
+      )
+      OR (
+        decision = 'release'
+        AND resolution_reason IN ('provider_confirmed_failed', 'customer_compensation')
+        AND resulting_status = 'released'
+      )
+    )
+  )
+);
+
+CREATE INDEX idx_image_generation_resolution_audit_reservation
+  ON image_generation_resolution_audit(reservation_id, created_at DESC);
+
+COMMENT ON TABLE image_generation_resolution_audit IS
+  'Durable operator decisions for ambiguous image-generation outcomes. Each row is committed atomically with the bound reservation and entitlement transition.';
+
 -- ---------------------------------------------------------------------------
 -- Durable Stripe dispute monitoring
 -- ---------------------------------------------------------------------------

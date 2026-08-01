@@ -535,7 +535,7 @@ linked PR before enabling Pay & Send.
 
 - [ ] Use only the Railway **development** services and isolated Neon development database.
 - [ ] Confirm migration `021_jit_commerce_foundation.sql` is recorded in development.
-- [ ] Confirm migration `023_jit_recovery_state_machines.sql` is recorded in development; migration 022 may arrive before or after it but must remain independently recorded.
+- [ ] Before applying migration 023, rerun both migration orders with the real issue #162 `022_admin_audit.sql`; do not treat the existing synthetic 022 probe as compatibility evidence. Confirm 023 is independently recorded only after both orders converge.
 - [ ] Confirm Stripe is in sandbox/test mode and both JIT prices are active at USD 4.99.
 - [ ] Confirm the non-production mail provider is selected; no real mail may be submitted.
 - [ ] Start with `JIT_PURCHASE_ENABLED=false`; the test coordinator may enable it in development only for this test and must restore it afterward.
@@ -565,7 +565,10 @@ linked PR before enabling Pay & Send.
 - [ ] Confirm a zero-entitlement account cannot use Letter IRL-funded generation but can upload or reuse an external/conversation-generated image. After provider generation succeeds, simulate temporary-image storage failure and confirm the entitlement is still consumed.
 - [ ] Stop the application after reservation commit but before durable dispatch; after the pre-dispatch lease expires, run maintenance and confirm the exact entitlement is released once.
 - [ ] Simulate a definite 4xx provider rejection after dispatch and confirm the exact entitlement is released. Separately simulate a transport timeout or 5xx response and confirm the reservation becomes `ambiguous`, quota remains held, and no automatic retry spends a second provider generation.
-- [ ] Resolve one ambiguous reservation from provider evidence as succeeded and confirm it becomes `consumed` without quota restoration. Resolve another as provider-confirmed failed (or record an explicit customer-compensation decision) and confirm only its exact entitlement is restored once.
+- [ ] Use the authenticated admin procedure in `docs/deployment.md` to inspect ambiguous reservations. Confirm an unauthenticated request cannot inspect or resolve them and a mismatched account cannot mutate the reservation.
+- [ ] Resolve one ambiguous reservation from provider evidence with `consume` / `provider_confirmed_succeeded` and confirm it becomes `consumed` without quota restoration. Resolve another with `release` / `provider_confirmed_failed` (or an explicitly approved `customer_compensation`) and confirm only its exact entitlement is restored once.
+- [ ] Replay each resolution with the same idempotency key and exact body. Confirm HTTP 200 with `replayed: true`, one audit row, and no second counter change. Reuse the key with changed evidence and confirm a conflict with no mutation.
+- [ ] Confirm operator diagnostics retain the stable decision/result classifications but never include reservation, account, provider request, address, URL, endpoint, tracking, or image identifiers.
 - [ ] Replay a Stripe dispute event after forcing the first durable-alert insert to roll back. Confirm retry creates exactly one webhook claim and one sanitized open operational alert with no recipient, letter, order, dispute, charge, payment, or user identifier in alert details or logs.
 
 ### Teardown

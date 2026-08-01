@@ -140,3 +140,8 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
   entitlement in a locked transaction. The small crash window after durable
   dispatch marking but before network I/O is also treated as ambiguous because
   the database cannot prove whether bytes reached the provider.
+- Ambiguous outcomes are resolved only through the authenticated admin route.
+  The request binds the reservation to its expected account, uses a durable
+  idempotency key, and restricts decisions to evidence-compatible enums. The
+  state/counter transition and durable operator audit row commit together;
+  exact retries return the recorded result and changed reuses fail closed.

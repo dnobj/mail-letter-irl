@@ -487,12 +487,20 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
       consumed_quantity: 1,
       image_generations_used: 1
     });
-    expect(
-      await imageService.resolveAmbiguousGenerationReservation(
-        ambiguous.reservationId!,
-        'provider_confirmed_failed'
-      )
-    ).toBe(true);
+    const releaseRequest = {
+      reservationId: ambiguous.reservationId!,
+      expectedUserId: ambiguousUser,
+      actorId: 'integration-admin',
+      idempotencyKey: 'integration-ambiguous-release',
+      decision: 'release' as const,
+      resolution: 'provider_confirmed_failed' as const
+    };
+    const concurrentResolutions = await Promise.all([
+      imageService.resolveAmbiguousGenerationReservation(releaseRequest),
+      imageService.resolveAmbiguousGenerationReservation(releaseRequest)
+    ]);
+    expect(concurrentResolutions.filter(result => result.replayed)).toHaveLength(1);
+    expect(concurrentResolutions.filter(result => !result.replayed)).toHaveLength(1);
     const resolvedState = await acidPool.query<{
       status: string;
       consumed_quantity: number;
@@ -510,6 +518,84 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
       status: 'released',
       consumed_quantity: 0,
       image_generations_used: 0
+    });
+    expect((await acidPool.query(
+      `SELECT resolution_id FROM image_generation_resolution_audit
+       WHERE idempotency_key = 'integration-ambiguous-release'`
+    )).rowCount).toBe(1);
+
+    await expect(imageService.resolveAmbiguousGenerationReservation({
+      ...releaseRequest,
+      expectedUserId: concurrentUser,
+      idempotencyKey: 'integration-cross-user-release'
+    })).rejects.toMatchObject({ code: 'not_found' });
+
+    const operatorSuccessUser = await seed('operator-success');
+    const operatorSuccess = await imageService.reserveGeneration(operatorSuccessUser);
+    await imageService.markGenerationDispatched(
+      operatorSuccessUser,
+      operatorSuccess.reservationId!
+    );
+    await imageService.markGenerationReservationAmbiguous(
+      operatorSuccessUser,
+      operatorSuccess.reservationId!,
+      'provider_outcome_unknown',
+      'request-operator-success'
+    );
+    await expect(imageService.resolveAmbiguousGenerationReservation({
+      reservationId: operatorSuccess.reservationId!,
+      expectedUserId: operatorSuccessUser,
+      actorId: 'integration-admin',
+      idempotencyKey: 'integration-ambiguous-consume',
+      decision: 'consume',
+      resolution: 'provider_confirmed_succeeded'
+    })).resolves.toMatchObject({
+      replayed: false,
+      resultingStatus: 'consumed'
+    });
+
+    const rollbackUser = await seed('operator-rollback');
+    const rollbackReservation = await imageService.reserveGeneration(rollbackUser);
+    await imageService.markGenerationDispatched(
+      rollbackUser,
+      rollbackReservation.reservationId!
+    );
+    await imageService.markGenerationReservationAmbiguous(
+      rollbackUser,
+      rollbackReservation.reservationId!,
+      'provider_outcome_unknown',
+      'request-operator-rollback'
+    );
+    await acidPool.query(
+      'UPDATE users SET image_generations_used = 0 WHERE user_id = $1',
+      [rollbackUser]
+    );
+    await expect(imageService.resolveAmbiguousGenerationReservation({
+      reservationId: rollbackReservation.reservationId!,
+      expectedUserId: rollbackUser,
+      actorId: 'integration-admin',
+      idempotencyKey: 'integration-ambiguous-rollback',
+      decision: 'release',
+      resolution: 'customer_compensation'
+    })).rejects.toThrow('user counter is inconsistent');
+    const rolledBack = await acidPool.query<{
+      status: string;
+      consumed_quantity: number;
+      audit_count: string;
+    }>(
+      `SELECT reservation.status, entitlement.consumed_quantity,
+              (SELECT COUNT(*) FROM image_generation_resolution_audit
+               WHERE idempotency_key = 'integration-ambiguous-rollback') AS audit_count
+       FROM image_generation_reservations AS reservation
+       JOIN image_entitlements AS entitlement
+         ON entitlement.entitlement_id = reservation.entitlement_id
+       WHERE reservation.reservation_id = $1`,
+      [rollbackReservation.reservationId]
+    );
+    expect(rolledBack.rows[0]).toEqual({
+      status: 'ambiguous',
+      consumed_quantity: 1,
+      audit_count: '0'
     });
   });
 });

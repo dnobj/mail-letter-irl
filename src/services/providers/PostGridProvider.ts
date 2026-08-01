@@ -27,6 +27,57 @@ import type {
   PostcardSize,
   LetterLayoutType
 } from './types.js';
+import { writeDiagnostic } from '../../utils/diagnosticLog.js';
+
+type PostGridOperation =
+  | 'create_letter'
+  | 'create_postcard'
+  | 'get_letter_status'
+  | 'get_postcard_status'
+  | 'validate_connection'
+  | 'verify_domestic_address'
+  | 'verify_international_address';
+
+type PostGridProviderStatus =
+  | 'ready'
+  | 'rendered'
+  | 'processed'
+  | 'printed'
+  | 'mailed'
+  | 'in_transit'
+  | 'processed_for_delivery'
+  | 'delivered'
+  | 'completed'
+  | 'returned'
+  | 'canceled'
+  | 'verified'
+  | 'corrected'
+  | 'failed'
+  | 'unknown';
+
+function classifyProviderStatus(status: unknown): PostGridProviderStatus {
+  if (typeof status !== 'string') return 'unknown';
+  const normalized = status.toLowerCase();
+  const knownStatuses = new Set<PostGridProviderStatus>([
+    'ready',
+    'rendered',
+    'processed',
+    'printed',
+    'mailed',
+    'in_transit',
+    'processed_for_delivery',
+    'delivered',
+    'completed',
+    'returned',
+    'canceled',
+    'verified',
+    'corrected',
+    'failed'
+  ]);
+  return knownStatuses.has(normalized as PostGridProviderStatus)
+    ? normalized as PostGridProviderStatus
+    : 'unknown';
+}
 
 export interface PostGridProviderOptions {
   /** PostGrid API key (test or live) */
@@ -173,9 +224,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     };
 
     if (this.options.verbose) {
-      console.log(`✅ PostGridProvider initialized`);
-      console.log(`   Mode: ${this.options.mode}`);
-      console.log(`   Base URL: ${this.options.baseUrl}`);
+      writeDiagnostic('info', 'provider.postgrid.initialized', {
+        mode: this.options.mode
+      });
     }
   }
 
@@ -184,7 +235,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    */
   async sendLetter(params: LetterParams): Promise<LetterResult> {
     if (this.options.verbose) {
-      console.log('📤 [PostGrid] Sending letter');
+      this.writeOperationDiagnostic('provider.postgrid.operation_started', 'create_letter');
     }
 
     try {
@@ -211,14 +262,16 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const response = await this.apiRequest<PostGridLetterResponse>(
         'POST',
         '/letters',
+        'create_letter',
         request,
         params.idempotencyKey
       );
 
       if (this.options.verbose) {
-        console.log(`✅ [PostGrid] Letter created successfully`);
-        console.log(`   Status: ${response.status}`);
-        console.log(`   Expected Delivery: ${response.expectedDeliveryDate || 'Unknown'}`);
+        this.writeOperationDiagnostic('provider.postgrid.operation_succeeded', 'create_letter', {
+          providerStatus: classifyProviderStatus(response.status),
+          expectedDeliveryPresent: Boolean(response.expectedDeliveryDate)
+        });
       }
 
       // Parse expected delivery date
@@ -244,7 +297,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const errorMessage = this.extractErrorMessage(error);
 
       if (this.options.verbose) {
-        console.log('❌ [PostGrid] Letter send failed');
+        this.writeOperationDiagnostic('provider.postgrid.operation_failed', 'create_letter', {
+          errorClass: this.classifyRequestError(error)
+        }, 'error');
       }
 
       return {
@@ -265,12 +320,15 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * Get delivery status of a letter or postcard
    */
   async getStatus(trackingId: string): Promise<LetterStatus> {
+    const isPostcard = trackingId.startsWith('postcard_');
+    const operation: PostGridOperation = isPostcard
+      ? 'get_postcard_status'
+      : 'get_letter_status';
     try {
       // Determine endpoint based on tracking ID prefix
-      const isPostcard = trackingId.startsWith('postcard_');
       const endpoint = isPostcard ? `/postcards/${trackingId}` : `/letters/${trackingId}`;
 
-      const response = await this.apiRequest<PostGridLetterResponse>('GET', endpoint);
+      const response = await this.apiRequest<PostGridLetterResponse>('GET', endpoint, operation);
 
       // Map PostGrid status to our status
       const status = this.mapStatus(response.status);
@@ -297,9 +355,23 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         }];
       }
 
+      if (this.options.verbose) {
+        this.writeOperationDiagnostic('provider.postgrid.operation_succeeded', operation, {
+          providerStatus: classifyProviderStatus(response.status)
+        });
+      }
+
       return letterStatus;
     } catch (error) {
-      throw new Error(`Failed to get status for ${trackingId}: ${this.extractErrorMessage(error)}`);
+      if (this.options.verbose) {
+        this.writeOperationDiagnostic(
+          'provider.postgrid.operation_failed',
+          operation,
+          { errorClass: this.classifyRequestError(error) },
+          'error'
+        );
+      }
+      throw new Error(`Failed to get provider status: ${this.extractErrorMessage(error)}`);
     }
   }
 
@@ -337,16 +409,24 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     try {
       // Try to make a simple API call to verify credentials
       // PostGrid doesn't have a dedicated health check endpoint, so we'll use the letters endpoint
-      await this.apiRequest<any>('GET', '/letters?limit=1');
+      await this.apiRequest<any>('GET', '/letters?limit=1', 'validate_connection');
 
       if (this.options.verbose) {
-        console.log(`✅ [PostGrid] Connection validated`);
+        this.writeOperationDiagnostic(
+          'provider.postgrid.operation_succeeded',
+          'validate_connection'
+        );
       }
 
       return true;
     } catch (error) {
       if (this.options.verbose) {
-        console.log('❌ [PostGrid] Connection validation failed');
+        this.writeOperationDiagnostic(
+          'provider.postgrid.operation_failed',
+          'validate_connection',
+          { errorClass: this.classifyRequestError(error) },
+          'error'
+        );
       }
 
       return false;
@@ -538,6 +618,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   private async apiRequest<T>(
     method: 'GET' | 'POST' | 'DELETE',
     endpoint: string,
+    operation: PostGridOperation,
     body?: any,
     idempotencyKey?: string
   ): Promise<T> {
@@ -562,7 +643,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     };
 
     if (this.options.verbose) {
-      console.log(`🌐 [PostGrid] ${method} ${endpoint}`);
+      this.writeOperationDiagnostic('provider.postgrid.request_dispatched', operation, {
+        method
+      });
     }
 
     try {
@@ -609,6 +692,26 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       return error.error.message;
     }
     return 'Unknown error occurred';
+  }
+
+  private classifyRequestError(error: unknown): string {
+    if (!(error instanceof PostGridRequestError)) return 'provider_error';
+    if (error.statusCode === 429) return 'rate_limit_error';
+    if (error.statusCode && error.statusCode >= 500) return 'provider_server_error';
+    if (error.statusCode && error.statusCode >= 400) return 'provider_client_error';
+    return error.retryable ? 'transport_error' : 'provider_error';
+  }
+
+  private writeOperationDiagnostic(
+    event: string,
+    operation: PostGridOperation,
+    fields: Record<string, string | number | boolean> = {},
+    level: 'info' | 'warn' | 'error' = 'info'
+  ): void {
+    writeDiagnostic(level, event, {
+      ...fields,
+      operation
+    });
   }
 
   /**
@@ -681,8 +784,15 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * Validate an address using PostGrid's Address Verification API
    */
   async validateAddress(address: AddressValidationInput): Promise<AddressValidationResult> {
+    const operation: PostGridOperation = address.country &&
+      address.country !== 'US' &&
+      address.country !== 'USA' &&
+      address.country !== 'CA' &&
+      address.country !== 'CAN'
+      ? 'verify_international_address'
+      : 'verify_domestic_address';
     if (this.options.verbose) {
-      console.log('🔍 [PostGrid] Validating address');
+      this.writeOperationDiagnostic('provider.postgrid.operation_started', operation);
     }
 
     try {
@@ -717,6 +827,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const response = await this.apiRequestAddressVerification<PostGridAddressVerificationResponse>(
         'POST',
         `${baseUrl}/verifications?includeDetails=true&properCase=true&geocode=true`,
+        operation,
         request
       );
 
@@ -724,7 +835,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const addressData = response.data;
 
       if (this.options.verbose) {
-        console.log(`✅ [PostGrid] Address validation status: ${addressData.status}`);
+        this.writeOperationDiagnostic('provider.postgrid.operation_succeeded', operation, {
+          providerStatus: classifyProviderStatus(addressData.status)
+        });
       }
 
       // Build result
@@ -768,7 +881,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const errorMessage = this.extractErrorMessage(error);
 
       if (this.options.verbose) {
-        console.log('❌ [PostGrid] Address validation failed');
+        this.writeOperationDiagnostic(
+          'provider.postgrid.operation_failed',
+          operation,
+          { errorClass: this.classifyRequestError(error) },
+          'error'
+        );
       }
 
       // Return failed validation result
@@ -791,6 +909,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   private async apiRequestAddressVerification<T>(
     method: 'POST',
     url: string,
+    operation: PostGridOperation,
     body?: any
   ): Promise<T> {
     // Use separate Address Verification API key if available, otherwise fall back to Print & Mail key
@@ -808,7 +927,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     };
 
     if (this.options.verbose) {
-      console.log(`🌐 [PostGrid] ${method} ${url.split('?')[0]}`);
+      this.writeOperationDiagnostic('provider.postgrid.request_dispatched', operation, {
+        method
+      });
     }
 
     const response = await fetch(url, requestOptions);
@@ -843,7 +964,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    */
   async sendPostcard(params: PostcardParams): Promise<PostcardResult> {
     if (this.options.verbose) {
-      console.log('📤 [PostGrid] Sending postcard');
+      this.writeOperationDiagnostic('provider.postgrid.operation_started', 'create_postcard');
     }
 
     try {
@@ -879,14 +1000,16 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const response = await this.apiRequest<PostGridPostcardResponse>(
         'POST',
         '/postcards',
+        'create_postcard',
         request,
         params.idempotencyKey
       );
 
       if (this.options.verbose) {
-        console.log(`✅ [PostGrid] Postcard created successfully`);
-        console.log(`   Status: ${response.status}`);
-        console.log(`   Expected Delivery: ${response.expectedDeliveryDate || 'Unknown'}`);
+        this.writeOperationDiagnostic('provider.postgrid.operation_succeeded', 'create_postcard', {
+          providerStatus: classifyProviderStatus(response.status),
+          expectedDeliveryPresent: Boolean(response.expectedDeliveryDate)
+        });
       }
 
       // Parse expected delivery date
@@ -912,7 +1035,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const errorMessage = this.extractErrorMessage(error);
 
       if (this.options.verbose) {
-        console.log('❌ [PostGrid] Postcard send failed');
+        this.writeOperationDiagnostic('provider.postgrid.operation_failed', 'create_postcard', {
+          errorClass: this.classifyRequestError(error)
+        }, 'error');
       }
 
       return {

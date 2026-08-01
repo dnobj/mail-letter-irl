@@ -20,5 +20,9 @@ application `DATABASE_URL`. It creates and drops only generated schemas whose
 names begin with `lirl_acid_`.
 
 The migration-order case runs the actual migrator in both supported sequences:
-`021 -> 023 -> later 022` and `021 -> 022 -> 023`. Both the migration ledger and
-the resulting schema fingerprint must match.
+`021 -> 023 -> later 022` and `021 -> 022 -> 023`. When no repository 022 exists,
+the test creates a synthetic sequence probe. That proves the migrator records a
+lower-numbered late arrival, but it does **not** prove compatibility with issue
+#162. Before #69 and #162 integrate or deploy, place the real
+`022_admin_audit.sql` in the test input, rerun both sequences, and require the
+migration ledger and resulting schema fingerprint to match.

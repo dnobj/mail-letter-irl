@@ -15,6 +15,8 @@ import {
   commitGenerationReservation,
   getGenerationQuota,
   grantImageEntitlement,
+  ImageGenerationResolutionError,
+  listAmbiguousGenerationReservations,
   markGenerationDispatched,
   markGenerationReservationAmbiguous,
   reconcileGenerationReservations,
@@ -160,6 +162,8 @@ describe('imageGenerationLimitService explicit entitlements', () => {
 
   it('resolves an ambiguous generation only through an explicit evidence decision', async () => {
     mocks.query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
         rows: [
           {
@@ -172,23 +176,50 @@ describe('imageGenerationLimitService explicit entitlements', () => {
       })
       .mockResolvedValueOnce({ rows: [{ entitlement_id: 'ent-1' }] })
       .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] });
 
     await expect(
-      resolveAmbiguousGenerationReservation(
-        'reservation-1',
-        'provider_confirmed_failed'
-      )
-    ).resolves.toBe(true);
+      resolveAmbiguousGenerationReservation({
+        reservationId: 'reservation-1',
+        expectedUserId: 'user-1',
+        actorId: 'admin-1',
+        idempotencyKey: 'image-resolution-1',
+        decision: 'release',
+        resolution: 'provider_confirmed_failed'
+      })
+    ).resolves.toEqual({
+      reservationId: 'reservation-1',
+      userId: 'user-1',
+      decision: 'release',
+      resolution: 'provider_confirmed_failed',
+      resultingStatus: 'released',
+      replayed: false
+    });
     expect(mocks.query).toHaveBeenNthCalledWith(
-      4,
+      6,
       expect.stringContaining("SET status = 'released'"),
       ['reservation-1', 'provider_confirmed_failed', ['ambiguous']]
+    );
+    expect(mocks.query).toHaveBeenNthCalledWith(
+      7,
+      expect.stringContaining('INSERT INTO image_generation_resolution_audit'),
+      [
+        'image-resolution-1',
+        'reservation-1',
+        'user-1',
+        'admin-1',
+        'release',
+        'provider_confirmed_failed',
+        'released'
+      ]
     );
   });
 
   it('consumes a provider-confirmed ambiguous success without restoring quota', async () => {
     mocks.query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
         rows: [
           {
@@ -199,19 +230,82 @@ describe('imageGenerationLimitService explicit entitlements', () => {
           }
         ]
       })
+      .mockResolvedValueOnce({ rows: [{ reservation_id: 'reservation-1' }] })
       .mockResolvedValueOnce({ rows: [] });
 
     await expect(
-      resolveAmbiguousGenerationReservation(
-        'reservation-1',
-        'provider_confirmed_succeeded'
-      )
-    ).resolves.toBe(true);
-    expect(mocks.query).toHaveBeenCalledTimes(2);
+      resolveAmbiguousGenerationReservation({
+        reservationId: 'reservation-1',
+        expectedUserId: 'user-1',
+        actorId: 'admin-1',
+        idempotencyKey: 'image-resolution-2',
+        decision: 'consume',
+        resolution: 'provider_confirmed_succeeded'
+      })
+    ).resolves.toMatchObject({ resultingStatus: 'consumed', replayed: false });
+    expect(mocks.query).toHaveBeenCalledTimes(5);
     expect(mocks.query).toHaveBeenNthCalledWith(
-      2,
+      4,
       expect.stringContaining("SET status = 'consumed'"),
       ['reservation-1', 'provider_confirmed_succeeded']
+    );
+  });
+
+  it('replays the same audited decision without a second quota mutation', async () => {
+    mocks.query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          reservation_id: 'reservation-1',
+          user_id: 'user-1',
+          actor_id: 'admin-1',
+          idempotency_key: 'image-resolution-replay',
+          decision: 'release',
+          resolution_reason: 'customer_compensation',
+          resulting_status: 'released'
+        }]
+      });
+
+    await expect(resolveAmbiguousGenerationReservation({
+      reservationId: 'reservation-1',
+      expectedUserId: 'user-1',
+      actorId: 'admin-1',
+      idempotencyKey: 'image-resolution-replay',
+      decision: 'release',
+      resolution: 'customer_compensation'
+    })).resolves.toMatchObject({ replayed: true, resultingStatus: 'released' });
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+  });
+
+  it('binds resolution to the expected user and rejects arbitrary cross-user mutation', async () => {
+    mocks.query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(resolveAmbiguousGenerationReservation({
+      reservationId: 'reservation-1',
+      expectedUserId: 'wrong-user',
+      actorId: 'admin-1',
+      idempotencyKey: 'image-resolution-cross-user',
+      decision: 'release',
+      resolution: 'provider_confirmed_failed'
+    })).rejects.toMatchObject<ImageGenerationResolutionError>({ code: 'not_found' });
+    expect(mocks.query).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('WHERE reservation_id = $1 AND user_id = $2'),
+      ['reservation-1', 'wrong-user']
+    );
+  });
+
+  it('lists only ambiguous reservations with a bounded operator inspection limit', async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ reservationId: 'reservation-1' }] });
+    await expect(listAmbiguousGenerationReservations(500)).resolves.toEqual([
+      { reservationId: 'reservation-1' }
+    ]);
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("WHERE status = 'ambiguous'"),
+      [100]
     );
   });
 

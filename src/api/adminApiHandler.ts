@@ -34,7 +34,19 @@ import {
 } from '../services/statusSyncService.js';
 import { getTokenStats } from '../services/patService.js';
 import { getRateLimitStats, getBlockedRequestCounts, RATE_LIMITS } from './middleware/rateLimit.js';
-import { getGenerationQuota } from '../services/imageGenerationLimitService.js';
+import {
+  getGenerationQuota,
+  ImageGenerationResolutionError,
+  listAmbiguousGenerationReservations,
+  resolveAmbiguousGenerationReservation
+} from '../services/imageGenerationLimitService.js';
+import type {
+  AmbiguousGenerationDecision,
+  AmbiguousGenerationResolution
+} from '../services/imageGenerationLimitService.js';
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const OPERATOR_IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 
 /**
  * Send JSON response
@@ -96,7 +108,11 @@ export async function handleAdminApiRequest(
 
   // Route handlers
   try {
-    console.log(`🔍 Admin API: ${req.method} ${pathname}`);
+    writeDiagnostic('info', 'admin.request_started', {
+      method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method || '')
+        ? req.method || 'UNKNOWN'
+        : 'UNKNOWN'
+    });
 
     // POST /api/admin/credits/adjust
     if (pathname === '/api/admin/credits/adjust' && req.method === 'POST') {
@@ -132,6 +148,24 @@ export async function handleAdminApiRequest(
     // GET /api/admin/alerts - Active alerts (failed jobs, expiring credits, etc.)
     if (pathname === '/api/admin/alerts' && req.method === 'GET') {
       await handleGetAlerts(res);
+      return true;
+    }
+
+    // GET /api/admin/image-generation/ambiguous - Inspect quarantined outcomes
+    if (pathname === '/api/admin/image-generation/ambiguous' && req.method === 'GET') {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      await handleListAmbiguousImageReservations(res, url.searchParams);
+      return true;
+    }
+
+    // POST /api/admin/image-generation/ambiguous/:reservationId/resolve
+    if (
+      pathname.match(/^\/api\/admin\/image-generation\/ambiguous\/[^/]+\/resolve$/) &&
+      req.method === 'POST'
+    ) {
+      const parts = pathname.split('/');
+      const reservationId = decodeURIComponent(parts[parts.length - 2] || '');
+      await handleResolveAmbiguousImageReservation(req, res, reservationId, adminInfo);
       return true;
     }
 
@@ -375,6 +409,106 @@ export async function handleAdminApiRequest(
       message: 'Unable to complete admin request'
     });
     return true;
+  }
+}
+
+async function handleListAmbiguousImageReservations(
+  res: ServerResponse,
+  searchParams: URLSearchParams
+): Promise<void> {
+  const requestedLimit = Number.parseInt(searchParams.get('limit') || '50', 10);
+  if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100) {
+    sendJson(res, 400, {
+      error: 'Invalid request',
+      message: 'limit must be an integer from 1 to 100'
+    });
+    return;
+  }
+
+  const reservations = await listAmbiguousGenerationReservations(requestedLimit);
+  writeDiagnostic('info', 'admin.image_resolution_inspection_completed', {
+    resultCount: reservations.length
+  });
+  sendJson(res, 200, { reservations });
+}
+
+function validResolutionPair(
+  decision: unknown,
+  resolution: unknown
+): decision is AmbiguousGenerationDecision {
+  return decision === 'consume'
+    ? resolution === 'provider_confirmed_succeeded'
+    : decision === 'release' &&
+        (resolution === 'provider_confirmed_failed' || resolution === 'customer_compensation');
+}
+
+async function handleResolveAmbiguousImageReservation(
+  req: IncomingMessage,
+  res: ServerResponse,
+  reservationId: string,
+  adminInfo: { userId: string }
+): Promise<void> {
+  const body = await parseBody(req);
+  const expectedUserId = typeof body.userId === 'string' ? body.userId : '';
+  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : '';
+  const decision = body.decision as unknown;
+  const resolution = body.resolution as unknown;
+
+  if (
+    !UUID_PATTERN.test(reservationId) ||
+    !expectedUserId ||
+    expectedUserId.length > 255 ||
+    !OPERATOR_IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey) ||
+    !validResolutionPair(decision, resolution)
+  ) {
+    sendJson(res, 400, {
+      error: 'Invalid request',
+      message: 'A bound account, valid idempotency key, and matching decision evidence are required'
+    });
+    return;
+  }
+
+  try {
+    const result = await resolveAmbiguousGenerationReservation({
+      reservationId,
+      expectedUserId,
+      actorId: adminInfo.userId,
+      idempotencyKey,
+      decision,
+      resolution: resolution as AmbiguousGenerationResolution
+    });
+    writeDiagnostic('info', 'admin.image_resolution_completed', {
+      decision: result.decision,
+      resultingStatus: result.resultingStatus,
+      replayed: result.replayed
+    });
+    sendJson(res, 200, result);
+  } catch (error) {
+    if (error instanceof ImageGenerationResolutionError) {
+      writeDiagnostic('warn', 'admin.image_resolution_rejected', {
+        errorClass: error.code
+      });
+      if (error.code === 'not_found') {
+        sendJson(res, 404, {
+          error: 'Not found',
+          message: 'No matching ambiguous reservation exists for that account'
+        });
+        return;
+      }
+      if (error.code === 'invalid_resolution' || error.code === 'invalid_request') {
+        sendJson(res, 400, {
+          error: 'Invalid request',
+          message: 'The decision does not match the supplied evidence classification'
+        });
+        return;
+      }
+      sendJson(res, 409, {
+        error: 'Conflict',
+        message: 'The reservation or idempotency key no longer matches this decision'
+      });
+      return;
+    }
+    throw error;
   }
 }
 
