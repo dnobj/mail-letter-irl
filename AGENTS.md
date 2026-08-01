@@ -25,7 +25,7 @@ Add Vitest specs under `tests/unit/**` named `*.test.ts`, grouped by subsystem. 
 
 ## Transaction Safety
 
-ACID—Atomicity, Consistency, Isolation, and Durability—is the guiding engineering principle for every mutation of financial, balance, order, draft, fulfillment, refund, or administrative state. Follow the authoritative [ACID Transaction Standard](docs/acid-transaction-standard.md), including its transaction-boundary, idempotency, outbox, reconciliation, concurrency-test, and PR-review requirements. External vendor calls cannot participate in a single PostgreSQL ACID transaction; model them as durable, resumable workflows.
+ACID—Atomicity, Consistency, Isolation, and Durability—is the guiding engineering principle for every mutation of financial, balance, order, draft, fulfillment, refund, or administrative state. Follow the authoritative [ACID Transaction Standard](docs/acid-transaction-standard.md), including its transaction-boundary, idempotency, outbox, reconciliation, and PR-review requirements. Require risk-proportional local transaction, concurrency, and replay/recovery tests; when a PR changes an external boundary, require the applicable webhook, outbox, vendor-ambiguity, compensation, and reconciliation tests or a concrete N/A reason. External vendor calls cannot participate in a single PostgreSQL ACID transaction; model them as durable, resumable workflows.
 
 ## Commit & Pull Request Guidelines
 

@@ -72,16 +72,22 @@ When local and vendor state cannot be made identical immediately, use an explici
 
 ## Required tests
 
-Each new or changed mutation needs tests proportional to its risk. At minimum, cover:
+Each new or changed mutation needs tests proportional to its risk and to the boundaries it changes. Every mutation must cover the following where applicable:
 
 - successful commit and rollback at each meaningful failure point;
-- two concurrent requests contending for the same draft, balance, order, refund, or job;
-- replay of the same client request, webhook event, and outbox job;
+- the affected invariant, constraint, and invalid-transition rejection;
+- concurrent requests contending for the same aggregate when conflicts are possible;
+- client-request replay or recovery when the operation is retryable or asynchronous.
+
+When a change affects a webhook, outbox, vendor call, compensation, or reconciliation boundary, it must also cover the applicable boundary scenarios:
+
+- replay of the same webhook event or outbox job;
 - process failure after local commit but before the vendor call;
 - timeout or crash after the vendor may have accepted the request but before Letter IRL records the response;
 - stale outbox claim recovery and bounded retry exhaustion;
-- constraint and invalid-transition rejection;
 - reconciliation of deliberately inconsistent local/vendor fixtures.
+
+A PR may mark a scenario not applicable only when it gives a concrete reason. Risk-proportional coverage does not permit omitting a local or external-boundary failure mode introduced or changed by the PR.
 
 Prefer integration tests against PostgreSQL for locking, constraint, isolation, and rollback behavior. Unit tests with mocked queries cannot prove those properties.
 
@@ -98,7 +104,8 @@ For every PR that changes durable business state, the author and reviewer must c
 - [ ] External calls occur outside the PostgreSQL transaction through a durable, resumable workflow.
 - [ ] Stable idempotency keys, guarded state transitions, compensation, and reconciliation are defined for external effects.
 - [ ] Financial, fulfillment, refund, and admin audit history is retained without logging unnecessary personal or secret data.
-- [ ] Commit, rollback, replay, crash/recovery, and concurrency tests cover the changed invariant.
+- [ ] Local commit, rollback, invariant, concurrency, and replay/recovery tests cover the changed behavior as applicable.
+- [ ] Changes to webhook, outbox, vendor, compensation, or reconciliation boundaries test their applicable failure modes, or the PR records a concrete N/A reason.
 - [ ] Migration and rollback/forward-fix behavior preserve existing data and in-flight work.
 
 If any item does not apply, the PR must state why. A reviewer should block a mutation that cannot explain its failure and concurrency behavior.
