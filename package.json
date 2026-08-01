@@ -30,6 +30,7 @@
     "test:run": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
+    "test:integration:postgres": "vitest run tests/integration/commerceAcid.postgres.test.ts",
     "test:coverage": "vitest run --coverage",
     "dev:local": "env $(cat .env.local | grep -v '^#' | grep -v '^$' | xargs) tsx watch src/mcp/httpServer.ts"
   },

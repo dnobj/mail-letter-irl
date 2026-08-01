@@ -84,6 +84,9 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
 - Image generation reserves and charges an exact entitlement in one transaction
   before the provider call. Provider success marks that durable reservation
   consumed; a known failure transactionally releases only that reservation.
+- Stripe dispute delivery claims its event and creates a sanitized operational
+  alert in one transaction. A failed alert insert rolls the claim back, so a
+  Stripe retry cannot be acknowledged while its monitoring work is lost.
 
 ### Consistency
 
@@ -111,6 +114,10 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
 - Refund workers use an atomic time-bounded lease. A separate order lock
   serializes the returned Stripe result with refund webhooks so grants are
   revoked at most once.
+- Image reservations move through `reserved -> dispatched -> consumed/released`
+  with `ambiguous` as a quarantine state. Stale pre-dispatch reservations are
+  locked with `SKIP LOCKED` and released once; stale dispatches are quarantined
+  without restoring quota. Concurrent reconcilers cannot resolve the same row.
 
 ### Durability and compensation
 
@@ -125,3 +132,11 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
   errors, and acceptance-persistence failures remain recoverable because their
   external outcome is ambiguous. This is the unavoidable compensation boundary
   where no distributed ACID transaction exists.
+- Image generation uses the same compensation rule. Validation and a stale
+  pre-dispatch lease are safe to release. Transport failures, HTTP timeouts and
+  5xx responses after the durable dispatch boundary are ambiguous and keep the
+  budget unit held. Provider-confirmed success consumes it; provider-confirmed
+  failure or a deliberate customer-compensation decision releases the exact
+  entitlement in a locked transaction. The small crash window after durable
+  dispatch marking but before network I/O is also treated as ambiguous because
+  the database cannot prove whether bytes reached the provider.

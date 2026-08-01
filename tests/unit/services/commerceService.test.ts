@@ -192,6 +192,56 @@ describe('commerceService', () => {
     expect(committedClaim).toBe(true);
   });
 
+  it('commits a dispute alert with its event claim so handler failure can replay', async () => {
+    let committedClaim = false;
+    let failAlertInsert = true;
+    let alertInsertions = 0;
+    mocks.transaction.mockImplementation(async callback => {
+      let transactionClaim = committedClaim;
+      const transactionQuery = vi.fn(async (sql: string, params: unknown[]) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) {
+          if (transactionClaim) return { rows: [] };
+          transactionClaim = true;
+          return { rows: [{ event_id: 'evt-dispute' }] };
+        }
+        if (sql.includes('INSERT INTO commerce_operational_alerts')) {
+          alertInsertions += 1;
+          expect(String(params[3])).not.toContain('dp-sensitive');
+          expect(String(params[3])).not.toContain('ch-sensitive');
+          if (failAlertInsert) {
+            failAlertInsert = false;
+            throw new Error('alert insert failed before transaction commit');
+          }
+          return { rows: [] };
+        }
+        return { rows: [] };
+      });
+      const result = await callback({ query: transactionQuery });
+      committedClaim = transactionClaim;
+      return result;
+    });
+    const event = {
+      id: 'evt-dispute',
+      type: 'charge.dispute.created',
+      data: {
+        object: {
+          id: 'dp-sensitive',
+          charge: 'ch-sensitive',
+          amount: 499,
+          currency: 'usd',
+          reason: 'fraudulent',
+          status: 'needs_response'
+        }
+      }
+    } as any;
+
+    await expect(processStripeWebhookEvent(event)).rejects.toThrow('alert insert failed');
+    await expect(processStripeWebhookEvent(event)).resolves.toEqual({ duplicate: false });
+
+    expect(alertInsertions).toBe(2);
+    expect(committedClaim).toBe(true);
+  });
+
   it('persists an authoritative pack order before creating its Stripe session', async () => {
     const pendingPack = {
       ...baseOrder,

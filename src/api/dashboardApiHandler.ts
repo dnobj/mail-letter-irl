@@ -14,7 +14,6 @@ import { createPackCheckout, processStripeWebhookEvent } from '../services/comme
 import { authenticateHttpRequest } from './middleware/auth.js';
 import { parseCookies, serializeCookie } from '../utils/cookies.js';
 import { query } from '../db/index.js';
-import Stripe from 'stripe';
 
 // Extended request/response types with cookie support
 type Request = http.IncomingMessage & {
@@ -208,84 +207,12 @@ export async function handleStripeWebhook(
     // The commerce service claims the Stripe event and applies its state
     // transition in one database transaction.
     const processed = await processStripeWebhookEvent(event);
-    if (!processed.duplicate) {
-      if (event.type === 'charge.dispute.created') {
-        await handleDisputeCreated(event.data.object as Stripe.Dispute);
-      } else if (event.type === 'charge.dispute.closed') {
-        await handleDisputeClosed(event.data.object as Stripe.Dispute);
-      }
-    }
     res.json({ received: true, duplicate: processed.duplicate });
     return;
   } catch (error: any) {
     console.error('Error in handleStripeWebhook:', error);
     res.statusCode = 500;
     res.json({ error: 'Webhook processing failed' });
-  }
-}
-
-/**
- * Handle charge.dispute.created event
- * Logs the dispute and recalculates tier (disputed purchase shouldn't count)
- */
-async function handleDisputeCreated(dispute: Stripe.Dispute): Promise<void> {
-  try {
-    console.log(
-      `⚠️ Dispute created: ${dispute.id}, amount: ${dispute.amount}, reason: ${dispute.reason}`
-    );
-
-    // Get the charge to find the user
-    const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
-
-    if (!chargeId) {
-      console.error('❌ Dispute webhook: No charge ID on dispute');
-      return;
-    }
-
-    // Log the dispute for monitoring (we may need manual investigation)
-    console.log(`🚨 DISPUTE ALERT: ${dispute.id}`);
-    console.log(`   Charge: ${chargeId}`);
-    console.log(`   Amount: ${dispute.amount / 100} ${dispute.currency.toUpperCase()}`);
-    console.log(`   Reason: ${dispute.reason}`);
-    console.log(`   Status: ${dispute.status}`);
-
-    // For now, disputes require manual investigation
-    // The purchase is already excluded from tier calculation since we check for refunds
-    // A chargeback will eventually result in a charge.refunded event if the customer wins
-  } catch (error: any) {
-    console.error('Error processing dispute created:', error);
-    throw error;
-  }
-}
-
-/**
- * Handle charge.dispute.closed event
- * If we lost (customer won), ensure credits are properly revoked
- * If we won, the purchase remains valid
- */
-async function handleDisputeClosed(dispute: Stripe.Dispute): Promise<void> {
-  try {
-    console.log(`📋 Dispute closed: ${dispute.id}, status: ${dispute.status}`);
-
-    const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
-
-    if (dispute.status === 'lost') {
-      // Customer won the dispute - this is like a refund
-      console.log(`❌ Dispute LOST: ${dispute.id} - Customer won chargeback`);
-      console.log(`   This should have triggered a charge.refunded event`);
-      console.log(`   If credits were not revoked, manual intervention may be needed`);
-
-      // Note: Stripe typically sends charge.refunded when we lose a dispute
-      // But we log this for monitoring purposes
-    } else if (dispute.status === 'won') {
-      // We won the dispute - nothing to do, purchase remains valid
-      console.log(`✅ Dispute WON: ${dispute.id} - Charge upheld`);
-    } else {
-      console.log(`ℹ️ Dispute closed with status: ${dispute.status}`);
-    }
-  } catch (error: any) {
-    console.error('Error processing dispute closed:', error);
-    throw error;
   }
 }
 

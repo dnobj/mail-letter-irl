@@ -528,6 +528,7 @@ linked PR before enabling Pay & Send.
 
 - [ ] Use only the Railway **development** services and isolated Neon development database.
 - [ ] Confirm migration `021_jit_commerce_foundation.sql` is recorded in development.
+- [ ] Confirm migration `023_jit_recovery_state_machines.sql` is recorded in development; migration 022 may arrive before or after it but must remain independently recorded.
 - [ ] Confirm Stripe is in sandbox/test mode and both JIT prices are active at USD 4.99.
 - [ ] Confirm the non-production mail provider is selected; no real mail may be submitted.
 - [ ] Start with `JIT_PURCHASE_ENABLED=false`; the test coordinator may enable it in development only for this test and must restore it afterward.
@@ -555,6 +556,10 @@ linked PR before enabling Pay & Send.
 - [ ] Confirm provider acceptance changes the JIT order to `fulfilled`; failures before acceptance use refund handling and never resubmit an already accepted mail item.
 - [ ] After a sandbox provider accepts a submission, fault the database result-persistence step. Confirm the outbox remains recoverable, no refund is started, replay uses the same letter idempotency key, and the order eventually reaches `fulfilled` with one provider order.
 - [ ] Confirm a zero-entitlement account cannot use Letter IRL-funded generation but can upload or reuse an external/conversation-generated image. After provider generation succeeds, simulate temporary-image storage failure and confirm the entitlement is still consumed.
+- [ ] Stop the application after reservation commit but before durable dispatch; after the pre-dispatch lease expires, run maintenance and confirm the exact entitlement is released once.
+- [ ] Simulate a definite 4xx provider rejection after dispatch and confirm the exact entitlement is released. Separately simulate a transport timeout or 5xx response and confirm the reservation becomes `ambiguous`, quota remains held, and no automatic retry spends a second provider generation.
+- [ ] Resolve one ambiguous reservation from provider evidence as succeeded and confirm it becomes `consumed` without quota restoration. Resolve another as provider-confirmed failed (or record an explicit customer-compensation decision) and confirm only its exact entitlement is restored once.
+- [ ] Replay a Stripe dispute event after forcing the first durable-alert insert to roll back. Confirm retry creates exactly one webhook claim and one sanitized open operational alert with no recipient, letter, order, dispute, charge, payment, or user identifier in alert details or logs.
 
 ### Teardown
 

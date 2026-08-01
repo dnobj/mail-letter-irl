@@ -15,7 +15,11 @@ import {
   commitGenerationReservation,
   getGenerationQuota,
   grantImageEntitlement,
+  markGenerationDispatched,
+  markGenerationReservationAmbiguous,
+  reconcileGenerationReservations,
   releaseGenerationReservation,
+  resolveAmbiguousGenerationReservation,
   reserveGeneration
 } from '../../../src/services/imageGenerationLimitService.js';
 
@@ -93,6 +97,10 @@ describe('imageGenerationLimitService explicit entitlements', () => {
       expect.stringContaining('LIMIT 1\n       FOR UPDATE'),
       ['user-1']
     );
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('lease_expires_at'),
+      ['ent-1', 'user-1', expect.any(Date)]
+    );
   });
 
   it('returns current quota when no entitlement can be reserved', async () => {
@@ -112,11 +120,99 @@ describe('imageGenerationLimitService explicit entitlements', () => {
   });
 
   it('commits a successful reservation', async () => {
-    mocks.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mocks.query.mockResolvedValueOnce({ rows: [{ reservation_id: 'reservation-1' }], rowCount: 1 });
     await commitGenerationReservation('reservation-1');
     expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining("SET status = 'consumed'"), [
-      'reservation-1'
+      'reservation-1',
+      null
     ]);
+  });
+
+  it('durably marks dispatch before provider I/O', async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ reservation_id: 'reservation-1' }] });
+
+    await expect(markGenerationDispatched('user-1', 'reservation-1')).resolves.toBe(true);
+
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'dispatched'"),
+      ['reservation-1', 'user-1', expect.any(Date)]
+    );
+  });
+
+  it('marks an unknown dispatched outcome ambiguous without restoring quota', async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ reservation_id: 'reservation-1' }] });
+
+    await expect(
+      markGenerationReservationAmbiguous(
+        'user-1',
+        'reservation-1',
+        'provider_outcome_unknown',
+        'request-1'
+      )
+    ).resolves.toBe(true);
+
+    expect(mocks.query).toHaveBeenCalledTimes(1);
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'ambiguous'"),
+      ['reservation-1', 'user-1', 'provider_outcome_unknown', 'request-1']
+    );
+  });
+
+  it('resolves an ambiguous generation only through an explicit evidence decision', async () => {
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            reservation_id: 'reservation-1',
+            entitlement_id: 'ent-1',
+            user_id: 'user-1',
+            status: 'ambiguous'
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ rows: [{ entitlement_id: 'ent-1' }] })
+      .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(
+      resolveAmbiguousGenerationReservation(
+        'reservation-1',
+        'provider_confirmed_failed'
+      )
+    ).resolves.toBe(true);
+    expect(mocks.query).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining("SET status = 'released'"),
+      ['reservation-1', 'provider_confirmed_failed', ['ambiguous']]
+    );
+  });
+
+  it('consumes a provider-confirmed ambiguous success without restoring quota', async () => {
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            reservation_id: 'reservation-1',
+            entitlement_id: 'ent-1',
+            user_id: 'user-1',
+            status: 'ambiguous'
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(
+      resolveAmbiguousGenerationReservation(
+        'reservation-1',
+        'provider_confirmed_succeeded'
+      )
+    ).resolves.toBe(true);
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+    expect(mocks.query).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining("SET status = 'consumed'"),
+      ['reservation-1', 'provider_confirmed_succeeded']
+    );
   });
 
   it('releases the exact reserved entitlement after provider failure', async () => {
@@ -130,20 +226,75 @@ describe('imageGenerationLimitService explicit entitlements', () => {
           }
         ]
       })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ entitlement_id: 'ent-1' }] })
+      .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
       .mockResolvedValueOnce({ rows: [] });
 
     await releaseGenerationReservation('user-1', 'reservation-1');
     expect(mocks.query).toHaveBeenNthCalledWith(
       2,
-      expect.stringContaining('consumed_quantity = GREATEST(consumed_quantity - 1, 0)'),
+      expect.stringContaining('consumed_quantity = consumed_quantity - 1'),
       ['ent-1']
     );
     expect(mocks.query).toHaveBeenNthCalledWith(
       4,
       expect.stringContaining("SET status = 'released'"),
-      ['reservation-1']
+      ['reservation-1', 'definite_failure', ['reserved', 'dispatched']]
+    );
+  });
+
+  it('rolls back release when the held entitlement counter is inconsistent', async () => {
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            reservation_id: 'reservation-1',
+            entitlement_id: 'ent-1',
+            status: 'reserved'
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await expect(
+      releaseGenerationReservation('user-1', 'reservation-1')
+    ).rejects.toThrow('entitlement counter is inconsistent');
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+  });
+
+  it('releases stale pre-dispatch reservations but quarantines stale dispatches', async () => {
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            reservation_id: 'reservation-pre',
+            entitlement_id: 'ent-1',
+            user_id: 'user-1',
+            status: 'reserved'
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ rows: [{ entitlement_id: 'ent-1' }] })
+      .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ reservation_id: 'reservation-dispatched' }], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [{ count: '2' }] });
+
+    await expect(reconcileGenerationReservations()).resolves.toEqual({
+      releasedBeforeDispatch: 1,
+      markedAmbiguous: 1,
+      ambiguousTotal: 2
+    });
+
+    expect(mocks.query).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining("SET status = 'released'"),
+      ['reservation-pre', 'crash_before_provider_dispatch', ['reserved']]
+    );
+    expect(mocks.query).toHaveBeenNthCalledWith(
+      5,
+      expect.stringContaining("SET status = 'ambiguous'"),
+      [100]
     );
   });
 });

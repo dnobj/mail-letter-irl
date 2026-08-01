@@ -29,6 +29,8 @@ import {
 } from "../services/imageGenerationService.js";
 import {
   commitGenerationReservation,
+  markGenerationDispatched,
+  markGenerationReservationAmbiguous,
   releaseGenerationReservation,
   reserveGeneration
 } from "../services/imageGenerationLimitService.js";
@@ -97,22 +99,51 @@ async function createPreview(base64Data: string): Promise<string> {
 async function releaseReservedGeneration(
   context: ToolContext,
   userId: string,
-  reservationId?: string
+  reservationId: string | undefined,
+  reason: string,
+  providerRequestId?: string
 ): Promise<void> {
   if (!reservationId) {
     return;
   }
   try {
-    await releaseGenerationReservation(userId, reservationId);
+    await releaseGenerationReservation(userId, reservationId, reason);
   } catch (releaseError) {
     context.logger.error(
       {
         correlationId: context.correlationId,
         event: "generate_image.reservation_release_failed",
-        errorMessage:
-          releaseError instanceof Error ? releaseError.message : "Unknown error"
+        errorType: releaseError instanceof Error ? releaseError.name : "UnknownError"
       },
       "Failed to release image generation reservation"
+    );
+  }
+}
+
+async function preserveAmbiguousGeneration(
+  context: ToolContext,
+  userId: string,
+  reservationId: string | undefined,
+  reason: string,
+  providerRequestId?: string
+): Promise<void> {
+  if (!reservationId) return;
+  try {
+    await markGenerationReservationAmbiguous(
+      userId,
+      reservationId,
+      reason,
+      providerRequestId
+    );
+  } catch (reconciliationError) {
+    context.logger.error(
+      {
+        correlationId: context.correlationId,
+        event: "generate_image.reservation_reconciliation_failed",
+        errorType:
+          reconciliationError instanceof Error ? reconciliationError.name : "UnknownError"
+      },
+      "Image generation reservation requires maintenance reconciliation"
     );
   }
 }
@@ -165,10 +196,24 @@ async function handler(
     );
   }
 
+  let providerDispatched = false;
   let providerSucceeded = false;
   try {
     const result = await generateImage(input.prompt, {
-      context: input.context
+      context: input.context,
+      beforeDispatch: async () => {
+        if (!reservation.reservationId) {
+          throw new Error("Image generation reservation is missing");
+        }
+        const dispatched = await markGenerationDispatched(
+          userId,
+          reservation.reservationId
+        );
+        if (!dispatched) {
+          throw new Error("Image generation reservation expired before provider dispatch");
+        }
+        providerDispatched = true;
+      }
     });
     providerSucceeded = true;
 
@@ -176,7 +221,15 @@ async function handler(
     // previewing or temporary storage later fails. Consume the reservation
     // immediately so those downstream failures cannot be retried for free.
     if (reservation.reservationId) {
-      await commitGenerationReservation(reservation.reservationId);
+      const committed = result.providerRequestId
+        ? await commitGenerationReservation(
+            reservation.reservationId,
+            result.providerRequestId
+          )
+        : await commitGenerationReservation(reservation.reservationId);
+      if (!committed) {
+        throw new Error("Image generation outcome could not be persisted");
+      }
     }
 
     const generationsRemaining = reservation.remaining;
@@ -210,8 +263,25 @@ async function handler(
       generationsRemaining
     };
   } catch (error) {
-    if (!providerSucceeded) {
-      await releaseReservedGeneration(context, userId, reservation.reservationId);
+    const ambiguousProviderOutcome =
+      providerSucceeded ||
+      (providerDispatched &&
+        (!(error instanceof ImageGenerationError) || error.outcome === "ambiguous"));
+    if (ambiguousProviderOutcome) {
+      await preserveAmbiguousGeneration(
+        context,
+        userId,
+        reservation.reservationId,
+        providerSucceeded ? "provider_succeeded_persistence_unknown" : "provider_outcome_unknown",
+        error instanceof ImageGenerationError ? error.providerRequestId : undefined
+      );
+    } else {
+      await releaseReservedGeneration(
+        context,
+        userId,
+        reservation.reservationId,
+        providerDispatched ? "provider_definite_failure" : "pre_dispatch_failure"
+      );
     }
 
     if (error instanceof ImageGenerationError) {
@@ -220,20 +290,18 @@ async function handler(
           correlationId: context.correlationId,
           event: "generate_image.failed",
           errorCode: error.code,
-          errorMessage: error.userMessage
+          providerOutcome: error.outcome
         },
         "Image generation failed"
       );
       throw new Error(error.userMessage);
     }
 
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
     context.logger.error(
       {
         correlationId: context.correlationId,
         event: "generate_image.error",
-        errorMessage
+        errorType: error instanceof Error ? error.name : "UnknownError"
       },
       "Unexpected image generation error"
     );

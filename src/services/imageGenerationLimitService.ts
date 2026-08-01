@@ -19,6 +19,24 @@ export interface GenerationReservation extends GenerationQuota {
   reservationId?: string;
 }
 
+export type ImageGenerationReservationStatus =
+  | 'reserved'
+  | 'dispatched'
+  | 'consumed'
+  | 'released'
+  | 'ambiguous';
+
+export interface GenerationReservationReconciliation {
+  releasedBeforeDispatch: number;
+  markedAmbiguous: number;
+  ambiguousTotal: number;
+}
+
+export type AmbiguousGenerationResolution =
+  | 'provider_confirmed_succeeded'
+  | 'provider_confirmed_failed'
+  | 'customer_compensation';
+
 export interface GrantImageEntitlementParams {
   userId: string;
   sourceType: string;
@@ -32,6 +50,36 @@ interface QuotaRow {
   allowance: string | number;
   used: string | number;
   remaining: string | number;
+}
+
+interface ReservationRow {
+  reservation_id: string;
+  entitlement_id: string;
+  user_id: string;
+  status: ImageGenerationReservationStatus;
+}
+
+function positiveIntegerSetting(name: string, fallback: number, minimum: number): number {
+  const parsed = Number.parseInt(process.env[name] || '', 10);
+  return Number.isInteger(parsed) && parsed >= minimum ? parsed : fallback;
+}
+
+function preDispatchLeaseExpiresAt(): Date {
+  const minutes = positiveIntegerSetting(
+    'IMAGE_RESERVATION_PRE_DISPATCH_TIMEOUT_MINUTES',
+    15,
+    1
+  );
+  return new Date(Date.now() + minutes * 60_000);
+}
+
+function providerOutcomeLeaseExpiresAt(): Date {
+  const minutes = positiveIntegerSetting(
+    'IMAGE_RESERVATION_PROVIDER_TIMEOUT_MINUTES',
+    30,
+    5
+  );
+  return new Date(Date.now() + minutes * 60_000);
 }
 
 function toQuota(row?: QuotaRow): GenerationQuota {
@@ -162,10 +210,11 @@ export async function reserveGeneration(userId: string): Promise<GenerationReser
     );
 
     const reservation = await client.query<{ reservation_id: string }>(
-      `INSERT INTO image_generation_reservations (entitlement_id, user_id, status)
-       VALUES ($1, $2, 'reserved')
+      `INSERT INTO image_generation_reservations (
+         entitlement_id, user_id, status, lease_expires_at
+       ) VALUES ($1, $2, 'reserved', $3)
        RETURNING reservation_id`,
-      [entitlement.entitlement_id, userId]
+      [entitlement.entitlement_id, userId, preDispatchLeaseExpiresAt()]
     );
     const quota = await getGenerationQuotaWithClient(client, userId);
 
@@ -177,27 +226,99 @@ export async function reserveGeneration(userId: string): Promise<GenerationReser
   });
 }
 
-/** Mark a successful provider call as having consumed its reservation. */
-export async function commitGenerationReservation(reservationId: string): Promise<void> {
-  await query(
-    `UPDATE image_generation_reservations
-     SET status = 'consumed', completed_at = NOW()
-     WHERE reservation_id = $1 AND status = 'reserved'`,
-    [reservationId]
-  );
-}
-
-/** Return a reservation to its exact entitlement after a failed provider call. */
-export async function releaseGenerationReservation(
+/** Durably mark provider dispatch before any network I/O begins. */
+export async function markGenerationDispatched(
   userId: string,
   reservationId: string
-): Promise<void> {
-  await transaction(async client => {
-    const reservation = await client.query<{
-      reservation_id: string;
-      entitlement_id: string;
-      status: string;
-    }>(
+): Promise<boolean> {
+  const result = await query<{ reservation_id: string }>(
+    `UPDATE image_generation_reservations
+     SET status = 'dispatched', dispatch_started_at = NOW(),
+         lease_expires_at = $3, resolution_reason = NULL, updated_at = NOW()
+     WHERE reservation_id = $1 AND user_id = $2 AND status = 'reserved'
+       AND lease_expires_at > NOW()
+     RETURNING reservation_id`,
+    [reservationId, userId, providerOutcomeLeaseExpiresAt()]
+  );
+  return Boolean(result.rows[0]);
+}
+
+/** Mark a successful provider call as having consumed its reservation. */
+export async function commitGenerationReservation(
+  reservationId: string,
+  providerRequestId?: string
+): Promise<boolean> {
+  const result = await query<{ reservation_id: string }>(
+    `UPDATE image_generation_reservations
+     SET status = 'consumed', completed_at = COALESCE(completed_at, NOW()),
+         provider_completed_at = COALESCE(provider_completed_at, NOW()),
+         provider_request_id = COALESCE(provider_request_id, $2),
+         lease_expires_at = NULL, resolution_reason = 'provider_succeeded',
+         updated_at = NOW()
+     WHERE reservation_id = $1 AND status IN ('dispatched', 'ambiguous')
+     RETURNING reservation_id`,
+    [reservationId, providerRequestId || null]
+  );
+  if (result.rows[0]) return true;
+  const current = await query<{ status: ImageGenerationReservationStatus }>(
+    'SELECT status FROM image_generation_reservations WHERE reservation_id = $1',
+    [reservationId]
+  );
+  return current.rows[0]?.status === 'consumed';
+}
+
+async function releaseReservationWithClient(
+  client: Pick<pg.PoolClient, 'query'>,
+  row: ReservationRow,
+  reason: string,
+  expectedStatuses: ImageGenerationReservationStatus[]
+): Promise<boolean> {
+  if (!expectedStatuses.includes(row.status)) return false;
+  const entitlement = await client.query<{ entitlement_id: string }>(
+    `UPDATE image_entitlements
+     SET consumed_quantity = consumed_quantity - 1,
+         status = CASE
+           WHEN status = 'depleted' AND (expires_at IS NULL OR expires_at > NOW()) THEN 'active'
+           WHEN status = 'depleted' THEN 'expired'
+           ELSE status
+         END,
+         updated_at = NOW()
+     WHERE entitlement_id = $1 AND consumed_quantity > 0
+     RETURNING entitlement_id`,
+    [row.entitlement_id]
+  );
+  if (!entitlement.rows[0]) {
+    throw new Error('Image reservation entitlement counter is inconsistent');
+  }
+  const user = await client.query<{ user_id: string }>(
+    `UPDATE users
+     SET image_generations_used = image_generations_used - 1,
+         updated_at = NOW()
+     WHERE user_id = $1 AND image_generations_used > 0
+     RETURNING user_id`,
+    [row.user_id]
+  );
+  if (!user.rows[0]) {
+    throw new Error('Image reservation user counter is inconsistent');
+  }
+  await client.query(
+    `UPDATE image_generation_reservations
+     SET status = 'released', completed_at = NOW(), lease_expires_at = NULL,
+         resolution_reason = $2, updated_at = NOW()
+     WHERE reservation_id = $1 AND status = ANY($3::varchar[])`,
+    [row.reservation_id, reason, expectedStatuses]
+  );
+  return true;
+}
+
+/** Return a reservation only after a definite non-billable provider outcome. */
+export async function releaseGenerationReservation(
+  userId: string,
+  reservationId: string,
+  reason = 'definite_failure'
+): Promise<boolean> {
+  return transaction(async client => {
+    const reservation = await client.query<ReservationRow>(
       `SELECT reservation_id, entitlement_id, status
        FROM image_generation_reservations
        WHERE reservation_id = $1 AND user_id = $2
@@ -205,31 +326,131 @@ export async function releaseGenerationReservation(
       [reservationId, userId]
     );
     const row = reservation.rows[0];
-    if (!row || row.status !== 'reserved') return;
+    if (!row) return false;
+    return releaseReservationWithClient(
+      client,
+      { ...row, user_id: userId },
+      reason,
+      ['reserved', 'dispatched']
+    );
+  });
+}
 
-    await client.query(
-      `UPDATE image_entitlements
-       SET consumed_quantity = GREATEST(consumed_quantity - 1, 0),
-           status = CASE
-             WHEN status = 'depleted' THEN 'active'
-             ELSE status
-           END,
+/** Preserve charged quota when provider dispatch has an unknown outcome. */
+export async function markGenerationReservationAmbiguous(
+  userId: string,
+  reservationId: string,
+  reason = 'provider_outcome_unknown',
+  providerRequestId?: string
+): Promise<boolean> {
+  const result = await query<{ reservation_id: string }>(
+    `UPDATE image_generation_reservations
+     SET status = 'ambiguous', lease_expires_at = NULL,
+         provider_request_id = COALESCE(provider_request_id, $4),
+         resolution_reason = $3, updated_at = NOW()
+     WHERE reservation_id = $1 AND user_id = $2 AND status = 'dispatched'
+     RETURNING reservation_id`,
+    [reservationId, userId, reason, providerRequestId || null]
+  );
+  return Boolean(result.rows[0]);
+}
+
+/**
+ * Resolve a quarantined provider outcome only after operator/provider review.
+ * A confirmed success consumes the held quota. A confirmed failure or an
+ * explicit customer-compensation decision restores the exact entitlement.
+ */
+export async function resolveAmbiguousGenerationReservation(
+  reservationId: string,
+  resolution: AmbiguousGenerationResolution
+): Promise<boolean> {
+  return transaction(async client => {
+    const reservation = await client.query<ReservationRow>(
+      `SELECT reservation_id, entitlement_id, user_id, status
+       FROM image_generation_reservations
+       WHERE reservation_id = $1
+       FOR UPDATE`,
+      [reservationId]
+    );
+    const row = reservation.rows[0];
+    if (!row || row.status !== 'ambiguous') return false;
+    if (resolution === 'provider_confirmed_succeeded') {
+      await client.query(
+        `UPDATE image_generation_reservations
+         SET status = 'consumed', completed_at = COALESCE(completed_at, NOW()),
+             provider_completed_at = COALESCE(provider_completed_at, NOW()),
+             resolution_reason = $2, updated_at = NOW()
+         WHERE reservation_id = $1 AND status = 'ambiguous'`,
+        [reservationId, resolution]
+      );
+      return true;
+    }
+    return releaseReservationWithClient(client, row, resolution, ['ambiguous']);
+  });
+}
+
+/**
+ * Reconcile process crashes without risking a second provider charge.
+ *
+ * - stale `reserved` rows were never durably dispatched and are released;
+ * - stale `dispatched` rows are outcome-ambiguous and keep quota consumed;
+ * - ambiguous rows remain inspectable until provider evidence or an explicit
+ *   operator decision resolves them.
+ */
+export async function reconcileGenerationReservations(
+  limit = 100
+): Promise<GenerationReservationReconciliation> {
+  const boundedLimit = Math.min(500, Math.max(1, limit));
+  return transaction(async client => {
+    const staleReserved = await client.query<ReservationRow>(
+      `SELECT reservation_id, entitlement_id, user_id, status
+       FROM image_generation_reservations
+       WHERE status = 'reserved' AND lease_expires_at <= NOW()
+       ORDER BY lease_expires_at, reservation_id
+       FOR UPDATE SKIP LOCKED
+       LIMIT $1`,
+      [boundedLimit]
+    );
+    let releasedBeforeDispatch = 0;
+    for (const row of staleReserved.rows) {
+      if (
+        await releaseReservationWithClient(
+          client,
+          row,
+          'crash_before_provider_dispatch',
+          ['reserved']
+        )
+      ) {
+        releasedBeforeDispatch += 1;
+      }
+    }
+
+    const marked = await client.query<{ reservation_id: string }>(
+      `WITH stale AS (
+         SELECT reservation_id
+         FROM image_generation_reservations
+         WHERE status = 'dispatched' AND lease_expires_at <= NOW()
+         ORDER BY lease_expires_at, reservation_id
+         FOR UPDATE SKIP LOCKED
+         LIMIT $1
+       )
+       UPDATE image_generation_reservations AS reservations
+       SET status = 'ambiguous', lease_expires_at = NULL,
+           resolution_reason = 'provider_outcome_unknown_after_crash',
            updated_at = NOW()
-       WHERE entitlement_id = $1`,
-      [row.entitlement_id]
+       FROM stale
+       WHERE reservations.reservation_id = stale.reservation_id
+       RETURNING reservations.reservation_id`,
+      [boundedLimit]
     );
-    await client.query(
-      `UPDATE users
-       SET image_generations_used = GREATEST(image_generations_used - 1, 0),
-           updated_at = NOW()
-       WHERE user_id = $1`,
-      [userId]
+    const ambiguous = await client.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM image_generation_reservations
+       WHERE status = 'ambiguous'`
     );
-    await client.query(
-      `UPDATE image_generation_reservations
-       SET status = 'released', completed_at = NOW()
-       WHERE reservation_id = $1`,
-      [row.reservation_id]
-    );
+    return {
+      releasedBeforeDispatch,
+      markedAmbiguous: marked.rowCount || 0,
+      ambiguousTotal: Number.parseInt(ambiguous.rows[0]?.count || '0', 10)
+    };
   });
 }

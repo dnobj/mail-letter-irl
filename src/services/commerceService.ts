@@ -951,6 +951,45 @@ async function processRefundEvent(
   });
 }
 
+async function processDisputeEvent(
+  eventId: string,
+  eventType: 'charge.dispute.created' | 'charge.dispute.closed',
+  dispute: Stripe.Dispute
+): Promise<StripeEventProcessingResult> {
+  return transaction(async client => {
+    if (!(await claimStripeEvent(client, eventId, eventType, dispute.id))) {
+      return { duplicate: true };
+    }
+    const closed = eventType === 'charge.dispute.closed';
+    const severity = closed
+      ? dispute.status === 'lost'
+        ? 'critical'
+        : dispute.status === 'won'
+          ? 'info'
+          : 'warning'
+      : 'warning';
+    await client.query(
+      `INSERT INTO commerce_operational_alerts (
+         source_event_id, alert_type, severity, details
+       ) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (source_event_id, alert_type) DO NOTHING`,
+      [
+        eventId,
+        closed ? 'stripe_dispute_closed' : 'stripe_dispute_created',
+        severity,
+        JSON.stringify({
+          disputeStatus: dispute.status,
+          reason: dispute.reason || null,
+          amountCents: dispute.amount,
+          currency: dispute.currency,
+          chargeReferencePresent: Boolean(dispute.charge)
+        })
+      ]
+    );
+    return { duplicate: false };
+  });
+}
+
 export async function processStripeWebhookEvent(
   event: Stripe.Event
 ): Promise<StripeEventProcessingResult> {
@@ -970,6 +1009,13 @@ export async function processStripeWebhookEvent(
       return processRefundEvent(event.id, event.type, event.data.object as Stripe.Refund);
     case 'charge.refunded':
       return processRefundEvent(event.id, event.type, event.data.object as Stripe.Charge);
+    case 'charge.dispute.created':
+    case 'charge.dispute.closed':
+      return processDisputeEvent(
+        event.id,
+        event.type,
+        event.data.object as Stripe.Dispute
+      );
     default:
       return transaction(async client => ({
         duplicate: !(await claimStripeEvent(

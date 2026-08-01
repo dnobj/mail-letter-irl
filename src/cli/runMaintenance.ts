@@ -7,6 +7,7 @@ import { cleanupExpiredImages, closeTempImageStore } from '../services/tempImage
 import { runDailyMaintenance } from '../workers/creditExpirationWorker.js';
 import { runStatusSync } from '../workers/statusSyncWorker.js';
 import { runCommerceMaintenance } from '../services/commerceService.js';
+import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -23,6 +24,9 @@ export async function runMaintenance(): Promise<void> {
 
   const commerce = await runCommerceMaintenance();
   console.log('[Maintenance] Commerce summary:', commerce);
+
+  const imageReservations = await reconcileGenerationReservations();
+  console.log('[Maintenance] Image reservation recovery summary:', imageReservations);
 
   const expiredImages = await cleanupExpiredImages();
   console.log(`[Maintenance] Removed ${expiredImages} expired temporary images`);

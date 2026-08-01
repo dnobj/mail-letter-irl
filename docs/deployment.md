@@ -112,6 +112,14 @@ receive the new Stripe events. Deploy with `JIT_PURCHASE_ENABLED=false` first.
 The migration is backward compatible with prepaid sends and migrates recoverable
 historical pack purchases into the authoritative `orders` model.
 
+Apply forward migration `023_jit_recovery_state_machines.sql` before running
+the issue #69 application revision. Migration 021 is already applied in
+development, and issue #162 owns migration 022. The repository migration runner
+records filenames and applies every unrecorded file, including a lower-numbered
+file that arrives later. Disposable-PostgreSQL tests must continue to prove that
+both `021 -> 023 -> 022` and `021 -> 022 -> 023` produce identical schema and
+migration ledgers. Migration 023 must remain independent of migration 022.
+
 Configure development and production independently:
 
 - `STRIPE_JIT_LETTER_PRICE_ID` and `STRIPE_JIT_POSTCARD_PRICE_ID`
@@ -119,6 +127,8 @@ Configure development and production independently:
 - `JIT_CHECKOUT_EXPIRY_MINUTES`, `JIT_REFUND_RETRY_LIMIT`, and
   `JIT_REFUND_RETRY_DELAY_SECONDS` (minimum 30; default 300)
 - `IMAGE_ENTITLEMENTS_PER_PACK_LETTER` and `IMAGE_ENTITLEMENTS_PER_JIT_ORDER`
+- `IMAGE_RESERVATION_PRE_DISPATCH_TIMEOUT_MINUTES` (default 15) and
+  `IMAGE_RESERVATION_PROVIDER_TIMEOUT_MINUTES` (default 30)
 - `LETTER_IRL_PACKS_URL`
 
 The configured cent amounts must exactly match their Stripe Prices. A paid

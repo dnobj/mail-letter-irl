@@ -512,3 +512,15 @@ explicit replay-safe grants. `image_generation_reservations` binds each atomic
 generation reservation to its exact grant so failed provider calls can release
 the correct unit. Migration 021 preserves previously earned allowances as a
 `legacy_migration` grant.
+
+Migration 023 extends each reservation with a durable dispatch lease and
+provider outcome state. `reserved` means no provider dispatch has been durably
+authorized, `dispatched` is the pre-network boundary, `consumed` and `released`
+are definite outcomes, and `ambiguous` quarantines an outcome that cannot be
+proved after dispatch. Ambiguous rows retain quota until provider evidence or
+an explicit customer-compensation decision resolves them. A unique non-null
+provider request ID supports reconciliation without exposing it in logs.
+
+`commerce_operational_alerts` stores sanitized Stripe dispute work in the same
+transaction as `stripe_webhook_events`. Its unique source-event/type key makes
+replay safe, while open/acknowledged/resolved states survive process restarts.
