@@ -4,6 +4,10 @@ vi.mock("../../../src/db/index.js", () => ({ query: vi.fn() }));
 
 import { query } from "../../../src/db/index.js";
 import { submitFeatureRequestTool } from "../../../src/tools/submitFeatureRequest.js";
+import {
+  FeatureRequestError,
+  submitFeatureRequest
+} from "../../../src/services/featureRequestService.js";
 import { submitFeatureRequestInputZ } from "../../../src/zodSchemas.js";
 
 function context() {
@@ -24,6 +28,21 @@ describe("feature request safe failures", () => {
     expect(() => submitFeatureRequestInputZ.parse({ title: "x".repeat(201), description: "valid" })).toThrow();
     expect(() => submitFeatureRequestInputZ.parse({ title: "valid", description: "x".repeat(2001) })).toThrow();
     expect(() => submitFeatureRequestInputZ.parse({ title: "valid", description: "valid", attemptedAction: "x".repeat(256) })).toThrow();
+    expect(() => submitFeatureRequestInputZ.parse({ title: "valid", description: "valid", contactEmail: "x".repeat(256) })).toThrow();
+  });
+
+  it("rejects overlong contact email before direct service persistence", async () => {
+    const overlongEmail = `${"x".repeat(244)}@private.example`;
+
+    await expect(submitFeatureRequest("auth0|private", {
+      title: "valid",
+      description: "valid",
+      contactEmail: overlongEmail
+    })).rejects.toMatchObject<Partial<FeatureRequestError>>({
+      code: "contact_email_too_long",
+      message: "Contact email must be 255 characters or less"
+    });
+    expect(query).not.toHaveBeenCalled();
   });
 
   it("returns bounded typed validation feedback", async () => {

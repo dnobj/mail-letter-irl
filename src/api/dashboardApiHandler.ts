@@ -169,7 +169,7 @@ export async function handleCreateCheckoutSession(
     }
   } catch (error: unknown) {
     writeDiagnostic('error', 'credits.checkout_creation_failed', {
-      errorClass: classifyDiagnosticError(error, 'provider_error')
+      errorClass: classifyDiagnosticError(error, 'database_error')
     });
 
     res.statusCode = 500;

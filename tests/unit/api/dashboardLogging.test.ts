@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createCheckoutSession, authenticateHttpRequest } = vi.hoisted(() => ({
+const { createCheckoutSession, authenticateHttpRequest, query } = vi.hoisted(() => ({
   createCheckoutSession: vi.fn(),
-  authenticateHttpRequest: vi.fn()
+  authenticateHttpRequest: vi.fn(),
+  query: vi.fn()
 }));
+vi.mock("../../../src/db/index.js", () => ({ query }));
 vi.mock("../../../src/api/middleware/auth.js", () => ({
   authenticateHttpRequest
 }));
@@ -21,6 +23,7 @@ import {
 
 describe("dashboard runtime logging privacy", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     authenticateHttpRequest.mockResolvedValue({
       userId: "auth0|private-user",
       email: "private@example.com",
@@ -85,5 +88,26 @@ describe("dashboard runtime logging privacy", () => {
 
     expect(error.mock.calls.flat().map(String).join("\n")).toContain('"errorClass":"configuration_error"');
     expect(res.statusCode).toBe(503);
+  });
+
+  it("classifies the actual user-email lookup failure as database error", async () => {
+    const sensitive = "private database detail auth0|private-user";
+    authenticateHttpRequest.mockResolvedValue({ userId: "auth0|private-user", claims: {} });
+    query.mockRejectedValue(new Error(sensitive));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const req = {
+      headers: {},
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+    };
+    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+    await handleCreateCheckoutSession(req as never, res as never);
+
+    const logged = error.mock.calls.flat().map(String).join("\n");
+    const body = String(res.end.mock.calls[0][0]);
+    expect(logged).toContain('"errorClass":"database_error"');
+    expect(logged).not.toContain(sensitive);
+    expect(body).not.toContain(sensitive);
+    expect(createCheckoutSession).not.toHaveBeenCalled();
   });
 });

@@ -69,6 +69,7 @@ const RATE_LIMIT_HOURS = 24;
 const MAX_TITLE_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 2000;
 const MAX_ATTEMPTED_ACTION_LENGTH = 255;
+const MAX_CONTACT_EMAIL_LENGTH = 255;
 
 export type FeatureRequestErrorCode =
   | 'title_required'
@@ -76,6 +77,7 @@ export type FeatureRequestErrorCode =
   | 'description_required'
   | 'description_too_long'
   | 'attempted_action_too_long'
+  | 'contact_email_too_long'
   | 'invalid_category'
   | 'rate_limited';
 
@@ -150,6 +152,13 @@ export async function submitFeatureRequest(
   // Validate attempted action (optional)
   if (input.attemptedAction && input.attemptedAction.length > MAX_ATTEMPTED_ACTION_LENGTH) {
     throw new FeatureRequestError('attempted_action_too_long', `Attempted action must be ${MAX_ATTEMPTED_ACTION_LENGTH} characters or less`);
+  }
+
+  if (input.contactEmail && input.contactEmail.length > MAX_CONTACT_EMAIL_LENGTH) {
+    throw new FeatureRequestError(
+      'contact_email_too_long',
+      `Contact email must be ${MAX_CONTACT_EMAIL_LENGTH} characters or less`
+    );
   }
 
   // Validate category (optional, defaults to 'other')

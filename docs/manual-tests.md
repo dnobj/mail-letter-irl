@@ -74,16 +74,14 @@ or raw request bodies.
       bodies, raw OAuth subject/user IDs, email addresses, MCP session IDs,
       addresses, letter/postcard content, generated image payloads or URLs,
       widget diagnostic payloads, or raw request bodies.
-- [ ] Confirm validation diagnostics identify only non-sensitive error classes
+- [ ] Confirm validation diagnostics use only stable event names and non-sensitive
+      error classes, with no arbitrary exception messages or stack traces.
 
 Diagnostic `errorClass` values use a fixed privacy-safe taxonomy: `authorization_error`,
 `configuration_error`, `database_error`, `provider_error`, `transport_error`,
 `validation_error`, `rate_limit_error`, and `unknown_error`. A small allowlist of trusted JOSE,
-network, and PostgreSQL codes
-codes may be emitted instead. Exception messages, stacks, identifiers, addresses,
+network, and PostgreSQL codes may be emitted instead. Exception messages, stacks, identifiers, addresses,
 tokens, and request content must never be used as an error class.
-      and stable event names while preserving no arbitrary exception messages or
-      stack traces.
 
 ### CIMD-09 — Claude/PAT regression
 
