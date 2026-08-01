@@ -70,6 +70,25 @@ const MAX_TITLE_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 2000;
 const MAX_ATTEMPTED_ACTION_LENGTH = 255;
 
+export type FeatureRequestErrorCode =
+  | 'title_required'
+  | 'title_too_long'
+  | 'description_required'
+  | 'description_too_long'
+  | 'attempted_action_too_long'
+  | 'invalid_category'
+  | 'rate_limited';
+
+export class FeatureRequestError extends Error {
+  constructor(
+    public readonly code: FeatureRequestErrorCode,
+    message: string
+  ) {
+    super(message);
+    this.name = 'FeatureRequestError';
+  }
+}
+
 // Valid categories for validation
 const VALID_CATEGORIES: FeatureRequestCategory[] = [
   'new_feature',
@@ -114,35 +133,35 @@ export async function submitFeatureRequest(
 ): Promise<SubmitFeatureRequestResult> {
   // Validate title
   if (!input.title || input.title.trim().length === 0) {
-    throw new Error('Title is required');
+    throw new FeatureRequestError('title_required', 'Title is required');
   }
   if (input.title.length > MAX_TITLE_LENGTH) {
-    throw new Error(`Title must be ${MAX_TITLE_LENGTH} characters or less`);
+    throw new FeatureRequestError('title_too_long', `Title must be ${MAX_TITLE_LENGTH} characters or less`);
   }
 
   // Validate description
   if (!input.description || input.description.trim().length === 0) {
-    throw new Error('Description is required');
+    throw new FeatureRequestError('description_required', 'Description is required');
   }
   if (input.description.length > MAX_DESCRIPTION_LENGTH) {
-    throw new Error(`Description must be ${MAX_DESCRIPTION_LENGTH} characters or less`);
+    throw new FeatureRequestError('description_too_long', `Description must be ${MAX_DESCRIPTION_LENGTH} characters or less`);
   }
 
   // Validate attempted action (optional)
   if (input.attemptedAction && input.attemptedAction.length > MAX_ATTEMPTED_ACTION_LENGTH) {
-    throw new Error(`Attempted action must be ${MAX_ATTEMPTED_ACTION_LENGTH} characters or less`);
+    throw new FeatureRequestError('attempted_action_too_long', `Attempted action must be ${MAX_ATTEMPTED_ACTION_LENGTH} characters or less`);
   }
 
   // Validate category (optional, defaults to 'other')
   const category: FeatureRequestCategory = input.category || 'other';
   if (!VALID_CATEGORIES.includes(category)) {
-    throw new Error(`Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}`);
+    throw new FeatureRequestError('invalid_category', `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}`);
   }
 
   // Check rate limit
   const rateLimited = await isRateLimited(userId);
   if (rateLimited) {
-    throw new Error(
+    throw new FeatureRequestError('rate_limited',
       `You've submitted several feature requests recently. Please wait before submitting more. ` +
       `Limit: ${RATE_LIMIT_COUNT} requests per ${RATE_LIMIT_HOURS} hours.`
     );

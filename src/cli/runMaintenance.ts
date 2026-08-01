@@ -9,9 +9,16 @@ import {
 } from '../services/tempImageStore.js';
 import { runDailyMaintenance } from '../workers/creditExpirationWorker.js';
 import { runStatusSync } from '../workers/statusSyncWorker.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+export function writeMaintenanceFailure(error: unknown): void {
+  writeDiagnostic('error', 'maintenance.run_failed', {
+    errorClass: classifyDiagnosticError(error, 'unknown_error')
+  });
+}
 
 export async function runMaintenance(): Promise<void> {
   const batchLimit = Math.max(
@@ -53,7 +60,7 @@ async function main(): Promise<void> {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
-    console.error('[Maintenance] Run failed');
+    writeMaintenanceFailure(error);
     process.exitCode = 1;
   });
 }

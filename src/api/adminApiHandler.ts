@@ -994,6 +994,13 @@ async function handleStripeReconcile(
         actualCredits: d.actualCredits,
         message: d.message,
         suggestedAction: d.suggestedAction,
+        // Sensitive operator-only references. This route is admin-authenticated;
+        // these values are returned for investigation and must never be logged.
+        operatorReference: {
+          accountId: d.userId,
+          paymentSessionId: d.stripeSessionId,
+          ledgerId: d.ledgerId,
+        },
       })),
       recommendations: result.recommendations,
     });

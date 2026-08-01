@@ -3,8 +3,15 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 const { Pool } = pg;
+
+export function writeMigrationFailure(error: unknown): void {
+  writeDiagnostic('error', 'database.migration_failed', {
+    errorClass: classifyDiagnosticError(error, 'database_error')
+  });
+}
 
 export async function migrate(): Promise<void> {
   const pool = new Pool({
@@ -53,7 +60,7 @@ export async function migrate(): Promise<void> {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   migrate().catch((error) => {
-    console.error('[Migrate] Failed');
+    writeMigrationFailure(error);
     process.exitCode = 1;
   });
 }

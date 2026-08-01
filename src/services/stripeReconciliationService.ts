@@ -52,6 +52,7 @@ interface Discrepancy {
   type: 'missing_credit' | 'missing_stripe' | 'amount_mismatch' | 'unprocessed_refund';
   severity: 'critical' | 'high' | 'medium' | 'low';
   stripeSessionId?: string;
+  ledgerId?: string;
   userId?: string;
   stripeAmount?: number;
   ourAmount?: number;
@@ -218,6 +219,7 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
           type: 'missing_stripe',
           severity: 'medium',
           stripeSessionId: sessionId,
+          ledgerId: ourRecord.ledgerId,
           userId: ourRecord.userId,
           actualCredits: ourRecord.credits,
           message: 'A credit entry has no matching payment in the reconciliation window',
@@ -380,7 +382,7 @@ export async function autoFixMissingCredits(dryRun: boolean = true): Promise<{
     } catch (error) {
       const msg = 'Failed to fix reconciliation discrepancy';
       writeDiagnostic('error', 'credits.reconciliation_fix_failed', {
-        errorClass: classifyDiagnosticError(error, 'provider_error')
+        errorClass: classifyDiagnosticError(error, 'database_error')
       });
       errors.push(msg);
     }

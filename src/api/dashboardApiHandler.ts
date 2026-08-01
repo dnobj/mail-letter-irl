@@ -140,13 +140,13 @@ export async function handleCreateCheckoutSession(
         sessionUrl: result.sessionUrl
       });
     } else {
-      writeDiagnostic('error', 'credits.checkout_creation_failed', {
-        errorClass: 'provider_error'
-      });
-
       // Distinguish between configuration errors and other failures
       const errorMessage = result.error || 'Failed to create checkout session';
-      if (errorMessage.includes('not configured') || errorMessage.includes('environment variable')) {
+      const configurationFailure = errorMessage.includes('not configured') || errorMessage.includes('environment variable');
+      writeDiagnostic('error', 'credits.checkout_creation_failed', {
+        errorClass: configurationFailure ? 'configuration_error' : 'provider_error'
+      });
+      if (configurationFailure) {
         // Configuration error - service temporarily unavailable
         res.statusCode = 503;
         res.json({

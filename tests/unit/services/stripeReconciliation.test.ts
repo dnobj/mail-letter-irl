@@ -18,10 +18,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock Stripe
-const { mockSessionsList, mockRefundsList, mockQuery } = vi.hoisted(() => ({
+const { mockSessionsList, mockRefundsList, mockQuery, mockAddCredits } = vi.hoisted(() => ({
   mockSessionsList: vi.fn(),
   mockRefundsList: vi.fn(),
-  mockQuery: vi.fn()
+  mockQuery: vi.fn(),
+  mockAddCredits: vi.fn()
 }));
 
 vi.mock('stripe', () => {
@@ -43,8 +44,14 @@ vi.mock('stripe', () => {
 vi.mock('../../../src/db/index.js', () => ({
   query: mockQuery,
 }));
+vi.mock('../../../src/services/creditService.js', () => ({
+  addCreditsWithOptions: mockAddCredits,
+}));
 
-import { reconcileStripePayments } from '../../../src/services/stripeReconciliationService.js';
+import {
+  autoFixMissingCredits,
+  reconcileStripePayments
+} from '../../../src/services/stripeReconciliationService.js';
 
 describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
   beforeEach(() => {
@@ -181,6 +188,30 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
       expect(discrepancy.type).toBe('unprocessed_refund');
       expect(discrepancy.severity).toBe('high');
     });
+  });
+
+  it('classifies reconciliation repair persistence failures as database errors', async () => {
+    mockSessionsList.mockResolvedValue({
+      data: [{
+        id: 'cs_private', payment_status: 'paid',
+        metadata: { userId: 'auth0|private', productId: 'credit-pack-10' },
+        amount_total: 1000, created: Date.now() / 1000
+      }],
+      has_more: false
+    });
+    mockRefundsList.mockResolvedValue({ data: [] });
+    mockQuery.mockResolvedValue({ rows: [] });
+    mockAddCredits.mockRejectedValue(new Error('private database message'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await autoFixMissingCredits(false);
+
+    const output = error.mock.calls.flat().map(String).join('\n');
+    expect(output).toContain('"event":"credits.reconciliation_fix_failed"');
+    expect(output).toContain('"errorClass":"database_error"');
+    expect(output).not.toContain('private database message');
   });
 
   describe('product credit mapping', () => {

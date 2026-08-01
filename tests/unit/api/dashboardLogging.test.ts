@@ -1,8 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createCheckoutSession } = vi.hoisted(() => ({ createCheckoutSession: vi.fn() }));
+const { createCheckoutSession, authenticateHttpRequest } = vi.hoisted(() => ({
+  createCheckoutSession: vi.fn(),
+  authenticateHttpRequest: vi.fn()
+}));
 vi.mock("../../../src/api/middleware/auth.js", () => ({
-  authenticateHttpRequest: vi.fn().mockResolvedValue({ userId: "auth0|private-user", claims: {} })
+  authenticateHttpRequest
 }));
 vi.mock("../../../src/services/stripeService.js", () => ({
   createCheckoutSession,
@@ -17,6 +20,13 @@ import {
 } from "../../../src/api/dashboardApiHandler.js";
 
 describe("dashboard runtime logging privacy", () => {
+  beforeEach(() => {
+    authenticateHttpRequest.mockResolvedValue({
+      userId: "auth0|private-user",
+      email: "private@example.com",
+      claims: {}
+    });
+  });
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -60,5 +70,20 @@ describe("dashboard runtime logging privacy", () => {
     expect(logged).not.toContain(sensitive);
     expect(body).toContain("Unable to create checkout session");
     expect(body).not.toContain(sensitive);
+  });
+
+  it("classifies known checkout configuration failures", async () => {
+    createCheckoutSession.mockResolvedValue({ success: false, error: "STRIPE_SECRET_KEY not configured" });
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const req = {
+      headers: {},
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+    };
+    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+    await handleCreateCheckoutSession(req as never, res as never);
+
+    expect(error.mock.calls.flat().map(String).join("\n")).toContain('"errorClass":"configuration_error"');
+    expect(res.statusCode).toBe(503);
   });
 });

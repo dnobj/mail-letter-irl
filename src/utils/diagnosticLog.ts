@@ -14,7 +14,11 @@ const SAFE_ERROR_CODES = new Set([
   "ECONNREFUSED",
   "ECONNRESET",
   "ENOTFOUND",
-  "ETIMEDOUT"
+  "ETIMEDOUT",
+  "23505",
+  "28P01",
+  "3D000",
+  "42P01"
 ]);
 
 export type DiagnosticErrorCategory =
@@ -22,6 +26,7 @@ export type DiagnosticErrorCategory =
   | "configuration_error"
   | "database_error"
   | "provider_error"
+  | "rate_limit_error"
   | "transport_error"
   | "validation_error"
   | "unknown_error";

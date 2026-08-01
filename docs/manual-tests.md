@@ -78,7 +78,8 @@ or raw request bodies.
 
 Diagnostic `errorClass` values use a fixed privacy-safe taxonomy: `authorization_error`,
 `configuration_error`, `database_error`, `provider_error`, `transport_error`,
-`validation_error`, and `unknown_error`. A small allowlist of trusted JOSE and network
+`validation_error`, `rate_limit_error`, and `unknown_error`. A small allowlist of trusted JOSE,
+network, and PostgreSQL codes
 codes may be emitted instead. Exception messages, stacks, identifiers, addresses,
 tokens, and request content must never be used as an error class.
       and stable event names while preserving no arbitrary exception messages or

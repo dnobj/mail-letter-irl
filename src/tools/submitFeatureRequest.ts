@@ -15,7 +15,8 @@ import {
 } from "../schemas.js";
 import {
   submitFeatureRequest,
-  FeatureRequestCategory
+  FeatureRequestCategory,
+  FeatureRequestError
 } from "../services/featureRequestService.js";
 
 interface SubmitFeatureRequestInput {
@@ -78,17 +79,24 @@ async function handler(
       category: result.category
     };
   } catch (error) {
+    const typedError = error instanceof FeatureRequestError ? error : null;
+    const errorClass = typedError?.code === "rate_limited"
+      ? "rate_limit_error"
+      : typedError
+        ? "validation_error"
+        : "database_error";
     context.logger.warn(
       {
         correlationId: context.correlationId,
         event: "feature_request.submit.failed",
-        errorClass: "database_error"
+        errorClass,
+        ...(typedError ? { errorCode: typedError.code } : {})
       },
       "Feature request submission failed"
     );
 
     // Re-throw with user-friendly message
-    throw new Error("Unable to submit feature request");
+    throw new Error(typedError?.message ?? "Unable to submit feature request");
   }
 }
 
