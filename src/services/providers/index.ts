@@ -89,7 +89,7 @@ export function getLetterProvider(): LetterFulfillmentProvider {
     try {
       additionalConfig = JSON.parse(configJson);
     } catch (error) {
-      console.warn('⚠️  Failed to parse LETTER_PROVIDER_CONFIG:', error);
+      console.warn('⚠️  Failed to parse LETTER_PROVIDER_CONFIG');
     }
   }
 
@@ -149,7 +149,7 @@ export function getProviderByName(providerName: string): LetterFulfillmentProvid
     try {
       additionalConfig = JSON.parse(configJson);
     } catch (error) {
-      console.warn('⚠️  Failed to parse LETTER_PROVIDER_CONFIG:', error);
+      console.warn('⚠️  Failed to parse LETTER_PROVIDER_CONFIG');
     }
   }
 
@@ -167,7 +167,7 @@ export function getProviderByName(providerName: string): LetterFulfillmentProvid
     console.log(`✅ Initialized provider by name: ${config.displayName}`);
     return provider;
   } catch (error) {
-    console.warn(`⚠️  Failed to create provider ${providerName}, falling back to default:`, error);
+    console.warn(`⚠️  Failed to create provider ${providerName}, falling back to default`);
     return getLetterProvider();
   }
 }
@@ -195,7 +195,7 @@ export async function getProviderRouting(mailType: MailType): Promise<string> {
       return providerName;
     }
   } catch (error) {
-    console.warn(`⚠️  Failed to get routing for ${mailType}:`, error);
+    console.warn(`⚠️  Failed to get routing for ${mailType}`);
   }
 
   // Fall back to default provider

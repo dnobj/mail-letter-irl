@@ -184,8 +184,7 @@ export async function prepareSender(
         {
           correlationId: context.correlationId,
           event: "quote.letter.using_saved_address",
-          savedAddressCity: savedAddress.city,
-          savedAddressState: savedAddress.state
+          savedAddressAvailable: true
         },
         "Using saved return address for sender"
       );
@@ -354,8 +353,7 @@ export async function validateAddressesWithProvider(
         {
           correlationId: context.correlationId,
           event: "quote.letter.sender_address_corrected",
-          original: `${sender.addressLine1}, ${sender.city}, ${sender.state} ${sender.postalCode}`,
-          corrected: `${senderValidation.verifiedAddress.line1}, ${senderValidation.verifiedAddress.city}, ${senderValidation.verifiedAddress.state} ${senderValidation.verifiedAddress.postalCode}`
+          correctionApplied: true
         },
         "Auto-applying corrected sender address"
       );
@@ -375,8 +373,7 @@ export async function validateAddressesWithProvider(
         {
           correlationId: context.correlationId,
           event: "quote.letter.recipient_address_corrected",
-          original: `${recipient.addressLine1}, ${recipient.city}, ${recipient.state} ${recipient.postalCode}`,
-          corrected: `${recipientValidation.verifiedAddress.line1}, ${recipientValidation.verifiedAddress.city}, ${recipientValidation.verifiedAddress.state} ${recipientValidation.verifiedAddress.postalCode}`
+          correctionApplied: true
         },
         "Auto-applying corrected recipient address"
       );
@@ -425,12 +422,7 @@ export function validateCharacterLimitForLayout(
         lineLimit: charValidation.lineLimit,
         newlineCount,
         signOffLength: signOff.length,
-        // Only log actual content in development/debug mode
-        ...(isDebug && {
-          bodyText,
-          signOff,
-          bodyTextEscaped: JSON.stringify(bodyText)  // Shows \n characters explicitly
-        })
+        debugMode: isDebug
       },
       "Letter exceeds one-page limit"
     );
@@ -539,7 +531,6 @@ export async function createLetterDraftAndBuildOutput(
     {
       correlationId: context.correlationId,
       event: "quote.letter.draft_created",
-      draftId: draftResult.draftId,
       layoutType,
       expiresAt: draftResult.expiresAt.toISOString()
     },

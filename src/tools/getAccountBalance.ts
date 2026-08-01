@@ -135,8 +135,6 @@ async function handler(
       lettersRemaining,
       lettersExpiringSoon,
       canSendStandardLetter,
-      userId,
-      email,
       authProvider
     },
     "Retrieved account balance from database"

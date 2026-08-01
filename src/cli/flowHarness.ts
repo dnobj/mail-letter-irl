@@ -65,6 +65,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("Flow harness failed:", error);
+  console.error("Flow harness failed");
   process.exitCode = 1;
 });

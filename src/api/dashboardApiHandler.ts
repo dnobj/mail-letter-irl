@@ -20,6 +20,7 @@ import { authenticateHttpRequest } from './middleware/auth.js';
 import { parseCookies, serializeCookie } from '../utils/cookies.js';
 import { query } from '../db/index.js';
 import { updateUserTier, invalidateTierCache } from '../services/tierService.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 // Default expiration for purchased credits (2 years)
 const DEFAULT_PURCHASE_EXPIRATION_DAYS = 730;
@@ -131,7 +132,7 @@ export async function handleCreateCheckoutSession(
     });
 
     if (result.success) {
-      console.log(`✅ Created checkout session for user ${authInfo.userId}: ${result.sessionId}`);
+      writeDiagnostic('info', 'credits.checkout_created');
 
       res.json({
         success: true,
@@ -139,39 +140,42 @@ export async function handleCreateCheckoutSession(
         sessionUrl: result.sessionUrl
       });
     } else {
-      console.error(`❌ Failed to create checkout session: ${result.error}`);
-
       // Distinguish between configuration errors and other failures
       const errorMessage = result.error || 'Failed to create checkout session';
-      if (errorMessage.includes('not configured') || errorMessage.includes('environment variable')) {
+      const configurationFailure = errorMessage.includes('not configured') || errorMessage.includes('environment variable');
+      writeDiagnostic('error', 'credits.checkout_creation_failed', {
+        errorClass: configurationFailure ? 'configuration_error' : 'provider_error'
+      });
+      if (configurationFailure) {
         // Configuration error - service temporarily unavailable
         res.statusCode = 503;
         res.json({
           error: 'Service configuration error',
           message: 'Payment processing is temporarily unavailable. Please try again later.',
-          details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
         });
       } else if (errorMessage.includes('Invalid product')) {
         // Client error - bad request
         res.statusCode = 400;
         res.json({
-          error: errorMessage
+          error: 'Invalid product'
         });
       } else {
         // Other errors
         res.statusCode = 500;
         res.json({
-          error: errorMessage
+          error: 'Unable to create checkout session'
         });
       }
     }
-  } catch (error: any) {
-    console.error('Error in handleCreateCheckoutSession:', error);
+  } catch (error: unknown) {
+    writeDiagnostic('error', 'credits.checkout_creation_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
 
     res.statusCode = 500;
     res.json({
       error: 'Internal server error',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Unable to create checkout session'
     });
   }
 }
@@ -221,7 +225,7 @@ export async function handleStripeWebhook(
         break;
 
       case 'checkout.session.async_payment_failed':
-        console.log(`❌ Async payment failed for session: ${event.data.object.id}`);
+        writeDiagnostic('warn', 'credits.async_payment_failed');
         break;
 
       case 'charge.refunded':
@@ -246,7 +250,9 @@ export async function handleStripeWebhook(
 
     res.json({ received: true });
   } catch (error: any) {
-    console.error('Error in handleStripeWebhook:', error);
+    writeDiagnostic('error', 'credits.webhook_failed', {
+      errorClass: classifyDiagnosticError(error, 'provider_error')
+    });
     res.statusCode = 500;
     res.json({ error: 'Webhook processing failed' });
   }
@@ -260,7 +266,7 @@ async function handleCheckoutSessionCompleted(
   session: Stripe.Checkout.Session
 ): Promise<void> {
   try {
-    console.log(`✅ Checkout completed: ${session.id}`);
+    writeDiagnostic('info', 'credits.checkout_completed');
 
     // Extract checkout data
     const checkoutData = await extractCheckoutData(session);
@@ -279,11 +285,11 @@ async function handleCheckoutSessionCompleted(
     );
 
     if (existingEntry.rows.length > 0) {
-      console.log(`⚠️ Webhook already processed for session ${session.id}, skipping (idempotent)`);
+      writeDiagnostic('info', 'credits.checkout_already_processed');
       return;
     }
 
-    console.log(`💳 Adding ${checkoutData.credits} credits to user ${checkoutData.userId}`);
+    writeDiagnostic('info', 'credits.checkout_applying', { credits: checkoutData.credits });
 
     // Add credits to user account with expiration tracking
     await addCreditsWithOptions({
@@ -302,9 +308,11 @@ async function handleCheckoutSessionCompleted(
       }
     });
 
-    console.log(`✅ Credits added successfully to user ${checkoutData.userId}`);
+    writeDiagnostic('info', 'credits.checkout_applied', { credits: checkoutData.credits });
   } catch (error: any) {
-    console.error('Error processing checkout completion:', error);
+    writeDiagnostic('error', 'credits.checkout_completion_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
     throw error;
   }
 }
@@ -315,7 +323,7 @@ async function handleCheckoutSessionCompleted(
  */
 async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
   try {
-    console.log(`💸 Refund webhook: charge ${charge.id}, amount refunded: ${charge.amount_refunded}`);
+    writeDiagnostic('info', 'credits.refund_received', { amount: charge.amount_refunded });
 
     // Get the payment intent to find the checkout session
     const paymentIntentId = typeof charge.payment_intent === 'string'
@@ -340,10 +348,12 @@ async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
 
       if (sessions.data.length > 0) {
         checkoutSessionId = sessions.data[0].id;
-        console.log(`   Found checkout session: ${checkoutSessionId}`);
+        writeDiagnostic('info', 'credits.checkout_match_found');
       }
     } catch (stripeError) {
-      console.warn(`   Could not look up checkout session from Stripe:`, stripeError);
+      writeDiagnostic('warn', 'credits.checkout_lookup_failed', {
+        errorClass: classifyDiagnosticError(stripeError, 'provider_error')
+      });
     }
 
     // Find the original purchase ledger entry by session ID or payment intent
@@ -383,7 +393,7 @@ async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
     }
 
     if (ledgerResult.rows.length === 0) {
-      console.warn(`⚠️ Refund webhook: Could not find matching purchase for charge ${charge.id}`);
+      writeDiagnostic('warn', 'credits.refund_purchase_not_found');
       console.log('   This may be a refund for a purchase before ledger tracking was enabled.');
       return;
     }
@@ -401,7 +411,7 @@ async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
     );
 
     if (existingRefund.rows.length > 0) {
-      console.log(`⚠️ Refund already processed for ledger entry ${entry.ledger_id}, skipping`);
+      writeDiagnostic('info', 'credits.refund_already_processed');
       return;
     }
 
@@ -429,19 +439,23 @@ async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
       ]
     );
 
-    console.log(`✅ Refund recorded for user ${userId}, ledger ${entry.ledger_id}`);
+    writeDiagnostic('info', 'credits.refund_recorded');
 
     // Recalculate user tier immediately (don't wait for daily job)
     try {
       const updatedUser = await updateUserTier(userId);
       invalidateTierCache(userId);
-      console.log(`🔄 Tier recalculated for user ${userId}: ${updatedUser.tier}`);
+      writeDiagnostic('info', 'credits.tier_recalculated', { tier: updatedUser.tier });
     } catch (tierError) {
-      console.error(`⚠️ Failed to recalculate tier for user ${userId}:`, tierError);
+      writeDiagnostic('error', 'credits.tier_recalculation_failed', {
+        errorClass: classifyDiagnosticError(tierError, 'database_error')
+      });
       // Don't fail the webhook - tier will be recalculated in daily job
     }
   } catch (error: any) {
-    console.error('Error processing refund:', error);
+    writeDiagnostic('error', 'credits.refund_processing_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
     throw error;
   }
 }
@@ -457,18 +471,16 @@ async function handleRefundCreated(refund: Stripe.Refund): Promise<void> {
       ? refund.payment_intent
       : refund.payment_intent?.id;
 
-    console.log(`💸 Refund created: ${refund.id}`);
-    console.log(`   Amount: ${refund.amount / 100} ${refund.currency.toUpperCase()}`);
-    console.log(`   Reason: ${refund.reason || 'not specified'}`);
-    console.log(`   Charge: ${chargeId}`);
-    console.log(`   Payment Intent: ${paymentIntentId}`);
+    writeDiagnostic('info', 'credits.refund_created');
     console.log(`   Status: ${refund.status}`);
 
     // The actual processing is done in handleChargeRefunded
     // This event is for logging/monitoring purposes
     // Both events fire for the same refund, so we avoid duplicate processing
   } catch (error: any) {
-    console.error('Error processing refund.created:', error);
+    writeDiagnostic('error', 'credits.refund_event_failed', {
+      errorClass: classifyDiagnosticError(error, 'provider_error')
+    });
     throw error;
   }
 }
@@ -479,7 +491,7 @@ async function handleRefundCreated(refund: Stripe.Refund): Promise<void> {
  */
 async function handleDisputeCreated(dispute: Stripe.Dispute): Promise<void> {
   try {
-    console.log(`⚠️ Dispute created: ${dispute.id}, amount: ${dispute.amount}, reason: ${dispute.reason}`);
+    writeDiagnostic('warn', 'credits.dispute_created', { amount: dispute.amount });
 
     // Get the charge to find the user
     const chargeId = typeof dispute.charge === 'string'
@@ -501,8 +513,7 @@ async function handleDisputeCreated(dispute: Stripe.Dispute): Promise<void> {
     );
 
     // Log the dispute for monitoring (we may need manual investigation)
-    console.log(`🚨 DISPUTE ALERT: ${dispute.id}`);
-    console.log(`   Charge: ${chargeId}`);
+    console.log('🚨 DISPUTE ALERT');
     console.log(`   Amount: ${dispute.amount / 100} ${dispute.currency.toUpperCase()}`);
     console.log(`   Reason: ${dispute.reason}`);
     console.log(`   Status: ${dispute.status}`);
@@ -511,7 +522,9 @@ async function handleDisputeCreated(dispute: Stripe.Dispute): Promise<void> {
     // The purchase is already excluded from tier calculation since we check for refunds
     // A chargeback will eventually result in a charge.refunded event if the customer wins
   } catch (error: any) {
-    console.error('Error processing dispute created:', error);
+    writeDiagnostic('error', 'credits.dispute_created_failed', {
+      errorClass: classifyDiagnosticError(error, 'provider_error')
+    });
     throw error;
   }
 }
@@ -523,7 +536,7 @@ async function handleDisputeCreated(dispute: Stripe.Dispute): Promise<void> {
  */
 async function handleDisputeClosed(dispute: Stripe.Dispute): Promise<void> {
   try {
-    console.log(`📋 Dispute closed: ${dispute.id}, status: ${dispute.status}`);
+    writeDiagnostic('info', 'credits.dispute_closed', { status: dispute.status });
 
     const chargeId = typeof dispute.charge === 'string'
       ? dispute.charge
@@ -531,7 +544,7 @@ async function handleDisputeClosed(dispute: Stripe.Dispute): Promise<void> {
 
     if (dispute.status === 'lost') {
       // Customer won the dispute - this is like a refund
-      console.log(`❌ Dispute LOST: ${dispute.id} - Customer won chargeback`);
+      console.log('❌ Dispute LOST - Customer won chargeback');
       console.log(`   This should have triggered a charge.refunded event`);
       console.log(`   If credits were not revoked, manual intervention may be needed`);
 
@@ -539,12 +552,14 @@ async function handleDisputeClosed(dispute: Stripe.Dispute): Promise<void> {
       // But we log this for monitoring purposes
     } else if (dispute.status === 'won') {
       // We won the dispute - nothing to do, purchase remains valid
-      console.log(`✅ Dispute WON: ${dispute.id} - Charge upheld`);
+      console.log('✅ Dispute WON - Charge upheld');
     } else {
       console.log(`ℹ️ Dispute closed with status: ${dispute.status}`);
     }
   } catch (error: any) {
-    console.error('Error processing dispute closed:', error);
+    writeDiagnostic('error', 'credits.dispute_closed_failed', {
+      errorClass: classifyDiagnosticError(error, 'provider_error')
+    });
     throw error;
   }
 }
@@ -608,7 +623,9 @@ export async function handleAuthLogin(
     res.setHeader('Location', authUrl.toString());
     res.end();
   } catch (error: any) {
-    console.error('Error in handleAuthLogin:', error);
+    writeDiagnostic('error', 'auth.dashboard_login_failed', {
+      errorClass: classifyDiagnosticError(error, 'configuration_error')
+    });
     res.statusCode = 500;
     res.setHeader('Content-Type', 'text/plain');
     res.end('Authentication error');
@@ -669,8 +686,11 @@ export async function handleAuthCallback(
     });
 
     if (!tokenResponse.ok) {
-      const error = await tokenResponse.text();
-      console.error('Token exchange failed:', error);
+      await tokenResponse.text();
+      writeDiagnostic('error', 'auth.token_exchange_failed', {
+        errorClass: 'authorization_error',
+        status: tokenResponse.status
+      });
       res.statusCode = 500;
       res.end('Failed to obtain access token');
       return;
@@ -694,8 +714,10 @@ export async function handleAuthCallback(
     res.statusCode = 302;
     res.setHeader('Location', returnTo);
     res.end();
-  } catch (error: any) {
-    console.error('Error in handleAuthCallback:', error);
+  } catch (error: unknown) {
+    writeDiagnostic('error', 'auth.dashboard_callback_failed', {
+      errorClass: classifyDiagnosticError(error, 'authorization_error')
+    });
     res.statusCode = 500;
     res.end('Authentication callback error');
   }

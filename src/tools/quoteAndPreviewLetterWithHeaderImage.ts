@@ -86,7 +86,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "quote.letter.header_image.from_url",
-        imageUrl: imageSource.substring(0, 100)
+        imageSource: "provided"
       },
       "Using header image from URL"
     );
@@ -164,7 +164,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "quote.letter.header_image.failed",
-        error: error instanceof Error ? error.message : 'Unknown error'
+        errorClass: 'validation_error'
       },
       "Header image processing failed"
     );

@@ -14,6 +14,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { validateAuthorizationHeader, type AuthenticatedUser } from '../auth/tokenValidator.js';
 import { createToken, listTokens, revokeToken } from '../services/patService.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 /**
  * Send JSON response
@@ -62,10 +63,10 @@ export async function handlePATApiRequest(
   let authInfo: AuthenticatedUser;
   try {
     authInfo = await validateAuthorizationHeader(req.headers.authorization);
-  } catch (error) {
+  } catch {
     sendJson(res, 401, {
       error: 'Unauthorized',
-      message: error instanceof Error ? error.message : 'Authentication failed',
+      message: 'Authentication failed',
     });
     return true;
   }
@@ -114,10 +115,12 @@ export async function handlePATApiRequest(
     sendJson(res, 404, { error: 'Not found' });
     return true;
   } catch (error) {
-    console.error('🔑 PAT API error:', error);
+    writeDiagnostic('error', 'auth.pat_api_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
     sendJson(res, 500, {
       error: 'Internal Server Error',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'Unable to complete token request',
     });
     return true;
   }

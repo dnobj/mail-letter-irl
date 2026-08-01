@@ -168,7 +168,7 @@ export async function updateUserTier(userId: string): Promise<User> {
 
   const effectiveTier = getEffectiveTier(user);
   console.log(
-    `   Tier updated for ${userId}: calculated=${calculation.tier}, effective=${effectiveTier} ` +
+    `   Tier updated: calculated=${calculation.tier}, effective=${effectiveTier} ` +
     `(purchases: ${calculation.purchaseCount}, days since qualifying: ${calculation.daysSinceQualifyingPurchase ?? 'N/A'})`
   );
 

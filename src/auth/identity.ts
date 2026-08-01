@@ -1,5 +1,6 @@
 import { findUser, getOrCreateUser } from "../services/userService.js";
 import { AuthenticatedUser } from "./tokenValidator.js";
+import { writeDiagnostic } from "../utils/diagnosticLog.js";
 
 interface IdentityDependencies {
   fetchUserInfo: typeof fetch;
@@ -31,11 +32,11 @@ export async function prepareAuthenticatedUser(
           const userInfo = (await response.json()) as { email?: unknown };
           email = typeof userInfo.email === "string" ? userInfo.email : null;
         } else {
-          console.warn(`[auth] Userinfo request failed status=${response.status}`);
+          writeDiagnostic("warn", "auth.userinfo_failed", { status: response.status });
         }
       }
     } catch {
-      console.warn("[auth] Userinfo request failed");
+      writeDiagnostic("warn", "auth.userinfo_failed", { errorClass: "request_failed" });
     }
   }
 
@@ -43,8 +44,8 @@ export async function prepareAuthenticatedUser(
   if (email) {
     await dependencies.upsertUser(authInfo.userId, email);
   } else if (!existingUser) {
-    console.warn(
-      `[auth] User ${authInfo.userId} has no verified email; account creation deferred`
-    );
+    writeDiagnostic("warn", "auth.account_creation_deferred", {
+      reason: "verified_email_unavailable"
+    });
   }
 }
