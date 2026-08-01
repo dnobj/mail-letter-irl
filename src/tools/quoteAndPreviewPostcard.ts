@@ -146,14 +146,7 @@ async function handler(
         hasMimeType: imageObj && 'mime_type' in imageObj,
         hasFileName: imageObj && 'file_name' in imageObj,
         // Log actual values (truncated for URLs, full for file_id)
-        fileId: imageObj?.file_id as string | undefined,
-        downloadUrlPrefix: typeof imageObj?.download_url === 'string'
-          ? imageObj.download_url.substring(0, 80) + '...'
-          : undefined,
         mimeType: imageObj?.mime_type as string | undefined,
-        fileName: imageObj?.file_name as string | undefined,
-        // Raw value for non-objects (e.g., empty string from mobile)
-        rawValue: typeof input.image === 'string' ? input.image : undefined,
         // Validation results
         isValidFileParam: isValidImageFileParam(input.image),
         hasFileIdOnly: hasFileIdOnly(input.image)
@@ -181,7 +174,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "quote.postcard.image_from_url",
-        imageUrl: input.imageUrl.substring(0, 100) // Log first 100 chars
+        imageSource: "provided"
       },
       "Using image from direct URL"
     );
@@ -260,8 +253,7 @@ async function handler(
         {
           correlationId: context.correlationId,
           event: "quote.postcard.using_saved_address",
-          savedAddressCity: savedAddress.city,
-          savedAddressState: savedAddress.state
+          savedAddressAvailable: true
         },
         "Using saved return address for sender"
       );
@@ -369,7 +361,7 @@ async function handler(
           correlationId: context.correlationId,
           event: "quote.postcard.image_processing_failed",
           errorCode: error.code,
-          errorMessage: error.userMessage
+          errorClass: "provider_error"
         },
         "Image processing failed"
       );
@@ -521,7 +513,6 @@ async function handler(
     {
       correlationId: context.correlationId,
       event: "quote.postcard.draft_created",
-      draftId: draftResult.draftId,
       expiresAt: draftResult.expiresAt.toISOString()
     },
     "Draft created for idempotent send"

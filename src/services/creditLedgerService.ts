@@ -672,7 +672,7 @@ export async function reconcileBalances(): Promise<{
     );
     fixed++;
     console.log(
-      `🔧 Fixed balance mismatch for ${mismatch.userId}: ${mismatch.cached} -> ${mismatch.actual}`
+      `🔧 Fixed balance mismatch: ${mismatch.cached} -> ${mismatch.actual}`
     );
   }
 

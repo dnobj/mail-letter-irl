@@ -92,7 +92,7 @@ export async function syncLetterStatuses(
 
       // Check if status changed
       if (providerStatus.status !== letter.status) {
-        console.log(`   📝 Letter ${letter.letter_id}: ${letter.status} → ${providerStatus.status}`);
+        console.log(`   📝 Letter status updated: ${letter.status} → ${providerStatus.status}`);
 
         if (!dryRun) {
           // Update current status
@@ -120,7 +120,7 @@ export async function syncLetterStatuses(
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`   ❌ Error syncing letter ${letter.letter_id}: ${errorMessage}`);
+      console.error('   ❌ Error syncing letter');
 
       result.errors++;
       result.details.push({

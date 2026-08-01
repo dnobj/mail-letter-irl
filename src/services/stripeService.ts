@@ -110,7 +110,7 @@ export async function createCheckoutSession(
       sessionUrl: session.url || undefined,
     };
   } catch (error: any) {
-    console.error("Failed to create Stripe Checkout session:", error);
+    console.error("Failed to create Stripe Checkout session");
     return {
       success: false,
       error: error.message || "Failed to create checkout session",
@@ -141,7 +141,7 @@ export function verifyWebhookSignature(
 
     return event;
   } catch (error: any) {
-    console.error("Webhook signature verification failed:", error.message);
+    console.error("Webhook signature verification failed");
     return null;
   }
 }
@@ -170,11 +170,7 @@ export async function extractCheckoutData(
       session.customer_email || session.customer_details?.email || "";
 
     if (!userId || !credits || !productId) {
-      console.error("Missing required metadata in checkout session:", {
-        userId,
-        credits,
-        productId,
-      });
+      console.error("Missing required metadata in checkout session");
       return null;
     }
 
@@ -187,7 +183,7 @@ export async function extractCheckoutData(
       customerEmail,
     };
   } catch (error: any) {
-    console.error("Failed to extract checkout data:", error);
+    console.error("Failed to extract checkout data");
     return null;
   }
 }

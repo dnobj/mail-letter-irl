@@ -40,14 +40,14 @@ export async function runDailyMaintenance(): Promise<DailyMaintenanceResult> {
       );
     }
   } catch (error) {
-    console.error('[Maintenance] Stripe reconciliation failed (non-fatal):', error);
+    console.error('[Maintenance] Stripe reconciliation failed (non-fatal)');
   }
 
   try {
     await updateAllUserTiers();
     clearTierCache();
   } catch (error) {
-    console.error('[Maintenance] Tier recalculation failed (non-fatal):', error);
+    console.error('[Maintenance] Tier recalculation failed (non-fatal)');
   }
 
   return {

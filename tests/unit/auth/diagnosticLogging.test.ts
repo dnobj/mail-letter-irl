@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { prepareAuthenticatedUser } from "../../../src/auth/identity.js";
 import {
@@ -18,6 +19,17 @@ const sensitiveValues = [
 
 function capturedText(spy: ReturnType<typeof vi.spyOn>): string {
   return spy.mock.calls.flat().map(String).join("\n");
+}
+
+function productionSources(directory = "src"): string {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    return entry.isDirectory()
+      ? [productionSources(path)]
+      : entry.name.endsWith(".ts")
+        ? [readFileSync(path, "utf8")]
+        : [];
+  }).join("\n");
 }
 
 describe("privacy-safe authentication diagnostics", () => {
@@ -131,5 +143,16 @@ describe("privacy-safe authentication diagnostics", () => {
     expect(sources).not.toContain("Error stack:");
     expect(sources).not.toContain("diagnostic: payload");
     expect(sources).not.toContain("userHash");
+  });
+
+  it("audits production console calls for indirect sensitive values", () => {
+    const sources = productionSources();
+    const calls = sources.match(/(?:console|logger)\.(?:log|warn|error|info)\([^;]*\)/g) ?? [];
+    const output = calls.join("\n");
+
+    expect(output).not.toMatch(/\$\{[^}]*(?:recipientName|senderName|userId|email|postalCode|clientIp)/);
+    expect(output).not.toMatch(/\$\{[^}]*\.(?:id|ledger_id|transaction_id|message|stack)\}/);
+    expect(output).not.toMatch(/,\s*(?:error|err|exception|responseBody|requestBody)\s*\)/);
+    expect(output).not.toMatch(/(?:tokenResponse|providerResponse|response)\.(?:text|json)\(/);
   });
 });

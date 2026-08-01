@@ -102,8 +102,7 @@ async function handler(
         {
           correlationId: context.correlationId,
           event: "quote.preview.using_saved_address",
-          savedAddressCity: savedAddress.city,
-          savedAddressState: savedAddress.state
+          savedAddressAvailable: true
         },
         "Using saved return address for sender"
       );
@@ -248,7 +247,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "quote.preview.layout_detection_failed",
-        error: error instanceof Error ? error.message : 'Unknown error'
+        errorClass: 'validation_error'
       },
       "Layout detection failed"
     );
@@ -307,7 +306,7 @@ async function handler(
         {
           correlationId: context.correlationId,
           event: "quote.preview.header_image_failed",
-          error: error instanceof Error ? error.message : 'Unknown error'
+          errorClass: 'validation_error'
         },
         "Header image processing failed"
       );
@@ -349,7 +348,7 @@ async function handler(
         {
           correlationId: context.correlationId,
           event: "quote.preview.inline_image_failed",
-          error: error instanceof Error ? error.message : 'Unknown error'
+          errorClass: 'validation_error'
         },
         "Inline image processing failed"
       );
@@ -487,8 +486,7 @@ async function handler(
         {
           correlationId: context.correlationId,
           event: "quote.preview.sender_address_corrected",
-          original: `${sender.addressLine1}, ${sender.city}, ${sender.state} ${sender.postalCode}`,
-          corrected: `${senderValidation.verifiedAddress.line1}, ${senderValidation.verifiedAddress.city}, ${senderValidation.verifiedAddress.state} ${senderValidation.verifiedAddress.postalCode}`
+          correctionApplied: true
         },
         "Auto-applying corrected sender address"
       );
@@ -509,8 +507,7 @@ async function handler(
         {
           correlationId: context.correlationId,
           event: "quote.preview.recipient_address_corrected",
-          original: `${input.recipient.addressLine1}, ${input.recipient.city}, ${input.recipient.state} ${input.recipient.postalCode}`,
-          corrected: `${recipientValidation.verifiedAddress.line1}, ${recipientValidation.verifiedAddress.city}, ${recipientValidation.verifiedAddress.state} ${recipientValidation.verifiedAddress.postalCode}`
+          correctionApplied: true
         },
         "Auto-applying corrected recipient address"
       );
@@ -580,7 +577,6 @@ async function handler(
     {
       correlationId: context.correlationId,
       event: "quote.preview.draft_created",
-      draftId: draftResult.draftId,
       layoutType,
       expiresAt: draftResult.expiresAt.toISOString()
     },

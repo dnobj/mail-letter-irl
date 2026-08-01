@@ -184,7 +184,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    */
   async sendLetter(params: LetterParams): Promise<LetterResult> {
     if (this.options.verbose) {
-      console.log(`📤 [PostGrid] Sending letter to ${params.recipientName}`);
+      console.log('📤 [PostGrid] Sending letter');
     }
 
     try {
@@ -217,7 +217,6 @@ export class PostGridProvider implements LetterFulfillmentProvider {
 
       if (this.options.verbose) {
         console.log(`✅ [PostGrid] Letter created successfully`);
-        console.log(`   Letter ID: ${response.id}`);
         console.log(`   Status: ${response.status}`);
         console.log(`   Expected Delivery: ${response.expectedDeliveryDate || 'Unknown'}`);
       }
@@ -245,7 +244,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const errorMessage = this.extractErrorMessage(error);
 
       if (this.options.verbose) {
-        console.log(`❌ [PostGrid] Failed to send letter: ${errorMessage}`);
+        console.log('❌ [PostGrid] Letter send failed');
       }
 
       return {
@@ -347,7 +346,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       return true;
     } catch (error) {
       if (this.options.verbose) {
-        console.log(`❌ [PostGrid] Connection validation failed: ${this.extractErrorMessage(error)}`);
+        console.log('❌ [PostGrid] Connection validation failed');
       }
 
       return false;
@@ -769,7 +768,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const errorMessage = this.extractErrorMessage(error);
 
       if (this.options.verbose) {
-        console.log(`❌ [PostGrid] Address validation failed: ${errorMessage}`);
+        console.log('❌ [PostGrid] Address validation failed');
       }
 
       // Return failed validation result
@@ -844,7 +843,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    */
   async sendPostcard(params: PostcardParams): Promise<PostcardResult> {
     if (this.options.verbose) {
-      console.log(`📤 [PostGrid] Sending postcard to ${params.recipientName}`);
+      console.log('📤 [PostGrid] Sending postcard');
     }
 
     try {
@@ -886,7 +885,6 @@ export class PostGridProvider implements LetterFulfillmentProvider {
 
       if (this.options.verbose) {
         console.log(`✅ [PostGrid] Postcard created successfully`);
-        console.log(`   Postcard ID: ${response.id}`);
         console.log(`   Status: ${response.status}`);
         console.log(`   Expected Delivery: ${response.expectedDeliveryDate || 'Unknown'}`);
       }
@@ -914,7 +912,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const errorMessage = this.extractErrorMessage(error);
 
       if (this.options.verbose) {
-        console.log(`❌ [PostGrid] Failed to send postcard: ${errorMessage}`);
+        console.log('❌ [PostGrid] Postcard send failed');
       }
 
       return {

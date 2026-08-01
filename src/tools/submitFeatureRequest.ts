@@ -44,7 +44,6 @@ async function handler(
     {
       correlationId: context.correlationId,
       event: "feature_request.submit.start",
-      title: input.title,
       category: input.category || "other",
       hasAttemptedAction: !!input.attemptedAction
     },
@@ -65,7 +64,6 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "feature_request.submit.success",
-        requestId: result.requestId,
         category: result.category
       },
       "Feature request submitted successfully"
@@ -80,19 +78,17 @@ async function handler(
       category: result.category
     };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-
     context.logger.warn(
       {
         correlationId: context.correlationId,
         event: "feature_request.submit.failed",
-        errorMessage
+        errorClass: "database_error"
       },
       "Feature request submission failed"
     );
 
     // Re-throw with user-friendly message
-    throw new Error(errorMessage);
+    throw new Error("Unable to submit feature request");
   }
 }
 

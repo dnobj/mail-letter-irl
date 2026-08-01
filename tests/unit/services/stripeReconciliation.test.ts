@@ -18,8 +18,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock Stripe
-const mockSessionsList = vi.fn();
-const mockRefundsList = vi.fn();
+const { mockSessionsList, mockRefundsList, mockQuery } = vi.hoisted(() => ({
+  mockSessionsList: vi.fn(),
+  mockRefundsList: vi.fn(),
+  mockQuery: vi.fn()
+}));
 
 vi.mock('stripe', () => {
   return {
@@ -37,10 +40,11 @@ vi.mock('stripe', () => {
 });
 
 // Mock database
-const mockQuery = vi.fn();
 vi.mock('../../../src/db/index.js', () => ({
   query: mockQuery,
 }));
+
+import { reconcileStripePayments } from '../../../src/services/stripeReconciliationService.js';
 
 describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
   beforeEach(() => {
@@ -112,6 +116,30 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
   });
 
   describe('discrepancy detection', () => {
+    it('logs structured discrepancy data without runtime identifiers', async () => {
+      const sensitive = ['cs_private_session', 'auth0|private-user', 'pi_private_refund'];
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      mockSessionsList.mockResolvedValue({
+        data: [{
+          id: sensitive[0], payment_status: 'paid',
+          metadata: { userId: sensitive[1], productId: 'credit-pack-10' },
+          client_reference_id: sensitive[1], amount_total: 1000, created: Date.now() / 1000
+        }],
+        has_more: false
+      });
+      mockRefundsList.mockResolvedValue({ data: [] });
+      mockQuery.mockResolvedValue({ rows: [] });
+
+      await reconcileStripePayments(1);
+
+      const logged = [...log.mock.calls, ...warn.mock.calls].flat().map(String).join('\n');
+      expect(logged).toContain('"event":"credits.reconciliation_discrepancy"');
+      expect(logged).toContain('"category":"missing_credit"');
+      expect(logged).toContain('"occurrence":1');
+      for (const value of sensitive) expect(logged).not.toContain(value);
+    });
+
     it('should identify missing_credit when payment exists in Stripe but not in ledger', () => {
       const discrepancy = {
         type: 'missing_credit',

@@ -412,7 +412,7 @@ export async function startHttpServer() {
         res.end(stringifyManifest(getPublicBaseUrl(req)));
       } catch (error) {
         writeDiagnostic("error", "mcp.manifest_generation_failed", {
-          errorClass: classifyDiagnosticError(error, "transport_error")
+          errorClass: classifyDiagnosticError(error, "configuration_error")
         });
         res.statusCode = 500;
         res.end("Manifest generation error");
@@ -560,7 +560,7 @@ export async function startHttpServer() {
         (req as any).body = body ? JSON.parse(body) : {};
         await handleCreateCheckoutSession(req as any, res as any);
       } catch (error) {
-        console.error('Error parsing checkout request body:', error);
+        console.error('Error parsing checkout request body');
         res.statusCode = 408;
         res.end('Request timeout or error');
       }
@@ -575,7 +575,7 @@ export async function startHttpServer() {
         (req as any).body = body; // Raw string for Stripe signature verification
         await handleStripeWebhook(req as any, res as any);
       } catch (error) {
-        console.error('Error parsing Stripe webhook body:', error);
+        console.error('Error parsing Stripe webhook body');
         res.statusCode = 408;
         res.end('Request timeout or error');
       }
@@ -609,7 +609,7 @@ export async function startHttpServer() {
           campaignName: result.campaign?.name,
         }));
       } catch (error) {
-        console.error('Error validating promo code:', error);
+        console.error('Error validating promo code');
         res.statusCode = 500;
         res.end(JSON.stringify({ valid: false, reason: 'Internal error' }));
       }
@@ -855,7 +855,7 @@ export async function startHttpServer() {
       await closePool();
     } catch (error) {
       writeDiagnostic("error", "server.shutdown_failed", {
-        errorClass: classifyDiagnosticError(error, "configuration_error")
+        errorClass: classifyDiagnosticError(error, "database_error")
       });
     }
     server.close(() => process.exit(0));

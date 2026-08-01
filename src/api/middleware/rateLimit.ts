@@ -443,7 +443,7 @@ export function rateLimitMiddlewareWithGlobal(
 
   if (!ipResult.allowed) {
     const clientIp = getClientIdentifier(req);
-    console.warn(`⚠️ Rate limit hit (IP): ${clientIp} on ${endpointType}`);
+    console.warn(`⚠️ Rate limit hit (IP scope) on ${endpointType}`);
     incrementBlockedCount(endpointType, 'ip');
 
     res.setHeader('X-RateLimit-Limit', ipResult.limit);

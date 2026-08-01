@@ -167,9 +167,7 @@ export async function submitFeatureRequest(
 
   const featureRequest = result.rows[0];
 
-  console.log(
-    `📝 Feature request submitted: ${featureRequest.request_id} by user ${userId} - "${featureRequest.title}"`
-  );
+  console.log('📝 Feature request submitted');
 
   return {
     requestId: featureRequest.request_id,

@@ -172,7 +172,7 @@ export async function consumeDraft(params: ConsumeDraftParams): Promise<ConsumeD
 
     // Check if already consumed (idempotent retry)
     if (draft.status === 'consumed') {
-      console.log(`📝 Draft already consumed: ${params.draftId} -> letter ${draft.consumed_letter_id}`);
+      console.log('📝 Draft already consumed');
       return {
         draft,
         alreadyConsumed: true,
@@ -209,7 +209,7 @@ export async function consumeDraft(params: ConsumeDraftParams): Promise<ConsumeD
     );
 
     const consumedDraft = updateResult.rows[0];
-    console.log(`📝 Draft consumed: ${params.draftId} (letter ID will be linked after creation)`);
+    console.log('📝 Draft consumed (letter ID will be linked after creation)');
 
     return {
       draft: consumedDraft,
@@ -230,7 +230,7 @@ export async function linkDraftToLetter(draftId: string, letterId: string): Prom
      WHERE draft_id = $1 AND status = 'consumed'`,
     [draftId, letterId]
   );
-  console.log(`📝 Draft linked to letter: ${draftId} -> ${letterId}`);
+  console.log('📝 Draft linked to letter');
 }
 
 // ============================================================================
@@ -324,7 +324,7 @@ export async function cancelDraft(draftId: string, userId: string): Promise<bool
 
   const cancelled = (result.rowCount ?? 0) > 0;
   if (cancelled) {
-    console.log(`📝 Draft cancelled: ${draftId}`);
+    console.log('📝 Draft cancelled');
   }
 
   return cancelled;

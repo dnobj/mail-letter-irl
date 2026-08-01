@@ -1,0 +1,64 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const { createCheckoutSession } = vi.hoisted(() => ({ createCheckoutSession: vi.fn() }));
+vi.mock("../../../src/api/middleware/auth.js", () => ({
+  authenticateHttpRequest: vi.fn().mockResolvedValue({ userId: "auth0|private-user", claims: {} })
+}));
+vi.mock("../../../src/services/stripeService.js", () => ({
+  createCheckoutSession,
+  verifyWebhookSignature: vi.fn(),
+  extractCheckoutData: vi.fn(),
+  getStripeClient: vi.fn()
+}));
+
+import {
+  handleAuthCallback,
+  handleCreateCheckoutSession
+} from "../../../src/api/dashboardApiHandler.js";
+
+describe("dashboard runtime logging privacy", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not log or return a token-exchange response body", async () => {
+    const sensitive = "access_token=private-token auth0|private-user";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(sensitive, { status: 401 })));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const req = {
+      url: "/auth/callback?code=private-code&state=expected",
+      headers: { host: "localhost", cookie: "auth_state=expected" }
+    };
+    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+    await handleAuthCallback(req as never, res as never);
+
+    const logged = error.mock.calls.flat().map(String).join("\n");
+    const body = String(res.end.mock.calls[0][0]);
+    expect(logged).toContain('"event":"auth.token_exchange_failed"');
+    expect(logged).toContain('"status":401');
+    expect(logged).not.toContain(sensitive);
+    expect(body).not.toContain(sensitive);
+  });
+
+  it("does not log or return arbitrary checkout exceptions", async () => {
+    const sensitive = "private checkout exception cs_private auth0|private-user";
+    createCheckoutSession.mockRejectedValue(new Error(sensitive));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const req = {
+      headers: {},
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+    };
+    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+    await handleCreateCheckoutSession(req as never, res as never);
+
+    const logged = error.mock.calls.flat().map(String).join("\n");
+    const body = String(res.end.mock.calls[0][0]);
+    expect(logged).toContain('"event":"credits.checkout_creation_failed"');
+    expect(logged).not.toContain(sensitive);
+    expect(body).toContain("Unable to create checkout session");
+    expect(body).not.toContain(sensitive);
+  });
+});

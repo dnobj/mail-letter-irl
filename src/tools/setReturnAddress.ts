@@ -61,7 +61,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "return_address.set.failed",
-        errors: result.errors
+        errorClass: "validation_error"
       },
       "Failed to set return address"
     );

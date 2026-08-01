@@ -38,7 +38,7 @@ pool.on('connect', () => {
 });
 
 pool.on('error', (error) => {
-  console.error('Unexpected database error:', error);
+  console.error('Unexpected database error');
 });
 
 export async function testConnection(): Promise<boolean> {
@@ -51,7 +51,7 @@ export async function testConnection(): Promise<boolean> {
     console.log(`   Version: ${result.rows[0].version.split(' ').slice(0, 2).join(' ')}`);
     return true;
   } catch (error) {
-    console.error('Database connection failed:', error);
+    console.error('Database connection failed');
     return false;
   }
 }
@@ -84,7 +84,7 @@ export async function query<T extends pg.QueryResultRow = any>(
         await wait(250);
         continue;
       }
-      console.error('Query error:', error);
+      console.error('Database query failed');
       console.error('   SQL:', text);
       throw error;
     }
@@ -123,7 +123,7 @@ export async function transaction<T>(
     try {
       await client.query('ROLLBACK');
     } catch (rollbackError) {
-      console.error('Database rollback failed:', rollbackError);
+      console.error('Database rollback failed');
     }
     throw error;
   } finally {

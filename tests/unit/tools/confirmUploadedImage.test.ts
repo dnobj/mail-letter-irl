@@ -112,7 +112,7 @@ describe("confirm_uploaded_image tool", () => {
       expect(result.suggestedNextStep).toContain("quote_and_preview_postcard or a letter preview tool");
     });
 
-    it("should log invocation with imageUrl and context", async () => {
+    it("should log invocation context without the image URL", async () => {
       const context = createMockContext();
       await confirmUploadedImageTool.handler(
         { imageUrl: TEST_URL, context: "postcard" },
@@ -122,10 +122,13 @@ describe("confirm_uploaded_image tool", () => {
       expect(context.logger.info).toHaveBeenCalledWith(
         expect.objectContaining({
           event: "confirm_uploaded_image.invoked",
-          imageUrl: TEST_URL,
           imageContext: "postcard"
         }),
         "Confirm uploaded image invoked"
+      );
+      expect(context.logger.info).not.toHaveBeenCalledWith(
+        expect.objectContaining({ imageUrl: TEST_URL }),
+        expect.anything()
       );
     });
 

@@ -185,8 +185,8 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
         userId: stripePayment.userId,
         stripeAmount: stripePayment.amount,
         expectedCredits: stripePayment.credits,
-        message: `Payment ${sessionId} for user ${stripePayment.userId} exists in Stripe but credits were never added`,
-        suggestedAction: `Run: addCreditsWithOptions({ userId: '${stripePayment.userId}', credits: ${stripePayment.credits}, sourceType: 'purchase', sourceReferenceId: '${sessionId}' })`,
+        message: 'A completed payment has no corresponding credit entry',
+        suggestedAction: 'Review the missing credit in the Stripe dashboard',
       });
     } else if (ourRecord.credits !== stripePayment.credits) {
       // Amount mismatch
@@ -198,8 +198,8 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
         userId: stripePayment.userId,
         expectedCredits: stripePayment.credits,
         actualCredits: ourRecord.credits,
-        message: `Credit amount mismatch for ${sessionId}: Stripe expects ${stripePayment.credits} credits, we recorded ${ourRecord.credits}`,
-        suggestedAction: `Review and manually adjust credits for user ${stripePayment.userId}`,
+        message: 'A payment and credit entry have different credit amounts',
+        suggestedAction: 'Review the product mapping and adjust credits if required',
       });
     } else {
       matched++;
@@ -220,8 +220,8 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
           stripeSessionId: sessionId,
           userId: ourRecord.userId,
           actualCredits: ourRecord.credits,
-          message: `Credit entry ${ourRecord.ledgerId} references Stripe session ${sessionId} which was not found in Stripe`,
-          suggestedAction: `Verify session exists in Stripe Dashboard. May be outside query window or in different Stripe account.`,
+          message: 'A credit entry has no matching payment in the reconciliation window',
+          suggestedAction: 'Verify the payment in the Stripe dashboard and environment',
         });
       }
     }
@@ -254,8 +254,8 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
           severity: 'high',
           stripeSessionId: refund.payment_intent as string,
           stripeAmount: refund.amount,
-          message: `Refund ${refund.id} for ${refund.amount / 100} was processed in Stripe but not reflected in our credit system`,
-          suggestedAction: `Process refund manually: deduct credits from affected user`,
+          message: 'A completed refund has no corresponding credit transaction',
+          suggestedAction: 'Review the refund and affected credit balance',
         });
       }
     }
@@ -317,8 +317,12 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
 
   if (discrepancies.length > 0) {
     console.log(`\n⚠️  Discrepancies found:`);
-    for (const d of discrepancies) {
-      console.log(`   [${d.severity.toUpperCase()}] ${d.message}`);
+    for (const [index, discrepancy] of discrepancies.entries()) {
+      writeDiagnostic('warn', 'credits.reconciliation_discrepancy', {
+        category: discrepancy.type,
+        severity: discrepancy.severity,
+        occurrence: index + 1
+      });
     }
   }
 
@@ -355,7 +359,7 @@ export async function autoFixMissingCredits(dryRun: boolean = true): Promise<{
 
   for (const discrepancy of missingCredits) {
     if (!discrepancy.userId || !discrepancy.stripeSessionId || !discrepancy.expectedCredits) {
-      errors.push(`Skipping ${discrepancy.stripeSessionId}: missing required data`);
+      errors.push('Skipped reconciliation discrepancy with missing required data');
       continue;
     }
 

@@ -53,7 +53,7 @@ export async function migrate(): Promise<void> {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   migrate().catch((error) => {
-    console.error('[Migrate] Failed:', error);
+    console.error('[Migrate] Failed');
     process.exitCode = 1;
   });
 }

@@ -104,8 +104,7 @@ async function releaseReservedGeneration(
       {
         correlationId: context.correlationId,
         event: "generate_image.reservation_release_failed",
-        errorMessage:
-          releaseError instanceof Error ? releaseError.message : "Unknown error"
+        errorClass: "database_error"
       },
       "Failed to release image generation reservation"
     );
@@ -180,7 +179,6 @@ async function handler(
         event: "generate_image.success",
         fullBase64Length: result.base64Data.length,
         previewBase64Length: previewBase64.length,
-        imageTokenSuffix: token.slice(-6),
         generationsRemaining
       },
       "Image generated successfully"
@@ -204,20 +202,18 @@ async function handler(
           correlationId: context.correlationId,
           event: "generate_image.failed",
           errorCode: error.code,
-          errorMessage: error.userMessage
+          errorClass: "provider_error"
         },
         "Image generation failed"
       );
       throw new Error(error.userMessage);
     }
 
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
     context.logger.error(
       {
         correlationId: context.correlationId,
         event: "generate_image.error",
-        errorMessage
+        errorClass: "unknown_error"
       },
       "Unexpected image generation error"
     );
