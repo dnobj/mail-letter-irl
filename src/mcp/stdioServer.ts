@@ -23,7 +23,7 @@ export async function startStdioServer() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   startStdioServer().catch((error) => {
     writeDiagnostic("error", "mcp.stdio_start_failed", {
-      errorClass: classifyDiagnosticError(error, "server_lifecycle_failed")
+      errorClass: classifyDiagnosticError(error, "configuration_error")
     });
     process.exit(1);
   });

@@ -13,6 +13,7 @@
 
 import { transaction, query } from '../db/index.js';
 import type pg from 'pg';
+import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import {
   User,
   CreditTransaction,
@@ -150,9 +151,12 @@ export async function addCreditsToLedger(
     );
     const txn = txResult.rows[0];
 
-    console.log(
-      `💳 Added ${credits} credits to ${userId} (${sourceType}), expires: ${finalExpiresAt?.toISOString() || 'never'}, new balance: ${user.credits}`
-    );
+    writeDiagnostic('info', 'credits.ledger_added', {
+      credits,
+      sourceType,
+      expires: finalExpiresAt ? 'scheduled' : 'never',
+      newBalance: user.credits
+    });
 
     return { user, transaction: txn, ledgerEntry };
   });
@@ -199,7 +203,7 @@ export async function deductCreditsFromLedgerWithClient(
     );
 
     if (userResult.rows.length === 0) {
-      throw new Error(`User not found: ${userId}`);
+      throw new Error('User not found');
     }
 
     const user = userResult.rows[0];
@@ -293,9 +297,11 @@ export async function deductCreditsFromLedgerWithClient(
       remainingToDeduct -= amountToTake;
     }
 
-    console.log(
-      `📤 Deducted ${credits} credits from ${userId} (letter: ${letterId}), consumed from ${consumptions.length} ledger entries, new balance: ${updatedUser.credits}`
-    );
+    writeDiagnostic('info', 'credits.ledger_deducted', {
+      credits,
+      ledgerEntries: consumptions.length,
+      newBalance: updatedUser.credits
+    });
 
     return {
       user: updatedUser,
@@ -366,7 +372,7 @@ export async function refundCreditsToLedger(
     );
 
     if (userResult.rows.length === 0) {
-      throw new Error(`User not found: ${userId}`);
+      throw new Error('User not found');
     }
 
     const user = userResult.rows[0];
@@ -410,9 +416,10 @@ export async function refundCreditsToLedger(
     );
     const txn = txResult.rows[0];
 
-    console.log(
-      `💸 Refunded ${credits} credits to ${userId}, new balance: ${user.credits}`
-    );
+    writeDiagnostic('info', 'credits.ledger_refunded', {
+      credits,
+      newBalance: user.credits
+    });
 
     return { user, transaction: txn, ledgerEntry };
   });

@@ -12,6 +12,7 @@
 
 import Stripe from 'stripe';
 import { query } from '../db/index.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 let stripeClient: Stripe | null = null;
 
@@ -368,11 +369,15 @@ export async function autoFixMissingCredits(dryRun: boolean = true): Promise<{
         expirationDays: 730, // 2 years
       });
 
-      console.log(`   ✅ Fixed: Added ${discrepancy.expectedCredits} credits to ${discrepancy.userId}`);
+      writeDiagnostic('info', 'credits.reconciliation_fixed', {
+        credits: discrepancy.expectedCredits
+      });
       fixed++;
     } catch (error) {
-      const msg = `Failed to fix ${discrepancy.stripeSessionId}: ${error}`;
-      console.error(`   ❌ ${msg}`);
+      const msg = 'Failed to fix reconciliation discrepancy';
+      writeDiagnostic('error', 'credits.reconciliation_fix_failed', {
+        errorClass: classifyDiagnosticError(error, 'provider_error')
+      });
       errors.push(msg);
     }
   }

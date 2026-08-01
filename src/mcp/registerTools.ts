@@ -416,7 +416,7 @@ export async function registerLetterTools(
       await prepareAuthenticatedUser(authInfo);
     } catch (error) {
       writeDiagnostic("error", "auth.user_preparation_failed", {
-        errorClass: classifyDiagnosticError(error, "identity_persistence_failed")
+        errorClass: classifyDiagnosticError(error, "database_error")
       });
     }
   }

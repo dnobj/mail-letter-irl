@@ -8,6 +8,7 @@
 import { query } from '../db/index.js';
 import { getLetterProvider } from './providers/index.js';
 import type { AddressValidationInput, AddressValidationResult } from './providers/types.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 /**
  * Address structure stored in database (matches frontend Address type)
@@ -117,7 +118,9 @@ export async function setReturnAddress(
     validation = await provider.validateAddress(validationInput);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown validation error';
-    console.error(`❌ Address validation failed:`, errorMessage);
+    writeDiagnostic('error', 'address.validation_provider_failed', {
+      errorClass: classifyDiagnosticError(error, 'provider_error')
+    });
     return {
       success: false,
       validationStatus: 'failed',
@@ -129,7 +132,9 @@ export async function setReturnAddress(
   // Handle validation result
   if (validation.status === 'failed') {
     const errorMessages = validation.errors?.map(e => e.message) || ['Address is invalid or undeliverable'];
-    console.log(`❌ Return address validation failed: ${errorMessages.join(', ')}`);
+    writeDiagnostic('info', 'address.validation_rejected', {
+      errorClass: 'validation_error'
+    });
     return {
       success: false,
       validationStatus: 'failed',
@@ -175,7 +180,7 @@ export async function setReturnAddress(
       ? changes.join('; ')
       : 'Minor formatting corrections applied';
 
-    console.log(`📫 Return address auto-corrected: ${correctionDetails}`);
+    writeDiagnostic('info', 'address.auto_corrected');
   } else {
     // Address is verified as-is
     addressToSave = normalizedAddress;
@@ -184,7 +189,7 @@ export async function setReturnAddress(
   // Save the validated address
   await saveReturnAddress(userId, addressToSave);
 
-  console.log(`✅ Return address saved for user ${userId.substring(0, 15)}...`);
+  writeDiagnostic('info', 'address.saved');
 
   return {
     success: true,
@@ -211,7 +216,7 @@ export async function clearReturnAddress(userId: string): Promise<void> {
     [userId]
   );
 
-  console.log(`🗑️ Return address cleared for user ${userId.substring(0, 15)}...`);
+  writeDiagnostic('info', 'address.cleared');
 }
 
 /**

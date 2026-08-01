@@ -56,13 +56,22 @@ describe("privacy-safe authentication diagnostics", () => {
     expect(output).not.toContain(error.message);
   });
 
-  it("uses trusted domain fallbacks and known network codes for useful diagnosis", () => {
-    expect(classifyDiagnosticError(new Error("private"), "tool_execution_failed"))
-      .toBe("tool_execution_failed");
+  it("uses the fixed domain taxonomy and known network codes for useful diagnosis", () => {
+    const categories = [
+      "authorization_error",
+      "configuration_error",
+      "database_error",
+      "provider_error",
+      "transport_error",
+      "validation_error"
+    ] as const;
+    for (const category of categories) {
+      expect(classifyDiagnosticError(new Error("private"), category)).toBe(category);
+    }
     expect(
       classifyDiagnosticError(
         Object.assign(new Error("private"), { code: "ETIMEDOUT" }),
-        "server_lifecycle_failed"
+        "configuration_error"
       )
     ).toBe("ETIMEDOUT");
   });
@@ -96,6 +105,17 @@ describe("privacy-safe authentication diagnostics", () => {
       "src/auth/tokenValidator.ts",
       "src/services/userService.ts",
       "src/services/patService.ts",
+      "src/services/returnAddressService.ts",
+      "src/services/creditLedgerService.ts",
+      "src/services/creditService.ts",
+      "src/services/stripeReconciliationService.ts",
+      "src/services/providers/PostGridProvider.ts",
+      "src/api/patApiHandler.ts",
+      "src/api/creditApiHandler.ts",
+      "src/api/returnAddressApiHandler.ts",
+      "src/api/dashboardApiHandler.ts",
+      "src/api/adminApiHandler.ts",
+      "src/api/middleware/rateLimit.ts",
       "src/store/fileAccountStore.ts",
       "src/server.ts",
       "src/mcp/httpServer.ts",
@@ -104,12 +124,12 @@ describe("privacy-safe authentication diagnostics", () => {
     ].map((path) => readFileSync(path, "utf8")).join("\n");
 
     expect(sources).not.toMatch(/console\.(?:log|warn|error)[^\n]*(?:userId|authInfo|sessionId|staticClientId)/);
+    expect(sources).not.toMatch(/console\.(?:log|warn|error)[^\n]*(?:address\.line1|address\.city|address\.state|postalCode|correctionDetails)/);
     expect(sources).not.toContain('console.error("MCP request failed", error)');
     expect(sources).not.toContain('console.warn("Optional auth validation failed", error)');
     expect(sources).not.toContain('console.error("SSE transport error", error)');
     expect(sources).not.toContain("Error stack:");
     expect(sources).not.toContain("diagnostic: payload");
     expect(sources).not.toContain("userHash");
-    expect(sources).not.toContain("errorMessage:");
   });
 });

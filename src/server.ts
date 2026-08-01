@@ -178,7 +178,7 @@ export class LetterIrlServer {
         {
           correlationId,
           event: "tool.invocation.failure",
-          errorClass: classifyDiagnosticError(error, "tool_execution_failed")
+          errorClass: classifyDiagnosticError(error, "provider_error")
         },
         "Tool invocation failed"
       );

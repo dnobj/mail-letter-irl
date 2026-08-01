@@ -16,6 +16,7 @@
  */
 
 import { transaction, query } from '../db/index.js';
+import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import {
   User,
   CreditTransaction,
@@ -183,7 +184,7 @@ export async function getBalance(userId: string): Promise<CreditBalance> {
   );
 
   if (result.rows.length === 0) {
-    throw new Error(`User not found: ${userId}`);
+    throw new Error('User not found');
   }
 
   const user = result.rows[0];
@@ -309,7 +310,7 @@ export async function adjustCredits(
       );
 
       if (userResult.rows.length === 0) {
-        throw new Error(`User not found: ${userId}`);
+        throw new Error('User not found');
       }
 
       const user = userResult.rows[0];
@@ -371,7 +372,10 @@ export async function adjustCredits(
 
       const txn = txResult.rows[0];
 
-      console.log(`🔧 Adjusted ${amount} credits for ${userId}: ${reason}, new balance: ${user.credits}`);
+      writeDiagnostic('info', 'credits.adjusted', {
+        amount,
+        newBalance: user.credits
+      });
 
       return { user, transaction: txn };
     });

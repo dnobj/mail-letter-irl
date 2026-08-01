@@ -10,6 +10,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'http';
 import { authenticateAdmin } from './middleware/adminAuth.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { adjustCredits } from '../services/creditService.js';
 import { getUser, getAllUsers } from '../services/userService.js';
 import { getAllJobs, getJobById, getJobsByUserId } from '../services/letterJobService.js';
@@ -105,11 +106,11 @@ export async function handleAdminApiRequest(
     // GET /api/admin/users/:userId
     if (pathname.startsWith('/api/admin/users/') && req.method === 'GET') {
       const userId = pathname.split('/').pop();
-      console.log(`🔍 Extracted userId from pathname: "${userId}"`);
+      console.log('🔍 Extracted account identifier from pathname');
       if (userId) {
         // Decode the userId (pathname is not auto-decoded in our setup)
         const decodedUserId = decodeURIComponent(userId);
-        console.log(`🔍 Decoded userId: "${decodedUserId}"`);
+        console.log('🔍 Decoded account identifier');
         await handleGetUser(res, decodedUserId);
         return true;
       }
@@ -417,7 +418,7 @@ async function handleAdjustCredits(
     `[Admin: ${adminInfo.email || adminInfo.userId}] ${body.reason}`
   );
 
-  console.log(`🔧 Admin ${adminInfo.userId} adjusted ${body.amount} credits for ${body.userId}`);
+  console.log(`🔧 Admin adjusted ${body.amount} credits`);
 
   sendJson(res, 200, {
     success: true,
@@ -753,7 +754,7 @@ async function handleCreateCampaign(
       createdBy: adminInfo.email || adminInfo.userId,
     });
 
-    console.log(`📢 Admin ${adminInfo.userId} created promo campaign: ${campaign.code}`);
+    console.log('📢 Admin created promo campaign');
 
     sendJson(res, 201, {
       success: true,
@@ -1022,7 +1023,7 @@ async function handleStripeReconcileFix(
 ) {
   const dryRun = body.dryRun !== false; // Default to dry run for safety
 
-  console.log(`🔧 Admin ${adminInfo.userId} triggered Stripe reconciliation fix (dryRun=${dryRun})`);
+  console.log(`🔧 Admin triggered Stripe reconciliation fix (dryRun=${dryRun})`);
 
   try {
     const result = await autoFixMissingCredits(dryRun);
@@ -1553,7 +1554,7 @@ async function handleRetryJob(
     [jobId, JSON.stringify({ admin: adminInfo.email || adminInfo.userId, at: new Date().toISOString() })]
   );
 
-  console.log(`🔄 Admin ${adminInfo.userId} retried job ${jobId}`);
+  console.log('🔄 Admin retried job');
 
   sendJson(res, 200, {
     success: true,
@@ -1683,10 +1684,12 @@ async function handleGetTokenStats(res: ServerResponse) {
       },
     });
   } catch (error: any) {
-    console.error('Get token stats error:', error);
+    writeDiagnostic('error', 'auth.pat_stats_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
     sendJson(res, 500, {
       error: 'Failed to get token stats',
-      message: error.message,
+      message: 'Unable to retrieve token stats',
     });
   }
 }
@@ -1828,7 +1831,7 @@ async function handleUpdateRouting(
     }
 
     const row = result.rows[0];
-    console.log(`🔧 Admin ${adminInfo.email || adminInfo.userId} updated routing: ${mailType} → ${body.provider}`);
+    console.log(`🔧 Admin updated routing: ${mailType} → ${body.provider}`);
 
     sendJson(res, 200, {
       success: true,

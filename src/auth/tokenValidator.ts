@@ -88,7 +88,7 @@ async function validatePATToken(token: string): Promise<AuthenticatedUser> {
   if (result.tokenId) {
     updateLastUsed(result.tokenId).catch((error) => {
       writeDiagnostic("error", "auth.pat_last_used_update_failed", {
-        errorClass: classifyDiagnosticError(error, "pat_persistence_failed")
+        errorClass: classifyDiagnosticError(error, "database_error")
       });
     });
   }
@@ -145,7 +145,7 @@ export async function validateJWTToken(
     return user;
   } catch (error) {
     writeDiagnostic("warn", "auth.jwt_rejected", {
-      errorClass: classifyDiagnosticError(error, "auth_validation_failed")
+      errorClass: classifyDiagnosticError(error, "authorization_error")
     });
     throw error;
   }

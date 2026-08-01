@@ -17,20 +17,18 @@ const SAFE_ERROR_CODES = new Set([
   "ETIMEDOUT"
 ]);
 
-export type DiagnosticErrorFallback =
-  | "account_persistence_failed"
-  | "auth_validation_failed"
-  | "identity_persistence_failed"
-  | "mcp_request_failed"
-  | "mcp_session_failed"
-  | "pat_persistence_failed"
-  | "server_lifecycle_failed"
-  | "tool_execution_failed"
+export type DiagnosticErrorCategory =
+  | "authorization_error"
+  | "configuration_error"
+  | "database_error"
+  | "provider_error"
+  | "transport_error"
+  | "validation_error"
   | "unknown_error";
 
 export function classifyDiagnosticError(
   error: unknown,
-  fallback: DiagnosticErrorFallback = "unknown_error"
+  fallback: DiagnosticErrorCategory = "unknown_error"
 ): string {
   if (!error || typeof error !== "object") {
     return "unknown_error";

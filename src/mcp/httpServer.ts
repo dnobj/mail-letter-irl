@@ -299,7 +299,7 @@ export async function startHttpServer() {
     };
     sseTransport.onerror = (error) => {
       writeDiagnostic("error", "mcp.sse_transport_error", {
-        errorClass: classifyDiagnosticError(error, "mcp_session_failed")
+        errorClass: classifyDiagnosticError(error, "transport_error")
       });
     };
 
@@ -315,13 +315,13 @@ export async function startHttpServer() {
       });
     } catch (error) {
       writeDiagnostic("error", "mcp.sse_session_start_failed", {
-        errorClass: classifyDiagnosticError(error, "mcp_session_failed")
+        errorClass: classifyDiagnosticError(error, "transport_error")
       });
       try {
         await sessionServer.close();
       } catch (closeError) {
         writeDiagnostic("warn", "mcp.sse_session_close_failed", {
-          errorClass: classifyDiagnosticError(closeError, "mcp_session_failed")
+          errorClass: classifyDiagnosticError(closeError, "transport_error")
         });
       }
       if (!res.headersSent) {
@@ -361,7 +361,7 @@ export async function startHttpServer() {
       await session.transport.handlePostMessage(req, res);
     } catch (error) {
       writeDiagnostic("error", "mcp.sse_message_failed", {
-        errorClass: classifyDiagnosticError(error, "mcp_request_failed")
+        errorClass: classifyDiagnosticError(error, "transport_error")
       });
       if (!res.headersSent) {
         res.writeHead(500).end("Failed to process message");
@@ -412,7 +412,7 @@ export async function startHttpServer() {
         res.end(stringifyManifest(getPublicBaseUrl(req)));
       } catch (error) {
         writeDiagnostic("error", "mcp.manifest_generation_failed", {
-          errorClass: classifyDiagnosticError(error, "mcp_request_failed")
+          errorClass: classifyDiagnosticError(error, "transport_error")
         });
         res.statusCode = 500;
         res.end("Manifest generation error");
@@ -820,7 +820,7 @@ export async function startHttpServer() {
         console.log(`Request handled successfully`);
       } catch (error) {
         writeDiagnostic("error", "mcp.request_failed", {
-          errorClass: classifyDiagnosticError(error, "mcp_request_failed")
+          errorClass: classifyDiagnosticError(error, "transport_error")
         });
         if (!res.headersSent) {
           res.statusCode = 500;
@@ -855,7 +855,7 @@ export async function startHttpServer() {
       await closePool();
     } catch (error) {
       writeDiagnostic("error", "server.shutdown_failed", {
-        errorClass: classifyDiagnosticError(error, "server_lifecycle_failed")
+        errorClass: classifyDiagnosticError(error, "configuration_error")
       });
     }
     server.close(() => process.exit(0));
@@ -868,7 +868,7 @@ export async function startHttpServer() {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   startHttpServer().catch((error) => {
     writeDiagnostic("error", "server.start_failed", {
-      errorClass: classifyDiagnosticError(error, "server_lifecycle_failed")
+      errorClass: classifyDiagnosticError(error, "configuration_error")
     });
     process.exit(1);
   });
@@ -887,7 +887,7 @@ async function authenticateRequest(
       return await validateAuthorizationHeader(req.headers.authorization);
     } catch (error) {
       writeDiagnostic("warn", "auth.optional_validation_failed", {
-        errorClass: classifyDiagnosticError(error, "auth_validation_failed")
+        errorClass: classifyDiagnosticError(error, "authorization_error")
       });
       return null;
     }

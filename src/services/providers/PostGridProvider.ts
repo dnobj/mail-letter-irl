@@ -683,7 +683,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    */
   async validateAddress(address: AddressValidationInput): Promise<AddressValidationResult> {
     if (this.options.verbose) {
-      console.log(`🔍 [PostGrid] Validating address: ${address.line1}, ${address.city}, ${address.state}`);
+      console.log('🔍 [PostGrid] Validating address');
     }
 
     try {

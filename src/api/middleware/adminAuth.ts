@@ -119,7 +119,7 @@ export async function authenticateAdmin(
     email = payload.email as string | undefined;
   } catch (error) {
     writeDiagnostic('error', 'auth.admin_validation_failed', {
-      errorClass: classifyDiagnosticError(error, 'auth_validation_failed')
+      errorClass: classifyDiagnosticError(error, 'authorization_error')
     });
     sendJson(res, 401, {
       error: 'Unauthorized',

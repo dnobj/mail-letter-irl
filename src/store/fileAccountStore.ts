@@ -149,7 +149,7 @@ export class FileAccountStore {
       });
     } catch (error) {
       writeDiagnostic("error", "account.orders_lookup_failed", {
-        errorClass: classifyDiagnosticError(error, "account_persistence_failed")
+        errorClass: classifyDiagnosticError(error, "database_error")
       });
       return [];
     }
@@ -164,7 +164,7 @@ export class FileAccountStore {
     } catch (error) {
       // User not found or other error - use default
       writeDiagnostic("warn", "account.balance_lookup_failed", {
-        errorClass: classifyDiagnosticError(error, "account_persistence_failed")
+        errorClass: classifyDiagnosticError(error, "database_error")
       });
     }
 
@@ -176,7 +176,7 @@ export class FileAccountStore {
     } catch (error) {
       // User not found or other error — leave undefined
       writeDiagnostic("warn", "account.image_quota_lookup_failed", {
-        errorClass: classifyDiagnosticError(error, "account_persistence_failed")
+        errorClass: classifyDiagnosticError(error, "database_error")
       });
     }
 

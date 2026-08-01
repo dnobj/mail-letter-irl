@@ -286,8 +286,8 @@ export async function checkRateLimitWithTier(
   if (userId) {
     try {
       tier = await getCachedUserTier(userId);
-    } catch (error) {
-      console.warn(`Failed to get tier for user ${userId}:`, error);
+    } catch {
+      console.warn('Failed to get account tier');
     }
   }
 

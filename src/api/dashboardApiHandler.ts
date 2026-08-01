@@ -20,6 +20,7 @@ import { authenticateHttpRequest } from './middleware/auth.js';
 import { parseCookies, serializeCookie } from '../utils/cookies.js';
 import { query } from '../db/index.js';
 import { updateUserTier, invalidateTierCache } from '../services/tierService.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 // Default expiration for purchased credits (2 years)
 const DEFAULT_PURCHASE_EXPIRATION_DAYS = 730;
@@ -131,7 +132,7 @@ export async function handleCreateCheckoutSession(
     });
 
     if (result.success) {
-      console.log(`✅ Created checkout session for user ${authInfo.userId}: ${result.sessionId}`);
+      writeDiagnostic('info', 'credits.checkout_created');
 
       res.json({
         success: true,
@@ -283,7 +284,7 @@ async function handleCheckoutSessionCompleted(
       return;
     }
 
-    console.log(`💳 Adding ${checkoutData.credits} credits to user ${checkoutData.userId}`);
+    writeDiagnostic('info', 'credits.checkout_applying', { credits: checkoutData.credits });
 
     // Add credits to user account with expiration tracking
     await addCreditsWithOptions({
@@ -302,7 +303,7 @@ async function handleCheckoutSessionCompleted(
       }
     });
 
-    console.log(`✅ Credits added successfully to user ${checkoutData.userId}`);
+    writeDiagnostic('info', 'credits.checkout_applied', { credits: checkoutData.credits });
   } catch (error: any) {
     console.error('Error processing checkout completion:', error);
     throw error;
@@ -429,15 +430,17 @@ async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
       ]
     );
 
-    console.log(`✅ Refund recorded for user ${userId}, ledger ${entry.ledger_id}`);
+    writeDiagnostic('info', 'credits.refund_recorded');
 
     // Recalculate user tier immediately (don't wait for daily job)
     try {
       const updatedUser = await updateUserTier(userId);
       invalidateTierCache(userId);
-      console.log(`🔄 Tier recalculated for user ${userId}: ${updatedUser.tier}`);
+      writeDiagnostic('info', 'credits.tier_recalculated', { tier: updatedUser.tier });
     } catch (tierError) {
-      console.error(`⚠️ Failed to recalculate tier for user ${userId}:`, tierError);
+      writeDiagnostic('error', 'credits.tier_recalculation_failed', {
+        errorClass: classifyDiagnosticError(tierError, 'database_error')
+      });
       // Don't fail the webhook - tier will be recalculated in daily job
     }
   } catch (error: any) {
