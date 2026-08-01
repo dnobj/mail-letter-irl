@@ -55,7 +55,6 @@ async function handler(
     {
       correlationId: context.correlationId,
       event: "confirm_uploaded_image.invoked",
-      imageUrl: input.imageUrl,
       imageContext: hint || "none"
     },
     "Confirm uploaded image invoked"

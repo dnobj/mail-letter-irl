@@ -79,7 +79,7 @@ async function handler(
   context: ToolContext
 ): Promise<SendLetterOutput> {
   context.logger.info(
-    { correlationId: context.correlationId, event: 'send.letter.start', draftId: input.draftId },
+    { correlationId: context.correlationId, event: 'send.letter.start' },
     'Processing send_letter'
   );
 
@@ -109,8 +109,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: 'send.letter.idempotent_retry',
-        draftId: input.draftId,
-        existingLetterId: created.letter.letter_id,
+        alreadyConsumed: true,
       },
       'Returning the existing order for a consumed draft'
     );
@@ -170,8 +169,6 @@ async function handler(
     {
       correlationId: context.correlationId,
       event: 'send.letter.committed',
-      orderId: created.letter.letter_id,
-      jobId: created.job.job_id,
       submissionCompleted: submission.completed,
       retryScheduled: submission.retryScheduled,
     },

@@ -2,6 +2,7 @@
 
 import Stripe from 'stripe';
 import type { MailType } from './types.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 let stripeClient: Stripe | null = null;
 
@@ -173,9 +174,12 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
       expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : params.expiresAt
     };
   } catch (error) {
+    writeDiagnostic('error', 'stripe.checkout_creation_failed', {
+      errorClass: classifyDiagnosticError(error, 'provider_error')
+    });
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to create checkout session'
+      error: 'Failed to create checkout session'
     };
   }
 }
@@ -219,10 +223,9 @@ export function verifyWebhookSignature(
     if (!webhookSecret) return null;
     return getStripeClient().webhooks.constructEvent(payload, signature, webhookSecret);
   } catch (error) {
-    console.error(
-      'Webhook signature verification failed:',
-      error instanceof Error ? error.message : error
-    );
+    writeDiagnostic('warn', 'stripe.webhook_signature_invalid', {
+      errorClass: classifyDiagnosticError(error, 'provider_error')
+    });
     return null;
   }
 }

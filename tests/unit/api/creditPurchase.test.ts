@@ -187,6 +187,11 @@ describe('Checkout Session Error Handling', () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
   it('should handle missing STRIPE_SECRET_KEY gracefully', async () => {
     // When STRIPE_SECRET_KEY is empty, Stripe client may throw
     // The service should catch and return a meaningful error
@@ -218,6 +223,44 @@ describe('Checkout Session Error Handling', () => {
     expect(expectedResponseShape).toHaveProperty('success');
     expect(expectedResponseShape).toHaveProperty('sessionId');
     expect(expectedResponseShape).toHaveProperty('sessionUrl');
+  });
+
+  it('does not log or return arbitrary Stripe checkout exceptions', async () => {
+    const sensitive = 'private Stripe failure cs_private pi_private auth0|private-user';
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
+    mockSessionCreate.mockRejectedValueOnce(new Error(sensitive));
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const result = await createCheckoutSession({
+      userId: 'auth0|private-user',
+      userEmail: 'private@example.test',
+      productId: 'credit-pack-4',
+      successUrl: 'https://example.test/success',
+      cancelUrl: 'https://example.test/cancel'
+    });
+
+    const output = diagnostic.mock.calls.flat().map(String).join('\n');
+    expect(output).toContain('"event":"stripe.checkout_creation_failed"');
+    expect(result).toEqual({ success: false, error: 'Failed to create checkout session' });
+    expect(output).not.toContain(sensitive);
+    expect(JSON.stringify(result)).not.toContain(sensitive);
+  });
+
+  it('does not log arbitrary webhook verification exceptions', () => {
+    const sensitive = 'private signature failure whsec_private evt_private';
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_mock');
+    mockConstructEvent.mockImplementationOnce(() => {
+      throw new Error(sensitive);
+    });
+    const diagnostic = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(verifyWebhookSignature('private-body', 'private-signature')).toBeNull();
+
+    const output = diagnostic.mock.calls.flat().map(String).join('\n');
+    expect(output).toContain('"event":"stripe.webhook_signature_invalid"');
+    expect(output).not.toContain(sensitive);
   });
 });
 

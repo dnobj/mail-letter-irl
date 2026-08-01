@@ -68,7 +68,7 @@ export async function authenticateHttpRequest(
       email: payload.email as string | undefined
     };
   } catch (error: any) {
-    console.error('Authentication error:', error);
+    console.error('Authentication failed');
 
     if (res) {
       res.statusCode = 401;

@@ -43,7 +43,7 @@ export class DIYProvider implements LetterFulfillmentProvider {
     const letterId = params.metadata?.letterId;
 
     if (this.verbose) {
-      console.log(`📤 [DIY] Queuing letter ${letterId} to ${params.recipientName} for manual fulfillment`);
+      console.log('📤 [DIY] Queuing letter for manual fulfillment');
     }
 
     // Estimate delivery: 7-10 business days for manual processing

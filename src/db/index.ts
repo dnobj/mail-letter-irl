@@ -3,6 +3,7 @@
 import pg from 'pg';
 
 import { isWakeConnectionError } from './wakeRetry.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 const { Pool } = pg;
 
@@ -37,8 +38,14 @@ pool.on('connect', () => {
   console.log('Database client connected');
 });
 
+export function writeDatabaseFailure(event: string, error: unknown): void {
+  writeDiagnostic('error', event, {
+    errorClass: classifyDiagnosticError(error, 'database_error')
+  });
+}
+
 pool.on('error', (error) => {
-  console.error('Unexpected database error:', error);
+  writeDatabaseFailure('database.pool_error', error);
 });
 
 export async function testConnection(): Promise<boolean> {
@@ -51,7 +58,7 @@ export async function testConnection(): Promise<boolean> {
     console.log(`   Version: ${result.rows[0].version.split(' ').slice(0, 2).join(' ')}`);
     return true;
   } catch (error) {
-    console.error('Database connection failed:', error);
+    writeDatabaseFailure('database.connection_failed', error);
     return false;
   }
 }
@@ -76,7 +83,7 @@ export async function query<T extends pg.QueryResultRow = any>(
       const result = await pool.query<T>(text, params);
       const duration = Date.now() - start;
       if (duration > 100) {
-        console.log(`Slow query (${duration}ms):`, text.substring(0, 100));
+        console.log(`Slow query (${duration}ms)`);
       }
       return result;
     } catch (error) {
@@ -84,8 +91,7 @@ export async function query<T extends pg.QueryResultRow = any>(
         await wait(250);
         continue;
       }
-      console.error('Query error:', error);
-      console.error('   SQL:', text);
+      writeDatabaseFailure('database.query_failed', error);
       throw error;
     }
   }
@@ -123,7 +129,7 @@ export async function transaction<T>(
     try {
       await client.query('ROLLBACK');
     } catch (rollbackError) {
-      console.error('Database rollback failed:', rollbackError);
+      writeDatabaseFailure('database.rollback_failed', rollbackError);
     }
     throw error;
   } finally {

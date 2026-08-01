@@ -21,6 +21,7 @@ import {
   type PackProductId
 } from './stripeService.js';
 import type { LetterDraft, MailType, Order, OrderStatus } from './types.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 const ACTIVE_JIT_STATUSES: OrderStatus[] = [
   'checkout_pending',
@@ -1305,7 +1306,9 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
         if (!result.duplicate && result.status === 'cancelled') expiredCheckouts += 1;
       }
     } catch (error) {
-      console.error(`[Commerce] Failed to reconcile order ${order.order_id}:`, error);
+      writeDiagnostic('error', 'commerce.checkout_reconciliation_failed', {
+        errorClass: classifyDiagnosticError(error, 'provider_error')
+      });
     }
   }
 
@@ -1348,9 +1351,7 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
   );
   const stuckOrders = Number.parseInt(stuck.rows[0]?.count || '0', 10);
   if (stuckOrders > 0) {
-    console.error(
-      `[Commerce] ALERT: ${stuckOrders} paid/refund orders are stuck beyond 30 minutes`
-    );
+    writeDiagnostic('error', 'commerce.stuck_orders_detected', { count: stuckOrders });
   }
 
   return {

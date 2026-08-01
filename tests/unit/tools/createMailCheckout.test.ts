@@ -72,4 +72,13 @@ describe("create_mail_checkout", () => {
       draftId: "draft-1"
     });
   });
+
+  it("does not expose arbitrary commerce exceptions", async () => {
+    const sensitive = "private database exception order-private pi-private";
+    mocks.createJitCheckout.mockRejectedValueOnce(new Error(sensitive));
+
+    await expect(
+      createMailCheckoutTool.handler({ draftId: "draft-1" }, context)
+    ).rejects.toThrow("Unable to create Pay & Send checkout. Please try again.");
+  });
 });

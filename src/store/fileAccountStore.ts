@@ -2,6 +2,10 @@ import { UserAccount, OrderRecord, LetterStatus } from "../contracts/types.js";
 import { query } from "../db/index.js";
 import { getBalance } from "../services/creditService.js";
 import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
+import {
+  classifyDiagnosticError,
+  writeDiagnostic
+} from "../utils/diagnosticLog.js";
 
 interface FileStoreOptions {
   initialCredits?: number;
@@ -144,7 +148,9 @@ export class FileAccountStore {
         } as OrderRecord;
       });
     } catch (error) {
-      console.error('Error fetching orders from database:', error);
+      writeDiagnostic("error", "account.orders_lookup_failed", {
+        errorClass: classifyDiagnosticError(error, "database_error")
+      });
       return [];
     }
   }
@@ -157,7 +163,9 @@ export class FileAccountStore {
       creditsRemaining = balance.credits;
     } catch (error) {
       // User not found or other error - use default
-      console.warn(`Could not fetch credits for ${userId}, using default:`, error);
+      writeDiagnostic("warn", "account.balance_lookup_failed", {
+        errorClass: classifyDiagnosticError(error, "database_error")
+      });
     }
 
     // Fetch image generation quota
@@ -167,7 +175,9 @@ export class FileAccountStore {
       imageGenerationsRemaining = quota.remaining;
     } catch (error) {
       // User not found or other error — leave undefined
-      console.warn(`Could not fetch image generation quota for ${userId}:`, error);
+      writeDiagnostic("warn", "account.image_quota_lookup_failed", {
+        errorClass: classifyDiagnosticError(error, "database_error")
+      });
     }
 
     // Fetch orders from database
@@ -184,6 +194,6 @@ export class FileAccountStore {
   async persist(account: UserAccount): Promise<void> {
     // No-op for database-backed store
     // Orders are persisted by sendLetter tool directly to the database
-    console.log(`FileAccountStore.persist called for ${account.userId} (no-op for DB store)`);
+    writeDiagnostic("info", "account.persist_noop");
   }
 }

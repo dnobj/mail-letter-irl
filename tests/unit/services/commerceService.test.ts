@@ -696,6 +696,37 @@ describe('commerceService', () => {
     );
   });
 
+  it('redacts order, session, and exception details from reconciliation diagnostics', async () => {
+    const sensitive = 'private reconciliation failure order-private cs-private pi-private';
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("order_type = 'jit_mail' AND status = 'paid'")) return { rows: [] };
+      if (sql.includes("status = 'checkout_pending' AND stripe_checkout_session_id")) {
+        return {
+          rows: [{ order_id: 'order-private', stripe_checkout_session_id: 'cs-private' }]
+        };
+      }
+      if (sql.includes("UPDATE orders SET status = 'cancelled'")) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (sql.includes("WHERE status = 'refund_pending'")) return { rows: [] };
+      if (sql.includes('SELECT COUNT(*) AS count FROM orders')) {
+        return { rows: [{ count: '0' }] };
+      }
+      return { rows: [] };
+    });
+    mocks.retrieveSession.mockRejectedValue(new Error(sensitive));
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await runCommerceMaintenance();
+
+    const output = diagnostic.mock.calls.flat().map(String).join('\n');
+    expect(output).toContain('"event":"commerce.checkout_reconciliation_failed"');
+    for (const value of [sensitive, 'order-private', 'cs-private', 'pi-private']) {
+      expect(output).not.toContain(value);
+    }
+    diagnostic.mockRestore();
+  });
+
   it('revokes a refunded pack once and links a refund ledger audit row', async () => {
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO stripe_webhook_events')) {

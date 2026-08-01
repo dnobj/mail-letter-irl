@@ -17,29 +17,35 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 - [user-stories.md](user-stories.md) - User stories for test coverage and acceptance criteria
 - [personas.md](personas.md) - User personas for product design and testing
 - [testing.md](testing.md) - Testing strategy and guide
+- [ACID Transaction Standard](acid-transaction-standard.md) - Required transaction, idempotency, outbox, recovery, and review rules for durable mutations
 
 ---
 
 ## Core Documentation
 
 ### Architecture & Design
+
+- [ACID Transaction Standard](acid-transaction-standard.md) - Authoritative engineering standard for financial and state-changing operations
 - [Overview](overview.md) - Product goals, objectives, and business constraints
 - [Use Cases](use-cases.md) - Product, marketing, and integration use cases
 - [Functional Requirements](functional-requirements.md) - Identity, credits, order lifecycle, auditing
 - [Engineering Plan](engineering-plan.md) - Module boundaries, logging, testing strategy
 
 ### User Flows
+
 - [User Flows](user-flows.md) - Step-by-step flows for sending letters, checking status, buying credits
 - [letter-send-flow.md](letter-send-flow.md) - Technical implementation of the send flow (letters and postcards)
 - [Just-in-Time Purchase Plan](just-in-time-purchase-plan.md) - Implementation plan for Pay & Send checkout, fulfillment, refunds, and image entitlements
 
 ### API & Tools
+
 - [MCP Tool APIs](tool-apis.md) - JSON schemas and behaviors for MCP tools
 - [Agent Platform Strategy](agent-platform-strategy.md) - Cross-platform MCP and agent packaging strategy
 - [UI Widgets](ui-widgets.md) - Apps SDK template layouts and interactions
 - [OpenAI Apps SDK Guidelines](apps-sdk-guidelines.md) - Current Apps SDK implementation notes for Letter IRL
 
 ### Database & Data Model
+
 - [database-schema.md](database-schema.md) - Complete table definitions, indexes, triggers
 - [Account and Credits](account-credits.md) - Credit data model and validation rules
 
@@ -48,6 +54,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 ## Technical Guides
 
 ### Setup & Deployment
+
 - [Environment Files](env-files.md) - All `.env` files explained (dev, admin, test)
 - [Database Setup](database-setup.md) - Neon PostgreSQL configuration
 - [deployment.md](deployment.md) - Railway deployment guide
@@ -56,17 +63,20 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 - [Idle-Cost Operations](idle-cost-operations.md) - Cost controls, observation targets, and rollback runbook
 
 ### Integrations
+
 - [Auth0 Configuration](auth0-tenant-configuration.md) - OAuth setup with 5 identity providers
 - [Stripe Integration](acp-stripe-integration.md) - Payments and webhooks
 - [PostGrid Testing](testing-postgrid.md) - Letter provider integration
 
 ### Credit System
+
 - [Credit API Implementation](credit-api-implementation.md) - Credit service internals
 - [Credit Packages](credit-packages-spec.md) - Pricing and package specs
 - [Credit Purchase Flow](credit-purchase-flow.md) - Stripe checkout integration
 - [Pricing and Credits](pricing-and-credits.md) - Pricing strategy
 
 ### Admin
+
 - [Admin Interface Modernization Plan](admin-interface-modernization-plan.md) - Approved hardened-local architecture, current-state audit, security model, implementation slices, tests, and rollout gates
 - [Admin Panel Guide](admin-panel-guide.md) - Current legacy local-only behavior; superseded for implementation direction by the modernization plan
 - [Archived Dashboard Implementation](archive/dashboard-implementation.md) - Historical customer-dashboard design, not the current admin panel
@@ -119,6 +129,7 @@ Materials for submitting to app directories:
 ## Getting Started
 
 ### Run the Server
+
 ```bash
 npm run dev          # Development with watch
 npm run start        # Production mode
@@ -133,6 +144,7 @@ hardened local-only operator application. Production credential provisioning, th
 connection, and full mutation mode each require explicit owner approval.
 
 ### Run Migrations
+
 ```bash
 npm run db:migrate
 ```

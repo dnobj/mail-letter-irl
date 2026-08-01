@@ -14,7 +14,7 @@ async function handler(input: GetPurchaseStatusInput, context: ToolContext) {
     if ((error as { code?: string })?.code === 'PURCHASE_NOT_FOUND') {
       throw new Error('Purchase not found for your account.');
     }
-    throw error;
+    throw new Error('Unable to retrieve purchase status. Please try again.');
   }
 }
 

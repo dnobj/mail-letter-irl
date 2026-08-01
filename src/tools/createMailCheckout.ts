@@ -40,7 +40,7 @@ function friendlyCheckoutError(error: unknown): Error {
     case 'JIT_NOT_CONFIGURED':
       return new Error('Pay & Send is temporarily unavailable. Please use a letter pack instead.');
     default:
-      return error instanceof Error ? error : new Error('Unable to create Pay & Send checkout');
+      return new Error('Unable to create Pay & Send checkout. Please try again.');
   }
 }
 

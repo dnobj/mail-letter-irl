@@ -77,7 +77,7 @@ async function handler(
   context: ToolContext
 ): Promise<SendPostcardOutput> {
   context.logger.info(
-    { correlationId: context.correlationId, event: 'send.postcard.start', draftId: input.draftId },
+    { correlationId: context.correlationId, event: 'send.postcard.start' },
     'Processing send_postcard'
   );
 
@@ -145,8 +145,6 @@ async function handler(
     {
       correlationId: context.correlationId,
       event: 'send.postcard.committed',
-      orderId: created.letter.letter_id,
-      jobId: created.job.job_id,
       submissionCompleted: submission.completed,
       retryScheduled: submission.retryScheduled,
     },

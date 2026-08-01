@@ -191,6 +191,28 @@ describe('mail outbox retries', () => {
     );
   });
 
+  it('redacts letter, job, provider, and exception details when recovery scheduling fails', async () => {
+    const sensitive = 'private database failure letter-1 job-1 provider-private';
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      if (sql.includes("SET status = 'pending'")) throw new Error(sensitive);
+      return { rows: [] };
+    });
+    mocks.transaction.mockRejectedValueOnce(new Error(sensitive));
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const result = await processLetterJob('job-1', { retryBaseDelayMs: 0 });
+
+    expect(result).toMatchObject({ completed: false, retryScheduled: true });
+    const output = diagnostic.mock.calls.flat().map(String).join('\n');
+    expect(output).toContain('"event":"outbox.persistence_recovery_schedule_failed"');
+    for (const value of [sensitive, 'letter-1', 'job-1', 'provider-private']) {
+      expect(output).not.toContain(value);
+    }
+    diagnostic.mockRestore();
+  });
+
   it('reschedules a timed-out send for hourly recovery', async () => {
     mockClaims();
     sendLetter.mockResolvedValue({

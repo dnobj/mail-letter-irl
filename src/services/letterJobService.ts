@@ -18,6 +18,7 @@ import type {
   PostcardSize,
 } from './providers/types.js';
 import type { Letter, LetterJob } from './types.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_PROVIDER_RETRIES = 3;
@@ -403,10 +404,9 @@ async function recoverProviderAcceptancePersistence(
     );
     return current.rows[0]?.status === 'completed' ? 'completed' : 'stale';
   } catch (recoveryError) {
-    console.error(
-      `[Outbox] Provider accepted ${job.letter_id}, but persistence recovery could not be scheduled:`,
-      recoveryError
-    );
+    writeDiagnostic('error', 'outbox.persistence_recovery_schedule_failed', {
+      errorClass: classifyDiagnosticError(recoveryError, 'database_error')
+    });
     // Leave the durable processing lease in place. The stale-job claimant will
     // retry with the same provider idempotency key after a process restart.
     return 'stale';

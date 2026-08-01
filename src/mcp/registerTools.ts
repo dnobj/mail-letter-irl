@@ -50,6 +50,10 @@ import { ToolMeta } from "../contracts/types.js";
 import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
 import { prepareAuthenticatedUser } from "../auth/identity.js";
 import {
+  classifyDiagnosticError,
+  writeDiagnostic
+} from "../utils/diagnosticLog.js";
+import {
   buildInsufficientScopeToolResult,
   InsufficientScopeError
 } from "../auth/oauthChallenge.js";
@@ -427,13 +431,17 @@ export async function registerLetterTools(
   authInfo: AuthenticatedUser | null = null
 ) {
   const userId = authInfo?.userId ?? DEFAULT_USER_ID;
-  console.log(`Registering Letter IRL tools for user: ${userId}`);
+  writeDiagnostic("info", "mcp.tools_registering", {
+    authType: authInfo?.authType ?? "disabled"
+  });
 
   if (authInfo) {
     try {
       await prepareAuthenticatedUser(authInfo);
     } catch (error) {
-      console.error(`[auth] Failed to prepare user ${userId}`, error);
+      writeDiagnostic("error", "auth.user_preparation_failed", {
+        errorClass: classifyDiagnosticError(error, "database_error")
+      });
     }
   }
 

@@ -100,20 +100,19 @@ async function releaseReservedGeneration(
   context: ToolContext,
   userId: string,
   reservationId: string | undefined,
-  reason: string,
-  providerRequestId?: string
+  reason: string
 ): Promise<void> {
   if (!reservationId) {
     return;
   }
   try {
     await releaseGenerationReservation(userId, reservationId, reason);
-  } catch (releaseError) {
+  } catch {
     context.logger.error(
       {
         correlationId: context.correlationId,
         event: "generate_image.reservation_release_failed",
-        errorType: releaseError instanceof Error ? releaseError.name : "UnknownError"
+        errorClass: "database_error"
       },
       "Failed to release image generation reservation"
     );
@@ -135,13 +134,12 @@ async function preserveAmbiguousGeneration(
       reason,
       providerRequestId
     );
-  } catch (reconciliationError) {
+  } catch {
     context.logger.error(
       {
         correlationId: context.correlationId,
         event: "generate_image.reservation_reconciliation_failed",
-        errorType:
-          reconciliationError instanceof Error ? reconciliationError.name : "UnknownError"
+        errorClass: "database_error"
       },
       "Image generation reservation requires maintenance reconciliation"
     );
@@ -247,7 +245,6 @@ async function handler(
         event: "generate_image.success",
         fullBase64Length: result.base64Data.length,
         previewBase64Length: previewBase64.length,
-        imageTokenSuffix: token.slice(-6),
         generationsRemaining
       },
       "Image generated successfully"
@@ -290,6 +287,7 @@ async function handler(
           correlationId: context.correlationId,
           event: "generate_image.failed",
           errorCode: error.code,
+          errorClass: "provider_error",
           providerOutcome: error.outcome
         },
         "Image generation failed"
@@ -301,7 +299,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "generate_image.error",
-        errorType: error instanceof Error ? error.name : "UnknownError"
+        errorClass: "unknown_error"
       },
       "Unexpected image generation error"
     );

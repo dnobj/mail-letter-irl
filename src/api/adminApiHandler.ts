@@ -10,6 +10,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'http';
 import { authenticateAdmin } from './middleware/adminAuth.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { adjustCredits } from '../services/creditService.js';
 import { getUser, getAllUsers } from '../services/userService.js';
 import { getAllJobs, getJobById, getJobsByUserId } from '../services/letterJobService.js';
@@ -106,11 +107,11 @@ export async function handleAdminApiRequest(
     // GET /api/admin/users/:userId
     if (pathname.startsWith('/api/admin/users/') && req.method === 'GET') {
       const userId = pathname.split('/').pop();
-      console.log(`🔍 Extracted userId from pathname: "${userId}"`);
+      console.log('🔍 Extracted account identifier from pathname');
       if (userId) {
         // Decode the userId (pathname is not auto-decoded in our setup)
         const decodedUserId = decodeURIComponent(userId);
-        console.log(`🔍 Decoded userId: "${decodedUserId}"`);
+        console.log('🔍 Decoded account identifier');
         await handleGetUser(res, decodedUserId);
         return true;
       }
@@ -368,10 +369,10 @@ export async function handleAdminApiRequest(
     return true;
 
   } catch (error) {
-    console.error('Admin API error:', error);
+    console.error('Admin API request failed');
     sendJson(res, 500, {
       error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: 'Unable to complete admin request'
     });
     return true;
   }
@@ -418,7 +419,7 @@ async function handleAdjustCredits(
     `[Admin: ${adminInfo.email || adminInfo.userId}] ${body.reason}`
   );
 
-  console.log(`🔧 Admin ${adminInfo.userId} adjusted ${body.amount} credits for ${body.userId}`);
+  console.log(`🔧 Admin adjusted ${body.amount} credits`);
 
   sendJson(res, 200, {
     success: true,
@@ -754,7 +755,7 @@ async function handleCreateCampaign(
       createdBy: adminInfo.email || adminInfo.userId,
     });
 
-    console.log(`📢 Admin ${adminInfo.userId} created promo campaign: ${campaign.code}`);
+    console.log('📢 Admin created promo campaign');
 
     sendJson(res, 201, {
       success: true,
@@ -990,21 +991,27 @@ async function handleStripeReconcile(
       discrepancies: result.discrepancies.map(d => ({
         type: d.type,
         severity: d.severity,
-        stripeSessionId: d.stripeSessionId,
-        userId: d.userId,
-        stripeAmount: d.stripeAmount,
         expectedCredits: d.expectedCredits,
         actualCredits: d.actualCredits,
         message: d.message,
         suggestedAction: d.suggestedAction,
+        // Sensitive operator-only references. This route is admin-authenticated;
+        // these values are returned for investigation and must never be logged.
+        operatorReference: {
+          accountId: d.userId,
+          paymentSessionId: d.stripeSessionId,
+          ledgerId: d.ledgerId,
+        },
       })),
       recommendations: result.recommendations,
     });
-  } catch (error: any) {
-    console.error('Stripe reconciliation error:', error);
+  } catch (error: unknown) {
+    writeDiagnostic('error', 'credits.reconciliation_failed', {
+      errorClass: classifyDiagnosticError(error, 'provider_error')
+    });
     sendJson(res, 500, {
       error: 'Reconciliation failed',
-      message: error.message,
+      message: 'Unable to reconcile payments',
     });
   }
 }
@@ -1023,7 +1030,7 @@ async function handleStripeReconcileFix(
 ) {
   const dryRun = body.dryRun !== false; // Default to dry run for safety
 
-  console.log(`🔧 Admin ${adminInfo.userId} triggered Stripe reconciliation fix (dryRun=${dryRun})`);
+  console.log(`🔧 Admin triggered Stripe reconciliation fix (dryRun=${dryRun})`);
 
   try {
     const result = await autoFixMissingCredits(dryRun);
@@ -1043,11 +1050,13 @@ async function handleStripeReconcileFix(
         errors: result.errors,
       });
     }
-  } catch (error: any) {
-    console.error('Stripe reconciliation fix error:', error);
+  } catch (error: unknown) {
+    writeDiagnostic('error', 'credits.reconciliation_fix_failed', {
+      errorClass: classifyDiagnosticError(error, 'provider_error')
+    });
     sendJson(res, 500, {
       error: 'Fix failed',
-      message: error.message,
+      message: 'Unable to apply reconciliation fixes',
     });
   }
 }
@@ -1555,7 +1564,7 @@ async function handleRetryJob(
     [jobId, JSON.stringify({ admin: adminInfo.email || adminInfo.userId, at: new Date().toISOString() })]
   );
 
-  console.log(`🔄 Admin ${adminInfo.userId} retried job ${jobId}`);
+  console.log('🔄 Admin retried job');
 
   sendJson(res, 200, {
     success: true,
@@ -1592,10 +1601,10 @@ async function handleStatusSyncDryRun(
       details: result.details,
     });
   } catch (error: any) {
-    console.error('Status sync dry run error:', error);
+    console.error('Status sync dry run failed');
     sendJson(res, 500, {
       error: 'Sync dry run failed',
-      message: error.message,
+      message: 'Unable to run status sync preview',
     });
   }
 }
@@ -1619,10 +1628,10 @@ async function handleStatusSync(res: ServerResponse) {
       details: result.details,
     });
   } catch (error: any) {
-    console.error('Status sync error:', error);
+    console.error('Status sync failed');
     sendJson(res, 500, {
       error: 'Sync failed',
-      message: error.message,
+      message: 'Unable to run status sync',
     });
   }
 }
@@ -1652,10 +1661,10 @@ async function handleGetStuckLetters(
       })),
     });
   } catch (error: any) {
-    console.error('Get stuck letters error:', error);
+    console.error('Get stuck letters failed');
     sendJson(res, 500, {
       error: 'Failed to get stuck letters',
-      message: error.message,
+      message: 'Unable to retrieve stuck letters',
     });
   }
 }
@@ -1685,10 +1694,12 @@ async function handleGetTokenStats(res: ServerResponse) {
       },
     });
   } catch (error: any) {
-    console.error('Get token stats error:', error);
+    writeDiagnostic('error', 'auth.pat_stats_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
     sendJson(res, 500, {
       error: 'Failed to get token stats',
-      message: error.message,
+      message: 'Unable to retrieve token stats',
     });
   }
 }
@@ -1725,10 +1736,10 @@ async function handleGetRateLimitStats(res: ServerResponse) {
       configuredLimits,
     });
   } catch (error: any) {
-    console.error('Get rate limit stats error:', error);
+    console.error('Get rate limit stats failed');
     sendJson(res, 500, {
       error: 'Failed to get rate limit stats',
-      message: error.message,
+      message: 'Unable to retrieve rate limit stats',
     });
   }
 }
@@ -1766,10 +1777,10 @@ async function handleGetRouting(res: ServerResponse) {
       })),
     });
   } catch (error: any) {
-    console.error('Get routing error:', error);
+    console.error('Get routing failed');
     sendJson(res, 500, {
       error: 'Failed to get routing rules',
-      message: error.message,
+      message: 'Unable to retrieve routing rules',
     });
   }
 }
@@ -1830,7 +1841,7 @@ async function handleUpdateRouting(
     }
 
     const row = result.rows[0];
-    console.log(`🔧 Admin ${adminInfo.email || adminInfo.userId} updated routing: ${mailType} → ${body.provider}`);
+    console.log(`🔧 Admin updated routing: ${mailType} → ${body.provider}`);
 
     sendJson(res, 200, {
       success: true,
@@ -1843,11 +1854,13 @@ async function handleUpdateRouting(
         updatedBy: row.updated_by,
       },
     });
-  } catch (error: any) {
-    console.error('Update routing error:', error);
+  } catch (error: unknown) {
+    writeDiagnostic('error', 'admin.routing_update_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
     sendJson(res, 500, {
       error: 'Failed to update routing',
-      message: error.message,
+      message: 'Unable to update routing',
     });
   }
 }
@@ -1905,10 +1918,10 @@ async function handleGetProviders(res: ServerResponse) {
       providers,
     });
   } catch (error: any) {
-    console.error('Get providers error:', error);
+    console.error('Get providers failed');
     sendJson(res, 500, {
       error: 'Failed to get providers',
-      message: error.message,
+      message: 'Unable to retrieve providers',
     });
   }
 }

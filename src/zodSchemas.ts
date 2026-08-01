@@ -119,8 +119,8 @@ export const sendPostcardInputZ = z.object({
 // ============================================================================
 
 export const submitFeatureRequestInputZ = z.object({
-  title: z.string(),
-  description: z.string(),
+  title: z.string().trim().min(1).max(200),
+  description: z.string().trim().min(1).max(2000),
   category: z.enum([
     "new_feature",
     "improvement",
@@ -129,8 +129,8 @@ export const submitFeatureRequestInputZ = z.object({
     "international",
     "other"
   ]).optional(),
-  attemptedAction: z.string().optional(),
-  contactEmail: z.string().optional(),
+  attemptedAction: z.string().max(255).optional(),
+  contactEmail: z.string().max(255).optional(),
   okToContact: z.boolean().optional()
 });
 

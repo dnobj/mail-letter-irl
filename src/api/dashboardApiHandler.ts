@@ -14,6 +14,7 @@ import { createPackCheckout, processStripeWebhookEvent } from '../services/comme
 import { authenticateHttpRequest } from './middleware/auth.js';
 import { parseCookies, serializeCookie } from '../utils/cookies.js';
 import { query } from '../db/index.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 // Extended request/response types with cookie support
 type Request = http.IncomingMessage & {
@@ -121,7 +122,7 @@ export async function handleCreateCheckoutSession(
     });
 
     if (result.success) {
-      console.log(`✅ Created checkout session for user ${authInfo.userId}: ${result.sessionId}`);
+      writeDiagnostic('info', 'credits.checkout_created');
 
       res.json({
         success: true,
@@ -130,42 +131,44 @@ export async function handleCreateCheckoutSession(
         sessionUrl: result.sessionUrl
       });
     } else {
-      console.error(`❌ Failed to create checkout session: ${result.error}`);
-
       // Distinguish between configuration errors and other failures
       const errorMessage = result.error || 'Failed to create checkout session';
-      if (
+      const configurationFailure =
         errorMessage.includes('not configured') ||
-        errorMessage.includes('environment variable')
-      ) {
+        errorMessage.includes('environment variable');
+      writeDiagnostic('error', 'credits.checkout_creation_failed', {
+        errorClass: configurationFailure ? 'configuration_error' : 'provider_error'
+      });
+      if (configurationFailure) {
         // Configuration error - service temporarily unavailable
         res.statusCode = 503;
         res.json({
           error: 'Service configuration error',
-          message: 'Payment processing is temporarily unavailable. Please try again later.',
-          details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
+          message: 'Payment processing is temporarily unavailable. Please try again later.'
         });
       } else if (errorMessage.includes('Invalid product')) {
         // Client error - bad request
         res.statusCode = 400;
         res.json({
-          error: errorMessage
+          error: 'Invalid product'
         });
       } else {
         // Other errors
         res.statusCode = 500;
         res.json({
-          error: errorMessage
+          error: 'Unable to create checkout session'
         });
       }
     }
-  } catch (error: any) {
-    console.error('Error in handleCreateCheckoutSession:', error);
+  } catch (error: unknown) {
+    writeDiagnostic('error', 'credits.checkout_creation_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
 
     res.statusCode = 500;
     res.json({
       error: 'Internal server error',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Unable to create checkout session'
     });
   }
 }
@@ -186,7 +189,7 @@ export async function handleStripeWebhook(
     const signature = req.headers['stripe-signature'];
 
     if (!signature || typeof signature !== 'string') {
-      console.error('❌ Webhook: Missing Stripe signature');
+      writeDiagnostic('warn', 'stripe.webhook_signature_missing');
       res.statusCode = 400;
       res.end('Missing signature');
       return;
@@ -196,21 +199,23 @@ export async function handleStripeWebhook(
     const event = verifyWebhookSignature(req.body, signature);
 
     if (!event) {
-      console.error('❌ Webhook: Invalid signature');
+      writeDiagnostic('warn', 'stripe.webhook_signature_invalid');
       res.statusCode = 400;
       res.end('Invalid signature');
       return;
     }
 
-    console.log(`📥 Webhook received: ${event.type}`);
+    writeDiagnostic('info', 'stripe.webhook_received', { eventType: event.type });
 
     // The commerce service claims the Stripe event and applies its state
     // transition in one database transaction.
     const processed = await processStripeWebhookEvent(event);
     res.json({ received: true, duplicate: processed.duplicate });
     return;
-  } catch (error: any) {
-    console.error('Error in handleStripeWebhook:', error);
+  } catch (error: unknown) {
+    writeDiagnostic('error', 'credits.webhook_failed', {
+      errorClass: classifyDiagnosticError(error, 'provider_error')
+    });
     res.statusCode = 500;
     res.json({ error: 'Webhook processing failed' });
   }
@@ -274,8 +279,10 @@ export async function handleAuthLogin(
     res.statusCode = 302;
     res.setHeader('Location', authUrl.toString());
     res.end();
-  } catch (error: any) {
-    console.error('Error in handleAuthLogin:', error);
+  } catch (error: unknown) {
+    writeDiagnostic('error', 'auth.dashboard_login_failed', {
+      errorClass: classifyDiagnosticError(error, 'configuration_error')
+    });
     res.statusCode = 500;
     res.setHeader('Content-Type', 'text/plain');
     res.end('Authentication error');
@@ -336,8 +343,11 @@ export async function handleAuthCallback(
     });
 
     if (!tokenResponse.ok) {
-      const error = await tokenResponse.text();
-      console.error('Token exchange failed:', error);
+      await tokenResponse.text();
+      writeDiagnostic('error', 'auth.token_exchange_failed', {
+        errorClass: 'authorization_error',
+        status: tokenResponse.status
+      });
       res.statusCode = 500;
       res.end('Failed to obtain access token');
       return;
@@ -361,8 +371,10 @@ export async function handleAuthCallback(
     res.statusCode = 302;
     res.setHeader('Location', returnTo);
     res.end();
-  } catch (error: any) {
-    console.error('Error in handleAuthCallback:', error);
+  } catch (error: unknown) {
+    writeDiagnostic('error', 'auth.dashboard_callback_failed', {
+      errorClass: classifyDiagnosticError(error, 'authorization_error')
+    });
     res.statusCode = 500;
     res.end('Authentication callback error');
   }

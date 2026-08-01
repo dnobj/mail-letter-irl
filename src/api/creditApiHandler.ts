@@ -10,6 +10,7 @@ import { getBalance, getTransactions, getDetailedBalance } from '../services/cre
 import { getUser } from '../services/userService.js';
 import { validatePromoCode, redeemPromoCode, getUserRedemptions } from '../services/promoService.js';
 import { getLedgerEntries } from '../services/creditLedgerService.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 const jwksUri = process.env.LETTER_IRL_OAUTH_JWKS_URI;
 const JWKS = jwksUri ? createRemoteJWKSet(new URL(jwksUri)) : null;
@@ -47,7 +48,9 @@ async function authenticateRequest(req: IncomingMessage): Promise<AuthInfo | nul
       email: payload.email as string | undefined
     };
   } catch (error) {
-    console.error('JWT validation failed:', error);
+    writeDiagnostic('warn', 'auth.credit_api_rejected', {
+      errorClass: classifyDiagnosticError(error, 'authorization_error')
+    });
     return null;
   }
 }
@@ -148,15 +151,12 @@ export async function handleCreditApiRequest(
     return true;
 
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const errorStack = error instanceof Error ? error.stack : undefined;
-    console.error('Credit API error:', errorMessage);
-    if (errorStack) {
-      console.error('Stack trace:', errorStack);
-    }
+    writeDiagnostic('error', 'credits.api_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
     sendJson(res, 500, {
       error: 'Internal server error',
-      message: errorMessage
+      message: 'Unable to complete credit request'
     });
     return true;
   }

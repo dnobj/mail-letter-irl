@@ -14,6 +14,7 @@ import {
   setReturnAddress,
   clearReturnAddress
 } from '../services/returnAddressService.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 const jwksUri = process.env.LETTER_IRL_OAUTH_JWKS_URI;
 const JWKS = jwksUri ? createRemoteJWKSet(new URL(jwksUri)) : null;
@@ -47,7 +48,9 @@ async function authenticateRequest(req: IncomingMessage): Promise<AuthInfo | nul
       email: payload.email as string | undefined
     };
   } catch (error) {
-    console.error('JWT validation failed:', error);
+    writeDiagnostic('warn', 'auth.return_address_rejected', {
+      errorClass: classifyDiagnosticError(error, 'authorization_error')
+    });
     return null;
   }
 }
@@ -195,7 +198,9 @@ export async function handleReturnAddressApiRequest(
     return true;
 
   } catch (error) {
-    console.error('Return address API error:', error);
+    writeDiagnostic('error', 'address.api_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
     sendJson(res, 500, {
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error'

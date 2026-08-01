@@ -39,7 +39,7 @@ async function authenticateRequest(req: IncomingMessage): Promise<AuthInfo | nul
         email: payload.email as string | undefined
       };
     } catch (error) {
-      console.error('JWT validation failed:', error);
+      console.error('JWT validation failed');
       return null;
     }
   }
@@ -65,7 +65,7 @@ async function authenticateRequest(req: IncomingMessage): Promise<AuthInfo | nul
           email: payload.email as string | undefined
         };
       } catch (error) {
-        console.error('Cookie JWT validation failed:', error);
+        console.error('Cookie JWT validation failed');
         return null;
       }
     }
@@ -132,7 +132,7 @@ export async function handleLetterApiRequest(
     return true;
 
   } catch (error: any) {
-    console.error('Letter API error:', error);
+    console.error('Letter API request failed');
     sendJson(res, 500, {
       error: 'Internal server error',
       message: error.message

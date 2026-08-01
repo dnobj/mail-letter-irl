@@ -76,8 +76,7 @@ export class DummyProvider implements LetterFulfillmentProvider {
     const trackingId = `DUMMY-${randomUUID()}`;
 
     if (this.options.verbose) {
-      console.log(`📤 [DummyProvider] Sending letter to ${params.recipientName}`);
-      console.log(`   Tracking ID: ${trackingId}`);
+      console.log('📤 [DummyProvider] Sending letter');
     }
 
     // Simulate network delay
@@ -88,7 +87,7 @@ export class DummyProvider implements LetterFulfillmentProvider {
       const error = `Simulated provider failure (${(this.options.failureRate * 100).toFixed(0)}% chance)`;
 
       if (this.options.verbose) {
-        console.log(`❌ [DummyProvider] ${error}`);
+        console.log('❌ [DummyProvider] Simulated provider failure');
       }
 
       return {
@@ -216,7 +215,7 @@ export class DummyProvider implements LetterFulfillmentProvider {
       letterStore.delete(trackingId);
 
       if (this.options.verbose) {
-        console.log(`🚫 [DummyProvider] Letter cancelled: ${trackingId}`);
+        console.log('🚫 [DummyProvider] Letter cancelled');
       }
 
       return true;

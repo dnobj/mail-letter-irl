@@ -72,7 +72,7 @@ export async function createCampaign(
     ]
   );
 
-  console.log(`📢 Created promo campaign: ${normalizedCode} (${creditsAmount} credits)`);
+  console.log(`📢 Created promo campaign (${creditsAmount} credits)`);
 
   return result.rows[0];
 }
@@ -159,7 +159,7 @@ export async function updateCampaignStatus(
     throw new Error(`Campaign not found: ${campaignId}`);
   }
 
-  console.log(`📢 Updated promo campaign ${campaignId} status to: ${status}`);
+  console.log(`📢 Updated promo campaign status to: ${status}`);
 
   return result.rows[0];
 }
@@ -390,9 +390,7 @@ export async function redeemPromoCode(
 
     // Note: Increment already done above with atomic check
 
-    console.log(
-      `🎁 Redeemed promo ${promoCode} for user ${userId}: ${campaign.credits_amount} credits, expires: ${expiresAt?.toISOString() || 'never'}`
-    );
+    console.log(`🎁 Redeemed promo for ${campaign.credits_amount} credits`);
 
     return {
       success: true,
@@ -498,7 +496,7 @@ export async function deleteCampaign(campaignId: string): Promise<{ success: boo
   // Delete the campaign
   await query('DELETE FROM promo_campaigns WHERE campaign_id = $1', [campaignId]);
 
-  console.log(`🗑️ Deleted promo campaign: ${campaign.code} (${campaignId})`);
+  console.log('🗑️ Deleted promo campaign');
 
   return { success: true };
 }
