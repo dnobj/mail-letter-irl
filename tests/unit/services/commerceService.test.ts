@@ -120,7 +120,7 @@ describe('commerceService', () => {
     mocks.findRefund.mockResolvedValue(null);
   });
 
-  it('claims a Stripe event transactionally so a replay cannot double-send or double-grant', async () => {
+  it('claims concurrent Stripe event replays so only one can send or grant', async () => {
     let claimed = false;
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO stripe_webhook_events')) {
@@ -132,8 +132,10 @@ describe('commerceService', () => {
       return { rows: [] };
     });
 
-    const first = await processStripeWebhookEvent(checkoutEvent());
-    const replay = await processStripeWebhookEvent(checkoutEvent());
+    const [first, replay] = await Promise.all([
+      processStripeWebhookEvent(checkoutEvent()),
+      processStripeWebhookEvent(checkoutEvent())
+    ]);
 
     expect(first).toMatchObject({
       duplicate: false,
@@ -149,6 +151,45 @@ describe('commerceService', () => {
       })
     );
     expect(mocks.grantEntitlement).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls back a webhook claim after a transaction crash so replay can recover', async () => {
+    let committedClaim = false;
+    let crashBeforeOrderLock = true;
+    mocks.transaction.mockImplementation(async callback => {
+      let transactionClaim = committedClaim;
+      const transactionQuery = vi.fn(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) {
+          if (transactionClaim) return { rows: [] };
+          transactionClaim = true;
+          return { rows: [{ event_id: 'evt-1' }] };
+        }
+        if (sql.includes('SELECT * FROM orders')) {
+          if (crashBeforeOrderLock) {
+            crashBeforeOrderLock = false;
+            throw new Error('database process terminated before commit');
+          }
+          return { rows: [baseOrder] };
+        }
+        return { rows: [] };
+      });
+
+      const result = await callback({ query: transactionQuery });
+      committedClaim = transactionClaim;
+      return result;
+    });
+
+    await expect(processStripeWebhookEvent(checkoutEvent())).rejects.toThrow(
+      'database process terminated before commit'
+    );
+    await expect(processStripeWebhookEvent(checkoutEvent())).resolves.toMatchObject({
+      duplicate: false,
+      status: 'fulfillment_pending'
+    });
+
+    expect(mocks.createMail).toHaveBeenCalledTimes(1);
+    expect(mocks.grantEntitlement).toHaveBeenCalledTimes(1);
+    expect(committedClaim).toBe(true);
   });
 
   it('persists an authoritative pack order before creating its Stripe session', async () => {
@@ -374,6 +415,77 @@ describe('commerceService', () => {
       reused: true
     });
     expect(mocks.createJitSession).not.toHaveBeenCalled();
+  });
+
+  it('reuses the durable order and Stripe key after checkout attachment crashes', async () => {
+    const draft = {
+      draft_id: 'draft-1',
+      user_id: 'user-1',
+      mail_type: 'letter',
+      required_credits: 2,
+      status: 'pending',
+      expires_at: new Date(Date.now() + 60 * 60_000)
+    };
+    let storedOrder: typeof baseOrder & {
+      checkout_expires_at?: Date;
+      stripe_checkout_session_id?: string;
+      checkout_url?: string;
+    } | null = null;
+    let failAttachment = true;
+    mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('SELECT * FROM letter_drafts')) return { rows: [draft] };
+      if (sql.includes("WHERE draft_id = $1 AND order_type = 'jit_mail'")) {
+        return { rows: storedOrder ? [storedOrder] : [] };
+      }
+      if (sql.includes('SELECT credits FROM users')) return { rows: [{ credits: 0 }] };
+      if (sql.includes('INSERT INTO orders')) {
+        storedOrder = {
+          ...baseOrder,
+          order_id: String(params[0]),
+          idempotency_key: `jit-checkout:${String(params[0])}`,
+          checkout_expires_at: params[8] as Date
+        };
+        return { rows: [storedOrder] };
+      }
+      if (sql.startsWith('SELECT * FROM orders WHERE order_id')) {
+        return { rows: storedOrder ? [storedOrder] : [] };
+      }
+      if (sql.includes('SET stripe_checkout_session_id = $2')) {
+        if (failAttachment) {
+          failAttachment = false;
+          throw new Error('database process terminated before checkout attachment commit');
+        }
+        storedOrder = {
+          ...storedOrder!,
+          stripe_checkout_session_id: String(params[1]),
+          checkout_url: String(params[2])
+        };
+        return { rows: [storedOrder] };
+      }
+      return { rows: [] };
+    });
+    mocks.createJitSession.mockResolvedValue({
+      success: true,
+      sessionId: 'cs-replayed',
+      sessionUrl: 'https://checkout.stripe.com/c/pay/replayed'
+    });
+
+    await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toThrow(
+      'checkout attachment commit'
+    );
+    const recovered = await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+
+    expect(recovered).toMatchObject({
+      orderId: storedOrder?.order_id,
+      sessionId: 'cs-replayed',
+      reused: true
+    });
+    expect(mocks.createJitSession).toHaveBeenCalledTimes(2);
+    const idempotencyKeys = mocks.createJitSession.mock.calls.map(
+      ([params]) => params.idempotencyKey
+    );
+    expect(new Set(idempotencyKeys).size).toBe(1);
+    expect(idempotencyKeys[0]).toBe(storedOrder?.idempotency_key);
   });
 
   it('reports exact server-configured Pay & Send eligibility only when enabled', () => {
@@ -604,6 +716,7 @@ describe('commerceService', () => {
         {
           ...baseOrder,
           status: 'refund_pending',
+          refund_attempts: 5,
           stripe_payment_intent_id: 'pi-1',
           stripe_refund_id: 're-1'
         }
@@ -618,13 +731,53 @@ describe('commerceService', () => {
     expect(mocks.createRefund).not.toHaveBeenCalled();
   });
 
+  it('leases a refund so concurrent workers make only one external request', async () => {
+    let refundClaimed = false;
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate AS')) {
+        if (refundClaimed) return { rows: [] };
+        refundClaimed = true;
+        return {
+          rows: [
+            {
+              ...baseOrder,
+              status: 'refund_pending',
+              refund_attempts: 1,
+              previous_refund_attempts: 0,
+              stripe_payment_intent_id: 'pi-1'
+            }
+          ]
+        };
+      }
+      if (sql.includes('SET stripe_refund_id = $2')) {
+        return { rows: [{ order_id: 'order-1' }] };
+      }
+      return { rows: [] };
+    });
+    mocks.createRefund.mockResolvedValue({ id: 're-1', status: 'pending' });
+
+    const results = await Promise.all([
+      requestRefund('order-1', 'provider rejected'),
+      requestRefund('order-1', 'provider rejected')
+    ]);
+
+    expect(results.sort()).toEqual([false, true]);
+    expect(mocks.findRefund).toHaveBeenCalledTimes(1);
+    expect(mocks.createRefund).toHaveBeenCalledTimes(1);
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("updated_at <= NOW() - ($4 * INTERVAL '1 second')"),
+      ['order-1', 'provider rejected', 5, 300]
+    );
+  });
+
   it('finds a previously created refund before retrying after a persistence failure', async () => {
     mocks.query.mockResolvedValueOnce({
       rows: [
         {
           ...baseOrder,
           status: 'refund_pending',
-          refund_attempts: 2,
+          refund_attempts: 5,
+          previous_refund_attempts: 5,
           stripe_payment_intent_id: 'pi-1',
           stripe_refund_id: null
         }
@@ -641,17 +794,19 @@ describe('commerceService', () => {
   it.each(['failed', 'canceled'])(
     'uses a new idempotency attempt after a known %s refund',
     async terminalRefundStatus => {
-      mocks.query.mockResolvedValueOnce({
-        rows: [
-          {
-            ...baseOrder,
-            status: 'refund_pending',
-            refund_attempts: 2,
-            stripe_payment_intent_id: 'pi-1',
-            stripe_refund_id: 're-failed'
-          }
-        ]
-      });
+      mocks.query
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              ...baseOrder,
+              status: 'refund_pending',
+              refund_attempts: 2,
+              stripe_payment_intent_id: 'pi-1',
+              stripe_refund_id: 're-failed'
+            }
+          ]
+        })
+        .mockResolvedValueOnce({ rows: [{ refund_attempts: 3 }] });
       mocks.retrieveRefund.mockResolvedValue({
         id: 're-failed',
         status: terminalRefundStatus
@@ -661,7 +816,7 @@ describe('commerceService', () => {
       await expect(requestRefund('order-1', 'retry')).resolves.toBe(true);
 
       expect(mocks.findRefund).toHaveBeenCalledWith('pi-1', 'order-1');
-      expect(mocks.createRefund).toHaveBeenCalledWith('pi-1', 'order-1', 2);
+      expect(mocks.createRefund).toHaveBeenCalledWith('pi-1', 'order-1', 3);
     }
   );
 });

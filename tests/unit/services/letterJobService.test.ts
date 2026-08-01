@@ -153,6 +153,44 @@ describe('mail outbox retries', () => {
     expect([first.claimed, second.claimed].sort()).toEqual([false, true]);
   });
 
+  it('replays with the same provider key after acceptance persistence crashes', async () => {
+    let claims = 0;
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) {
+        claims += 1;
+        return { rows: claims <= 2 ? [{ ...job }] : [] };
+      }
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      if (sql.includes("SET status = 'pending'")) return { rows: [{ job_id: 'job-1' }] };
+      return { rows: [] };
+    });
+    mocks.transaction
+      .mockRejectedValueOnce(new Error('database connection lost before commit acknowledgement'))
+      .mockImplementation(
+        async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) =>
+          callback({ query: clientQuery })
+      );
+
+    const first = await processLetterJob('job-1', { retryBaseDelayMs: 0 });
+    const replay = await processLetterJob('job-1', { retryBaseDelayMs: 0 });
+
+    expect(first).toMatchObject({ completed: false, retryScheduled: true });
+    expect(replay).toMatchObject({ completed: true, retryScheduled: false });
+    expect(sendLetter).toHaveBeenCalledTimes(2);
+    expect(sendLetter.mock.calls.map(([params]) => params.idempotencyKey)).toEqual([
+      'letter-1',
+      'letter-1',
+    ]);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("WHERE job_id = $1 AND status = 'processing'"),
+      expect.arrayContaining(['job-1', expect.stringContaining('reconciliation required')])
+    );
+    expect(clientQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'refund_pending'"),
+      expect.anything()
+    );
+  });
+
   it('reschedules a timed-out send for hourly recovery', async () => {
     mockClaims();
     sendLetter.mockResolvedValue({
@@ -171,6 +209,66 @@ describe('mail outbox retries', () => {
     expect(clientQuery).toHaveBeenCalledWith(
       expect.stringContaining("SET status = $1"),
       expect.arrayContaining(['pending'])
+    );
+  });
+
+  it('does not refund an ambiguous provider timeout when the attempt counter is exhausted', async () => {
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) {
+        return { rows: [{ ...job, attempts: 5, max_attempts: 5 }] };
+      }
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      return { rows: [] };
+    });
+    sendLetter.mockResolvedValue({
+      success: false,
+      trackingId: '',
+      error: 'network timeout after submission',
+      metadata: { retryable: true },
+    });
+
+    const result = await processLetterJob('job-1', {
+      providerRetries: 1,
+      retryBaseDelayMs: 0,
+      random: () => 0,
+    });
+
+    expect(result).toMatchObject({ completed: false, retryScheduled: true });
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining('THEN GREATEST(max_attempts - 1, 0)'),
+      expect.arrayContaining(['pending'])
+    );
+    expect(clientQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'refund_pending'"),
+      expect.anything()
+    );
+  });
+
+  it('moves an explicitly rejected pre-provider submission to refund recovery', async () => {
+    mockClaims();
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET status = 'refund_pending'")) {
+        return { rows: [{ order_id: 'order-1' }] };
+      }
+      return { rows: [] };
+    });
+    sendLetter.mockResolvedValue({
+      success: false,
+      trackingId: '',
+      error: 'HTTP 400 invalid address',
+      metadata: { retryable: false },
+    });
+
+    const result = await processLetterJob('job-1', { providerRetries: 1 });
+
+    expect(result).toMatchObject({ completed: false, retryScheduled: false });
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'refund_pending'"),
+      ['letter-1', 'HTTP 400 invalid address']
+    );
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining("'provider.terminal_failure'"),
+      expect.arrayContaining(['order-1'])
     );
   });
 

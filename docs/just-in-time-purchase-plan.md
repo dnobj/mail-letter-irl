@@ -264,11 +264,18 @@ Add environment-specific settings without committing values:
 - `STRIPE_JIT_POSTCARD_PRICE_ID`
 - `JIT_CHECKOUT_EXPIRY_MINUTES`
 - `JIT_REFUND_RETRY_LIMIT`
+- `JIT_REFUND_RETRY_DELAY_SECONDS`
 - `IMAGE_ENTITLEMENTS_PER_JIT_ORDER`
 - `IMAGE_TRIAL_ENABLED`
 - `IMAGE_TRIAL_DAILY_BUDGET_CENTS`
 
 Price IDs and webhook secrets must use Railway environment variables and must never be shared between development and production.
+
+The implemented database and provider transaction boundaries are documented in
+[`security-and-policy.md`](security-and-policy.md#pay--send-acid-and-distributed-transaction-boundaries).
+PostgreSQL provides ACID guarantees for local state. Stripe and mail/image
+provider calls use durable intent, idempotency, outbox work, and compensation;
+they are not part of a database transaction.
 
 ## Verification and Acceptance Criteria
 

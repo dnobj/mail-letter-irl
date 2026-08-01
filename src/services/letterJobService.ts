@@ -89,7 +89,10 @@ function errorResult(error: unknown): ProviderResult {
     trackingId: '',
     error: message,
     metadata: {
-      retryable: /timeout|timed out|network|fetch failed|econnreset|econnrefused|socket/i.test(message),
+      // A thrown provider error has no authoritative rejection response. Its
+      // outcome is therefore ambiguous and must be retried with the stable
+      // letter idempotency key instead of being treated as safe to refund.
+      retryable: true,
     },
   };
 }
@@ -369,6 +372,47 @@ async function completeJob(
   });
 }
 
+async function recoverProviderAcceptancePersistence(
+  job: LetterJob,
+  error: unknown
+): Promise<'completed' | 'scheduled' | 'stale'> {
+  const message = error instanceof Error ? error.message : 'Provider acceptance persistence failed';
+  try {
+    // The provider call already succeeded, so this is reconciliation rather
+    // than another delivery attempt. If COMMIT actually succeeded but its
+    // acknowledgement was lost, the status predicate leaves the completed job
+    // untouched. Otherwise the same provider idempotency key is retried later.
+    const recovered = await query<{ job_id: string }>(
+      `UPDATE letter_jobs
+       SET status = 'pending',
+           attempts = GREATEST(attempts - 1, 0),
+           next_attempt_at = NOW() + INTERVAL '1 minute',
+           locked_at = NULL,
+           last_error = $2,
+           error_message = $2,
+           updated_at = NOW()
+       WHERE job_id = $1 AND status = 'processing'
+       RETURNING job_id`,
+      [job.job_id, `Provider accepted; database reconciliation required: ${message}`]
+    );
+    if (recovered.rows[0]) return 'scheduled';
+
+    const current = await query<{ status: LetterJob['status'] }>(
+      'SELECT status FROM letter_jobs WHERE job_id = $1',
+      [job.job_id]
+    );
+    return current.rows[0]?.status === 'completed' ? 'completed' : 'stale';
+  } catch (recoveryError) {
+    console.error(
+      `[Outbox] Provider accepted ${job.letter_id}, but persistence recovery could not be scheduled:`,
+      recoveryError
+    );
+    // Leave the durable processing lease in place. The stale-job claimant will
+    // retry with the same provider idempotency key after a process restart.
+    return 'stale';
+  }
+}
+
 async function failOrRescheduleJob(
   job: LetterJob,
   result: ProviderResult,
@@ -376,7 +420,10 @@ async function failOrRescheduleJob(
 ): Promise<boolean> {
   const error = result.error || 'Provider returned an unsuccessful result';
   const retryable = isTransientProviderFailure(result);
-  const terminal = !retryable || job.attempts >= job.max_attempts;
+  // Only an explicit provider rejection proves that no mail was accepted and
+  // is therefore safe to compensate with a refund. Ambiguous failures retain
+  // durable outbox work and stable idempotency until reconciliation succeeds.
+  const terminal = !retryable;
   const nextAttemptAt = terminal
     ? new Date()
     : new Date(Date.now() + retryDelayMilliseconds(job.attempts, random));
@@ -386,7 +433,12 @@ async function failOrRescheduleJob(
       `UPDATE letter_jobs
        SET status = $1, next_attempt_at = $2, locked_at = NULL,
            completed_at = CASE WHEN $1 = 'failed' THEN NOW() ELSE NULL END,
-           attempts = CASE WHEN $1 = 'failed' AND $3 = false THEN max_attempts ELSE attempts END,
+           attempts = CASE
+             WHEN $1 = 'failed' AND $3 = false THEN max_attempts
+             WHEN $1 = 'pending' AND attempts >= max_attempts
+               THEN GREATEST(max_attempts - 1, 0)
+             ELSE attempts
+           END,
            last_error = $4, error_message = $4, updated_at = NOW()
        WHERE job_id = $5`,
       [terminal ? 'failed' : 'pending', nextAttemptAt, retryable, error, job.job_id]
@@ -430,8 +482,22 @@ async function processClaimedJob(
     const { result, providerName } = await submitToProvider(letter, job, options);
 
     if (result.success) {
-      await completeJob(job, letter, providerName, result);
-      return { claimed: true, completed: true, retryScheduled: false, job };
+      try {
+        await completeJob(job, letter, providerName, result);
+        return { claimed: true, completed: true, retryScheduled: false, job };
+      } catch (error) {
+        const recovery = await recoverProviderAcceptancePersistence(job, error);
+        if (recovery === 'completed') {
+          return { claimed: true, completed: true, retryScheduled: false, job };
+        }
+        return {
+          claimed: true,
+          completed: false,
+          retryScheduled: true,
+          job,
+          error: error instanceof Error ? error.message : 'Provider acceptance persistence failed',
+        };
+      }
     }
 
     const retryScheduled = await failOrRescheduleJob(job, result, random);

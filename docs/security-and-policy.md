@@ -49,3 +49,79 @@
   letter text, images, or card data.
 - Terminal failures before provider acceptance enter an idempotent monetary
   refund path. They do not create general-purpose credit.
+
+## Pay & Send ACID and distributed transaction boundaries
+
+PostgreSQL is the ACID boundary. Stripe and the mail/image providers are never
+called inside a database transaction. Cross-system work uses durable intent,
+stable idempotency keys, leases, transactional outbox rows, and reconciliation.
+
+### Atomicity
+
+- Checkout creation first commits an authoritative `orders` intent. Stripe is
+  then called with the order's stable idempotency key, and a second transaction
+  attaches the returned Session. A crash between those steps leaves a reusable
+  order; retry asks Stripe for and reattaches the same Session. A racing webhook
+  can bind the order from signed metadata, and maintenance reconciles attached
+  paid Sessions whose webhook was missed.
+- A paid webhook claims its event ID and locks the order in one transaction.
+  Pack credit, its ledger audit, image entitlement, and final order state commit
+  together. For JIT mail, the paid state, exact-draft consumption, letter,
+  funding link, image entitlement, outbox job, and fulfillment state commit
+  together. A savepoint converts a pre-provider fulfillment rejection into a
+  durable `refund_pending` outcome without retaining partial mail state.
+- A prepaid send locks the draft and user, deducts the credit ledger, creates
+  the letter, consumes the draft, and inserts the outbox job in one transaction.
+- A mail provider call occurs only after the outbox commit. Provider acceptance
+  is persisted in a later transaction that updates the letter, job, JIT order,
+  and order event together. If that persistence is ambiguous, the job is kept
+  recoverable and replayed with the same letter idempotency key; it is not
+  reclassified as a pre-provider failure.
+- Refund work atomically acquires a database lease, calls Stripe outside the
+  transaction, and then locks/finalizes the order, revocations, and audit event
+  in one transaction. If Stripe succeeds before persistence crashes, retry
+  discovers the existing refund by payment intent and order metadata.
+- Image generation reserves and charges an exact entitlement in one transaction
+  before the provider call. Provider success marks that durable reservation
+  consumed; a known failure transactionally releases only that reservation.
+
+### Consistency
+
+- Database checks prevent negative cached balances, negative or over-consumed
+  ledger buckets, invalid order/funding/reservation states, non-positive grants,
+  and entitlement consumption above its quantity.
+- Unique constraints prevent duplicate Stripe Session, PaymentIntent, refund,
+  application idempotency, webhook-event, grant-source, JIT-letter-funding, and
+  active-JIT-draft records.
+- Runtime transitions additionally require locked ownership and exact
+  `user_id`/`draft_id`/paid-order binding. JIT funding cannot debit prepaid
+  balance, and a letter funded by one order cannot satisfy another order.
+- State changes use locked current rows and status predicates. Late payment
+  failures, expirations, refunds, and provider outcomes cannot move an already
+  terminal order backward.
+
+### Isolation
+
+- Draft, order, user/ledger, entitlement, reservation, and outbox candidate rows
+  are locked before decisions that consume or transition them. `SKIP LOCKED`
+  gives one worker a job; stale leases recover after process loss.
+- Concurrent webhook deliveries compete on the unique event claim and order
+  lock. Concurrent checkout/prepaid/JIT paths serialize on the same draft, and
+  the partial unique index remains a final database guard.
+- Refund workers use an atomic time-bounded lease. A separate order lock
+  serializes the returned Stripe result with refund webhooks so grants are
+  revoked at most once.
+
+### Durability and compensation
+
+- Orders, webhook claims, event history, credit transactions, entitlements,
+  reservations, letters, refund attempts, and outbox work are committed data;
+  none depends on process memory or an in-process queue.
+- Stable Stripe order/attempt keys and the letter ID used as the provider key
+  make crash/redeploy replay deterministic. Maintenance reconciles paid
+  Sessions, paid orders, stale mail jobs, and pending refunds.
+- Only an explicit provider rejection is treated as proof that no mail was
+  accepted and is eligible for automatic refund. Timeouts, thrown provider
+  errors, and acceptance-persistence failures remain recoverable because their
+  external outcome is ambiguous. This is the unavoidable compensation boundary
+  where no distributed ACID transaction exists.

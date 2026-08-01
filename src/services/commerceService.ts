@@ -29,6 +29,7 @@ const ACTIVE_JIT_STATUSES: OrderStatus[] = [
   'refund_pending'
 ];
 const PURCHASE_CREDIT_EXPIRY_DAYS = 730;
+const MINIMUM_REFUND_RETRY_DELAY_SECONDS = 30;
 
 export interface CommerceCheckoutResult {
   success: true;
@@ -115,6 +116,15 @@ export interface SendEligibility {
 function integerSetting(name: string, fallback: number): number {
   const parsed = Number.parseInt(process.env[name] || '', 10);
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+type RefundClaim = Order & { previous_refund_attempts: number };
+
+function refundRetryDelaySeconds(): number {
+  return Math.max(
+    MINIMUM_REFUND_RETRY_DELAY_SECONDS,
+    integerSetting('JIT_REFUND_RETRY_DELAY_SECONDS', 300)
+  );
 }
 
 export function getSendEligibility(
@@ -1097,16 +1107,32 @@ export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
 }
 
 export async function requestRefund(orderId: string, reason: string): Promise<boolean> {
-  const claimed = await query<Order>(
-    `UPDATE orders
-     SET refund_attempts = refund_attempts + 1,
+  const retryLimit = integerSetting('JIT_REFUND_RETRY_LIMIT', 5);
+  const claimed = await query<RefundClaim>(
+    `WITH candidate AS (
+       SELECT order_id, refund_attempts
+       FROM orders
+       WHERE order_id = $1 AND status = 'refund_pending'
+         AND stripe_payment_intent_id IS NOT NULL
+         AND (
+           refund_attempts = 0
+           OR updated_at <= NOW() - ($4 * INTERVAL '1 second')
+         )
+       FOR UPDATE
+     )
+     UPDATE orders AS refundable
+     SET refund_attempts = CASE
+           WHEN refundable.stripe_refund_id IS NULL
+             AND candidate.refund_attempts < $3
+             THEN candidate.refund_attempts + 1
+           ELSE refundable.refund_attempts
+         END,
          refund_pending_at = COALESCE(refund_pending_at, NOW()),
          last_error = $2, updated_at = NOW()
-     WHERE order_id = $1 AND status = 'refund_pending'
-       AND stripe_payment_intent_id IS NOT NULL
-       AND refund_attempts < $3
-     RETURNING *`,
-    [orderId, reason, integerSetting('JIT_REFUND_RETRY_LIMIT', 5)]
+     FROM candidate
+     WHERE refundable.order_id = candidate.order_id
+     RETURNING refundable.*, candidate.refund_attempts AS previous_refund_attempts`,
+    [orderId, reason, retryLimit, refundRetryDelaySeconds()]
   );
   const order = claimed.rows[0];
   if (!order?.stripe_payment_intent_id) return false;
@@ -1124,21 +1150,47 @@ export async function requestRefund(orderId: string, reason: string): Promise<bo
       }
     }
     refund ??= await findPaymentRefund(order.stripe_payment_intent_id, order.order_id);
-    refund ??= await createPaymentRefund(
-      order.stripe_payment_intent_id,
-      order.order_id,
-      order.refund_attempts
-    );
+    if (!refund) {
+      let attempt = order.refund_attempts;
+      if (order.stripe_refund_id) {
+        const retry = await query<{ refund_attempts: number }>(
+          `UPDATE orders
+           SET refund_attempts = refund_attempts + 1, updated_at = NOW()
+           WHERE order_id = $1 AND status = 'refund_pending'
+             AND refund_attempts = $2 AND refund_attempts < $3
+           RETURNING refund_attempts`,
+          [orderId, order.refund_attempts, retryLimit]
+        );
+        if (!retry.rows[0]) return false;
+        attempt = retry.rows[0].refund_attempts;
+      } else {
+        const previousAttempts = Number(
+          order.previous_refund_attempts ?? order.refund_attempts
+        );
+        if (previousAttempts >= retryLimit) return false;
+      }
+      refund = await createPaymentRefund(
+        order.stripe_payment_intent_id,
+        order.order_id,
+        attempt
+      );
+    }
     const nextStatus: OrderStatus = refund.status === 'succeeded' ? 'refunded' : 'refund_pending';
     await transaction(async client => {
-      await client.query(
+      // Serialize the external outcome with refund webhooks. If a webhook
+      // finalized the same refund while Stripe was in flight, its transaction
+      // wins and this path becomes a no-op instead of replaying revocations.
+      await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [orderId]);
+      const finalized = await client.query<{ order_id: string }>(
         `UPDATE orders
          SET stripe_refund_id = $2, status = $3,
              refunded_at = CASE WHEN $3 = 'refunded' THEN NOW() ELSE refunded_at END,
              updated_at = NOW()
-         WHERE order_id = $1`,
+         WHERE order_id = $1 AND status = 'refund_pending'
+         RETURNING order_id`,
         [orderId, refund.id, nextStatus]
       );
+      if (!finalized?.rows[0]) return;
       if (nextStatus === 'refunded') {
         if (order.order_type === 'letter_pack') {
           await revokePackCredits(client, order);
@@ -1158,7 +1210,7 @@ export async function requestRefund(orderId: string, reason: string): Promise<bo
   } catch (error) {
     await query(
       `UPDATE orders SET last_error_code = 'REFUND_REQUEST_FAILED', last_error = $2,
-         updated_at = NOW() WHERE order_id = $1`,
+         updated_at = NOW() WHERE order_id = $1 AND status = 'refund_pending'`,
       [orderId, error instanceof Error ? error.message : 'Refund request failed']
     );
     return false;
@@ -1227,10 +1279,13 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
     `SELECT order_id, last_error FROM orders
      WHERE status = 'refund_pending'
        AND stripe_payment_intent_id IS NOT NULL
-       AND refund_attempts < $1
+       AND (
+         refund_attempts = 0
+         OR updated_at <= NOW() - ($1 * INTERVAL '1 second')
+       )
      ORDER BY refund_pending_at NULLS FIRST, created_at
      LIMIT 25`,
-    [integerSetting('JIT_REFUND_RETRY_LIMIT', 5)]
+    [refundRetryDelaySeconds()]
   );
   for (const order of refunds.rows) {
     if (
