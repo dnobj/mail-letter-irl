@@ -403,6 +403,34 @@ describe('commerceService', () => {
     );
   });
 
+  // The gate is "did money move", not "which event carried the news". A
+  // delayed-payment method lands its money on async_payment_succeeded, so
+  // narrowing this to checkout.session.completed would silently drop it.
+  it.each(['checkout.session.completed', 'checkout.session.async_payment_succeeded'])(
+    'records unmatched money whichever paid event delivers it (%s)',
+    async (eventType) => {
+      mocks.getPackProduct.mockReturnValue(null);
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+        return { rows: [] };
+      });
+
+      const event = checkoutEvent({ client_reference_id: null, metadata: {} }) as any;
+      event.type = eventType;
+
+      await expect(processStripeWebhookEvent(event)).resolves.toMatchObject({ duplicate: false });
+
+      expect(mocks.query).toHaveBeenCalledWith(
+        expect.stringContaining("processing_status = 'unmatched'"),
+        ['evt-1', 'pi-1']
+      );
+      expect(mocks.query).toHaveBeenCalledWith(
+        expect.stringContaining("'stripe_money_event_unmatched'"),
+        expect.arrayContaining(['evt-1'])
+      );
+    }
+  );
+
   it('does not raise unmatched money for an unpaid session that matches no order', async () => {
     mocks.getPackProduct.mockReturnValue(null);
     mocks.query.mockImplementation(async (sql: string) => {

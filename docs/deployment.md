@@ -249,12 +249,24 @@ re-dispatched: `POST /api/admin/jobs/{jobId}/retry` rejects it, and only
 `resolve-ambiguous` with conclusive provider evidence can finish it. Each
 ambiguous outcome raises a durable `mail_provider_outcome_ambiguous` alert.
 
-`stripe_money_event_unmatched` means a refund or dispute arrived before an
-authoritative order relation existed. The webhook claim and sanitized alert are
-durable. A later checkout with the same payment intent/order relation resolves
-the alert and moves the order directly to `refund_pending` or `disputed` before
-mail creation. Events without enough provider references remain open for
-operator reconciliation and must never be dismissed merely because replay is
+`stripe_money_event_unmatched` covers two different situations, and they have
+different recovery paths.
+
+**A refund or dispute arrived before an authoritative order relation existed.**
+This is a genuine race, so a later checkout with the same payment intent/order
+relation resolves the alert automatically and moves the order directly to
+`refund_pending` or `disputed` before mail creation.
+
+**A paid Checkout Session could not be bound to any order** — the amount was
+not configured, or the session carried no usable identity. Here the checkout has
+already happened, so **no later checkout is coming and nothing auto-recovers
+it**. Manual Stripe redelivery does not help either: the replayed event is
+deduplicated by its event ID and returns before the recovery sweep. The critical
+alert *is* the recovery path. An operator must reconcile the payment by hand,
+after fixing the configuration that caused the refusal.
+
+Events without enough provider references remain open for operator
+reconciliation and must never be dismissed merely because replay is
 deduplicated.
 
 Pack amount variables (`STRIPE_*_AMOUNT_CENTS`) are required alongside price
