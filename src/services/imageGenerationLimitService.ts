@@ -595,10 +595,14 @@ export async function reconcileGenerationReservations(
   const boundedLimit = Math.min(500, Math.max(1, limit));
   return transaction(async client => {
     const staleReserved = await client.query<ReservationRow>(
+      // This is the one transaction that spans multiple accounts, so it cannot
+      // rely on the single-account guarantee alone. Ordering by user_id makes
+      // two overlapping maintenance runs walk accounts in the same direction,
+      // which is what keeps their per-account locks from inverting.
       `SELECT reservation_id, entitlement_id, user_id, status
        FROM image_generation_reservations
        WHERE status = 'reserved' AND lease_expires_at <= NOW()
-       ORDER BY lease_expires_at, reservation_id
+       ORDER BY user_id, lease_expires_at, reservation_id
        FOR UPDATE SKIP LOCKED
        LIMIT $1`,
       [boundedLimit]

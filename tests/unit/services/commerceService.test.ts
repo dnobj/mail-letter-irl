@@ -95,6 +95,8 @@ function checkoutEvent(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
+const ACCOUNT_LOCK_SQL = 'SELECT user_id FROM users WHERE user_id = $1 FOR UPDATE';
+
 describe('commerceService', () => {
   it('uses the same active JIT status set as the database uniqueness policy', () => {
     expect(ACTIVE_JIT_STATUSES).toEqual([
@@ -348,14 +350,46 @@ describe('commerceService', () => {
       String(call[0]).includes('credit_ledger') ||
       String(call[0]).includes('image_entitlements'))).toBe(true);
 
-    const statements = mocks.query.mock.calls
-      .map(call => String(call[0]))
-      .filter(sql =>
-        sql.includes('FROM users WHERE user_id = $1 FOR UPDATE') ||
-        sql.includes('credit_ledger') ||
-        sql.includes('image_entitlements'));
-    const firstAccountLock = statements.findIndex(sql => sql.includes('FOR UPDATE'));
-    expect(firstAccountLock).toBe(0);
+    // Exact-match the account lock, not merely "contains FOR UPDATE": the
+    // ledger statements this guards against are themselves SELECT ... FOR
+    // UPDATE, so a looser predicate would still pass with the lock removed.
+    const ordered = mocks.query.mock.calls
+      .filter(call =>
+        String(call[0]) === ACCOUNT_LOCK_SQL ||
+        String(call[0]).includes('credit_ledger') ||
+        String(call[0]).includes('image_entitlements'));
+    expect([String(ordered[0]?.[0]), ordered[0]?.[1]]).toEqual([ACCOUNT_LOCK_SQL, ['user-1']]);
+  });
+
+  it('refuses to adopt a legacy pack session when its amount is not configured', async () => {
+    mocks.getPackProduct.mockReturnValue({
+      productCode: 'credit-pack-4',
+      priceId: 'price-pack',
+      amountCents: 0,
+      currency: 'usd',
+      credits: 4,
+      name: 'Starter Pack',
+      description: 'Two prepaid letters'
+    });
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-legacy' }] };
+      return { rows: [] };
+    });
+
+    await expect(processStripeWebhookEvent(checkoutEvent({
+      id: 'cs-legacy',
+      client_reference_id: null,
+      metadata: { userId: 'user-1', productId: 'credit-pack-4' },
+      amount_total: 500
+    }) as any)).resolves.toMatchObject({ duplicate: false });
+
+    // Inserting a zero amount would violate the amount_cents CHECK and roll
+    // back the webhook claim, leaving Stripe to retry forever with no signal.
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO orders'),
+      expect.anything()
+    );
+    expect(mocks.addCredits).not.toHaveBeenCalled();
   });
 
   it('refuses a pack checkout when its amount is not configured', async () => {

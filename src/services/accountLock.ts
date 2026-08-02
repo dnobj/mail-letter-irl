@@ -22,6 +22,12 @@ import type pg from 'pg';
  * The lock is deliberately taken with a `SELECT ... FOR UPDATE` rather than a
  * no-op `UPDATE` so it never touches `updated_at` and never fails when the
  * account row does not exist.
+ *
+ * This makes two transactions touching the *same* account safe. A transaction
+ * that spans several accounts must additionally visit them in a deterministic
+ * account order, or two such transactions can still invert against each other;
+ * `reconcileGenerationReservations` is the only such path and orders by
+ * `user_id` for exactly that reason.
  */
 export async function lockAccountForBalanceChange(
   client: Pick<pg.PoolClient, 'query'>,

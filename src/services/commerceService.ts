@@ -585,6 +585,16 @@ async function createLegacyPackOrder(
   if (!userId || !product) {
     return null;
   }
+  // Without a configured amount this INSERT would violate the amount_cents
+  // CHECK and roll back the whole webhook transaction, including the event
+  // claim, leaving Stripe to retry forever with no operator signal. Refuse the
+  // adoption instead so the unmatched-money path records it durably.
+  if (!Number.isInteger(product.amountCents) || product.amountCents <= 0) {
+    writeDiagnostic('error', 'commerce.legacy_pack_amount_not_configured', {
+      productCode: product.productCode
+    });
+    return null;
+  }
   const orderId = `stripe-${session.id}`;
   const inserted = await client.query<Order>(
     `INSERT INTO orders (
