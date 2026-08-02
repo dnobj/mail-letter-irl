@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { ServerResponse } from "node:http";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   denyLegacyPublicAdminRoute,
@@ -100,15 +100,50 @@ describe("legacy public admin route denial", () => {
     const handlerSource = await readFile("src/api/adminApiHandler.ts", "utf8");
     const guardSource = await readFile("src/mcp/legacyAdminRoutes.ts", "utf8");
 
-    // Both legacy dispatch sites match on the bare prefix. If either narrows or
-    // widens, the guard must move with it or a public path slips through.
+    // Both legacy dispatch sites match on the bare prefix. A substring check
+    // alone only catches a NARROWED dispatcher, so it is paired with the
+    // literal sweep below, which catches a widened one.
     expect(httpServerSource).toContain("url.pathname.startsWith('/api/admin')");
     expect(handlerSource).toContain("pathname.startsWith('/api/admin')");
     expect(guardSource).toContain('pathname.startsWith("/api/admin")');
 
-    // Any path the dispatcher would accept must also be denied by the guard.
-    const dispatcherAccepts = (pathname: string) =>
-      pathname.startsWith("/api/admin");
+    // Every admin-ish path literal either dispatch site mentions must be inside
+    // the guard's surface. Appending a clause such as
+    // `|| url.pathname.startsWith('/api/adm')` introduces a literal that is a
+    // strict prefix of /api/admin, which the guard does not deny, and this
+    // fails rather than passing on the still-present original substring.
+    const adminishLiterals = (source: string): string[] => [
+      ...new Set(
+        [...source.matchAll(/['"`](\/api\/adm[^'"`]*)['"`]/g)].map(
+          (match) => match[1],
+        ),
+      ),
+    ];
+
+    const dispatcherLiterals = [
+      ...new Set([
+        ...adminishLiterals(httpServerSource),
+        ...adminishLiterals(handlerSource),
+      ]),
+    ].sort();
+
+    // Non-vacuity: the sweep must actually find the dispatch literals.
+    expect(dispatcherLiterals).toContain("/api/admin");
+    expect(dispatcherLiterals.length).toBeGreaterThan(1);
+
+    for (const literal of dispatcherLiterals) {
+      expect(
+        literal.startsWith("/api/admin"),
+        `dispatch literal ${literal} is wider than the guard surface /api/admin`,
+      ).toBe(true);
+      expect(
+        isLegacyPublicAdminPath(literal),
+        `dispatch literal ${literal} is not denied by the guard`,
+      ).toBe(true);
+    }
+
+    // Representative paths the bare-prefix dispatcher accepts, including the
+    // ones that previously bypassed the narrower guard.
     for (const pathname of [
       "/api/admin",
       "/api/admin/",
@@ -118,7 +153,6 @@ describe("legacy public admin route denial", () => {
       "/api/administrator",
       "/api/admin/image-generation/ambiguous",
     ]) {
-      expect(dispatcherAccepts(pathname)).toBe(true);
       expect(isLegacyPublicAdminPath(pathname)).toBe(true);
     }
   });
@@ -135,7 +169,7 @@ describe("legacy public admin route denial", () => {
     );
   });
 
-  it("warns without throwing when a coupled feature flag is enabled", async () => {
+  it("classifies coupled feature flags", async () => {
     const { findCoupledFeatureFlagWarnings, ADMIN_COUPLED_FEATURE_FLAGS } =
       await import("../../../src/admin/config.js");
 
@@ -157,16 +191,98 @@ describe("legacy public admin route denial", () => {
         IMAGE_TRIAL_ENABLED: "true",
       }),
     ).toEqual(["JIT_PURCHASE_ENABLED", "IMAGE_TRIAL_ENABLED"]);
+  });
 
-    // The detector must never be wired to a throw: a flag combination must not
-    // be able to boot-loop a running deployment.
-    expect(() =>
-      findCoupledFeatureFlagWarnings({ JIT_PURCHASE_ENABLED: "true" }),
-    ).not.toThrow();
+  describe("boot validation with coupled feature flags enabled", () => {
+    const OWNED_KEYS = [
+      "JIT_PURCHASE_ENABLED",
+      "IMAGE_TRIAL_ENABLED",
+      "ADMIN_ENABLED",
+      "LETTER_IRL_REQUIRE_AUTH",
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+      "DATABASE_URL",
+    ] as const;
 
-    const source = await readFile("src/mcp/httpServer.ts", "utf8");
-    expect(source).toContain("findCoupledFeatureFlagWarnings(process.env)");
-    expect(source).toContain("console.warn(");
+    let saved: Record<string, string | undefined>;
+
+    beforeEach(() => {
+      saved = Object.fromEntries(
+        OWNED_KEYS.map((key) => [key, process.env[key]]),
+      );
+
+      // LETTER_IRL_REQUIRE_AUTH is read into a module constant at import time,
+      // so it must be set before the dynamic import below. Disabling it also
+      // suppresses the unrelated CIMD startup warning, which is the other
+      // console.warn in this file — the spy therefore observes the coupling
+      // warning alone rather than passing on the wrong call.
+      process.env.LETTER_IRL_REQUIRE_AUTH = "false";
+      process.env.DATABASE_URL = "postgres://localhost/letterirl_test";
+      process.env.STRIPE_SECRET_KEY = "sk_test_boot_validation_fixture";
+      process.env.STRIPE_WEBHOOK_SECRET = "whsec_boot_validation_fixture";
+      delete process.env.ADMIN_ENABLED;
+    });
+
+    afterEach(() => {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      vi.resetModules();
+    });
+
+    async function loadBootValidation() {
+      vi.resetModules();
+      const module = await import("../../../src/mcp/httpServer.js");
+      return module.validateEnvironment;
+    }
+
+    it("emits the coupling warning and does not throw", async () => {
+      process.env.JIT_PURCHASE_ENABLED = "true";
+      process.env.IMAGE_TRIAL_ENABLED = "true";
+
+      const validateEnvironment = await loadBootValidation();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      // The real boot path, not the pure detector. If the coupling check is
+      // ever rewritten as a throw, this fails.
+      expect(() => validateEnvironment()).not.toThrow();
+
+      const messages = warn.mock.calls.map((call) => String(call[0]));
+      expect(messages).toHaveLength(2);
+      expect(messages[0]).toContain("JIT_PURCHASE_ENABLED=true");
+      expect(messages[1]).toContain("IMAGE_TRIAL_ENABLED=true");
+      for (const message of messages) {
+        expect(message).toContain("operator recovery is unreachable");
+        expect(message).toContain(
+          "docs/deployment.md#operator-recovery-interaction",
+        );
+      }
+      warn.mockRestore();
+    });
+
+    it("stays silent when the coupled flags are disabled", async () => {
+      process.env.JIT_PURCHASE_ENABLED = "false";
+      process.env.IMAGE_TRIAL_ENABLED = "false";
+
+      const validateEnvironment = await loadBootValidation();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      expect(() => validateEnvironment()).not.toThrow();
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it("still refuses ADMIN_ENABLED=true, proving this is the real boot path", async () => {
+      // Negative control. Without it, `not.toThrow()` above could be green
+      // because the imported function is not the one that guards startup.
+      process.env.ADMIN_ENABLED = "true";
+
+      const validateEnvironment = await loadBootValidation();
+      expect(() => validateEnvironment()).toThrowError(
+        expect.objectContaining({ code: "ADMIN_LEGACY_ROUTES_DISABLED" }),
+      );
+    });
   });
 
   it("documents the coupling between the admin denial and the JIT flags", async () => {
