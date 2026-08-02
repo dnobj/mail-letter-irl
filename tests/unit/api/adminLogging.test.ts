@@ -5,7 +5,8 @@ const { query } = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock("../../../src/db/index.js", () => ({ query, transaction: vi.fn() }));
 
 vi.mock("../../../src/api/middleware/adminAuth.js", () => ({
-  authenticateAdmin: vi.fn().mockResolvedValue({ userId: "auth0|private-admin" })
+  authenticateAdmin: vi.fn().mockResolvedValue({ userId: "auth0|private-admin" }),
+  validateAdminRequestBoundary: vi.fn(() => true)
 }));
 vi.mock("../../../src/services/stripeReconciliationService.js", () => ({
   reconcileStripePayments: vi.fn(),

@@ -72,11 +72,11 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
   durable `refund_pending` outcome without retaining partial mail state.
 - A prepaid send locks the draft and user, deducts the credit ledger, creates
   the letter, consumes the draft, and inserts the outbox job in one transaction.
-- A mail provider call occurs only after the outbox commit. Provider acceptance
-  is persisted in a later transaction that updates the letter, job, JIT order,
-  and order event together. If that persistence is ambiguous, the job is kept
-  recoverable and replayed with the same letter idempotency key; it is not
-  reclassified as a pre-provider failure.
+- A mail provider call occurs only after the outbox commit and a second
+  transaction locks funding order, letter, and job before marking the durable
+  provider boundary. Once dispatch begins, timeout, crash, or ambiguous
+  persistence quarantines the job and holds JIT funding for operator
+  reconciliation; it is never automatically submitted again.
 - Refund work atomically acquires a database lease, calls Stripe outside the
   transaction, and then locks/finalizes the order, revocations, and audit event
   in one transaction. If Stripe succeeds before persistence crashes, retry
@@ -124,9 +124,9 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
 - Orders, webhook claims, event history, credit transactions, entitlements,
   reservations, letters, refund attempts, and outbox work are committed data;
   none depends on process memory or an in-process queue.
-- Stable Stripe order/attempt keys and the letter ID used as the provider key
-  make crash/redeploy replay deterministic. Maintenance reconciles paid
-  Sessions, paid orders, stale mail jobs, and pending refunds.
+- Stable Stripe order/attempt keys make financial replay deterministic.
+  Pre-dispatch mail failures have a bounded durable attempt count; stale work
+  after the provider boundary becomes an inspectable hold, not another send.
 - Only an explicit provider rejection is treated as proof that no mail was
   accepted and is eligible for automatic refund. Timeouts, thrown provider
   errors, and acceptance-persistence failures remain recoverable because their

@@ -535,7 +535,7 @@ linked PR before enabling Pay & Send.
 
 - [ ] Use only the Railway **development** services and isolated Neon development database.
 - [ ] Confirm migration `021_jit_commerce_foundation.sql` is recorded in development.
-- [ ] Before applying migration 023, rerun both migration orders with the real issue #162 `022_admin_audit.sql`; do not treat the existing synthetic 022 probe as compatibility evidence. Confirm 023 is independently recorded only after both orders converge.
+- [ ] Before applying migration 023, rerun both migration orders with the exact issue #162 `022_admin_audit.sql`. Confirm 023 is independently recorded only after both orders converge structurally, including defaults, constraints, triggers/functions, and privileges.
 - [ ] Confirm Stripe is in sandbox/test mode and both JIT prices are active at USD 4.99.
 - [ ] Confirm the non-production mail provider is selected; no real mail may be submitted.
 - [ ] Start with `JIT_PURCHASE_ENABLED=false`; the test coordinator may enable it in development only for this test and must restore it afterward.
@@ -561,7 +561,9 @@ linked PR before enabling Pay & Send.
 - [ ] Start two refund-maintenance attempts concurrently and confirm only one acquires the lease and contacts Stripe. Then interrupt persistence after Stripe creates the refund; on replay, confirm the existing refund is discovered and finalized without creating another.
 - [ ] Issue a partial sandbox refund and confirm the whole order and all entitlements are not marked refunded/revoked; then complete the full refund and verify terminal state.
 - [ ] Confirm provider acceptance changes the JIT order to `fulfilled`; failures before acceptance use refund handling and never resubmit an already accepted mail item.
-- [ ] After a sandbox provider accepts a submission, fault the database result-persistence step. Confirm the outbox remains recoverable, no refund is started, replay uses the same letter idempotency key, and the order eventually reaches `fulfilled` with one provider order.
+- [ ] After a sandbox provider accepts a submission, fault the database result-persistence step. Confirm the outbox becomes `held`/`ambiguous`, no refund or automatic resend starts, and an authenticated operator must reconcile the single provider outcome.
+- [ ] Race a full refund and a dispute against the final pre-dispatch lock. Confirm the winner atomically cancels undispatched mail or holds ambiguous dispatched mail; an admin retry must reject refunded, disputed, held, accepted, and exhausted jobs.
+- [ ] From the hardened local origin, inspect `commerce_operational_alerts`, acknowledge one, resolve one with a safe resolution code, and replay the same idempotency key. Confirm cross-origin, preflight, missing custom-header, non-JSON mutation, bad-CSRF, proxied, and unauthenticated requests fail closed without CORS readback.
 - [ ] Confirm a zero-entitlement account cannot use Letter IRL-funded generation but can upload or reuse an external/conversation-generated image. After provider generation succeeds, simulate temporary-image storage failure and confirm the entitlement is still consumed.
 - [ ] Stop the application after reservation commit but before durable dispatch; after the pre-dispatch lease expires, run maintenance and confirm the exact entitlement is released once.
 - [ ] Simulate a definite 4xx provider rejection after dispatch and confirm the exact entitlement is released. Separately simulate a transport timeout or 5xx response and confirm the reservation becomes `ambiguous`, quota remains held, and no automatic retry spends a second provider generation.

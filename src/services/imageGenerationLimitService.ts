@@ -1,5 +1,6 @@
 /** Explicit, replay-safe image-generation entitlements and reservations. */
 
+import { createHash } from 'node:crypto';
 import type pg from 'pg';
 import { query, transaction } from '../db/index.js';
 import type { ImageEntitlement } from './types.js';
@@ -104,13 +105,16 @@ interface ReservationRow {
 }
 
 interface ResolutionAuditRow {
-  reservation_id: string;
-  user_id: string;
-  actor_id: string;
-  idempotency_key: string;
+  target_reference_hash: string;
+  actor_subject_hash: string;
+  subject_binding_hash: string;
   decision: AmbiguousGenerationDecision;
   resolution_reason: AmbiguousGenerationResolution;
   resulting_status: 'consumed' | 'released';
+}
+
+function resolutionSubjectBinding(reservationId: string, userId: string): string {
+  return createHash('sha256').update(`${reservationId}\0${userId}`).digest('hex');
 }
 
 function positiveIntegerSetting(name: string, fallback: number, minimum: number): number {
@@ -445,17 +449,17 @@ function replayResolution(
   params: ResolveAmbiguousGenerationReservationParams
 ): AmbiguousGenerationResolutionResult {
   if (
-    existing.reservation_id !== params.reservationId ||
-    existing.user_id !== params.expectedUserId ||
-    existing.actor_id !== params.actorId ||
+    existing.target_reference_hash !== createHash('sha256').update(params.reservationId).digest('hex') ||
+    existing.actor_subject_hash !== createHash('sha256').update(params.actorId).digest('hex') ||
+    existing.subject_binding_hash !== resolutionSubjectBinding(params.reservationId, params.expectedUserId) ||
     existing.decision !== params.decision ||
     existing.resolution_reason !== params.resolution
   ) {
     throw new ImageGenerationResolutionError('idempotency_conflict');
   }
   return {
-    reservationId: existing.reservation_id,
-    userId: existing.user_id,
+    reservationId: params.reservationId,
+    userId: params.expectedUserId,
     decision: existing.decision,
     resolution: existing.resolution_reason,
     resultingStatus: existing.resulting_status,
@@ -492,11 +496,14 @@ export async function resolveAmbiguousGenerationReservation(
       [params.idempotencyKey]
     );
     const replay = await client.query<ResolutionAuditRow>(
-      `SELECT reservation_id, user_id, actor_id, idempotency_key, decision,
-              resolution_reason, resulting_status
-       FROM image_generation_resolution_audit
-       WHERE idempotency_key = $1`,
-      [params.idempotencyKey]
+      `SELECT target_reference_hash, actor_subject_hash,
+              before_state->>'subjectBinding' AS subject_binding_hash,
+              after_state->>'decision' AS decision,
+              after_state->>'resolution' AS resolution_reason,
+              after_state->>'status' AS resulting_status
+       FROM commerce_operator_audit_events
+       WHERE idempotency_key_hash = $1`,
+      [createHash('sha256').update(params.idempotencyKey).digest('hex')]
     );
     if (replay.rows[0]) return replayResolution(replay.rows[0], params);
 
@@ -530,18 +537,24 @@ export async function resolveAmbiguousGenerationReservation(
     }
 
     await client.query(
-      `INSERT INTO image_generation_resolution_audit (
-         idempotency_key, reservation_id, user_id, actor_id, decision,
-         resolution_reason, prior_status, resulting_status
-       ) VALUES ($1, $2, $3, $4, $5, $6, 'ambiguous', $7)`,
+      `INSERT INTO commerce_operator_audit_events (
+         idempotency_key_hash, actor_subject_hash, operation, target_type,
+         target_reference_hash, reason_code, before_state, after_state, provider_evidence
+       ) VALUES ($1, $2, 'image_reservation_resolve', 'image_reservation', $3, $4, $5, $6, $7)`,
       [
-        params.idempotencyKey,
-        params.reservationId,
-        params.expectedUserId,
-        params.actorId,
-        params.decision,
+        createHash('sha256').update(params.idempotencyKey).digest('hex'),
+        createHash('sha256').update(params.actorId).digest('hex'),
+        createHash('sha256').update(params.reservationId).digest('hex'),
         params.resolution,
-        resultingStatus
+        JSON.stringify({ status: 'ambiguous', quotaHeld: true,
+          subjectBinding: resolutionSubjectBinding(params.reservationId, params.expectedUserId) }),
+        JSON.stringify({ status: resultingStatus, decision: params.decision,
+          resolution: params.resolution, quotaHeld: resultingStatus === 'consumed' }),
+        JSON.stringify({
+          classification: params.resolution,
+          providerReferenceStored: false,
+          evidenceReviewed: params.resolution !== 'customer_compensation'
+        })
       ]
     );
 

@@ -1,4 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import {
   copyFile,
   mkdir,
@@ -17,6 +19,24 @@ const { Pool } = pg;
 const enabled = process.env.LIRL_RUN_POSTGRES_INTEGRATION === 'true';
 const describePostgres = enabled ? describe : describe.skip;
 const repositoryMigrations = path.resolve(process.cwd(), 'db', 'migrations');
+const execFileAsync = promisify(execFile);
+
+async function actualMigration022(): Promise<{ name: string; sql: string }> {
+  const repository022 = (await readdir(repositoryMigrations)).find(file => file.startsWith('022_'));
+  if (repository022) {
+    return { name: repository022, sql: await (await import('node:fs/promises')).readFile(
+      path.join(repositoryMigrations, repository022), 'utf8'
+    ) };
+  }
+  const { stdout } = await execFileAsync('git', [
+    'show', 'origin/codex/issue-162-foundation:db/migrations/022_admin_audit.sql'
+  ], { cwd: process.cwd(), maxBuffer: 2_000_000 });
+  if (!stdout.includes('CREATE TABLE admin_audit_events') ||
+      !stdout.includes('reject_admin_audit_event_mutation')) {
+    throw new Error('Refusing synthetic 022: actual admin audit migration was not available');
+  }
+  return { name: '022_admin_audit.sql', sql: stdout };
+}
 
 function validateDisposableDatabaseUrl(value: string | undefined): string {
   if (!value) throw new Error('LIRL_TEST_DATABASE_URL is required for PostgreSQL integration');
@@ -70,81 +90,81 @@ async function prepareMigrationDirectory(
   const directory = path.join(root, 'db', 'migrations');
   await mkdir(directory, { recursive: true });
   const files = (await readdir(repositoryMigrations)).filter(file => file.endsWith('.sql'));
-  const repository022 = files.find(file => file.startsWith('022_'));
   for (const file of files) {
     if (file.startsWith('022_')) continue;
     await copyFile(path.join(repositoryMigrations, file), path.join(directory, file));
   }
-  const migration022Name = repository022 || '022_sequence_probe.sql';
+  const actual022 = await actualMigration022();
+  const migration022Name = actual022.name;
   if (include022) {
-    if (repository022) {
-      await copyFile(
-        path.join(repositoryMigrations, repository022),
-        path.join(directory, repository022)
-      );
-    } else {
-      await writeFile(
-        path.join(directory, migration022Name),
-        'CREATE TABLE migration_022_sequence_probe (probe_id INTEGER PRIMARY KEY);\n',
-        'utf8'
-      );
-    }
+    await writeFile(path.join(directory, migration022Name), actual022.sql, 'utf8');
   }
   return { directory, migration022Name };
 }
 
 async function addMigration022(directory: string, migration022Name: string): Promise<void> {
-  const repository022 = (await readdir(repositoryMigrations)).find(file =>
-    file.startsWith('022_')
-  );
-  if (repository022) {
-    await copyFile(
-      path.join(repositoryMigrations, repository022),
-      path.join(directory, repository022)
-    );
-    return;
-  }
-  await writeFile(
-    path.join(directory, migration022Name),
-    'CREATE TABLE migration_022_sequence_probe (probe_id INTEGER PRIMARY KEY);\n',
-    'utf8'
-  );
+  const actual022 = await actualMigration022();
+  if (actual022.name !== migration022Name) throw new Error('Migration 022 name changed during test');
+  await writeFile(path.join(directory, migration022Name), actual022.sql, 'utf8');
 }
 
 async function schemaFingerprint(pool: pg.Pool, schema: string): Promise<unknown> {
-  const [migrations, tables, columns, constraints, indexes] = await Promise.all([
+  const [migrations, tables, columns, constraints, indexes, triggers, functions, privileges] = await Promise.all([
     pool.query<{ name: string }>('SELECT name FROM migrations ORDER BY name'),
     pool.query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema = $1 ORDER BY table_name`,
       [schema]
     ),
-    pool.query<{ table_name: string; column_name: string; data_type: string; is_nullable: string }>(
-      `SELECT table_name, column_name, data_type, is_nullable
+    pool.query(
+      `SELECT table_name, column_name, data_type, is_nullable, column_default
        FROM information_schema.columns
        WHERE table_schema = $1 ORDER BY table_name, ordinal_position`,
       [schema]
     ),
-    pool.query<{ conname: string; contype: string }>(
-      `SELECT constraint_info.conname, constraint_info.contype
+    pool.query(
+      `SELECT constraint_info.conname, constraint_info.contype,
+              pg_get_constraintdef(constraint_info.oid, true) AS definition
        FROM pg_constraint AS constraint_info
        JOIN pg_namespace AS namespace ON namespace.oid = constraint_info.connamespace
        WHERE namespace.nspname = $1 ORDER BY constraint_info.conname`,
       [schema]
     ),
-    pool.query<{ indexname: string }>(
-      `SELECT indexname FROM pg_indexes
+    pool.query(
+      `SELECT indexname, indexdef FROM pg_indexes
        WHERE schemaname = $1 ORDER BY indexname`,
       [schema]
+    ),
+    pool.query(
+      `SELECT event_object_table, trigger_name, action_timing, event_manipulation,
+              action_statement FROM information_schema.triggers
+       WHERE trigger_schema = $1 ORDER BY event_object_table, trigger_name, event_manipulation`, [schema]
+    ),
+    pool.query(
+      `SELECT routine_name, routine_type, data_type, routine_definition
+       FROM information_schema.routines WHERE routine_schema = $1 ORDER BY routine_name`, [schema]
+    ),
+    pool.query(
+      `SELECT c.relname, c.relkind, c.relacl::text AS acl
+       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = $1
+       UNION ALL
+       SELECT p.proname, 'f', p.proacl::text
+       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = $1 ORDER BY 1, 2`, [schema]
     )
   ]);
-  return {
+  const fingerprint = {
     migrations: migrations.rows,
     tables: tables.rows,
     columns: columns.rows,
     constraints: constraints.rows,
-    indexes: indexes.rows
+    indexes: indexes.rows,
+    triggers: triggers.rows,
+    functions: functions.rows,
+    privileges: privileges.rows
   };
+  return JSON.parse(JSON.stringify(fingerprint).replaceAll(schema, '<schema>'));
 }
 
 describePostgres('commerce ACID on disposable PostgreSQL', () => {
@@ -156,6 +176,7 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
   let tempRoot: string;
   let imageService: typeof import('../../src/services/imageGenerationLimitService.js');
   let commerceService: typeof import('../../src/services/commerceService.js');
+  let letterJobService: typeof import('../../src/services/letterJobService.js');
   let closeServicePool: (() => Promise<void>) | undefined;
 
   beforeAll(async () => {
@@ -174,6 +195,7 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
     process.env.DATABASE_URL = serviceDatabaseUrl;
     imageService = await import('../../src/services/imageGenerationLimitService.js');
     commerceService = await import('../../src/services/commerceService.js');
+    letterJobService = await import('../../src/services/letterJobService.js');
     closeServicePool = (await import('../../src/db/index.js')).closePool;
   }, 120_000);
 
@@ -329,6 +351,53 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
           WHERE source_event_id = 'evt-dispute-acid') AS alerts`
     );
     expect(durable.rows[0]).toEqual({ events: '1', alerts: '1' });
+  });
+
+  it('atomically cancels disputed funded mail and denies admin retry', async () => {
+    await acidPool.query(
+      `INSERT INTO users (user_id, email) VALUES ('dispute-user', 'dispute@example.test');
+       INSERT INTO letter_drafts (
+         draft_id, user_id, sender, recipient, body_text, sign_off, required_credits, expires_at
+       ) VALUES ('00000000-0000-0000-0000-000000000109', 'dispute-user', '{}', '{}',
+         'Dispute', 'Regards', 2, NOW() + INTERVAL '1 day');
+       INSERT INTO orders (
+         order_id, user_id, order_type, draft_id, product_code, product_snapshot,
+         amount_cents, currency, stripe_payment_intent_id, idempotency_key, status
+       ) VALUES ('dispute-order', 'dispute-user', 'jit_mail',
+         '00000000-0000-0000-0000-000000000109', 'jit-letter', '{}', 499, 'usd',
+         'pi-dispute-acid', 'jit-checkout:dispute-order', 'fulfillment_pending');
+       INSERT INTO letters (
+         letter_id, user_id, content, recipient, credits_cost, status,
+         funding_type, funding_order_id
+       ) VALUES ('dispute-letter', 'dispute-user', '{}', '{}', 2, 'queued',
+         'jit_order', 'dispute-order');
+       UPDATE orders SET letter_id = 'dispute-letter' WHERE order_id = 'dispute-order';
+       INSERT INTO letter_jobs (
+         job_id, letter_id, status, attempts, max_attempts, scheduled_at,
+         idempotency_key, next_attempt_at
+       ) VALUES ('00000000-0000-4000-8000-000000000109', 'dispute-letter',
+         'pending', 0, 5, NOW(), 'dispute-letter', NOW())`
+    );
+    await commerceService.processStripeWebhookEvent({
+      id: 'evt-dispute-funded', type: 'charge.dispute.created', data: { object: {
+        id: 'dp-funded', payment_intent: 'pi-dispute-acid', charge: 'ch-funded',
+        amount: 499, currency: 'usd', reason: 'fraudulent', status: 'needs_response'
+      } }
+    } as any);
+    const state = await acidPool.query(
+      `SELECT orders.status AS order_status, letters.status AS letter_status,
+              jobs.status AS job_status
+       FROM orders JOIN letters ON letters.letter_id = orders.letter_id
+       JOIN letter_jobs jobs ON jobs.letter_id = letters.letter_id
+       WHERE orders.order_id = 'dispute-order'`
+    );
+    expect(state.rows[0]).toEqual({
+      order_status: 'disputed', letter_status: 'cancelled', job_status: 'cancelled'
+    });
+    await expect(letterJobService.retryLetterJobAsAdmin({
+      jobId: '00000000-0000-4000-8000-000000000109', actorId: 'admin-acid',
+      reason: 'provider confirmed rejection', idempotencyKey: 'admin-retry-dispute-acid'
+    })).rejects.toMatchObject({ code: 'invalid_state' });
   });
 
   it('leases one refund worker, blocks replay, and releases a rolled-back claim', async () => {
@@ -519,9 +588,21 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
       consumed_quantity: 0,
       image_generations_used: 0
     });
+    const releaseAuditHash = createHash('sha256')
+      .update('integration-ambiguous-release').digest('hex');
+    const audit = await acidPool.query<{ audit_event_id: string }>(
+      `SELECT audit_event_id FROM commerce_operator_audit_events
+       WHERE idempotency_key_hash = $1`, [releaseAuditHash]
+    );
+    expect(audit.rowCount).toBe(1);
+    await expect(acidPool.query(
+      `UPDATE commerce_operator_audit_events SET outcome = 'rejected'
+       WHERE audit_event_id = $1`, [audit.rows[0].audit_event_id]
+    )).rejects.toThrow(/append-only/);
+    await acidPool.query('DELETE FROM users WHERE user_id = $1', [ambiguousUser]);
     expect((await acidPool.query(
-      `SELECT resolution_id FROM image_generation_resolution_audit
-       WHERE idempotency_key = 'integration-ambiguous-release'`
+      'SELECT audit_event_id FROM commerce_operator_audit_events WHERE audit_event_id = $1',
+      [audit.rows[0].audit_event_id]
     )).rowCount).toBe(1);
 
     await expect(imageService.resolveAmbiguousGenerationReservation({
@@ -584,13 +665,15 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
       audit_count: string;
     }>(
       `SELECT reservation.status, entitlement.consumed_quantity,
-              (SELECT COUNT(*) FROM image_generation_resolution_audit
-               WHERE idempotency_key = 'integration-ambiguous-rollback') AS audit_count
+              (SELECT COUNT(*) FROM commerce_operator_audit_events
+               WHERE idempotency_key_hash = $2) AS audit_count
        FROM image_generation_reservations AS reservation
        JOIN image_entitlements AS entitlement
          ON entitlement.entitlement_id = reservation.entitlement_id
        WHERE reservation.reservation_id = $1`,
-      [rollbackReservation.reservationId]
+      [rollbackReservation.reservationId,
+        createHash('sha256')
+          .update('integration-ambiguous-rollback').digest('hex')]
     );
     expect(rolledBack.rows[0]).toEqual({
       status: 'ambiguous',

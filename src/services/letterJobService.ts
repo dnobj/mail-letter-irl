@@ -6,7 +6,7 @@
  * later claims any due or stale rows with SKIP LOCKED.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { query, transaction } from '../db/index.js';
 import { getProviderForMailType, type MailType } from './providers/index.js';
@@ -21,7 +21,7 @@ import type { Letter, LetterJob } from './types.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
-const DEFAULT_PROVIDER_RETRIES = 3;
+const DEFAULT_PROVIDER_RETRIES = 1;
 const STALE_LOCK_MINUTES = 15;
 
 type ProviderResult = LetterResult | PostcardResult;
@@ -102,10 +102,10 @@ export async function sendWithBoundedRetries(
   send: () => Promise<ProviderResult>,
   options: ProcessLetterJobOptions = {}
 ): Promise<ProviderResult> {
-  const retries = Math.max(1, options.providerRetries ?? DEFAULT_PROVIDER_RETRIES);
-  const baseDelay = Math.max(0, options.retryBaseDelayMs ?? 250);
-  const sleep = options.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
-  const random = options.random ?? Math.random;
+  // A provider request that times out or returns a transient response may have
+  // been accepted. Never repeat it automatically: durable reconciliation must
+  // establish a definite rejection before another physical-mail submission.
+  const retries = Math.min(1, Math.max(1, options.providerRetries ?? DEFAULT_PROVIDER_RETRIES));
   let lastResult: ProviderResult = {
     success: false,
     trackingId: '',
@@ -123,8 +123,6 @@ export async function sendWithBoundedRetries(
       return lastResult;
     }
 
-    const jitter = Math.floor(random() * baseDelay);
-    await sleep(baseDelay * 2 ** (attempt - 1) + jitter);
   }
 
   return lastResult;
@@ -174,6 +172,7 @@ async function claimJob(jobId?: string): Promise<LetterJob | null> {
        SELECT job_id
        FROM letter_jobs
        WHERE attempts < max_attempts
+         AND provider_outcome = 'not_dispatched'
          ${specificJobClause}
          AND (
            (status IN ('pending', 'failed') AND next_attempt_at <= NOW())
@@ -202,6 +201,94 @@ async function claimJob(jobId?: string): Promise<LetterJob | null> {
   );
 
   return result.rows[0] || null;
+}
+
+async function markProviderDispatch(job: LetterJob): Promise<Letter> {
+  return transaction(async client => {
+    const relation = await client.query<{ letter_id: string; funding_order_id: string | null }>(
+      `SELECT jobs.letter_id, letters.funding_order_id
+       FROM letter_jobs AS jobs
+       JOIN letters ON letters.letter_id = jobs.letter_id
+       WHERE jobs.job_id = $1`,
+      [job.job_id]
+    );
+    const ids = relation.rows[0];
+    if (!ids) throw new Error('Outbox relation no longer exists');
+
+    if (ids.funding_order_id) {
+      const funding = await client.query<{ status: string }>(
+        'SELECT status FROM orders WHERE order_id = $1 FOR UPDATE',
+        [ids.funding_order_id]
+      );
+      if (funding.rows[0]?.status !== 'fulfillment_pending') {
+        throw new Error('Funding order is not dispatchable');
+      }
+    }
+    const letterResult = await client.query<Letter>(
+      'SELECT * FROM letters WHERE letter_id = $1 FOR UPDATE',
+      [ids.letter_id]
+    );
+    const lockedJob = await client.query<LetterJob>(
+      'SELECT * FROM letter_jobs WHERE job_id = $1 FOR UPDATE',
+      [job.job_id]
+    );
+    const letter = letterResult.rows[0];
+    const current = lockedJob.rows[0];
+    if (!letter || !current || current.status !== 'processing' ||
+        current.provider_outcome !== 'not_dispatched' ||
+        !['queued', 'processing'].includes(letter.status)) {
+      throw new Error('Mail item is held or no longer dispatchable');
+    }
+    await client.query(
+      `UPDATE letter_jobs
+       SET provider_outcome = 'dispatching', provider_dispatch_started_at = NOW(), updated_at = NOW()
+       WHERE job_id = $1`,
+      [job.job_id]
+    );
+    await client.query(
+      `UPDATE letters SET status = 'processing', updated_at = NOW() WHERE letter_id = $1`,
+      [letter.letter_id]
+    );
+    return letter;
+  });
+}
+
+async function holdAmbiguousDispatch(job: LetterJob, error: unknown): Promise<void> {
+  const errorClass = classifyDiagnosticError(error, 'provider_error');
+  await transaction(async client => {
+    const relation = await client.query<{ funding_order_id: string | null }>(
+      'SELECT funding_order_id FROM letters WHERE letter_id = $1', [job.letter_id]
+    );
+    const orderId = relation.rows[0]?.funding_order_id || null;
+    if (orderId) await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [orderId]);
+    await client.query('SELECT letter_id FROM letters WHERE letter_id = $1 FOR UPDATE', [job.letter_id]);
+    await client.query('SELECT job_id FROM letter_jobs WHERE job_id = $1 FOR UPDATE', [job.job_id]);
+    await client.query(
+      `UPDATE letter_jobs SET status = 'held', provider_outcome = 'ambiguous',
+         held_at = NOW(), hold_reason = 'provider_outcome_ambiguous', locked_at = NULL,
+         last_error = $2, error_message = $2, updated_at = NOW()
+       WHERE job_id = $1 AND status <> 'completed'`,
+      [job.job_id, errorClass]
+    );
+    await client.query(
+      `UPDATE letters SET status = 'held', updated_at = NOW()
+       WHERE letter_id = $1 AND status NOT IN ('accepted','sent','in_transit','delivered','returned')`,
+      [job.letter_id]
+    );
+    if (orderId) {
+      await client.query(
+        `UPDATE orders SET status = 'held', hold_previous_status = status,
+           held_at = NOW(), hold_reason = 'provider_outcome_ambiguous', updated_at = NOW()
+         WHERE order_id = $1 AND status = 'fulfillment_pending'`, [orderId]
+      );
+    }
+    await client.query(
+      `INSERT INTO commerce_operational_alerts
+         (source_event_id, order_id, alert_type, severity, details)
+       VALUES (NULL, $1, 'mail_provider_outcome_ambiguous', 'critical', $2)`,
+      [orderId, JSON.stringify({ jobId: job.job_id, errorClass })]
+    );
+  });
 }
 
 async function loadLetter(letterId: string): Promise<Letter> {
@@ -343,6 +430,7 @@ async function completeJob(
     await client.query(
       `UPDATE letter_jobs
        SET status = 'completed', provider_order_id = $1, completed_at = NOW(),
+           provider_outcome = 'accepted',
            locked_at = NULL, last_error = NULL, error_message = NULL, updated_at = NOW()
        WHERE job_id = $2`,
       [result.trackingId, job.job_id]
@@ -376,39 +464,22 @@ async function completeJob(
 async function recoverProviderAcceptancePersistence(
   job: LetterJob,
   error: unknown
-): Promise<'completed' | 'scheduled' | 'stale'> {
+): Promise<'completed' | 'held' | 'stale'> {
   const message = error instanceof Error ? error.message : 'Provider acceptance persistence failed';
   try {
-    // The provider call already succeeded, so this is reconciliation rather
-    // than another delivery attempt. If COMMIT actually succeeded but its
-    // acknowledgement was lost, the status predicate leaves the completed job
-    // untouched. Otherwise the same provider idempotency key is retried later.
-    const recovered = await query<{ job_id: string }>(
-      `UPDATE letter_jobs
-       SET status = 'pending',
-           attempts = GREATEST(attempts - 1, 0),
-           next_attempt_at = NOW() + INTERVAL '1 minute',
-           locked_at = NULL,
-           last_error = $2,
-           error_message = $2,
-           updated_at = NOW()
-       WHERE job_id = $1 AND status = 'processing'
-       RETURNING job_id`,
-      [job.job_id, `Provider accepted; database reconciliation required: ${message}`]
-    );
-    if (recovered.rows[0]) return 'scheduled';
-
     const current = await query<{ status: LetterJob['status'] }>(
       'SELECT status FROM letter_jobs WHERE job_id = $1',
       [job.job_id]
     );
-    return current.rows[0]?.status === 'completed' ? 'completed' : 'stale';
+    if (current.rows[0]?.status === 'completed') return 'completed';
+    await holdAmbiguousDispatch(job, new Error(message));
+    return 'held';
   } catch (recoveryError) {
     writeDiagnostic('error', 'outbox.persistence_recovery_schedule_failed', {
       errorClass: classifyDiagnosticError(recoveryError, 'database_error')
     });
-    // Leave the durable processing lease in place. The stale-job claimant will
-    // retry with the same provider idempotency key after a process restart.
+    // Leave the durable dispatched marker in place. Recovery quarantines it;
+    // the claimant predicate can never submit it again.
     return 'stale';
   }
 }
@@ -423,7 +494,11 @@ async function failOrRescheduleJob(
   // Only an explicit provider rejection proves that no mail was accepted and
   // is therefore safe to compensate with a refund. Ambiguous failures retain
   // durable outbox work and stable idempotency until reconciliation succeeds.
-  const terminal = !retryable;
+  if (retryable) {
+    await holdAmbiguousDispatch(job, new Error(error));
+    return false;
+  }
+  const terminal = true;
   const nextAttemptAt = terminal
     ? new Date()
     : new Date(Date.now() + retryDelayMilliseconds(job.attempts, random));
@@ -433,12 +508,7 @@ async function failOrRescheduleJob(
       `UPDATE letter_jobs
        SET status = $1, next_attempt_at = $2, locked_at = NULL,
            completed_at = CASE WHEN $1 = 'failed' THEN NOW() ELSE NULL END,
-           attempts = CASE
-             WHEN $1 = 'failed' AND $3 = false THEN max_attempts
-             WHEN $1 = 'pending' AND attempts >= max_attempts
-               THEN GREATEST(max_attempts - 1, 0)
-             ELSE attempts
-           END,
+           provider_outcome = CASE WHEN $1 = 'failed' THEN 'definite_failure' ELSE provider_outcome END,
            last_error = $4, error_message = $4, updated_at = NOW()
        WHERE job_id = $5`,
       [terminal ? 'failed' : 'pending', nextAttemptAt, retryable, error, job.job_id]
@@ -472,13 +542,37 @@ async function failOrRescheduleJob(
   return !terminal;
 }
 
+async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => number): Promise<boolean> {
+  const retryable = job.attempts < job.max_attempts;
+  const errorClass = classifyDiagnosticError(error, 'unknown_error');
+  await transaction(async client => {
+    await client.query(
+      `UPDATE letter_jobs SET status = $2, next_attempt_at = $3, locked_at = NULL,
+         completed_at = CASE WHEN $2 = 'failed' THEN NOW() ELSE NULL END,
+         last_error = $4, error_message = $4, updated_at = NOW()
+       WHERE job_id = $1 AND provider_outcome = 'not_dispatched'`,
+      [job.job_id, retryable ? 'pending' : 'failed',
+        new Date(Date.now() + retryDelayMilliseconds(job.attempts, random)), errorClass]
+    );
+    await client.query(
+      `UPDATE letters SET status = $2, updated_at = NOW()
+       WHERE letter_id = $1 AND status NOT IN ('held','cancelled')`,
+      [job.letter_id, retryable ? 'queued' : 'failed']
+    );
+  });
+  return retryable;
+}
+
 async function processClaimedJob(
   job: LetterJob,
   options: ProcessLetterJobOptions = {}
 ): Promise<ProcessLetterJobResult> {
   const random = options.random ?? Math.random;
+  let dispatched = false;
   try {
-    const letter = await loadLetter(job.letter_id);
+    await loadLetter(job.letter_id);
+    const letter = await markProviderDispatch(job);
+    dispatched = true;
     const { result, providerName } = await submitToProvider(letter, job, options);
 
     if (result.success) {
@@ -493,7 +587,7 @@ async function processClaimedJob(
         return {
           claimed: true,
           completed: false,
-          retryScheduled: true,
+          retryScheduled: false,
           job,
           error: error instanceof Error ? error.message : 'Provider acceptance persistence failed',
         };
@@ -509,14 +603,23 @@ async function processClaimedJob(
       error: result.error,
     };
   } catch (error) {
-    const result = errorResult(error);
-    const retryScheduled = await failOrRescheduleJob(job, result, random);
+    if (dispatched) {
+      await holdAmbiguousDispatch(job, error);
+      return {
+        claimed: true,
+        completed: false,
+        retryScheduled: false,
+        job,
+        error: error instanceof Error ? error.message : 'Provider outcome is ambiguous',
+      };
+    }
+    const retryScheduled = await failBeforeDispatch(job, error, random);
     return {
       claimed: true,
       completed: false,
       retryScheduled,
       job,
-      error: result.error,
+      error: error instanceof Error ? error.message : 'Pre-dispatch failure',
     };
   }
 }
@@ -539,6 +642,17 @@ export async function processDueLetterJobs(
   options: ProcessLetterJobOptions = {}
 ): Promise<{ processed: number; completed: number; retryScheduled: number; failed: number }> {
   const summary = { processed: 0, completed: 0, retryScheduled: 0, failed: 0 };
+
+  const staleDispatched = await query<LetterJob>(
+    `SELECT * FROM letter_jobs
+     WHERE status = 'processing' AND provider_outcome = 'dispatching'
+       AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
+     ORDER BY locked_at LIMIT $1`,
+    [limit]
+  );
+  for (const job of staleDispatched.rows) {
+    await holdAmbiguousDispatch(job, new Error('process_interrupted_after_provider_dispatch'));
+  }
 
   while (summary.processed < limit) {
     const job = await claimJob();
@@ -625,4 +739,80 @@ export async function getJobsByUserId(
   ]);
 
   return { jobs: jobsResult.rows, total: Number.parseInt(countResult.rows[0].count, 10) };
+}
+
+export class AdminJobRetryError extends Error {
+  constructor(readonly code: 'not_found' | 'invalid_state' | 'idempotency_conflict') {
+    super(code);
+  }
+}
+
+export async function retryLetterJobAsAdmin(params: {
+  jobId: string;
+  actorId: string;
+  reason: string;
+  idempotencyKey: string;
+}): Promise<{ jobId: string; replayed: boolean }> {
+  return transaction(async client => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [params.idempotencyKey]);
+    const replay = await client.query<{ job_id: string }>(
+      `SELECT target_reference_hash AS job_id FROM commerce_operator_audit_events
+       WHERE idempotency_key_hash = $1`,
+      [createHash('sha256').update(params.idempotencyKey).digest('hex')]
+    );
+    if (replay.rows[0]) {
+      if (replay.rows[0].job_id !== createHash('sha256').update(params.jobId).digest('hex')) {
+        throw new AdminJobRetryError('idempotency_conflict');
+      }
+      return { jobId: params.jobId, replayed: true };
+    }
+    const relation = await client.query<{ letter_id: string; funding_order_id: string | null }>(
+      `SELECT jobs.letter_id, letters.funding_order_id FROM letter_jobs AS jobs
+       JOIN letters ON letters.letter_id = jobs.letter_id WHERE jobs.job_id = $1`, [params.jobId]
+    );
+    const ids = relation.rows[0];
+    if (!ids) throw new AdminJobRetryError('not_found');
+    let orderStatus: string | null = null;
+    if (ids.funding_order_id) {
+      const order = await client.query<{ status: string }>(
+        'SELECT status FROM orders WHERE order_id = $1 FOR UPDATE', [ids.funding_order_id]
+      );
+      orderStatus = order.rows[0]?.status || null;
+    }
+    const letter = await client.query<{ status: string }>(
+      'SELECT status FROM letters WHERE letter_id = $1 FOR UPDATE', [ids.letter_id]
+    );
+    const job = await client.query<LetterJob>(
+      'SELECT * FROM letter_jobs WHERE job_id = $1 FOR UPDATE', [params.jobId]
+    );
+    const current = job.rows[0];
+    if (!current || current.status !== 'failed' || current.provider_outcome !== 'definite_failure' ||
+        current.attempts >= current.max_attempts || letter.rows[0]?.status !== 'failed' ||
+        (ids.funding_order_id && orderStatus !== 'fulfillment_pending')) {
+      throw new AdminJobRetryError('invalid_state');
+    }
+    await client.query(
+      `UPDATE letter_jobs SET status = 'pending', provider_outcome = 'not_dispatched',
+         next_attempt_at = NOW(), scheduled_at = NOW(), completed_at = NULL,
+         last_error = NULL, error_message = NULL, updated_at = NOW() WHERE job_id = $1`,
+      [params.jobId]
+    );
+    await client.query(
+      `UPDATE letters SET status = 'queued', updated_at = NOW() WHERE letter_id = $1`,
+      [ids.letter_id]
+    );
+    await client.query(
+      `INSERT INTO commerce_operator_audit_events
+         (idempotency_key_hash, actor_subject_hash, operation, target_type,
+          target_reference_hash, reason_code, before_state, after_state, provider_evidence)
+       VALUES ($1, $2, 'mail_job_retry', 'letter_job', $3, 'operator_confirmed_rejection', $4, $5, $6)`,
+      [createHash('sha256').update(params.idempotencyKey).digest('hex'),
+        createHash('sha256').update(params.actorId).digest('hex'),
+        createHash('sha256').update(params.jobId).digest('hex'),
+        JSON.stringify({ jobStatus: current.status, providerOutcome: current.provider_outcome, orderStatus }),
+        JSON.stringify({ jobStatus: 'pending', providerOutcome: 'not_dispatched', orderStatus }),
+        JSON.stringify({ operatorReasonHash: createHash('sha256').update(params.reason).digest('hex') })]
+    );
+    return { jobId: params.jobId, replayed: false };
+  });
 }

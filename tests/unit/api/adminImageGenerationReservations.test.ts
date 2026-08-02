@@ -2,7 +2,8 @@ import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const adminAuth = vi.hoisted(() => ({
-  authenticateAdmin: vi.fn()
+  authenticateAdmin: vi.fn(),
+  validateAdminRequestBoundary: vi.fn(() => true)
 }));
 
 const imageService = vi.hoisted(() => {

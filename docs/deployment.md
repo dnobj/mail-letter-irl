@@ -116,10 +116,11 @@ Apply forward migration `023_jit_recovery_state_machines.sql` before running
 the issue #69 application revision. Migration 021 is already applied in
 development, and issue #162 owns migration 022. The repository migration runner
 records filenames and applies every unrecorded file, including a lower-numbered
-file that arrives later. The current disposable-PostgreSQL test uses a synthetic
-022 probe because the real `022_admin_audit.sql` is not present on this branch;
-that proves runner ordering only, not compatibility with issue #162. Before both
-changes integrate or deploy, rerun the test with the real 022 in both
+file that arrives later. The disposable-PostgreSQL test loads the exact issue
+#162 `022_admin_audit.sql` (from this checkout once merged, otherwise from its
+pinned remote branch) and compares defaults, constraints, indexes,
+triggers/functions, and privileges. Because 022 is not yet on `dev`, rerun the
+proof after its final merge commit. Test both
 `021 -> 023 -> 022` and `021 -> 022 -> 023` order and require identical schema
 fingerprints and migration ledgers. Do not apply 023 ahead of that gate if the
 real migrations fail to converge.
@@ -171,10 +172,17 @@ control (including the eventual issue #162 admin integration).
    the exact same body and idempotency key; an exact retry returns
    `replayed: true`, while a reused key with changed inputs returns a conflict.
    A mismatched account returns not found and cannot mutate another user's row.
-5. Verify exactly one matching `image_generation_resolution_audit` row and the
+5. Verify exactly one matching `commerce_operator_audit_events` row and the
    corresponding reservation/entitlement counters. Confirm application logs
    contain only the stable decision/status classifications and no reservation,
    account, provider, address, or image identifiers.
+
+All temporary admin requests must originate from the exact
+`ADMIN_ALLOWED_ORIGIN`, target its exact Host on loopback without forwarding
+headers, include `X-Letter-IRL-Admin: local-operator`, and use an authenticated
+allow-listed bearer identity. Mutations additionally require
+`Content-Type: application/json` and the `X-CSRF-Token` matching the local
+operator bootstrap secret. The server emits no admin CORS or preflight grant.
 
 After the migration and disabled deployment are healthy, validate both mail
 types in Stripe test mode, enable only internal development accounts, and then

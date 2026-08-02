@@ -635,12 +635,6 @@ export async function startHttpServer() {
       return;
     }
 
-    // Handle CORS preflight for admin API routes
-    if (url.pathname.startsWith('/api/admin/') && req.method === 'OPTIONS') {
-      respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
-      return;
-    }
-
     if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.png" || url.pathname === "/favicon.svg") {
       res.statusCode = 204;
       res.end();

@@ -29,6 +29,7 @@ const job = {
   job_id: 'job-1',
   letter_id: 'letter-1',
   status: 'processing',
+  provider_outcome: 'not_dispatched',
   attempts: 1,
   max_attempts: 5,
   idempotency_key: 'letter-1',
@@ -86,7 +87,14 @@ describe('mail outbox retries', () => {
       async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) =>
         callback({ query: clientQuery })
     );
-    clientQuery.mockResolvedValue({ rows: [] });
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT jobs.letter_id')) {
+        return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+      }
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      if (sql.startsWith('SELECT * FROM letter_jobs')) return { rows: [{ ...job }] };
+      return { rows: [] };
+    });
     sendLetter.mockResolvedValue({
       success: true,
       trackingId: 'provider-1',
@@ -94,7 +102,7 @@ describe('mail outbox retries', () => {
     });
   });
 
-  it.each([429, 503])('retries transient HTTP %s responses with bounded backoff', async (statusCode) => {
+  it.each([429, 503])('does not replay an ambiguous HTTP %s provider response', async (statusCode) => {
     const send = vi
       .fn()
       .mockResolvedValueOnce({
@@ -109,18 +117,19 @@ describe('mail outbox retries', () => {
       sleep: async () => undefined,
       random: () => 0,
     });
-    expect(result.success).toBe(true);
-    expect(send).toHaveBeenCalledTimes(2);
+    expect(result.success).toBe(false);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it('retries a network timeout but not a permanent provider rejection', async () => {
+  it('does not replay a network timeout or a permanent provider rejection', async () => {
     const timeoutSend = vi
       .fn()
       .mockRejectedValueOnce(new Error('network timeout'))
       .mockResolvedValueOnce({ success: true, trackingId: 'provider-1' });
     await expect(
       sendWithBoundedRetries(timeoutSend, { sleep: async () => undefined, random: () => 0 })
-    ).resolves.toMatchObject({ success: true });
+    ).resolves.toMatchObject({ success: false });
+    expect(timeoutSend).toHaveBeenCalledTimes(1);
 
     const rejected = vi.fn().mockResolvedValue({
       success: false,
@@ -153,7 +162,7 @@ describe('mail outbox retries', () => {
     expect([first.claimed, second.claimed].sort()).toEqual([false, true]);
   });
 
-  it('replays with the same provider key after acceptance persistence crashes', async () => {
+  it('holds instead of replaying after acceptance persistence crashes', async () => {
     let claims = 0;
     query.mockImplementation(async (sql: string) => {
       if (sql.includes('WITH candidate')) {
@@ -165,6 +174,10 @@ describe('mail outbox retries', () => {
       return { rows: [] };
     });
     mocks.transaction
+      .mockImplementationOnce(
+        async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) =>
+          callback({ query: clientQuery })
+      )
       .mockRejectedValueOnce(new Error('database connection lost before commit acknowledgement'))
       .mockImplementation(
         async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) =>
@@ -172,19 +185,8 @@ describe('mail outbox retries', () => {
       );
 
     const first = await processLetterJob('job-1', { retryBaseDelayMs: 0 });
-    const replay = await processLetterJob('job-1', { retryBaseDelayMs: 0 });
-
-    expect(first).toMatchObject({ completed: false, retryScheduled: true });
-    expect(replay).toMatchObject({ completed: true, retryScheduled: false });
-    expect(sendLetter).toHaveBeenCalledTimes(2);
-    expect(sendLetter.mock.calls.map(([params]) => params.idempotencyKey)).toEqual([
-      'letter-1',
-      'letter-1',
-    ]);
-    expect(query).toHaveBeenCalledWith(
-      expect.stringContaining("WHERE job_id = $1 AND status = 'processing'"),
-      expect.arrayContaining(['job-1', expect.stringContaining('reconciliation required')])
-    );
+    expect(first).toMatchObject({ completed: false, retryScheduled: false });
+    expect(sendLetter).toHaveBeenCalledTimes(1);
     expect(clientQuery).not.toHaveBeenCalledWith(
       expect.stringContaining("SET status = 'refund_pending'"),
       expect.anything()
@@ -199,12 +201,18 @@ describe('mail outbox retries', () => {
       if (sql.includes("SET status = 'pending'")) throw new Error(sensitive);
       return { rows: [] };
     });
-    mocks.transaction.mockRejectedValueOnce(new Error(sensitive));
+    mocks.transaction
+      .mockImplementationOnce(
+        async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) =>
+          callback({ query: clientQuery })
+      )
+      .mockRejectedValueOnce(new Error(sensitive))
+      .mockRejectedValueOnce(new Error(sensitive));
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     const result = await processLetterJob('job-1', { retryBaseDelayMs: 0 });
 
-    expect(result).toMatchObject({ completed: false, retryScheduled: true });
+    expect(result).toMatchObject({ completed: false, retryScheduled: false });
     const output = diagnostic.mock.calls.flat().map(String).join('\n');
     expect(output).toContain('"event":"outbox.persistence_recovery_schedule_failed"');
     for (const value of [sensitive, 'letter-1', 'job-1', 'provider-private']) {
@@ -213,7 +221,7 @@ describe('mail outbox retries', () => {
     diagnostic.mockRestore();
   });
 
-  it('reschedules a timed-out send for hourly recovery', async () => {
+  it('holds a timed-out send for operator recovery', async () => {
     mockClaims();
     sendLetter.mockResolvedValue({
       success: false,
@@ -227,10 +235,10 @@ describe('mail outbox retries', () => {
       retryBaseDelayMs: 0,
       random: () => 0,
     });
-    expect(result.retryScheduled).toBe(true);
+    expect(result.retryScheduled).toBe(false);
     expect(clientQuery).toHaveBeenCalledWith(
-      expect.stringContaining("SET status = $1"),
-      expect.arrayContaining(['pending'])
+      expect.stringContaining("SET status = 'held'"),
+      expect.anything()
     );
   });
 
@@ -255,10 +263,10 @@ describe('mail outbox retries', () => {
       random: () => 0,
     });
 
-    expect(result).toMatchObject({ completed: false, retryScheduled: true });
+    expect(result).toMatchObject({ completed: false, retryScheduled: false });
     expect(clientQuery).toHaveBeenCalledWith(
-      expect.stringContaining('THEN GREATEST(max_attempts - 1, 0)'),
-      expect.arrayContaining(['pending'])
+      expect.stringContaining("SET status = 'held'"),
+      expect.anything()
     );
     expect(clientQuery).not.toHaveBeenCalledWith(
       expect.stringContaining("SET status = 'refund_pending'"),
@@ -269,6 +277,11 @@ describe('mail outbox retries', () => {
   it('moves an explicitly rejected pre-provider submission to refund recovery', async () => {
     mockClaims();
     clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT jobs.letter_id')) {
+        return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+      }
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      if (sql.startsWith('SELECT * FROM letter_jobs')) return { rows: [{ ...job }] };
       if (sql.includes("SET status = 'refund_pending'")) {
         return { rows: [{ order_id: 'order-1' }] };
       }

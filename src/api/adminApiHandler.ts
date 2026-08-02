@@ -9,12 +9,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { authenticateAdmin } from './middleware/adminAuth.js';
+import { createHash } from 'node:crypto';
+import { authenticateAdmin, validateAdminRequestBoundary } from './middleware/adminAuth.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { adjustCredits } from '../services/creditService.js';
 import { getUser, getAllUsers } from '../services/userService.js';
-import { getAllJobs, getJobById, getJobsByUserId } from '../services/letterJobService.js';
-import { query } from '../db/index.js';
+import { AdminJobRetryError, getAllJobs, getJobById, getJobsByUserId, retryLetterJobAsAdmin } from '../services/letterJobService.js';
+import { query, transaction } from '../db/index.js';
 import {
   createCampaign,
   getCampaignById,
@@ -89,16 +90,7 @@ export async function handleAdminApiRequest(
     return false; // Not an admin route, continue to next handler
   }
 
-  // Set CORS headers for admin API (supports file:// protocol and localhost)
-  const origin = req.headers.origin;
-  if (origin === 'null') {
-    // file:// protocol sends "null" as origin
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  } else if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
+  if (!validateAdminRequestBoundary(req, res)) return true;
 
   // Authenticate and verify admin status
   const adminInfo = await authenticateAdmin(req, res);
@@ -148,6 +140,13 @@ export async function handleAdminApiRequest(
     // GET /api/admin/alerts - Active alerts (failed jobs, expiring credits, etc.)
     if (pathname === '/api/admin/alerts' && req.method === 'GET') {
       await handleGetAlerts(res);
+      return true;
+    }
+
+    if (pathname.match(/^\/api\/admin\/commerce-alerts\/[^/]+$/) && req.method === 'PATCH') {
+      await handleTransitionCommerceAlert(
+        req, res, decodeURIComponent(pathname.split('/').pop() || ''), adminInfo
+      );
       return true;
     }
 
@@ -247,7 +246,7 @@ export async function handleAdminApiRequest(
       const parts = pathname.split('/');
       const jobId = parts[parts.length - 2];
       if (jobId) {
-        await handleRetryJob(res, decodeURIComponent(jobId), adminInfo);
+        await handleRetryJob(req, res, decodeURIComponent(jobId), adminInfo);
         return true;
       }
     }
@@ -1396,27 +1395,24 @@ async function handleGetAlerts(res: ServerResponse) {
     });
   }
 
-  // Check for Stripe disputes table (if it exists)
-  try {
-    const disputes = await query<{ dispute_id: string; amount_cents: number; reason: string }>(
-      `SELECT dispute_id, amount_cents, reason
-       FROM stripe_disputes
-       WHERE status = 'open'
-       ORDER BY created_at DESC
-       LIMIT 10`
-    );
-
-    if (disputes.rows.length > 0) {
-      alerts.push({
-        type: 'chargebacks',
-        severity: 'critical',
-        title: 'Open Chargebacks',
-        message: `${disputes.rows.length} open chargeback(s) require immediate attention.`,
-        data: disputes.rows,
-      });
-    }
-  } catch (error) {
-    // Table doesn't exist yet, ignore
+  const operational = await query<{
+    alert_id: string; order_id: string | null; alert_type: string;
+    severity: 'critical' | 'warning' | 'info'; status: string;
+    details: Record<string, unknown>; created_at: Date;
+  }>(
+    `SELECT alert_id, order_id, alert_type, severity, status, details, created_at
+     FROM commerce_operational_alerts WHERE status <> 'resolved'
+     ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+              created_at ASC LIMIT 50`
+  );
+  if (operational.rows.length > 0) {
+    alerts.push({
+      type: 'commerce_operations',
+      severity: operational.rows.some(row => row.severity === 'critical') ? 'critical' : 'warning',
+      title: 'Commerce operational work',
+      message: `${operational.rows.length} durable commerce alert(s) require review.`,
+      data: operational.rows,
+    });
   }
 
   sendJson(res, 200, {
@@ -1651,60 +1647,95 @@ async function handleGetLetterById(res: ServerResponse, letterId: string) {
  * Retry a failed job
  */
 async function handleRetryJob(
+  req: IncomingMessage,
   res: ServerResponse,
   jobId: string,
   adminInfo: { userId: string; email?: string }
 ) {
-  // Get the job
-  const jobResult = await query(
-    `SELECT * FROM letter_jobs WHERE job_id = $1`,
-    [jobId]
-  );
-
-  if (jobResult.rows.length === 0) {
-    sendJson(res, 404, { error: 'Job not found', jobId });
+  const body = await parseBody(req);
+  const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : '';
+  if (reason.length < 8 || reason.length > 500 || !OPERATOR_IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+    sendJson(res, 400, { error: 'A reason and valid idempotency key are required' });
     return;
   }
-
-  const job = jobResult.rows[0] as any;
-
-  if (job.status !== 'failed') {
-    sendJson(res, 400, {
-      error: 'Can only retry failed jobs',
-      currentStatus: job.status,
+  try {
+    const result = await retryLetterJobAsAdmin({
+      jobId, actorId: adminInfo.userId, reason, idempotencyKey
     });
+    sendJson(res, 200, { success: true, ...result });
+  } catch (error) {
+    if (error instanceof AdminJobRetryError) {
+      sendJson(res, error.code === 'not_found' ? 404 : 409, { error: error.code });
+      return;
+    }
+    throw error;
+  }
+}
+
+async function handleTransitionCommerceAlert(
+  req: IncomingMessage,
+  res: ServerResponse,
+  alertId: string,
+  adminInfo: { userId: string }
+) {
+  const body = await parseBody(req);
+  const status = body.status === 'acknowledged' || body.status === 'resolved' ? body.status : null;
+  const resolutionCode = typeof body.resolutionCode === 'string' ? body.resolutionCode : '';
+  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : '';
+  if (!UUID_PATTERN.test(alertId) || !status || !OPERATOR_IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey) ||
+      (status === 'resolved' && !/^[a-z][a-z0-9_]{2,79}$/.test(resolutionCode))) {
+    sendJson(res, 400, { error: 'Invalid alert transition request' });
     return;
   }
-
-  // Reset the job to pending
-  await query(
-    `UPDATE letter_jobs
-     SET status = 'pending',
-         attempts = 0,
-         error_message = NULL,
-         last_error = NULL,
-         scheduled_at = NOW(),
-         next_attempt_at = NOW(),
-         started_at = NULL,
-         completed_at = NULL,
-         locked_at = NULL,
-         updated_at = NOW(),
-         metadata = jsonb_set(
-           COALESCE(metadata, '{}'::jsonb),
-           '{retried_by}',
-           $2::jsonb
-         )
-     WHERE job_id = $1`,
-    [jobId, JSON.stringify({ admin: adminInfo.email || adminInfo.userId, at: new Date().toISOString() })]
-  );
-
-  console.log('🔄 Admin retried job');
-
-  sendJson(res, 200, {
-    success: true,
-    message: 'Job has been reset to pending and will be processed soon.',
-    jobId,
-  });
+  const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+  try {
+    const result = await transaction(async client => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [idempotencyKey]);
+      const replay = await client.query<{ target_reference_hash: string }>(
+        `SELECT target_reference_hash FROM commerce_operator_audit_events
+         WHERE idempotency_key_hash = $1`, [hash(idempotencyKey)]
+      );
+      if (replay.rows[0]) {
+        if (replay.rows[0].target_reference_hash !== hash(alertId)) throw new Error('idempotency_conflict');
+        return { replayed: true };
+      }
+      const locked = await client.query<{ status: string; severity: string; alert_type: string }>(
+        `SELECT status, severity, alert_type FROM commerce_operational_alerts
+         WHERE alert_id = $1 FOR UPDATE`, [alertId]
+      );
+      const current = locked.rows[0];
+      if (!current) throw new Error('not_found');
+      if (current.status === 'resolved' || (status === 'acknowledged' && current.status !== 'open')) {
+        throw new Error('invalid_state');
+      }
+      await client.query(
+        `UPDATE commerce_operational_alerts SET status = $2,
+           acknowledged_at = CASE WHEN $2 = 'acknowledged' THEN NOW() ELSE acknowledged_at END,
+           acknowledged_by_actor_hash = CASE WHEN $2 = 'acknowledged' THEN $3 ELSE acknowledged_by_actor_hash END,
+           resolved_at = CASE WHEN $2 = 'resolved' THEN NOW() ELSE NULL END,
+           resolved_by_actor_hash = CASE WHEN $2 = 'resolved' THEN $3 ELSE NULL END,
+           resolution_code = CASE WHEN $2 = 'resolved' THEN $4 ELSE NULL END,
+           updated_at = NOW() WHERE alert_id = $1`,
+        [alertId, status, hash(adminInfo.userId), resolutionCode || null]
+      );
+      await client.query(
+        `INSERT INTO commerce_operator_audit_events
+           (idempotency_key_hash, actor_subject_hash, operation, target_type,
+            target_reference_hash, reason_code, before_state, after_state)
+         VALUES ($1, $2, 'commerce_alert_transition', 'commerce_alert', $3, $4, $5, $6)`,
+        [hash(idempotencyKey), hash(adminInfo.userId), hash(alertId),
+          resolutionCode || 'operator_acknowledged',
+          JSON.stringify({ status: current.status, severity: current.severity, type: current.alert_type }),
+          JSON.stringify({ status, severity: current.severity, type: current.alert_type })]
+      );
+      return { replayed: false };
+    });
+    sendJson(res, 200, { success: true, status, ...result });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'transition_failed';
+    sendJson(res, code === 'not_found' ? 404 : 409, { error: code });
+  }
 }
 
 // =========================================================================

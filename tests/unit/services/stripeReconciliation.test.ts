@@ -123,6 +123,46 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
   });
 
   describe('discrepancy detection', () => {
+    it('joins pack ledger order references to their Stripe session', async () => {
+      mockSessionsList.mockResolvedValue({ data: [{
+        id: 'cs_pack', payment_status: 'paid', amount_total: 1000, created: Date.now() / 1000,
+        client_reference_id: 'order-pack',
+        metadata: { orderId: 'order-pack', orderType: 'letter_pack', productCode: 'credit-pack-10' }
+      }], has_more: false });
+      mockRefundsList.mockResolvedValue({ data: [] });
+      mockQuery
+        .mockResolvedValueOnce({ rows: [{
+          ledger_id: 'ledger-pack', user_id: 'user-pack', initial_amount: 10,
+          source_reference_id: 'order-pack', source_type: 'purchase', created_at: new Date(),
+          order_id: 'order-pack', order_type: 'letter_pack', stripe_checkout_session_id: 'cs_pack'
+        }] })
+        .mockResolvedValueOnce({ rows: [{
+          order_id: 'order-pack', order_type: 'letter_pack', stripe_checkout_session_id: 'cs_pack',
+          status: 'fulfilled', user_id: 'user-pack'
+        }] });
+      await expect(reconcileStripePayments(1)).resolves.toMatchObject({
+        summary: { matched: 1, missingInOurSystem: 0, ourCredits: 1 }
+      });
+    });
+
+    it('reconciles JIT funding through its order without expecting a credit grant', async () => {
+      mockSessionsList.mockResolvedValue({ data: [{
+        id: 'cs_jit', payment_status: 'paid', amount_total: 499, created: Date.now() / 1000,
+        client_reference_id: 'order-jit',
+        metadata: { orderId: 'order-jit', orderType: 'jit_mail', productCode: 'jit-letter' }
+      }], has_more: false });
+      mockRefundsList.mockResolvedValue({ data: [] });
+      mockQuery
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{
+          order_id: 'order-jit', order_type: 'jit_mail', stripe_checkout_session_id: 'cs_jit',
+          status: 'fulfilled', user_id: 'user-jit'
+        }] });
+      const result = await reconcileStripePayments(1);
+      expect(result.summary).toMatchObject({ matched: 1, missingInOurSystem: 0, ourCredits: 0 });
+      expect(result.discrepancies).toEqual([]);
+    });
+
     it('logs structured discrepancy data without runtime identifiers', async () => {
       const sensitive = ['cs_private_session', 'auth0|private-user', 'pi_private_refund'];
       const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -200,7 +240,15 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
       has_more: false
     });
     mockRefundsList.mockResolvedValue({ data: [] });
-    mockQuery.mockResolvedValue({ rows: [] });
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{
+        order_id: 'order-private',
+        order_type: 'letter_pack',
+        stripe_checkout_session_id: 'cs_private',
+        status: 'fulfilled',
+        user_id: 'auth0|private'
+      }] });
     mockAddCredits.mockRejectedValue(new Error('private database message'));
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.spyOn(console, 'log').mockImplementation(() => undefined);

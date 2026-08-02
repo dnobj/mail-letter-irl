@@ -520,12 +520,15 @@ are definite outcomes, and `ambiguous` quarantines an outcome that cannot be
 proved after dispatch. Ambiguous rows retain quota until provider evidence or
 an explicit customer-compensation decision resolves them. A unique non-null
 provider request ID supports reconciliation without exposing it in logs.
-`image_generation_resolution_audit` records the authenticated actor, exact
-reservation/account binding, idempotency key, constrained consume-or-release
-decision, evidence classification, and resulting state. Its composite foreign
-key and transition constraint prevent cross-account or impossible decisions;
-the durable audit insert and reservation/entitlement mutation share one transaction.
+`commerce_operator_audit_events` records privacy-minimized hashes for the
+authenticated actor, target, and idempotency key plus constrained before/after
+state and provider-evidence classifications. It is append-only, has no user or
+domain foreign keys that could block account deletion, and expires into an
+owner-controlled retention workflow. The durable audit insert and exact
+reservation/entitlement mutation share one transaction.
 
 `commerce_operational_alerts` stores sanitized Stripe dispute work in the same
 transaction as `stripe_webhook_events`. Its unique source-event/type key makes
 replay safe, while open/acknowledged/resolved states survive process restarts.
+The same table surfaces ambiguous mail dispatch and refund-after-dispatch work;
+operator transitions are idempotent and append an audit event atomically.

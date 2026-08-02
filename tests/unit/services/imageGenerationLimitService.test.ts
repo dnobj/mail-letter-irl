@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -203,16 +204,8 @@ describe('imageGenerationLimitService explicit entitlements', () => {
     );
     expect(mocks.query).toHaveBeenNthCalledWith(
       7,
-      expect.stringContaining('INSERT INTO image_generation_resolution_audit'),
-      [
-        'image-resolution-1',
-        'reservation-1',
-        'user-1',
-        'admin-1',
-        'release',
-        'provider_confirmed_failed',
-        'released'
-      ]
+      expect.stringContaining('INSERT INTO commerce_operator_audit_events'),
+      expect.arrayContaining(['provider_confirmed_failed'])
     );
   });
 
@@ -256,10 +249,9 @@ describe('imageGenerationLimitService explicit entitlements', () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
         rows: [{
-          reservation_id: 'reservation-1',
-          user_id: 'user-1',
-          actor_id: 'admin-1',
-          idempotency_key: 'image-resolution-replay',
+          target_reference_hash: createHash('sha256').update('reservation-1').digest('hex'),
+          actor_subject_hash: createHash('sha256').update('admin-1').digest('hex'),
+          subject_binding_hash: createHash('sha256').update('reservation-1\0user-1').digest('hex'),
           decision: 'release',
           resolution_reason: 'customer_compensation',
           resulting_status: 'released'

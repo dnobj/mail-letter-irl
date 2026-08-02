@@ -107,6 +107,8 @@ export type OrderStatus =
   | 'payment_failed'
   | 'refund_pending'
   | 'refunded'
+  | 'disputed'
+  | 'held'
   | 'cancelled';
 
 export interface Order {
@@ -146,7 +148,8 @@ export interface Order {
 // Letter Types
 // ============================================================================
 
-export type LetterStatus = 'draft' | 'queued' | 'processing' | 'sent' | 'failed' | 'cancelled';
+export type LetterStatus = 'draft' | 'queued' | 'processing' | 'held' | 'sent' | 'accepted' |
+  'in_transit' | 'delivered' | 'returned' | 'failed' | 'cancelled';
 
 export interface Letter {
   letter_id: string;
@@ -188,7 +191,7 @@ export interface ImageEntitlement {
 // Letter Job Types
 // ============================================================================
 
-export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+export type JobStatus = 'pending' | 'processing' | 'held' | 'completed' | 'failed' | 'cancelled';
 
 export interface LetterJob {
   job_id: string;
@@ -201,6 +204,10 @@ export interface LetterJob {
   next_attempt_at: Date;
   locked_at?: Date;
   provider_order_id?: string;
+  provider_outcome: 'not_dispatched' | 'dispatching' | 'accepted' | 'definite_failure' | 'ambiguous';
+  provider_dispatch_started_at?: Date;
+  held_at?: Date;
+  hold_reason?: string;
   last_error?: string;
   started_at?: Date;
   completed_at?: Date;

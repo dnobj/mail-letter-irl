@@ -39,7 +39,7 @@ interface SendPostcardOutput {
 }
 
 function publicStatus(status: LetterStatus): PublicStatus {
-  if (status === 'queued' || status === 'processing' || status === 'draft') return 'pending';
+  if (status === 'queued' || status === 'processing' || status === 'held' || status === 'draft') return 'pending';
   if (status === 'sent') return 'accepted';
   return status;
 }

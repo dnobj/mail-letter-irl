@@ -874,6 +874,78 @@ async function revokePackCredits(
       ]
     );
   }
+  await client.query(
+    `WITH ranked AS (
+       SELECT created_at, ROW_NUMBER() OVER (ORDER BY created_at) AS rank
+       FROM credit_ledger AS purchase
+       WHERE purchase.user_id = $1 AND purchase.source_type = 'purchase'
+         AND NOT EXISTS (
+           SELECT 1 FROM credit_ledger AS refund
+           WHERE refund.source_type = 'refund'
+             AND refund.related_ledger_id = purchase.ledger_id
+         )
+     ), eligibility AS (
+       SELECT COUNT(*) AS purchase_count,
+              MAX(created_at) FILTER (WHERE rank = 3) AS qualifying_at FROM ranked
+     )
+     UPDATE users SET tier = CASE
+       WHEN eligibility.purchase_count >= 3
+        AND eligibility.qualifying_at <= NOW() - INTERVAL '120 days' THEN 'trusted'
+       ELSE 'standard' END,
+       tier_calculated_at = NOW(), updated_at = NOW()
+     FROM eligibility WHERE users.user_id = $1`,
+    [order.user_id]
+  );
+}
+
+async function stopFundedMailBeforeFinancialReversal(
+  client: pg.PoolClient,
+  order: Order,
+  sourceEventId: string,
+  reason: 'payment_reversed' | 'payment_disputed'
+): Promise<'none' | 'cancelled' | 'held'> {
+  if (order.order_type !== 'jit_mail' || !order.letter_id) return 'none';
+  await client.query('SELECT letter_id FROM letters WHERE letter_id = $1 FOR UPDATE', [order.letter_id]);
+  const job = await client.query<{ job_id: string; status: string; provider_outcome: string }>(
+    'SELECT job_id, status, provider_outcome FROM letter_jobs WHERE letter_id = $1 FOR UPDATE',
+    [order.letter_id]
+  );
+  const current = job.rows[0];
+  if (!current) return 'none';
+  if (current.provider_outcome === 'not_dispatched') {
+    await client.query(
+      `UPDATE letter_jobs SET status = 'cancelled', completed_at = NOW(), locked_at = NULL,
+         hold_reason = $2, updated_at = NOW() WHERE job_id = $1 AND status <> 'completed'`,
+      [current.job_id, reason]
+    );
+    await client.query(
+      `UPDATE letters SET status = 'cancelled', updated_at = NOW()
+       WHERE letter_id = $1 AND status NOT IN ('accepted','sent','in_transit','delivered','returned')`,
+      [order.letter_id]
+    );
+    return 'cancelled';
+  }
+  if (current.provider_outcome === 'dispatching' || current.provider_outcome === 'ambiguous') {
+    await client.query(
+      `UPDATE letter_jobs SET status = 'held', provider_outcome = 'ambiguous', held_at = NOW(),
+         hold_reason = $2, locked_at = NULL, updated_at = NOW() WHERE job_id = $1`,
+      [current.job_id, reason]
+    );
+    await client.query(
+      `UPDATE letters SET status = 'held', updated_at = NOW()
+       WHERE letter_id = $1 AND status NOT IN ('accepted','sent','in_transit','delivered','returned')`,
+      [order.letter_id]
+    );
+    await client.query(
+      `INSERT INTO commerce_operational_alerts
+         (source_event_id, order_id, alert_type, severity, details)
+       VALUES ($1, $2, 'refunded_mail_already_dispatched', 'critical', $3)
+       ON CONFLICT (source_event_id, alert_type) DO NOTHING`,
+      [sourceEventId, order.order_id, JSON.stringify({ providerOutcome: current.provider_outcome })]
+    );
+    return 'held';
+  }
+  return 'none';
 }
 
 async function processRefundEvent(
@@ -926,6 +998,7 @@ async function processRefundEvent(
       });
       return { duplicate: false, orderId: order.order_id, status: order.status };
     }
+    await stopFundedMailBeforeFinancialReversal(client, order, eventId, 'payment_reversed');
     if (nextStatus === 'refunded' && order.order_type === 'letter_pack') {
       await revokePackCredits(client, order);
     }
@@ -962,6 +1035,39 @@ async function processDisputeEvent(
       return { duplicate: true };
     }
     const closed = eventType === 'charge.dispute.closed';
+    const paymentIntentId = typeof dispute.payment_intent === 'string'
+      ? dispute.payment_intent
+      : dispute.payment_intent?.id;
+    const orderResult = paymentIntentId
+      ? await client.query<Order>(
+          'SELECT * FROM orders WHERE stripe_payment_intent_id = $1 FOR UPDATE',
+          [paymentIntentId]
+        )
+      : { rows: [] as Order[] };
+    const order = orderResult.rows[0];
+    if (order) {
+      await client.query('UPDATE stripe_webhook_events SET order_id = $2 WHERE event_id = $1', [
+        eventId, order.order_id
+      ]);
+      await stopFundedMailBeforeFinancialReversal(client, order, eventId, 'payment_disputed');
+      await client.query(
+        `UPDATE orders SET status = 'disputed',
+           hold_previous_status = COALESCE(hold_previous_status, status),
+           held_at = COALESCE(held_at, NOW()), hold_reason = 'payment_disputed',
+           stripe_dispute_status = $2, updated_at = NOW() WHERE order_id = $1`,
+        [order.order_id, dispute.status]
+      );
+      await recordOrderEvent(client, order.order_id, eventType, order.status, 'disputed', {
+        disputeStatus: dispute.status
+      });
+      if (closed) {
+        await client.query(
+          `UPDATE commerce_operational_alerts SET status = 'resolved', resolved_at = NOW(), updated_at = NOW()
+           WHERE order_id = $1 AND alert_type = 'stripe_dispute_created' AND status <> 'resolved'`,
+          [order.order_id]
+        );
+      }
+    }
     const severity = closed
       ? dispute.status === 'lost'
         ? 'critical'
@@ -971,11 +1077,12 @@ async function processDisputeEvent(
       : 'warning';
     await client.query(
       `INSERT INTO commerce_operational_alerts (
-         source_event_id, alert_type, severity, details
-       ) VALUES ($1, $2, $3, $4)
+         source_event_id, order_id, alert_type, severity, details
+       ) VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (source_event_id, alert_type) DO NOTHING`,
       [
         eventId,
+        order?.order_id || null,
         closed ? 'stripe_dispute_closed' : 'stripe_dispute_created',
         severity,
         JSON.stringify({
@@ -1044,6 +1151,9 @@ function publicPurchaseStatus(status: OrderStatus): PurchaseStatusResult['purcha
       return 'refund_pending';
     case 'refunded':
       return 'refunded';
+    case 'disputed':
+    case 'held':
+      return 'refund_pending';
     case 'cancelled':
       return 'cancelled';
   }
@@ -1155,6 +1265,7 @@ export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
 
 export async function requestRefund(orderId: string, reason: string): Promise<boolean> {
   const retryLimit = integerSetting('JIT_REFUND_RETRY_LIMIT', 5);
+  if (retryLimit === 0) return false;
   const claimed = await query<RefundClaim>(
     `WITH candidate AS (
        SELECT order_id, refund_attempts
@@ -1273,7 +1384,13 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
      LIMIT 25`
   );
   for (const order of paid.rows) {
-    if (await fulfillPaidOrder(order.order_id)) recoveredFulfillments += 1;
+    try {
+      if (await fulfillPaidOrder(order.order_id)) recoveredFulfillments += 1;
+    } catch (error) {
+      writeDiagnostic('error', 'commerce.fulfillment_recovery_failed', {
+        errorClass: classifyDiagnosticError(error, 'database_error')
+      });
+    }
   }
 
   let reconciledPayments = 0;
@@ -1328,19 +1445,26 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
     `SELECT order_id, last_error FROM orders
      WHERE status = 'refund_pending'
        AND stripe_payment_intent_id IS NOT NULL
+       AND refund_attempts < $2
        AND (
          refund_attempts = 0
          OR updated_at <= NOW() - ($1 * INTERVAL '1 second')
        )
      ORDER BY refund_pending_at NULLS FIRST, created_at
      LIMIT 25`,
-    [refundRetryDelaySeconds()]
+    [refundRetryDelaySeconds(), integerSetting('JIT_REFUND_RETRY_LIMIT', 5)]
   );
   for (const order of refunds.rows) {
-    if (
-      await requestRefund(order.order_id, order.last_error || 'Pre-provider fulfillment failure')
-    ) {
-      refundAttempts += 1;
+    try {
+      if (
+        await requestRefund(order.order_id, order.last_error || 'Pre-provider fulfillment failure')
+      ) {
+        refundAttempts += 1;
+      }
+    } catch (error) {
+      writeDiagnostic('error', 'commerce.refund_recovery_failed', {
+        errorClass: classifyDiagnosticError(error, 'database_error')
+      });
     }
   }
 

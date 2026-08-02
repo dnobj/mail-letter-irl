@@ -787,7 +787,7 @@ describe('commerceService', () => {
       ])
     );
     expect(
-      mocks.query.mock.calls.filter(([sql]) => String(sql).includes('UPDATE users'))
+      mocks.query.mock.calls.filter(([sql]) => String(sql).includes('SET credits = GREATEST'))
     ).toHaveLength(1);
   });
 
