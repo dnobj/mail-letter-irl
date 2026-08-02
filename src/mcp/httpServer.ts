@@ -43,7 +43,10 @@ import {
   writeDiagnostic
 } from "../utils/diagnosticLog.js";
 import { buildWwwAuthenticateChallenge } from "../auth/oauthChallenge.js";
-import { validatePublicServerAdminConfiguration } from "../admin/config.js";
+import {
+  findCoupledFeatureFlagWarnings,
+  validatePublicServerAdminConfiguration
+} from "../admin/config.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -86,6 +89,15 @@ const PRODUCTION_ENV_VARS = [
 
 export function validateEnvironment() {
   validatePublicServerAdminConfiguration(process.env);
+
+  // Warn, never throw. The operator recovery routes these flags depend on are
+  // denied by the legacy admin guard, but failing startup on a flag combination
+  // would boot-loop a running deployment.
+  for (const flag of findCoupledFeatureFlagWarnings(process.env)) {
+    console.warn(
+      `[admin] ${flag}=true while public /api/admin* routes are denied; issue #69 operator recovery is unreachable. See docs/deployment.md#operator-recovery-interaction`
+    );
+  }
 
   const missing: string[] = [];
 

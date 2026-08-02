@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -31,6 +31,9 @@ interface Fingerprint {
   triggers: string[];
   routines: string[];
   privileges: string[];
+  comments: string[];
+  routinePrivileges: string[];
+  schemaPrivileges: string[];
 }
 
 function quoteIdentifier(identifier: string): string {
@@ -153,6 +156,76 @@ async function readFingerprint(
     [schemaName],
   );
 
+  // Migration 022 documents every table and its audit trigger function with
+  // COMMENT ON. Without this leg the fingerprint cannot see a lost or reworded
+  // comment, and cannot see one arrival order winning a COMMENT race.
+  const comments = await client.query<{ entry: string }>(
+    `
+      SELECT format('relation %s = %s', relation.relname, description.description) AS entry
+      FROM pg_description AS description
+      JOIN pg_class AS relation ON relation.oid = description.objoid
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = $1 AND description.objsubid = 0
+      UNION ALL
+      SELECT format('column %s.%s = %s', relation.relname, attribute.attname, description.description)
+      FROM pg_description AS description
+      JOIN pg_class AS relation ON relation.oid = description.objoid
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+      JOIN pg_attribute AS attribute
+        ON attribute.attrelid = relation.oid AND attribute.attnum = description.objsubid
+      WHERE namespace.nspname = $1 AND description.objsubid > 0
+      UNION ALL
+      SELECT format('routine %s = %s', routine.proname, description.description)
+      FROM pg_description AS description
+      JOIN pg_proc AS routine ON routine.oid = description.objoid
+      JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+      WHERE namespace.nspname = $1
+      ORDER BY 1
+    `,
+    [schemaName],
+  );
+
+  // The relation privilege query above filters relkind, so pg_proc ACLs are
+  // invisible to it. A migration that revoked (or failed to revoke) EXECUTE on a
+  // trigger function would not show up without this leg.
+  const routinePrivileges = await client.query<{ entry: string }>(
+    `
+      SELECT format(
+        '%s(%s) grantee=%s privilege=%s grantable=%s',
+        routine.proname, pg_get_function_identity_arguments(routine.oid),
+        CASE WHEN privilege.grantee = 0 THEN 'PUBLIC'
+             ELSE COALESCE(pg_get_userbyid(privilege.grantee), 'unknown') END,
+        privilege.privilege_type, privilege.is_grantable
+      ) AS entry
+      FROM pg_proc AS routine
+      JOIN pg_namespace AS namespace ON namespace.oid = routine.pronamespace
+      CROSS JOIN LATERAL aclexplode(
+        COALESCE(routine.proacl, acldefault('f', routine.proowner))
+      ) AS privilege
+      WHERE namespace.nspname = $1
+      ORDER BY entry
+    `,
+    [schemaName],
+  );
+
+  const schemaPrivileges = await client.query<{ entry: string }>(
+    `
+      SELECT format(
+        'schema grantee=%s privilege=%s grantable=%s',
+        CASE WHEN privilege.grantee = 0 THEN 'PUBLIC'
+             ELSE COALESCE(pg_get_userbyid(privilege.grantee), 'unknown') END,
+        privilege.privilege_type, privilege.is_grantable
+      ) AS entry
+      FROM pg_namespace AS namespace
+      CROSS JOIN LATERAL aclexplode(
+        COALESCE(namespace.nspacl, acldefault('n', namespace.nspowner))
+      ) AS privilege
+      WHERE namespace.nspname = $1
+      ORDER BY entry
+    `,
+    [schemaName],
+  );
+
   const project = (rows: { entry: string }[]): string[] =>
     rows.map((row) => normalize(schemaName, row.entry)).sort();
 
@@ -164,22 +237,34 @@ async function readFingerprint(
     triggers: project(triggers.rows),
     routines: project(routines.rows),
     privileges: project(privileges.rows),
+    comments: project(comments.rows),
+    routinePrivileges: project(routinePrivileges.rows),
+    schemaPrivileges: project(schemaPrivileges.rows),
   };
 }
 
-function selectAdminObjects(fingerprint: Fingerprint): Fingerprint {
+type AdminObjects = Omit<Fingerprint, "ledger">;
+
+function selectAdminObjects(fingerprint: Fingerprint): AdminObjects {
   const ownedBy022 = (entry: string): boolean =>
     ADMIN_RELATIONS.some((relation) => entry.includes(relation)) ||
     entry.includes("reject_admin_audit_event_mutation");
 
+  // The ledger leg is deliberately absent. Filtering it to the single expected
+  // migration name made it constant across every scenario, so comparing it
+  // proved nothing. Ledger content is asserted per scenario instead.
   return {
-    ledger: fingerprint.ledger.filter((name) => name === ADMIN_AUDIT_MIGRATION),
     columns: fingerprint.columns.filter(ownedBy022),
     constraints: fingerprint.constraints.filter(ownedBy022),
     indexes: fingerprint.indexes.filter(ownedBy022),
     triggers: fingerprint.triggers.filter(ownedBy022),
     routines: fingerprint.routines.filter(ownedBy022),
     privileges: fingerprint.privileges.filter(ownedBy022),
+    comments: fingerprint.comments.filter(ownedBy022),
+    routinePrivileges: fingerprint.routinePrivileges.filter(ownedBy022),
+    // Schema-level grants are not owned by any one relation, so they are
+    // compared whole rather than filtered to 022's objects.
+    schemaPrivileges: fingerprint.schemaPrivileges,
   };
 }
 
@@ -327,12 +412,21 @@ describeWithDatabase("admin migration arrival order compatibility", () => {
   }, 180_000);
 
   it("converges on identical structure regardless of 022/023 arrival order", () => {
+    // The two scenarios applied 022 and 023 in opposite orders, so this is a
+    // real comparison rather than a schema compared against itself.
+    expect(recoveryFirst.ledger).not.toEqual(auditFirst.ledger);
+
     expect(recoveryFirst.columns).toEqual(auditFirst.columns);
     expect(recoveryFirst.constraints).toEqual(auditFirst.constraints);
     expect(recoveryFirst.indexes).toEqual(auditFirst.indexes);
     expect(recoveryFirst.triggers).toEqual(auditFirst.triggers);
     expect(recoveryFirst.routines).toEqual(auditFirst.routines);
     expect(recoveryFirst.privileges).toEqual(auditFirst.privileges);
+    expect(recoveryFirst.comments).toEqual(auditFirst.comments);
+    expect(recoveryFirst.routinePrivileges).toEqual(
+      auditFirst.routinePrivileges,
+    );
+    expect(recoveryFirst.schemaPrivileges).toEqual(auditFirst.schemaPrivileges);
     expect([...recoveryFirst.ledger].sort()).toEqual(
       [...auditFirst.ledger].sort(),
     );
@@ -343,9 +437,18 @@ describeWithDatabase("admin migration arrival order compatibility", () => {
     const recoveryFirstAdmin = selectAdminObjects(recoveryFirst);
     const auditFirstAdmin = selectAdminObjects(auditFirst);
 
+    // Non-vacuity: every compared leg 022 actually populates must be non-empty,
+    // otherwise this would be comparing empty arrays.
     expect(sliceOneAdmin.columns.length).toBeGreaterThan(0);
     expect(sliceOneAdmin.constraints.length).toBeGreaterThan(0);
     expect(sliceOneAdmin.triggers.length).toBeGreaterThan(0);
+    expect(sliceOneAdmin.routines.length).toBeGreaterThan(0);
+    expect(sliceOneAdmin.indexes.length).toBeGreaterThan(0);
+    expect(sliceOneAdmin.privileges.length).toBeGreaterThan(0);
+    expect(sliceOneAdmin.routinePrivileges.length).toBeGreaterThan(0);
+    // Migration 022 sets five COMMENT ON statements: four tables plus the
+    // audit-mutation trigger function.
+    expect(sliceOneAdmin.comments.length).toBe(5);
 
     expect(recoveryFirstAdmin).toEqual(sliceOneAdmin);
     expect(auditFirstAdmin).toEqual(sliceOneAdmin);
@@ -379,7 +482,7 @@ describeWithDatabase("admin migration arrival order compatibility", () => {
     }
   }, 180_000);
 
-  it("proves the staged 022 is the real repository file", async () => {
+  it("stages byte-identical copies of the real repository migrations", async () => {
     const staged = await stage("identity", upToJit);
     const files = await readdir(staged);
     expect(files).toContain(JIT_FOUNDATION_MIGRATION);
@@ -389,5 +492,23 @@ describeWithDatabase("admin migration arrival order compatibility", () => {
     const fullFiles = await readdir(full);
     expect(fullFiles).toContain(ADMIN_AUDIT_MIGRATION);
     expect(fullFiles).toContain(JIT_RECOVERY_MIGRATION);
+
+    // Filenames alone would not detect a rewritten or substituted body, which
+    // is the exact failure the integration gate has to exclude. Compare
+    // content digests against db/migrations.
+    for (const migration of [
+      JIT_FOUNDATION_MIGRATION,
+      ADMIN_AUDIT_MIGRATION,
+      JIT_RECOVERY_MIGRATION,
+    ]) {
+      const repositoryBytes = await readFile(
+        join(migrationsDirectory, migration),
+      );
+      const stagedBytes = await readFile(join(full, migration));
+      expect(repositoryBytes.length).toBeGreaterThan(0);
+      expect(createHash("sha256").update(stagedBytes).digest("hex")).toBe(
+        createHash("sha256").update(repositoryBytes).digest("hex"),
+      );
+    }
   });
 });

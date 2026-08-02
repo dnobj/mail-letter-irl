@@ -298,6 +298,32 @@ export function validatePublicServerAdminConfiguration(
   }
 }
 
+/**
+ * Names the feature flags that must stay disabled while the legacy public admin
+ * surface is denied.
+ *
+ * Issue #69's ambiguous-image operator recovery routes live under
+ * `/api/admin/image-generation/*`, which this slice answers with a no-store 404.
+ * Enabling JIT purchase or the image trial without an operator recovery path
+ * would strand quota that only an operator decision can resolve.
+ *
+ * This deliberately warns instead of throwing. A hard failure here would turn a
+ * flag combination into a boot loop on an already-running deployment, which is a
+ * worse outcome than the condition it reports.
+ */
+export const ADMIN_COUPLED_FEATURE_FLAGS = [
+  "JIT_PURCHASE_ENABLED",
+  "IMAGE_TRIAL_ENABLED",
+] as const;
+
+export function findCoupledFeatureFlagWarnings(
+  processEnvironment: NodeJS.ProcessEnv,
+): string[] {
+  return ADMIN_COUPLED_FEATURE_FLAGS.filter(
+    (flag) => processEnvironment[flag] === "true",
+  );
+}
+
 function parseConnectionUrl(connectionString: string): URL {
   try {
     const url = new URL(connectionString);

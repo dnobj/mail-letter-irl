@@ -289,28 +289,71 @@ describeWithDatabase("admin foundation database migration", () => {
     expect(persisted.rows[0].count).toBe("0");
   });
 
-  it("revokes default public access to the admin foundation tables", async () => {
-    const result = await client.query<{ publicPrivilegeCount: string }>(
-      `
-      SELECT COUNT(*)::text AS "publicPrivilegeCount"
-      FROM pg_class AS relation
-      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-      CROSS JOIN LATERAL aclexplode(
-        COALESCE(relation.relacl, acldefault('r', relation.relowner))
-      ) AS privilege
-      WHERE namespace.nspname = $1
-        AND relation.relname IN (
-          'admin_environment_marker',
-          'admin_audit_events',
-          'admin_command_runs',
-          'admin_operations'
-        )
-        AND privilege.grantee = 0
-    `,
-      [schemaName],
-    );
+  const ADMIN_FOUNDATION_RELATIONS = [
+    "admin_environment_marker",
+    "admin_audit_events",
+    "admin_command_runs",
+    "admin_operations",
+  ];
 
-    expect(result.rows[0].publicPrivilegeCount).toBe("0");
+  /**
+   * Counts PUBLIC grants from the relation's own stored ACL.
+   *
+   * Deliberately does NOT fall back to `acldefault()`. acldefault for a table
+   * never contains a PUBLIC entry, so a COALESCE onto it reports zero for a
+   * table that was never revoked at all, which makes the assertion pass with
+   * migration 022's REVOKE statements deleted.
+   */
+  async function countPublicGrants(relation: string): Promise<number> {
+    const result = await client.query<{ count: string }>(
+      `
+      SELECT COUNT(*)::text AS count
+      FROM pg_class AS rel
+      JOIN pg_namespace AS ns ON ns.oid = rel.relnamespace
+      CROSS JOIN LATERAL aclexplode(rel.relacl) AS privilege
+      WHERE ns.nspname = $1 AND rel.relname = $2 AND privilege.grantee = 0
+    `,
+      [schemaName, relation],
+    );
+    return Number(result.rows[0].count);
+  }
+
+  it("revokes default public access to the admin foundation tables", async () => {
+    for (const relation of ADMIN_FOUNDATION_RELATIONS) {
+      // An explicit REVOKE materialises relacl. If migration 022 stopped
+      // revoking, relacl stays NULL and this fails instead of silently
+      // reporting zero PUBLIC grants.
+      const stored = await client.query<{ relaclIsNull: boolean }>(
+        `
+        SELECT rel.relacl IS NULL AS "relaclIsNull"
+        FROM pg_class AS rel
+        JOIN pg_namespace AS ns ON ns.oid = rel.relnamespace
+        WHERE ns.nspname = $1 AND rel.relname = $2
+      `,
+        [schemaName, relation],
+      );
+      expect(stored.rows).toHaveLength(1);
+      expect(
+        stored.rows[0].relaclIsNull,
+        `${relation} has no stored ACL, so nothing was revoked`,
+      ).toBe(false);
+
+      expect(await countPublicGrants(relation)).toBe(0);
+    }
+  });
+
+  it("detects a PUBLIC grant and confirms REVOKE removes it", async () => {
+    // Positive control for the assertion above: without this round trip the
+    // zero-PUBLIC-grant check could be green because the detector is broken
+    // rather than because access is actually revoked.
+    const relation = "admin_audit_events";
+    expect(await countPublicGrants(relation)).toBe(0);
+
+    await client.query(`GRANT SELECT ON ${relation} TO PUBLIC`);
+    expect(await countPublicGrants(relation)).toBeGreaterThan(0);
+
+    await client.query(`REVOKE ALL ON ${relation} FROM PUBLIC`);
+    expect(await countPublicGrants(relation)).toBe(0);
   });
 
   it("applies least-privilege reader/operator grants and denies arbitrary writes", async () => {

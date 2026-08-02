@@ -1,3 +1,6 @@
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { parseAdminEnvironmentConfig } from "../../../src/admin/config.js";
@@ -17,11 +20,27 @@ import {
 const config = parseAdminEnvironmentConfig(validDevelopmentAdminConfig);
 
 describe("admin database access provisioning", () => {
-  it("explicitly sequences JIT migration 021 before admin migration 022", () => {
+  it("explicitly sequences JIT migration 021 before admin migration 022", async () => {
     expect([
       ADMIN_JIT_PREDECESSOR_MIGRATION,
       ADMIN_FOUNDATION_MIGRATION,
     ]).toEqual(ADMIN_MIGRATION_SEQUENCE);
+
+    // Comparing the two source constants against a fixture that hard-codes the
+    // same strings cannot notice a renamed migration file. Anchor both names to
+    // what is actually on disk.
+    const migrationFiles = await readdir(join(process.cwd(), "db", "migrations"));
+    expect(migrationFiles).toContain(ADMIN_JIT_PREDECESSOR_MIGRATION);
+    expect(migrationFiles).toContain(ADMIN_FOUNDATION_MIGRATION);
+
+    // Exactly one 021 and one 022 must exist, so neither constant can drift
+    // onto a stale duplicate left beside a renamed file.
+    expect(migrationFiles.filter((file) => file.startsWith("021_"))).toEqual([
+      ADMIN_JIT_PREDECESSOR_MIGRATION,
+    ]);
+    expect(migrationFiles.filter((file) => file.startsWith("022_"))).toEqual([
+      ADMIN_FOUNDATION_MIGRATION,
+    ]);
   });
 
   it("requires apply and a separate production confirmation flag", () => {

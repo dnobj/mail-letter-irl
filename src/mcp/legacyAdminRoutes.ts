@@ -6,8 +6,13 @@ export function isLegacyPublicAdminPath(pathname: string): boolean {
     pathname.startsWith("/admin/") ||
     pathname === "/admin.html" ||
     pathname === "/admin-panel.html" ||
-    pathname === "/api/admin" ||
-    pathname.startsWith("/api/admin/")
+    // Must be exactly as wide as the legacy dispatcher predicate in
+    // httpServer.ts and adminApiHandler.ts, which both use
+    // startsWith('/api/admin'). A narrower guard here would let a path such as
+    // /api/adminfoo reach the admin-tier rate limiter and the admin request
+    // boundary, leaking a distinguishable response and a public rate-limit
+    // bucket even though no admin function is reachable.
+    pathname.startsWith("/api/admin")
   );
 }
 
