@@ -212,6 +212,16 @@ Neon databases, and PostGrid environments separated as described in
 
 ## Ambiguous image-reservation operator procedure
 
+> **Currently unreachable in deployed environments.** The issue #162 admin
+> foundation forces every public `/admin*` and `/api/admin*` request to a no-store
+> 404 and makes `ADMIN_ENABLED=true` a startup error, so the routes below cannot
+> be served once both changes are on `dev`. Keep `JIT_PURCHASE_ENABLED=false` and
+> `IMAGE_TRIAL_ENABLED=false` until a later issue #162 slice ships the replacement
+> operator control. See
+> [Operator recovery interaction](#operator-recovery-interaction). This procedure
+> is retained as the authoritative decision and evidence contract for that
+> replacement.
+
 Keep `JIT_PURCHASE_ENABLED=false` and `IMAGE_TRIAL_ENABLED=false` while validating
 this recovery path. The routes below use the existing `/api/admin` authentication
 and authorization boundary; never expose them through a public or user token.
