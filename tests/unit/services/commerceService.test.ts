@@ -44,6 +44,8 @@ vi.mock('../../../src/services/stripeService.js', () => ({
 
 import {
   ACTIVE_JIT_STATUSES,
+  FUNDED_OR_REVERSED_ORDER_STATUSES,
+  PackAmountNotConfiguredError,
   createPackCheckout,
   createJitCheckout,
   getSendEligibility,
@@ -97,6 +99,12 @@ describe('commerceService', () => {
   it('uses the same active JIT status set as the database uniqueness policy', () => {
     expect(ACTIVE_JIT_STATUSES).toEqual([
       'checkout_pending', 'paid', 'fulfillment_pending', 'refund_pending', 'disputed', 'held'
+    ]);
+  });
+
+  it('treats every funded, reversed, disputed, or held order as terminal for checkout replay', () => {
+    expect(FUNDED_OR_REVERSED_ORDER_STATUSES).toEqual([
+      'fulfillment_pending', 'fulfilled', 'refund_pending', 'refunded', 'disputed', 'held'
     ]);
   });
   beforeEach(() => {
@@ -247,6 +255,130 @@ describe('commerceService', () => {
 
     expect(alertInsertions).toBe(2);
     expect(committedClaim).toBe(true);
+  });
+
+  it.each(['disputed', 'held', 'refunded', 'fulfilled'])(
+    'ignores a replayed paid checkout for a %s order instead of re-granting',
+    async (status) => {
+      const guarded = {
+        ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4',
+        credits: 4, amount_cents: 500, status
+      };
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+        if (sql.includes('SELECT * FROM orders')) return { rows: [guarded] };
+        return { rows: [] };
+      });
+
+      await expect(processStripeWebhookEvent(checkoutEvent({ amount_total: 500 }) as any))
+        .resolves.toMatchObject({ duplicate: false, status });
+
+      expect(mocks.addCredits).not.toHaveBeenCalled();
+      expect(mocks.grantEntitlement).not.toHaveBeenCalled();
+      expect(mocks.query).not.toHaveBeenCalledWith(
+        expect.stringContaining("SET status = 'paid'"),
+        expect.anything()
+      );
+    }
+  );
+
+  it('binds a pack grant to its funding order so the database can reject a replay', async () => {
+    const pendingPackOrder = {
+      ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4',
+      credits: 4, amount_cents: 500, draft_id: undefined, status: 'checkout_pending'
+    };
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+      if (sql.includes('SELECT * FROM orders')) return { rows: [pendingPackOrder] };
+      return { rows: [] };
+    });
+
+    await expect(processStripeWebhookEvent(checkoutEvent({ amount_total: 500 }) as any))
+      .resolves.toMatchObject({ status: 'fulfilled' });
+
+    expect(mocks.addCredits).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ sourceType: 'purchase', sourceOrderId: 'order-1' })
+    );
+  });
+
+  // Deterministic proof of the canonical order. The PostgreSQL concurrency
+  // tests can only ever show the absence of a deadlock on the interleavings
+  // they happen to hit; this asserts the statement order itself.
+  it.each([
+    ['refund webhook', async () => {
+      await processStripeWebhookEvent({
+        id: 'evt-refund-lock', type: 'refund.updated', data: { object: {
+          id: 're-lock', payment_intent: 'pi-lock', charge: 'ch-lock',
+          amount: 500, status: 'succeeded', metadata: {}
+        } }
+      } as any);
+    }],
+    ['operator refund request', async () => {
+      await requestRefund('order-1', 'operator requested');
+    }],
+    ['reconciliation pack repair', async () => {
+      await repairFulfilledPackGrant({
+        orderId: 'order-1', stripeSessionId: 'cs-lock', expectedCredits: 4,
+        paidAmountCents: 500, paidCurrency: 'usd'
+      });
+    }]
+  ])('locks the account row before any ledger or entitlement write (%s)', async (_label, run) => {
+    const packOrder = {
+      ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4',
+      draft_id: undefined, credits: 4, amount_cents: 500, currency: 'usd',
+      status: 'fulfilled', stripe_checkout_session_id: 'cs-lock',
+      stripe_payment_intent_id: 'pi-lock', refund_attempts: 0
+    };
+    mocks.findRefund.mockResolvedValue({ id: 're-lock', status: 'succeeded' });
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-refund-lock' }] };
+      if (sql.includes('UPDATE orders') && sql.includes('RETURNING order_id')) {
+        return { rows: [{ order_id: 'order-1' }] };
+      }
+      if (sql.includes('FROM orders')) return { rows: [packOrder] };
+      if (sql.includes('FROM credit_ledger')) return { rows: [] };
+      return { rows: [] };
+    });
+
+    await run().catch(() => undefined);
+    // The scenario must actually reach ledger/entitlement work, or the
+    // assertion below would be vacuously satisfied by an empty trace.
+    expect(mocks.query.mock.calls.some(call =>
+      String(call[0]).includes('credit_ledger') ||
+      String(call[0]).includes('image_entitlements'))).toBe(true);
+
+    const statements = mocks.query.mock.calls
+      .map(call => String(call[0]))
+      .filter(sql =>
+        sql.includes('FROM users WHERE user_id = $1 FOR UPDATE') ||
+        sql.includes('credit_ledger') ||
+        sql.includes('image_entitlements'));
+    const firstAccountLock = statements.findIndex(sql => sql.includes('FOR UPDATE'));
+    expect(firstAccountLock).toBe(0);
+  });
+
+  it('refuses a pack checkout when its amount is not configured', async () => {
+    mocks.getPackProduct.mockReturnValue({
+      productCode: 'credit-pack-4',
+      priceId: 'price-pack',
+      amountCents: 0,
+      currency: 'usd',
+      name: 'Starter Pack',
+      description: 'Two prepaid letters'
+    });
+
+    await expect(createPackCheckout({
+      userId: 'user-1', userEmail: 'user@example.test', productId: 'credit-pack-4',
+      successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no'
+    } as never)).rejects.toBeInstanceOf(PackAmountNotConfiguredError);
+
+    // No authoritative order may exist for an amount we cannot reconcile.
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO orders'),
+      expect.anything()
+    );
+    expect(mocks.createPackSession).not.toHaveBeenCalled();
   });
 
   it('records the required durable resolution code when a Stripe dispute closes', async () => {

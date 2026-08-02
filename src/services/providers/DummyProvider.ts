@@ -93,7 +93,10 @@ export class DummyProvider implements LetterFulfillmentProvider {
       return {
         success: false,
         trackingId,
-        error
+        error,
+        // The simulated failure happens before any submission exists, so it is
+        // an authoritative rejection rather than an unknown outcome.
+        metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
       };
     }
 

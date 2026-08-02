@@ -23,6 +23,14 @@ Use strict ESM TypeScript with two-space indentation. Prefer named exports; rese
 
 Add Vitest specs under `tests/unit/**` named `*.test.ts`, grouped by subsystem. Pair new logic with a happy-path test and at least one failure or recovery case. For mail delivery changes, cover duplicate/concurrent calls, provider timeouts, retries, and process recovery. Run lint, strict TypeScript, the full unit suite, and the relevant manual tests before opening a PR.
 
+`npm run test:run` does **not** include the real-PostgreSQL ACID suite: it is opt-in behind
+`LIRL_RUN_POSTGRES_INTEGRATION=true`, it silently skips otherwise, and there is no CI. For any
+change to financial, fulfillment, refund, entitlement, migration, or admin state, running
+`npm run test:integration:postgres` against a disposable local PostgreSQL is a **required** gate,
+and the PR must report its actual pass count. See
+[ACID Transaction Standard](docs/acid-transaction-standard.md) for the command and the canonical
+lock order.
+
 ## Transaction Safety
 
 ACID—Atomicity, Consistency, Isolation, and Durability—is the guiding engineering principle for every mutation of financial, balance, order, draft, fulfillment, refund, or administrative state. Follow the authoritative [ACID Transaction Standard](docs/acid-transaction-standard.md), including its transaction-boundary, idempotency, outbox, reconciliation, and PR-review requirements. Require risk-proportional local transaction, concurrency, and replay/recovery tests; when a PR changes an external boundary, require the applicable webhook, outbox, vendor-ambiguity, compensation, and reconciliation tests or a concrete N/A reason. External vendor calls cannot participate in a single PostgreSQL ACID transaction; model them as durable, resumable workflows.

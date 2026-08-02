@@ -21,12 +21,9 @@ import type { Letter, LetterJob } from './types.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
-const DEFAULT_PROVIDER_RETRIES = 3;
 const STALE_LOCK_MINUTES = 15;
-const defaultSleep: Sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 type ProviderResult = LetterResult | PostcardResult;
-type Sleep = (milliseconds: number) => Promise<void>;
 
 export interface LetterJobPayload {
   letterId: string;
@@ -38,9 +35,6 @@ export interface LetterJobPayload {
 }
 
 export interface ProcessLetterJobOptions {
-  providerRetries?: number;
-  retryBaseDelayMs?: number;
-  sleep?: Sleep;
   random?: () => number;
 }
 
@@ -75,15 +69,6 @@ function determineMailType(mailType: string, layoutType?: string): MailType {
   return 'text_only_letter';
 }
 
-function isTransientProviderFailure(result: ProviderResult): boolean {
-  if (typeof result.metadata?.retryable === 'boolean') {
-    return result.metadata.retryable;
-  }
-
-  const message = result.error?.toLowerCase() || '';
-  return /\b429\b|\b5\d\d\b|timeout|timed out|network|fetch failed|econnreset|econnrefused|socket/.test(message);
-}
-
 function errorResult(error: unknown): ProviderResult {
   const message = error instanceof Error ? error.message : 'Unknown provider error';
   return {
@@ -100,37 +85,28 @@ function errorResult(error: unknown): ProviderResult {
   };
 }
 
-export async function sendWithBoundedRetries(
-  send: () => Promise<ProviderResult>,
-  options: ProcessLetterJobOptions = {}
+/**
+ * Submit to the mail provider exactly once per claimed outbox job.
+ *
+ * There is deliberately no automatic in-flight retry. The only outcome that
+ * would be safe to repeat is one the provider authoritatively rejected, and an
+ * authoritative rejection is not transient - repeating it just re-earns the same
+ * refusal. Every other outcome (5xx, 408/409/425/429, transport loss, timeout,
+ * unreadable body, unusable 2xx) may mean the piece was already accepted and
+ * physically mailed, so it becomes a durable hold for operator reconciliation
+ * instead of a second submission.
+ *
+ * A thrown provider error carries no response at all and is therefore always
+ * ambiguous.
+ */
+export async function submitToProviderOnce(
+  send: () => Promise<ProviderResult>
 ): Promise<ProviderResult> {
-  // A provider request that times out or returns a transient response may have
-  // been accepted. Never repeat it automatically: durable reconciliation must
-  // establish a definite rejection before another physical-mail submission.
-  const retries = Math.max(1, Math.min(5, options.providerRetries ?? DEFAULT_PROVIDER_RETRIES));
-  let lastResult: ProviderResult = {
-    success: false,
-    trackingId: '',
-    error: 'Provider send did not run',
-  };
-
-  for (let attempt = 1; attempt <= retries; attempt += 1) {
-    try {
-      lastResult = await send();
-    } catch (error) {
-      lastResult = errorResult(error);
-    }
-
-    const safelyRetryable = lastResult.metadata?.submissionOutcome === 'definite_rejection'
-      && isTransientProviderFailure(lastResult);
-    if (lastResult.success || !safelyRetryable || attempt === retries) {
-      return lastResult;
-    }
-    const baseDelay = Math.max(0, options.retryBaseDelayMs ?? 250);
-    await (options.sleep ?? defaultSleep)(baseDelay * 2 ** (attempt - 1));
+  try {
+    return await send();
+  } catch (error) {
+    return errorResult(error);
   }
-
-  return lastResult;
 }
 
 /** Insert an outbox row using the caller's transaction. */
@@ -389,20 +365,21 @@ async function submitToProvider(
   const routingType = determineMailType(mailType, content.layoutType);
   const provider = await getProviderForMailType(routingType);
 
-  const result = await sendWithBoundedRetries(async () => {
+  const result = await submitToProviderOnce(async () => {
     if (mailType === 'postcard') {
       if (!provider.sendPostcard) {
+        // Nothing was submitted, so this is an authoritative rejection.
         return {
           success: false,
           trackingId: '',
           error: `${provider.config.displayName} does not support postcards`,
-          metadata: { retryable: false },
+          metadata: { retryable: false, submissionOutcome: 'definite_rejection' },
         };
       }
       return provider.sendPostcard(postcardParams(letter, job));
     }
     return provider.sendLetter(letterParams(letter, job));
-  }, options);
+  });
 
   return { result, providerName: provider.config.name };
 }
@@ -497,15 +474,19 @@ export async function completeJob(
        WHERE job_id = $2`,
       [result.trackingId, job.job_id]
     );
-    const fulfilledOrder = await client.query<{ order_id: string }>(
-      `UPDATE orders
-       SET status = 'fulfilled', fulfilled_at = NOW(), completed_at = NOW(),
-           last_error_code = NULL, last_error = NULL, updated_at = NOW()
-       WHERE order_type = 'jit_mail' AND letter_id = $1
-         AND status = 'fulfillment_pending'
-       RETURNING order_id`,
-      [letter.letter_id]
-    );
+    // Transition only the funding order already locked above. Re-deriving it
+    // from letter_id here would write a row outside the canonical lock order.
+    const fulfilledOrder = fundingOrderId
+      ? await client.query<{ order_id: string }>(
+        `UPDATE orders
+         SET status = 'fulfilled', fulfilled_at = NOW(), completed_at = NOW(),
+             last_error_code = NULL, last_error = NULL, updated_at = NOW()
+         WHERE order_id = $1 AND order_type = 'jit_mail'
+           AND status = 'fulfillment_pending'
+         RETURNING order_id`,
+        [fundingOrderId]
+      )
+      : { rows: [] as { order_id: string }[] };
     if (fulfilledOrder.rows[0]) {
       await client.query(
         `INSERT INTO commerce_order_events (
@@ -552,8 +533,11 @@ async function failOrRescheduleJob(
   random: () => number
 ): Promise<boolean> {
   const error = result.error || 'Provider returned an unsuccessful result';
-  const ambiguous = result.metadata?.submissionOutcome === 'ambiguous' ||
-    (result.metadata?.submissionOutcome === undefined && isTransientProviderFailure(result));
+  // Fail safe: only an explicit `definite_rejection` may compensate a paid send.
+  // A provider that reports no classification has not proved that the piece was
+  // refused, and an unnecessary hold is recoverable while refunding physically
+  // mailed post is not.
+  const ambiguous = result.metadata?.submissionOutcome !== 'definite_rejection';
   // Only an explicit provider rejection proves that no mail was accepted and
   // is therefore safe to compensate with a refund. Ambiguous failures retain
   // durable outbox work and stable idempotency until reconciliation succeeds.
@@ -567,7 +551,7 @@ async function failOrRescheduleJob(
     : new Date(Date.now() + retryDelayMilliseconds(job.attempts, random));
 
   await transaction(async (client) => {
-    await lockFundingGraph(client, job);
+    const fundingOrderId = await lockFundingGraph(client, job);
     await client.query(
       `UPDATE letter_jobs
        SET status = $1, next_attempt_at = $2, locked_at = NULL,
@@ -581,16 +565,16 @@ async function failOrRescheduleJob(
       `UPDATE letters SET status = $1, updated_at = NOW() WHERE letter_id = $2`,
       [terminal ? 'failed' : 'queued', job.letter_id]
     );
-    if (terminal) {
+    if (terminal && fundingOrderId) {
       const refundOrder = await client.query<{ order_id: string }>(
         `UPDATE orders
          SET status = 'refund_pending', refund_pending_at = NOW(),
              last_error_code = 'PROVIDER_SUBMISSION_FAILED', last_error = $2,
              updated_at = NOW()
-         WHERE order_type = 'jit_mail' AND letter_id = $1
+         WHERE order_id = $1 AND order_type = 'jit_mail'
            AND status = 'fulfillment_pending'
          RETURNING order_id`,
-        [job.letter_id, error]
+        [fundingOrderId, error]
       );
       if (refundOrder.rows[0]) {
         await client.query(
@@ -610,7 +594,7 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
   const retryable = job.attempts < job.max_attempts;
   const errorClass = classifyDiagnosticError(error, 'unknown_error');
   await transaction(async client => {
-    await lockFundingGraph(client, job);
+    const fundingOrderId = await lockFundingGraph(client, job);
     await client.query(
       `UPDATE letter_jobs SET status = $2, next_attempt_at = $3, locked_at = NULL,
          completed_at = CASE WHEN $2 = 'failed' THEN NOW() ELSE NULL END,
@@ -624,15 +608,15 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
        WHERE letter_id = $1 AND status NOT IN ('held','cancelled')`,
       [job.letter_id, retryable ? 'queued' : 'failed']
     );
-    if (!retryable) {
+    if (!retryable && fundingOrderId) {
       const refundOrder = await client.query<{ order_id: string }>(
         `UPDATE orders SET status = 'refund_pending', refund_pending_at = NOW(),
            last_error_code = 'PRE_DISPATCH_TERMINAL_FAILURE', last_error = $2,
            updated_at = NOW()
-         WHERE order_type = 'jit_mail' AND letter_id = $1
+         WHERE order_id = $1 AND order_type = 'jit_mail'
            AND status = 'fulfillment_pending'
          RETURNING order_id`,
-        [job.letter_id, errorClass]
+        [fundingOrderId, errorClass]
       );
       if (refundOrder.rows[0]) {
         await client.query(

@@ -3,6 +3,7 @@
 import { createHash } from 'node:crypto';
 import type pg from 'pg';
 import { query, transaction } from '../db/index.js';
+import { lockAccountForBalanceChange } from './accountLock.js';
 import type { ImageEntitlement } from './types.js';
 
 export interface GenerationQuota {
@@ -196,6 +197,10 @@ export async function grantImageEntitlementWithClient(
 ): Promise<ImageEntitlement | null> {
   if (!Number.isInteger(params.quantity) || params.quantity <= 0) return null;
 
+  // Enforced here rather than at each call site so every grant path - pack
+  // checkout, JIT checkout, delayed fulfillment, and reconciliation repair -
+  // holds the account row before any image_entitlements write.
+  await lockAccountForBalanceChange(client, params.userId);
   const result = await client.query<ImageEntitlement>(
     `INSERT INTO image_entitlements (
        user_id, source_type, source_reference_id, source_order_id,
@@ -224,6 +229,10 @@ export async function grantImageEntitlement(
 /** Atomically reserve one available grant before calling the image provider. */
 export async function reserveGeneration(userId: string): Promise<GenerationReservation> {
   return transaction(async client => {
+    // Canonical account lock order: users -> credit_ledger -> image_entitlements.
+    // The expiry sweep below already write-locks entitlement rows, so the
+    // account row must be held first or this races a concurrent refund.
+    await lockAccountForBalanceChange(client, userId);
     await client.query(
       `UPDATE image_entitlements
        SET status = 'expired', updated_at = NOW()
@@ -332,6 +341,9 @@ async function releaseReservationWithClient(
   expectedStatuses: ImageGenerationReservationStatus[]
 ): Promise<boolean> {
   if (!expectedStatuses.includes(row.status)) return false;
+  // Canonical account lock order: users -> image_entitlements. Restoring quota
+  // must not invert against a concurrent reservation or pack refund.
+  await lockAccountForBalanceChange(client, row.user_id);
   const entitlement = await client.query<{ entitlement_id: string }>(
     `UPDATE image_entitlements
      SET consumed_quantity = consumed_quantity - 1,

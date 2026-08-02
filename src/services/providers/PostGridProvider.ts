@@ -96,14 +96,43 @@ export interface PostGridProviderOptions {
   timeoutMs?: number;
 }
 
+export type ProviderSubmissionOutcome = 'definite_rejection' | 'ambiguous';
+
+/**
+ * HTTP statuses that never prove the provider refused the submission. A shared
+ * edge, proxy, load balancer, or gateway can answer any of these after the
+ * origin already accepted and queued the physical piece, and 409/425 describe
+ * conflicting or replayed work rather than a refusal.
+ */
+const AMBIGUOUS_SUBMISSION_STATUS_CODES = new Set([408, 409, 425, 429]);
+
+/**
+ * Classify whether an unsuccessful submission is authoritative rejection
+ * evidence. Only a non-ambiguous 4xx originates from the provider's own
+ * request validation and therefore proves that no mail exists. Everything
+ * else - transport loss, timeouts, unreadable bodies, 5xx, and the statuses
+ * above - is ambiguous and must be reconciled rather than refunded.
+ */
+export function classifySubmissionOutcome(statusCode?: number): ProviderSubmissionOutcome {
+  if (statusCode === undefined) return 'ambiguous';
+  if (statusCode >= 500) return 'ambiguous';
+  if (AMBIGUOUS_SUBMISSION_STATUS_CODES.has(statusCode)) return 'ambiguous';
+  if (statusCode >= 400) return 'definite_rejection';
+  return 'ambiguous';
+}
+
 class PostGridRequestError extends Error {
+  readonly submissionOutcome: ProviderSubmissionOutcome;
+
   constructor(
     message: string,
     readonly statusCode?: number,
-    readonly retryable = false
+    readonly retryable = false,
+    submissionOutcome?: ProviderSubmissionOutcome
   ) {
     super(message);
     this.name = 'PostGridRequestError';
+    this.submissionOutcome = submissionOutcome ?? classifySubmissionOutcome(statusCode);
   }
 }
 
@@ -152,6 +181,18 @@ interface PostGridError {
     code?: string;
     details?: any;
   };
+}
+
+/**
+ * A submission response is usable only when it carries the provider identifier
+ * we persist as the tracking reference plus a provider status. Anything else
+ * cannot be reconciled later and must not be recorded as an accepted send.
+ */
+function isUsableSubmissionResponse(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  const candidate = payload as { id?: unknown; status?: unknown };
+  return typeof candidate.id === 'string' && candidate.id.trim().length > 0 &&
+    typeof candidate.status === 'string' && candidate.status.trim().length > 0;
 }
 
 interface PostGridPostcardRequest {
@@ -264,7 +305,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         '/letters',
         'create_letter',
         request,
-        params.idempotencyKey
+        params.idempotencyKey,
+        isUsableSubmissionResponse
       );
 
       if (this.options.verbose) {
@@ -311,8 +353,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           retryable: error instanceof PostGridRequestError
             ? error.retryable
             : /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
-          submissionOutcome: error instanceof PostGridRequestError && error.statusCode !== undefined
-            ? 'definite_rejection'
+          // Only an authoritative provider rejection may compensate a paid
+          // send. Everything else is held for reconciliation so a physically
+          // mailed piece is never refunded or silently re-dispatched.
+          submissionOutcome: error instanceof PostGridRequestError
+            ? error.submissionOutcome
             : 'ambiguous',
         }
       };
@@ -623,7 +668,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     endpoint: string,
     operation: PostGridOperation,
     body?: any,
-    idempotencyKey?: string
+    idempotencyKey?: string,
+    validate?: (payload: unknown) => boolean
   ): Promise<T> {
     const url = `${this.options.baseUrl}${endpoint}`;
 
@@ -636,6 +682,10 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     }
 
     const controller = new AbortController();
+    // One budget covers the whole exchange, headers and body. Arming a second
+    // full timer after headers arrive would let a provider that stalls its body
+    // occupy an outbox worker for nearly twice the configured timeout.
+    const deadline = Date.now() + this.options.timeoutMs;
     const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
 
     const requestOptions: RequestInit = {
@@ -655,8 +705,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const response = await fetch(url, requestOptions);
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: { message: response.statusText } })) as PostGridError;
-        const message = errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+        // The error body shares the same deadline. An aborted or truncated
+        // error body must not stall the worker, and its absence must not change
+        // the outcome classification, which is derived from the status alone.
+        const errorData = await this.readJsonWithinDeadline(response, controller, deadline)
+          .catch(() => ({ error: { message: response.statusText } })) as PostGridError;
+        const message = errorData?.error?.message || `HTTP ${response.status}: ${response.statusText}`;
         throw new PostGridRequestError(
           `HTTP ${response.status}: ${message}`,
           response.status,
@@ -664,7 +718,34 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         );
       }
 
-      return response.json() as Promise<T>;
+      // The body must be consumed here, under its own deadline. Returning the
+      // unawaited promise would leave a stalled response body untimed and
+      // surface parse failures as unclassified errors outside the provider's
+      // error contract. The request abort signal is not sufficient on its own:
+      // once headers have arrived a stalled body can outlive it.
+      let payload: unknown;
+      try {
+        payload = await this.readJsonWithinDeadline(response, controller, deadline);
+      } catch {
+        throw new PostGridRequestError(
+          `HTTP ${response.status}: provider response body was unreadable`,
+          response.status,
+          false,
+          'ambiguous'
+        );
+      }
+      if (validate && !validate(payload)) {
+        // A success status without the identifiers we need is unreconcilable:
+        // the provider may have accepted the piece even though we cannot record
+        // it. Fail ambiguous so it is held for operator reconciliation.
+        throw new PostGridRequestError(
+          `HTTP ${response.status}: provider response was missing required fields`,
+          response.status,
+          false,
+          'ambiguous'
+        );
+      }
+      return payload as T;
     } catch (error) {
       if (error instanceof PostGridRequestError) throw error;
       if (error instanceof Error && error.name === 'AbortError') {
@@ -678,6 +759,36 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       throw new PostGridRequestError(message, undefined, true);
     } finally {
       clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Read a JSON body under an explicit deadline and tear down the underlying
+   * stream when it expires, so a provider that stops mid-body cannot stall an
+   * outbox worker indefinitely.
+   */
+  private async readJsonWithinDeadline(
+    response: Response,
+    controller: AbortController,
+    deadline: number
+  ): Promise<unknown> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const body = response.json();
+    // The losing side of the race must never surface as an unhandled rejection.
+    body.catch(() => undefined);
+    try {
+      return await Promise.race([
+        body,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            void response.body?.cancel().catch(() => undefined);
+            reject(new Error('PostGrid response body read timed out'));
+          }, Math.max(0, deadline - Date.now()));
+        })
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -699,6 +810,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
 
   private classifyRequestError(error: unknown): string {
     if (!(error instanceof PostGridRequestError)) return 'provider_error';
+    if (error.statusCode !== undefined && error.statusCode < 400) return 'unusable_provider_response';
     if (error.statusCode === 429) return 'rate_limit_error';
     if (error.statusCode && error.statusCode >= 500) return 'provider_server_error';
     if (error.statusCode && error.statusCode >= 400) return 'provider_client_error';
@@ -923,9 +1035,16 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'Content-Type': 'application/json'
     };
 
+    // Address verification is a blocking pre-send step, so it needs the same
+    // request and body deadlines as the submission calls.
+    const controller = new AbortController();
+    const deadline = Date.now() + this.options.timeoutMs;
+    const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
+
     const requestOptions: RequestInit = {
       method,
       headers,
+      signal: controller.signal,
       ...(body && { body: JSON.stringify(body) })
     };
 
@@ -935,14 +1054,19 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       });
     }
 
-    const response = await fetch(url, requestOptions);
+    try {
+      const response = await fetch(url, requestOptions);
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: { message: response.statusText } })) as PostGridError;
-      throw new Error(errorData.error?.message || `HTTP ${response.status}: ${response.statusText}`);
+      if (!response.ok) {
+        const errorData = await this.readJsonWithinDeadline(response, controller, deadline)
+          .catch(() => ({ error: { message: response.statusText } })) as PostGridError;
+        throw new Error(errorData?.error?.message || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      return await this.readJsonWithinDeadline(response, controller, deadline) as T;
+    } finally {
+      clearTimeout(timeout);
     }
-
-    return response.json() as Promise<T>;
   }
 
   /**
@@ -1005,7 +1129,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         '/postcards',
         'create_postcard',
         request,
-        params.idempotencyKey
+        params.idempotencyKey,
+        isUsableSubmissionResponse
       );
 
       if (this.options.verbose) {
@@ -1052,8 +1177,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           retryable: error instanceof PostGridRequestError
             ? error.retryable
             : /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
-          submissionOutcome: error instanceof PostGridRequestError && error.statusCode !== undefined
-            ? 'definite_rejection'
+          // Only an authoritative provider rejection may compensate a paid
+          // send. Everything else is held for reconciliation so a physically
+          // mailed piece is never refunded or silently re-dispatched.
+          submissionOutcome: error instanceof PostGridRequestError
+            ? error.submissionOutcome
             : 'ambiguous',
         }
       };

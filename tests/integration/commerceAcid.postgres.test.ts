@@ -1050,6 +1050,91 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
     expect(state.rows[0]).toMatchObject({ order_status: 'fulfillment_pending',
       refund_pending_at: null, letter_status: 'queued', job_status: 'pending',
       provider_outcome: 'not_dispatched', max_attempts: 6, audits: '1' });
+
+    // The audit must record what the operator actually reversed: the order was
+    // in refund recovery before the decision and funded after it. Recording the
+    // restored status on both sides would erase the fact that money was on its
+    // way back to the customer.
+    const audit = await acidPool.query<{
+      before_order_status: string; before_job_status: string; before_provider_outcome: string;
+      after_order_status: string; after_job_status: string; after_provider_outcome: string;
+      reason_code: string; outcome: string;
+    }>(
+      `SELECT before_state->>'orderStatus' AS before_order_status,
+              before_state->>'jobStatus' AS before_job_status,
+              before_state->>'providerOutcome' AS before_provider_outcome,
+              after_state->>'orderStatus' AS after_order_status,
+              after_state->>'jobStatus' AS after_job_status,
+              after_state->>'providerOutcome' AS after_provider_outcome,
+              reason_code, outcome
+       FROM commerce_operator_audit_events
+       WHERE operation = 'mail_job_retry' AND target_reference_hash = $1`,
+      [createHash('sha256').update(jobId).digest('hex')]
+    );
+    expect(audit.rows[0]).toEqual({
+      before_order_status: 'refund_pending',
+      before_job_status: 'failed',
+      before_provider_outcome: 'definite_failure',
+      after_order_status: 'fulfillment_pending',
+      after_job_status: 'pending',
+      after_provider_outcome: 'not_dispatched',
+      reason_code: 'operator_confirmed_rejection',
+      outcome: 'succeeded'
+    });
+  });
+
+  it('refuses to re-dispatch mail whose provider outcome is still ambiguous', async () => {
+    const jobId = '00000000-0000-4000-8000-000000000210';
+    await acidPool.query(
+      `INSERT INTO users (user_id, email) VALUES ('ambiguous-retry-user', 'amb-retry@example.test');
+       INSERT INTO letter_drafts
+         (draft_id, user_id, sender, recipient, body_text, sign_off, required_credits, expires_at)
+       VALUES ('00000000-0000-0000-0000-000000000210', 'ambiguous-retry-user', '{}', '{}',
+         'Ambiguous', 'Regards', 2, NOW() + INTERVAL '1 day');
+       INSERT INTO orders
+         (order_id, user_id, order_type, draft_id, product_code, product_snapshot,
+          amount_cents, currency, idempotency_key, status, hold_previous_status,
+          held_at, hold_reason)
+       VALUES ('ambiguous-retry-order', 'ambiguous-retry-user', 'jit_mail',
+         '00000000-0000-0000-0000-000000000210', 'jit-letter', '{}', 499, 'usd',
+         'jit:ambiguous-retry', 'held', 'fulfillment_pending', NOW(),
+         'provider_outcome_ambiguous');
+       INSERT INTO letters
+         (letter_id, user_id, content, recipient, credits_cost, status, funding_type, funding_order_id)
+       VALUES ('ambiguous-retry-letter', 'ambiguous-retry-user', '{}', '{}', 2, 'held',
+         'jit_order', 'ambiguous-retry-order');
+       UPDATE orders SET letter_id = 'ambiguous-retry-letter'
+         WHERE order_id = 'ambiguous-retry-order';
+       INSERT INTO letter_jobs
+         (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
+          next_attempt_at, provider_outcome, held_at, hold_reason)
+       VALUES ('00000000-0000-4000-8000-000000000210', 'ambiguous-retry-letter', 'held', 1, 5,
+         NOW(), 'ambiguous-retry-letter', NOW(), 'ambiguous', NOW(),
+         'provider_outcome_ambiguous')`
+    );
+
+    // An operator may only finish an ambiguous piece through the evidence-based
+    // resolution endpoint. The retry path must never put it back on the wire.
+    await expect(letterJobService.retryLetterJobAsAdmin({
+      jobId, expectedUserId: 'ambiguous-retry-user', actorId: 'admin-acid',
+      reason: 'attempt to resend an ambiguous piece',
+      idempotencyKey: 'retry-ambiguous-denied-acid'
+    })).rejects.toMatchObject({ code: 'invalid_state' });
+
+    const state = await acidPool.query<{
+      job_status: string; provider_outcome: string; order_status: string; audits: string;
+    }>(
+      `SELECT jobs.status AS job_status, jobs.provider_outcome, orders.status AS order_status,
+              (SELECT COUNT(*) FROM commerce_operator_audit_events
+               WHERE target_reference_hash = $2) AS audits
+       FROM letter_jobs AS jobs
+       JOIN orders ON orders.letter_id = jobs.letter_id
+       WHERE jobs.job_id = $1`,
+      [jobId, createHash('sha256').update(jobId).digest('hex')]
+    );
+    expect(state.rows[0]).toEqual({
+      job_status: 'held', provider_outcome: 'ambiguous', order_status: 'held', audits: '0'
+    });
   });
 
   it('durably recovers an unmatched refund before a later checkout can fulfill mail', async () => {
@@ -1152,4 +1237,304 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
     expect(state.rows[0]).toEqual({ order_status: 'refunded', letter_status: 'accepted',
       job_status: 'completed', provider_outcome: 'accepted', alerts: '1' });
   });
+
+  it('holds the account row before credit_ledger so refund and send cannot invert', async () => {
+    await acidPool.query(
+      `INSERT INTO users (user_id, email, credits, credits_purchased)
+       VALUES ('lock-credit-user', 'lock-credit@example.test', 10, 10);
+       INSERT INTO orders
+         (order_id, user_id, order_type, product_code, product_snapshot, credits,
+          amount_cents, currency, stripe_payment_intent_id, idempotency_key, status, paid_at)
+       VALUES ('lock-credit-order', 'lock-credit-user', 'letter_pack', 'credit-pack-10',
+         '{}', 10, 1000, 'usd', 'pi-lock-credit', 'pack:lock-credit', 'fulfilled', NOW());
+       INSERT INTO credit_ledger
+         (user_id, initial_amount, remaining_amount, source_type, source_reference_id,
+          source_order_id, activated_at, expiration_policy, status)
+       VALUES ('lock-credit-user', 10, 10, 'purchase', 'lock-credit-order',
+         'lock-credit-order', NOW(), 'days_from_activation', 'active');
+       INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status)
+       VALUES ('lock-letter-a', 'lock-credit-user', '{}', '{}', 1, 'queued'),
+              ('lock-letter-b', 'lock-credit-user', '{}', '{}', 1, 'queued')`
+    );
+
+    // Drive both directions concurrently: the refund path reverses the ledger
+    // while the send path deducts from it. Before the canonical order was
+    // enforced these took users/credit_ledger in opposite directions.
+    const deducting = (await import('../../src/services/creditLedgerService.js'));
+    const contend = async (letterId: string) => {
+      const client = await acidPool.connect();
+      try {
+        await client.query('BEGIN');
+        await deducting.deductCreditsFromLedgerWithClient(client, {
+          userId: 'lock-credit-user', credits: 1, letterId
+        });
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    };
+
+    const settled = await Promise.race([
+      Promise.allSettled([
+        contend('lock-letter-a'),
+        commerceService.processStripeWebhookEvent({
+          id: 'evt-lock-credit-refund', type: 'refund.updated', data: { object: {
+            id: 're-lock-credit', payment_intent: 'pi-lock-credit', charge: 'ch-lock-credit',
+            amount: 1000, status: 'succeeded', metadata: {}
+          } }
+        } as any),
+        contend('lock-letter-b')
+      ]),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('users/credit_ledger deadlock')), 5000))
+    ]);
+    // A deadlock would surface here as SQLSTATE 40P01 rather than a hang.
+    for (const outcome of settled) {
+      if (outcome.status === 'rejected') {
+        expect(String(outcome.reason?.code ?? '')).not.toBe('40P01');
+      }
+    }
+    expect(
+      settled[1].status === 'rejected' ? String(settled[1].reason) : 'fulfilled'
+    ).toBe('fulfilled');
+
+    const state = await acidPool.query<{
+      order_status: string; credits: number; revoked: string; deadlocks: string;
+    }>(
+      `SELECT orders.status AS order_status, users.credits,
+              (SELECT COUNT(*) FROM credit_ledger
+               WHERE user_id = 'lock-credit-user' AND status = 'revoked') AS revoked,
+              (SELECT COUNT(*) FROM pg_stat_database
+               WHERE datname = current_database() AND deadlocks > 0) AS deadlocks
+       FROM orders JOIN users ON users.user_id = orders.user_id
+       WHERE orders.order_id = 'lock-credit-order'`
+    );
+    expect(state.rows[0].order_status).toBe('refunded');
+    expect(state.rows[0].deadlocks).toBe('0');
+    expect(state.rows[0].credits).toBeGreaterThanOrEqual(0);
+  }, 30_000);
+
+  it('holds the account row before image_entitlements so reserve and refund cannot invert', async () => {
+    await acidPool.query(
+      `INSERT INTO users (user_id, email, image_generations_used)
+       VALUES ('lock-image-user', 'lock-image@example.test', 0);
+       INSERT INTO orders
+         (order_id, user_id, order_type, product_code, product_snapshot, credits,
+          amount_cents, currency, stripe_payment_intent_id, idempotency_key, status, paid_at)
+       VALUES ('lock-image-order', 'lock-image-user', 'letter_pack', 'credit-pack-10',
+         '{}', 10, 1000, 'usd', 'pi-lock-image', 'pack:lock-image', 'fulfilled', NOW());
+       INSERT INTO image_entitlements
+         (user_id, source_type, source_reference_id, source_order_id, quantity,
+          consumed_quantity, status)
+       VALUES ('lock-image-user', 'letter_pack', 'lock-image-order', 'lock-image-order',
+         5, 0, 'active')`
+    );
+
+    await Promise.race([
+      Promise.allSettled([
+        imageService.reserveGeneration('lock-image-user'),
+        commerceService.processStripeWebhookEvent({
+          id: 'evt-lock-image-refund', type: 'refund.updated', data: { object: {
+            id: 're-lock-image', payment_intent: 'pi-lock-image', charge: 'ch-lock-image',
+            amount: 1000, status: 'succeeded', metadata: {}
+          } }
+        } as any),
+        imageService.reserveGeneration('lock-image-user')
+      ]),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('users/image_entitlements deadlock')), 5000))
+    ]);
+
+    const state = await acidPool.query<{
+      order_status: string; entitlement_status: string; used: number; deadlocks: string;
+    }>(
+      `SELECT orders.status AS order_status, entitlements.status AS entitlement_status,
+              users.image_generations_used AS used,
+              (SELECT COUNT(*) FROM pg_stat_database
+               WHERE datname = current_database() AND deadlocks > 0) AS deadlocks
+       FROM orders
+       JOIN users ON users.user_id = orders.user_id
+       JOIN image_entitlements entitlements ON entitlements.source_order_id = orders.order_id
+       WHERE orders.order_id = 'lock-image-order'`
+    );
+    expect(state.rows[0].order_status).toBe('refunded');
+    expect(state.rows[0].entitlement_status).toBe('revoked');
+    expect(state.rows[0].deadlocks).toBe('0');
+  }, 30_000);
+
+  it('blocks a replayed pack grant in the database even if a guard is bypassed', async () => {
+    await acidPool.query(
+      `INSERT INTO users (user_id, email) VALUES ('replay-grant-user', 'replay-grant@example.test');
+       INSERT INTO orders
+         (order_id, user_id, order_type, product_code, product_snapshot, credits,
+          amount_cents, currency, idempotency_key, status)
+       VALUES ('replay-grant-order', 'replay-grant-user', 'letter_pack', 'credit-pack-4',
+         '{}', 4, 500, 'usd', 'pack:replay-grant', 'fulfilled');
+       INSERT INTO credit_ledger
+         (user_id, initial_amount, remaining_amount, source_type, source_reference_id,
+          source_order_id, activated_at, expiration_policy, status)
+       VALUES ('replay-grant-user', 4, 4, 'purchase', 'replay-grant-order',
+         'replay-grant-order', NOW(), 'days_from_activation', 'active')`
+    );
+
+    await expect(acidPool.query(
+      `INSERT INTO credit_ledger
+         (user_id, initial_amount, remaining_amount, source_type, source_reference_id,
+          source_order_id, activated_at, expiration_policy, status)
+       VALUES ('replay-grant-user', 4, 4, 'purchase', 'replay-grant-order',
+         'replay-grant-order', NOW(), 'days_from_activation', 'active')`
+    )).rejects.toMatchObject({ code: '23505' });
+
+    // A non-purchase reversal for the same order must still be allowed.
+    await expect(acidPool.query(
+      `INSERT INTO credit_ledger
+         (user_id, initial_amount, remaining_amount, source_type, source_reference_id,
+          source_order_id, activated_at, expiration_policy, status)
+       VALUES ('replay-grant-user', 4, 0, 'refund', 'replay-grant-order',
+         'replay-grant-order', NOW(), 'never', 'revoked')`
+    )).resolves.toBeTruthy();
+  });
+
+  it('mirrors the active JIT status set in the partial unique index predicate', async () => {
+    const index = await acidPool.query<{ indexdef: string }>(
+      `SELECT indexdef FROM pg_indexes
+       WHERE schemaname = $1 AND indexname = 'idx_orders_active_jit_draft_unique'`,
+      [acidSchema]
+    );
+    const definition = index.rows[0]?.indexdef;
+    expect(definition).toBeTruthy();
+
+    // Every status the service treats as an active JIT order must appear in the
+    // database predicate, and the predicate must contain nothing else.
+    const predicate = definition!.slice(definition!.toUpperCase().lastIndexOf('WHERE'));
+    const indexStatuses = [...predicate.matchAll(/'([a-z_]+)'::/g)]
+      .map(match => match[1])
+      .filter(value => value !== 'jit_mail')
+      .sort();
+    expect(indexStatuses).toEqual([...commerceService.ACTIVE_JIT_STATUSES].sort());
+  });
+
+  it('marks only unevidenced legacy one-cent orders as unknown revenue', async () => {
+    const schema = schemaName('lirl_acid_amount_backfill');
+    await createSchema(adminPool, schema);
+    const pool = new Pool({ connectionString: databaseUrlForSchema(baseUrl, schema) });
+    try {
+      const root = path.join(tempRoot, 'amount-backfill');
+      const directory = path.join(root, 'db', 'migrations');
+      await mkdir(directory, { recursive: true });
+      const files = (await readdir(repositoryMigrations)).filter(file => file.endsWith('.sql'));
+      // Apply everything up to 021 so migration 023 runs against realistic
+      // pre-023 rows rather than an empty schema.
+      for (const file of files) {
+        if (file.startsWith('022_') || file.startsWith('023_')) continue;
+        await copyFile(path.join(repositoryMigrations, file), path.join(directory, file));
+      }
+      const url = databaseUrlForSchema(baseUrl, schema);
+      await migrate({ connectionString: url, migrationsDirectory: directory });
+
+      await pool.query(
+        `INSERT INTO users (user_id, email) VALUES ('legacy-amount-user', 'legacy@example.test');
+         INSERT INTO orders
+           (order_id, user_id, order_type, product_code, product_snapshot, credits,
+            amount_cents, currency, idempotency_key, status, paid_at)
+         VALUES
+           ('legacy-placeholder', 'legacy-amount-user', 'letter_pack', 'legacy-letter-pack',
+            '{"name":"Legacy Letter Pack","migrated":true}'::jsonb, 4, 1, 'usd',
+            'legacy-ledger:legacy-placeholder', 'fulfilled', NOW()),
+           ('legacy-evidenced', 'legacy-amount-user', 'letter_pack', 'legacy-letter-pack',
+            '{"name":"Legacy Letter Pack","migrated":true}'::jsonb, 4, 500, 'usd',
+            'legacy-ledger:legacy-evidenced', 'fulfilled', NOW()),
+           ('modern-one-cent', 'legacy-amount-user', 'letter_pack', 'credit-pack-4',
+            '{"name":"Starter"}'::jsonb, 4, 1, 'usd',
+            'pack:modern-one-cent', 'fulfilled', NOW());
+         INSERT INTO credit_ledger
+           (user_id, initial_amount, remaining_amount, source_type, source_reference_id,
+            activated_at, expiration_policy, status)
+         VALUES
+           -- Unambiguous history: exactly one purchase row for one order.
+           ('legacy-amount-user', 4, 4, 'purchase', 'legacy-evidenced',
+            NOW(), 'days_from_activation', 'active'),
+           -- Pre-existing duplicate history must stay NULL rather than break
+           -- the migration or be silently collapsed.
+           ('legacy-amount-user', 4, 4, 'purchase', 'modern-one-cent',
+            NOW(), 'days_from_activation', 'active'),
+           ('legacy-amount-user', 4, 0, 'purchase', 'modern-one-cent',
+            NOW(), 'days_from_activation', 'depleted'),
+           -- A purchase row that points at no order at all.
+           ('legacy-amount-user', 4, 4, 'purchase', 'cs_legacy_session',
+            NOW(), 'days_from_activation', 'active')`
+      );
+
+      await copyFile(
+        path.join(repositoryMigrations, '023_jit_recovery_state_machines.sql'),
+        path.join(directory, '023_jit_recovery_state_machines.sql')
+      );
+      await migrate({ connectionString: url, migrationsDirectory: directory });
+
+      const rows = await pool.query<{
+        order_id: string; amount_known: boolean; amount_cents: number; treatment: string | null;
+      }>(
+        `SELECT order_id, amount_known, amount_cents,
+                product_snapshot->>'amountTreatment' AS treatment
+         FROM orders ORDER BY order_id`
+      );
+      expect(rows.rows).toEqual([
+        // Evidenced legacy amounts stay countable and are never rewritten.
+        { order_id: 'legacy-evidenced', amount_known: true, amount_cents: 500, treatment: null },
+        // Only the indistinguishable one-cent placeholder is excluded, and its
+        // raw value is preserved for audit rather than invented or deleted.
+        { order_id: 'legacy-placeholder', amount_known: false, amount_cents: 1,
+          treatment: 'unknown_legacy' },
+        // A genuine one-cent commerce order is not a migration placeholder.
+        { order_id: 'modern-one-cent', amount_known: true, amount_cents: 1, treatment: null }
+      ]);
+
+      const revenue = await pool.query<{ total: string }>(
+        `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM orders
+         WHERE amount_known AND paid_at IS NOT NULL
+           AND status NOT IN ('refunded', 'cancelled', 'payment_failed')`
+      );
+      // 500 + 1, never 502: the placeholder cent is not revenue.
+      expect(revenue.rows[0].total).toBe('501');
+
+      // Only unambiguous purchase history is bound to its funding order, so the
+      // new unique index can be created over pre-existing rows without failing.
+      const ledger = await pool.query<{ source_reference_id: string; source_order_id: string | null }>(
+        `SELECT source_reference_id, source_order_id FROM credit_ledger
+         ORDER BY source_reference_id, remaining_amount DESC`
+      );
+      expect(ledger.rows).toEqual([
+        { source_reference_id: 'cs_legacy_session', source_order_id: null },
+        { source_reference_id: 'legacy-evidenced', source_order_id: 'legacy-evidenced' },
+        { source_reference_id: 'modern-one-cent', source_order_id: null },
+        { source_reference_id: 'modern-one-cent', source_order_id: null }
+      ]);
+
+      const guard = await pool.query<{ indexdef: string }>(
+        `SELECT indexdef FROM pg_indexes
+         WHERE schemaname = $1 AND indexname = 'idx_credit_ledger_purchase_order_unique'`,
+        [schema]
+      );
+      expect(guard.rows[0]?.indexdef).toContain('source_order_id');
+
+      // And the guard is live for anything written after the migration.
+      await pool.query(
+        `UPDATE credit_ledger SET source_order_id = 'legacy-placeholder'
+         WHERE source_reference_id = 'cs_legacy_session'`
+      );
+      await expect(pool.query(
+        `INSERT INTO credit_ledger
+           (user_id, initial_amount, remaining_amount, source_type, source_reference_id,
+            source_order_id, activated_at, expiration_policy, status)
+         VALUES ('legacy-amount-user', 4, 4, 'purchase', 'legacy-placeholder',
+           'legacy-placeholder', NOW(), 'days_from_activation', 'active')`
+      )).rejects.toMatchObject({ code: '23505' });
+    } finally {
+      await pool.end();
+      await dropSchema(adminPool, schema);
+    }
+  }, 120_000);
 });

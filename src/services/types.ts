@@ -316,6 +316,11 @@ export interface AddCreditsToLedgerParams {
   credits: number;
   sourceType: CreditSourceType;
   sourceReferenceId?: string;
+  /**
+   * Authoritative commerce order that funded this grant. Setting it engages the
+   * database uniqueness guard that makes a replayed purchase grant impossible.
+   */
+  sourceOrderId?: string;
   sourceMetadata?: Record<string, unknown>;
   expirationPolicy?: ExpirationPolicy;
   expiresAt?: Date;           // For fixed_date policy

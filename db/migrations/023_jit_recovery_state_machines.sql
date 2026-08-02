@@ -112,6 +112,44 @@ WHERE order_type = 'jit_mail'
   AND letter_id IN (SELECT letter_id FROM letter_jobs WHERE status = 'held')
   AND status = 'fulfillment_pending';
 
+-- ---------------------------------------------------------------------------
+-- Database guard against a replayed pack grant
+-- ---------------------------------------------------------------------------
+--
+-- A duplicated or late checkout event must never be able to grant the same
+-- pack twice. `source_order_id` records the authoritative funding order and is
+-- written only by the commerce state machine, so the partial unique index below
+-- can never conflict with pre-021 ledger history, which leaves it NULL.
+
+ALTER TABLE credit_ledger
+  ADD COLUMN IF NOT EXISTS source_order_id VARCHAR(255)
+    REFERENCES orders(order_id) ON DELETE SET NULL;
+
+-- Backfill only unambiguous history: exactly one purchase row pointing at one
+-- authoritative order. Anything already duplicated stays NULL so this migration
+-- cannot fail on, or silently paper over, a pre-existing double grant.
+UPDATE credit_ledger AS ledger
+SET source_order_id = ledger.source_reference_id
+WHERE ledger.source_type = 'purchase'
+  AND ledger.source_order_id IS NULL
+  AND EXISTS (
+    SELECT 1 FROM orders
+    WHERE orders.order_id = ledger.source_reference_id
+      AND orders.order_type = 'letter_pack'
+  )
+  AND (
+    SELECT COUNT(*) FROM credit_ledger AS sibling
+    WHERE sibling.source_type = 'purchase'
+      AND sibling.source_reference_id = ledger.source_reference_id
+  ) = 1;
+
+CREATE UNIQUE INDEX idx_credit_ledger_purchase_order_unique
+  ON credit_ledger(source_order_id)
+  WHERE source_order_id IS NOT NULL AND source_type = 'purchase';
+
+COMMENT ON COLUMN credit_ledger.source_order_id IS
+  'Authoritative commerce order that funded this entry. Unique per purchase so a replayed checkout event cannot double-grant; NULL for pre-commerce history.';
+
 DROP INDEX IF EXISTS idx_orders_active_jit_draft_unique;
 CREATE UNIQUE INDEX idx_orders_active_jit_draft_unique
   ON orders(draft_id)

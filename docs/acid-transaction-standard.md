@@ -91,6 +91,49 @@ A PR may mark a scenario not applicable only when it gives a concrete reason. Ri
 
 Prefer integration tests against PostgreSQL for locking, constraint, isolation, and rollback behavior. Unit tests with mocked queries cannot prove those properties.
 
+### The real-PostgreSQL suite is a required gate, not an optional extra
+
+`npm run test:run` does **not** execute `tests/integration/commerceAcid.postgres.test.ts`. That
+suite is opt-in and silently *skips* unless `LIRL_RUN_POSTGRES_INTEGRATION=true` is set, and this
+repository has no CI. A green default test run is therefore **not** evidence of any locking,
+constraint, isolation, migration, or rollback property.
+
+Any PR that changes a financial, fulfillment, refund, entitlement, migration, or admin mutation
+must run the suite against a disposable local PostgreSQL and record the real pass count in its
+evidence. Reporting only `npm run test:run` for such a change is incomplete evidence.
+
+```bash
+docker run -d --name lirl-acid -e POSTGRES_PASSWORD=lirl_test_password \
+  -e POSTGRES_DB=letterirl_acid_test -p 127.0.0.1:55432:5432 postgres:16-alpine
+export LIRL_RUN_POSTGRES_INTEGRATION=true
+export LIRL_TEST_DATABASE_URL='postgresql://postgres:lirl_test_password@127.0.0.1:55432/letterirl_acid_test'
+npm run test:integration:postgres
+docker rm -f lirl-acid
+```
+
+The suite refuses to run against a non-local host, a database whose name contains neither `test`
+nor `acid`, `NODE_ENV=production`, or the application `DATABASE_URL`.
+
+## Canonical lock order
+
+Every transaction that mutates account balances, grants, or entitlements acquires locks in exactly
+this order:
+
+```
+orders -> letters -> letter_jobs -> image_generation_reservations
+       -> users -> credit_ledger -> image_entitlements
+```
+
+`users` is the account aggregate root: holding it first is what makes the ledger and entitlement
+rows below it safe. Note that a bare `UPDATE` takes the same row lock as `SELECT ... FOR UPDATE`,
+so an unguarded `UPDATE credit_ledger` or `UPDATE image_entitlements` counts as taking that lock
+first and inverts the order. Call `lockAccountForBalanceChange` (`src/services/accountLock.ts`)
+before the first ledger or entitlement statement.
+
+Within the mail graph, take the funding order lock from `lockFundingGraph` and then address that
+order by its `order_id`. Re-deriving the order from `letter_id` in a later `UPDATE ... WHERE
+letter_id = $1` writes a row outside the lock you actually hold.
+
 ## Pull request review checklist
 
 For every PR that changes durable business state, the author and reviewer must confirm:
@@ -99,7 +142,8 @@ For every PR that changes durable business state, the author and reviewer must c
 - [ ] All required local writes share one explicit transaction and database client.
 - [ ] Mutable preconditions are checked under a lock, conditional write, or justified isolation level.
 - [ ] Database constraints enforce invariants that must survive application bugs or concurrency.
-- [ ] Lock ordering is deterministic, and serialization/deadlock retries are bounded and idempotent.
+- [ ] Lock ordering follows the canonical order above, including locks taken implicitly by bare `UPDATE` statements, and serialization/deadlock retries are bounded and idempotent.
+- [ ] The real-PostgreSQL suite was run for financial, fulfillment, refund, entitlement, migration, or admin changes, and its actual pass count is in the PR evidence.
 - [ ] Success is returned only after commit; failure cannot leave partial local state.
 - [ ] External calls occur outside the PostgreSQL transaction through a durable, resumable workflow.
 - [ ] Stable idempotency keys, guarded state transitions, compensation, and reconciliation are defined for external effects.

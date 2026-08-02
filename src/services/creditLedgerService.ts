@@ -58,6 +58,7 @@ export async function addCreditsToLedger(
     credits,
     sourceType,
     sourceReferenceId,
+    sourceOrderId,
     sourceMetadata,
     expirationPolicy,
     expiresAt,
@@ -115,9 +116,9 @@ export async function addCreditsToLedger(
     const ledgerResult = await client.query<CreditLedgerEntry>(
       `INSERT INTO credit_ledger (
         user_id, initial_amount, remaining_amount, source_type,
-        source_reference_id, source_metadata, activated_at, expires_at,
-        expiration_policy, expiration_days, status, description
-      ) VALUES ($1, $2, $2, $3, $4, $5, NOW(), $6, $7, $8, 'active', $9)
+        source_reference_id, source_order_id, source_metadata, activated_at,
+        expires_at, expiration_policy, expiration_days, status, description
+      ) VALUES ($1, $2, $2, $3, $4, $10, $5, NOW(), $6, $7, $8, 'active', $9)
       RETURNING *`,
       [
         userId,
@@ -129,6 +130,7 @@ export async function addCreditsToLedger(
         finalExpirationPolicy,
         finalExpirationDays || null,
         description || `Added ${credits} credits (${sourceType})`,
+        sourceOrderId || null,
       ]
     );
     const ledgerEntry = ledgerResult.rows[0];
@@ -173,6 +175,7 @@ export async function addCreditsToLedgerWithClient(
     credits,
     sourceType,
     sourceReferenceId,
+    sourceOrderId,
     sourceMetadata,
     expirationPolicy,
     expiresAt,
@@ -219,9 +222,9 @@ export async function addCreditsToLedgerWithClient(
   const ledgerResult = await client.query<CreditLedgerEntry>(
     `INSERT INTO credit_ledger (
        user_id, initial_amount, remaining_amount, source_type,
-       source_reference_id, source_metadata, activated_at, expires_at,
-       expiration_policy, expiration_days, status, description
-     ) VALUES ($1, $2, $2, $3, $4, $5, NOW(), $6, $7, $8, 'active', $9)
+       source_reference_id, source_order_id, source_metadata, activated_at,
+       expires_at, expiration_policy, expiration_days, status, description
+     ) VALUES ($1, $2, $2, $3, $4, $10, $5, NOW(), $6, $7, $8, 'active', $9)
      RETURNING *`,
     [
       userId,
@@ -232,7 +235,8 @@ export async function addCreditsToLedgerWithClient(
       finalExpiresAt,
       finalExpirationPolicy,
       finalExpirationDays || null,
-      description || `Added ${credits} credits (${sourceType})`
+      description || `Added ${credits} credits (${sourceType})`,
+      sourceOrderId || null
     ]
   );
   const ledgerEntry = ledgerResult.rows[0];

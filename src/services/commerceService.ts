@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type Stripe from 'stripe';
 import { query, transaction } from '../db/index.js';
+import { lockAccountForBalanceChange } from './accountLock.js';
 import { addCreditsToLedgerWithClient } from './creditLedgerService.js';
 import { grantImageEntitlementWithClient } from './imageGenerationLimitService.js';
 import { createMailOrderFromDraftWithClient } from './mailSendService.js';
@@ -29,6 +30,20 @@ export const ACTIVE_JIT_STATUSES: OrderStatus[] = [
   'paid',
   'fulfillment_pending',
   'refund_pending',
+  'disputed',
+  'held'
+];
+/**
+ * Statuses in which a paid Checkout Session has already been acted on. A
+ * replayed, duplicated, or late `checkout.session.completed` for one of these
+ * must be ignored: `disputed` and `held` are financial holds that a fulfillment
+ * transition would silently clear.
+ */
+export const FUNDED_OR_REVERSED_ORDER_STATUSES: OrderStatus[] = [
+  'fulfillment_pending',
+  'fulfilled',
+  'refund_pending',
+  'refunded',
   'disputed',
   'held'
 ];
@@ -309,12 +324,39 @@ async function attachCheckout(
   });
 }
 
+export class PackAmountNotConfiguredError extends Error {
+  readonly code = 'PACK_AMOUNT_NOT_CONFIGURED';
+  constructor(readonly productCode: string) {
+    super(`Pack amount is not configured for ${productCode}`);
+    this.name = 'PackAmountNotConfiguredError';
+  }
+}
+
+/**
+ * Fail closed when a pack price is configured without its authoritative amount.
+ * Amounts are never inferred from a Stripe Price ID: an unknown amount must
+ * disable the purchase rather than create an order that cannot be reconciled or
+ * refunded against a trusted figure.
+ */
+export function assertConfiguredAmount(
+  product: Pick<CommerceProductConfig, 'amountCents'>,
+  productCode: string
+): void {
+  if (!Number.isInteger(product.amountCents) || product.amountCents <= 0) {
+    throw new PackAmountNotConfiguredError(productCode);
+  }
+}
+
 export async function createPackCheckout(
   params: CreatePackCheckoutParams
 ): Promise<CommerceCheckoutResult> {
   const product = getPackProductConfig(params.productId);
   if (!product) throw new Error(`Invalid product ID: ${params.productId}`);
   if (!product.priceId) throw new Error(`Price ID not configured for ${params.productId}`);
+  // A missing STRIPE_*_AMOUNT_CENTS must fail before any authoritative order
+  // exists. Persisting a zero amount would make the order unreconcilable
+  // against Stripe and would leave any later refund without a trusted amount.
+  assertConfiguredAmount(product, params.productId);
 
   const orderId = randomUUID();
   const idempotencyKey = `pack-checkout:${orderId}`;
@@ -641,6 +683,8 @@ export async function repairFulfilledPackGrant(
       throw new Error('Pack reconciliation does not match a fulfilled authoritative order');
     }
 
+    // Canonical account lock order: users -> credit_ledger -> image_entitlements.
+    await lockAccountForBalanceChange(client, order.user_id);
     const existing = await client.query<{ ledger_id: string }>(
       `SELECT ledger_id FROM credit_ledger
        WHERE source_type = 'purchase' AND source_reference_id = $1
@@ -661,6 +705,7 @@ export async function repairFulfilledPackGrant(
       credits: order.credits,
       sourceType: 'purchase',
       sourceReferenceId: order.order_id,
+      sourceOrderId: order.order_id,
       sourceMetadata: {
         stripe_session_id: params.stripeSessionId,
         stripe_payment_intent_id: order.stripe_payment_intent_id,
@@ -701,7 +746,10 @@ async function transitionPaidCheckout(
   );
 
   if (session.payment_status !== 'paid') return order.status;
-  if (['fulfillment_pending', 'fulfilled', 'refund_pending', 'refunded'].includes(order.status)) {
+  // Any order that has already been funded, compensated, disputed, or held is
+  // terminal for this transition. A replayed or late Checkout event must never
+  // re-grant credits, re-create mail, or reset a financial hold.
+  if (FUNDED_OR_REVERSED_ORDER_STATUSES.includes(order.status)) {
     return order.status;
   }
 
@@ -743,6 +791,7 @@ async function transitionPaidCheckout(
       credits,
       sourceType: 'purchase',
       sourceReferenceId: order.order_id,
+      sourceOrderId: order.order_id,
       sourceMetadata: {
         stripe_session_id: session.id,
         stripe_payment_intent_id: intentId,
@@ -932,6 +981,10 @@ async function revokePackCredits(
   client: Pick<pg.PoolClient, 'query'>,
   order: Order
 ): Promise<void> {
+  // Canonical account lock order: users -> credit_ledger -> image_entitlements.
+  // Reversal must take the account lock first so it cannot deadlock against a
+  // concurrent ledger deduction or grant, which lock the user row first.
+  await lockAccountForBalanceChange(client, order.user_id);
   const entries = await client.query<{
     ledger_id: string;
     initial_amount: number;
@@ -1008,10 +1061,10 @@ async function revokePackCredits(
        SELECT COUNT(*) AS purchase_count,
               MAX(created_at) FILTER (WHERE rank = 3) AS qualifying_at FROM ranked
      )
-     UPDATE users SET tier = CASE
+     UPDATE users SET tier = (CASE
        WHEN eligibility.purchase_count >= 3
         AND eligibility.qualifying_at <= NOW() - INTERVAL '120 days' THEN 'trusted'
-       ELSE 'standard' END,
+       ELSE 'standard' END)::user_tier,
        tier_calculated_at = NOW(), updated_at = NOW()
      FROM eligibility WHERE users.user_id = $1`,
     [order.user_id]
@@ -1163,6 +1216,9 @@ async function processRefundEvent(
       await revokePackCredits(client, order);
     }
     if (nextStatus === 'refunded') {
+      // JIT refunds never call revokePackCredits, so the account lock has to be
+      // taken here or entitlements would be write-locked without it.
+      await lockAccountForBalanceChange(client, order.user_id);
       await client.query(
         `UPDATE image_entitlements
          SET status = 'revoked', updated_at = NOW()
@@ -1543,6 +1599,7 @@ export async function requestRefund(orderId: string, reason: string): Promise<bo
         if (order.order_type === 'letter_pack') {
           await revokePackCredits(client, order);
         }
+        await lockAccountForBalanceChange(client, order.user_id);
         await client.query(
           `UPDATE image_entitlements SET status = 'revoked', updated_at = NOW()
            WHERE source_order_id = $1 AND status <> 'revoked'`,

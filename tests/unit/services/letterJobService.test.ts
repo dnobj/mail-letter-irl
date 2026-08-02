@@ -25,7 +25,7 @@ import {
   processLetterJob,
   resolveAmbiguousLetterJobAsAdmin,
   retryLetterJobAsAdmin,
-  sendWithBoundedRetries,
+  submitToProviderOnce,
 } from '../../../src/services/letterJobService.js';
 
 const job = {
@@ -112,48 +112,47 @@ describe('mail outbox retries', () => {
     });
   });
 
-  it.each([429, 503])('bounded-retries an authoritative HTTP %s rejection', async (statusCode) => {
-    const send = vi
-      .fn()
-      .mockResolvedValueOnce({
-        success: false,
-        trackingId: '',
-        error: `HTTP ${statusCode}`,
-        metadata: { statusCode, retryable: true, submissionOutcome: 'definite_rejection' },
-      })
-      .mockResolvedValueOnce({ success: true, trackingId: 'provider-1' });
-
-    const result = await sendWithBoundedRetries(send, {
-      sleep: async () => undefined,
-      random: () => 0,
-    });
-    expect(result.success).toBe(true);
-    expect(send).toHaveBeenCalledTimes(2);
+  // No outcome may be re-submitted automatically. A repeat is only ever safe
+  // when the provider authoritatively refused the piece, and an authoritative
+  // refusal is not transient, so a second attempt would just re-earn it.
+  it.each([
+    ['authoritative rejection', {
+      success: false, trackingId: '', error: 'HTTP 400',
+      metadata: { statusCode: 400, retryable: false, submissionOutcome: 'definite_rejection' },
+    }],
+    ['ambiguous 5xx', {
+      success: false, trackingId: '', error: 'HTTP 503',
+      metadata: { statusCode: 503, retryable: true, submissionOutcome: 'ambiguous' },
+    }],
+    ['ambiguous rate limit', {
+      success: false, trackingId: '', error: 'HTTP 429',
+      metadata: { statusCode: 429, retryable: true, submissionOutcome: 'ambiguous' },
+    }],
+    ['unclassified provider failure', {
+      success: false, trackingId: '', error: 'provider said no',
+    }],
+  ])('submits exactly once for a %s', async (_label, providerResult) => {
+    const send = vi.fn().mockResolvedValue(providerResult);
+    await expect(submitToProviderOnce(send)).resolves.toMatchObject({ success: false });
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it('does not replay a network timeout or a permanent provider rejection', async () => {
-    const timeoutSend = vi
+  it('converts a thrown provider error into a single ambiguous outcome', async () => {
+    const throwing = vi
       .fn()
       .mockRejectedValueOnce(new Error('network timeout'))
       .mockResolvedValueOnce({ success: true, trackingId: 'provider-1' });
-    await expect(
-      sendWithBoundedRetries(timeoutSend, { sleep: async () => undefined, random: () => 0 })
-    ).resolves.toMatchObject({ success: false });
-    expect(timeoutSend).toHaveBeenCalledTimes(1);
 
-    const rejected = vi.fn().mockResolvedValue({
+    await expect(submitToProviderOnce(throwing)).resolves.toMatchObject({
       success: false,
-      trackingId: '',
-      error: 'HTTP 400',
-      metadata: { retryable: false },
+      metadata: { retryable: false, submissionOutcome: 'ambiguous' },
     });
-    await sendWithBoundedRetries(rejected, { sleep: async () => undefined });
-    expect(rejected).toHaveBeenCalledTimes(1);
+    expect(throwing).toHaveBeenCalledTimes(1);
   });
 
   it('passes the stable letter ID as the provider idempotency key', async () => {
     mockClaims();
-    const result = await processLetterJob('job-1', { retryBaseDelayMs: 0 });
+    const result = await processLetterJob('job-1', {});
 
     expect(result.completed).toBe(true);
     expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({
@@ -164,27 +163,12 @@ describe('mail outbox retries', () => {
   it('allows only one concurrent claimant to create a provider order', async () => {
     mockClaims();
     const [first, second] = await Promise.all([
-      processLetterJob('job-1', { retryBaseDelayMs: 0 }),
-      processLetterJob('job-1', { retryBaseDelayMs: 0 }),
+      processLetterJob('job-1', {}),
+      processLetterJob('job-1', {}),
     ]);
 
     expect(sendLetter).toHaveBeenCalledTimes(1);
     expect([first.claimed, second.claimed].sort()).toEqual([false, true]);
-  });
-
-  it('bounds authoritative rejection retries and never retries transport ambiguity', async () => {
-    const rejected = vi.fn().mockResolvedValue({
-      success: false, trackingId: '', error: 'HTTP 503',
-      metadata: { statusCode: 503, retryable: true, submissionOutcome: 'definite_rejection' },
-    });
-    await expect(sendWithBoundedRetries(rejected, {
-      providerRetries: 3, sleep: async () => undefined,
-    })).resolves.toMatchObject({ success: false });
-    expect(rejected).toHaveBeenCalledTimes(3);
-
-    const ambiguous = vi.fn().mockRejectedValue(new Error('socket timeout after dispatch'));
-    await sendWithBoundedRetries(ambiguous, { providerRetries: 3, sleep: async () => undefined });
-    expect(ambiguous).toHaveBeenCalledTimes(1);
   });
 
   it('holds instead of replaying after acceptance persistence crashes', async () => {
@@ -209,7 +193,7 @@ describe('mail outbox retries', () => {
           callback({ query: clientQuery })
       );
 
-    const first = await processLetterJob('job-1', { retryBaseDelayMs: 0 });
+    const first = await processLetterJob('job-1', {});
     expect(first).toMatchObject({ completed: false, retryScheduled: false });
     expect(sendLetter).toHaveBeenCalledTimes(1);
     expect(clientQuery).not.toHaveBeenCalledWith(
@@ -235,7 +219,7 @@ describe('mail outbox retries', () => {
       .mockRejectedValueOnce(new Error(sensitive));
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    const result = await processLetterJob('job-1', { retryBaseDelayMs: 0 });
+    const result = await processLetterJob('job-1', {});
 
     expect(result).toMatchObject({ completed: false, retryScheduled: false });
     const output = diagnostic.mock.calls.flat().map(String).join('\n');
@@ -256,8 +240,6 @@ describe('mail outbox retries', () => {
     });
 
     const result = await processLetterJob('job-1', {
-      providerRetries: 1,
-      retryBaseDelayMs: 0,
       random: () => 0,
     });
     expect(result.retryScheduled).toBe(false);
@@ -283,8 +265,6 @@ describe('mail outbox retries', () => {
     });
 
     const result = await processLetterJob('job-1', {
-      providerRetries: 1,
-      retryBaseDelayMs: 0,
       random: () => 0,
     });
 
@@ -303,12 +283,24 @@ describe('mail outbox retries', () => {
     mockClaims();
     clientQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT jobs.letter_id')) {
-        return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+        return { rows: [{ letter_id: 'letter-1', funding_order_id: 'order-1' }] };
       }
       if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
       if (sql.startsWith('SELECT * FROM letter_jobs')) return { rows: [{ ...job }] };
       if (sql.includes('SELECT funding_order_id FROM letters')) {
-        return { rows: [{ funding_order_id: null }] };
+        return { rows: [{ funding_order_id: 'order-1' }] };
+      }
+      if (sql.includes('SELECT status FROM orders')) {
+        return { rows: [{ status: 'fulfillment_pending' }] };
+      }
+      if (sql.includes('SELECT order_id FROM orders')) {
+        return { rows: [{ order_id: 'order-1' }] };
+      }
+      if (sql.includes('SELECT letter_id FROM letter_jobs')) {
+        return { rows: [{ letter_id: 'letter-1' }] };
+      }
+      if (sql.includes('SELECT order_id FROM orders')) {
+        return { rows: [{ order_id: 'order-1' }] };
       }
       if (sql.includes('SELECT letter_id FROM letter_jobs')) {
         return { rows: [{ letter_id: 'letter-1' }] };
@@ -322,15 +314,21 @@ describe('mail outbox retries', () => {
       success: false,
       trackingId: '',
       error: 'HTTP 400 invalid address',
-      metadata: { retryable: false },
+      metadata: { retryable: false, submissionOutcome: 'definite_rejection' },
     });
 
-    const result = await processLetterJob('job-1', { providerRetries: 1 });
+    const result = await processLetterJob('job-1', {});
 
     expect(result).toMatchObject({ completed: false, retryScheduled: false });
+    // The compensation must target the funding order already locked by the
+    // canonical order -> letter -> job sequence, never a re-derived letter_id.
     expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining('WHERE order_id = $1'),
+      ['order-1', 'HTTP 400 invalid address']
+    );
+    expect(clientQuery).not.toHaveBeenCalledWith(
       expect.stringContaining("SET status = 'refund_pending'"),
-      ['letter-1', 'HTTP 400 invalid address']
+      expect.arrayContaining(['letter-1'])
     );
     expect(clientQuery).toHaveBeenCalledWith(
       expect.stringContaining("'provider.terminal_failure'"),
@@ -338,9 +336,57 @@ describe('mail outbox retries', () => {
     );
   });
 
+  it('never refunds a paid send whose provider outcome is only ambiguous', async () => {
+    mockClaims();
+    const held: string[] = [];
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT jobs.letter_id')) {
+        return { rows: [{ letter_id: 'letter-1', funding_order_id: 'order-1' }] };
+      }
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      if (sql.startsWith('SELECT * FROM letter_jobs')) return { rows: [{ ...job }] };
+      if (sql.includes('SELECT funding_order_id FROM letters')) {
+        return { rows: [{ funding_order_id: 'order-1' }] };
+      }
+      if (sql.includes('SELECT status FROM orders')) {
+        return { rows: [{ status: 'fulfillment_pending' }] };
+      }
+      if (sql.includes('SELECT order_id FROM orders')) {
+        return { rows: [{ order_id: 'order-1' }] };
+      }
+      if (sql.includes('SELECT letter_id FROM letter_jobs')) {
+        return { rows: [{ letter_id: 'letter-1' }] };
+      }
+      if (sql.includes("hold_reason = 'provider_outcome_ambiguous'")) held.push(sql);
+      return { rows: [] };
+    });
+    // An upstream gateway can answer 5xx after the origin already accepted the
+    // piece, so exhausting these attempts must hold, never compensate.
+    sendLetter.mockResolvedValue({
+      success: false,
+      trackingId: '',
+      error: 'HTTP 503 service unavailable',
+      metadata: { statusCode: 503, retryable: true, submissionOutcome: 'ambiguous' },
+    });
+
+    const result = await processLetterJob('job-1', {});
+
+    expect(result).toMatchObject({ completed: false, retryScheduled: false });
+    expect(sendLetter).toHaveBeenCalledTimes(1);
+    expect(held.length).toBeGreaterThan(0);
+    expect(clientQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'refund_pending'"),
+      expect.anything()
+    );
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining("'mail_provider_outcome_ambiguous'"),
+      expect.anything()
+    );
+  });
+
   it('recovers a due or stale job during a one-shot maintenance batch', async () => {
     mockClaims();
-    const result = await processDueLetterJobs(25, { retryBaseDelayMs: 0 });
+    const result = await processDueLetterJobs(25, {});
     expect(result).toEqual({ processed: 1, completed: 1, retryScheduled: 0, failed: 0 });
     expect(sendLetter).toHaveBeenCalledTimes(1);
   });

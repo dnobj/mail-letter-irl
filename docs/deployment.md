@@ -234,9 +234,20 @@ atomically restores `refund_pending` to `fulfillment_pending` only while no
 refund attempt has started and no Stripe refund ID exists. It then queues the
 same outbox job with the same provider idempotency key. Refund/dispute state,
 ambiguous outcomes, accepted mail, resolved ambiguity, and cross-account input
-all fail closed. HTTP 429/5xx responses with an authoritative provider response
-are bounded-retryable; timeouts and transport loss remain held because provider
-acceptance is unknown.
+all fail closed.
+
+Provider submission outcomes are classified on one axis only: whether the
+provider authoritatively refused the piece. A non-ambiguous 4xx comes from
+PostGrid's own request validation and proves no mail exists, so it is a definite
+rejection and is eligible for refund compensation and audited operator retry.
+Everything else is ambiguous and is held for reconciliation: 5xx (a shared edge,
+proxy, or gateway can answer 500/502/503/504 after the origin already accepted
+and queued the piece), 408/409/425/429, transport loss and timeouts, an
+unreadable response body, and any 2xx that lacks a usable provider id/status.
+Ambiguous mail is never refunded and never automatically or manually
+re-dispatched: `POST /api/admin/jobs/{jobId}/retry` rejects it, and only
+`resolve-ambiguous` with conclusive provider evidence can finish it. Each
+ambiguous outcome raises a durable `mail_provider_outcome_ambiguous` alert.
 
 `stripe_money_event_unmatched` means a refund or dispute arrived before an
 authoritative order relation existed. The webhook claim and sanitized alert are

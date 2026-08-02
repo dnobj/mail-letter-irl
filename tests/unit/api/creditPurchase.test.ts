@@ -47,6 +47,7 @@ vi.mock('../../../src/db/index.js', () => ({
 // Import after mocking
 import {
   createCheckoutSession,
+  getPackProductConfig,
   verifyWebhookSignature,
   extractCheckoutData,
 } from '../../../src/services/stripeService.js';
@@ -94,15 +95,57 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
       expect(result.error).toContain('Invalid product ID');
     });
 
-    it('should fail when price ID is not configured', async () => {
-      // Remove the price environment variable
+    it('should fail closed with a stable code when the price ID is not configured', async () => {
       vi.stubEnv('STRIPE_PRICE_STARTER', '');
+      vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '500');
 
-      // Re-import to pick up new env vars (need to reset module cache)
-      vi.resetModules();
+      const result = await createCheckoutSession({
+        userId: 'user-123',
+        userEmail: 'test@example.com',
+        productId: 'credit-pack-4',
+        successUrl: 'https://example.com/success',
+        cancelUrl: 'https://example.com/cancel',
+      });
 
-      // The test validates the error handling path
-      // In production, missing STRIPE_PRICE_* should return an error
+      expect(result).toMatchObject({ success: false, errorCode: 'PRICE_ID_NOT_CONFIGURED' });
+      expect(mockSessionCreate).not.toHaveBeenCalled();
+    });
+
+    // A Stripe Price ID is not evidence of an amount. Without the explicit
+    // amount variable the legacy pack path must disable the purchase rather
+    // than fall back to a hard-coded figure that a later refund would trust.
+    it.each([
+      ['missing', undefined],
+      ['zero', '0'],
+      ['non-numeric', 'free'],
+      ['negative', '-500'],
+    ])('should fail closed when the pack amount is %s', async (_label, amount) => {
+      if (amount === undefined) {
+        vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '');
+      } else {
+        vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', amount);
+      }
+
+      const result = await createCheckoutSession({
+        userId: 'user-123',
+        userEmail: 'test@example.com',
+        productId: 'credit-pack-4',
+        successUrl: 'https://example.com/success',
+        cancelUrl: 'https://example.com/cancel',
+      });
+
+      expect(result).toMatchObject({ success: false, errorCode: 'PACK_AMOUNT_NOT_CONFIGURED' });
+      expect(mockSessionCreate).not.toHaveBeenCalled();
+    });
+
+    it('should read the amount only from configuration, with no built-in default', () => {
+      vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '777');
+      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 777 });
+
+      // Removing the variable must yield an unusable amount rather than the
+      // historical hard-coded 500.
+      vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '');
+      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 0 });
     });
 
     it('should handle emails without @ symbol gracefully', async () => {

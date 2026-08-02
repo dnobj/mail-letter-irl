@@ -119,6 +119,8 @@ export interface CheckoutSessionResult {
   sessionUrl?: string;
   expiresAt?: Date;
   error?: string;
+  /** Stable, non-PII classification for configuration failures. */
+  errorCode?: 'PRICE_ID_NOT_CONFIGURED' | 'PACK_AMOUNT_NOT_CONFIGURED' | 'PROVIDER_ERROR';
 }
 
 interface HostedCheckoutParams {
@@ -136,12 +138,17 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
   if (!params.product.priceId) {
     return {
       success: false,
+      errorCode: 'PRICE_ID_NOT_CONFIGURED',
       error: `Price ID not configured for product: ${params.product.productCode}`
     };
   }
-  if (params.product.amountCents <= 0) {
+  // Amounts are never inferred from a Price ID. Without an explicit
+  // STRIPE_*_AMOUNT_CENTS the purchase is disabled rather than transacted
+  // against a figure we cannot reconcile or refund.
+  if (!Number.isInteger(params.product.amountCents) || params.product.amountCents <= 0) {
     return {
       success: false,
+      errorCode: 'PACK_AMOUNT_NOT_CONFIGURED',
       error: `Amount not configured for product: ${params.product.productCode}`
     };
   }

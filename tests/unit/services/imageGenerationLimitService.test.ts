@@ -26,9 +26,24 @@ import {
   reserveGeneration
 } from '../../../src/services/imageGenerationLimitService.js';
 
+const ACCOUNT_LOCK_SQL = 'SELECT user_id FROM users WHERE user_id = $1 FOR UPDATE';
+
+/**
+ * The canonical account lock order requires `users` to be held before any
+ * `image_entitlements` statement, so the account lock must be the very first
+ * query in the transaction.
+ */
+function expectAccountLockedFirst(userId: string, callIndex = 0) {
+  expect(mocks.query.mock.calls[callIndex]).toEqual([ACCOUNT_LOCK_SQL, [userId]]);
+  const entitlementCall = mocks.query.mock.calls.findIndex(
+    call => typeof call[0] === 'string' && call[0].includes('image_entitlements')
+  );
+  expect(entitlementCall).toBeGreaterThan(callIndex);
+}
+
 describe('imageGenerationLimitService explicit entitlements', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.transaction.mockImplementation(async callback => callback({ query: mocks.query }));
   });
 
@@ -58,9 +73,9 @@ describe('imageGenerationLimitService explicit entitlements', () => {
   });
 
   it('grants by a unique source reference so payment replays cannot duplicate it', async () => {
-    mocks.query.mockResolvedValueOnce({
-      rows: [{ entitlement_id: 'ent-1', quantity: 1 }]
-    });
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
+      .mockResolvedValueOnce({ rows: [{ entitlement_id: 'ent-1', quantity: 1 }] });
     const grant = await grantImageEntitlement({
       userId: 'user-1',
       sourceType: 'jit_order',
@@ -70,6 +85,8 @@ describe('imageGenerationLimitService explicit entitlements', () => {
     });
 
     expect(grant).toMatchObject({ entitlement_id: 'ent-1' });
+    // Every grant path must hold the account row before writing entitlements.
+    expectAccountLockedFirst('user-1');
     expect(mocks.query).toHaveBeenCalledWith(
       expect.stringContaining('ON CONFLICT (source_type, source_reference_id) DO NOTHING'),
       ['user-1', 'jit_order', 'order-1', 'order-1', 1, null]
@@ -78,6 +95,7 @@ describe('imageGenerationLimitService explicit entitlements', () => {
 
   it('atomically reserves the oldest available entitlement', async () => {
     mocks.query
+      .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
         rows: [{ entitlement_id: 'ent-1', quantity: 2, consumed_quantity: 0 }]
@@ -96,6 +114,7 @@ describe('imageGenerationLimitService explicit entitlements', () => {
       used: 1,
       remaining: 1
     });
+    expectAccountLockedFirst('user-1');
     expect(mocks.query).toHaveBeenCalledWith(
       expect.stringContaining('LIMIT 1\n       FOR UPDATE'),
       ['user-1']
@@ -108,6 +127,7 @@ describe('imageGenerationLimitService explicit entitlements', () => {
 
   it('returns current quota when no entitlement can be reserved', async () => {
     mocks.query
+      .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
@@ -175,6 +195,7 @@ describe('imageGenerationLimitService explicit entitlements', () => {
           }
         ]
       })
+      .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
       .mockResolvedValueOnce({ rows: [{ entitlement_id: 'ent-1' }] })
       .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
       .mockResolvedValueOnce({ rows: [] })
@@ -197,13 +218,15 @@ describe('imageGenerationLimitService explicit entitlements', () => {
       resultingStatus: 'released',
       replayed: false
     });
+    // The reservation is locked first, then the account, then its entitlement.
+    expectAccountLockedFirst('user-1', 3);
     expect(mocks.query).toHaveBeenNthCalledWith(
-      6,
+      7,
       expect.stringContaining("SET status = 'released'"),
       ['reservation-1', 'provider_confirmed_failed', ['ambiguous']]
     );
     expect(mocks.query).toHaveBeenNthCalledWith(
-      7,
+      8,
       expect.stringContaining('INSERT INTO commerce_operator_audit_events'),
       expect.arrayContaining(['provider_confirmed_failed'])
     );
@@ -312,18 +335,20 @@ describe('imageGenerationLimitService explicit entitlements', () => {
           }
         ]
       })
+      .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
       .mockResolvedValueOnce({ rows: [{ entitlement_id: 'ent-1' }] })
       .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
       .mockResolvedValueOnce({ rows: [] });
 
     await releaseGenerationReservation('user-1', 'reservation-1');
+    expectAccountLockedFirst('user-1', 1);
     expect(mocks.query).toHaveBeenNthCalledWith(
-      2,
+      3,
       expect.stringContaining('consumed_quantity = consumed_quantity - 1'),
       ['ent-1']
     );
     expect(mocks.query).toHaveBeenNthCalledWith(
-      4,
+      5,
       expect.stringContaining("SET status = 'released'"),
       ['reservation-1', 'definite_failure', ['reserved', 'dispatched']]
     );
@@ -340,12 +365,13 @@ describe('imageGenerationLimitService explicit entitlements', () => {
           }
         ]
       })
+      .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
       .mockResolvedValueOnce({ rows: [] });
 
     await expect(
       releaseGenerationReservation('user-1', 'reservation-1')
     ).rejects.toThrow('entitlement counter is inconsistent');
-    expect(mocks.query).toHaveBeenCalledTimes(2);
+    expect(mocks.query).toHaveBeenCalledTimes(3);
   });
 
   it('releases stale pre-dispatch reservations but quarantines stale dispatches', async () => {
@@ -360,6 +386,7 @@ describe('imageGenerationLimitService explicit entitlements', () => {
           }
         ]
       })
+      .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
       .mockResolvedValueOnce({ rows: [{ entitlement_id: 'ent-1' }] })
       .mockResolvedValueOnce({ rows: [{ user_id: 'user-1' }] })
       .mockResolvedValueOnce({ rows: [] })
@@ -372,13 +399,14 @@ describe('imageGenerationLimitService explicit entitlements', () => {
       ambiguousTotal: 2
     });
 
+    expectAccountLockedFirst('user-1', 1);
     expect(mocks.query).toHaveBeenNthCalledWith(
-      4,
+      5,
       expect.stringContaining("SET status = 'released'"),
       ['reservation-pre', 'crash_before_provider_dispatch', ['reserved']]
     );
     expect(mocks.query).toHaveBeenNthCalledWith(
-      5,
+      6,
       expect.stringContaining("SET status = 'ambiguous'"),
       [100]
     );
