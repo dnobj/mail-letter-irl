@@ -358,6 +358,9 @@ database URL in `.env`.
 - Use the deployed development public API only; do not connect to production or provision a role.
 - Confirm the candidate build contains `022_admin_audit.sql` and that the migration record shows the
   separate `021_jit_commerce_foundation.sql` before `022_admin_audit.sql`.
+- Confirm the migration content identities in the
+  [migration 021/022/023 integration gate](deployment.md#migration-021022023-integration-gate) still match
+  the candidate build. A changed blob ID means the arrival-order proof must be rerun first.
 - Record the candidate commit and development public API origin without recording any credential.
 
 **Steps:**
@@ -373,7 +376,10 @@ database URL in `.env`.
    existing public behavior remains successful and contains no admin route advertisement.
 6. [ ] Confirm no new local admin browser server or UI is expected in this slice and no production access,
    provider call, charge, mail order, Railway mutation, or role provisioning was performed.
-7. [ ] Attach status/header evidence for every route, the migration ordering evidence, browser console
+7. [ ] Confirm `JIT_PURCHASE_ENABLED` and `IMAGE_TRIAL_ENABLED` are still `false`, because issue #69's
+   `/api/admin/image-generation/*` operator recovery routes are intentionally among the paths this slice
+   404s and no replacement operator control exists yet.
+8. [ ] Attach status/header evidence for every route, the migration ordering evidence, browser console
    observations, and the tested commit to the PR. Redact origins only if required; never attach secrets.
 
 **Pass criteria:** Every legacy path is a no-store `404` with no CORS/data leakage, and the public health,

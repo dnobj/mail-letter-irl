@@ -298,18 +298,23 @@ integration-tests:
     POSTGRID_API_KEY: ${{ secrets.POSTGRID_TEST_KEY }}
 ```
 
-The admin foundation database integration spec is opt-in and refuses non-loopback databases or database
+The admin foundation database integration specs are opt-in and refuse non-loopback databases or database
 names that do not contain `test`. Set `LETTER_IRL_ADMIN_TEST_DATABASE_URL` to an isolated local PostgreSQL
-test database. Until issue #69's migration is merged into the branch under test, also set
-`LETTER_IRL_JIT_MIGRATION_PATH` to that worktree's read-only
-`021_jit_commerce_foundation.sql`; the test always applies it immediately before `022_admin_audit.sql`.
-Never point this test at Neon.
+test database. Never point these tests at Neon.
 
 ```powershell
 $env:LETTER_IRL_ADMIN_TEST_DATABASE_URL='postgresql://postgres:test-only@127.0.0.1:55432/letter_irl_admin_test'
-$env:LETTER_IRL_JIT_MIGRATION_PATH='C:\path\to\021_jit_commerce_foundation.sql'
-npx vitest run tests/integration/admin/adminFoundationDatabase.test.ts
+npx vitest run tests/integration/admin
 ```
+
+Both specs read migrations 021, 022, and 023 only from this repository's `db/migrations`. There is no path
+override, so an external or synthetic `021_jit_commerce_foundation.sql` cannot be substituted for the real
+one. `adminFoundationDatabase.test.ts` proves the `001-020 -> 021 -> 022` sequence and the constraint,
+immutability, and least-privilege behavior of migration 022. `adminMigrationOrder.test.ts` additionally
+proves that `001-020 -> 021 -> 023 -> 022` and `001-020 -> 021 -> 022 -> 023` converge on identical
+columns, constraints, defaults, indexes, triggers, functions, and table privileges, and that migration 022
+fails closed when 021 is absent. See the
+[migration 021/022/023 integration gate](deployment.md#migration-021022023-integration-gate).
 
 ---
 

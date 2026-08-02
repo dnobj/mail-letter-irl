@@ -43,9 +43,12 @@ describeWithDatabase("admin foundation database migration", () => {
       );
     }
 
-    const jitMigrationPath =
-      process.env.LETTER_IRL_JIT_MIGRATION_PATH ??
-      join(migrationsDirectory, ADMIN_MIGRATION_SEQUENCE[0]);
+    // The JIT foundation migration is read from this repository only. An
+    // external or synthetic substitute would invalidate the 021 -> 022 proof.
+    const jitMigrationPath = join(
+      migrationsDirectory,
+      ADMIN_MIGRATION_SEQUENCE[0],
+    );
     await access(jitMigrationPath);
 
     pool = new Pool({ connectionString: databaseUrl, max: 1 });

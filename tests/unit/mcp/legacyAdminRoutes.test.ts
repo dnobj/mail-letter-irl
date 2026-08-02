@@ -65,11 +65,36 @@ describe("legacy public admin route denial", () => {
     expect(guardIndex).toBeLessThan(
       source.indexOf('url.pathname === "/healthz"'),
     );
-    expect(guardIndex).toBeLessThan(
-      source.indexOf("url.pathname.startsWith('/api/admin/')"),
+
+    // Every legacy admin surface must be unreachable. A marker that no longer
+    // exists upstream is also acceptable; a marker that survives must sit
+    // behind the guard.
+    const markersBehindGuard = [
+      "url.pathname.startsWith('/api/admin')",
+      "url.pathname.startsWith('/api/admin/')",
+      "handleAdminApiRequest(req, res",
+      'url.pathname === "/admin-panel.html"',
+    ];
+    for (const marker of markersBehindGuard) {
+      const markerIndex = source.indexOf(marker);
+      if (markerIndex === -1) continue;
+      expect(markerIndex).toBeGreaterThan(guardIndex);
+    }
+
+    // At least the admin API dispatch marker has to be present, otherwise this
+    // ordering assertion would pass vacuously.
+    expect(source.indexOf("handleAdminApiRequest(req, res")).toBeGreaterThan(-1);
+  });
+
+  it("keeps public startup validation ahead of the rest of environment validation", async () => {
+    const source = await readFile("src/mcp/httpServer.ts", "utf8");
+    const validationIndex = source.indexOf(
+      "validatePublicServerAdminConfiguration(process.env)",
     );
-    expect(guardIndex).toBeLessThan(
-      source.indexOf("handleAdminApiRequest(req, res"),
+
+    expect(validationIndex).toBeGreaterThan(-1);
+    expect(validationIndex).toBeLessThan(
+      source.indexOf("const missing: string[] = []"),
     );
   });
 

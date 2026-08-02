@@ -83,12 +83,73 @@ As of July 16, 2026, development has the transactional-outbox release and hourly
 2. Confirm Railway deploys the development API, maintenance service, and website successfully.
 3. Confirm `021_jit_commerce_foundation.sql` is recorded before `022_admin_audit.sql` on the Neon
    development branch. Do not apply 022 as a substitute for or copy of issue #69's migration 021.
+   Confirm the migration content identities in
+   [Migration 021/022/023 integration gate](#migration-021022023-integration-gate) still match.
 4. Check `/healthz`, OAuth metadata, manifest, MCP connection, and website `/api/health`.
 5. Run the automated suites in both repositories.
 6. Run the manual checks in [manual-tests.md](manual-tests.md), including zero balance, simulated purchase, confirmed send, status retrieval, image generation, and restart persistence.
 7. Confirm Serverless is enabled, leave development idle for more than ten minutes, and confirm both API and website sleep.
 8. Measure first-use recovery. Roll back Serverless if it exceeds three seconds or a widget/MCP flow fails.
 9. Leave Neon idle for more than five minutes and confirm the development compute suspends.
+
+## Migration 021/022/023 integration gate
+
+Issue #69 owns `021_jit_commerce_foundation.sql` and `023_jit_recovery_state_machines.sql`. Issue #162
+owns `022_admin_audit.sql`, which refuses to apply unless 021 is already recorded. Because 022 cannot
+exist on `dev` before 021 does, a gate phrased as "rerun the proof against issue #162's final merged
+commit" can never be satisfied before issue #69 merges. It is replaced by a **content-identity gate**.
+
+### Reviewed migration content identity
+
+Identity is the Git blob ID, which is line-ending normalized. Do not use a workstation file hash: this
+repository checks out with `core.autocrlf=true` on Windows, so the on-disk SHA-256 differs per host.
+
+| Migration | Git blob ID | Blob SHA-256 (LF canonical) |
+|-----------|-------------|------------------------------|
+| `021_jit_commerce_foundation.sql` | `47ad1a799e913cff8364fb19cc6197cd7aac04a4` | `d6f9a11b74fa745f0b3fc34b27a496e5c6e2245a96a9c34a77c1b289c7b46056` |
+| `022_admin_audit.sql` | `6200c2660ef97ce9902d62bde7c75312b5beff8a` | `b13ddc770e80049d01ef3a88c1c0374408da04f0dc43ccff781322e5472fb0eb` |
+| `023_jit_recovery_state_machines.sql` | `cb1fb0d57cf272e54f1e3f547b7060303926b652` | `3080bdfaad673dc51ba5fb32f0d813059dac1285a024c7d1324e84f6a0af38b8` |
+
+Verify with:
+
+```bash
+git rev-parse HEAD:db/migrations/022_admin_audit.sql
+git cat-file -p HEAD:db/migrations/022_admin_audit.sql | sha256sum
+```
+
+### Gate
+
+The proven arrival orders may be relied on only while all three blob IDs above are unchanged. If any of
+them differs at merge or deploy time, rerun the arrival-order proof before integration or deployment and
+republish this table. The proof is durable and rerunnable:
+
+```bash
+LETTER_IRL_ADMIN_TEST_DATABASE_URL=postgresql://postgres:<local>@127.0.0.1:<port>/letter_irl_admin_test \
+  npx vitest run tests/integration/admin/adminMigrationOrder.test.ts
+```
+
+It applies the real repository migrations with the real migrator and compares columns, constraints,
+defaults, indexes, triggers, functions, and table privileges across `001-020 -> 021 -> 022`,
+`001-020 -> 021 -> 023 -> 022`, and `001-020 -> 021 -> 022 -> 023`.
+
+### Safe merge sequence
+
+1. Merge issue #69 (PR #164) into `dev` first. It carries 021 and 023 and does not depend on 022.
+2. Confirm the three blob IDs above are unchanged on the merged `dev` and on the issue #162 branch.
+3. Rebase issue #162 (PR #165) onto the merged `dev`. Its diff collapses to the admin foundation only.
+4. Merge PR #165 into `dev`.
+5. Apply migrations to the Neon development branch in recorded order, then deploy.
+
+If PR #165 must merge before PR #164, migration 022 will refuse to apply until 021 is recorded, and the
+development database would be left without the admin foundation. Do not attempt that order.
+
+### Operator recovery interaction
+
+Migration 022's branch also forces every public `/admin*` and `/api/admin*` request to a no-store 404 and
+makes `ADMIN_ENABLED=true` a startup error. Issue #69's ambiguous-image operator recovery routes under
+`/api/admin/image-generation/*` are therefore unreachable in deployed environments once both land. Keep
+`JIT_PURCHASE_ENABLED=false` and `IMAGE_TRIAL_ENABLED=false` until a later issue #162 slice ships the
+replacement operator control.
 
 ## Production Promotion
 
