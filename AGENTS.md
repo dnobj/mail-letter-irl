@@ -59,6 +59,12 @@ mechanism armed. Keep ephemeral session inventory outside Git; GitHub issues, pl
 and test evidence remain the durable work ledger. Never store Switchyard tokens, test credentials, or
 PATs in Git.
 
+The Master maintains `docs/owner-attention.md` as the prioritized, non-secret view of decisions and
+actions that genuinely require the owner. Active blockers and time-sensitive gates stay at the top;
+routine reversible work continues without interruption. Workers report owner needs to the Master rather
+than repeatedly asking the owner. Never put credentials, tokens, MFA codes, or private billing data in
+the queue.
+
 ## Infrastructure Truths
 
 Letter IRL uses one Railway project with separate `production` and `development` environments. The backend auto-deploys from `master` (production) and `dev` (development); the companion website auto-deploys from `main` (production) and `dev` (development). Production stays warm; development uses Railway Serverless and must retain it only while the documented wake-up acceptance checks pass.

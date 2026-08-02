@@ -19,6 +19,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 - [testing.md](testing.md) - Testing strategy and guide
 - [ACID Transaction Standard](acid-transaction-standard.md) - Required transaction, idempotency, outbox, recovery, and review rules for durable mutations
 - [agent-workflow.md](agent-workflow.md) - Multi-engine orchestration, worker safety, and delivery gates
+- [owner-attention.md](owner-attention.md) - Prioritized decisions, credentials/MFA gates, and conversations requiring Dave
 - [manual-tests.md](manual-tests.md) - Focused PR and release-group browser/live verification cases
 
 ---

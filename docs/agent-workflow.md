@@ -195,10 +195,14 @@ store. Never include passwords, PATs, bearer tokens, billing data, or reusable O
 logs, issues, plans, or handoffs. Use the narrowest practical scope and lifetime, and revoke temporary
 credentials after testing.
 
-Maintain one owner attention queue. Each item says what is blocked, the recommendation, and what happens
-if the owner does nothing. Take safe defaults without interrupting; stop for credentials/MFA, production,
-irreversible actions, or product decisions with no defensible default. When a user must enter another task,
-name the exact task and action.
+Maintain [owner-attention.md](owner-attention.md) as one prioritized, deduplicated owner attention queue.
+Each item says what is blocked, the recommendation, what happens if the owner does nothing, and the owning
+issue or task. GitHub remains the authoritative backlog; the queue is only an attention view. Workers send
+new owner needs to the Master, which consolidates them and surfaces only newly urgent or materially changed
+items. Take safe defaults without interrupting; stop for credentials/MFA, production, irreversible actions,
+or product decisions with no defensible default. When a user must enter another task, name the exact task
+and action. Never put credentials, tokens, MFA codes, billing details, customer data, or other secrets in
+the queue.
 
 Work closes only when acceptance criteria and verification are complete, documentation and rollback are
 current, review/manual-test findings are resolved, the PR and issue reflect reality, temporary resources
@@ -207,6 +211,7 @@ are cleaned up, and newly discovered work is captured rather than silently expan
 ## See Also
 
 - [manual-tests.md](manual-tests.md) - Durable focused and release-group manual test cases
+- [owner-attention.md](owner-attention.md) - Prioritized non-secret owner decisions and gates
 - [testing.md](testing.md) - Automated testing strategy and commands
 - [deployment.md](deployment.md) - DEV/production deployment boundaries and gates
 - [acid-transaction-standard.md](acid-transaction-standard.md) - Transaction and external-side-effect standard
