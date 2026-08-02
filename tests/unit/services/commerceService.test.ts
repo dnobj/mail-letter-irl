@@ -390,6 +390,34 @@ describe('commerceService', () => {
       expect.anything()
     );
     expect(mocks.addCredits).not.toHaveBeenCalled();
+    // But refusing must not silently consume paid money either: the event stays
+    // unmatched and raises a durable alert, so a recovery path can find it once
+    // the amount is configured.
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("processing_status = 'unmatched'"),
+      ['evt-1', 'pi-1']
+    );
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("'stripe_money_event_unmatched'"),
+      expect.arrayContaining(['evt-1'])
+    );
+  });
+
+  it('does not raise unmatched money for an unpaid session that matches no order', async () => {
+    mocks.getPackProduct.mockReturnValue(null);
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+      return { rows: [] };
+    });
+
+    await expect(processStripeWebhookEvent(checkoutEvent({
+      client_reference_id: null, metadata: {}, payment_status: 'unpaid'
+    }) as any)).resolves.toMatchObject({ duplicate: false });
+
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("'stripe_money_event_unmatched'"),
+      expect.anything()
+    );
   });
 
   it('refuses a pack checkout when its amount is not configured', async () => {

@@ -588,7 +588,7 @@ async function createLegacyPackOrder(
   // Without a configured amount this INSERT would violate the amount_cents
   // CHECK and roll back the whole webhook transaction, including the event
   // claim, leaving Stripe to retry forever with no operator signal. Refuse the
-  // adoption instead so the unmatched-money path records it durably.
+  // adoption instead; the caller records a paid refusal as unmatched money.
   if (!Number.isInteger(product.amountCents) || product.amountCents <= 0) {
     writeDiagnostic('error', 'commerce.legacy_pack_amount_not_configured', {
       productCode: product.productCode
@@ -888,7 +888,32 @@ async function processCheckoutSessionEvent(
     }
     let order = await findCheckoutOrder(client, session);
     if (!order) order = await createLegacyPackOrder(client, session);
-    if (!order) return { duplicate: false };
+    if (!order) {
+      // A paid session we cannot bind to an order is unmatched money. Consuming
+      // the event here without a durable record would charge the customer,
+      // deliver nothing, return HTTP 200 so Stripe stops retrying, and leave no
+      // row for any recovery path to find.
+      if (session.payment_status === 'paid') {
+        await client.query(
+          `UPDATE stripe_webhook_events SET processing_status = 'unmatched',
+             provider_payment_intent_id = $2 WHERE event_id = $1`,
+          [eventId, paymentIntentId(session) || null]
+        );
+        await client.query(
+          `INSERT INTO commerce_operational_alerts
+             (source_event_id, alert_type, severity, details)
+           VALUES ($1, 'stripe_money_event_unmatched', 'critical', $2)
+           ON CONFLICT (source_event_id, alert_type) DO NOTHING`,
+          [eventId, JSON.stringify({
+            eventClass: 'checkout',
+            hasPaymentIntent: Boolean(paymentIntentId(session)),
+            hasCharge: false,
+            hasMetadataOrder: Boolean(session.metadata?.orderId)
+          })]
+        );
+      }
+      return { duplicate: false };
+    }
     await client.query('UPDATE stripe_webhook_events SET order_id = $2 WHERE event_id = $1', [
       eventId,
       order.order_id

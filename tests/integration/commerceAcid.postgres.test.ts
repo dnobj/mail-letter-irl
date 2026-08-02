@@ -1083,6 +1083,53 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
     });
   });
 
+  it('records a paid checkout it cannot bind as durably recoverable unmatched money', async () => {
+    await acidPool.query(
+      `INSERT INTO users (user_id, email) VALUES ('orphan-pay-user', 'orphan-pay@example.test')`
+    );
+
+    // No commerce order, and no legacy metadata the adoption path can use. The
+    // customer has still paid, so consuming this event silently would charge
+    // them, deliver nothing, and stop Stripe retrying with no record anywhere.
+    await expect(commerceService.processStripeWebhookEvent({
+      id: 'evt-orphan-paid', type: 'checkout.session.completed', data: { object: {
+        id: 'cs-orphan-paid', client_reference_id: null, metadata: {},
+        payment_intent: 'pi-orphan-paid', payment_status: 'paid',
+        amount_total: 500, currency: 'usd',
+        expires_at: Math.floor(Date.now() / 1000) + 3600
+      } }
+    } as any)).resolves.toEqual({ duplicate: false });
+
+    const recorded = await acidPool.query<{
+      processing_status: string; order_id: string | null;
+      alert_type: string; alert_status: string; severity: string;
+    }>(
+      `SELECT events.processing_status, events.order_id,
+              alerts.alert_type, alerts.status AS alert_status, alerts.severity
+       FROM stripe_webhook_events AS events
+       JOIN commerce_operational_alerts AS alerts ON alerts.source_event_id = events.event_id
+       WHERE events.event_id = 'evt-orphan-paid'`
+    );
+    expect(recorded.rows[0]).toEqual({
+      processing_status: 'unmatched', order_id: null,
+      alert_type: 'stripe_money_event_unmatched', alert_status: 'open', severity: 'critical'
+    });
+
+    // An unpaid session that matches nothing is not money and must stay quiet.
+    await expect(commerceService.processStripeWebhookEvent({
+      id: 'evt-orphan-unpaid', type: 'checkout.session.completed', data: { object: {
+        id: 'cs-orphan-unpaid', client_reference_id: null, metadata: {},
+        payment_status: 'unpaid', amount_total: 500, currency: 'usd',
+        expires_at: Math.floor(Date.now() / 1000) + 3600
+      } }
+    } as any)).resolves.toEqual({ duplicate: false });
+    const quiet = await acidPool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM commerce_operational_alerts
+       WHERE source_event_id = 'evt-orphan-unpaid'`
+    );
+    expect(quiet.rows[0].count).toBe('0');
+  });
+
   it('refuses to re-dispatch mail whose provider outcome is still ambiguous', async () => {
     const jobId = '00000000-0000-4000-8000-000000000210';
     await acidPool.query(
