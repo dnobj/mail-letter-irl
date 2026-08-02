@@ -32,12 +32,28 @@ ACID—Atomicity, Consistency, Isolation, and Durability—is the guiding engine
 Use short imperative commit summaries without trailing punctuation. PRs should describe behavior, link the issue when one exists, include test evidence, and call out migrations, environment variables, manifest changes, or external dependencies. Include screenshots or logs when a widget or protocol contract changes.
 
 ## Work Management & Agent Coordination
-Follow `docs/agent-workflow.md` for backlog classification, planning, delegation, handoffs, and
-manual-test gates. Frame non-trivial work with a goal, relevant context, constraints, and explicit
-done criteria before implementation. Keep one task/chat focused on one coherent outcome; continue in
-the same task when its context remains useful, and use separate worktrees for independent parallel
-changes. Delegate only bounded work with a clear owner and deliverable, and never have multiple agents
-edit the same files or branch concurrently.
+
+This project follows the code-teem orchestration playbook pinned at `v0.5.0`; the Letter IRL
+adaptation is `docs/agent-workflow.md`. Use Switchyard (`sy`; legacy `sb` is a temporary alias) as the
+preferred control plane for durable Claude Code and Codex workers when it is available.
+
+Honor the one-writer rule. A session open in a human UI is a cockpit, not a programmatic write target;
+use the platform's supported nudge/handoff channel or wait until it is headless. Give each writing
+worker one issue, branch, and isolated worktree, and never let two workers or engines edit the same
+checkout. The human checkout is not a worker surface.
+
+New bounded research, planning, implementation, and routine verification should normally use Claude
+Code workers through `sy`; the Codex Master remains the owner-facing coordinator and handles
+OpenAI/ChatGPT-specific work, release gates, and embedded-browser tasks. Material auth, payment,
+privacy, database, migration, or transaction changes require adversarial review by the other model
+family before merge. Briefs stay capability-based rather than depending on engine-specific commands.
+
+Every delegation must have a bounded brief, trust mode, and structured handoff. Prefer asynchronous
+`continue_session` with a result schema and `await_job`; a timeout means the job is still running, not
+that it failed. A coordinator must either wait for the completion signal or be protected by the
+Switchyard watchdog before ending its turn. Never promise a later update with neither mechanism armed.
+Keep ephemeral session inventory outside Git; GitHub issues, plans, branches, PRs, and test evidence
+remain the durable work ledger. Never store Switchyard tokens, test credentials, or PATs in Git.
 
 ## Infrastructure Truths
 
