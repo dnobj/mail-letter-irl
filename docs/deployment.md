@@ -184,6 +184,74 @@ allow-listed bearer identity. Mutations additionally require
 `Content-Type: application/json` and the `X-CSRF-Token` matching the local
 operator bootstrap secret. The server emits no admin CORS or preflight grant.
 
+## Commerce operational-alert procedure
+
+Use the same hardened local admin boundary for financial/provider recovery.
+`GET /api/admin/alerts` includes unresolved `commerce_operational_alerts` in the
+`commerce_operations` group. Treat the returned order and job references as
+restricted operator evidence; do not paste them into application logs.
+
+To record review without closing the work, send
+`PATCH /api/admin/commerce-alerts/{alertId}` with JSON `status` set to
+`acknowledged` and a new operator-controlled `idempotencyKey`. Resolve only after
+the provider/payment evidence is conclusive: send `status: resolved`, a stable
+non-PII `resolutionCode`, and a new key. The authenticated bearer identity—not a
+request-body actor—provides attribution. An exact retry returns `replayed: true`;
+reusing a key with a different actor, alert, state, or resolution fails closed.
+The alert transition and privacy-minimized append-only audit record commit in
+one transaction. Stripe dispute-close events automatically resolve only the
+matching dispute-created alert and persist a safe provider-status resolution
+code in that same webhook transaction.
+
+For `mail_provider_outcome_ambiguous`, first reconcile the job against the
+provider using its restricted operator evidence. Then send
+`POST /api/admin/jobs/{jobId}/resolve-ambiguous` with the exact bound `userId`, a
+new `idempotencyKey`, the known `providerName`, and one conclusive pair:
+
+- `accepted` / `provider_confirmed_accepted`, including the provider tracking
+  reference; this records acceptance and completes eligible JIT fulfillment
+  without another provider call.
+- `retry` / `provider_confirmed_rejected_retry`, with no tracking reference;
+  this proves the ambiguous request was rejected, clears the hold, and queues
+  the same job with the same provider idempotency key. Eligible JIT funding
+  returns from `held` to `fulfillment_pending` in the same transaction.
+- `rejected` / `provider_confirmed_rejected_refund`, with no tracking
+  reference; this makes the job terminal and exhausted, and moves an eligible
+  JIT order to refund recovery.
+
+Never use this endpoint while evidence is inconclusive. It never submits mail,
+and refund-resolved or accepted ambiguous work cannot be sent through the admin
+retry endpoint. The explicit retry outcome is the only way to resume a held
+provider dispatch, and it is bounded to one audited recovery decision.
+The order, letter, job, matching operational alert, and append-only audit are
+locked and committed together; provider references are stored where required
+for fulfillment but only hashed in the operator audit and never logged.
+
+An authoritative provider rejection or terminal failure before dispatch may be
+retried only with `POST /api/admin/jobs/{jobId}/retry`, including the exact
+bound `userId`, a non-PII reason, and a new idempotency key. For JIT mail this
+atomically restores `refund_pending` to `fulfillment_pending` only while no
+refund attempt has started and no Stripe refund ID exists. It then queues the
+same outbox job with the same provider idempotency key. Refund/dispute state,
+ambiguous outcomes, accepted mail, resolved ambiguity, and cross-account input
+all fail closed. HTTP 429/5xx responses with an authoritative provider response
+are bounded-retryable; timeouts and transport loss remain held because provider
+acceptance is unknown.
+
+`stripe_money_event_unmatched` means a refund or dispute arrived before an
+authoritative order relation existed. The webhook claim and sanitized alert are
+durable. A later checkout with the same payment intent/order relation resolves
+the alert and moves the order directly to `refund_pending` or `disputed` before
+mail creation. Events without enough provider references remain open for
+operator reconciliation and must never be dismissed merely because replay is
+deduplicated.
+
+Pack amount variables (`STRIPE_*_AMOUNT_CENTS`) are required alongside price
+IDs. Missing amounts disable checkout/reconciliation; there are no runtime
+price fallbacks. Historical migration-021 rows whose one-cent value cannot be
+distinguished from its placeholder are marked `amount_known=false` by migration
+023 and excluded from revenue totals while retaining their audit value.
+
 After the migration and disabled deployment are healthy, validate both mail
 types in Stripe test mode, enable only internal development accounts, and then
 set `JIT_PURCHASE_ENABLED=true` for the intended environment. Do not enable the

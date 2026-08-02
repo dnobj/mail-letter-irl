@@ -23,11 +23,14 @@ import {
 import type { LetterDraft, MailType, Order, OrderStatus } from './types.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
-const ACTIVE_JIT_STATUSES: OrderStatus[] = [
+// Must mirror idx_orders_active_jit_draft_unique in migration 023.
+export const ACTIVE_JIT_STATUSES: OrderStatus[] = [
   'checkout_pending',
   'paid',
   'fulfillment_pending',
-  'refund_pending'
+  'refund_pending',
+  'disputed',
+  'held'
 ];
 const PURCHASE_CREDIT_EXPIRY_DAYS = 730;
 const MINIMUM_REFUND_RETRY_DELAY_SECONDS = 30;
@@ -600,6 +603,86 @@ function packImageGrant(credits: number): number {
   return Math.floor(credits / 2) * perLetter;
 }
 
+export interface RepairFulfilledPackGrantParams {
+  orderId: string;
+  stripeSessionId: string;
+  expectedCredits: number;
+  paidAmountCents: number;
+  paidCurrency: string;
+}
+
+/**
+ * Repair a legacy/inconsistent fulfilled pack grant discovered from a paid
+ * Stripe session. The exact order/session binding, ledger grant, image grant,
+ * user balance, and order event are serialized by the order lock and commit in
+ * one transaction. Checkout-pending or financially reversed orders must be
+ * repaired by replaying their provider event instead of bypassing the commerce
+ * state machine here.
+ */
+export async function repairFulfilledPackGrant(
+  params: RepairFulfilledPackGrantParams
+): Promise<'repaired' | 'already_granted'> {
+  return transaction(async client => {
+    const result = await client.query<Order>(
+      `SELECT * FROM orders
+       WHERE order_id = $1 AND order_type = 'letter_pack'
+       FOR UPDATE`,
+      [params.orderId]
+    );
+    const order = result.rows[0];
+    if (
+      !order ||
+      order.status !== 'fulfilled' ||
+      order.stripe_checkout_session_id !== params.stripeSessionId ||
+      order.credits !== params.expectedCredits ||
+      order.amount_cents !== params.paidAmountCents ||
+      order.currency.toLowerCase() !== params.paidCurrency.toLowerCase()
+    ) {
+      throw new Error('Pack reconciliation does not match a fulfilled authoritative order');
+    }
+
+    const existing = await client.query<{ ledger_id: string }>(
+      `SELECT ledger_id FROM credit_ledger
+       WHERE source_type = 'purchase' AND source_reference_id = $1
+       FOR UPDATE`,
+      [order.order_id]
+    );
+    await grantImageEntitlementWithClient(client, {
+      userId: order.user_id,
+      sourceType: 'letter_pack',
+      sourceReferenceId: order.order_id,
+      sourceOrderId: order.order_id,
+      quantity: packImageGrant(order.credits)
+    });
+    if (existing.rows[0]) return 'already_granted';
+
+    await addCreditsToLedgerWithClient(client, {
+      userId: order.user_id,
+      credits: order.credits,
+      sourceType: 'purchase',
+      sourceReferenceId: order.order_id,
+      sourceMetadata: {
+        stripe_session_id: params.stripeSessionId,
+        stripe_payment_intent_id: order.stripe_payment_intent_id,
+        product_code: order.product_code,
+        amount_cents: order.amount_cents,
+        currency: order.currency
+      },
+      expirationDays: PURCHASE_CREDIT_EXPIRY_DAYS,
+      description: `Repaired ${order.product_code} grant after Stripe reconciliation`
+    });
+    await recordOrderEvent(
+      client,
+      order.order_id,
+      'maintenance.pack_grant_repaired',
+      order.status,
+      order.status,
+      { source: 'stripe_reconciliation' }
+    );
+    return 'repaired';
+  });
+}
+
 async function transitionPaidCheckout(
   client: pg.PoolClient,
   order: Order,
@@ -751,6 +834,43 @@ async function processCheckoutSessionEvent(
       eventId,
       order.order_id
     ]);
+
+    const intentId = paymentIntentId(session);
+    const unmatchedMoney = await client.query<{ event_id: string; event_type: string }>(
+      `SELECT event_id, event_type FROM stripe_webhook_events
+       WHERE processing_status = 'unmatched'
+         AND (($1::varchar IS NOT NULL AND provider_payment_intent_id = $1)
+           OR metadata_order_id = $2)
+       ORDER BY processed_at FOR UPDATE`,
+      [intentId, order.order_id]
+    );
+    if (unmatchedMoney.rows[0]) {
+      const isDispute = unmatchedMoney.rows.some(row => row.event_type.startsWith('charge.dispute.'));
+      const blockedStatus: OrderStatus = isDispute ? 'disputed' : 'refund_pending';
+      await client.query(
+        `UPDATE orders SET stripe_checkout_session_id = COALESCE(stripe_checkout_session_id, $2),
+           stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, $3),
+           status = $4::varchar, refund_pending_at = CASE WHEN $4::varchar = 'refund_pending'
+             THEN COALESCE(refund_pending_at, NOW()) ELSE refund_pending_at END,
+           last_error_code = 'UNMATCHED_MONEY_EVENT_RECOVERED', updated_at = NOW()
+         WHERE order_id = $1`,
+        [order.order_id, session.id, intentId, blockedStatus]
+      );
+      await client.query(
+        `UPDATE stripe_webhook_events SET order_id = $2, processing_status = 'processed',
+           resolved_at = NOW() WHERE event_id = ANY($1::varchar[])`,
+        [unmatchedMoney.rows.map(row => row.event_id), order.order_id]
+      );
+      await client.query(
+        `UPDATE commerce_operational_alerts SET status = 'resolved', resolved_at = NOW(),
+           resolution_code = 'matched_later_checkout', updated_at = NOW()
+         WHERE source_event_id = ANY($1::varchar[]) AND status <> 'resolved'`,
+        [unmatchedMoney.rows.map(row => row.event_id)]
+      );
+      await recordOrderEvent(client, order.order_id, 'stripe.money_event_recovered',
+        order.status, blockedStatus, { eventCount: unmatchedMoney.rows.length });
+      return { duplicate: false, orderId: order.order_id, status: blockedStatus };
+    }
 
     // Once a Checkout Session has been attached, never let a different
     // server-signed Session reuse metadata to authorize this order. The
@@ -941,9 +1061,22 @@ async function stopFundedMailBeforeFinancialReversal(
          (source_event_id, order_id, alert_type, severity, details)
        VALUES ($1, $2, 'refunded_mail_already_dispatched', 'critical', $3)
        ON CONFLICT (source_event_id, alert_type) DO NOTHING`,
-      [sourceEventId, order.order_id, JSON.stringify({ providerOutcome: current.provider_outcome })]
+      [sourceEventId, order.order_id, JSON.stringify({
+        jobId: current.job_id, providerOutcome: current.provider_outcome
+      })]
     );
     return 'held';
+  }
+  if (current.provider_outcome === 'accepted' || current.status === 'completed') {
+    await client.query(
+      `INSERT INTO commerce_operational_alerts
+         (source_event_id, order_id, alert_type, severity, details)
+       VALUES ($1, $2, 'refunded_mail_already_dispatched', 'critical', $3)
+       ON CONFLICT (source_event_id, alert_type) DO NOTHING`,
+      [sourceEventId, order.order_id, JSON.stringify({
+        jobId: current.job_id, providerOutcome: 'accepted'
+      })]
+    );
   }
   return 'none';
 }
@@ -957,12 +1090,22 @@ async function processRefundEvent(
     typeof refundOrCharge.payment_intent === 'string'
       ? refundOrCharge.payment_intent
       : refundOrCharge.payment_intent?.id;
+  const charge = 'charge' in refundOrCharge
+    ? (typeof refundOrCharge.charge === 'string'
+        ? refundOrCharge.charge
+        : refundOrCharge.charge?.id)
+    : refundOrCharge.id;
   return transaction(async client => {
     if (!(await claimStripeEvent(client, eventId, eventType, refundOrCharge.id))) {
       return { duplicate: true };
     }
     const metadataOrderId =
       'metadata' in refundOrCharge ? refundOrCharge.metadata?.orderId : undefined;
+    await client.query(
+      `UPDATE stripe_webhook_events SET provider_payment_intent_id = $2,
+         provider_charge_id = $3, metadata_order_id = $4 WHERE event_id = $1`,
+      [eventId, intent || null, charge || null, metadataOrderId || null]
+    );
     const orderResult = await client.query<Order>(
       `SELECT * FROM orders
        WHERE ($1::varchar IS NOT NULL AND order_id = $1)
@@ -971,7 +1114,24 @@ async function processRefundEvent(
       [metadataOrderId || null, intent || null]
     );
     const order = orderResult.rows[0];
-    if (!order) return { duplicate: false };
+    if (!order) {
+      await client.query(
+        `UPDATE stripe_webhook_events SET processing_status = 'unmatched'
+         WHERE event_id = $1`, [eventId]
+      );
+      await client.query(
+        `INSERT INTO commerce_operational_alerts
+           (source_event_id, alert_type, severity, details)
+         VALUES ($1, 'stripe_money_event_unmatched', 'critical', $2)
+         ON CONFLICT (source_event_id, alert_type) DO NOTHING`,
+        [eventId, JSON.stringify({
+          eventClass: eventType.startsWith('charge.dispute.') ? 'dispute' : 'refund',
+          hasPaymentIntent: Boolean(intent), hasCharge: Boolean(charge),
+          hasMetadataOrder: Boolean(metadataOrderId)
+        })]
+      );
+      return { duplicate: false };
+    }
     await client.query('UPDATE stripe_webhook_events SET order_id = $2 WHERE event_id = $1', [
       eventId,
       order.order_id
@@ -1012,10 +1172,10 @@ async function processRefundEvent(
     }
     await client.query(
       `UPDATE orders
-       SET status = $2,
+       SET status = $2::varchar,
            stripe_refund_id = COALESCE($3, stripe_refund_id),
-           refund_pending_at = CASE WHEN $2 = 'refund_pending' THEN COALESCE(refund_pending_at, NOW()) ELSE refund_pending_at END,
-           refunded_at = CASE WHEN $2 = 'refunded' THEN NOW() ELSE refunded_at END,
+           refund_pending_at = CASE WHEN $2::varchar = 'refund_pending' THEN COALESCE(refund_pending_at, NOW()) ELSE refund_pending_at END,
+           refunded_at = CASE WHEN $2::varchar = 'refunded' THEN NOW() ELSE refunded_at END,
            updated_at = NOW()
        WHERE order_id = $1`,
       [order.order_id, nextStatus, isRefund ? refundOrCharge.id : null]
@@ -1038,6 +1198,13 @@ async function processDisputeEvent(
     const paymentIntentId = typeof dispute.payment_intent === 'string'
       ? dispute.payment_intent
       : dispute.payment_intent?.id;
+    const disputeChargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
+    const metadataOrderId = dispute.metadata?.orderId;
+    await client.query(
+      `UPDATE stripe_webhook_events SET provider_payment_intent_id = $2,
+         provider_charge_id = $3, metadata_order_id = $4 WHERE event_id = $1`,
+      [eventId, paymentIntentId || null, disputeChargeId || null, metadataOrderId || null]
+    );
     const orderResult = paymentIntentId
       ? await client.query<Order>(
           'SELECT * FROM orders WHERE stripe_payment_intent_id = $1 FOR UPDATE',
@@ -1045,6 +1212,22 @@ async function processDisputeEvent(
         )
       : { rows: [] as Order[] };
     const order = orderResult.rows[0];
+    if (!order) {
+      await client.query(
+        `UPDATE stripe_webhook_events SET processing_status = 'unmatched'
+         WHERE event_id = $1`, [eventId]
+      );
+      await client.query(
+        `INSERT INTO commerce_operational_alerts
+           (source_event_id, alert_type, severity, details)
+         VALUES ($1, 'stripe_money_event_unmatched', 'critical', $2)
+         ON CONFLICT (source_event_id, alert_type) DO NOTHING`,
+        [eventId, JSON.stringify({ eventClass: 'dispute',
+          hasPaymentIntent: Boolean(paymentIntentId), hasCharge: Boolean(disputeChargeId),
+          hasMetadataOrder: Boolean(metadataOrderId) })]
+      );
+      return { duplicate: false };
+    }
     if (order) {
       await client.query('UPDATE stripe_webhook_events SET order_id = $2 WHERE event_id = $1', [
         eventId, order.order_id
@@ -1061,10 +1244,17 @@ async function processDisputeEvent(
         disputeStatus: dispute.status
       });
       if (closed) {
+        const resolutionCode = `stripe_dispute_${String(dispute.status || 'unknown')
+          .toLowerCase()
+          .replace(/[^a-z0-9_]/g, '_')}`.slice(0, 80);
         await client.query(
-          `UPDATE commerce_operational_alerts SET status = 'resolved', resolved_at = NOW(), updated_at = NOW()
-           WHERE order_id = $1 AND alert_type = 'stripe_dispute_created' AND status <> 'resolved'`,
-          [order.order_id]
+          `UPDATE commerce_operational_alerts SET status = 'resolved', resolved_at = NOW(),
+             resolution_code = $2, updated_at = NOW()
+           WHERE order_id = $1 AND alert_type = 'stripe_dispute_created' AND status <> 'resolved'
+             AND source_event_id IN (
+               SELECT event_id FROM stripe_webhook_events WHERE provider_object_id = $3
+             )`,
+          [order.order_id, resolutionCode, dispute.id]
         );
       }
     }

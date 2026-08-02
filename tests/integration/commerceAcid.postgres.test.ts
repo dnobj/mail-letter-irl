@@ -177,6 +177,7 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
   let imageService: typeof import('../../src/services/imageGenerationLimitService.js');
   let commerceService: typeof import('../../src/services/commerceService.js');
   let letterJobService: typeof import('../../src/services/letterJobService.js');
+  let stripeReconciliationService: typeof import('../../src/services/stripeReconciliationService.js');
   let closeServicePool: (() => Promise<void>) | undefined;
 
   beforeAll(async () => {
@@ -196,6 +197,7 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
     imageService = await import('../../src/services/imageGenerationLimitService.js');
     commerceService = await import('../../src/services/commerceService.js');
     letterJobService = await import('../../src/services/letterJobService.js');
+    stripeReconciliationService = await import('../../src/services/stripeReconciliationService.js');
     closeServicePool = (await import('../../src/db/index.js')).closePool;
   }, 120_000);
 
@@ -395,9 +397,328 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
       order_status: 'disputed', letter_status: 'cancelled', job_status: 'cancelled'
     });
     await expect(letterJobService.retryLetterJobAsAdmin({
-      jobId: '00000000-0000-4000-8000-000000000109', actorId: 'admin-acid',
+      jobId: '00000000-0000-4000-8000-000000000109', expectedUserId: 'dispute-user', actorId: 'admin-acid',
       reason: 'provider confirmed rejection', idempotencyKey: 'admin-retry-dispute-acid'
     })).rejects.toMatchObject({ code: 'invalid_state' });
+
+    await expect(commerceService.processStripeWebhookEvent({
+      id: 'evt-dispute-funded-closed', type: 'charge.dispute.closed', data: { object: {
+        id: 'dp-funded', payment_intent: 'pi-dispute-acid', charge: 'ch-funded',
+        amount: 499, currency: 'usd', reason: 'fraudulent', status: 'won'
+      } }
+    } as any)).resolves.toEqual({ duplicate: false });
+    const resolvedAlert = await acidPool.query<{
+      status: string; resolution_code: string; close_alerts: string;
+    }>(
+      `SELECT created.status, created.resolution_code,
+              (SELECT COUNT(*) FROM commerce_operational_alerts
+               WHERE source_event_id = 'evt-dispute-funded-closed'
+                 AND alert_type = 'stripe_dispute_closed') AS close_alerts
+       FROM commerce_operational_alerts AS created
+       WHERE created.source_event_id = 'evt-dispute-funded'
+         AND created.alert_type = 'stripe_dispute_created'`
+    );
+    expect(resolvedAlert.rows[0]).toEqual({
+      status: 'resolved', resolution_code: 'stripe_dispute_won', close_alerts: '1'
+    });
+  });
+
+  it('reconciles pack and JIT funding relations and serializes exact pack grant repair', async () => {
+    await acidPool.query(
+      `INSERT INTO users (user_id, email) VALUES
+         ('reconcile-pack-user', 'pack-reconcile@example.test'),
+         ('reconcile-jit-user', 'jit-reconcile@example.test'),
+         ('repair-pack-user', 'pack-repair@example.test');
+       INSERT INTO letter_drafts (
+         draft_id, user_id, sender, recipient, body_text, sign_off, required_credits, expires_at
+       ) VALUES ('00000000-0000-0000-0000-000000000120', 'reconcile-jit-user', '{}', '{}',
+         'Reconcile', 'Regards', 2, NOW() + INTERVAL '1 day');
+       INSERT INTO orders (
+         order_id, user_id, order_type, product_code, product_snapshot, credits,
+         amount_cents, currency, stripe_checkout_session_id, stripe_payment_intent_id,
+         idempotency_key, status
+       ) VALUES
+         ('reconcile-pack-order', 'reconcile-pack-user', 'letter_pack', 'credit-pack-4', '{}', 4,
+          500, 'usd', 'cs_acid_pack', 'pi_acid_pack', 'pack-checkout:reconcile-pack', 'fulfilled'),
+         ('repair-pack-order', 'repair-pack-user', 'letter_pack', 'credit-pack-4', '{}', 4,
+          500, 'usd', 'cs_acid_repair', 'pi_acid_repair', 'pack-checkout:repair-pack', 'fulfilled');
+       INSERT INTO orders (
+         order_id, user_id, order_type, draft_id, product_code, product_snapshot,
+         amount_cents, currency, stripe_checkout_session_id, stripe_payment_intent_id,
+         idempotency_key, status
+       ) VALUES ('reconcile-jit-order', 'reconcile-jit-user', 'jit_mail',
+         '00000000-0000-0000-0000-000000000120', 'jit-letter', '{}', 499, 'usd',
+         'cs_acid_jit', 'pi_acid_jit', 'jit-checkout:reconcile-jit', 'fulfillment_pending');
+       INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type, source_reference_id,
+         activated_at, expiration_policy, status
+       ) VALUES ('reconcile-pack-user', 4, 4, 'purchase', 'reconcile-pack-order',
+         NOW(), 'days_from_activation', 'active')`
+    );
+    const created = Math.floor(Date.now() / 1000);
+    const stripe = {
+      checkout: { sessions: { list: async () => ({ has_more: false, data: [
+        { id: 'cs_acid_pack', payment_status: 'paid', amount_total: 500, currency: 'usd', created,
+          metadata: { orderId: 'reconcile-pack-order', orderType: 'letter_pack', productCode: 'credit-pack-4' } },
+        { id: 'cs_acid_jit', payment_status: 'paid', amount_total: 499, currency: 'usd', created,
+          metadata: { orderId: 'reconcile-jit-order', orderType: 'jit_mail', productCode: 'jit-letter' } }
+      ] }) } },
+      refunds: { list: async () => ({ data: [] }) }
+    } as any;
+    const reconciliation = await stripeReconciliationService.reconcileStripePayments(1, stripe);
+    expect(reconciliation.summary).toMatchObject({ matched: 2, missingInOurSystem: 0 });
+    expect(reconciliation.discrepancies).toEqual([]);
+
+    const repair = {
+      orderId: 'repair-pack-order', stripeSessionId: 'cs_acid_repair',
+      expectedCredits: 4, paidAmountCents: 500, paidCurrency: 'usd'
+    };
+    const repairs = await Promise.all([
+      commerceService.repairFulfilledPackGrant(repair),
+      commerceService.repairFulfilledPackGrant(repair)
+    ]);
+    expect(repairs.sort()).toEqual(['already_granted', 'repaired']);
+    const repaired = await acidPool.query<{
+      credits: number; ledger_count: string; entitlement_count: string; event_count: string;
+    }>(
+      `SELECT users.credits,
+              (SELECT COUNT(*) FROM credit_ledger WHERE source_type = 'purchase'
+               AND source_reference_id = 'repair-pack-order') AS ledger_count,
+              (SELECT COUNT(*) FROM image_entitlements WHERE source_type = 'letter_pack'
+               AND source_reference_id = 'repair-pack-order') AS entitlement_count,
+              (SELECT COUNT(*) FROM commerce_order_events WHERE order_id = 'repair-pack-order'
+               AND event_type = 'maintenance.pack_grant_repaired') AS event_count
+       FROM users WHERE user_id = 'repair-pack-user'`
+    );
+    expect(repaired.rows[0]).toEqual({
+      credits: 4, ledger_count: '1', entitlement_count: '1', event_count: '1'
+    });
+  });
+
+  it('replays only the exact audited admin retry decision', async () => {
+    await acidPool.query(
+      `INSERT INTO users (user_id, email) VALUES ('retry-user', 'retry@example.test');
+       INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status)
+       VALUES ('retry-letter', 'retry-user', '{}', '{}', 2, 'failed');
+       INSERT INTO letter_jobs (
+         job_id, letter_id, status, attempts, max_attempts, scheduled_at,
+         idempotency_key, next_attempt_at, provider_outcome
+       ) VALUES ('00000000-0000-4000-8000-000000000121', 'retry-letter',
+         'failed', 1, 5, NOW(), 'retry-letter', NOW(), 'definite_failure')`
+    );
+    const request = {
+      jobId: '00000000-0000-4000-8000-000000000121', expectedUserId: 'retry-user', actorId: 'admin-acid',
+      reason: 'provider confirmed rejection', idempotencyKey: 'admin-retry-exact-acid'
+    };
+    await expect(letterJobService.retryLetterJobAsAdmin(request)).resolves.toMatchObject({ replayed: false });
+    await expect(letterJobService.retryLetterJobAsAdmin(request)).resolves.toMatchObject({ replayed: true });
+    await expect(letterJobService.retryLetterJobAsAdmin({
+      ...request, actorId: 'different-admin'
+    })).rejects.toMatchObject({ code: 'idempotency_conflict' });
+    const state = await acidPool.query<{ job_status: string; letter_status: string; audits: string }>(
+      `SELECT jobs.status AS job_status, letters.status AS letter_status,
+              (SELECT COUNT(*) FROM commerce_operator_audit_events
+               WHERE operation = 'mail_job_retry'
+                 AND target_reference_hash = $2) AS audits
+       FROM letter_jobs AS jobs JOIN letters ON letters.letter_id = jobs.letter_id
+       WHERE jobs.job_id = $1`,
+      [request.jobId, createHash('sha256').update(request.jobId).digest('hex')]
+    );
+    expect(state.rows[0]).toEqual({ job_status: 'pending', letter_status: 'queued', audits: '1' });
+  });
+
+  it('terminally resolves rejected ambiguous JIT mail without making it resendable', async () => {
+    const jobId = '00000000-0000-4000-8000-000000000122';
+    await acidPool.query(
+      `INSERT INTO users (user_id, email) VALUES ('mail-resolution-user', 'mail-resolution@example.test');
+       INSERT INTO letter_drafts (
+         draft_id, user_id, sender, recipient, body_text, sign_off, required_credits, expires_at
+       ) VALUES ('00000000-0000-0000-0000-000000000122', 'mail-resolution-user', '{}', '{}',
+         'Ambiguous', 'Regards', 2, NOW() + INTERVAL '1 day');
+       INSERT INTO orders (
+         order_id, user_id, order_type, draft_id, product_code, product_snapshot,
+         amount_cents, currency, idempotency_key, status, hold_previous_status,
+         held_at, hold_reason
+       ) VALUES ('mail-resolution-order', 'mail-resolution-user', 'jit_mail',
+         '00000000-0000-0000-0000-000000000122', 'jit-letter', '{}', 499, 'usd',
+         'jit-checkout:mail-resolution', 'held', 'fulfillment_pending', NOW(),
+         'provider_outcome_ambiguous');
+       INSERT INTO letters (
+         letter_id, user_id, content, recipient, credits_cost, status,
+         funding_type, funding_order_id
+       ) VALUES ('mail-resolution-letter', 'mail-resolution-user', '{}', '{}', 2, 'held',
+         'jit_order', 'mail-resolution-order');
+       UPDATE orders SET letter_id = 'mail-resolution-letter'
+         WHERE order_id = 'mail-resolution-order';
+       INSERT INTO letter_jobs (
+         job_id, letter_id, status, attempts, max_attempts, scheduled_at,
+         idempotency_key, next_attempt_at, provider_outcome, held_at, hold_reason
+       ) VALUES ('00000000-0000-4000-8000-000000000122', 'mail-resolution-letter', 'held', 1, 5, NOW(),
+         'mail-resolution-letter', NOW(), 'ambiguous', NOW(), 'provider_outcome_ambiguous');
+       INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+       VALUES ('mail-resolution-order', 'mail_provider_outcome_ambiguous', 'critical',
+         jsonb_build_object('jobId', '00000000-0000-4000-8000-000000000122',
+           'errorClass', 'provider_error'))`
+    );
+    const request = {
+      jobId,
+      expectedUserId: 'mail-resolution-user',
+      actorId: 'admin-acid',
+      idempotencyKey: 'resolve-mail-rejected-acid',
+      decision: 'rejected' as const,
+      resolution: 'provider_confirmed_rejected_refund' as const,
+      providerName: 'postgrid' as const
+    };
+    await acidPool.query(
+      `CREATE FUNCTION fail_test_mail_resolution_audit() RETURNS TRIGGER AS $$
+       BEGIN
+         IF NEW.operation = 'mail_fulfillment_resolve' THEN
+           RAISE EXCEPTION 'simulated audit persistence failure';
+         END IF;
+         RETURN NEW;
+       END;
+       $$ LANGUAGE plpgsql;
+       CREATE TRIGGER fail_test_mail_resolution_audit
+       BEFORE INSERT ON commerce_operator_audit_events
+       FOR EACH ROW EXECUTE FUNCTION fail_test_mail_resolution_audit()`
+    );
+    await expect(letterJobService.resolveAmbiguousLetterJobAsAdmin(request))
+      .rejects.toThrow('simulated audit persistence failure');
+    const rolledBack = await acidPool.query<{
+      order_status: string; letter_status: string; job_status: string; alert_status: string;
+    }>(
+      `SELECT orders.status AS order_status, letters.status AS letter_status,
+              jobs.status AS job_status, alerts.status AS alert_status
+       FROM orders JOIN letters ON letters.letter_id = orders.letter_id
+       JOIN letter_jobs AS jobs ON jobs.letter_id = letters.letter_id
+       JOIN commerce_operational_alerts AS alerts ON alerts.order_id = orders.order_id
+       WHERE jobs.job_id = $1`,
+      [jobId]
+    );
+    expect(rolledBack.rows[0]).toEqual({
+      order_status: 'held', letter_status: 'held', job_status: 'held', alert_status: 'open'
+    });
+    await acidPool.query(
+      `DROP TRIGGER fail_test_mail_resolution_audit ON commerce_operator_audit_events;
+       DROP FUNCTION fail_test_mail_resolution_audit()`
+    );
+    await expect(letterJobService.resolveAmbiguousLetterJobAsAdmin(request)).resolves.toMatchObject({
+      replayed: false, jobStatus: 'failed', letterStatus: 'failed', orderStatus: 'refund_pending'
+    });
+    await expect(letterJobService.resolveAmbiguousLetterJobAsAdmin(request)).resolves.toMatchObject({
+      replayed: true
+    });
+    await expect(letterJobService.resolveAmbiguousLetterJobAsAdmin({
+      ...request, actorId: 'other-admin'
+    })).rejects.toMatchObject({ code: 'idempotency_conflict' });
+    await expect(letterJobService.retryLetterJobAsAdmin({
+      jobId, expectedUserId: 'mail-resolution-user', actorId: 'admin-acid', reason: 'try to resend ambiguous mail',
+      idempotencyKey: 'retry-resolved-mail-acid'
+    })).rejects.toMatchObject({ code: 'invalid_state' });
+
+    const state = await acidPool.query<{
+      order_status: string; letter_status: string; job_status: string;
+      provider_outcome: string; attempts: number; max_attempts: number;
+      operator_resolution: string; alert_status: string; resolution_code: string;
+      audit_count: string;
+    }>(
+      `SELECT orders.status AS order_status, letters.status AS letter_status,
+              jobs.status AS job_status, jobs.provider_outcome, jobs.attempts,
+              jobs.max_attempts, jobs.operator_resolution,
+              alerts.status AS alert_status, alerts.resolution_code,
+              (SELECT COUNT(*) FROM commerce_operator_audit_events
+               WHERE operation = 'mail_fulfillment_resolve'
+                 AND target_reference_hash = $2) AS audit_count
+       FROM orders JOIN letters ON letters.letter_id = orders.letter_id
+       JOIN letter_jobs AS jobs ON jobs.letter_id = letters.letter_id
+       JOIN commerce_operational_alerts AS alerts ON alerts.order_id = orders.order_id
+       WHERE jobs.job_id = $1`,
+      [jobId, createHash('sha256').update(jobId).digest('hex')]
+    );
+    expect(state.rows[0]).toEqual({
+      order_status: 'refund_pending', letter_status: 'failed', job_status: 'failed',
+      provider_outcome: 'definite_failure', attempts: 5, max_attempts: 5,
+      operator_resolution: 'provider_confirmed_rejected_refund', alert_status: 'resolved',
+      resolution_code: 'provider_confirmed_rejected_refund', audit_count: '1'
+    });
+  });
+
+  it('resumes held JIT mail only after an audited provider-confirmed rejection', async () => {
+    const jobId = '00000000-0000-4000-8000-000000000123';
+    await acidPool.query(
+      `INSERT INTO users (user_id, email) VALUES ('mail-resume-user', 'mail-resume@example.test');
+       INSERT INTO letter_drafts (
+         draft_id, user_id, sender, recipient, body_text, sign_off, required_credits, expires_at
+       ) VALUES ('00000000-0000-0000-0000-000000000123', 'mail-resume-user', '{}', '{}',
+         'Resume', 'Regards', 2, NOW() + INTERVAL '1 day');
+       INSERT INTO orders (
+         order_id, user_id, order_type, draft_id, product_code, product_snapshot,
+         amount_cents, currency, idempotency_key, status, hold_previous_status,
+         held_at, hold_reason
+       ) VALUES ('mail-resume-order', 'mail-resume-user', 'jit_mail',
+         '00000000-0000-0000-0000-000000000123', 'jit-letter', '{}', 499, 'usd',
+         'jit-checkout:mail-resume', 'held', 'fulfillment_pending', NOW(),
+         'provider_outcome_ambiguous');
+       INSERT INTO letters (
+         letter_id, user_id, content, recipient, credits_cost, status,
+         funding_type, funding_order_id
+       ) VALUES ('mail-resume-letter', 'mail-resume-user', '{}', '{}', 2, 'held',
+         'jit_order', 'mail-resume-order');
+       UPDATE orders SET letter_id = 'mail-resume-letter' WHERE order_id = 'mail-resume-order';
+       INSERT INTO letter_jobs (
+         job_id, letter_id, status, attempts, max_attempts, scheduled_at,
+         idempotency_key, next_attempt_at, provider_outcome, held_at, hold_reason
+       ) VALUES ('00000000-0000-4000-8000-000000000123', 'mail-resume-letter', 'held', 5, 5, NOW(),
+         'mail-resume-letter', NOW(), 'ambiguous', NOW(), 'provider_outcome_ambiguous');
+       INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+       VALUES ('mail-resume-order', 'mail_provider_outcome_ambiguous', 'critical',
+         jsonb_build_object('jobId', '00000000-0000-4000-8000-000000000123',
+           'errorClass', 'transport_error'))`
+    );
+    const request = {
+      jobId,
+      expectedUserId: 'mail-resume-user',
+      actorId: 'admin-acid',
+      idempotencyKey: 'resolve-mail-retry-acid',
+      decision: 'retry' as const,
+      resolution: 'provider_confirmed_rejected_retry' as const,
+      providerName: 'postgrid' as const
+    };
+
+    await expect(letterJobService.resolveAmbiguousLetterJobAsAdmin(request)).resolves.toMatchObject({
+      replayed: false,
+      jobStatus: 'pending',
+      letterStatus: 'queued',
+      orderStatus: 'fulfillment_pending'
+    });
+    await expect(letterJobService.resolveAmbiguousLetterJobAsAdmin(request)).resolves.toMatchObject({
+      replayed: true
+    });
+
+    const state = await acidPool.query<{
+      order_status: string; hold_reason: string | null; letter_status: string;
+      job_status: string; provider_outcome: string; attempts: number; max_attempts: number;
+      operator_resolution: string; alert_status: string; audit_count: string;
+    }>(
+      `SELECT orders.status AS order_status, orders.hold_reason,
+              letters.status AS letter_status, jobs.status AS job_status,
+              jobs.provider_outcome, jobs.attempts, jobs.max_attempts,
+              jobs.operator_resolution, alerts.status AS alert_status,
+              (SELECT COUNT(*) FROM commerce_operator_audit_events
+               WHERE operation = 'mail_fulfillment_resolve'
+                 AND target_reference_hash = $2) AS audit_count
+       FROM orders JOIN letters ON letters.letter_id = orders.letter_id
+       JOIN letter_jobs AS jobs ON jobs.letter_id = letters.letter_id
+       JOIN commerce_operational_alerts AS alerts ON alerts.order_id = orders.order_id
+       WHERE jobs.job_id = $1`,
+      [jobId, createHash('sha256').update(jobId).digest('hex')]
+    );
+    expect(state.rows[0]).toEqual({
+      order_status: 'fulfillment_pending', hold_reason: null, letter_status: 'queued',
+      job_status: 'pending', provider_outcome: 'not_dispatched', attempts: 5,
+      max_attempts: 6, operator_resolution: 'provider_confirmed_rejected_retry',
+      alert_status: 'resolved', audit_count: '1'
+    });
   });
 
   it('leases one refund worker, blocks replay, and releases a rolled-back claim', async () => {
@@ -680,5 +1001,155 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
       consumed_quantity: 1,
       audit_count: '0'
     });
+  });
+
+  it('atomically restores a JIT definite failure before refund for one audited retry', async () => {
+    const jobId = '00000000-0000-4000-8000-000000000177';
+    await acidPool.query(
+      `INSERT INTO users (user_id, email) VALUES ('jit-retry-user', 'jit-retry@example.test');
+       INSERT INTO letter_drafts
+         (draft_id, user_id, sender, recipient, body_text, sign_off, required_credits, expires_at)
+       VALUES ('00000000-0000-0000-0000-000000000177', 'jit-retry-user', '{}', '{}',
+         'Retry', 'Regards', 2, NOW() + INTERVAL '1 day');
+       INSERT INTO orders
+         (order_id, user_id, order_type, draft_id, product_code, product_snapshot,
+          amount_cents, currency, idempotency_key, status, refund_pending_at,
+          last_error_code, refund_attempts)
+       VALUES ('jit-retry-order', 'jit-retry-user', 'jit_mail',
+         '00000000-0000-0000-0000-000000000177', 'jit-letter', '{}', 499, 'usd',
+         'jit-retry-order-key', 'refund_pending', NOW(), 'PROVIDER_SUBMISSION_FAILED', 0);
+       INSERT INTO letters
+         (letter_id, user_id, content, recipient, credits_cost, status, funding_type, funding_order_id)
+       VALUES ('jit-retry-letter', 'jit-retry-user', '{}', '{}', 2, 'failed',
+         'jit_order', 'jit-retry-order');
+       UPDATE orders SET letter_id = 'jit-retry-letter' WHERE order_id = 'jit-retry-order';
+       INSERT INTO letter_jobs
+         (job_id, letter_id, status, attempts, max_attempts, scheduled_at,
+          idempotency_key, next_attempt_at, provider_outcome)
+       VALUES ('00000000-0000-4000-8000-000000000177', 'jit-retry-letter', 'failed', 5, 5, NOW(),
+         'jit-retry-letter', NOW(), 'definite_failure')`
+    );
+    const request = { jobId, expectedUserId: 'jit-retry-user', actorId: 'admin-acid',
+      reason: 'provider confirmed definite rejection', idempotencyKey: 'jit-retry-positive-acid' };
+    await expect(letterJobService.retryLetterJobAsAdmin({
+      ...request, expectedUserId: 'different-user'
+    })).rejects.toMatchObject({ code: 'not_found' });
+    await expect(letterJobService.retryLetterJobAsAdmin(request)).resolves.toEqual({ jobId, replayed: false });
+    await expect(letterJobService.retryLetterJobAsAdmin(request)).resolves.toEqual({ jobId, replayed: true });
+    const state = await acidPool.query(
+      `SELECT orders.status AS order_status, orders.refund_pending_at,
+              letters.status AS letter_status, jobs.status AS job_status,
+              jobs.provider_outcome, jobs.max_attempts,
+              (SELECT COUNT(*) FROM commerce_operator_audit_events
+               WHERE operation = 'mail_job_retry' AND target_reference_hash = $2) AS audits
+       FROM orders JOIN letters ON letters.letter_id = orders.letter_id
+       JOIN letter_jobs jobs ON jobs.letter_id = letters.letter_id
+       WHERE jobs.job_id = $1`,
+      [jobId, createHash('sha256').update(jobId).digest('hex')]
+    );
+    expect(state.rows[0]).toMatchObject({ order_status: 'fulfillment_pending',
+      refund_pending_at: null, letter_status: 'queued', job_status: 'pending',
+      provider_outcome: 'not_dispatched', max_attempts: 6, audits: '1' });
+  });
+
+  it('durably recovers an unmatched refund before a later checkout can fulfill mail', async () => {
+    await acidPool.query(
+      `INSERT INTO users (user_id, email) VALUES ('unmatched-user', 'unmatched@example.test');
+       INSERT INTO letter_drafts
+         (draft_id, user_id, sender, recipient, body_text, sign_off, required_credits, expires_at)
+       VALUES ('00000000-0000-0000-0000-000000000188', 'unmatched-user', '{}', '{}',
+         'Never mail after refund', 'Regards', 2, NOW() + INTERVAL '1 day');
+       INSERT INTO orders
+         (order_id, user_id, order_type, draft_id, product_code, product_snapshot,
+          amount_cents, currency, idempotency_key, status)
+       VALUES ('unmatched-order', 'unmatched-user', 'jit_mail',
+         '00000000-0000-0000-0000-000000000188', 'jit-letter',
+         '{"mailType":"letter"}', 499, 'usd', 'unmatched-order-key', 'checkout_pending')`
+    );
+    await expect(commerceService.processStripeWebhookEvent({
+      id: 'evt-unmatched-refund', type: 'refund.updated', data: { object: {
+        id: 're-unmatched', payment_intent: 'pi-unmatched', charge: 'ch-unmatched',
+        amount: 499, status: 'succeeded', metadata: {}
+      } }
+    } as any)).resolves.toEqual({ duplicate: false });
+    await expect(commerceService.processStripeWebhookEvent({
+      id: 'evt-unmatched-checkout', type: 'checkout.session.completed', data: { object: {
+        id: 'cs-unmatched', client_reference_id: 'unmatched-order',
+        metadata: { orderId: 'unmatched-order' }, payment_intent: 'pi-unmatched',
+        payment_status: 'paid', amount_total: 499, currency: 'usd',
+        expires_at: Math.floor(Date.now() / 1000) + 3600
+      } }
+    } as any)).resolves.toMatchObject({ status: 'refund_pending' });
+    const state = await acidPool.query(
+      `SELECT orders.status,
+              (SELECT COUNT(*) FROM letters WHERE funding_order_id = orders.order_id) AS letters,
+              events.processing_status, alerts.status AS alert_status,
+              alerts.resolution_code
+       FROM orders
+       JOIN stripe_webhook_events events ON events.event_id = 'evt-unmatched-refund'
+       JOIN commerce_operational_alerts alerts ON alerts.source_event_id = events.event_id
+       WHERE orders.order_id = 'unmatched-order'`
+    );
+    expect(state.rows[0]).toEqual({ status: 'refund_pending', letters: '0',
+      processing_status: 'processed', alert_status: 'resolved',
+      resolution_code: 'matched_later_checkout' });
+    await expect(commerceService.processStripeWebhookEvent({
+      id: 'evt-unmatched-refund', type: 'refund.updated', data: { object: { id: 're-unmatched' } }
+    } as any)).resolves.toEqual({ duplicate: true });
+  });
+
+  it('serializes provider completion against a refund without deadlock or remailing', async () => {
+    const jobId = '00000000-0000-4000-8000-000000000199';
+    await acidPool.query(
+      `INSERT INTO users (user_id, email) VALUES ('complete-refund-user', 'complete-refund@example.test');
+       INSERT INTO letter_drafts
+         (draft_id, user_id, sender, recipient, body_text, sign_off, required_credits, expires_at)
+       VALUES ('00000000-0000-0000-0000-000000000199', 'complete-refund-user', '{}', '{}',
+         'Race', 'Regards', 2, NOW() + INTERVAL '1 day');
+       INSERT INTO orders
+         (order_id, user_id, order_type, draft_id, product_code, product_snapshot,
+          amount_cents, currency, stripe_payment_intent_id, idempotency_key, status)
+       VALUES ('complete-refund-order', 'complete-refund-user', 'jit_mail',
+         '00000000-0000-0000-0000-000000000199', 'jit-letter', '{}', 499, 'usd',
+         'pi-complete-refund', 'complete-refund-key', 'fulfillment_pending');
+       INSERT INTO letters
+         (letter_id, user_id, content, recipient, credits_cost, status, funding_type, funding_order_id)
+       VALUES ('complete-refund-letter', 'complete-refund-user', '{}', '{}', 2, 'processing',
+         'jit_order', 'complete-refund-order');
+       UPDATE orders SET letter_id = 'complete-refund-letter' WHERE order_id = 'complete-refund-order';
+       INSERT INTO letter_jobs
+         (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
+          next_attempt_at, provider_outcome, provider_dispatch_started_at)
+       VALUES ('00000000-0000-4000-8000-000000000199', 'complete-refund-letter',
+         'processing', 1, 5, NOW(), 'complete-refund-letter', NOW(), 'dispatching', NOW())`
+    );
+    const job = (await acidPool.query('SELECT * FROM letter_jobs WHERE job_id = $1', [jobId])).rows[0];
+    const letter = (await acidPool.query("SELECT * FROM letters WHERE letter_id = 'complete-refund-letter'")).rows[0];
+    await Promise.race([
+      Promise.all([
+        letterJobService.completeJob(job, letter, 'postgrid', {
+          success: true, trackingId: 'provider-complete-refund'
+        }),
+        commerceService.processStripeWebhookEvent({
+          id: 'evt-complete-refund', type: 'refund.updated', data: { object: {
+            id: 're-complete-refund', payment_intent: 'pi-complete-refund',
+            charge: 'ch-complete-refund', amount: 499, status: 'succeeded', metadata: {}
+          } }
+        } as any)
+      ]),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('complete/refund deadlock')), 3000))
+    ]);
+    const state = await acidPool.query(
+      `SELECT orders.status AS order_status, letters.status AS letter_status,
+              jobs.status AS job_status, jobs.provider_outcome,
+              (SELECT COUNT(*) FROM commerce_operational_alerts
+               WHERE source_event_id = 'evt-complete-refund'
+                 AND alert_type = 'refunded_mail_already_dispatched') AS alerts
+       FROM orders JOIN letters ON letters.letter_id = orders.letter_id
+       JOIN letter_jobs jobs ON jobs.letter_id = letters.letter_id
+       WHERE orders.order_id = 'complete-refund-order'`
+    );
+    expect(state.rows[0]).toEqual({ order_status: 'refunded', letter_status: 'accepted',
+      job_status: 'completed', provider_outcome: 'accepted', alerts: '1' });
   });
 });

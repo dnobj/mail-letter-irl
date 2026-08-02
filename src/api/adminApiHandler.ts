@@ -14,7 +14,15 @@ import { authenticateAdmin, validateAdminRequestBoundary } from './middleware/ad
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { adjustCredits } from '../services/creditService.js';
 import { getUser, getAllUsers } from '../services/userService.js';
-import { AdminJobRetryError, getAllJobs, getJobById, getJobsByUserId, retryLetterJobAsAdmin } from '../services/letterJobService.js';
+import {
+  AdminJobRetryError,
+  AdminMailResolutionError,
+  getAllJobs,
+  getJobById,
+  getJobsByUserId,
+  resolveAmbiguousLetterJobAsAdmin,
+  retryLetterJobAsAdmin
+} from '../services/letterJobService.js';
 import { query, transaction } from '../db/index.js';
 import {
   createCampaign,
@@ -237,6 +245,16 @@ export async function handleAdminApiRequest(
       const letterId = pathname.split('/').pop();
       if (letterId) {
         await handleGetLetterById(res, decodeURIComponent(letterId));
+        return true;
+      }
+    }
+
+    // POST /api/admin/jobs/:jobId/resolve-ambiguous - Finish a provider hold without resending
+    if (pathname.match(/^\/api\/admin\/jobs\/[^/]+\/resolve-ambiguous$/) && req.method === 'POST') {
+      const parts = pathname.split('/');
+      const jobId = parts[parts.length - 2];
+      if (jobId) {
+        await handleResolveAmbiguousJob(req, res, decodeURIComponent(jobId), adminInfo);
         return true;
       }
     }
@@ -677,7 +695,7 @@ async function handleGetStats(res: ServerResponse) {
     `SELECT
        COUNT(*) as count,
        SUM(CASE
-         WHEN paid_at IS NOT NULL AND status NOT IN ('refunded', 'cancelled', 'payment_failed')
+         WHEN amount_known AND paid_at IS NOT NULL AND status NOT IN ('refunded', 'cancelled', 'payment_failed')
            THEN amount_cents
          ELSE 0
        END) as total_revenue,
@@ -1260,14 +1278,14 @@ async function handleGetDashboard(res: ServerResponse) {
         COALESCE(SUM(amount_cents), 0) as total_cents,
         COUNT(*) as total_orders
       FROM orders
-      WHERE paid_at IS NOT NULL AND status NOT IN ('refunded', 'cancelled', 'payment_failed')`
+      WHERE amount_known AND paid_at IS NOT NULL AND status NOT IN ('refunded', 'cancelled', 'payment_failed')`
     ),
     // Revenue today
-    query<{ total_cents: string }>("SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE paid_at >= $1 AND status NOT IN ('refunded', 'cancelled', 'payment_failed')", [today]),
+    query<{ total_cents: string }>("SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE amount_known AND paid_at >= $1 AND status NOT IN ('refunded', 'cancelled', 'payment_failed')", [today]),
     // Revenue 7d
-    query<{ total_cents: string }>("SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE paid_at >= $1 AND status NOT IN ('refunded', 'cancelled', 'payment_failed')", [sevenDaysAgo]),
+    query<{ total_cents: string }>("SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE amount_known AND paid_at >= $1 AND status NOT IN ('refunded', 'cancelled', 'payment_failed')", [sevenDaysAgo]),
     // Revenue 30d
-    query<{ total_cents: string }>("SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE paid_at >= $1 AND status NOT IN ('refunded', 'cancelled', 'payment_failed')", [thirtyDaysAgo]),
+    query<{ total_cents: string }>("SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE amount_known AND paid_at >= $1 AND status NOT IN ('refunded', 'cancelled', 'payment_failed')", [thirtyDaysAgo]),
     // Job stats
     query<{ status: string; count: string }>(
       `SELECT status, COUNT(*) as count FROM letter_jobs GROUP BY status`
@@ -1655,18 +1673,68 @@ async function handleRetryJob(
   const body = await parseBody(req);
   const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
   const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : '';
-  if (reason.length < 8 || reason.length > 500 || !OPERATOR_IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+  const expectedUserId = typeof body.userId === 'string' ? body.userId : '';
+  if (!expectedUserId || reason.length < 8 || reason.length > 500 || !OPERATOR_IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
     sendJson(res, 400, { error: 'A reason and valid idempotency key are required' });
     return;
   }
   try {
     const result = await retryLetterJobAsAdmin({
-      jobId, actorId: adminInfo.userId, reason, idempotencyKey
+      jobId, expectedUserId, actorId: adminInfo.userId, reason, idempotencyKey
     });
     sendJson(res, 200, { success: true, ...result });
   } catch (error) {
     if (error instanceof AdminJobRetryError) {
       sendJson(res, error.code === 'not_found' ? 404 : 409, { error: error.code });
+      return;
+    }
+    throw error;
+  }
+}
+
+async function handleResolveAmbiguousJob(
+  req: IncomingMessage,
+  res: ServerResponse,
+  jobId: string,
+  adminInfo: { userId: string }
+) {
+  const body = await parseBody(req);
+  const expectedUserId = typeof body.userId === 'string' ? body.userId : '';
+  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : '';
+  const decision = body.decision === 'accepted' || body.decision === 'retry' ||
+    body.decision === 'rejected'
+    ? body.decision
+    : null;
+  const resolution = body.resolution === 'provider_confirmed_accepted' ||
+    body.resolution === 'provider_confirmed_rejected_retry' ||
+    body.resolution === 'provider_confirmed_rejected_refund' ? body.resolution : null;
+  const providerName = body.providerName === 'postgrid' || body.providerName === 'dummy' ||
+    body.providerName === 'diy' ? body.providerName : null;
+  const providerTrackingId = typeof body.providerTrackingId === 'string'
+    ? body.providerTrackingId
+    : undefined;
+  if (!UUID_PATTERN.test(jobId) || !expectedUserId || expectedUserId.length > 255 ||
+      !OPERATOR_IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey) || !decision || !resolution ||
+      !providerName) {
+    sendJson(res, 400, { error: 'Invalid ambiguous mail resolution request' });
+    return;
+  }
+  try {
+    const result = await resolveAmbiguousLetterJobAsAdmin({
+      jobId,
+      expectedUserId,
+      actorId: adminInfo.userId,
+      idempotencyKey,
+      decision,
+      resolution,
+      providerName,
+      providerTrackingId
+    });
+    sendJson(res, 200, { success: true, ...result });
+  } catch (error) {
+    if (error instanceof AdminMailResolutionError) {
+      const statusCode = error.code === 'not_found' ? 404 : error.code === 'invalid_request' ? 400 : 409;
+      sendJson(res, statusCode, { error: error.code });
       return;
     }
     throw error;
@@ -1692,12 +1760,25 @@ async function handleTransitionCommerceAlert(
   try {
     const result = await transaction(async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [idempotencyKey]);
-      const replay = await client.query<{ target_reference_hash: string }>(
-        `SELECT target_reference_hash FROM commerce_operator_audit_events
+      const replay = await client.query<{
+        operation: string; target_type: string; target_reference_hash: string;
+        actor_subject_hash: string; reason_code: string; requested_status: string;
+      }>(
+        `SELECT operation, target_type, target_reference_hash, actor_subject_hash,
+                reason_code, after_state->>'status' AS requested_status
+         FROM commerce_operator_audit_events
          WHERE idempotency_key_hash = $1`, [hash(idempotencyKey)]
       );
       if (replay.rows[0]) {
-        if (replay.rows[0].target_reference_hash !== hash(alertId)) throw new Error('idempotency_conflict');
+        const existing = replay.rows[0];
+        if (existing.operation !== 'commerce_alert_transition' ||
+            existing.target_type !== 'commerce_alert' ||
+            existing.target_reference_hash !== hash(alertId) ||
+            existing.actor_subject_hash !== hash(adminInfo.userId) ||
+            existing.reason_code !== (resolutionCode || 'operator_acknowledged') ||
+            existing.requested_status !== status) {
+          throw new Error('idempotency_conflict');
+        }
         return { replayed: true };
       }
       const locked = await client.query<{ status: string; severity: string; alert_type: string }>(

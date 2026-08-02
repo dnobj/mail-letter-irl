@@ -311,6 +311,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           retryable: error instanceof PostGridRequestError
             ? error.retryable
             : /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
+          submissionOutcome: error instanceof PostGridRequestError && error.statusCode !== undefined
+            ? 'definite_rejection'
+            : 'ambiguous',
         }
       };
     }
@@ -1049,6 +1052,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           retryable: error instanceof PostGridRequestError
             ? error.retryable
             : /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
+          submissionOutcome: error instanceof PostGridRequestError && error.statusCode !== undefined
+            ? 'definite_rejection'
+            : 'ambiguous',
         }
       };
     }

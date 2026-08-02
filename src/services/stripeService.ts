@@ -30,7 +30,6 @@ interface PackProductDefinition {
   credits: number;
   priceEnv: string;
   amountEnv: string;
-  defaultAmountCents: number;
   name: string;
   description: string;
 }
@@ -40,7 +39,6 @@ const PACK_PRODUCTS: Record<PackProductId, PackProductDefinition> = {
     credits: 4,
     priceEnv: 'STRIPE_PRICE_STARTER',
     amountEnv: 'STRIPE_STARTER_AMOUNT_CENTS',
-    defaultAmountCents: 500,
     name: 'Starter Pack - 2 Letters',
     description: 'Two prepaid physical letters or postcards'
   },
@@ -48,7 +46,6 @@ const PACK_PRODUCTS: Record<PackProductId, PackProductDefinition> = {
     credits: 10,
     priceEnv: 'STRIPE_PRICE_REGULAR',
     amountEnv: 'STRIPE_REGULAR_AMOUNT_CENTS',
-    defaultAmountCents: 1000,
     name: 'Regular Pack - 5 Letters',
     description: 'Five prepaid physical letters or postcards'
   },
@@ -56,7 +53,6 @@ const PACK_PRODUCTS: Record<PackProductId, PackProductDefinition> = {
     credits: 100,
     priceEnv: 'STRIPE_PRICE_POWER',
     amountEnv: 'STRIPE_POWER_AMOUNT_CENTS',
-    defaultAmountCents: 9000,
     name: 'Power Pack - 50 Letters',
     description: 'Fifty prepaid physical letters or postcards'
   }
@@ -75,7 +71,10 @@ export function getPackProductConfig(productId: PackProductId): CommerceProductC
     productCode: productId,
     credits: definition.credits,
     priceId: process.env[definition.priceEnv] || '',
-    amountCents: positiveInteger(process.env[definition.amountEnv], definition.defaultAmountCents),
+    // Never guess a financial amount from a price identifier. Missing config
+    // disables checkout and reconciliation instead of refunding a legitimate
+    // purchase against a stale hard-coded price.
+    amountCents: positiveInteger(process.env[definition.amountEnv]),
     currency: (process.env.STRIPE_CURRENCY || 'usd').toLowerCase(),
     name: definition.name,
     description: definition.description

@@ -18,11 +18,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock Stripe
-const { mockSessionsList, mockRefundsList, mockQuery, mockAddCredits } = vi.hoisted(() => ({
+const { mockSessionsList, mockRefundsList, mockQuery, mockRepairPackGrant } = vi.hoisted(() => ({
   mockSessionsList: vi.fn(),
   mockRefundsList: vi.fn(),
   mockQuery: vi.fn(),
-  mockAddCredits: vi.fn()
+  mockRepairPackGrant: vi.fn()
 }));
 
 vi.mock('stripe', () => {
@@ -44,8 +44,8 @@ vi.mock('stripe', () => {
 vi.mock('../../../src/db/index.js', () => ({
   query: mockQuery,
 }));
-vi.mock('../../../src/services/creditService.js', () => ({
-  addCreditsWithOptions: mockAddCredits,
+vi.mock('../../../src/services/commerceService.js', () => ({
+  repairFulfilledPackGrant: mockRepairPackGrant,
 }));
 
 import {
@@ -125,7 +125,7 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
   describe('discrepancy detection', () => {
     it('joins pack ledger order references to their Stripe session', async () => {
       mockSessionsList.mockResolvedValue({ data: [{
-        id: 'cs_pack', payment_status: 'paid', amount_total: 1000, created: Date.now() / 1000,
+        id: 'cs_pack', payment_status: 'paid', amount_total: 1000, currency: 'usd', created: Date.now() / 1000,
         client_reference_id: 'order-pack',
         metadata: { orderId: 'order-pack', orderType: 'letter_pack', productCode: 'credit-pack-10' }
       }], has_more: false });
@@ -138,7 +138,8 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
         }] })
         .mockResolvedValueOnce({ rows: [{
           order_id: 'order-pack', order_type: 'letter_pack', stripe_checkout_session_id: 'cs_pack',
-          status: 'fulfilled', user_id: 'user-pack'
+          status: 'fulfilled', user_id: 'user-pack', credits: 10,
+          amount_cents: 1000, currency: 'usd'
         }] });
       await expect(reconcileStripePayments(1)).resolves.toMatchObject({
         summary: { matched: 1, missingInOurSystem: 0, ourCredits: 1 }
@@ -147,7 +148,7 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
 
     it('reconciles JIT funding through its order without expecting a credit grant', async () => {
       mockSessionsList.mockResolvedValue({ data: [{
-        id: 'cs_jit', payment_status: 'paid', amount_total: 499, created: Date.now() / 1000,
+        id: 'cs_jit', payment_status: 'paid', amount_total: 499, currency: 'usd', created: Date.now() / 1000,
         client_reference_id: 'order-jit',
         metadata: { orderId: 'order-jit', orderType: 'jit_mail', productCode: 'jit-letter' }
       }], has_more: false });
@@ -156,11 +157,73 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
         .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [{
           order_id: 'order-jit', order_type: 'jit_mail', stripe_checkout_session_id: 'cs_jit',
-          status: 'fulfilled', user_id: 'user-jit'
+          status: 'fulfilled', user_id: 'user-jit', credits: null, amount_cents: 499, currency: 'usd'
         }] });
       const result = await reconcileStripePayments(1);
       expect(result.summary).toMatchObject({ matched: 1, missingInOurSystem: 0, ourCredits: 0 });
       expect(result.discrepancies).toEqual([]);
+    });
+
+    it('requires paid JIT checkout state to be reconciled by webhook instead of pack credit repair', async () => {
+      mockSessionsList.mockResolvedValue({ data: [{
+        id: 'cs_jit_pending', payment_status: 'paid', amount_total: 499, currency: 'usd',
+        created: Date.now() / 1000, client_reference_id: 'order-jit-pending',
+        metadata: { orderId: 'order-jit-pending', orderType: 'jit_mail', productCode: 'jit-letter' }
+      }], has_more: false });
+      mockRefundsList.mockResolvedValue({ data: [] });
+      mockQuery
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{
+          order_id: 'order-jit-pending', order_type: 'jit_mail',
+          stripe_checkout_session_id: 'cs_jit_pending', status: 'checkout_pending',
+          user_id: 'user-jit', credits: null, amount_cents: 499, currency: 'usd'
+        }] });
+
+      const result = await reconcileStripePayments(1);
+
+      expect(result.summary).toMatchObject({ matched: 0, missingInOurSystem: 1 });
+      expect(result.discrepancies).toContainEqual(expect.objectContaining({
+        type: 'missing_order', fundingType: 'jit_mail', orderId: 'order-jit-pending'
+      }));
+    });
+
+    it('treats a refunded JIT order as reconciled without requiring a credit reversal row', async () => {
+      mockSessionsList.mockResolvedValue({ data: [], has_more: false });
+      mockRefundsList.mockResolvedValue({ data: [{
+        id: 're_jit', status: 'succeeded', payment_intent: 'pi_jit', amount: 499
+      }] });
+      mockQuery
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{
+          order_id: 'order-jit', order_type: 'jit_mail', status: 'refunded',
+          pack_reversal_recorded: true
+        }] });
+
+      await expect(reconcileStripePayments(1)).resolves.toMatchObject({
+        summary: { unprocessedRefunds: 0 }
+      });
+    });
+
+    it('requires a pack refund ledger reversal linked through the authoritative order', async () => {
+      mockSessionsList.mockResolvedValue({ data: [], has_more: false });
+      mockRefundsList.mockResolvedValue({ data: [{
+        id: 're_pack', status: 'succeeded', payment_intent: 'pi_pack', amount: 500
+      }] });
+      mockQuery
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{
+          order_id: 'order-pack', order_type: 'letter_pack', status: 'refunded',
+          pack_reversal_recorded: false
+        }] });
+
+      const result = await reconcileStripePayments(1);
+
+      expect(result.summary.unprocessedRefunds).toBe(1);
+      expect(result.discrepancies).toContainEqual(expect.objectContaining({
+        type: 'unprocessed_refund', fundingType: 'letter_pack', orderId: 'order-pack'
+      }));
     });
 
     it('logs structured discrepancy data without runtime identifiers', async () => {
@@ -233,7 +296,7 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
   it('classifies reconciliation repair persistence failures as database errors', async () => {
     mockSessionsList.mockResolvedValue({
       data: [{
-        id: 'cs_private', payment_status: 'paid',
+        id: 'cs_private', payment_status: 'paid', currency: 'usd',
         metadata: { userId: 'auth0|private', productId: 'credit-pack-10' },
         amount_total: 1000, created: Date.now() / 1000
       }],
@@ -247,9 +310,12 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
         order_type: 'letter_pack',
         stripe_checkout_session_id: 'cs_private',
         status: 'fulfilled',
-        user_id: 'auth0|private'
+        user_id: 'auth0|private',
+        credits: 10,
+        amount_cents: 1000,
+        currency: 'usd'
       }] });
-    mockAddCredits.mockRejectedValue(new Error('private database message'));
+    mockRepairPackGrant.mockRejectedValue(new Error('private database message'));
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -260,6 +326,37 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
     expect(output).toContain('"event":"credits.reconciliation_fix_failed"');
     expect(output).toContain('"errorClass":"database_error"');
     expect(output).not.toContain('private database message');
+  });
+
+  it('repairs a missing pack grant only through its exact order and Stripe session', async () => {
+    mockSessionsList.mockResolvedValue({
+      data: [{
+        id: 'cs_pack_repair', payment_status: 'paid', currency: 'usd',
+        metadata: { userId: 'user-pack', productId: 'credit-pack-10' },
+        amount_total: 1000, created: Date.now() / 1000
+      }],
+      has_more: false
+    });
+    mockRefundsList.mockResolvedValue({ data: [] });
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{
+        order_id: 'order-pack-repair', order_type: 'letter_pack',
+        stripe_checkout_session_id: 'cs_pack_repair', status: 'fulfilled',
+        user_id: 'user-pack', credits: 10, amount_cents: 1000, currency: 'usd'
+      }] });
+    mockRepairPackGrant.mockResolvedValue('repaired');
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(autoFixMissingCredits(false)).resolves.toMatchObject({ fixed: 1, errors: [] });
+    expect(mockRepairPackGrant).toHaveBeenCalledWith({
+      orderId: 'order-pack-repair',
+      stripeSessionId: 'cs_pack_repair',
+      expectedCredits: 10,
+      paidAmountCents: 1000,
+      paidCurrency: 'usd'
+    });
   });
 
   describe('product credit mapping', () => {

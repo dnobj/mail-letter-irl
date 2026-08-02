@@ -121,6 +121,7 @@ export interface Order {
   product_snapshot: Record<string, unknown>;
   credits?: number;
   amount_cents: number;
+  amount_known?: boolean;
   currency: string;
   payment_provider: string;
   stripe_checkout_session_id?: string;
@@ -208,6 +209,8 @@ export interface LetterJob {
   provider_dispatch_started_at?: Date;
   held_at?: Date;
   hold_reason?: string;
+  operator_resolution?: string;
+  resolved_at?: Date;
   last_error?: string;
   started_at?: Date;
   completed_at?: Date;

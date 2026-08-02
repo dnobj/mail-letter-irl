@@ -57,6 +57,7 @@ interface Discrepancy {
   ledgerId?: string;
   userId?: string;
   stripeAmount?: number;
+  stripeCurrency?: string;
   ourAmount?: number;
   expectedCredits?: number;
   actualCredits?: number;
@@ -69,7 +70,10 @@ interface Discrepancy {
  *
  * @param daysBack - Number of days to look back (default 30)
  */
-export async function reconcileStripePayments(daysBack: number = 30): Promise<ReconciliationResult> {
+export async function reconcileStripePayments(
+  daysBack: number = 30,
+  stripe: Stripe = getStripeClient()
+): Promise<ReconciliationResult> {
   const endDate = new Date();
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - daysBack);
@@ -88,6 +92,7 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
     sessionId: string;
     userId: string;
     amount: number;
+    currency: string;
     credits: number;
     productId: string;
     created: Date;
@@ -100,7 +105,7 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
   let startingAfter: string | undefined;
 
   while (hasMore) {
-    const sessions = await getStripeClient().checkout.sessions.list({
+    const sessions = await stripe.checkout.sessions.list({
       created: {
         gte: Math.floor(startDate.getTime() / 1000),
         lte: Math.floor(endDate.getTime() / 1000),
@@ -123,6 +128,7 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
           sessionId: session.id,
           userId,
           amount: session.amount_total || 0,
+          currency: (session.currency || '').toLowerCase(),
           credits,
           productId,
           created: new Date(session.created * 1000),
@@ -201,12 +207,16 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
     stripe_checkout_session_id: string;
     status: string;
     user_id: string;
+    credits: number | null;
+    amount_cents: number;
+    currency: string;
   }>(
-    `SELECT order_id, order_type, stripe_checkout_session_id, status, user_id
+    `SELECT order_id, order_type, stripe_checkout_session_id, status, user_id,
+            credits, amount_cents, currency
      FROM orders
      WHERE stripe_checkout_session_id IS NOT NULL
-       AND created_at >= $1
-       AND created_at <= $2`,
+       AND created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
+       AND created_at <= ($2::timestamptz AT TIME ZONE 'UTC')`,
     [startDate, endDate]
   );
   const ourOrders = new Map(orderResult.rows.map(row => [row.stripe_checkout_session_id, row]));
@@ -232,14 +242,65 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
       continue;
     }
 
+    const paidOrderState = !['checkout_pending', 'payment_failed', 'cancelled', 'paid']
+      .includes(order.status);
+    if (stripePayment.amount !== order.amount_cents ||
+        stripePayment.currency !== order.currency.toLowerCase()) {
+      amountMismatches++;
+      discrepancies.push({
+        type: 'amount_mismatch',
+        severity: 'high',
+        stripeSessionId: sessionId,
+        orderId: order.order_id,
+        fundingType: order.order_type,
+        userId: order.user_id,
+        stripeAmount: stripePayment.amount,
+        stripeCurrency: stripePayment.currency,
+        ourAmount: order.amount_cents,
+        message: 'Stripe payment amount or currency does not match the authoritative order',
+        suggestedAction: 'Do not grant or fulfill; review the signed Stripe session and order'
+      });
+      continue;
+    }
     if (order.order_type === 'jit_mail') {
+      if (!paidOrderState) {
+        missingInOurSystem++;
+        discrepancies.push({
+          type: 'missing_order',
+          severity: 'critical',
+          stripeSessionId: sessionId,
+          orderId: order.order_id,
+          fundingType: 'jit_mail',
+          userId: order.user_id,
+          stripeAmount: stripePayment.amount,
+          stripeCurrency: stripePayment.currency,
+          message: 'A paid JIT checkout has not reached a funded commerce state',
+          suggestedAction: 'Replay the Stripe checkout webhook; do not grant pack credits'
+        });
+        continue;
+      }
       matched++;
       continue;
     }
 
     const ourRecord = ourCredits.get(sessionId);
 
-    if (!ourRecord) {
+    if (!ourRecord && !paidOrderState) {
+      missingInOurSystem++;
+      discrepancies.push({
+        type: 'missing_order',
+        severity: 'critical',
+        stripeSessionId: sessionId,
+        orderId: order.order_id,
+        fundingType: 'letter_pack',
+        userId: order.user_id,
+        stripeAmount: stripePayment.amount,
+        stripeCurrency: stripePayment.currency,
+        expectedCredits: order.credits || undefined,
+        message: 'A paid pack checkout has not reached its fulfilled commerce state',
+        suggestedAction: 'Replay the Stripe checkout webhook before repairing grants'
+      });
+    } else if (!ourRecord) {
       // Payment exists in Stripe but not in our system
       missingInOurSystem++;
       discrepancies.push({
@@ -250,11 +311,12 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
         fundingType: 'letter_pack',
         userId: order.user_id,
         stripeAmount: stripePayment.amount,
-        expectedCredits: stripePayment.credits,
+        expectedCredits: order.credits || undefined,
+        stripeCurrency: stripePayment.currency,
         message: 'A completed payment has no corresponding credit entry',
         suggestedAction: 'Review the missing credit in the Stripe dashboard',
       });
-    } else if (ourRecord.credits !== stripePayment.credits) {
+    } else if (ourRecord.credits !== order.credits) {
       // Amount mismatch
       amountMismatches++;
       discrepancies.push({
@@ -264,7 +326,7 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
         orderId: order.order_id,
         fundingType: 'letter_pack',
         userId: order.user_id,
-        expectedCredits: stripePayment.credits,
+        expectedCredits: order.credits || undefined,
         actualCredits: ourRecord.credits,
         message: 'A payment and credit entry have different credit amounts',
         suggestedAction: 'Review the product mapping and adjust credits if required',
@@ -297,7 +359,7 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
   }
 
   // 5. Check for refunds in Stripe that weren't processed
-  const refunds = await getStripeClient().refunds.list({
+  const refunds = await stripe.refunds.list({
     created: {
       gte: Math.floor(startDate.getTime() / 1000),
       lte: Math.floor(endDate.getTime() / 1000),
@@ -307,24 +369,40 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
 
   for (const refund of refunds.data) {
     if (refund.status === 'succeeded' && refund.payment_intent) {
+      const paymentIntentReference = typeof refund.payment_intent === 'string'
+        ? refund.payment_intent
+        : refund.payment_intent.id;
       // Check if we have a corresponding refund transaction
-      const refundCheck = await query<{ transaction_id: number }>(
-        `SELECT transaction_id FROM credit_transactions
-         WHERE type = 'refund'
-           AND description LIKE $1
-         LIMIT 1`,
-        [`%${refund.id}%`]
+      const refundCheck = await query<{
+        order_id: string;
+        order_type: 'letter_pack' | 'jit_mail';
+        status: string;
+        pack_reversal_recorded: boolean;
+      }>(
+        `SELECT orders.order_id, orders.order_type, orders.status,
+                CASE WHEN orders.order_type = 'letter_pack' THEN EXISTS (
+                  SELECT 1 FROM credit_ledger AS reversal
+                  WHERE reversal.source_type = 'refund'
+                    AND reversal.source_reference_id = orders.order_id
+                ) ELSE TRUE END AS pack_reversal_recorded
+         FROM orders
+         WHERE orders.stripe_payment_intent_id = $1
+         ORDER BY orders.created_at DESC LIMIT 1`,
+        [paymentIntentReference]
       );
 
-      if (refundCheck.rows.length === 0) {
+      const matchedRefund = refundCheck.rows[0];
+      if (!matchedRefund || matchedRefund.status !== 'refunded' || !matchedRefund.pack_reversal_recorded) {
         unprocessedRefunds++;
         discrepancies.push({
           type: 'unprocessed_refund',
           severity: 'high',
-          stripeSessionId: refund.payment_intent as string,
+          stripeSessionId: paymentIntentReference,
+          orderId: matchedRefund?.order_id,
+          fundingType: matchedRefund?.order_type,
           stripeAmount: refund.amount,
-          message: 'A completed refund has no corresponding credit transaction',
-          suggestedAction: 'Review the refund and affected credit balance',
+          message: 'A completed refund has no corresponding durable commerce reversal',
+          suggestedAction: 'Review the funding order, refund state, and any pack-ledger reversal',
         });
       }
     }
@@ -335,8 +413,8 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
 
   if (missingInOurSystem > 0) {
     recommendations.push(
-      `CRITICAL: ${missingInOurSystem} payments in Stripe have no corresponding credits. ` +
-      `Review discrepancies and add missing credits.`
+      `CRITICAL: ${missingInOurSystem} payments in Stripe lack a funded order state or pack grant. ` +
+      `Review discrepancies and replay the appropriate commerce transition.`
     );
   }
 
@@ -350,7 +428,7 @@ export async function reconcileStripePayments(daysBack: number = 30): Promise<Re
   if (amountMismatches > 0) {
     recommendations.push(
       `HIGH: ${amountMismatches} transactions have amount mismatches. ` +
-      `Review product ID to credit mapping.`
+      `Review the provider amount/currency and authoritative order.`
     );
   }
 
@@ -423,8 +501,7 @@ export async function autoFixMissingCredits(dryRun: boolean = true): Promise<{
     return { wouldFix: missingCredits.length, fixed: 0, errors: [] };
   }
 
-  // Import addCreditsWithOptions dynamically to avoid circular deps
-  const { addCreditsWithOptions } = await import('./creditService.js');
+  const { repairFulfilledPackGrant } = await import('./commerceService.js');
 
   for (const discrepancy of missingCredits) {
     if (!discrepancy.userId || !discrepancy.stripeSessionId || !discrepancy.orderId || !discrepancy.expectedCredits) {
@@ -433,13 +510,12 @@ export async function autoFixMissingCredits(dryRun: boolean = true): Promise<{
     }
 
     try {
-      await addCreditsWithOptions({
-        userId: discrepancy.userId,
-        credits: discrepancy.expectedCredits,
-        sourceType: 'purchase',
-        sourceReferenceId: discrepancy.orderId,
-        description: 'Auto-reconciled from an authoritative commerce order',
-        expirationDays: 730, // 2 years
+      await repairFulfilledPackGrant({
+        orderId: discrepancy.orderId,
+        stripeSessionId: discrepancy.stripeSessionId,
+        expectedCredits: discrepancy.expectedCredits,
+        paidAmountCents: discrepancy.stripeAmount || 0,
+        paidCurrency: discrepancy.stripeCurrency || ''
       });
 
       writeDiagnostic('info', 'credits.reconciliation_fixed', {

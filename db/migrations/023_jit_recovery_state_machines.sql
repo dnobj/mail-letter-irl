@@ -79,6 +79,7 @@ WHERE letter_id IN (SELECT letter_id FROM letter_jobs WHERE status = 'held')
 
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS valid_order_status;
 ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS amount_known BOOLEAN NOT NULL DEFAULT TRUE,
   ADD COLUMN IF NOT EXISTS hold_previous_status VARCHAR(30),
   ADD COLUMN IF NOT EXISTS held_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS hold_reason VARCHAR(100),
@@ -88,6 +89,18 @@ ALTER TABLE orders
     'payment_failed', 'refund_pending', 'refunded', 'disputed', 'held',
     'cancelled'
   ));
+
+-- Migration 021 had no evidence for some historical amounts and used one cent
+-- only to satisfy the legacy NOT NULL/check constraint. Preserve the raw value
+-- for audit, but explicitly exclude those indistinguishable placeholders from
+-- revenue reporting.
+UPDATE orders
+SET amount_known = FALSE,
+    product_snapshot = product_snapshot || '{"amountTreatment":"unknown_legacy"}'::jsonb
+WHERE product_snapshot->>'migrated' = 'true' AND amount_cents = 1;
+
+COMMENT ON COLUMN orders.amount_known IS
+  'True only when amount_cents is supported by checkout/provider evidence; false legacy placeholders must not be counted as revenue.';
 
 UPDATE orders
 SET hold_previous_status = status,
@@ -295,6 +308,22 @@ COMMENT ON TABLE commerce_operator_audit_events IS
 -- Durable Stripe dispute monitoring
 -- ---------------------------------------------------------------------------
 
+ALTER TABLE stripe_webhook_events
+  ADD COLUMN IF NOT EXISTS processing_status VARCHAR(20) NOT NULL DEFAULT 'processed',
+  ADD COLUMN IF NOT EXISTS provider_payment_intent_id VARCHAR(255),
+  ADD COLUMN IF NOT EXISTS provider_charge_id VARCHAR(255),
+  ADD COLUMN IF NOT EXISTS metadata_order_id VARCHAR(255),
+  ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ,
+  ADD CONSTRAINT valid_stripe_webhook_processing_status CHECK (
+    processing_status IN ('processed', 'unmatched')
+  );
+
+CREATE INDEX idx_stripe_webhook_events_unmatched_money
+  ON stripe_webhook_events(
+    processing_status, provider_payment_intent_id, provider_charge_id, metadata_order_id
+  )
+  WHERE processing_status = 'unmatched';
+
 CREATE TABLE commerce_operational_alerts (
   alert_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   source_event_id VARCHAR(255)
@@ -314,7 +343,8 @@ CREATE TABLE commerce_operational_alerts (
   CONSTRAINT valid_commerce_alert_type CHECK (
     alert_type IN (
       'stripe_dispute_created', 'stripe_dispute_closed',
-      'mail_provider_outcome_ambiguous', 'refunded_mail_already_dispatched'
+      'mail_provider_outcome_ambiguous', 'refunded_mail_already_dispatched',
+      'stripe_money_event_unmatched'
     )
   ),
   CONSTRAINT valid_commerce_alert_severity CHECK (

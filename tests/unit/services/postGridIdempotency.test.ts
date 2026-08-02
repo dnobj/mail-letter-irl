@@ -61,7 +61,15 @@ describe('PostGrid idempotency and retry metadata', () => {
     const result = await provider().sendLetter(params);
     expect(result).toMatchObject({
       success: false,
-      metadata: { statusCode, retryable },
+      metadata: { statusCode, retryable, submissionOutcome: 'definite_rejection' },
+    });
+  });
+
+  it('classifies a transport timeout as ambiguous acceptance', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('socket timeout')));
+    await expect(provider().sendLetter(params)).resolves.toMatchObject({
+      success: false,
+      metadata: { submissionOutcome: 'ambiguous' },
     });
   });
 });

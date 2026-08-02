@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -22,6 +23,8 @@ vi.mock('../../../src/services/providers/index.js', () => ({
 import {
   processDueLetterJobs,
   processLetterJob,
+  resolveAmbiguousLetterJobAsAdmin,
+  retryLetterJobAsAdmin,
   sendWithBoundedRetries,
 } from '../../../src/services/letterJobService.js';
 
@@ -87,12 +90,19 @@ describe('mail outbox retries', () => {
       async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) =>
         callback({ query: clientQuery })
     );
+    let providerDispatched = false;
     clientQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT jobs.letter_id')) {
         return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
       }
+      if (sql.includes("SET provider_outcome = 'dispatching'")) providerDispatched = true;
+      if (sql.startsWith('SELECT status, funding_order_id FROM letters')) {
+        return { rows: [{ status: providerDispatched ? 'processing' : 'queued', funding_order_id: null }] };
+      }
       if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
-      if (sql.startsWith('SELECT * FROM letter_jobs')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letter_jobs')) {
+        return { rows: [{ ...job, provider_outcome: providerDispatched ? 'dispatching' : 'not_dispatched' }] };
+      }
       return { rows: [] };
     });
     sendLetter.mockResolvedValue({
@@ -102,14 +112,14 @@ describe('mail outbox retries', () => {
     });
   });
 
-  it.each([429, 503])('does not replay an ambiguous HTTP %s provider response', async (statusCode) => {
+  it.each([429, 503])('bounded-retries an authoritative HTTP %s rejection', async (statusCode) => {
     const send = vi
       .fn()
       .mockResolvedValueOnce({
         success: false,
         trackingId: '',
         error: `HTTP ${statusCode}`,
-        metadata: { statusCode, retryable: true },
+        metadata: { statusCode, retryable: true, submissionOutcome: 'definite_rejection' },
       })
       .mockResolvedValueOnce({ success: true, trackingId: 'provider-1' });
 
@@ -117,8 +127,8 @@ describe('mail outbox retries', () => {
       sleep: async () => undefined,
       random: () => 0,
     });
-    expect(result.success).toBe(false);
-    expect(send).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(true);
+    expect(send).toHaveBeenCalledTimes(2);
   });
 
   it('does not replay a network timeout or a permanent provider rejection', async () => {
@@ -160,6 +170,21 @@ describe('mail outbox retries', () => {
 
     expect(sendLetter).toHaveBeenCalledTimes(1);
     expect([first.claimed, second.claimed].sort()).toEqual([false, true]);
+  });
+
+  it('bounds authoritative rejection retries and never retries transport ambiguity', async () => {
+    const rejected = vi.fn().mockResolvedValue({
+      success: false, trackingId: '', error: 'HTTP 503',
+      metadata: { statusCode: 503, retryable: true, submissionOutcome: 'definite_rejection' },
+    });
+    await expect(sendWithBoundedRetries(rejected, {
+      providerRetries: 3, sleep: async () => undefined,
+    })).resolves.toMatchObject({ success: false });
+    expect(rejected).toHaveBeenCalledTimes(3);
+
+    const ambiguous = vi.fn().mockRejectedValue(new Error('socket timeout after dispatch'));
+    await sendWithBoundedRetries(ambiguous, { providerRetries: 3, sleep: async () => undefined });
+    expect(ambiguous).toHaveBeenCalledTimes(1);
   });
 
   it('holds instead of replaying after acceptance persistence crashes', async () => {
@@ -282,6 +307,12 @@ describe('mail outbox retries', () => {
       }
       if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
       if (sql.startsWith('SELECT * FROM letter_jobs')) return { rows: [{ ...job }] };
+      if (sql.includes('SELECT funding_order_id FROM letters')) {
+        return { rows: [{ funding_order_id: null }] };
+      }
+      if (sql.includes('SELECT letter_id FROM letter_jobs')) {
+        return { rows: [{ letter_id: 'letter-1' }] };
+      }
       if (sql.includes("SET status = 'refund_pending'")) {
         return { rows: [{ order_id: 'order-1' }] };
       }
@@ -312,5 +343,103 @@ describe('mail outbox retries', () => {
     const result = await processDueLetterJobs(25, { retryBaseDelayMs: 0 });
     expect(result).toEqual({ processed: 1, completed: 1, retryScheduled: 0, failed: 0 });
     expect(sendLetter).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays an exact admin retry but rejects reuse by a different actor or reason', async () => {
+    const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM commerce_operator_audit_events')) {
+        return { rows: [{
+          operation: 'mail_job_retry',
+          target_type: 'letter_job',
+          target_reference_hash: hash('job-1'),
+          actor_subject_hash: hash('admin-1'),
+          operator_reason_hash: hash('provider confirmed rejection'),
+          expected_user_hash: hash('user-1')
+        }] };
+      }
+      return { rows: [] };
+    });
+
+    await expect(retryLetterJobAsAdmin({
+      jobId: 'job-1', expectedUserId: 'user-1', actorId: 'admin-1', reason: 'provider confirmed rejection',
+      idempotencyKey: 'retry-job-exact-001'
+    })).resolves.toEqual({ jobId: 'job-1', replayed: true });
+
+    await expect(retryLetterJobAsAdmin({
+      jobId: 'job-1', expectedUserId: 'user-1', actorId: 'admin-2', reason: 'different operator decision',
+      idempotencyKey: 'retry-job-exact-001'
+    })).rejects.toMatchObject({ code: 'idempotency_conflict' });
+    await expect(retryLetterJobAsAdmin({
+      jobId: 'job-1', expectedUserId: 'other-user', actorId: 'admin-1',
+      reason: 'provider confirmed rejection', idempotencyKey: 'retry-job-exact-001'
+    })).rejects.toMatchObject({ code: 'idempotency_conflict' });
+  });
+
+  it('records a confirmed ambiguous acceptance without calling the mail provider again', async () => {
+    const jobId = '00000000-0000-4000-8000-000000000301';
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM commerce_operator_audit_events')) return { rows: [] };
+      if (sql.includes('SELECT jobs.letter_id')) {
+        return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+      }
+      if (sql.startsWith('SELECT user_id, status, funding_order_id FROM letters')) {
+        return { rows: [{ user_id: 'user-1', status: 'held', funding_order_id: null }] };
+      }
+      if (sql.startsWith('SELECT * FROM letter_jobs')) {
+        return { rows: [{ ...job, job_id: jobId, status: 'held', provider_outcome: 'ambiguous' }] };
+      }
+      return { rows: [] };
+    });
+
+    await expect(resolveAmbiguousLetterJobAsAdmin({
+      jobId,
+      expectedUserId: 'user-1',
+      actorId: 'admin-1',
+      idempotencyKey: 'resolve-mail-accepted-001',
+      decision: 'accepted',
+      resolution: 'provider_confirmed_accepted',
+      providerName: 'postgrid',
+      providerTrackingId: 'provider-confirmed-301'
+    })).resolves.toMatchObject({
+      replayed: false, jobStatus: 'completed', letterStatus: 'accepted'
+    });
+
+    expect(sendLetter).not.toHaveBeenCalled();
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining("'mail_fulfillment_resolve'"),
+      expect.anything()
+    );
+  });
+
+  it('rejects an ambiguous mail resolution bound to another account', async () => {
+    const jobId = '00000000-0000-4000-8000-000000000302';
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM commerce_operator_audit_events')) return { rows: [] };
+      if (sql.includes('SELECT jobs.letter_id')) {
+        return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+      }
+      if (sql.startsWith('SELECT user_id, status, funding_order_id FROM letters')) {
+        return { rows: [{ user_id: 'user-1', status: 'held', funding_order_id: null }] };
+      }
+      if (sql.startsWith('SELECT * FROM letter_jobs')) {
+        return { rows: [{ ...job, job_id: jobId, status: 'held', provider_outcome: 'ambiguous' }] };
+      }
+      return { rows: [] };
+    });
+
+    await expect(resolveAmbiguousLetterJobAsAdmin({
+      jobId,
+      expectedUserId: 'different-user',
+      actorId: 'admin-1',
+      idempotencyKey: 'resolve-mail-cross-user-001',
+      decision: 'rejected',
+      resolution: 'provider_confirmed_rejected_refund',
+      providerName: 'postgrid'
+    })).rejects.toMatchObject({ code: 'not_found' });
+    expect(clientQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE letter_jobs SET status'),
+      expect.anything()
+    );
   });
 });

@@ -43,10 +43,12 @@ vi.mock('../../../src/services/stripeService.js', () => ({
 }));
 
 import {
+  ACTIVE_JIT_STATUSES,
   createPackCheckout,
   createJitCheckout,
   getSendEligibility,
   processStripeWebhookEvent,
+  repairFulfilledPackGrant,
   requestRefund,
   runCommerceMaintenance
 } from '../../../src/services/commerceService.js';
@@ -92,6 +94,11 @@ function checkoutEvent(overrides: Record<string, unknown> = {}) {
 }
 
 describe('commerceService', () => {
+  it('uses the same active JIT status set as the database uniqueness policy', () => {
+    expect(ACTIVE_JIT_STATUSES).toEqual([
+      'checkout_pending', 'paid', 'fulfillment_pending', 'refund_pending', 'disputed', 'held'
+    ]);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', '1');
@@ -240,6 +247,72 @@ describe('commerceService', () => {
 
     expect(alertInsertions).toBe(2);
     expect(committedClaim).toBe(true);
+  });
+
+  it('records the required durable resolution code when a Stripe dispute closes', async () => {
+    const disputedOrder = { ...baseOrder, status: 'disputed', stripe_payment_intent_id: 'pi-1' };
+    mocks.query.mockImplementation(async (sql: string, params: unknown[]) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-close' }] };
+      if (sql.includes('SELECT * FROM orders')) return { rows: [disputedOrder] };
+      if (sql.includes("alert_type = 'stripe_dispute_created'")) {
+        expect(params).toEqual(['order-1', 'stripe_dispute_won', 'dp-closed']);
+      }
+      return { rows: [] };
+    });
+
+    await expect(processStripeWebhookEvent({
+      id: 'evt-close', type: 'charge.dispute.closed', data: { object: {
+        id: 'dp-closed', payment_intent: 'pi-1', charge: 'ch-closed', amount: 499,
+        currency: 'usd', reason: 'fraudulent', status: 'won'
+      } }
+    } as any)).resolves.toEqual({ duplicate: false });
+
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('resolution_code = $2'),
+      ['order-1', 'stripe_dispute_won', 'dp-closed']
+    );
+  });
+
+  it('repairs a fulfilled pack grant atomically through the exact order/session binding', async () => {
+    const packOrder = {
+      ...baseOrder,
+      order_id: 'pack-order',
+      order_type: 'letter_pack',
+      draft_id: undefined,
+      status: 'fulfilled',
+      credits: 4,
+      amount_cents: 500,
+      currency: 'usd',
+      product_code: 'credit-pack-4',
+      stripe_checkout_session_id: 'cs-pack'
+    };
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("order_type = 'letter_pack'")) return { rows: [packOrder] };
+      if (sql.includes('SELECT ledger_id FROM credit_ledger')) return { rows: [] };
+      return { rows: [] };
+    });
+
+    await expect(repairFulfilledPackGrant({
+      orderId: 'pack-order', stripeSessionId: 'cs-pack', expectedCredits: 4,
+      paidAmountCents: 500, paidCurrency: 'usd'
+    })).resolves.toBe('repaired');
+
+    expect(mocks.addCredits).toHaveBeenCalledTimes(1);
+    expect(mocks.grantEntitlement).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses pack repair when the provider session does not match the locked order', async () => {
+    mocks.query.mockResolvedValue({ rows: [{
+      ...baseOrder, order_type: 'letter_pack', status: 'fulfilled', credits: 4,
+      amount_cents: 500, stripe_checkout_session_id: 'cs-authoritative'
+    }] });
+
+    await expect(repairFulfilledPackGrant({
+      orderId: 'order-1', stripeSessionId: 'cs-attacker', expectedCredits: 4,
+      paidAmountCents: 500, paidCurrency: 'usd'
+    })).rejects.toThrow('does not match');
+    expect(mocks.addCredits).not.toHaveBeenCalled();
+    expect(mocks.grantEntitlement).not.toHaveBeenCalled();
   });
 
   it('persists an authoritative pack order before creating its Stripe session', async () => {

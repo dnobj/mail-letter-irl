@@ -229,6 +229,7 @@ describe('Checkout Session Error Handling', () => {
     const sensitive = 'private Stripe failure cs_private pi_private auth0|private-user';
     vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
     vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
+    vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '500');
     mockSessionCreate.mockRejectedValueOnce(new Error(sensitive));
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
