@@ -1,6 +1,6 @@
 # Letter IRL Documentation Index
 
-**Last Updated:** July 18, 2026
+**Last Updated:** August 2, 2026
 **Purpose:** Central navigation hub for all Letter IRL documentation
 
 Welcome to the Letter IRL documentation. This is a physical letter mailing service integrated with ChatGPT via MCP (Model Context Protocol).
@@ -18,7 +18,8 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 - [personas.md](personas.md) - User personas for product design and testing
 - [testing.md](testing.md) - Testing strategy and guide
 - [ACID Transaction Standard](acid-transaction-standard.md) - Required transaction, idempotency, outbox, recovery, and review rules for durable mutations
-- [Agent Workflow](agent-workflow.md) - Backlog, planning, implementation, and validation process
+- [agent-workflow.md](agent-workflow.md) - Multi-engine orchestration, worker safety, and delivery gates
+- [manual-tests.md](manual-tests.md) - Focused PR and release-group browser/live verification cases
 
 ---
 

@@ -1,8 +1,18 @@
 # Agent Work and Delivery Workflow
 
-This is Letter IRL's project adaptation of the private code-teem orchestration playbook, pinned at
-`v0.5.0` (2026-08-02). Switchyard (`sy`, formerly claude-reach/session-bridge) is the reference session
-control plane. This document supplements `AGENTS.md`; repository and safety rules there still apply.
+**Last Updated:** August 2, 2026
+**Status:** Active
+**Purpose:** Define Letter IRL's multi-agent planning, implementation, verification, and release workflow
+
+---
+
+## Overview
+
+This is Letter IRL's project adaptation of the private
+[code-teem](https://github.com/pettheory/code-teem) orchestration playbook, pinned at `v0.5.0`, commit
+`ec487cf50ffd4924d44d6b5c57e21762fe361478` (2026-08-02). Switchyard (`sy`, formerly
+claude-reach/session-bridge) is the reference session control plane. This document supplements
+`AGENTS.md`; repository and safety rules there still apply.
 
 ## 1. Operating Model
 
@@ -10,12 +20,19 @@ The owner normally communicates only with `LIRL · Master`. The Master turns hig
 durable backlog, delegates bounded work, reconciles results, and owns release gates. Specialist workers
 perform investigation, planning, implementation, review, and testing.
 
+The current `LIRL · Master` is deliberately an owner-facing Codex cockpit, not a Switchyard-owned
+headless worker. It must use native Codex completion waits while delegations run and an independently
+scheduled Codex heartbeat as its parked-session backstop. Switchyard's Claude watchdog protects
+headless Claude workers; do not claim it can wake a live Codex cockpit. A future headless Master may be
+adopted into a cockpit on demand when the cross-engine control plane supports that lifecycle end to end.
+
 There are two session classes:
 
 - **Cockpit:** open in a human-facing assistant UI. The UI process owns its transcript. Read it or use
   the platform's supported nudge/handoff channel, but never attach another programmatic writer.
 - **Worker:** a durable headless session owned by the orchestration layer. It can be resumed, awaited,
-  scheduled, and adopted into a UI for inspection when idle.
+  and adopted into a UI for inspection when idle. Recurring loop scheduling is planned Switchyard work,
+  not a currently assumed project capability.
 
 One writer per session is a hard invariant: competing attachments silently fork transcript history.
 One writing worker also owns one issue, branch, and isolated worktree. The human checkout is never a
@@ -33,9 +50,10 @@ LIRL · Ops · #<issue> · <environment>
 LIRL · Investigate · <topic>
 ```
 
-Session inventory is ephemeral and stays outside Git. Generate the durable-headless portion from
-`sy list` when possible and annotate role, machine, cwd, state, branch/worktree, and reuse notes. GitHub
-issues, plans, branches, PRs, and test records—not transcripts or the inventory—are the work ledger.
+Session inventory is ephemeral and stays outside Git in the Master's local operations directory. Merge
+`sy list` (Claude) with `sy codex-list` (Codex), then annotate role, machine, cwd, state,
+branch/worktree, and reuse notes. GitHub issues, plans, branches, PRs, and test records—not transcripts
+or the inventory—are the work ledger.
 
 ## 2. Engine and Machine Dispatch
 
@@ -59,23 +77,30 @@ with the session, and keep trust, limits, pause controls, and audit enforcement 
 
 ## 3. Completion, Monitoring, and Recovery
 
-Switchyard's preferred delegation sequence is:
+Switchyard's preferred Claude-worker delegation sequence is:
 
 1. Select or create a headless worker in the correct cwd and trust mode.
-2. Dispatch asynchronously with `continue_session` and a result schema. At minimum request status,
-   summary, branch/PR, tests, blockers, and deliberately untouched scope.
+2. Read `get_bridge_info.recommendedResultSchema`, then dispatch asynchronously with
+   `continue_session` and that result schema. At minimum request status, summary, branch/PR, tests,
+   blockers, and deliberately untouched scope.
 3. Call `await_job` for the returned job id. `outcome: timeout` means it is still running; await again.
    Use `get_job` only for a cheap snapshot.
-4. Validate the handoff against Git, GitHub, tests, and deployed state rather than trusting prose alone.
+4. Inspect both `resultStructured` and `resultSchemaError`. A malformed handoff does not make an
+   otherwise successful job fail, but it must be repaired or manually interpreted before advancing.
+5. Validate the handoff against Git, GitHub, tests, and deployed state rather than trusting prose alone.
 
-For Codex-managed tasks, use the platform's thread wait/completion tools with the same discipline.
-A wrapper or client timeout is not evidence that the worker failed: inspect the job/session record,
-transcript, process ownership, branch, and worktree, then resume instead of restarting from scratch.
+Switchyard's Codex adapter is currently synchronous and does not expose Claude's `jobId`, result schema,
+or `await_job` contract. For Codex-managed tasks, use the platform's native task wait/completion tools
+with the same discipline. A wrapper or client timeout is not evidence that the worker failed: inspect
+the job/session record, transcript, process ownership, branch, and worktree, then resume instead of
+restarting from scratch.
 
 Every delegation must end in one of two safe states: the Master is actively awaiting the completion
-signal, or the Master is registered with the Switchyard idle watchdog before ending its turn. Never end
-with “I'll report when it finishes” while neither is armed. The watchdog is a backstop with backoff and
-a finite give-up cap, not a substitute for normal job completion.
+signal, or an independently running watchdog/heartbeat appropriate to that session type is armed before
+the Master ends its turn. For the current Codex cockpit, that is the Codex heartbeat; for headless Claude
+workers, it is the Switchyard watchdog. Never end with “I'll report when it finishes” while neither is
+armed. A watchdog is a finite backstop with backoff and a give-up cap, not a substitute for normal job
+completion.
 
 On failure, preserve the existing branch/worktree and create or resume a successor with a precise
 remaining-work brief. Do not redo completed work or duplicate external mutations.
@@ -108,9 +133,15 @@ Parallelism is limited by shared mutable resources, not available agents:
   uses it.
 - Production has zero autonomous live-system workers without explicit owner authorization.
 
-Before dispatching overlapping builds, compare their branch diffs. Never point two engines at the same
-working tree. Never switch a shared CLI's global account; inject the required identity per command so
-concurrent repositories are not broken elsewhere on the machine.
+Worktree isolation is a project convention, not a Switchyard-enforced control: the Master must create or
+select the worktree first and set the worker's `cwd` to it. Before dispatching overlapping builds,
+compare their branch diffs. Never point two engines at the same working tree. Never switch a shared
+CLI's global account; inject the required identity per command so concurrent repositories are not broken
+elsewhere on the machine.
+
+Use Switchyard trust mechanically: read-only audits use `readonly`; writing workers use the narrowest
+trusted path and mode that permits their task; `auto` is only for explicitly trusted isolated worktrees.
+Set finite `maxTurns` and `maxBudgetUsd` caps and keep the global pause/audit controls enabled.
 
 ## 6. Pull Request and Browser Verification
 
@@ -120,15 +151,21 @@ from new failures. The author updates affected requirements, architecture decisi
 manual tests in the same PR.
 
 For every user-visible, protocol, authentication, payment, or deployment-sensitive PR, an agent creates
-or updates durable manual cases and executes the focused cases in DEV. The record includes the issue/PR,
-exact commit or deployed revision, environment, preconditions, constrained test data, steps, expected and
-actual results, pass/fail, evidence, cleanup, and limitations. Run the full applicable agent-driven
-manual suite between major PR groups and before production promotion.
+or updates durable cases in `docs/manual-tests.md`. Execute focused cases against a local or isolated
+preview before merge when one exists. Because shared Railway DEV deploys from `dev`, execute the shared-
+DEV cases after merge and successful deployment, keep the issue in validation until evidence passes,
+and use a follow-up fix PR for failures. Production-host smoke cases are owner-gated and are not an
+autonomous DEV requirement. The record includes the issue/PR, exact commit or deployed revision,
+environment, preconditions, constrained test data, steps, expected and actual results, pass/fail,
+evidence, cleanup, and limitations. Run the full applicable agent-driven manual suite between major PR
+groups and before production promotion.
 
-Prefer a per-worker Playwright-class browser with a clean profile. Use the embedded browser for cockpit
-exploration and the human's browser only when their existing identity is genuinely required. Letter IRL's
-shared DEV/ChatGPT/Auth0 surfaces remain a single serialized lane even if workers own separate browsers.
-For assertions, prefer DOM/accessibility, console, and network evidence; screenshots are for human review.
+Prefer a per-worker Playwright-class browser with a clean profile. Until a repository-owned browser kit
+and named launch configuration exist, `LIRL · Test · Browser` owns the documented operational procedure
+and serialized shared-DEV lane. Use the embedded browser for cockpit exploration and the human's browser
+only when their existing identity is genuinely required. Letter IRL's shared DEV/ChatGPT/Auth0 surfaces
+remain a single serialized lane even if workers own separate browsers. For assertions, prefer
+DOM/accessibility, console, and network evidence; screenshots are for human review.
 
 The human evaluates product quality and approves credentials, MFA, production, irreversible actions, and
 material product choices. Agents verify objective correctness. Batch optional human UX review around a
@@ -166,3 +203,11 @@ name the exact task and action.
 Work closes only when acceptance criteria and verification are complete, documentation and rollback are
 current, review/manual-test findings are resolved, the PR and issue reflect reality, temporary resources
 are cleaned up, and newly discovered work is captured rather than silently expanding scope.
+
+## See Also
+
+- [manual-tests.md](manual-tests.md) - Durable focused and release-group manual test cases
+- [testing.md](testing.md) - Automated testing strategy and commands
+- [deployment.md](deployment.md) - DEV/production deployment boundaries and gates
+- [acid-transaction-standard.md](acid-transaction-standard.md) - Transaction and external-side-effect standard
+- [status.md](status.md) - Current product and implementation status
