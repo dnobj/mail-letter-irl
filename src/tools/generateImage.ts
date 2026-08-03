@@ -28,6 +28,9 @@ import {
   type ImageContext
 } from "../services/imageGenerationService.js";
 import {
+  commitGenerationReservation,
+  markGenerationDispatched,
+  markGenerationReservationAmbiguous,
   releaseGenerationReservation,
   reserveGeneration
 } from "../services/imageGenerationLimitService.js";
@@ -95,11 +98,16 @@ async function createPreview(base64Data: string): Promise<string> {
 
 async function releaseReservedGeneration(
   context: ToolContext,
-  userId: string
+  userId: string,
+  reservationId: string | undefined,
+  reason: string
 ): Promise<void> {
+  if (!reservationId) {
+    return;
+  }
   try {
-    await releaseGenerationReservation(userId);
-  } catch (releaseError) {
+    await releaseGenerationReservation(userId, reservationId, reason);
+  } catch {
     context.logger.error(
       {
         correlationId: context.correlationId,
@@ -107,6 +115,33 @@ async function releaseReservedGeneration(
         errorClass: "database_error"
       },
       "Failed to release image generation reservation"
+    );
+  }
+}
+
+async function preserveAmbiguousGeneration(
+  context: ToolContext,
+  userId: string,
+  reservationId: string | undefined,
+  reason: string,
+  providerRequestId?: string
+): Promise<void> {
+  if (!reservationId) return;
+  try {
+    await markGenerationReservationAmbiguous(
+      userId,
+      reservationId,
+      reason,
+      providerRequestId
+    );
+  } catch {
+    context.logger.error(
+      {
+        correlationId: context.correlationId,
+        event: "generate_image.reservation_reconciliation_failed",
+        errorClass: "database_error"
+      },
+      "Image generation reservation requires maintenance reconciliation"
     );
   }
 }
@@ -155,14 +190,45 @@ async function handler(
       "Image generation limit reached"
     );
     throw new Error(
-      "You've used all your image generations. Purchase more letters to get additional generations (5 per letter)."
+      "You've used all your Letter IRL image generations. Complete a qualifying physical-mail purchase to receive another entitlement, or reuse an uploaded or conversation-generated image."
     );
   }
 
+  let providerDispatched = false;
+  let providerSucceeded = false;
   try {
     const result = await generateImage(input.prompt, {
-      context: input.context
+      context: input.context,
+      beforeDispatch: async () => {
+        if (!reservation.reservationId) {
+          throw new Error("Image generation reservation is missing");
+        }
+        const dispatched = await markGenerationDispatched(
+          userId,
+          reservation.reservationId
+        );
+        if (!dispatched) {
+          throw new Error("Image generation reservation expired before provider dispatch");
+        }
+        providerDispatched = true;
+      }
     });
+    providerSucceeded = true;
+
+    // Provider usage is billable once generation succeeds, even if local
+    // previewing or temporary storage later fails. Consume the reservation
+    // immediately so those downstream failures cannot be retried for free.
+    if (reservation.reservationId) {
+      const committed = result.providerRequestId
+        ? await commitGenerationReservation(
+            reservation.reservationId,
+            result.providerRequestId
+          )
+        : await commitGenerationReservation(reservation.reservationId);
+      if (!committed) {
+        throw new Error("Image generation outcome could not be persisted");
+      }
+    }
 
     const generationsRemaining = reservation.remaining;
 
@@ -194,7 +260,26 @@ async function handler(
       generationsRemaining
     };
   } catch (error) {
-    await releaseReservedGeneration(context, userId);
+    const ambiguousProviderOutcome =
+      providerSucceeded ||
+      (providerDispatched &&
+        (!(error instanceof ImageGenerationError) || error.outcome === "ambiguous"));
+    if (ambiguousProviderOutcome) {
+      await preserveAmbiguousGeneration(
+        context,
+        userId,
+        reservation.reservationId,
+        providerSucceeded ? "provider_succeeded_persistence_unknown" : "provider_outcome_unknown",
+        error instanceof ImageGenerationError ? error.providerRequestId : undefined
+      );
+    } else {
+      await releaseReservedGeneration(
+        context,
+        userId,
+        reservation.reservationId,
+        providerDispatched ? "provider_definite_failure" : "pre_dispatch_failure"
+      );
+    }
 
     if (error instanceof ImageGenerationError) {
       context.logger.warn(
@@ -202,7 +287,8 @@ async function handler(
           correlationId: context.correlationId,
           event: "generate_image.failed",
           errorCode: error.code,
-          errorClass: "provider_error"
+          errorClass: "provider_error",
+          providerOutcome: error.outcome
         },
         "Image generation failed"
       );

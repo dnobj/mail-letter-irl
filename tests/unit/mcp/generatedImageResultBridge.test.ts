@@ -267,11 +267,13 @@ describe("widget image CSP", () => {
 
     expect(meta.ui.csp).toEqual({
       connectDomains: ["https://chatgpt.com", "https://api.letterirl.com"],
-      resourceDomains: ["https://*.oaistatic.com", "https://api.letterirl.com"]
+      resourceDomains: ["https://*.oaistatic.com", "https://api.letterirl.com"],
+      redirectDomains: ["https://checkout.stripe.com", "https://letterirl.com"]
     });
     expect(meta["openai/widgetCSP"]).toEqual({
       connect_domains: ["https://chatgpt.com", "https://api.letterirl.com"],
-      resource_domains: ["https://*.oaistatic.com", "https://api.letterirl.com"]
+      resource_domains: ["https://*.oaistatic.com", "https://api.letterirl.com"],
+      redirect_domains: ["https://checkout.stripe.com", "https://letterirl.com"]
     });
   });
 

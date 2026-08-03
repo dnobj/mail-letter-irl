@@ -168,3 +168,16 @@ This pricing is effective as of November 19, 2025 and subject to change. Users w
 
 **Version:** 1.0
 **Effective Date:** November 19, 2025
+
+# Pay & Send pricing
+
+Pay & Send sells one exact physical letter or postcard and does not add prepaid
+balance. Letter packs remain the discounted prepaid option. JIT cent amounts and
+Stripe Prices are environment configuration and must match exactly; the values
+shown in example env files are placeholders until the launch price is approved.
+Payment authorizes immediate fulfillment of the immutable previewed item.
+
+Qualifying purchases grant explicit image entitlements. The defaults are five
+per prepaid physical-mail entitlement and one future generation per completed
+JIT order, both configurable. `IMAGE_TRIAL_ENABLED` remains false unless a
+separate, budget-capped acquisition experiment is approved.

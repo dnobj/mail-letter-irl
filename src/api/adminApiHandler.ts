@@ -9,12 +9,21 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { authenticateAdmin } from './middleware/adminAuth.js';
+import { createHash } from 'node:crypto';
+import { authenticateAdmin, validateAdminRequestBoundary } from './middleware/adminAuth.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { adjustCredits } from '../services/creditService.js';
 import { getUser, getAllUsers } from '../services/userService.js';
-import { getAllJobs, getJobById, getJobsByUserId } from '../services/letterJobService.js';
-import { query } from '../db/index.js';
+import {
+  AdminJobRetryError,
+  AdminMailResolutionError,
+  getAllJobs,
+  getJobById,
+  getJobsByUserId,
+  resolveAmbiguousLetterJobAsAdmin,
+  retryLetterJobAsAdmin
+} from '../services/letterJobService.js';
+import { query, transaction } from '../db/index.js';
 import {
   createCampaign,
   getCampaignById,
@@ -34,6 +43,19 @@ import {
 } from '../services/statusSyncService.js';
 import { getTokenStats } from '../services/patService.js';
 import { getRateLimitStats, getBlockedRequestCounts, RATE_LIMITS } from './middleware/rateLimit.js';
+import {
+  getGenerationQuota,
+  ImageGenerationResolutionError,
+  listAmbiguousGenerationReservations,
+  resolveAmbiguousGenerationReservation
+} from '../services/imageGenerationLimitService.js';
+import type {
+  AmbiguousGenerationDecision,
+  AmbiguousGenerationResolution
+} from '../services/imageGenerationLimitService.js';
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const OPERATOR_IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 
 /**
  * Send JSON response
@@ -76,16 +98,7 @@ export async function handleAdminApiRequest(
     return false; // Not an admin route, continue to next handler
   }
 
-  // Set CORS headers for admin API (supports file:// protocol and localhost)
-  const origin = req.headers.origin;
-  if (origin === 'null') {
-    // file:// protocol sends "null" as origin
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  } else if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
+  if (!validateAdminRequestBoundary(req, res)) return true;
 
   // Authenticate and verify admin status
   const adminInfo = await authenticateAdmin(req, res);
@@ -95,7 +108,11 @@ export async function handleAdminApiRequest(
 
   // Route handlers
   try {
-    console.log(`🔍 Admin API: ${req.method} ${pathname}`);
+    writeDiagnostic('info', 'admin.request_started', {
+      method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method || '')
+        ? req.method || 'UNKNOWN'
+        : 'UNKNOWN'
+    });
 
     // POST /api/admin/credits/adjust
     if (pathname === '/api/admin/credits/adjust' && req.method === 'POST') {
@@ -131,6 +148,31 @@ export async function handleAdminApiRequest(
     // GET /api/admin/alerts - Active alerts (failed jobs, expiring credits, etc.)
     if (pathname === '/api/admin/alerts' && req.method === 'GET') {
       await handleGetAlerts(res);
+      return true;
+    }
+
+    if (pathname.match(/^\/api\/admin\/commerce-alerts\/[^/]+$/) && req.method === 'PATCH') {
+      await handleTransitionCommerceAlert(
+        req, res, decodeURIComponent(pathname.split('/').pop() || ''), adminInfo
+      );
+      return true;
+    }
+
+    // GET /api/admin/image-generation/ambiguous - Inspect quarantined outcomes
+    if (pathname === '/api/admin/image-generation/ambiguous' && req.method === 'GET') {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      await handleListAmbiguousImageReservations(res, url.searchParams);
+      return true;
+    }
+
+    // POST /api/admin/image-generation/ambiguous/:reservationId/resolve
+    if (
+      pathname.match(/^\/api\/admin\/image-generation\/ambiguous\/[^/]+\/resolve$/) &&
+      req.method === 'POST'
+    ) {
+      const parts = pathname.split('/');
+      const reservationId = decodeURIComponent(parts[parts.length - 2] || '');
+      await handleResolveAmbiguousImageReservation(req, res, reservationId, adminInfo);
       return true;
     }
 
@@ -207,12 +249,22 @@ export async function handleAdminApiRequest(
       }
     }
 
+    // POST /api/admin/jobs/:jobId/resolve-ambiguous - Finish a provider hold without resending
+    if (pathname.match(/^\/api\/admin\/jobs\/[^/]+\/resolve-ambiguous$/) && req.method === 'POST') {
+      const parts = pathname.split('/');
+      const jobId = parts[parts.length - 2];
+      if (jobId) {
+        await handleResolveAmbiguousJob(req, res, decodeURIComponent(jobId), adminInfo);
+        return true;
+      }
+    }
+
     // POST /api/admin/jobs/:jobId/retry - Retry a failed job
     if (pathname.match(/^\/api\/admin\/jobs\/[^/]+\/retry$/) && req.method === 'POST') {
       const parts = pathname.split('/');
       const jobId = parts[parts.length - 2];
       if (jobId) {
-        await handleRetryJob(res, decodeURIComponent(jobId), adminInfo);
+        await handleRetryJob(req, res, decodeURIComponent(jobId), adminInfo);
         return true;
       }
     }
@@ -377,6 +429,106 @@ export async function handleAdminApiRequest(
   }
 }
 
+async function handleListAmbiguousImageReservations(
+  res: ServerResponse,
+  searchParams: URLSearchParams
+): Promise<void> {
+  const requestedLimit = Number.parseInt(searchParams.get('limit') || '50', 10);
+  if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100) {
+    sendJson(res, 400, {
+      error: 'Invalid request',
+      message: 'limit must be an integer from 1 to 100'
+    });
+    return;
+  }
+
+  const reservations = await listAmbiguousGenerationReservations(requestedLimit);
+  writeDiagnostic('info', 'admin.image_resolution_inspection_completed', {
+    resultCount: reservations.length
+  });
+  sendJson(res, 200, { reservations });
+}
+
+function validResolutionPair(
+  decision: unknown,
+  resolution: unknown
+): decision is AmbiguousGenerationDecision {
+  return decision === 'consume'
+    ? resolution === 'provider_confirmed_succeeded'
+    : decision === 'release' &&
+        (resolution === 'provider_confirmed_failed' || resolution === 'customer_compensation');
+}
+
+async function handleResolveAmbiguousImageReservation(
+  req: IncomingMessage,
+  res: ServerResponse,
+  reservationId: string,
+  adminInfo: { userId: string }
+): Promise<void> {
+  const body = await parseBody(req);
+  const expectedUserId = typeof body.userId === 'string' ? body.userId : '';
+  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : '';
+  const decision = body.decision as unknown;
+  const resolution = body.resolution as unknown;
+
+  if (
+    !UUID_PATTERN.test(reservationId) ||
+    !expectedUserId ||
+    expectedUserId.length > 255 ||
+    !OPERATOR_IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey) ||
+    !validResolutionPair(decision, resolution)
+  ) {
+    sendJson(res, 400, {
+      error: 'Invalid request',
+      message: 'A bound account, valid idempotency key, and matching decision evidence are required'
+    });
+    return;
+  }
+
+  try {
+    const result = await resolveAmbiguousGenerationReservation({
+      reservationId,
+      expectedUserId,
+      actorId: adminInfo.userId,
+      idempotencyKey,
+      decision,
+      resolution: resolution as AmbiguousGenerationResolution
+    });
+    writeDiagnostic('info', 'admin.image_resolution_completed', {
+      decision: result.decision,
+      resultingStatus: result.resultingStatus,
+      replayed: result.replayed
+    });
+    sendJson(res, 200, result);
+  } catch (error) {
+    if (error instanceof ImageGenerationResolutionError) {
+      writeDiagnostic('warn', 'admin.image_resolution_rejected', {
+        errorClass: error.code
+      });
+      if (error.code === 'not_found') {
+        sendJson(res, 404, {
+          error: 'Not found',
+          message: 'No matching ambiguous reservation exists for that account'
+        });
+        return;
+      }
+      if (error.code === 'invalid_resolution' || error.code === 'invalid_request') {
+        sendJson(res, 400, {
+          error: 'Invalid request',
+          message: 'The decision does not match the supplied evidence classification'
+        });
+        return;
+      }
+      sendJson(res, 409, {
+        error: 'Conflict',
+        message: 'The reservation or idempotency key no longer matches this decision'
+      });
+      return;
+    }
+    throw error;
+  }
+}
+
 /**
  * POST /api/admin/credits/adjust
  * Manually adjust user credits (add or remove)
@@ -458,11 +610,7 @@ async function handleGetUser(res: ServerResponse, userId: string) {
       [userId]
     );
 
-    // Compute image generation quota
-    const lettersPurchased = Math.floor(user.credits_purchased / 2);
-    const generationsPerLetter = parseInt(process.env.IMAGE_GENERATION_LIMIT_PER_LETTER || '5', 10);
-    const imageGenerationsAllowance = lettersPurchased * generationsPerLetter;
-    const imageGenerationsRemaining = Math.max(0, imageGenerationsAllowance - user.image_generations_used);
+    const imageQuota = await getGenerationQuota(userId);
 
     sendJson(res, 200, {
       user: {
@@ -471,9 +619,9 @@ async function handleGetUser(res: ServerResponse, userId: string) {
         credits: user.credits,
         creditsPurchased: user.credits_purchased,
         creditsUsed: user.credits_used,
-        imageGenerationsUsed: user.image_generations_used,
-        imageGenerationsAllowance,
-        imageGenerationsRemaining,
+        imageGenerationsUsed: imageQuota.used,
+        imageGenerationsAllowance: imageQuota.allowance,
+        imageGenerationsRemaining: imageQuota.remaining,
         createdAt: user.created_at,
         updatedAt: user.updated_at
       },
@@ -546,8 +694,12 @@ async function handleGetStats(res: ServerResponse) {
   }>(
     `SELECT
        COUNT(*) as count,
-       SUM(amount_cents) as total_revenue,
-       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count
+       SUM(CASE
+         WHEN amount_known AND paid_at IS NOT NULL AND status NOT IN ('refunded', 'cancelled', 'payment_failed')
+           THEN amount_cents
+         ELSE 0
+       END) as total_revenue,
+       SUM(CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END) as completed_count
      FROM orders`
   );
 
@@ -1125,14 +1277,15 @@ async function handleGetDashboard(res: ServerResponse) {
       `SELECT
         COALESCE(SUM(amount_cents), 0) as total_cents,
         COUNT(*) as total_orders
-      FROM orders WHERE status = 'completed'`
+      FROM orders
+      WHERE amount_known AND paid_at IS NOT NULL AND status NOT IN ('refunded', 'cancelled', 'payment_failed')`
     ),
     // Revenue today
-    query<{ total_cents: string }>('SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE status = $1 AND completed_at >= $2', ['completed', today]),
+    query<{ total_cents: string }>("SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE amount_known AND paid_at >= $1 AND status NOT IN ('refunded', 'cancelled', 'payment_failed')", [today]),
     // Revenue 7d
-    query<{ total_cents: string }>('SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE status = $1 AND completed_at >= $2', ['completed', sevenDaysAgo]),
+    query<{ total_cents: string }>("SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE amount_known AND paid_at >= $1 AND status NOT IN ('refunded', 'cancelled', 'payment_failed')", [sevenDaysAgo]),
     // Revenue 30d
-    query<{ total_cents: string }>('SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE status = $1 AND completed_at >= $2', ['completed', thirtyDaysAgo]),
+    query<{ total_cents: string }>("SELECT COALESCE(SUM(amount_cents), 0) as total_cents FROM orders WHERE amount_known AND paid_at >= $1 AND status NOT IN ('refunded', 'cancelled', 'payment_failed')", [thirtyDaysAgo]),
     // Job stats
     query<{ status: string; count: string }>(
       `SELECT status, COUNT(*) as count FROM letter_jobs GROUP BY status`
@@ -1260,27 +1413,24 @@ async function handleGetAlerts(res: ServerResponse) {
     });
   }
 
-  // Check for Stripe disputes table (if it exists)
-  try {
-    const disputes = await query<{ dispute_id: string; amount_cents: number; reason: string }>(
-      `SELECT dispute_id, amount_cents, reason
-       FROM stripe_disputes
-       WHERE status = 'open'
-       ORDER BY created_at DESC
-       LIMIT 10`
-    );
-
-    if (disputes.rows.length > 0) {
-      alerts.push({
-        type: 'chargebacks',
-        severity: 'critical',
-        title: 'Open Chargebacks',
-        message: `${disputes.rows.length} open chargeback(s) require immediate attention.`,
-        data: disputes.rows,
-      });
-    }
-  } catch (error) {
-    // Table doesn't exist yet, ignore
+  const operational = await query<{
+    alert_id: string; order_id: string | null; alert_type: string;
+    severity: 'critical' | 'warning' | 'info'; status: string;
+    details: Record<string, unknown>; created_at: Date;
+  }>(
+    `SELECT alert_id, order_id, alert_type, severity, status, details, created_at
+     FROM commerce_operational_alerts WHERE status <> 'resolved'
+     ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+              created_at ASC LIMIT 50`
+  );
+  if (operational.rows.length > 0) {
+    alerts.push({
+      type: 'commerce_operations',
+      severity: operational.rows.some(row => row.severity === 'critical') ? 'critical' : 'warning',
+      title: 'Commerce operational work',
+      message: `${operational.rows.length} durable commerce alert(s) require review.`,
+      data: operational.rows,
+    });
   }
 
   sendJson(res, 200, {
@@ -1515,60 +1665,158 @@ async function handleGetLetterById(res: ServerResponse, letterId: string) {
  * Retry a failed job
  */
 async function handleRetryJob(
+  req: IncomingMessage,
   res: ServerResponse,
   jobId: string,
   adminInfo: { userId: string; email?: string }
 ) {
-  // Get the job
-  const jobResult = await query(
-    `SELECT * FROM letter_jobs WHERE job_id = $1`,
-    [jobId]
-  );
-
-  if (jobResult.rows.length === 0) {
-    sendJson(res, 404, { error: 'Job not found', jobId });
+  const body = await parseBody(req);
+  const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : '';
+  const expectedUserId = typeof body.userId === 'string' ? body.userId : '';
+  if (!expectedUserId || reason.length < 8 || reason.length > 500 || !OPERATOR_IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+    sendJson(res, 400, { error: 'A reason and valid idempotency key are required' });
     return;
   }
-
-  const job = jobResult.rows[0] as any;
-
-  if (job.status !== 'failed') {
-    sendJson(res, 400, {
-      error: 'Can only retry failed jobs',
-      currentStatus: job.status,
+  try {
+    const result = await retryLetterJobAsAdmin({
+      jobId, expectedUserId, actorId: adminInfo.userId, reason, idempotencyKey
     });
+    sendJson(res, 200, { success: true, ...result });
+  } catch (error) {
+    if (error instanceof AdminJobRetryError) {
+      sendJson(res, error.code === 'not_found' ? 404 : 409, { error: error.code });
+      return;
+    }
+    throw error;
+  }
+}
+
+async function handleResolveAmbiguousJob(
+  req: IncomingMessage,
+  res: ServerResponse,
+  jobId: string,
+  adminInfo: { userId: string }
+) {
+  const body = await parseBody(req);
+  const expectedUserId = typeof body.userId === 'string' ? body.userId : '';
+  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : '';
+  const decision = body.decision === 'accepted' || body.decision === 'retry' ||
+    body.decision === 'rejected'
+    ? body.decision
+    : null;
+  const resolution = body.resolution === 'provider_confirmed_accepted' ||
+    body.resolution === 'provider_confirmed_rejected_retry' ||
+    body.resolution === 'provider_confirmed_rejected_refund' ? body.resolution : null;
+  const providerName = body.providerName === 'postgrid' || body.providerName === 'dummy' ||
+    body.providerName === 'diy' ? body.providerName : null;
+  const providerTrackingId = typeof body.providerTrackingId === 'string'
+    ? body.providerTrackingId
+    : undefined;
+  if (!UUID_PATTERN.test(jobId) || !expectedUserId || expectedUserId.length > 255 ||
+      !OPERATOR_IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey) || !decision || !resolution ||
+      !providerName) {
+    sendJson(res, 400, { error: 'Invalid ambiguous mail resolution request' });
     return;
   }
+  try {
+    const result = await resolveAmbiguousLetterJobAsAdmin({
+      jobId,
+      expectedUserId,
+      actorId: adminInfo.userId,
+      idempotencyKey,
+      decision,
+      resolution,
+      providerName,
+      providerTrackingId
+    });
+    sendJson(res, 200, { success: true, ...result });
+  } catch (error) {
+    if (error instanceof AdminMailResolutionError) {
+      const statusCode = error.code === 'not_found' ? 404 : error.code === 'invalid_request' ? 400 : 409;
+      sendJson(res, statusCode, { error: error.code });
+      return;
+    }
+    throw error;
+  }
+}
 
-  // Reset the job to pending
-  await query(
-    `UPDATE letter_jobs
-     SET status = 'pending',
-         attempts = 0,
-         error_message = NULL,
-         last_error = NULL,
-         scheduled_at = NOW(),
-         next_attempt_at = NOW(),
-         started_at = NULL,
-         completed_at = NULL,
-         locked_at = NULL,
-         updated_at = NOW(),
-         metadata = jsonb_set(
-           COALESCE(metadata, '{}'::jsonb),
-           '{retried_by}',
-           $2::jsonb
-         )
-     WHERE job_id = $1`,
-    [jobId, JSON.stringify({ admin: adminInfo.email || adminInfo.userId, at: new Date().toISOString() })]
-  );
-
-  console.log('🔄 Admin retried job');
-
-  sendJson(res, 200, {
-    success: true,
-    message: 'Job has been reset to pending and will be processed soon.',
-    jobId,
-  });
+async function handleTransitionCommerceAlert(
+  req: IncomingMessage,
+  res: ServerResponse,
+  alertId: string,
+  adminInfo: { userId: string }
+) {
+  const body = await parseBody(req);
+  const status = body.status === 'acknowledged' || body.status === 'resolved' ? body.status : null;
+  const resolutionCode = typeof body.resolutionCode === 'string' ? body.resolutionCode : '';
+  const idempotencyKey = typeof body.idempotencyKey === 'string' ? body.idempotencyKey : '';
+  if (!UUID_PATTERN.test(alertId) || !status || !OPERATOR_IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey) ||
+      (status === 'resolved' && !/^[a-z][a-z0-9_]{2,79}$/.test(resolutionCode))) {
+    sendJson(res, 400, { error: 'Invalid alert transition request' });
+    return;
+  }
+  const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+  try {
+    const result = await transaction(async client => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [idempotencyKey]);
+      const replay = await client.query<{
+        operation: string; target_type: string; target_reference_hash: string;
+        actor_subject_hash: string; reason_code: string; requested_status: string;
+      }>(
+        `SELECT operation, target_type, target_reference_hash, actor_subject_hash,
+                reason_code, after_state->>'status' AS requested_status
+         FROM commerce_operator_audit_events
+         WHERE idempotency_key_hash = $1`, [hash(idempotencyKey)]
+      );
+      if (replay.rows[0]) {
+        const existing = replay.rows[0];
+        if (existing.operation !== 'commerce_alert_transition' ||
+            existing.target_type !== 'commerce_alert' ||
+            existing.target_reference_hash !== hash(alertId) ||
+            existing.actor_subject_hash !== hash(adminInfo.userId) ||
+            existing.reason_code !== (resolutionCode || 'operator_acknowledged') ||
+            existing.requested_status !== status) {
+          throw new Error('idempotency_conflict');
+        }
+        return { replayed: true };
+      }
+      const locked = await client.query<{ status: string; severity: string; alert_type: string }>(
+        `SELECT status, severity, alert_type FROM commerce_operational_alerts
+         WHERE alert_id = $1 FOR UPDATE`, [alertId]
+      );
+      const current = locked.rows[0];
+      if (!current) throw new Error('not_found');
+      if (current.status === 'resolved' || (status === 'acknowledged' && current.status !== 'open')) {
+        throw new Error('invalid_state');
+      }
+      await client.query(
+        `UPDATE commerce_operational_alerts SET status = $2,
+           acknowledged_at = CASE WHEN $2 = 'acknowledged' THEN NOW() ELSE acknowledged_at END,
+           acknowledged_by_actor_hash = CASE WHEN $2 = 'acknowledged' THEN $3 ELSE acknowledged_by_actor_hash END,
+           resolved_at = CASE WHEN $2 = 'resolved' THEN NOW() ELSE NULL END,
+           resolved_by_actor_hash = CASE WHEN $2 = 'resolved' THEN $3 ELSE NULL END,
+           resolution_code = CASE WHEN $2 = 'resolved' THEN $4 ELSE NULL END,
+           updated_at = NOW() WHERE alert_id = $1`,
+        [alertId, status, hash(adminInfo.userId), resolutionCode || null]
+      );
+      await client.query(
+        `INSERT INTO commerce_operator_audit_events
+           (idempotency_key_hash, actor_subject_hash, operation, target_type,
+            target_reference_hash, reason_code, before_state, after_state)
+         VALUES ($1, $2, 'commerce_alert_transition', 'commerce_alert', $3, $4, $5, $6)`,
+        [hash(idempotencyKey), hash(adminInfo.userId), hash(alertId),
+          resolutionCode || 'operator_acknowledged',
+          JSON.stringify({ status: current.status, severity: current.severity, type: current.alert_type }),
+          JSON.stringify({ status, severity: current.severity, type: current.alert_type })]
+      );
+      return { replayed: false };
+    });
+    sendJson(res, 200, { success: true, status, ...result });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'transition_failed';
+    sendJson(res, code === 'not_found' ? 404 : 409, { error: code });
+  }
 }
 
 // =========================================================================

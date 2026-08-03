@@ -39,6 +39,7 @@ const readOnlyTools = [
   { name: 'get_started', readOnly: true },
   { name: 'get_account_balance', readOnly: true },
   { name: 'get_order_status', readOnly: true },
+  { name: 'get_purchase_status', readOnly: true },
   { name: 'get_return_address', readOnly: true },
   { name: 'list_orders', readOnly: true },
 ];
@@ -59,6 +60,7 @@ const sendTools = [
 
 // Other write tools
 const otherWriteTools = [
+  { name: 'create_mail_checkout', readOnly: false },
   { name: 'set_return_address', readOnly: false },
   { name: 'confirm_uploaded_image', readOnly: false },
   { name: 'submit_feature_request', readOnly: false },
@@ -91,8 +93,8 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       }
     );
 
-    it('should have exactly 5 read-only tools', () => {
-      expect(readOnlyTools.length).toBe(5);
+    it('should have exactly 6 read-only tools', () => {
+      expect(readOnlyTools.length).toBe(6);
     });
   });
 
@@ -246,44 +248,44 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
   });
 
   describe('Tool Classification Summary', () => {
-    it('should cover all 17 registered tools in annotation checks', () => {
+    it('should cover all 19 registered tools in annotation checks', () => {
       const runtimeToolNames = new LetterIrlServer().listTools().map((tool) => tool.name).sort();
       const checkedToolNames = allTools.map((tool) => tool.name).sort();
 
-      expect(allTools.length).toBe(17);
+      expect(allTools.length).toBe(19);
       expect(checkedToolNames).toEqual(runtimeToolNames);
     });
 
-    it('should have 5 read-only tools', () => {
+    it('should have 6 read-only tools', () => {
       const readOnlyCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === true;
       }).length;
-      expect(readOnlyCount).toBe(5);
+      expect(readOnlyCount).toBe(6);
     });
 
-    it('should have 12 write tools (non-read-only)', () => {
+    it('should have 13 write tools (non-read-only)', () => {
       const writeCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === false;
       }).length;
-      expect(writeCount).toBe(12);
+      expect(writeCount).toBe(13);
     });
 
-    it('should have 8 open-world tools (call external APIs)', () => {
+    it('should have 9 open-world tools (call external APIs)', () => {
       const openWorldCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.openWorldHint === true;
       }).length;
-      expect(openWorldCount).toBe(8);
+      expect(openWorldCount).toBe(9);
     });
 
-    it('should have 5 idempotent tools (send + address management + upload relay)', () => {
+    it('should have 6 idempotent tools (send + checkout + address management + upload relay)', () => {
       const idempotentCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.idempotentHint === true;
       }).length;
-      expect(idempotentCount).toBe(5);
+      expect(idempotentCount).toBe(6);
     });
 
     it('should have 1 destructive tool', () => {

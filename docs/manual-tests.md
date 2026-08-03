@@ -523,3 +523,67 @@ Check admin panel or database for active test campaigns.
 - PostGrid test mode or dummy provider for letter tests
 - Document any issues found in GitHub Issues
 - Update this checklist as features change
+
+## LIRL · Test · Browser — Issue #69 Pay & Send
+
+**Execution status:** Not executed as part of the implementation PR. The test
+coordinator must record the date, tester, client versions, order IDs, Stripe
+session/payment/refund IDs, screenshots, and pass/fail results here or in the
+linked PR before enabling Pay & Send.
+
+### Preconditions
+
+- [ ] Use only the Railway **development** services and isolated Neon development database.
+- [ ] Confirm migration `021_jit_commerce_foundation.sql` is recorded in development.
+- [ ] Before applying migration 023, rerun both migration orders with the exact issue #162 `022_admin_audit.sql`. Confirm 023 is independently recorded only after both orders converge structurally, including defaults, constraints, triggers/functions, and privileges.
+- [ ] Confirm Stripe is in sandbox/test mode and both JIT prices are active at USD 4.99.
+- [ ] Confirm the non-production mail provider is selected; no real mail may be submitted.
+- [ ] Start with `JIT_PURCHASE_ENABLED=false`; the test coordinator may enable it in development only for this test and must restore it afterward.
+- [ ] Prepare separate owner and non-owner test users, one zero-balance account, and one account with sufficient prepaid balance.
+
+### Browser acceptance
+
+1. [ ] In the desktop ChatGPT client, create and preview a letter with the zero-balance user. Choose **Pay & Send**, verify the checkout describes that exact letter and charges USD 4.99, complete sandbox payment, return to the conversation, observe **Paid - preparing mail**, and then observe **Sent**.
+2. [ ] Repeat the complete path for a 6x9 postcard and verify the checkout describes that exact postcard at USD 4.99.
+3. [ ] Repeat the letter or postcard happy path on Android, including return from Stripe to ChatGPT and the processing-to-sent status transition.
+4. [ ] When `JIT_ALLOW_WITH_PREPAID_BALANCE=true`, confirm a funded user can see both the normal prepaid send action and Pay & Send; confirm the pack purchase action is not redundantly shown beside an already-available prepaid send.
+5. [ ] Open Pay & Send and abandon the checkout. After Stripe reports the session expired, confirm the draft remains unsent and a new checkout or prepaid send can be started.
+6. [ ] While a JIT checkout is active, attempt prepaid send for the same draft and confirm it is rejected. After a prepaid send wins, attempt to fulfill a late paid JIT session for that draft and confirm no second mail item is created and the paid order enters refund handling.
+7. [ ] As the non-owner, attempt checkout and purchase-status access for the owner's draft/order. Confirm both are rejected without revealing whether the target exists.
+8. [ ] Buy a sandbox letter pack and send from its balance to regression-test the existing prepaid path.
+
+### Stripe, database, and recovery evidence
+
+- [ ] For each successful JIT purchase, verify one authoritative `orders` row, one consumed draft, one funded `letters` row, one outbox job, one provider submission, and the configured image entitlement grant.
+- [ ] Replay both completed-payment and asynchronous-payment-success events. Verify webhook-event deduplication and no duplicate fulfillment, provider submission, credit, or entitlement.
+- [ ] Leave an asynchronous Checkout session in `complete`/`unpaid`; run maintenance and confirm it remains `checkout_pending` until Stripe reports success, failure, or expiry.
+- [ ] Simulate a terminal failure before provider acceptance. Confirm `refund_pending`, at most one active Stripe refund for the order, retry recovery after a failed refund, and eventual `refunded` status.
+- [ ] Start two refund-maintenance attempts concurrently and confirm only one acquires the lease and contacts Stripe. Then interrupt persistence after Stripe creates the refund; on replay, confirm the existing refund is discovered and finalized without creating another.
+- [ ] Issue a partial sandbox refund and confirm the whole order and all entitlements are not marked refunded/revoked; then complete the full refund and verify terminal state.
+- [ ] Confirm provider acceptance changes the JIT order to `fulfilled`; failures before acceptance use refund handling and never resubmit an already accepted mail item.
+- [ ] Force PostGrid 429, 500, 502, 503, and 504 responses and confirm each becomes a held/ambiguous outcome with a `mail_provider_outcome_ambiguous` alert, no refund, and no second submission. Repeat with a timeout/connection loss, a truncated response body, and a 2xx body missing `id`/`status`. Confirm the admin retry endpoint rejects every one of them, and that only a non-ambiguous 4xx (400/401/403/404/422) becomes a definite rejection eligible for refund and audited retry.
+- [ ] Confirm an audited retry can restore JIT fulfillment only before refund starts; cross-account/replayed/changed requests fail closed.
+- [ ] Remove one `STRIPE_*_AMOUNT_CENTS` and confirm both the current and legacy pack checkout paths fail closed with a stable configuration error, create no order, and call no Stripe API.
+- [ ] With that variable still missing, complete a paid sandbox checkout that no order can bind. Confirm the webhook event is retained as `unmatched` with an open critical `stripe_money_event_unmatched` alert, no credits are granted, and the customer's payment is visible to an operator. Restore the variable and confirm the alert still requires manual reconciliation — this case does not auto-recover, and redelivering the event from Stripe is deduplicated.
+- [ ] After a sandbox provider accepts a submission, fault the database result-persistence step. Confirm the outbox becomes `held`/`ambiguous`, no refund or automatic resend starts, and an authenticated operator must reconcile the single provider outcome.
+- [ ] Resolve an ambiguous mail job with conclusive provider acceptance and confirm the existing submission becomes `accepted`/`completed` without another provider call. For a provider-confirmed rejection, test both explicit outcomes: `retry` must atomically restore the held job/letter/JIT order to `pending`/`queued`/`fulfillment_pending` with the same provider idempotency key, while `rejected` must make the job terminal/exhausted and move the JIT order to `refund_pending`. Confirm exact replay is harmless, changed-actor/key reuse conflicts, and accepted/refund-resolved work cannot be re-mailed.
+- [ ] Race a full refund and a dispute against the final pre-dispatch lock. Confirm the winner atomically cancels undispatched mail or holds ambiguous dispatched mail; an admin retry must reject refunded, disputed, held, accepted, and exhausted jobs.
+- [ ] From the hardened local origin, inspect `commerce_operational_alerts`, acknowledge one, resolve one with a safe resolution code, and replay the same idempotency key. Confirm cross-origin, preflight, missing custom-header, non-JSON mutation, bad-CSRF, proxied, and unauthenticated requests fail closed without CORS readback.
+- [ ] Confirm a zero-entitlement account cannot use Letter IRL-funded generation but can upload or reuse an external/conversation-generated image. After provider generation succeeds, simulate temporary-image storage failure and confirm the entitlement is still consumed.
+- [ ] Stop the application after reservation commit but before durable dispatch; after the pre-dispatch lease expires, run maintenance and confirm the exact entitlement is released once.
+- [ ] Simulate a definite 4xx provider rejection after dispatch and confirm the exact entitlement is released. Separately simulate a transport timeout or 5xx response and confirm the reservation becomes `ambiguous`, quota remains held, and no automatic retry spends a second provider generation.
+- [ ] Use the authenticated admin procedure in `docs/deployment.md` to inspect ambiguous reservations. Confirm an unauthenticated request cannot inspect or resolve them and a mismatched account cannot mutate the reservation.
+- [ ] Resolve one ambiguous reservation from provider evidence with `consume` / `provider_confirmed_succeeded` and confirm it becomes `consumed` without quota restoration. Resolve another with `release` / `provider_confirmed_failed` (or an explicitly approved `customer_compensation`) and confirm only its exact entitlement is restored once.
+- [ ] Replay each resolution with the same idempotency key and exact body. Confirm HTTP 200 with `replayed: true`, one audit row, and no second counter change. Reuse the key with changed evidence and confirm a conflict with no mutation.
+- [ ] Confirm operator diagnostics retain the stable decision/result classifications but never include reservation, account, provider request, address, URL, endpoint, tracking, or image identifiers.
+- [ ] Replay a Stripe dispute event after forcing the first durable-alert insert to roll back. Confirm retry creates exactly one webhook claim and one sanitized open operational alert with no recipient, letter, order, dispute, charge, payment, or user identifier in alert details or logs.
+- [ ] Close that sandbox dispute and confirm the matching open alert becomes `resolved` with a safe `stripe_dispute_*` resolution code while an idempotent close alert is recorded; unrelated dispute alerts must remain open.
+- [ ] Cause checkout completion handling to roll back, then issue a dashboard refund before replaying checkout. Confirm the refund creates `stripe_money_event_unmatched`; later checkout/reconciliation resolves it into `refund_pending` without creating a letter or provider submission. Repeat with missing payment/order references and confirm the durable alert remains open.
+- [ ] Race provider-acceptance persistence against a full refund in disposable PostgreSQL. Confirm no deadlock, one accepted provider submission, a refunded order, and a critical already-dispatched alert; no retry path may submit the mail again.
+- [ ] Run Stripe reconciliation with one fulfilled pack and one funded JIT order. Confirm the pack ledger is joined through `order_id -> stripe_checkout_session_id`, JIT requires no credit row, and both match. Remove a test pack grant and confirm repair locks the exact fulfilled order/session and restores its ledger plus image entitlement once under concurrent attempts. A pending JIT checkout, wrong session, or amount/currency mismatch must require webhook/operator review and must never receive pack credits.
+
+### Teardown
+
+- [ ] Restore `JIT_PURCHASE_ENABLED=false` in Railway development.
+- [ ] Confirm production configuration, Stripe live mode, production Neon, and production mail-provider state were never changed.
+- [ ] Attach the collected browser, Stripe, provider, and database evidence to the draft PR and record any deviations as linked issues.

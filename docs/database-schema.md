@@ -492,3 +492,43 @@ All tables with `updated_at` columns have triggers calling `update_updated_at_co
 - promo_campaigns
 - letter_drafts
 - stripe_disputes
+
+# Commerce and image entitlements (migration 021)
+
+`orders` is authoritative for both `letter_pack` and `jit_mail` purchases. It
+stores the server-selected product snapshot, exact amount/currency, unique
+Stripe Checkout Session and PaymentIntent IDs, an application idempotency key,
+the bound draft/letter for JIT mail, and payment/fulfillment/refund timestamps.
+A partial unique index permits only one active JIT order per draft.
+
+`stripe_webhook_events` claims each verified Stripe event ID in the same
+transaction as its order transition. `commerce_order_events` provides a
+sanitized transition audit trail. `letters.funding_type` records either
+`prepaid_balance` or `jit_order`, and JIT-funded letters reference exactly one
+commerce order.
+
+`image_entitlements` replaces the lifetime `credits_purchased` formula with
+explicit replay-safe grants. `image_generation_reservations` binds each atomic
+generation reservation to its exact grant so failed provider calls can release
+the correct unit. Migration 021 preserves previously earned allowances as a
+`legacy_migration` grant.
+
+Migration 023 extends each reservation with a durable dispatch lease and
+provider outcome state. `reserved` means no provider dispatch has been durably
+authorized, `dispatched` is the pre-network boundary, `consumed` and `released`
+are definite outcomes, and `ambiguous` quarantines an outcome that cannot be
+proved after dispatch. Ambiguous rows retain quota until provider evidence or
+an explicit customer-compensation decision resolves them. A unique non-null
+provider request ID supports reconciliation without exposing it in logs.
+`commerce_operator_audit_events` records privacy-minimized hashes for the
+authenticated actor, target, and idempotency key plus constrained before/after
+state and provider-evidence classifications. It is append-only, has no user or
+domain foreign keys that could block account deletion, and expires into an
+owner-controlled retention workflow. The durable audit insert and exact
+reservation/entitlement mutation share one transaction.
+
+`commerce_operational_alerts` stores sanitized Stripe dispute work in the same
+transaction as `stripe_webhook_events`. Its unique source-event/type key makes
+replay safe, while open/acknowledged/resolved states survive process restarts.
+The same table surfaces ambiguous mail dispatch and refund-after-dispatch work;
+operator transitions are idempotent and append an audit event atomically.

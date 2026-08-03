@@ -24,3 +24,17 @@ Letter IRL registers five OpenAI Apps SDK widgets as MCP resources with `ui://` 
 - Keep previews mobile-friendly and resilient to delayed or repeated render lifecycle events.
 - Clearly show recipient context before confirmation when available.
 - Prefer direct conversation image reuse or `imageUrl` handoff before opening the upload widget.
+
+# Pay & Send preview actions
+
+When prepaid balance is sufficient, letter and postcard preview widgets retain
+their existing Send action. When it is insufficient, the widgets render the
+server-provided alternatives:
+
+- **Pay & Send** calls `create_mail_checkout`, displays the exact physical item
+  and amount, and opens Stripe with `window.openai.openExternal`.
+- **Buy a Letter Pack** opens the configured `LETTER_IRL_PACKS_URL`.
+
+After opening checkout, the widget polls `get_purchase_status` for a bounded
+period and shows webhook delay as processing rather than failure. Widget CSP is
+limited to the configured Letter IRL endpoint and Stripe-hosted Checkout.

@@ -17,10 +17,12 @@ export type ImageContext = "postcard" | "header_image" | "inline_image";
 
 export interface GenerateImageOptions {
   context?: ImageContext;
+  beforeDispatch?: () => Promise<void>;
 }
 
 export interface GenerateImageResult {
   base64Data: string;
+  providerRequestId?: string;
 }
 
 // ============================================================================
@@ -34,8 +36,11 @@ export class ImageGenerationError extends Error {
       | "CONTENT_POLICY_VIOLATION"
       | "RATE_LIMITED"
       | "API_ERROR"
-      | "INVALID_PROMPT",
-    public readonly userMessage: string
+      | "INVALID_PROMPT"
+      | "AMBIGUOUS_PROVIDER_OUTCOME",
+    public readonly userMessage: string,
+    public readonly outcome: "definite_failure" | "ambiguous" = "definite_failure",
+    public readonly providerRequestId?: string
   ) {
     super(userMessage);
     this.name = "ImageGenerationError";
@@ -90,22 +95,35 @@ export async function generateImage(
   const quality = process.env.OPENAI_IMAGE_QUALITY ?? "medium";
   const size = SIZE_MAP[options.context ?? ""] ?? DEFAULT_SIZE;
 
-  const response = await fetch("https://api.openai.com/v1/images/generations", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      prompt: prompt.trim(),
-      n: 1,
-      size,
-      quality,
-      output_format: "jpeg",
-      output_compression: 85
-    })
-  });
+  await options.beforeDispatch?.();
+
+  let response: Response;
+  try {
+    response = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        prompt: prompt.trim(),
+        n: 1,
+        size,
+        quality,
+        output_format: "jpeg",
+        output_compression: 85
+      })
+    });
+  } catch {
+    throw new ImageGenerationError(
+      "AMBIGUOUS_PROVIDER_OUTCOME",
+      "Image generation had an uncertain provider outcome. Support can reconcile the reserved generation.",
+      "ambiguous"
+    );
+  }
+
+  const providerRequestId = response.headers?.get?.("x-request-id") || undefined;
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -130,25 +148,47 @@ export async function generateImage(
       );
     }
 
+    if (response.status === 408 || response.status >= 500) {
+      throw new ImageGenerationError(
+        "AMBIGUOUS_PROVIDER_OUTCOME",
+        "Image generation had an uncertain provider outcome. Support can reconcile the reserved generation.",
+        "ambiguous",
+        providerRequestId
+      );
+    }
+
     throw new ImageGenerationError(
       "API_ERROR",
-      errorMessage ?? "Image generation failed. Please try again."
+      errorMessage ? "The image provider rejected the request." : "Image generation failed. Please try again.",
+      "definite_failure",
+      providerRequestId
     );
   }
 
-  const data = (await response.json()) as {
-    data: Array<{ b64_json: string }>;
-  };
+  let data: { data: Array<{ b64_json: string }> };
+  try {
+    data = (await response.json()) as { data: Array<{ b64_json: string }> };
+  } catch {
+    throw new ImageGenerationError(
+      "AMBIGUOUS_PROVIDER_OUTCOME",
+      "Image generation completed with an unreadable provider response. Support can reconcile the reserved generation.",
+      "ambiguous",
+      providerRequestId
+    );
+  }
 
   const image = data.data[0];
   if (!image?.b64_json) {
     throw new ImageGenerationError(
-      "API_ERROR",
-      "Image generation returned no data. Please try again."
+      "AMBIGUOUS_PROVIDER_OUTCOME",
+      "Image generation completed without a usable result. Support can reconcile the reserved generation.",
+      "ambiguous",
+      providerRequestId
     );
   }
 
   return {
-    base64Data: image.b64_json
+    base64Data: image.b64_json,
+    providerRequestId
   };
 }

@@ -15,10 +15,19 @@ vi.mock("../../../src/services/imageGenerationService.js", () => ({
   ImageGenerationError: class ImageGenerationError extends Error {
     code: string;
     userMessage: string;
-    constructor(code: string, userMessage: string) {
+    outcome: "definite_failure" | "ambiguous";
+    providerRequestId?: string;
+    constructor(
+      code: string,
+      userMessage: string,
+      outcome: "definite_failure" | "ambiguous" = "definite_failure",
+      providerRequestId?: string
+    ) {
       super(userMessage);
       this.code = code;
       this.userMessage = userMessage;
+      this.outcome = outcome;
+      this.providerRequestId = providerRequestId;
       this.name = "ImageGenerationError";
     }
   }
@@ -41,6 +50,9 @@ vi.mock("../../../src/services/tempImageStore.js", () => ({
 
 // Mock image generation limit service
 vi.mock("../../../src/services/imageGenerationLimitService.js", () => ({
+  commitGenerationReservation: vi.fn(),
+  markGenerationDispatched: vi.fn(),
+  markGenerationReservationAmbiguous: vi.fn(),
   releaseGenerationReservation: vi.fn(),
   reserveGeneration: vi.fn()
 }));
@@ -51,6 +63,9 @@ import {
 } from "../../../src/services/imageGenerationService.js";
 import { storeImage } from "../../../src/services/tempImageStore.js";
 import {
+  commitGenerationReservation,
+  markGenerationDispatched,
+  markGenerationReservationAmbiguous,
   releaseGenerationReservation,
   reserveGeneration
 } from "../../../src/services/imageGenerationLimitService.js";
@@ -58,6 +73,9 @@ import { generateImageTool } from "../../../src/tools/generateImage.js";
 
 const mockGenerateImage = generateImage as ReturnType<typeof vi.fn>;
 const mockStoreImage = storeImage as ReturnType<typeof vi.fn>;
+const mockCommitReservation = commitGenerationReservation as ReturnType<typeof vi.fn>;
+const mockMarkDispatched = markGenerationDispatched as ReturnType<typeof vi.fn>;
+const mockMarkAmbiguous = markGenerationReservationAmbiguous as ReturnType<typeof vi.fn>;
 const mockReleaseReservation = releaseGenerationReservation as ReturnType<typeof vi.fn>;
 const mockReserveGeneration = reserveGeneration as ReturnType<typeof vi.fn>;
 
@@ -88,11 +106,15 @@ describe("generate_image tool", () => {
     // Default: reserve generation with plenty remaining
     mockReserveGeneration.mockResolvedValue({
       reserved: true,
+      reservationId: "reservation-1",
       used: 3,
       allowance: 25,
       remaining: 22
     });
-    mockReleaseReservation.mockResolvedValue(undefined);
+    mockMarkDispatched.mockResolvedValue(true);
+    mockMarkAmbiguous.mockResolvedValue(true);
+    mockCommitReservation.mockResolvedValue(true);
+    mockReleaseReservation.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -247,7 +269,8 @@ describe("generate_image tool", () => {
       );
 
       expect(mockGenerateImage).toHaveBeenCalledWith("a sunset", {
-        context: "postcard"
+        context: "postcard",
+        beforeDispatch: expect.any(Function)
       });
     });
 
@@ -270,7 +293,10 @@ describe("generate_image tool", () => {
     });
 
     it("should reserve generation before API call", async () => {
-      mockGenerateImage.mockResolvedValueOnce({ base64Data: "fakeb64" });
+      mockGenerateImage.mockImplementationOnce(async (_prompt, options) => {
+        await options.beforeDispatch?.();
+        return { base64Data: "fakeb64" };
+      });
 
       const context = createMockContext();
       await generateImageTool.handler(
@@ -279,7 +305,9 @@ describe("generate_image tool", () => {
       );
 
       expect(mockReserveGeneration).toHaveBeenCalledWith("test-user-id");
+      expect(mockMarkDispatched).toHaveBeenCalledWith("test-user-id", "reservation-1");
       expect(mockGenerateImage).toHaveBeenCalled();
+      expect(mockCommitReservation).toHaveBeenCalledWith("reservation-1");
       expect(mockReleaseReservation).not.toHaveBeenCalled();
     });
   });
@@ -296,7 +324,7 @@ describe("generate_image tool", () => {
       const context = createMockContext();
       await expect(
         generateImageTool.handler({ prompt: "a sunset" }, context)
-      ).rejects.toThrow("used all your image generations");
+      ).rejects.toThrow("used all your Letter IRL image generations");
 
       // Should NOT have called generateImage
       expect(mockGenerateImage).not.toHaveBeenCalled();
@@ -331,7 +359,7 @@ describe("generate_image tool", () => {
       const context = createMockContext();
       await expect(
         generateImageTool.handler({ prompt: "a sunset" }, context)
-      ).rejects.toThrow("Purchase more letters");
+      ).rejects.toThrow("qualifying physical-mail purchase");
     });
 
     it("should log warning when limit is reached", async () => {
@@ -373,7 +401,11 @@ describe("generate_image tool", () => {
           context
         )
       ).rejects.toThrow("content policy");
-      expect(mockReleaseReservation).toHaveBeenCalledWith("test-user-id");
+      expect(mockReleaseReservation).toHaveBeenCalledWith(
+        "test-user-id",
+        "reservation-1",
+        "pre_dispatch_failure"
+      );
     });
 
     it("should throw user-friendly error for missing API key", async () => {
@@ -396,6 +428,44 @@ describe("generate_image tool", () => {
       await expect(
         generateImageTool.handler({ prompt: "a sunset" }, context)
       ).rejects.toThrow("Please try again");
+    });
+
+    it("should quarantine an ambiguous error after durable provider dispatch", async () => {
+      mockGenerateImage.mockImplementationOnce(async (_prompt, options) => {
+        await options.beforeDispatch?.();
+        throw new (ImageGenerationError as any)(
+          "AMBIGUOUS_PROVIDER_OUTCOME",
+          "Provider outcome unknown",
+          "ambiguous",
+          "request-ambiguous"
+        );
+      });
+
+      const context = createMockContext();
+      await expect(
+        generateImageTool.handler({ prompt: "a sunset" }, context)
+      ).rejects.toThrow("Provider outcome unknown");
+
+      expect(mockMarkAmbiguous).toHaveBeenCalledWith(
+        "test-user-id",
+        "reservation-1",
+        "provider_outcome_unknown",
+        "request-ambiguous"
+      );
+      expect(mockReleaseReservation).not.toHaveBeenCalled();
+    });
+
+    it("should consume the entitlement when storage fails after provider success", async () => {
+      mockGenerateImage.mockResolvedValueOnce({ base64Data: "billable-image" });
+      mockStoreImage.mockRejectedValueOnce(new Error("Storage unavailable"));
+
+      const context = createMockContext();
+      await expect(
+        generateImageTool.handler({ prompt: "a sunset" }, context)
+      ).rejects.toThrow("Please try again");
+
+      expect(mockCommitReservation).toHaveBeenCalledWith("reservation-1");
+      expect(mockReleaseReservation).not.toHaveBeenCalled();
     });
 
     it("should log ImageGenerationError as warning", async () => {

@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createCheckoutSession, authenticateHttpRequest, query } = vi.hoisted(() => ({
-  createCheckoutSession: vi.fn(),
+const {
+  createPackCheckout,
+  processStripeWebhookEvent,
+  verifyWebhookSignature,
+  authenticateHttpRequest,
+  query
+} = vi.hoisted(() => ({
+  createPackCheckout: vi.fn(),
+  processStripeWebhookEvent: vi.fn(),
+  verifyWebhookSignature: vi.fn(),
   authenticateHttpRequest: vi.fn(),
   query: vi.fn()
 }));
@@ -10,15 +18,17 @@ vi.mock("../../../src/api/middleware/auth.js", () => ({
   authenticateHttpRequest
 }));
 vi.mock("../../../src/services/stripeService.js", () => ({
-  createCheckoutSession,
-  verifyWebhookSignature: vi.fn(),
-  extractCheckoutData: vi.fn(),
-  getStripeClient: vi.fn()
+  verifyWebhookSignature
+}));
+vi.mock("../../../src/services/commerceService.js", () => ({
+  createPackCheckout,
+  processStripeWebhookEvent
 }));
 
 import {
   handleAuthCallback,
-  handleCreateCheckoutSession
+  handleCreateCheckoutSession,
+  handleStripeWebhook
 } from "../../../src/api/dashboardApiHandler.js";
 
 describe("dashboard runtime logging privacy", () => {
@@ -28,6 +38,12 @@ describe("dashboard runtime logging privacy", () => {
       userId: "auth0|private-user",
       email: "private@example.com",
       claims: {}
+    });
+    createPackCheckout.mockResolvedValue({
+      success: true,
+      orderId: "private-order",
+      sessionId: "private-session",
+      sessionUrl: "https://example.test/checkout"
     });
   });
   afterEach(() => {
@@ -57,7 +73,7 @@ describe("dashboard runtime logging privacy", () => {
 
   it("does not log or return arbitrary checkout exceptions", async () => {
     const sensitive = "private checkout exception cs_private auth0|private-user";
-    createCheckoutSession.mockRejectedValue(new Error(sensitive));
+    createPackCheckout.mockRejectedValue(new Error(sensitive));
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
@@ -76,7 +92,7 @@ describe("dashboard runtime logging privacy", () => {
   });
 
   it("classifies known checkout configuration failures", async () => {
-    createCheckoutSession.mockResolvedValue({ success: false, error: "STRIPE_SECRET_KEY not configured" });
+    createPackCheckout.mockResolvedValue({ success: false, error: "STRIPE_SECRET_KEY not configured" });
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
@@ -108,6 +124,33 @@ describe("dashboard runtime logging privacy", () => {
     expect(logged).toContain('"errorClass":"database_error"');
     expect(logged).not.toContain(sensitive);
     expect(body).not.toContain(sensitive);
-    expect(createCheckoutSession).not.toHaveBeenCalled();
+    expect(createPackCheckout).not.toHaveBeenCalled();
+  });
+
+  it("does not log arbitrary commerce webhook exceptions or event identifiers", async () => {
+    const sensitive = "private webhook failure evt_private pi_private auth0|private-user";
+    verifyWebhookSignature.mockReturnValue({
+      id: "evt_private",
+      type: "checkout.session.completed",
+      data: { object: { id: "cs_private" } }
+    });
+    processStripeWebhookEvent.mockRejectedValue(new Error(sensitive));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const req = {
+      headers: { "stripe-signature": "private-signature" },
+      body: "private-body"
+    };
+    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+    await handleStripeWebhook(req as never, res as never);
+
+    const output = [...error.mock.calls, ...log.mock.calls].flat().map(String).join("\n");
+    const body = String(res.end.mock.calls[0][0]);
+    expect(output).toContain('"event":"credits.webhook_failed"');
+    for (const value of [sensitive, "evt_private", "pi_private", "cs_private"]) {
+      expect(output).not.toContain(value);
+      expect(body).not.toContain(value);
+    }
   });
 });

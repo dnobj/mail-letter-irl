@@ -9,22 +9,12 @@
 
 import http from 'node:http';
 import { randomBytes } from 'node:crypto';
-import {
-  createCheckoutSession,
-  verifyWebhookSignature,
-  extractCheckoutData,
-  getStripeClient
-} from '../services/stripeService.js';
-import { addCreditsWithOptions, deductCredits } from '../services/creditService.js';
+import { verifyWebhookSignature } from '../services/stripeService.js';
+import { createPackCheckout, processStripeWebhookEvent } from '../services/commerceService.js';
 import { authenticateHttpRequest } from './middleware/auth.js';
 import { parseCookies, serializeCookie } from '../utils/cookies.js';
 import { query } from '../db/index.js';
-import { updateUserTier, invalidateTierCache } from '../services/tierService.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
-
-// Default expiration for purchased credits (2 years)
-const DEFAULT_PURCHASE_EXPIRATION_DAYS = 730;
-import Stripe from 'stripe';
 
 // Extended request/response types with cookie support
 type Request = http.IncomingMessage & {
@@ -123,7 +113,7 @@ export async function handleCreateCheckoutSession(
     }
 
     // Create checkout session
-    const result = await createCheckoutSession({
+    const result = await createPackCheckout({
       userId: authInfo.userId,
       userEmail: userEmail || '',
       productId: productId as any,
@@ -136,13 +126,16 @@ export async function handleCreateCheckoutSession(
 
       res.json({
         success: true,
+        orderId: result.orderId,
         sessionId: result.sessionId,
         sessionUrl: result.sessionUrl
       });
     } else {
       // Distinguish between configuration errors and other failures
       const errorMessage = result.error || 'Failed to create checkout session';
-      const configurationFailure = errorMessage.includes('not configured') || errorMessage.includes('environment variable');
+      const configurationFailure =
+        errorMessage.includes('not configured') ||
+        errorMessage.includes('environment variable');
       writeDiagnostic('error', 'credits.checkout_creation_failed', {
         errorClass: configurationFailure ? 'configuration_error' : 'provider_error'
       });
@@ -151,7 +144,7 @@ export async function handleCreateCheckoutSession(
         res.statusCode = 503;
         res.json({
           error: 'Service configuration error',
-          message: 'Payment processing is temporarily unavailable. Please try again later.',
+          message: 'Payment processing is temporarily unavailable. Please try again later.'
         });
       } else if (errorMessage.includes('Invalid product')) {
         // Client error - bad request
@@ -196,7 +189,7 @@ export async function handleStripeWebhook(
     const signature = req.headers['stripe-signature'];
 
     if (!signature || typeof signature !== 'string') {
-      console.error('❌ Webhook: Missing Stripe signature');
+      writeDiagnostic('warn', 'stripe.webhook_signature_missing');
       res.statusCode = 400;
       res.end('Missing signature');
       return;
@@ -206,361 +199,25 @@ export async function handleStripeWebhook(
     const event = verifyWebhookSignature(req.body, signature);
 
     if (!event) {
-      console.error('❌ Webhook: Invalid signature');
+      writeDiagnostic('warn', 'stripe.webhook_signature_invalid');
       res.statusCode = 400;
       res.end('Invalid signature');
       return;
     }
 
-    console.log(`📥 Webhook received: ${event.type}`);
+    writeDiagnostic('info', 'stripe.webhook_received', { eventType: event.type });
 
-    // Handle different event types
-    switch (event.type) {
-      case 'checkout.session.completed':
-        await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session);
-        break;
-
-      case 'checkout.session.async_payment_succeeded':
-        await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session);
-        break;
-
-      case 'checkout.session.async_payment_failed':
-        writeDiagnostic('warn', 'credits.async_payment_failed');
-        break;
-
-      case 'charge.refunded':
-        await handleChargeRefunded(event.data.object as Stripe.Charge);
-        break;
-
-      case 'refund.created':
-        await handleRefundCreated(event.data.object as Stripe.Refund);
-        break;
-
-      case 'charge.dispute.created':
-        await handleDisputeCreated(event.data.object as Stripe.Dispute);
-        break;
-
-      case 'charge.dispute.closed':
-        await handleDisputeClosed(event.data.object as Stripe.Dispute);
-        break;
-
-      default:
-        console.log(`ℹ️  Unhandled event type: ${event.type}`);
-    }
-
-    res.json({ received: true });
-  } catch (error: any) {
+    // The commerce service claims the Stripe event and applies its state
+    // transition in one database transaction.
+    const processed = await processStripeWebhookEvent(event);
+    res.json({ received: true, duplicate: processed.duplicate });
+    return;
+  } catch (error: unknown) {
     writeDiagnostic('error', 'credits.webhook_failed', {
       errorClass: classifyDiagnosticError(error, 'provider_error')
     });
     res.statusCode = 500;
     res.json({ error: 'Webhook processing failed' });
-  }
-}
-
-/**
- * Process successful checkout session
- * Implements idempotency to prevent duplicate credit additions from webhook retries
- */
-async function handleCheckoutSessionCompleted(
-  session: Stripe.Checkout.Session
-): Promise<void> {
-  try {
-    writeDiagnostic('info', 'credits.checkout_completed');
-
-    // Extract checkout data
-    const checkoutData = await extractCheckoutData(session);
-
-    if (!checkoutData) {
-      console.error('❌ Failed to extract checkout data');
-      return;
-    }
-
-    // Idempotency check: verify this session hasn't already been processed
-    const existingEntry = await query<{ ledger_id: string }>(
-      `SELECT ledger_id FROM credit_ledger
-       WHERE source_reference_id = $1 AND source_type = 'purchase'
-       LIMIT 1`,
-      [session.id]
-    );
-
-    if (existingEntry.rows.length > 0) {
-      writeDiagnostic('info', 'credits.checkout_already_processed');
-      return;
-    }
-
-    writeDiagnostic('info', 'credits.checkout_applying', { credits: checkoutData.credits });
-
-    // Add credits to user account with expiration tracking
-    await addCreditsWithOptions({
-      userId: checkoutData.userId,
-      email: checkoutData.customerEmail,
-      credits: checkoutData.credits,
-      sourceType: 'purchase',
-      sourceReferenceId: checkoutData.sessionId,
-      expirationDays: DEFAULT_PURCHASE_EXPIRATION_DAYS,
-      description: `Purchased ${checkoutData.productId} via Stripe Checkout`,
-      sourceMetadata: {
-        stripe_session_id: checkoutData.sessionId,
-        product_id: checkoutData.productId,
-        amount_paid: checkoutData.amountPaid,
-        customer_email: checkoutData.customerEmail
-      }
-    });
-
-    writeDiagnostic('info', 'credits.checkout_applied', { credits: checkoutData.credits });
-  } catch (error: any) {
-    writeDiagnostic('error', 'credits.checkout_completion_failed', {
-      errorClass: classifyDiagnosticError(error, 'database_error')
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle charge.refunded event
- * Revokes credits from the refunded purchase and recalculates user tier
- */
-async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
-  try {
-    writeDiagnostic('info', 'credits.refund_received', { amount: charge.amount_refunded });
-
-    // Get the payment intent to find the checkout session
-    const paymentIntentId = typeof charge.payment_intent === 'string'
-      ? charge.payment_intent
-      : charge.payment_intent?.id;
-
-    if (!paymentIntentId) {
-      console.error('❌ Refund webhook: No payment intent ID on charge');
-      return;
-    }
-
-    // Use Stripe API to find checkout session from payment intent
-    const stripe = getStripeClient();
-    let checkoutSessionId: string | null = null;
-
-    try {
-      // Search for checkout sessions with this payment intent
-      const sessions = await stripe.checkout.sessions.list({
-        payment_intent: paymentIntentId,
-        limit: 1
-      });
-
-      if (sessions.data.length > 0) {
-        checkoutSessionId = sessions.data[0].id;
-        writeDiagnostic('info', 'credits.checkout_match_found');
-      }
-    } catch (stripeError) {
-      writeDiagnostic('warn', 'credits.checkout_lookup_failed', {
-        errorClass: classifyDiagnosticError(stripeError, 'provider_error')
-      });
-    }
-
-    // Find the original purchase ledger entry by session ID or payment intent
-    let ledgerResult;
-    if (checkoutSessionId) {
-      // Look up by session ID (most reliable)
-      ledgerResult = await query<{
-        ledger_id: string;
-        user_id: string;
-        initial_amount: number;
-        remaining_amount: number;
-        source_metadata: any;
-      }>(
-        `SELECT ledger_id, user_id, initial_amount, remaining_amount, source_metadata
-         FROM credit_ledger
-         WHERE source_type = 'purchase'
-           AND (source_reference_id = $1 OR source_metadata->>'stripe_session_id' = $1)
-         LIMIT 1`,
-        [checkoutSessionId]
-      );
-    } else {
-      // Fallback: try to find by metadata containing the payment intent
-      ledgerResult = await query<{
-        ledger_id: string;
-        user_id: string;
-        initial_amount: number;
-        remaining_amount: number;
-        source_metadata: any;
-      }>(
-        `SELECT ledger_id, user_id, initial_amount, remaining_amount, source_metadata
-         FROM credit_ledger
-         WHERE source_type = 'purchase'
-           AND source_metadata->>'stripe_payment_intent' = $1
-         LIMIT 1`,
-        [paymentIntentId]
-      );
-    }
-
-    if (ledgerResult.rows.length === 0) {
-      writeDiagnostic('warn', 'credits.refund_purchase_not_found');
-      console.log('   This may be a refund for a purchase before ledger tracking was enabled.');
-      return;
-    }
-
-    const entry = ledgerResult.rows[0];
-    const userId = entry.user_id;
-
-    // Check if we've already processed this refund (idempotency)
-    const existingRefund = await query<{ ledger_id: string }>(
-      `SELECT ledger_id FROM credit_ledger
-       WHERE source_type = 'refund'
-         AND related_ledger_id = $1
-       LIMIT 1`,
-      [entry.ledger_id]
-    );
-
-    if (existingRefund.rows.length > 0) {
-      writeDiagnostic('info', 'credits.refund_already_processed');
-      return;
-    }
-
-    // Create a refund ledger entry (negative credits)
-    // This marks the original purchase as having a matching refund
-    await query(
-      `INSERT INTO credit_ledger (
-        user_id, initial_amount, remaining_amount, source_type,
-        source_reference_id, source_metadata, status, description,
-        related_ledger_id, activated_at
-      ) VALUES (
-        $1, $2, 0, 'refund', $3, $4, 'active', $5, $6, NOW()
-      )`,
-      [
-        userId,
-        -entry.initial_amount, // Negative amount for refund
-        charge.id,
-        JSON.stringify({
-          stripe_charge_id: charge.id,
-          stripe_refund_amount: charge.amount_refunded,
-          original_purchase_ledger_id: entry.ledger_id,
-        }),
-        `Refund for charge ${charge.id}`,
-        entry.ledger_id, // Link to original purchase
-      ]
-    );
-
-    writeDiagnostic('info', 'credits.refund_recorded');
-
-    // Recalculate user tier immediately (don't wait for daily job)
-    try {
-      const updatedUser = await updateUserTier(userId);
-      invalidateTierCache(userId);
-      writeDiagnostic('info', 'credits.tier_recalculated', { tier: updatedUser.tier });
-    } catch (tierError) {
-      writeDiagnostic('error', 'credits.tier_recalculation_failed', {
-        errorClass: classifyDiagnosticError(tierError, 'database_error')
-      });
-      // Don't fail the webhook - tier will be recalculated in daily job
-    }
-  } catch (error: any) {
-    writeDiagnostic('error', 'credits.refund_processing_failed', {
-      errorClass: classifyDiagnosticError(error, 'database_error')
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle refund.created event
- * This provides more detailed refund information than charge.refunded
- */
-async function handleRefundCreated(refund: Stripe.Refund): Promise<void> {
-  try {
-    const chargeId = typeof refund.charge === 'string' ? refund.charge : refund.charge?.id;
-    const paymentIntentId = typeof refund.payment_intent === 'string'
-      ? refund.payment_intent
-      : refund.payment_intent?.id;
-
-    writeDiagnostic('info', 'credits.refund_created');
-    console.log(`   Status: ${refund.status}`);
-
-    // The actual processing is done in handleChargeRefunded
-    // This event is for logging/monitoring purposes
-    // Both events fire for the same refund, so we avoid duplicate processing
-  } catch (error: any) {
-    writeDiagnostic('error', 'credits.refund_event_failed', {
-      errorClass: classifyDiagnosticError(error, 'provider_error')
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle charge.dispute.created event
- * Logs the dispute and recalculates tier (disputed purchase shouldn't count)
- */
-async function handleDisputeCreated(dispute: Stripe.Dispute): Promise<void> {
-  try {
-    writeDiagnostic('warn', 'credits.dispute_created', { amount: dispute.amount });
-
-    // Get the charge to find the user
-    const chargeId = typeof dispute.charge === 'string'
-      ? dispute.charge
-      : dispute.charge?.id;
-
-    if (!chargeId) {
-      console.error('❌ Dispute webhook: No charge ID on dispute');
-      return;
-    }
-
-    // Try to find the user from our purchase records
-    // Note: We may not be able to find the user if the purchase predates ledger tracking
-    const ledgerResult = await query<{ user_id: string; ledger_id: string }>(
-      `SELECT user_id, ledger_id FROM credit_ledger
-       WHERE source_type = 'purchase'
-       ORDER BY created_at DESC
-       LIMIT 100`
-    );
-
-    // Log the dispute for monitoring (we may need manual investigation)
-    console.log('🚨 DISPUTE ALERT');
-    console.log(`   Amount: ${dispute.amount / 100} ${dispute.currency.toUpperCase()}`);
-    console.log(`   Reason: ${dispute.reason}`);
-    console.log(`   Status: ${dispute.status}`);
-
-    // For now, disputes require manual investigation
-    // The purchase is already excluded from tier calculation since we check for refunds
-    // A chargeback will eventually result in a charge.refunded event if the customer wins
-  } catch (error: any) {
-    writeDiagnostic('error', 'credits.dispute_created_failed', {
-      errorClass: classifyDiagnosticError(error, 'provider_error')
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle charge.dispute.closed event
- * If we lost (customer won), ensure credits are properly revoked
- * If we won, the purchase remains valid
- */
-async function handleDisputeClosed(dispute: Stripe.Dispute): Promise<void> {
-  try {
-    writeDiagnostic('info', 'credits.dispute_closed', { status: dispute.status });
-
-    const chargeId = typeof dispute.charge === 'string'
-      ? dispute.charge
-      : dispute.charge?.id;
-
-    if (dispute.status === 'lost') {
-      // Customer won the dispute - this is like a refund
-      console.log('❌ Dispute LOST - Customer won chargeback');
-      console.log(`   This should have triggered a charge.refunded event`);
-      console.log(`   If credits were not revoked, manual intervention may be needed`);
-
-      // Note: Stripe typically sends charge.refunded when we lose a dispute
-      // But we log this for monitoring purposes
-    } else if (dispute.status === 'won') {
-      // We won the dispute - nothing to do, purchase remains valid
-      console.log('✅ Dispute WON - Charge upheld');
-    } else {
-      console.log(`ℹ️ Dispute closed with status: ${dispute.status}`);
-    }
-  } catch (error: any) {
-    writeDiagnostic('error', 'credits.dispute_closed_failed', {
-      errorClass: classifyDiagnosticError(error, 'provider_error')
-    });
-    throw error;
   }
 }
 
@@ -622,7 +279,7 @@ export async function handleAuthLogin(
     res.statusCode = 302;
     res.setHeader('Location', authUrl.toString());
     res.end();
-  } catch (error: any) {
+  } catch (error: unknown) {
     writeDiagnostic('error', 'auth.dashboard_login_failed', {
       errorClass: classifyDiagnosticError(error, 'configuration_error')
     });

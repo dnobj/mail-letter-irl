@@ -3,6 +3,8 @@ export { quoteAndPreviewLetterTextOnlyTool } from "./quoteAndPreviewLetterTextOn
 export { quoteAndPreviewLetterWithHeaderImageTool } from "./quoteAndPreviewLetterWithHeaderImage.js";
 export { quoteAndPreviewLetterWithImageTool } from "./quoteAndPreviewLetterWithImage.js";
 export { sendLetterTool } from "./sendLetter.js";
+export { createMailCheckoutTool } from "./createMailCheckout.js";
+export { getPurchaseStatusTool } from "./getPurchaseStatus.js";
 
 // Account and order management tools
 export { getOrderStatusTool } from "./getOrderStatus.js";

@@ -7,20 +7,26 @@ import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog
 
 const { Pool } = pg;
 
+export interface MigrationOptions {
+  connectionString?: string;
+  migrationsDirectory?: string;
+}
+
 export function writeMigrationFailure(error: unknown): void {
   writeDiagnostic('error', 'database.migration_failed', {
     errorClass: classifyDiagnosticError(error, 'database_error')
   });
 }
 
-export async function migrate(): Promise<void> {
+export async function migrate(options: MigrationOptions = {}): Promise<void> {
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: options.connectionString || process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
     max: 1,
     connectionTimeoutMillis: 5_000,
   });
-  const migrationsDirectory = path.resolve(process.cwd(), 'db', 'migrations');
+  const migrationsDirectory =
+    options.migrationsDirectory || path.resolve(process.cwd(), 'db', 'migrations');
 
   try {
     await pool.query(`

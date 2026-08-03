@@ -548,6 +548,19 @@ export async function startHttpServer() {
       return;
     }
 
+    // Server-controlled Stripe return page. It intentionally shows no order
+    // details; authenticated status is available only through get_purchase_status.
+    if (url.pathname === '/purchase/return' && req.method === 'GET') {
+      const cancelled = url.searchParams.get('outcome') === 'cancelled';
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.end(
+        `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Letter IRL</title></head><body style="font-family:system-ui;max-width:36rem;margin:4rem auto;padding:1rem"><h1>${cancelled ? 'Checkout cancelled' : 'Payment received'}</h1><p>${cancelled ? 'Your draft was not sent. Return to ChatGPT to retry or choose a letter pack.' : 'Return to ChatGPT. Letter IRL will update the purchase status as soon as Stripe confirms payment.'}</p></body></html>`
+      );
+      return;
+    }
+
     // Stripe Checkout API
     if (url.pathname === "/api/stripe/create-checkout-session" && req.method === "POST") {
       // Rate limit checkout attempts
@@ -618,12 +631,6 @@ export async function startHttpServer() {
 
     // Handle CORS preflight for public promo endpoint
     if (url.pathname.startsWith('/api/public/promo/') && req.method === 'OPTIONS') {
-      respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
-      return;
-    }
-
-    // Handle CORS preflight for admin API routes
-    if (url.pathname.startsWith('/api/admin/') && req.method === 'OPTIONS') {
       respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
       return;
     }

@@ -39,7 +39,7 @@ interface SendPostcardOutput {
 }
 
 function publicStatus(status: LetterStatus): PublicStatus {
-  if (status === 'queued' || status === 'processing' || status === 'draft') return 'pending';
+  if (status === 'queued' || status === 'processing' || status === 'held' || status === 'draft') return 'pending';
   if (status === 'sent') return 'accepted';
   return status;
 }
@@ -57,6 +57,11 @@ function friendlyDraftError(error: unknown, draftId: string): Error {
   }
   if (code === 'DRAFT_CANCELLED') {
     return new Error('This draft was cancelled. Please create a new postcard draft.');
+  }
+  if (code === 'DRAFT_CHECKOUT_PENDING') {
+    return new Error(
+      'This draft has an active Pay & Send checkout. Complete or wait for that checkout to expire before using prepaid balance.'
+    );
   }
   if (code === 'DRAFT_WRONG_MAIL_TYPE') {
     return new Error('This is a letter draft. Please use send_letter instead.');

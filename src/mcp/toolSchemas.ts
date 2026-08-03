@@ -53,6 +53,12 @@ export const toolInputSchemas = {
     draftId: z.string(),
     confirm: z.boolean()
   }),
+  create_mail_checkout: z.object({
+    draftId: z.string()
+  }),
+  get_purchase_status: z.object({
+    orderId: z.string()
+  }),
   // Account and order management tools
   get_order_status: z.object({
     orderId: z.string().optional()

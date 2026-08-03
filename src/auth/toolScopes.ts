@@ -5,6 +5,7 @@ export type ProductScope = "mail:read" | "mail:draft" | "mail:send";
 const TOOL_SCOPES: Record<string, ProductScope> = {
   get_started: "mail:read",
   get_account_balance: "mail:read",
+  get_purchase_status: "mail:read",
   get_order_status: "mail:read",
   list_orders: "mail:read",
   get_return_address: "mail:read",
@@ -18,6 +19,7 @@ const TOOL_SCOPES: Record<string, ProductScope> = {
   generate_image: "mail:draft",
   confirm_uploaded_image: "mail:draft",
   submit_feature_request: "mail:draft",
+  create_mail_checkout: "mail:send",
   send_letter: "mail:send",
   send_postcard: "mail:send"
 };

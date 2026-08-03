@@ -7,6 +7,7 @@
 
 import { query, transaction } from '../db/index.js';
 import type pg from 'pg';
+import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import type {
   LetterDraft,
   CreateDraftParams,
@@ -63,7 +64,7 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
 
   const draft = result.rows[0];
 
-  console.log(`📝 Draft created: ${draft.draft_id} (layout: ${layoutType}, expires: ${expiresAt.toISOString()})`);
+  writeDiagnostic('info', 'draft.created', { layoutType, expiresInHours });
 
   return {
     draftId: draft.draft_id,
@@ -106,7 +107,7 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
 
   const draft = result.rows[0];
 
-  console.log(`📮 Postcard draft created: ${draft.draft_id} (expires: ${expiresAt.toISOString()})`);
+  writeDiagnostic('info', 'draft.postcard_created', { postcardSize, expiresInHours });
 
   return {
     draftId: draft.draft_id,
@@ -297,6 +298,9 @@ export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<numbe
     `DELETE FROM letter_drafts
      WHERE status IN ('consumed', 'expired', 'cancelled')
        AND updated_at < $1
+       AND NOT EXISTS (
+         SELECT 1 FROM orders WHERE orders.draft_id = letter_drafts.draft_id
+       )
      RETURNING draft_id`,
     [cutoffDate]
   );

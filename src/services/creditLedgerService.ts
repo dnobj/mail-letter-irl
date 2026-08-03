@@ -58,6 +58,7 @@ export async function addCreditsToLedger(
     credits,
     sourceType,
     sourceReferenceId,
+    sourceOrderId,
     sourceMetadata,
     expirationPolicy,
     expiresAt,
@@ -115,9 +116,9 @@ export async function addCreditsToLedger(
     const ledgerResult = await client.query<CreditLedgerEntry>(
       `INSERT INTO credit_ledger (
         user_id, initial_amount, remaining_amount, source_type,
-        source_reference_id, source_metadata, activated_at, expires_at,
-        expiration_policy, expiration_days, status, description
-      ) VALUES ($1, $2, $2, $3, $4, $5, NOW(), $6, $7, $8, 'active', $9)
+        source_reference_id, source_order_id, source_metadata, activated_at,
+        expires_at, expiration_policy, expiration_days, status, description
+      ) VALUES ($1, $2, $2, $3, $4, $10, $5, NOW(), $6, $7, $8, 'active', $9)
       RETURNING *`,
       [
         userId,
@@ -129,6 +130,7 @@ export async function addCreditsToLedger(
         finalExpirationPolicy,
         finalExpirationDays || null,
         description || `Added ${credits} credits (${sourceType})`,
+        sourceOrderId || null,
       ]
     );
     const ledgerEntry = ledgerResult.rows[0];
@@ -160,6 +162,102 @@ export async function addCreditsToLedger(
 
     return { user, transaction: txn, ledgerEntry };
   });
+}
+
+/** Add credits inside a caller-owned transaction (used by payment webhooks). */
+export async function addCreditsToLedgerWithClient(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: AddCreditsToLedgerParams
+): Promise<CreditLedgerOperationResult> {
+  const {
+    userId,
+    email,
+    credits,
+    sourceType,
+    sourceReferenceId,
+    sourceOrderId,
+    sourceMetadata,
+    expirationPolicy,
+    expiresAt,
+    expirationDays,
+    description
+  } = params;
+
+  if (credits <= 0) throw new Error('Credits must be positive');
+
+  let finalExpiresAt: Date | null = null;
+  let finalExpirationPolicy = expirationPolicy || 'days_from_activation';
+  let finalExpirationDays = expirationDays;
+  if (expiresAt) {
+    finalExpiresAt = expiresAt;
+    finalExpirationPolicy = 'fixed_date';
+  } else if (expirationDays !== undefined) {
+    finalExpiresAt = new Date();
+    finalExpiresAt.setDate(finalExpiresAt.getDate() + expirationDays);
+    finalExpirationPolicy = 'days_from_activation';
+  } else {
+    const defaultDays = DEFAULT_EXPIRATION_DAYS[sourceType];
+    if (defaultDays === null) {
+      finalExpirationPolicy = 'never';
+    } else {
+      finalExpiresAt = new Date();
+      finalExpiresAt.setDate(finalExpiresAt.getDate() + defaultDays);
+      finalExpirationPolicy = 'days_from_activation';
+      finalExpirationDays = defaultDays;
+    }
+  }
+
+  const userResult = await client.query<User>(
+    `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
+     VALUES ($1, $2, $3, $3, 0)
+     ON CONFLICT (user_id) DO UPDATE
+     SET credits = users.credits + $3,
+         credits_purchased = users.credits_purchased + $3,
+         updated_at = NOW()
+     RETURNING *`,
+    [userId, email || `${userId}@unknown.com`, credits]
+  );
+  const user = userResult.rows[0];
+
+  const ledgerResult = await client.query<CreditLedgerEntry>(
+    `INSERT INTO credit_ledger (
+       user_id, initial_amount, remaining_amount, source_type,
+       source_reference_id, source_order_id, source_metadata, activated_at,
+       expires_at, expiration_policy, expiration_days, status, description
+     ) VALUES ($1, $2, $2, $3, $4, $10, $5, NOW(), $6, $7, $8, 'active', $9)
+     RETURNING *`,
+    [
+      userId,
+      credits,
+      sourceType,
+      sourceReferenceId || null,
+      sourceMetadata ? JSON.stringify(sourceMetadata) : null,
+      finalExpiresAt,
+      finalExpirationPolicy,
+      finalExpirationDays || null,
+      description || `Added ${credits} credits (${sourceType})`,
+      sourceOrderId || null
+    ]
+  );
+  const ledgerEntry = ledgerResult.rows[0];
+
+  const txResult = await client.query<CreditTransaction>(
+    `INSERT INTO credit_transactions (
+       user_id, amount, balance_after, type, reference_type, reference_id, description
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING *`,
+    [
+      userId,
+      credits,
+      user.credits,
+      sourceType === 'purchase' ? 'purchase' : 'adjustment',
+      sourceType === 'purchase' ? 'order' : 'manual',
+      sourceReferenceId || ledgerEntry.ledger_id,
+      description || `Added ${credits} credits (${sourceType})`
+    ]
+  );
+
+  return { user, transaction: txResult.rows[0], ledgerEntry };
 }
 
 /**

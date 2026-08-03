@@ -9,6 +9,7 @@
  * - ADMIN_LOCAL_ONLY restricts to localhost connections only
  */
 
+import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { classifyDiagnosticError, writeDiagnostic } from '../../utils/diagnosticLog.js';
@@ -79,17 +80,8 @@ export async function authenticateAdmin(
     return null;
   }
 
-  // Allow localhost requests without authentication
-  if (isLocalhost && !isProxied) {
-    console.log('✅ Admin API: Localhost access (no auth required)');
-    return {
-      userId: 'localhost-admin',
-      email: 'localhost@admin',
-      isAdmin: true
-    };
-  }
-
-  // For remote access, require Authorization header
+  // Localhost is a network boundary, not an identity. Authentication and
+  // allow-list attribution remain mandatory below.
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -177,4 +169,50 @@ export function isAdminEnabled(): boolean {
  */
 export function isAdminLocalOnly(): boolean {
   return ADMIN_LOCAL_ONLY;
+}
+
+function equalSecret(left: string, right: string): boolean {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** Fail-closed browser/readback and CSRF boundary for the temporary local API. */
+export function validateAdminRequestBoundary(req: IncomingMessage, res: ServerResponse): boolean {
+  const allowedOrigin = process.env.ADMIN_ALLOWED_ORIGIN;
+  const csrfSecret = process.env.ADMIN_CSRF_TOKEN;
+  if (process.env.ADMIN_LOCAL_ONLY !== 'true' || !allowedOrigin || !csrfSecret) {
+    sendJson(res, 404, { error: 'Not found' });
+    return false;
+  }
+  let expected: URL;
+  try {
+    expected = new URL(allowedOrigin);
+  } catch {
+    sendJson(res, 404, { error: 'Not found' });
+    return false;
+  }
+  const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress || '');
+  const forwarded = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.headers['ngrok-agent-ips'];
+  const origin = req.headers.origin;
+  const fetchSite = req.headers['sec-fetch-site'];
+  if (!local || forwarded || req.headers.host !== expected.host ||
+      (origin !== undefined && origin !== allowedOrigin) ||
+      (fetchSite !== undefined && !['same-origin', 'none'].includes(String(fetchSite)))) {
+    sendJson(res, 404, { error: 'Not found' });
+    return false;
+  }
+  if (req.method === 'OPTIONS' || req.headers['x-letter-irl-admin'] !== 'local-operator') {
+    sendJson(res, 403, { error: 'Forbidden' });
+    return false;
+  }
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method || '')) {
+    const contentType = String(req.headers['content-type'] || '').split(';', 1)[0].trim();
+    const supplied = String(req.headers['x-csrf-token'] || '');
+    if (contentType !== 'application/json' || !supplied || !equalSecret(supplied, csrfSecret)) {
+      sendJson(res, 403, { error: 'Forbidden' });
+      return false;
+    }
+  }
+  return true;
 }

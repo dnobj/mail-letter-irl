@@ -47,6 +47,7 @@ vi.mock('../../../src/db/index.js', () => ({
 // Import after mocking
 import {
   createCheckoutSession,
+  getPackProductConfig,
   verifyWebhookSignature,
   extractCheckoutData,
 } from '../../../src/services/stripeService.js';
@@ -94,15 +95,57 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
       expect(result.error).toContain('Invalid product ID');
     });
 
-    it('should fail when price ID is not configured', async () => {
-      // Remove the price environment variable
+    it('should fail closed with a stable code when the price ID is not configured', async () => {
       vi.stubEnv('STRIPE_PRICE_STARTER', '');
+      vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '500');
 
-      // Re-import to pick up new env vars (need to reset module cache)
-      vi.resetModules();
+      const result = await createCheckoutSession({
+        userId: 'user-123',
+        userEmail: 'test@example.com',
+        productId: 'credit-pack-4',
+        successUrl: 'https://example.com/success',
+        cancelUrl: 'https://example.com/cancel',
+      });
 
-      // The test validates the error handling path
-      // In production, missing STRIPE_PRICE_* should return an error
+      expect(result).toMatchObject({ success: false, errorCode: 'PRICE_ID_NOT_CONFIGURED' });
+      expect(mockSessionCreate).not.toHaveBeenCalled();
+    });
+
+    // A Stripe Price ID is not evidence of an amount. Without the explicit
+    // amount variable the legacy pack path must disable the purchase rather
+    // than fall back to a hard-coded figure that a later refund would trust.
+    it.each([
+      ['missing', undefined],
+      ['zero', '0'],
+      ['non-numeric', 'free'],
+      ['negative', '-500'],
+    ])('should fail closed when the pack amount is %s', async (_label, amount) => {
+      if (amount === undefined) {
+        vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '');
+      } else {
+        vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', amount);
+      }
+
+      const result = await createCheckoutSession({
+        userId: 'user-123',
+        userEmail: 'test@example.com',
+        productId: 'credit-pack-4',
+        successUrl: 'https://example.com/success',
+        cancelUrl: 'https://example.com/cancel',
+      });
+
+      expect(result).toMatchObject({ success: false, errorCode: 'PACK_AMOUNT_NOT_CONFIGURED' });
+      expect(mockSessionCreate).not.toHaveBeenCalled();
+    });
+
+    it('should read the amount only from configuration, with no built-in default', () => {
+      vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '777');
+      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 777 });
+
+      // Removing the variable must yield an unusable amount rather than the
+      // historical hard-coded 500.
+      vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '');
+      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 0 });
     });
 
     it('should handle emails without @ symbol gracefully', async () => {
@@ -187,6 +230,11 @@ describe('Checkout Session Error Handling', () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
   it('should handle missing STRIPE_SECRET_KEY gracefully', async () => {
     // When STRIPE_SECRET_KEY is empty, Stripe client may throw
     // The service should catch and return a meaningful error
@@ -218,6 +266,45 @@ describe('Checkout Session Error Handling', () => {
     expect(expectedResponseShape).toHaveProperty('success');
     expect(expectedResponseShape).toHaveProperty('sessionId');
     expect(expectedResponseShape).toHaveProperty('sessionUrl');
+  });
+
+  it('does not log or return arbitrary Stripe checkout exceptions', async () => {
+    const sensitive = 'private Stripe failure cs_private pi_private auth0|private-user';
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
+    vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '500');
+    mockSessionCreate.mockRejectedValueOnce(new Error(sensitive));
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const result = await createCheckoutSession({
+      userId: 'auth0|private-user',
+      userEmail: 'private@example.test',
+      productId: 'credit-pack-4',
+      successUrl: 'https://example.test/success',
+      cancelUrl: 'https://example.test/cancel'
+    });
+
+    const output = diagnostic.mock.calls.flat().map(String).join('\n');
+    expect(output).toContain('"event":"stripe.checkout_creation_failed"');
+    expect(result).toEqual({ success: false, error: 'Failed to create checkout session' });
+    expect(output).not.toContain(sensitive);
+    expect(JSON.stringify(result)).not.toContain(sensitive);
+  });
+
+  it('does not log arbitrary webhook verification exceptions', () => {
+    const sensitive = 'private signature failure whsec_private evt_private';
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_mock');
+    mockConstructEvent.mockImplementationOnce(() => {
+      throw new Error(sensitive);
+    });
+    const diagnostic = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(verifyWebhookSignature('private-body', 'private-signature')).toBeNull();
+
+    const output = diagnostic.mock.calls.flat().map(String).join('\n');
+    expect(output).toContain('"event":"stripe.webhook_signature_invalid"');
+    expect(output).not.toContain(sensitive);
   });
 });
 
