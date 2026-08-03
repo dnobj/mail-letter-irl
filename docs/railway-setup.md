@@ -1,6 +1,6 @@
 # Railway Setup Guide
 
-Last updated: July 16, 2026
+Last updated: July 19, 2026
 
 Letter IRL uses one Railway project with `production` and `development` environments. Environment isolation is achieved with per-environment variables and branch deployment settings, not separate Railway projects.
 
@@ -40,6 +40,9 @@ TEMP_IMAGE_BUCKET_SECRET_ACCESS_KEY=<reference to bucket secret>
 ```
 
 Use Railway variable references to the bucket service. Do not copy bucket credentials into Git, screenshots, logs, or documentation. The application also accepts Railway's standard `BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` names.
+
+Leave `ADMIN_ENABLED` unset or `false`. A `true` value fails API startup; there is no Railway admin web
+service and no public admin route in either environment.
 
 ## Maintenance Settings
 
@@ -107,7 +110,7 @@ Current development placement is API and website in Railway US West, maintenance
 
 - Deploy status is successful in both environments.
 - `/healthz` and `/api/health` return successfully.
-- Migrations show `020_transactional_outbox.sql` as executed.
+- Migrations show issue #69's `021_jit_commerce_foundation.sql` before `022_admin_audit.sql`.
 - Maintenance logs show one short run and clean process exit.
 - An image remains retrievable after API restart for its documented 15 minutes.
 - Development sleeps after ten idle minutes.

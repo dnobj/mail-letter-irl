@@ -1,6 +1,6 @@
 # Database Schema
 
-**Last Updated:** January 28, 2026
+**Last Updated:** July 19, 2026
 **Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
 This document describes the Letter IRL database schema as deployed in production (Neon PostgreSQL).
@@ -9,7 +9,8 @@ This document describes the Letter IRL database schema as deployed in production
 
 ## Overview
 
-**14 Tables** across 14 migrations:
+The schema is forward-migrated. Admin foundation migration 022 requires #69's distinct JIT commerce
+migration 021 as its immediate predecessor.
 
 | Category | Tables |
 |----------|--------|
@@ -20,6 +21,7 @@ This document describes the Letter IRL database schema as deployed in production
 | Promos | `promo_campaigns`, `promo_redemptions` |
 | Feedback | `feature_requests` |
 | System | `migrations`, `personal_access_tokens` |
+| Admin foundation | `admin_environment_marker`, `admin_audit_events`, `admin_command_runs`, `admin_operations` |
 
 ---
 
@@ -417,6 +419,44 @@ User-submitted feature requests for product feedback.
 
 ---
 
+### admin_environment_marker
+
+Singleton database identity used to fail closed when a development/production selection does not match
+the connected branch. Provisioning inserts either `development` or `production`; migration 022 does not
+guess or seed it. A constant unique index enforces at most one row.
+
+### admin_audit_events
+
+Append-only actor/action/target/outcome history. UUIDs, stable error codes, session hashes, reasons, and
+three bounded JSONB summaries support later authenticated reads, reveals, and commands. A trigger rejects
+every `UPDATE` and `DELETE`; public privileges are revoked and provisioned application roles receive no
+mutation privilege beyond `INSERT`.
+
+Indexes cover environment plus actor/time, environment plus target/time, and correlation ID. Audit
+retention and archival must be approved before any production access; application rollback retains all
+rows.
+
+### admin_command_runs
+
+Durable command state keyed uniquely by `(environment, idempotency_key)`. The table stores the actor SID,
+preview digest, expected version, timestamps, correlation ID, bounded sanitized result, and stable error
+code. Status and timing constraints reject inconsistent outcomes.
+
+### admin_operations
+
+Environment-scoped provider-operation queue for a later deployed worker. Each command can enqueue one
+operation. Payload/result size, status, attempts, lock, and completion constraints support deterministic
+claim/retry behavior; a partial index covers claimable pending rows.
+
+### Admin grants and provisioning
+
+Migration 022 revokes `PUBLIC` privileges but creates no role or credential. The explicit provisioning
+script requires pre-existing, environment-specific reader/operator login roles, verifies migrations 021
+and 022 plus the database marker, rejects privileged roles, and reapplies a narrow grant set. Production
+provisioning and the first production connection remain separate owner-approved operations.
+
+---
+
 ## Migrations History
 
 | # | File | Description |
@@ -438,6 +478,11 @@ User-submitted feature requests for product feedback.
 | 15 | 015_provider_routing.sql | Provider routing system |
 | 16 | 016_feature_requests.sql | Feature request submission (US-FEEDBACK-01) |
 | 17 | 017_feature_request_contact.sql | Add contact email and consent fields |
+| 18 | 018_image_generation_tracking.sql | Track image generations used |
+| 19 | 019_recent_uploads.sql | Durable recent-upload fallback |
+| 20 | 020_transactional_outbox.sql | Durable mail outbox and maintenance state |
+| 21 | 021_jit_commerce_foundation.sql | JIT commerce foundation owned by issue #69 |
+| 22 | 022_admin_audit.sql | Environment marker, append-only audit, command runs, operations, and grants foundation |
 
 ---
 

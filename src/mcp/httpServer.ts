@@ -43,6 +43,11 @@ import {
   writeDiagnostic
 } from "../utils/diagnosticLog.js";
 import { buildWwwAuthenticateChallenge } from "../auth/oauthChallenge.js";
+import {
+  findCoupledFeatureFlagWarnings,
+  validatePublicServerAdminConfiguration
+} from "../admin/config.js";
+import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,6 +88,17 @@ const PRODUCTION_ENV_VARS = [
 ];
 
 export function validateEnvironment() {
+  validatePublicServerAdminConfiguration(process.env);
+
+  // Warn, never throw. The operator recovery routes these flags depend on are
+  // denied by the legacy admin guard, but failing startup on a flag combination
+  // would boot-loop a running deployment.
+  for (const flag of findCoupledFeatureFlagWarnings(process.env)) {
+    console.warn(
+      `[admin] ${flag}=true while public /api/admin* routes are denied; issue #69 operator recovery is unreachable. See docs/deployment.md#operator-recovery-interaction`
+    );
+  }
+
   const missing: string[] = [];
 
   for (const envVar of REQUIRED_ENV_VARS) {
@@ -371,6 +387,10 @@ export async function startHttpServer() {
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? `${DEFAULT_HOST}:${DEFAULT_PORT}`}`);
+
+    if (denyLegacyPublicAdminRoute(url.pathname, res)) {
+      return;
+    }
 
     if (url.pathname === "/healthz") {
       res.statusCode = 200;
