@@ -30,6 +30,8 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:integration:postgres": "vitest run tests/integration/commerceAcid.postgres.test.ts",
+    "test:integration:local": "tsx scripts/run-integration-local.ts",
+    "verify": "npm run lint && npm run build && npm run test:unit && npm run test:submission",
     "test:coverage": "vitest run --coverage",
     "dev:local": "env $(cat .env.local | grep -v '^#' | grep -v '^$' | xargs) tsx watch src/mcp/httpServer.ts"
   },
