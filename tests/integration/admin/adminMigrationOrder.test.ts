@@ -471,12 +471,38 @@ describeWithDatabase("admin migration arrival order compatibility", () => {
 
     const scenarioPool = new Pool({ connectionString, max: 1 });
     try {
-      const applied = await scenarioPool.query<{ name: string }>(
-        "SELECT name FROM migrations ORDER BY id",
+      // The migrator runs every pending file inside ONE transaction and creates
+      // the ledger table inside that same transaction, so a refused migration
+      // rolls back the ledger's creation too. Absent table and present-but-
+      // without-022 are both correct outcomes; the absent table is the stronger
+      // one, because it proves nothing at all was committed.
+      //
+      // The ledger creation cannot be hoisted out of the transaction to make
+      // this simpler: concurrent CREATE TABLE IF NOT EXISTS races on
+      // pg_type_typname_nsp_index, which is why it lives inside.
+      const ledgerExists = await scenarioPool.query<{ exists: boolean }>(
+        "SELECT to_regclass('migrations') IS NOT NULL AS exists",
       );
-      expect(applied.rows.map((row) => row.name)).not.toContain(
-        ADMIN_AUDIT_MIGRATION,
+
+      if (ledgerExists.rows[0]?.exists) {
+        const applied = await scenarioPool.query<{ name: string }>(
+          "SELECT name FROM migrations ORDER BY id",
+        );
+        expect(applied.rows.map((row) => row.name)).not.toContain(
+          ADMIN_AUDIT_MIGRATION,
+        );
+      }
+
+      // Independent of the ledger: 022's own objects must not survive a refused
+      // run. This is the assertion that actually matters, and it holds whether
+      // or not the ledger table was rolled back with it.
+      const adminObjects = await scenarioPool.query<{ count: string }>(
+        `SELECT count(*)::text AS count
+           FROM pg_tables
+          WHERE schemaname = current_schema()
+            AND tablename LIKE 'admin\\_%'`,
       );
+      expect(adminObjects.rows[0]?.count).toBe("0");
     } finally {
       await scenarioPool.end();
     }

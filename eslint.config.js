@@ -41,5 +41,20 @@ export default tseslint.config(
     rules: {
       "@typescript-eslint/no-unused-vars": "off"
     }
+  },
+  {
+    // CI helper scripts are plain Node ESM, not TypeScript, so the "**/*.ts"
+    // block above does not reach them and they would fail no-undef on
+    // `process` and `console`.
+    files: [".github/scripts/**/*.mjs"],
+    languageOptions: {
+      sourceType: "module",
+      globals: {
+        ...globals.node
+      }
+    },
+    rules: {
+      "no-console": "off"
+    }
   }
 );
