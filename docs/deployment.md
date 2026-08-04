@@ -151,6 +151,122 @@ makes `ADMIN_ENABLED=true` a startup error. Issue #69's ambiguous-image operator
 `JIT_PURCHASE_ENABLED=false` and `IMAGE_TRIAL_ENABLED=false` until a later issue #162 slice ships the
 replacement operator control.
 
+## Concurrent deploy safety (migration advisory lock)
+
+Railway runs `npm run db:migrate:prod` as a pre-deploy command. When two PRs merge back to back it
+queues two deploys at once, so two migrator processes from **different images** can run against the same
+Neon database simultaneously. That is what happened when PRs #164 and #165 merged together: #164's image
+had 021 and 023 pending, #165's had 021, 022 and 023 pending, and #165's deploy failed after 8 seconds
+with `Pre-deploy command failed`, leaving DEV on #164's code until a manual redeploy.
+
+The migrator now serialises itself. **The whole run is a single transaction**:
+
+```
+BEGIN
+  SET LOCAL lock_timeout = 60000
+  SELECT pg_advisory_xact_lock(7252245186587111069)
+  CREATE TABLE IF NOT EXISTS migrations (...)
+  SELECT name FROM migrations              -- read AFTER the lock, see below
+  <apply each pending file, insert each ledger row>
+COMMIT
+```
+
+- The lock is **transaction-scoped** (`pg_advisory_xact_lock`), not session-scoped. This is not a
+  stylistic choice and must not be changed. `DATABASE_URL` is a Neon **pooled** hostname in both
+  environments (see the environment checks above and `docs/infrastructure.md`), and Neon's `-pooler`
+  is PgBouncer in **transaction pooling** mode. A session-level `pg_advisory_lock()` issued outside an
+  explicit transaction is its own implicit transaction, so the pooler hands the server backend to
+  another client the instant it returns — while the lock is still held on it. The paired
+  `pg_advisory_unlock()` then lands on a different backend, returns `false` rather than raising, and
+  the lock is orphaned until that server process dies. Ending the client pool does not help: it closes
+  the socket to PgBouncer, never the backend holding the lock. The failure mode is that **every
+  subsequent deploy blocks forever at lock acquisition and redeploying does not clear it**. A
+  transaction-scoped lock is immune by construction: the pooler pins the backend for the transaction
+  and `COMMIT`/`ROLLBACK` releases the lock on that same backend. Every other advisory lock in this
+  codebase is transaction-scoped for the same reason.
+- The key is a hardcoded constant derived from `sha256('letter-irl:db-migrations')`, precisely so that
+  old and new deploy images contend for the same key.
+- It reads the executed-migration ledger **after** acquiring the lock. This is the actual correctness
+  fix: a process that queued on the lock must observe the winner's committed work, otherwise it would
+  re-run migrations it had already listed as pending before it waited.
+- The ledger insert uses `ON CONFLICT (name) DO NOTHING` as defence in depth only. It cannot prevent a
+  duplicate apply on its own, because the migration body has already run by the time it executes.
+
+The lock is database-scoped, not schema-scoped, so migrators targeting different schemas of one database
+serialise against each other. Production runs a single schema, so this costs nothing there.
+
+### Migrations are all-or-nothing (behaviour change)
+
+Because the run is one transaction, **a failure rolls the entire run back**. This changed the recovery
+story, so read this before responding to a failed pre-deploy:
+
+- Previously each migration file committed on its own. A run that died on file 5 of 8 left files 1–4
+  applied and recorded, and the fix was to repair the database and rerun to pick up where it stopped.
+- Now nothing is applied unless everything applies. A run that dies on file 5 leaves the database
+  exactly as it was — on a fresh database not even the `migrations` ledger table exists afterwards.
+- **Recovery is therefore: fix the broken migration and redeploy.** There is no partially-migrated
+  intermediate state to reconcile, and no manual cleanup step before retrying. Do not "resume" a failed
+  run; there is nothing to resume from.
+- The trade-off is that all DDL locks taken by the run are held until `COMMIT` rather than released
+  per file. Migration runs are short (seconds), and Railway keeps the old image serving during the
+  pre-deploy command, so this is not a live-traffic concern at current migration sizes.
+- This design requires every migration to be transaction-safe. See [`db/README.md`](../db/README.md)
+  for the constraint this places on new migrations.
+
+### Bounded wait (`lock_timeout`)
+
+`SET LOCAL lock_timeout = 60000` bounds how long a queued migrator waits for the lock. Without it a
+migrator behind a stuck run blocks until the platform's own deploy timeout kills it, producing a dead
+deploy with no diagnostic. With it the loser gives up in a known time and logs
+`{"errorClass":"55P03","lockTimeoutMs":60000,"event":"database.migration_lock_timeout"}`.
+
+60s is roughly an order of magnitude above the realistic worst case it waits on (a single pending
+migration commits in well under a second; a full 23-file bootstrap takes a few seconds), while staying
+far inside any deploy window so *we* emit the error rather than the platform emitting a SIGKILL.
+
+`SET LOCAL` persists for the transaction, so the same bound also applies to the migration DDL's own lock
+waits. That is deliberate — a migration blocked behind a long-running application query should fail
+loudly rather than hold the migration lock open while the deploy hangs — but it does mean a migration
+that genuinely needs to wait more than 60s for a table lock will fail.
+
+**`database.migration_lock_timeout` is not a broken migration.** It means another migrator held the
+lock. Redeploying is the correct response.
+
+### Failure diagnostics
+
+A failed migration still exits non-zero and still fails the deploy. The diagnostic names the failing
+migration file alongside the redacted error class, e.g.
+`{"errorClass":"42P01","migrationFile":"022_admin_audit.sql","event":"database.migration_failed"}`.
+Filenames are repository-public and carry no user data; the underlying PostgreSQL message stays redacted
+under the issue #160 policy. A `ROLLBACK` that itself fails is reported separately as
+`database.migration_rollback_failed` rather than being swallowed, and the original error still
+propagates.
+
+### Proof
+
+Two suites, both rerunnable. The first races two real `node dist/cli/migrate.js` processes against a
+fresh database, directly connected:
+
+```bash
+LIRL_RUN_POSTGRES_INTEGRATION=true \
+LIRL_TEST_DATABASE_URL=postgresql://postgres:<local>@127.0.0.1:<port>/letterirl_migrate_test \
+  npx vitest run tests/integration/migrateConcurrency.postgres.test.ts
+```
+
+The second runs the migrator through a **real PgBouncer in transaction pooling mode**, i.e.
+production's actual topology, and is what guards the lock-scope property above. A directly-connected
+test cannot observe it — a session-level lock passes every direct-connection test and still breaks
+production:
+
+```bash
+LIRL_RUN_POSTGRES_INTEGRATION=true \
+LIRL_TEST_DATABASE_URL=postgresql://postgres:<local>@127.0.0.1:<pg-port>/letterirl_migrate_test \
+LIRL_TEST_PGBOUNCER_URL=postgresql://postgres:<local>@127.0.0.1:<pgbouncer-port>/letterirl_pooled_test \
+  npx vitest run tests/integration/migratePooled.postgres.test.ts
+```
+
+See [`tests/integration/README.md`](../tests/integration/README.md) for how to stand the pooler up.
+
 ## Production Promotion
 
 1. Review the `dev` to `master` backend diff and the `dev` to `main` website diff.
