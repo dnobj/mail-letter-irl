@@ -22,6 +22,7 @@
  */
 import { spawn } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import pg from 'pg';
 
@@ -102,13 +103,36 @@ async function main(): Promise<void> {
   console.log('\nRunning integration suite (this takes ~75s; one test deliberately');
   console.log('waits out a 60s lock_timeout, which is not a hang)\n');
 
-  const child = spawn('npx', ['vitest', 'run', 'tests/integration'], {
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
-    env: { ...process.env, LIRL_RUN_POSTGRES_INTEGRATION: 'true' },
-  });
+  const reportPath = path.join(os.tmpdir(), 'lirl-integration-report.json');
 
-  child.on('exit', (code) => process.exit(code ?? 1));
+  const testCode = await run('npx', [
+    'vitest',
+    'run',
+    'tests/integration',
+    '--reporter=default',
+    '--reporter=json',
+    `--outputFile=${reportPath}`,
+  ]);
+
+  // Every Postgres suite here is opt-in and fail-closed, so a misconfigured run
+  // skips everything and still exits 0. Without this check a green local run
+  // would be indistinguishable from one that proved nothing.
+  console.log('');
+  const assertCode = await run('node', ['.github/scripts/assert-integration-ran.mjs', reportPath]);
+
+  process.exit(testCode !== 0 ? testCode : assertCode);
+}
+
+/** Run a command with inherited stdio and resolve its exit code. */
+function run(command: string, args: string[]): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      stdio: 'inherit',
+      shell: process.platform === 'win32',
+      env: { ...process.env, LIRL_RUN_POSTGRES_INTEGRATION: 'true' },
+    });
+    child.on('exit', (code) => resolve(code ?? 1));
+  });
 }
 
 main().catch((error) => {

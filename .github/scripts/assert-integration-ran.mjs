@@ -29,7 +29,9 @@ const REQUIRED = [
  */
 const OPTIONAL = {
   'migratePooled.postgres.test.ts':
-    'needs LIRL_TEST_PGBOUNCER_URL; no PgBouncer service is provisioned in CI yet',
+    'set LIRL_TEST_PGBOUNCER_URL to a PgBouncer in transaction pooling mode to run it. ' +
+    'Worth doing before touching the migrator: this is the suite that caught a lock ' +
+    'which was green against direct PostgreSQL and broken through Neon\'s pooler',
 };
 
 const reportPath = process.argv[2];
