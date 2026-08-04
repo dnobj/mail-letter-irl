@@ -87,6 +87,19 @@ const PRODUCTION_ENV_VARS = [
   'STRIPE_WEBHOOK_SECRET',
 ];
 
+/**
+ * Build identity, for verifying which revision is actually serving.
+ *
+ * Railway injects these at build time; they are absent when running locally,
+ * where "unknown" is the honest answer rather than a fabricated value.
+ *
+ * Exposed as response headers on /healthz rather than in the body, because the
+ * body is asserted to be exactly "ok" by docs/manual-tests.md and is consumed by
+ * the Railway healthcheck. A header is additive and breaks neither.
+ */
+export const BUILD_COMMIT = process.env.RAILWAY_GIT_COMMIT_SHA ?? "unknown";
+export const BUILD_BRANCH = process.env.RAILWAY_GIT_BRANCH ?? "unknown";
+
 export function validateEnvironment() {
   validatePublicServerAdminConfiguration(process.env);
 
@@ -394,6 +407,11 @@ export async function startHttpServer() {
 
     if (url.pathname === "/healthz") {
       res.statusCode = 200;
+      // Deploy verification: a status code alone cannot distinguish a new build
+      // from an old one still serving after a failed deploy.
+      res.setHeader("X-Build-Commit", BUILD_COMMIT);
+      res.setHeader("X-Build-Branch", BUILD_BRANCH);
+      res.setHeader("Cache-Control", "no-store");
       res.end("ok");
       return;
     }

@@ -86,6 +86,10 @@ As of July 16, 2026, development has the transactional-outbox release and hourly
    Confirm the migration content identities in
    [Migration 021/022/023 integration gate](#migration-021022023-integration-gate) still match.
 4. Check `/healthz`, OAuth metadata, manifest, MCP connection, and website `/api/health`.
+   `/healthz` still returns `200` with body `ok`, and additionally carries `X-Build-Commit` and
+   `X-Build-Branch` from Railway's injected git variables. Assert those against the commit you
+   expect: a successful HTTP response proves the service is up, not that your deployment replaced
+   the previous image. A failed pre-deploy leaves the old build serving and every other check green.
 5. Run the automated suites in both repositories.
 6. Run the manual checks in [manual-tests.md](manual-tests.md), including zero balance, simulated purchase, confirmed send, status retrieval, image generation, and restart persistence.
 7. Confirm Serverless is enabled, leave development idle for more than ten minutes, and confirm both API and website sleep.
