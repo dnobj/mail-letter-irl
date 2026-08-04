@@ -1,0 +1,120 @@
+name: CI
+
+# First automated gate for this repository. Before this, every check was manual.
+#
+# Two jobs on purpose: `checks` is fast and needs nothing external, so it gives a
+# signal in ~1 minute. `postgres-integration` provisions a real database, because
+# financial and concurrency invariants cannot be proven against mocks.
+
+on:
+  pull_request:
+    branches: [dev, master]
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Matches Railway's runtime (node@22.23.1). Drift here means CI proves nothing
+  # about what actually ships.
+  NODE_VERSION: '22'
+
+jobs:
+  checks:
+    name: Lint, build, unit, submission
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # `npm ci` not `npm install` - installs exactly the lockfile and fails if
+      # package.json and package-lock.json disagree.
+      - name: Install from lockfile
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: TypeScript production build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      # Apps SDK submission surface: manifest, tool registration, widget
+      # resources, OAuth metadata. Lint already ran above, so this calls
+      # test:submission directly rather than check:submission.
+      - name: Apps SDK submission checks
+        run: npm run test:submission
+
+  postgres-integration:
+    name: PostgreSQL integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        # Major version matches production (Neon PostgreSQL 17).
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      LIRL_RUN_POSTGRES_INTEGRATION: 'true'
+      # The suite's own guard refuses any non-local host and any database name
+      # without "test" or "acid" in it, so this URL is deliberately shaped to
+      # satisfy it. It cannot be pointed at a shared environment.
+      LIRL_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/letterirl_test
+      LETTER_IRL_ADMIN_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/letterirl_admin_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install from lockfile
+        run: npm ci
+
+      - name: Create test databases
+        run: |
+          psql "postgres://postgres:postgres@localhost:5432/postgres" \
+            -c 'CREATE DATABASE letterirl_test;' \
+            -c 'CREATE DATABASE letterirl_admin_test;'
+
+      - name: Integration tests
+        run: npm run test:integration -- --reporter=default --reporter=json --outputFile=integration-report.json
+
+      # A green job here would otherwise be indistinguishable from every suite
+      # silently skipping because an env var was wrong. That failure mode is the
+      # reason this step exists: assert the suites actually executed.
+      - name: Assert the Postgres suites actually ran
+        if: always()
+        run: node .github/scripts/assert-integration-ran.mjs integration-report.json
+
+      - name: Upload integration report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-report
+          path: integration-report.json
+          retention-days: 14
