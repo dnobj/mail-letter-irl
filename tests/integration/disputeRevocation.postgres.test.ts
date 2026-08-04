@@ -290,4 +290,68 @@ describePostgres('dispute and refund pack revocation', () => {
       client.release();
     }
   }, 60_000);
+
+  it('does NOT block Pay & Send fulfilment, which runs after the charge', async () => {
+    const { userId } = await seedPackHolder({ credits: 5 });
+    await pool.query(
+      `UPDATE users SET sends_blocked_at = NOW(), sends_blocked_reason = 'payment_disputed'
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    const draftId = randomUUID();
+    await pool.query(
+      `INSERT INTO letter_drafts (
+         draft_id, user_id, sender, recipient, body_text, sign_off,
+         required_credits, status, expires_at
+       ) VALUES ($1, $2, $3, $4, 'body', 'regards', 1, 'pending', NOW() + INTERVAL '1 day')`,
+      [draftId, userId, JSON.stringify({ name: 'A' }), JSON.stringify({ name: 'B' })]
+    );
+
+    // Pay & Send fulfilment runs only after Stripe has charged the customer.
+    // Refusing here would take the money and withhold the send in the same
+    // transaction. It may fail for unrelated reasons in this fixture - what
+    // must NOT happen is a block rejection.
+    const client = await pool.connect();
+    try {
+      let code: string | undefined;
+      try {
+        await mailSendService.createMailOrderFromDraftWithClient(client, {
+          draftId,
+          userId,
+          mailType: 'letter',
+          funding: { type: 'jit_order', orderId: `order_${randomUUID()}` }
+        });
+      } catch (error) {
+        code = (error as { code?: string }).code;
+      }
+      expect(code).not.toBe('ACCOUNT_SENDS_BLOCKED');
+    } finally {
+      client.release();
+    }
+  }, 60_000);
+
+  it('refuses a Pay & Send checkout for a blocked account, before any charge', async () => {
+    const { userId } = await seedPackHolder({ credits: 0 + 1 });
+    await pool.query(
+      `UPDATE users SET sends_blocked_at = NOW(), sends_blocked_reason = 'payment_disputed'
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    const previous = process.env.JIT_PURCHASE_ENABLED;
+    process.env.JIT_PURCHASE_ENABLED = 'true';
+    try {
+      await expect(
+        commerceService.createJitCheckout({
+          userId,
+          draftId: randomUUID(),
+          mailType: 'letter'
+        } as Parameters<typeof commerceService.createJitCheckout>[0])
+      ).rejects.toMatchObject({ code: 'ACCOUNT_SENDS_BLOCKED' });
+    } finally {
+      if (previous === undefined) delete process.env.JIT_PURCHASE_ENABLED;
+      else process.env.JIT_PURCHASE_ENABLED = previous;
+    }
+  }, 60_000);
 });

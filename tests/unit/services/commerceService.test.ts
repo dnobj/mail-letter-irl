@@ -711,6 +711,9 @@ describe('commerceService', () => {
   });
 
   it('rejects cross-user draft checkout before calling Stripe', async () => {
+    // Issue #150 added a send-block lookup ahead of the draft read. This account
+    // is not blocked, so the original assertion below is unchanged.
+    mocks.query.mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] });
     mocks.query.mockResolvedValueOnce({
       rows: [
         {
@@ -736,6 +739,8 @@ describe('commerceService', () => {
       checkout_expires_at: new Date(Date.now() + 20 * 60_000)
     };
     mocks.query
+      // Issue #150 added a send-block lookup ahead of the draft read.
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
       .mockResolvedValueOnce({
         rows: [
           {

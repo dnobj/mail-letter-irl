@@ -515,6 +515,26 @@ export async function createJitCheckout(
       code: 'JIT_DISABLED'
     });
   }
+
+  // Issue #150: refuse a restricted account BEFORE taking payment.
+  //
+  // The send-path block in mailSendService deliberately exempts jit_order
+  // funding, because that path runs during fulfilment - after Stripe has already
+  // charged the customer. Blocking there would take the money and refuse the
+  // send in the same transaction, stranding funds that would then need a refund.
+  // This is the correct gate for Pay & Send: no charge is created at all.
+  const blocked = await query<{ sends_blocked_reason: string | null }>(
+    'SELECT sends_blocked_reason FROM users WHERE user_id = $1',
+    [params.userId]
+  );
+  const blockedReason = blocked.rows[0]?.sends_blocked_reason;
+  if (blockedReason) {
+    throw Object.assign(
+      new Error(`Sending is disabled on this account (${blockedReason}). Contact support.`),
+      { code: 'ACCOUNT_SENDS_BLOCKED' }
+    );
+  }
+
   const prepared = await prepareJitOrder(params);
   if (prepared.order.status !== 'checkout_pending' || prepared.order.checkout_url) {
     return asCheckoutResult(prepared.order, true);
