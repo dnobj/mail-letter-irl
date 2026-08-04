@@ -25,6 +25,39 @@ The migration-order case runs the actual migrator in both supported sequences:
 substitute. While issue #162's branch is stacked on issue #69, that file is
 present in this repository, so both sequences now use the reviewed 022.
 
+## Concurrent migrator tests
+
+`migrateConcurrency.postgres.test.ts` reproduces the PR #164 / PR #165 Railway
+failure, where two queued deploys each ran `npm run db:migrate:prod` against the
+same database and the second one died. It shares the same gate and the same
+fail-closed URL validation as the ACID suite:
+
+```powershell
+$env:LIRL_RUN_POSTGRES_INTEGRATION = 'true'
+$env:LIRL_TEST_DATABASE_URL = 'postgresql://postgres:password@127.0.0.1:5432/letterirl_migrate_test'
+npx vitest run tests/integration/migrateConcurrency.postgres.test.ts
+```
+
+It copies the real `db/migrations` into a scratch directory (never writing to
+them) and appends a probe migration whose `CREATE TABLE` is guarded with
+`IF NOT EXISTS` but whose `INSERT` is not, so a migration body applied twice
+shows up as two rows rather than an error. Coverage:
+
+- two concurrent in-process migrators against one fresh schema,
+- a third migrator afterwards, which must be a no-op,
+- a failing migration, which must release the advisory lock so the next
+  migrator still runs, and must rethrow PostgreSQL's own error annotated with
+  `migrationFile`,
+- two real `node dist/cli/migrate.js` processes racing, exactly as Railway
+  invokes them (this case builds `dist` via `tsc` in `beforeAll`),
+- a failing CLI run, which must exit 1 and log the failing filename while
+  keeping the PostgreSQL message redacted.
+
+Against the pre-fix migrator every case fails, most often with
+`duplicate key value violates unique constraint "pg_class_relname_nsp_index"`
+or `"pg_type_typname_nsp_index"` — two processes creating the same table at the
+same instant. It creates and drops only generated schemas named `lirl_migrate_*`.
+
 ## Admin foundation and arrival-order tests
 
 `admin/adminFoundationDatabase.test.ts` and `admin/adminMigrationOrder.test.ts`

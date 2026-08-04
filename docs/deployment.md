@@ -151,6 +151,42 @@ makes `ADMIN_ENABLED=true` a startup error. Issue #69's ambiguous-image operator
 `JIT_PURCHASE_ENABLED=false` and `IMAGE_TRIAL_ENABLED=false` until a later issue #162 slice ships the
 replacement operator control.
 
+## Concurrent deploy safety (migration advisory lock)
+
+Railway runs `npm run db:migrate:prod` as a pre-deploy command. When two PRs merge back to back it
+queues two deploys at once, so two migrator processes from **different images** can run against the same
+Neon database simultaneously. That is what happened when PRs #164 and #165 merged together: #164's image
+had 021 and 023 pending, #165's had 021, 022 and 023 pending, and #165's deploy failed after 8 seconds
+with `Pre-deploy command failed`, leaving DEV on #164's code until a manual redeploy.
+
+The migrator now serialises itself:
+
+- It takes a session-level `pg_advisory_lock(7252245186587111069)` on a dedicated connection held for
+  the whole run and released in a `finally` block. The key is a hardcoded constant, derived from
+  `sha256('letter-irl:db-migrations')`, precisely so that old and new images contend for the same key.
+- It reads the executed-migration ledger **after** acquiring the lock. This is the actual correctness
+  fix: a process that queued on the lock must observe the winner's committed work, otherwise it would
+  re-run migrations it had already listed as pending before it waited.
+- The ledger insert uses `ON CONFLICT (name) DO NOTHING` as defence in depth only. It cannot prevent a
+  duplicate apply on its own, because the migration body has already run by the time it executes.
+
+The lock is database-scoped, not schema-scoped, so migrators targeting different schemas of one database
+serialise against each other. Production runs a single schema, so this costs nothing there.
+
+A failed migration still exits non-zero and still fails the deploy. The diagnostic now names the failing
+migration file alongside the redacted error class, e.g.
+`{"errorClass":"42P01","migrationFile":"022_admin_audit.sql","event":"database.migration_failed"}`.
+Filenames are repository-public and carry no user data; the underlying PostgreSQL message stays redacted
+under the issue #160 policy.
+
+Proof is rerunnable, and covers two real `node dist/cli/migrate.js` processes racing a fresh database:
+
+```bash
+LIRL_RUN_POSTGRES_INTEGRATION=true \
+LIRL_TEST_DATABASE_URL=postgresql://postgres:<local>@127.0.0.1:<port>/letterirl_migrate_test \
+  npx vitest run tests/integration/migrateConcurrency.postgres.test.ts
+```
+
 ## Production Promotion
 
 1. Review the `dev` to `master` backend diff and the `dev` to `main` website diff.
