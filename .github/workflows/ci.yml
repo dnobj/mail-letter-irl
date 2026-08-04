@@ -6,24 +6,22 @@ name: CI
 # signal in ~1 minute. `postgres-integration` provisions a real database, because
 # financial and concurrency invariants cannot be proven against mocks.
 
-# DORMANT ON PURPOSE - manual dispatch only, no automatic triggers.
+# Active. Actions is free and unlimited for public repositories, which this now
+# is, so these run automatically again.
 #
-# GitHub Actions bills for private repositories and this account is not funded
-# for it. Automatic triggers would put a failing check on every pull request
-# ("recent account payments have failed or your spending limit needs to be
-# increased"), and a permanently red check that means nothing is worse than no
-# check at all - it teaches you to ignore the signal.
-#
-# The local equivalents are the real gate, and they are what to run:
-#   npm run verify                  - mirrors the `checks` job below
+# The local equivalents remain the fast pre-push check and are worth running
+# before opening a pull request rather than waiting for the result here:
+#   npm run verify                  - mirrors the `checks` job
 #   npm run test:integration:local  - mirrors `postgres-integration`
 #
-# To activate this later, fund Actions and restore:
-#   pull_request:
-#     branches: [dev, master]
-#   push:
-#     branches: [dev]
+# Note on fork pull requests: this workflow uses no secrets, so the default
+# read-only token given to fork PRs is sufficient and nothing sensitive is
+# reachable from an untrusted contribution.
 on:
+  pull_request:
+    branches: [dev, master]
+  push:
+    branches: [dev]
   workflow_dispatch:
 
 concurrency:
