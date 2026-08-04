@@ -7,10 +7,17 @@
  * computed the same pending-migration list and raced to apply it.
  *
  * Runs against REAL PostgreSQL only; opt in exactly like commerceAcid.postgres.
+ *
+ * SCOPE LIMIT, read this before adding cases here: this file connects DIRECTLY
+ * to PostgreSQL. It therefore cannot observe anything about connection-pooler
+ * behaviour, and production's DATABASE_URL is a Neon `-pooler` endpoint. The
+ * properties that only hold (or only break) under PgBouncer transaction
+ * pooling — advisory lock scope above all — belong in
+ * `migratePooled.postgres.test.ts`.
  */
 
 import { execFile } from 'node:child_process';
-import { copyFile, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -18,52 +25,18 @@ import { promisify } from 'node:util';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrate } from '../../src/cli/migrate.js';
+import {
+  MIGRATION_ADVISORY_LOCK_KEY,
+  prepareMigrationDirectory,
+  readLedgerState,
+  validateDisposableDatabaseUrl
+} from './support/disposableDatabase.js';
 
-const { Pool } = pg;
+const { Pool, Client } = pg;
 const execFileAsync = promisify(execFile);
 
 const enabled = process.env.LIRL_RUN_POSTGRES_INTEGRATION === 'true';
 const describePostgres = enabled ? describe : describe.skip;
-const repositoryMigrations = path.resolve(process.cwd(), 'db', 'migrations');
-
-/**
- * A test-only migration appended after the real repository set.
- *
- * It is deliberately written so that a SECOND execution does NOT raise: the
- * table creation is guarded with IF NOT EXISTS, but the INSERT is
- * unconditional. So if a migration SQL body is ever applied twice, this table
- * silently ends up with two rows instead of one. That makes it a positive
- * detector for double-application rather than relying only on the real
- * migrations happening to collide.
- */
-const PROBE_MIGRATION_NAME = '999_concurrency_probe.sql';
-const PROBE_MIGRATION_SQL = `-- Test-only probe. Never added to db/migrations.
-CREATE TABLE IF NOT EXISTS migration_concurrency_probe (
-  id SERIAL PRIMARY KEY,
-  marker TEXT NOT NULL,
-  recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-INSERT INTO migration_concurrency_probe (marker) VALUES ('probe');
-`;
-
-function validateDisposableDatabaseUrl(value: string | undefined): string {
-  if (!value) throw new Error('LIRL_TEST_DATABASE_URL is required for PostgreSQL integration');
-  const parsed = new URL(value);
-  const localHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-  const databaseName = parsed.pathname.replace(/^\//, '');
-  if (!localHosts.has(parsed.hostname) || !/(acid|test)/i.test(databaseName)) {
-    throw new Error(
-      'PostgreSQL integration refuses non-local or non-test databases; use localhost and a database name containing test or acid'
-    );
-  }
-  if (
-    process.env.NODE_ENV === 'production' ||
-    (process.env.DATABASE_URL && process.env.DATABASE_URL === value)
-  ) {
-    throw new Error('PostgreSQL integration refuses production or application DATABASE_URL values');
-  }
-  return value;
-}
 
 function schemaName(prefix: string): string {
   return `${prefix}_${randomUUID().replaceAll('-', '')}`;
@@ -89,51 +62,6 @@ function databaseUrlForSchema(connectionString: string, schema: string): string 
   const parsed = new URL(connectionString);
   parsed.searchParams.set('options', `-c search_path=${schema},public`);
   return parsed.toString();
-}
-
-/**
- * Copies the real repository migrations into a scratch directory and appends
- * the double-application probe. The real files are used unmodified so the test
- * exercises genuine DDL (bare CREATE TABLE, which collides hard if applied
- * twice), and db/migrations itself is never written to.
- */
-async function prepareMigrationDirectory(root: string): Promise<{
-  directory: string;
-  expectedNames: string[];
-}> {
-  const directory = path.join(root, 'db', 'migrations');
-  await mkdir(directory, { recursive: true });
-  const files = (await readdir(repositoryMigrations)).filter(file => file.endsWith('.sql'));
-  for (const file of files) {
-    await copyFile(path.join(repositoryMigrations, file), path.join(directory, file));
-  }
-  await writeFile(path.join(directory, PROBE_MIGRATION_NAME), PROBE_MIGRATION_SQL, 'utf8');
-  return { directory, expectedNames: [...files, PROBE_MIGRATION_NAME].sort() };
-}
-
-interface LedgerState {
-  names: string[];
-  duplicateNames: string[];
-  probeRows: number;
-}
-
-async function readLedgerState(connectionString: string): Promise<LedgerState> {
-  const pool = new Pool({ connectionString, max: 1 });
-  try {
-    const ledger = await pool.query<{ name: string; occurrences: string }>(
-      'SELECT name, COUNT(*)::text AS occurrences FROM migrations GROUP BY name ORDER BY name'
-    );
-    const probe = await pool.query<{ count: string }>(
-      'SELECT COUNT(*)::text AS count FROM migration_concurrency_probe'
-    );
-    return {
-      names: ledger.rows.map(row => row.name),
-      duplicateNames: ledger.rows.filter(row => row.occurrences !== '1').map(row => row.name),
-      probeRows: Number(probe.rows[0].count)
-    };
-  } finally {
-    await pool.end();
-  }
 }
 
 describePostgres('concurrent migrators on disposable PostgreSQL', () => {
@@ -176,8 +104,8 @@ describePostgres('concurrent migrators on disposable PostgreSQL', () => {
       const url = databaseUrlForSchema(baseUrl, schema);
 
       // Two independent migrate() calls, each building its own Pool and so its
-      // own PostgreSQL sessions — the advisory lock is session-scoped, so this
-      // is genuine contention, not two callers sharing one connection.
+      // own PostgreSQL sessions and its own transaction — genuine contention on
+      // the advisory lock, not two callers sharing one connection.
       const results = await Promise.allSettled([
         migrate({ connectionString: url, migrationsDirectory: directory }),
         migrate({ connectionString: url, migrationsDirectory: directory })
@@ -227,12 +155,24 @@ describePostgres('concurrent migrators on disposable PostgreSQL', () => {
     }
   }, 180_000);
 
-  it('releases the advisory lock after a failure so the next migrator still runs', async () => {
+  it('rolls the ENTIRE run back when one migration fails, then reruns cleanly', async () => {
+    // Replaces an earlier case that claimed to prove the advisory lock was
+    // released after a failure. It could not: migrate() ends its pool in the
+    // same finally block, and ending the pool drops a session-level lock on its
+    // own, so the assertion passed with or without an explicit unlock. Lock
+    // SCOPE is only observable through a pooler and is proven in
+    // migratePooled.postgres.test.ts.
+    //
+    // What IS observable here, and what this now pins, is the all-or-nothing
+    // semantics of wrapping the run in a single transaction: a failure must
+    // leave the database byte-for-byte untouched, not partially migrated.
     const schema = schemaName('lirl_migrate_failure');
     await createSchema(adminPool, schema);
     try {
       const brokenRoot = path.join(tempRoot, 'broken');
       const { directory, expectedNames } = await prepareMigrationDirectory(brokenRoot);
+      // Sorts after every real migration but before the 999 probe, so the run
+      // dies with ~23 files already applied inside the open transaction.
       const brokenName = '998_deliberately_broken.sql';
       await writeFile(
         path.join(directory, brokenName),
@@ -247,8 +187,17 @@ describePostgres('concurrent migrators on disposable PostgreSQL', () => {
         migrate({ connectionString: url, migrationsDirectory: directory })
       ).rejects.toMatchObject({ code: '42P01', migrationFile: brokenName });
 
-      // If the failure path leaked the session-level lock, this second call
-      // would block until the pool's connectionTimeoutMillis and fail.
+      // ALL-OR-NOTHING. Under the previous per-file-commit design this schema
+      // would now hold a migrations ledger with every file up to 023 in it.
+      // Under a single wrapping transaction not even the ledger table survives,
+      // because CREATE TABLE IF NOT EXISTS was part of the same transaction.
+      const afterFailure = await adminPool.query<{ ledger: string | null }>(
+        'SELECT to_regclass($1)::text AS ledger',
+        [`${schema}.migrations`]
+      );
+      expect(afterFailure.rows[0].ledger).toBeNull();
+
+      // ...and the next migrator still runs to completion.
       await rm(path.join(directory, brokenName));
       await migrate({ connectionString: url, migrationsDirectory: directory });
 
@@ -260,6 +209,55 @@ describePostgres('concurrent migrators on disposable PostgreSQL', () => {
       await dropSchema(adminPool, schema);
     }
   }, 180_000);
+
+  it('fails with a bounded lock_timeout instead of hanging when the lock is already held', async () => {
+    // Without `SET LOCAL lock_timeout` this case does not fail — it HANGS,
+    // until the platform kills the deploy with no diagnostic. That is the
+    // failure mode being pinned, so a regression shows up as a test timeout.
+    const schema = schemaName('lirl_migrate_locked');
+    await createSchema(adminPool, schema);
+    const holder = new Client({ connectionString: baseUrl });
+    try {
+      const { directory } = await prepareMigrationDirectory(path.join(tempRoot, 'locked'));
+      const url = databaseUrlForSchema(baseUrl, schema);
+
+      // Hold the lock from an unrelated session. Advisory locks are scoped to
+      // the DATABASE, so a different schema does not escape it.
+      await holder.connect();
+      await holder.query('SELECT pg_advisory_lock($1::bigint)', [MIGRATION_ADVISORY_LOCK_KEY]);
+
+      const startedAt = Date.now();
+      const failure = await migrate({
+        connectionString: url,
+        migrationsDirectory: directory
+      }).then(
+        () => null,
+        (error: unknown) => error as { code?: string; migrationLockTimeout?: boolean }
+      );
+      const elapsedMs = Date.now() - startedAt;
+
+      // 55P03 = lock_not_available, i.e. lock_timeout expired.
+      expect(failure?.code).toBe('55P03');
+      // Flagged so the CLI reports lock contention rather than sending the
+      // operator off to debug a migration file that is perfectly fine.
+      expect(failure?.migrationLockTimeout).toBe(true);
+      // Bounded: it gave up on its own rather than waiting indefinitely.
+      expect(elapsedMs).toBeLessThan(150_000);
+
+      // Nothing was applied while it was blocked.
+      const afterTimeout = await adminPool.query<{ ledger: string | null }>(
+        'SELECT to_regclass($1)::text AS ledger',
+        [`${schema}.migrations`]
+      );
+      expect(afterTimeout.rows[0].ledger).toBeNull();
+    } finally {
+      await holder.query('SELECT pg_advisory_unlock($1::bigint)', [
+        MIGRATION_ADVISORY_LOCK_KEY
+      ]).catch(() => undefined);
+      await holder.end().catch(() => undefined);
+      await dropSchema(adminPool, schema);
+    }
+  }, 300_000);
 
   it('survives two real `node dist/cli/migrate.js` processes racing, as Railway runs them', async () => {
     const schema = schemaName('lirl_migrate_subprocess');

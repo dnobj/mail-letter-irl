@@ -18,7 +18,11 @@ const SAFE_ERROR_CODES = new Set([
   "23505",
   "28P01",
   "3D000",
-  "42P01"
+  "42P01",
+  // lock_timeout expiry. Surfaced verbatim so a failed deploy says "another
+  // migrator holds the migration lock" instead of the useless generic
+  // "database_error"; the code itself carries no user or secret data.
+  "55P03"
 ]);
 
 export type DiagnosticErrorCategory =

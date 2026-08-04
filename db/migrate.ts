@@ -54,6 +54,23 @@ async function rollback() {
   try {
     console.log('🔄 Rolling back last migration...\n');
 
+    // A fresh database has no ledger yet. Without this check the SELECT below
+    // dies with 42P01 and exits 1, when the correct answer is simply that there
+    // is nothing to roll back. (This check replaced an ensureMigrationsTable()
+    // call that was lost when the apply loop moved to src/cli/migrate.ts.
+    // Probing rather than re-creating is deliberate: the old helper carried its
+    // OWN `CREATE TABLE migrations` whose executed_at was TIMESTAMP where the
+    // real migrator uses TIMESTAMPTZ. Reinstating it would reinstate that
+    // drift, and a read-only advisory command has no business creating the
+    // ledger in the first place.)
+    const ledgerExists = await pool.query<{ present: boolean }>(
+      "SELECT to_regclass('migrations') IS NOT NULL AS present"
+    );
+    if (!ledgerExists.rows[0]?.present) {
+      console.log('No migrations to rollback.\n');
+      return;
+    }
+
     const executed = await pool.query<{ name: string; executed_at: Date }>(
       'SELECT name, executed_at FROM migrations ORDER BY id ASC'
     );
