@@ -1276,6 +1276,87 @@ async function processRefundEvent(
   });
 }
 
+/**
+ * Persist the dispute lifecycle idempotently.
+ *
+ * Keyed on Stripe's dispute id, so replayed, reordered or concurrently
+ * delivered events converge on one row rather than accumulating duplicates.
+ * Reordering is handled explicitly: a late-arriving `created` must not
+ * overwrite the resolution written by a `closed` that already landed, so
+ * `resolved_at` is only ever set, never cleared.
+ */
+async function recordDispute(
+  client: Pick<pg.PoolClient, 'query'>,
+  dispute: Stripe.Dispute,
+  userId: string | null,
+  closed: boolean
+): Promise<void> {
+  const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
+  const paymentIntentId = typeof dispute.payment_intent === 'string'
+    ? dispute.payment_intent
+    : dispute.payment_intent?.id;
+
+  await client.query(
+    `INSERT INTO stripe_disputes (
+       dispute_id, charge_id, payment_intent_id, user_id, amount_cents, currency,
+       reason, status, evidence_due_by, stripe_created_at, resolved_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     ON CONFLICT (dispute_id) DO UPDATE SET
+       charge_id = EXCLUDED.charge_id,
+       payment_intent_id = COALESCE(EXCLUDED.payment_intent_id, stripe_disputes.payment_intent_id),
+       user_id = COALESCE(EXCLUDED.user_id, stripe_disputes.user_id),
+       amount_cents = EXCLUDED.amount_cents,
+       currency = EXCLUDED.currency,
+       reason = COALESCE(EXCLUDED.reason, stripe_disputes.reason),
+       status = EXCLUDED.status,
+       evidence_due_by = COALESCE(EXCLUDED.evidence_due_by, stripe_disputes.evidence_due_by),
+       stripe_created_at = COALESCE(EXCLUDED.stripe_created_at, stripe_disputes.stripe_created_at),
+       -- Never clear a resolution: a replayed created event arriving after a
+       -- closed one would otherwise reopen a settled dispute.
+       resolved_at = COALESCE(stripe_disputes.resolved_at, EXCLUDED.resolved_at),
+       updated_at = NOW()`,
+    [
+      dispute.id,
+      chargeId || '',
+      paymentIntentId || null,
+      userId,
+      dispute.amount,
+      dispute.currency,
+      dispute.reason || null,
+      String(dispute.status || 'open'),
+      dispute.evidence_details?.due_by ? new Date(dispute.evidence_details.due_by * 1000) : null,
+      dispute.created ? new Date(dispute.created * 1000) : null,
+      closed ? new Date() : null
+    ]
+  );
+}
+
+/**
+ * Restrict an account from sending further mail.
+ *
+ * Approved policy for issue #150: a dispute zeroes the pack balance and blocks
+ * sends pending operator review. Deliberately idempotent and non-clobbering -
+ * an account already blocked for an earlier dispute keeps its original
+ * timestamp and reason, so a second chargeback cannot mask the first.
+ *
+ * The block is never lifted automatically, including when a dispute is won.
+ * Restoring an account is an operator decision.
+ */
+async function blockAccountSends(
+  client: Pick<pg.PoolClient, 'query'>,
+  userId: string,
+  reason: string
+): Promise<void> {
+  await client.query(
+    `UPDATE users
+     SET sends_blocked_at = COALESCE(sends_blocked_at, NOW()),
+         sends_blocked_reason = COALESCE(sends_blocked_reason, $2),
+         updated_at = NOW()
+     WHERE user_id = $1`,
+    [userId, reason]
+  );
+}
+
 async function processDisputeEvent(
   eventId: string,
   eventType: 'charge.dispute.created' | 'charge.dispute.closed',
@@ -1303,6 +1384,10 @@ async function processDisputeEvent(
         )
       : { rows: [] as Order[] };
     const order = orderResult.rows[0];
+    // Persist before the unmatched-order branch returns. An unmatched dispute is
+    // still money leaving the account, and the operator reviewing it needs the
+    // record regardless of whether we could tie it to an order.
+    await recordDispute(client, dispute, order?.user_id ?? null, closed);
     if (!order) {
       await client.query(
         `UPDATE stripe_webhook_events SET processing_status = 'unmatched'
@@ -1334,6 +1419,27 @@ async function processDisputeEvent(
       await recordOrderEvent(client, order.order_id, eventType, order.status, 'disputed', {
         disputeStatus: dispute.status
       });
+
+      // Issue #150, approved policy. A refund absorbs packs the customer already
+      // spent and leaves the account alone; a dispute is adversarial and does
+      // neither. Zero the pack balance and restrict sends pending review.
+      //
+      // Not applied when the dispute was WON: the funds stayed with us, so the
+      // customer effectively paid and must keep what they bought. Revoking there
+      // would penalise a customer whose bank raised the dispute in error.
+      //
+      // Applied on created AND on any non-won close, because Stripe can deliver
+      // these out of order and a `closed` arriving without its `created` must
+      // still revoke rather than leave the packs quietly spendable. Both
+      // operations are idempotent, so the second event is a no-op.
+      const disputeWon = String(dispute.status || '') === 'won';
+      if (!disputeWon) {
+        if (order.order_type === 'letter_pack') {
+          await revokePackCredits(client, order);
+        }
+        await blockAccountSends(client, order.user_id, 'payment_disputed');
+      }
+
       if (closed) {
         const resolutionCode = `stripe_dispute_${String(dispute.status || 'unknown')
           .toLowerCase()
