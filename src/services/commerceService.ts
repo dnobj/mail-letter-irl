@@ -1057,8 +1057,13 @@ async function revokePackCredits(
     initial_amount: number;
     remaining_amount: number;
   }>(
+    // 'adjustment' is included deliberately. A dispute compensation posts an
+    // adjustment lot against this order, and without it here that lot would sit
+    // outside the scope of every later claw-back: the purchase lot stays
+    // 'revoked' so this query would find nothing and return, leaving a customer
+    // who was later refunded holding both the money and the compensated credits.
     `SELECT ledger_id, initial_amount, remaining_amount FROM credit_ledger
-     WHERE user_id = $1 AND source_type = 'purchase'
+     WHERE user_id = $1 AND source_type IN ('purchase', 'adjustment')
        AND (source_reference_id = $2 OR source_metadata->>'stripe_session_id' = $3)
        AND status <> 'revoked'
      FOR UPDATE`,
@@ -1396,16 +1401,22 @@ async function compensateDisputedPacks(
          ON audit.related_ledger_id = purchase.ledger_id
         AND audit.source_type = 'refund'
         AND audit.source_metadata->>'reason' = 'payment_disputed'
+        -- Pinned to the dispute that actually caused this revocation. Matching
+        -- any dispute-caused revocation would let a second, unrelated dispute
+        -- closing favourably compensate a lot the first one took.
+        AND audit.source_metadata->>'dispute_id' = $4
       WHERE purchase.user_id = $1
         AND purchase.source_type = 'purchase'
         AND purchase.status = 'revoked'
         AND (purchase.source_reference_id = $2
              OR purchase.source_metadata->>'stripe_session_id' = $3)
+        -- Keyed per LOT, not per (lot, dispute). A lot can only ever be
+        -- compensated once: entitlement belongs to the lot, so keying on the
+        -- dispute would grant again for each new dispute touching the order.
         AND NOT EXISTS (
           SELECT 1 FROM credit_ledger compensation
            WHERE compensation.related_ledger_id = purchase.ledger_id
              AND compensation.source_type = 'adjustment'
-             AND compensation.source_metadata->>'dispute_id' = $4
         )
       FOR UPDATE OF purchase`,
     [order.user_id, order.order_id, order.stripe_checkout_session_id || null, disputeId]
@@ -1492,9 +1503,16 @@ async function compensateDisputedPacks(
  * Lift a send block after a dispute resolves in our favour.
  *
  * Scoped deliberately: the block is only lifted when the account has no OTHER
- * dispute still open or lost. Keying on the reason alone would let a benign
- * outcome on one order unlock a block that a different, still-standing
+ * dispute that would itself justify a block. Keying on the reason alone would
+ * let a benign outcome on one order unlock a block a different, still-standing
  * chargeback had set.
+ *
+ * "Would justify a block" means exactly the statuses that revoke - the inverse
+ * of NON_LOSS_DISPUTE_STATUSES. Counting inquiries here was a dead end: an open
+ * inquiry never blocks anything, but it would veto the unblock, and when it
+ * later closed warning_closed that status is not favourable so no further
+ * unblock is attempted. A customer who won their chargeback stayed blocked
+ * forever, with no tooling to clear it.
  */
 async function unblockAccountSends(
   client: Pick<pg.PoolClient, 'query'>,
@@ -1510,9 +1528,9 @@ async function unblockAccountSends(
          SELECT 1 FROM stripe_disputes other
           WHERE other.user_id = $1
             AND other.dispute_id <> $2
-            AND other.status NOT IN ('won', 'prevented', 'warning_closed')
+            AND NOT (other.status = ANY($3::text[]))
        )`,
-    [userId, resolvedDisputeId]
+    [userId, resolvedDisputeId, [...NON_LOSS_DISPUTE_STATUSES]]
   );
 }
 

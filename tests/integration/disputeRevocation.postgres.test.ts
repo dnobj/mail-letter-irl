@@ -117,11 +117,15 @@ describePostgres('dispute and refund pack revocation', () => {
        ) VALUES ($1, $2, $3, 1999, 'USD', $4, 'fulfilled', 'letter_pack', $5, $6)`,
       [orderId, userId, options.credits, paymentIntentId, 'starter', `idem_${orderId}`]
     );
+    // A real expiry, not NULL. An earlier version of this fixture left it unset,
+    // which made the "compensation inherits the expiry" assertion compare null to
+    // null - it would have passed even if the code dropped the expiry entirely.
     await pool.query(
       `INSERT INTO credit_ledger (
          user_id, initial_amount, remaining_amount, source_type,
-         source_reference_id, activated_at, expiration_policy, status
-       ) VALUES ($1, $2, $3, 'purchase', $4, NOW(), 'never', 'active')`,
+         source_reference_id, activated_at, expires_at, expiration_policy, status
+       ) VALUES ($1, $2, $3, 'purchase', $4, NOW(), NOW() + INTERVAL '730 days',
+                 'days_from_activation', 'active')`,
       [userId, options.credits, remaining, orderId]
     );
     return { userId, orderId, paymentIntentId };
@@ -249,6 +253,92 @@ describePostgres('dispute and refund pack revocation', () => {
     expect(txn.rows[0]?.balance_after).toBe(6);
   }, 60_000);
 
+  it('can claw back a compensation again if money leaves later', async () => {
+    const { userId, paymentIntentId } = await seedPackHolder({ credits: 10, spent: 4 });
+    const firstDispute = `dp_${randomUUID().slice(0, 8)}`;
+
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.created', disputeFixture({
+        id: firstDispute, payment_intent: paymentIntentId, status: 'needs_response'
+      }))
+    );
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.closed', disputeFixture({
+        id: firstDispute, payment_intent: paymentIntentId, status: 'won'
+      }))
+    );
+    expect((await readAccount(userId)).credits).toBe(6);
+
+    // The compensation lot must remain reachable by later claw-backs. Revocation
+    // used to select only source_type='purchase', so a compensated lot sat
+    // outside its scope forever and any subsequent money-out event no-opped -
+    // leaving the customer with the money and the credits.
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.created', disputeFixture({
+        id: `dp_${randomUUID().slice(0, 8)}`,
+        payment_intent: paymentIntentId,
+        status: 'needs_response'
+      }))
+    );
+
+    expect((await readAccount(userId)).credits).toBe(0);
+  }, 60_000);
+
+  it('compensates a lot only once, however many disputes touch the order', async () => {
+    const { userId, paymentIntentId } = await seedPackHolder({ credits: 10, spent: 4 });
+
+    for (const _ of [0, 1]) {
+      const disputeId = `dp_${randomUUID().slice(0, 8)}`;
+      await commerceService.processStripeWebhookEvent(
+        disputeEvent('charge.dispute.created', disputeFixture({
+          id: disputeId, payment_intent: paymentIntentId, status: 'needs_response'
+        }))
+      );
+      await commerceService.processStripeWebhookEvent(
+        disputeEvent('charge.dispute.closed', disputeFixture({
+          id: disputeId, payment_intent: paymentIntentId, status: 'won'
+        }))
+      );
+    }
+
+    // Entitlement belongs to the lot. Keying idempotency on the dispute instead
+    // would grant a fresh 6 for every new dispute that closed favourably.
+    const compensations = await pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM credit_ledger
+        WHERE user_id = $1 AND source_type = 'adjustment'`,
+      [userId]
+    );
+    expect(compensations.rows[0].n).toBe('1');
+  }, 60_000);
+
+  it('lifts the block on a win even while an unrelated inquiry is open', async () => {
+    const { userId, paymentIntentId } = await seedPackHolder({ credits: 10 });
+    const chargeback = `dp_${randomUUID().slice(0, 8)}`;
+
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.created', disputeFixture({
+        id: chargeback, payment_intent: paymentIntentId, status: 'needs_response'
+      }))
+    );
+    // An inquiry on the same account. It never blocks anything, so it must not
+    // veto the unblock either - counting it left a customer who won their
+    // chargeback blocked permanently, because the inquiry's own benign close is
+    // not a favourable status and never retries the unblock.
+    await pool.query(
+      `INSERT INTO stripe_disputes (dispute_id, charge_id, user_id, amount_cents, currency, status)
+       VALUES ($1, 'ch_inquiry', $2, 500, 'usd', 'warning_under_review')`,
+      [`dp_inq_${randomUUID().slice(0, 8)}`, userId]
+    );
+
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.closed', disputeFixture({
+        id: chargeback, payment_intent: paymentIntentId, status: 'won'
+      }))
+    );
+
+    expect((await readAccount(userId)).sends_blocked_at).toBeNull();
+  }, 60_000);
+
   it('does NOT compensate a revocation that a refund caused', async () => {
     const { userId, orderId, paymentIntentId } = await seedPackHolder({ credits: 10, spent: 4 });
 
@@ -297,6 +387,7 @@ describePostgres('dispute and refund pack revocation', () => {
 
   it('flags rather than silently skipping a revocation with no recorded balance', async () => {
     const { userId, orderId, paymentIntentId } = await seedPackHolder({ credits: 10 });
+    const disputeId = `dp_${randomUUID().slice(0, 8)}`;
 
     // A lot revoked before remaining_at_revocation was recorded. There is no way
     // to know what it held, so compensating would be inventing a number.
@@ -316,7 +407,9 @@ describePostgres('dispute and refund pack revocation', () => {
       [
         userId,
         orderId,
-        JSON.stringify({ reason: 'payment_disputed', order_id: orderId }),
+        // Carries the dispute id, as a real revocation does, but predates
+        // remaining_at_revocation being recorded.
+        JSON.stringify({ reason: 'payment_disputed', order_id: orderId, dispute_id: disputeId }),
         lot.rows[0].ledger_id
       ]
     );
@@ -324,7 +417,7 @@ describePostgres('dispute and refund pack revocation', () => {
 
     await commerceService.processStripeWebhookEvent(
       disputeEvent('charge.dispute.closed', disputeFixture({
-        id: `dp_${randomUUID().slice(0, 8)}`, payment_intent: paymentIntentId, status: 'won'
+        id: disputeId, payment_intent: paymentIntentId, status: 'won'
       }))
     );
 
