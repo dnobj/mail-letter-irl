@@ -1056,13 +1056,14 @@ async function revokePackCredits(
     ledger_id: string;
     initial_amount: number;
     remaining_amount: number;
+    source_type: string;
   }>(
     // 'adjustment' is included deliberately. A dispute compensation posts an
     // adjustment lot against this order, and without it here that lot would sit
     // outside the scope of every later claw-back: the purchase lot stays
     // 'revoked' so this query would find nothing and return, leaving a customer
     // who was later refunded holding both the money and the compensated credits.
-    `SELECT ledger_id, initial_amount, remaining_amount FROM credit_ledger
+    `SELECT ledger_id, initial_amount, remaining_amount, source_type FROM credit_ledger
      WHERE user_id = $1 AND source_type IN ('purchase', 'adjustment')
        AND (source_reference_id = $2 OR source_metadata->>'stripe_session_id' = $3)
        AND status <> 'revoked'
@@ -1106,6 +1107,11 @@ async function revokePackCredits(
       ]
     );
   }
+  // credits_purchased is lifetime spend and must be decremented once per order,
+  // not once per revocation. Revoking a compensation lot is a second claw-back
+  // of the same order; subtracting again understates the customer's lifetime
+  // total. Only the revocation that takes the original purchase adjusts it.
+  const revokedAPurchase = entries.rows.some(entry => entry.source_type === 'purchase');
   const user = await client.query<{ credits: number }>(
     `UPDATE users
      SET credits = GREATEST(credits - $1, 0),
@@ -1113,7 +1119,7 @@ async function revokePackCredits(
          updated_at = NOW()
      WHERE user_id = $3
      RETURNING credits`,
-    [remaining, order.credits || 0, order.user_id]
+    [remaining, revokedAPurchase ? order.credits || 0 : 0, order.user_id]
   );
   if (remaining > 0 && user.rows[0]) {
     await client.query(
@@ -1381,6 +1387,16 @@ async function compensateDisputedPacks(
   order: Order,
   disputeId: string
 ): Promise<void> {
+  // A refunded order must never be compensated. Stripe can deliver a delayed
+  // closed(won) after a refund has already been processed; the refund's own
+  // claw-back no-ops against lots the dispute already revoked, so compensating
+  // afterwards would hand the customer the refund AND the credits with nothing
+  // left to reverse it. The legitimate won-then-refunded order is unaffected:
+  // there compensation happens first and the later refund claws it back.
+  if (order.status === 'refunded' || order.status === 'refund_pending') {
+    return;
+  }
+
   await lockAccountForBalanceChange(client, order.user_id);
 
   // Only lots revoked BY A DISPUTE, and only where no compensation for this

@@ -320,6 +320,11 @@ describePostgres('dispute and refund pack revocation', () => {
         id: chargeback, payment_intent: paymentIntentId, status: 'needs_response'
       }))
     );
+    // Assert the premise before the conclusion. Without this the test passes
+    // vacuously if blocking regresses entirely - it would be asserting that an
+    // absent block is absent.
+    expect((await readAccount(userId)).sends_blocked_at).not.toBeNull();
+
     // An inquiry on the same account. It never blocks anything, so it must not
     // veto the unblock either - counting it left a customer who won their
     // chargeback blocked permanently, because the inquiry's own benign close is
