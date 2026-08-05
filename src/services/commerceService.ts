@@ -1073,7 +1073,16 @@ async function revokePackCredits(
         order.user_id,
         entry.initial_amount,
         order.order_id,
-        JSON.stringify({ reason: 'payment_refunded', order_id: order.order_id }),
+        // remaining_at_revocation is what a later restore must put back. The
+        // revocation zeroes remaining_amount on the original row, so without
+        // recording it here the pre-revocation balance is unrecoverable and a
+        // won dispute could not be undone. initial_amount is the original grant,
+        // not what was left.
+        JSON.stringify({
+          reason: 'payment_refunded',
+          order_id: order.order_id,
+          remaining_at_revocation: entry.remaining_amount
+        }),
         `Payment refund for ${order.order_id}`,
         entry.ledger_id
       ]
@@ -1297,6 +1306,101 @@ async function processRefundEvent(
 }
 
 /**
+ * Stripe dispute statuses that mean no money was, or will be, taken from us.
+ *
+ * The status enum is not two-valued. `warning_*` are card-network inquiries -
+ * a bank asking a question - where funds are never withdrawn. Treating those as
+ * chargebacks would confiscate a paying customer's balance because someone
+ * queried a charge. `won` and `prevented` are outright favourable outcomes.
+ *
+ * Anything not listed here is treated as a loss and revokes, which is the
+ * correct default for an unrecognised or future status.
+ */
+const NON_LOSS_DISPUTE_STATUSES = new Set([
+  'won',
+  'prevented',
+  'warning_needs_response',
+  'warning_under_review',
+  'warning_closed'
+]);
+
+/** Outcomes that positively restore a previously revoked pack, not merely decline to revoke. */
+const FAVOURABLE_DISPUTE_STATUSES = new Set(['won', 'prevented', 'warning_closed']);
+
+/**
+ * Undo a pack revocation after a dispute resolves in our favour.
+ *
+ * Stripe always emits `created` before `closed`, so by the time a win arrives the
+ * packs have already been revoked and the account blocked. We kept the funds, so
+ * the customer effectively paid: restoring is the only outcome that does not
+ * punish someone whose bank raised the dispute in error.
+ *
+ * Idempotent. Restores only rows this order revoked, using the remaining balance
+ * captured at revocation time, and only while they are still `revoked` - so a
+ * replayed win cannot double-grant.
+ */
+async function restorePackCredits(
+  client: Pick<pg.PoolClient, 'query'>,
+  order: Order
+): Promise<void> {
+  await lockAccountForBalanceChange(client, order.user_id);
+
+  // Pair each revoked purchase row with the audit row that recorded what it held.
+  const entries = await client.query<{ ledger_id: string; restore_amount: number }>(
+    `SELECT purchase.ledger_id,
+            COALESCE((audit.source_metadata->>'remaining_at_revocation')::int, 0) AS restore_amount
+       FROM credit_ledger purchase
+       JOIN credit_ledger audit ON audit.related_ledger_id = purchase.ledger_id
+      WHERE purchase.user_id = $1
+        AND purchase.source_type = 'purchase'
+        AND purchase.status = 'revoked'
+        AND audit.source_type = 'refund'
+        AND (purchase.source_reference_id = $2
+             OR purchase.source_metadata->>'stripe_session_id' = $3)
+      FOR UPDATE OF purchase`,
+    [order.user_id, order.order_id, order.stripe_checkout_session_id || null]
+  );
+  if (entries.rows.length === 0) return;
+
+  let restored = 0;
+  for (const entry of entries.rows) {
+    if (entry.restore_amount <= 0) continue;
+    await client.query(
+      `UPDATE credit_ledger
+       SET remaining_amount = $2, status = 'active', updated_at = NOW()
+       WHERE ledger_id = $1 AND status = 'revoked'`,
+      [entry.ledger_id, entry.restore_amount]
+    );
+    restored += entry.restore_amount;
+  }
+  if (restored === 0) return;
+
+  await client.query(
+    `UPDATE users
+     SET credits = credits + $1,
+         credits_purchased = credits_purchased + $2,
+         updated_at = NOW()
+     WHERE user_id = $3`,
+    [restored, order.credits || 0, order.user_id]
+  );
+}
+
+/**
+ * Lift a send block. Only ever called when a dispute resolves in our favour.
+ */
+async function unblockAccountSends(
+  client: Pick<pg.PoolClient, 'query'>,
+  userId: string
+): Promise<void> {
+  await client.query(
+    `UPDATE users
+     SET sends_blocked_at = NULL, sends_blocked_reason = NULL, updated_at = NOW()
+     WHERE user_id = $1 AND sends_blocked_reason = 'payment_disputed'`,
+    [userId]
+  );
+}
+
+/**
  * Persist the dispute lifecycle idempotently.
  *
  * Keyed on Stripe's dispute id, so replayed, reordered or concurrently
@@ -1444,20 +1548,31 @@ async function processDisputeEvent(
       // spent and leaves the account alone; a dispute is adversarial and does
       // neither. Zero the pack balance and restrict sends pending review.
       //
-      // Not applied when the dispute was WON: the funds stayed with us, so the
-      // customer effectively paid and must keep what they bought. Revoking there
-      // would penalise a customer whose bank raised the dispute in error.
+      // Not applied for outcomes where no money was or will be taken. That is
+      // NOT just 'won': the warning_* statuses are card-network inquiries where
+      // funds are never withdrawn, and treating a bank's question as a
+      // chargeback would confiscate a paying customer's balance. Anything
+      // unrecognised is treated as a loss, which is the safe default.
       //
-      // Applied on created AND on any non-won close, because Stripe can deliver
-      // these out of order and a `closed` arriving without its `created` must
-      // still revoke rather than leave the packs quietly spendable. Both
-      // operations are idempotent, so the second event is a no-op.
-      const disputeWon = String(dispute.status || '') === 'won';
-      if (!disputeWon) {
+      // Applied on created AND on any losing close, because Stripe can deliver
+      // these out of order and a close arriving without its create must still
+      // revoke rather than leave the packs quietly spendable. Both operations
+      // are idempotent, so the second event is a no-op.
+      const status = String(dispute.status || '');
+      if (!NON_LOSS_DISPUTE_STATUSES.has(status)) {
         if (order.order_type === 'letter_pack') {
           await revokePackCredits(client, order);
         }
         await blockAccountSends(client, order.user_id, 'payment_disputed');
+      } else if (closed && FAVOURABLE_DISPUTE_STATUSES.has(status)) {
+        // Stripe always emits created before closed, so a win arrives AFTER the
+        // packs were revoked and the account blocked. Declining to revoke again
+        // is not enough - without restoring, we keep the funds and the customer
+        // keeps nothing, permanently. Approved policy is to make them whole.
+        if (order.order_type === 'letter_pack') {
+          await restorePackCredits(client, order);
+        }
+        await unblockAccountSends(client, order.user_id);
       }
 
       if (closed) {

@@ -173,22 +173,94 @@ describePostgres('dispute and refund pack revocation', () => {
     expect(persisted.rows[0].user_id).toBe(userId);
   }, 60_000);
 
-  it('does NOT revoke or block when the dispute is won', async () => {
+  it('restores packs and lifts the block when a dispute is WON, in the real event order', async () => {
+    const { userId, paymentIntentId } = await seedPackHolder({ credits: 10, spent: 4 });
+    const disputeId = `dp_${randomUUID().slice(0, 8)}`;
+
+    // Stripe ALWAYS emits created before closed. An earlier version of this test
+    // fired closed(won) alone - an ordering Stripe never produces - and so passed
+    // while the real sequence permanently confiscated a paying customer's packs.
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.created', disputeFixture({
+        id: disputeId, payment_intent: paymentIntentId, status: 'needs_response'
+      }))
+    );
+    const duringDispute = await readAccount(userId);
+    expect(duringDispute.credits).toBe(0);
+    expect(duringDispute.sends_blocked_at).not.toBeNull();
+
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.closed', disputeFixture({
+        id: disputeId, payment_intent: paymentIntentId, status: 'won'
+      }))
+    );
+
+    // We kept the funds, so the customer paid. They had 6 unspent when the
+    // dispute opened; they get exactly those 6 back, not the original 10.
+    const afterWin = await readAccount(userId);
+    expect(afterWin.credits).toBe(6);
+    expect(afterWin.sends_blocked_at).toBeNull();
+    expect(afterWin.sends_blocked_reason).toBeNull();
+    expect(await readLedgerStatuses(userId)).toEqual(['active']);
+  }, 60_000);
+
+  it('does not double-restore when a won dispute is replayed', async () => {
+    const { userId, paymentIntentId } = await seedPackHolder({ credits: 10, spent: 4 });
+    const disputeId = `dp_${randomUUID().slice(0, 8)}`;
+
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.created', disputeFixture({
+        id: disputeId, payment_intent: paymentIntentId, status: 'needs_response'
+      }))
+    );
+    const won = disputeFixture({ id: disputeId, payment_intent: paymentIntentId, status: 'won' });
+    await commerceService.processStripeWebhookEvent(disputeEvent('charge.dispute.closed', won));
+    await commerceService.processStripeWebhookEvent(disputeEvent('charge.dispute.closed', won));
+
+    // Distinct event ids, so claimStripeEvent does not suppress the second. The
+    // restore itself must be idempotent or the customer is granted free credits.
+    expect((await readAccount(userId)).credits).toBe(6);
+  }, 60_000);
+
+  it('does NOT revoke on a card-network inquiry, where no funds move', async () => {
+    const { userId, paymentIntentId } = await seedPackHolder({ credits: 10 });
+    const disputeId = `dp_${randomUUID().slice(0, 8)}`;
+
+    // warning_* is an inquiry - a bank asking a question. No money is withdrawn.
+    // Revoking here would confiscate a paying customer's balance over a query.
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.created', disputeFixture({
+        id: disputeId, payment_intent: paymentIntentId, status: 'warning_needs_response'
+      }))
+    );
+    const duringInquiry = await readAccount(userId);
+    expect(duringInquiry.credits).toBe(10);
+    expect(duringInquiry.sends_blocked_at).toBeNull();
+
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.closed', disputeFixture({
+        id: disputeId, payment_intent: paymentIntentId, status: 'warning_closed'
+      }))
+    );
+    const afterClose = await readAccount(userId);
+    expect(afterClose.credits).toBe(10);
+    expect(afterClose.sends_blocked_at).toBeNull();
+    expect(await readLedgerStatuses(userId)).toEqual(['active']);
+  }, 60_000);
+
+  it('still revokes on an unrecognised status, failing safe', async () => {
     const { userId, paymentIntentId } = await seedPackHolder({ credits: 10 });
 
-    const dispute = disputeFixture({
-      id: `dp_${randomUUID().slice(0, 8)}`,
-      payment_intent: paymentIntentId,
-      status: 'won'
-    });
-    await commerceService.processStripeWebhookEvent(disputeEvent('charge.dispute.closed', dispute));
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.created', disputeFixture({
+        id: `dp_${randomUUID().slice(0, 8)}`,
+        payment_intent: paymentIntentId,
+        status: 'some_future_stripe_status'
+      }))
+    );
 
-    // We kept the funds, so the customer effectively paid and must keep what they
-    // bought. Revoking here would punish someone whose bank raised the dispute.
-    const account = await readAccount(userId);
-    expect(account.credits).toBe(10);
-    expect(account.sends_blocked_at).toBeNull();
-    expect(await readLedgerStatuses(userId)).toEqual(['active']);
+    // An unknown status must be treated as a loss, not silently ignored.
+    expect((await readAccount(userId)).credits).toBe(0);
   }, 60_000);
 
   it('is idempotent when the same dispute event is replayed', async () => {
