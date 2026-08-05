@@ -201,7 +201,142 @@ describePostgres('dispute and refund pack revocation', () => {
     expect(afterWin.credits).toBe(6);
     expect(afterWin.sends_blocked_at).toBeNull();
     expect(afterWin.sends_blocked_reason).toBeNull();
-    expect(await readLedgerStatuses(userId)).toEqual(['active']);
+
+    // The revocation is NOT reversed. It stays in history as a record of what
+    // happened, and a separate linked grant makes the customer whole.
+    expect(await readLedgerStatuses(userId)).toEqual(['revoked']);
+
+    // Traceability: from the revoked lot, one indexed lookup finds both the
+    // revocation and its compensation, and the compensation names the dispute.
+    const purchase = await pool.query<{ ledger_id: string; expires_at: Date | null }>(
+      `SELECT ledger_id, expires_at FROM credit_ledger
+        WHERE user_id = $1 AND source_type = 'purchase'`,
+      [userId]
+    );
+    const chain = await pool.query<{
+      source_type: string;
+      initial_amount: number;
+      status: string;
+      dispute_id: string | null;
+      expires_at: Date | null;
+    }>(
+      `SELECT source_type, initial_amount, status,
+              source_metadata->>'dispute_id' AS dispute_id, expires_at
+         FROM credit_ledger
+        WHERE related_ledger_id = $1
+        ORDER BY created_at`,
+      [purchase.rows[0].ledger_id]
+    );
+    const compensation = chain.rows.find(row => row.source_type === 'adjustment');
+    expect(compensation).toBeDefined();
+    expect(compensation?.initial_amount).toBe(6);
+    expect(compensation?.status).toBe('active');
+    expect(compensation?.dispute_id).toBe(disputeId);
+
+    // The compensating lot must inherit the original lot's expiry. Credits are
+    // consumed FIFO by expires_at, so a lot with a different window would
+    // silently move the customer's expiry.
+    expect(compensation?.expires_at).toEqual(purchase.rows[0].expires_at);
+
+    // Accounting symmetry: revocation writes a credit_transactions debit, so the
+    // compensation must write the matching credit or the ledger never balances.
+    const txn = await pool.query<{ amount: number; balance_after: number }>(
+      `SELECT amount, balance_after FROM credit_transactions
+        WHERE user_id = $1 AND type = 'refund' ORDER BY transaction_id DESC LIMIT 1`,
+      [userId]
+    );
+    expect(txn.rows[0]?.amount).toBe(6);
+    expect(txn.rows[0]?.balance_after).toBe(6);
+  }, 60_000);
+
+  it('does NOT compensate a revocation that a refund caused', async () => {
+    const { userId, orderId, paymentIntentId } = await seedPackHolder({ credits: 10, spent: 4 });
+
+    // Simulate the state a refund leaves behind: lot revoked, audit row stamped
+    // with the REFUND cause. This is the sequence that made the previous
+    // implementation hand out free credits - an inquiry, then a goodwill refund
+    // to resolve it, then the inquiry closing favourably, which reversed the
+    // refund because both causes wrote identical audit rows.
+    const lot = await pool.query<{ ledger_id: string }>(
+      `SELECT ledger_id FROM credit_ledger WHERE user_id = $1 AND source_type = 'purchase'`,
+      [userId]
+    );
+    await pool.query(
+      `UPDATE credit_ledger SET remaining_amount = 0, status = 'revoked' WHERE ledger_id = $1`,
+      [lot.rows[0].ledger_id]
+    );
+    await pool.query(
+      `INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type, source_reference_id,
+         source_metadata, activated_at, expiration_policy, status, related_ledger_id
+       ) VALUES ($1, 10, 0, 'refund', $2, $3, NOW(), 'never', 'revoked', $4)`,
+      [
+        userId,
+        orderId,
+        JSON.stringify({ reason: 'payment_refunded', order_id: orderId, remaining_at_revocation: 6 }),
+        lot.rows[0].ledger_id
+      ]
+    );
+    await pool.query('UPDATE users SET credits = 0 WHERE user_id = $1', [userId]);
+
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.closed', disputeFixture({
+        id: `dp_${randomUUID().slice(0, 8)}`, payment_intent: paymentIntentId, status: 'won'
+      }))
+    );
+
+    // The customer already has their money back. Compensating here would hand
+    // them the credits as well.
+    expect((await readAccount(userId)).credits).toBe(0);
+    const compensations = await pool.query(
+      `SELECT 1 FROM credit_ledger WHERE user_id = $1 AND source_type = 'adjustment'`,
+      [userId]
+    );
+    expect(compensations.rowCount).toBe(0);
+  }, 60_000);
+
+  it('flags rather than silently skipping a revocation with no recorded balance', async () => {
+    const { userId, orderId, paymentIntentId } = await seedPackHolder({ credits: 10 });
+
+    // A lot revoked before remaining_at_revocation was recorded. There is no way
+    // to know what it held, so compensating would be inventing a number.
+    const lot = await pool.query<{ ledger_id: string }>(
+      `SELECT ledger_id FROM credit_ledger WHERE user_id = $1 AND source_type = 'purchase'`,
+      [userId]
+    );
+    await pool.query(
+      `UPDATE credit_ledger SET remaining_amount = 0, status = 'revoked' WHERE ledger_id = $1`,
+      [lot.rows[0].ledger_id]
+    );
+    await pool.query(
+      `INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type, source_reference_id,
+         source_metadata, activated_at, expiration_policy, status, related_ledger_id
+       ) VALUES ($1, 10, 0, 'refund', $2, $3, NOW(), 'never', 'revoked', $4)`,
+      [
+        userId,
+        orderId,
+        JSON.stringify({ reason: 'payment_disputed', order_id: orderId }),
+        lot.rows[0].ledger_id
+      ]
+    );
+    await pool.query('UPDATE users SET credits = 0 WHERE user_id = $1', [userId]);
+
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.closed', disputeFixture({
+        id: `dp_${randomUUID().slice(0, 8)}`, payment_intent: paymentIntentId, status: 'won'
+      }))
+    );
+
+    // Nothing granted, but somebody must be told - otherwise a customer who won
+    // a dispute silently receives nothing.
+    expect((await readAccount(userId)).credits).toBe(0);
+    const alerts = await pool.query(
+      `SELECT 1 FROM commerce_operational_alerts
+        WHERE order_id = $1 AND alert_type = 'dispute_compensation_incomplete'`,
+      [orderId]
+    );
+    expect(alerts.rowCount).toBe(1);
   }, 60_000);
 
   it('does not double-restore when a won dispute is replayed', async () => {

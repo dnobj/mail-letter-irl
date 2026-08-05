@@ -1032,9 +1032,21 @@ async function processCheckoutSessionEvent(
   });
 }
 
+/**
+ * Why a pack was revoked. Stamped into the audit row so a later compensation can
+ * tell a dispute-caused revocation from a refund-caused one.
+ *
+ * Without this the two are byte-identical, and a compensation cannot know which
+ * revocation it is answering - which would let a favourable dispute close undo a
+ * legitimate refund and hand the customer both the money and the credits.
+ */
+type RevocationCause = 'payment_refunded' | 'payment_disputed';
+
 async function revokePackCredits(
   client: Pick<pg.PoolClient, 'query'>,
-  order: Order
+  order: Order,
+  cause: RevocationCause = 'payment_refunded',
+  disputeId?: string
 ): Promise<void> {
   // Canonical account lock order: users -> credit_ledger -> image_entitlements.
   // Reversal must take the account lock first so it cannot deadlock against a
@@ -1079,9 +1091,10 @@ async function revokePackCredits(
         // won dispute could not be undone. initial_amount is the original grant,
         // not what was left.
         JSON.stringify({
-          reason: 'payment_refunded',
+          reason: cause,
           order_id: order.order_id,
-          remaining_at_revocation: entry.remaining_amount
+          remaining_at_revocation: entry.remaining_amount,
+          ...(disputeId ? { dispute_id: disputeId } : {})
         }),
         `Payment refund for ${order.order_id}`,
         entry.ledger_id
@@ -1324,79 +1337,182 @@ const NON_LOSS_DISPUTE_STATUSES = new Set([
   'warning_closed'
 ]);
 
-/** Outcomes that positively restore a previously revoked pack, not merely decline to revoke. */
-const FAVOURABLE_DISPUTE_STATUSES = new Set(['won', 'prevented', 'warning_closed']);
+/**
+ * Outcomes that positively compensate a previously revoked pack, not merely
+ * decline to revoke.
+ *
+ * `warning_closed` is deliberately NOT here despite being a non-loss status. An
+ * inquiry never revokes anything, so it has nothing of its own to compensate -
+ * its only reachable effect would be to trigger a compensation for a revocation
+ * that something else caused.
+ */
+const FAVOURABLE_DISPUTE_STATUSES = new Set(['won', 'prevented']);
 
 /**
- * Undo a pack revocation after a dispute resolves in our favour.
+ * Make a customer whole after a dispute resolves in our favour.
  *
- * Stripe always emits `created` before `closed`, so by the time a win arrives the
- * packs have already been revoked and the account blocked. We kept the funds, so
- * the customer effectively paid: restoring is the only outcome that does not
- * punish someone whose bank raised the dispute in error.
+ * Posts a NEW compensating grant rather than reversing the revocation. The
+ * revocation stays in history as an honest record of what happened, and the
+ * compensation is a separate, linked entry - so `related_ledger_id` on the
+ * original purchase row answers "was this ever revoked, and was it made good?"
+ * in a single indexed lookup.
  *
- * Idempotent. Restores only rows this order revoked, using the remaining balance
- * captured at revocation time, and only while they are still `revoked` - so a
- * replayed win cannot double-grant.
+ * Reversal was tried first and rejected: identifying WHICH revocation to undo
+ * from audit rows that look identical for refunds and disputes let a favourable
+ * dispute silently undo a legitimate refund.
+ *
+ * Uses source_type 'adjustment', not 'refund'. A 'refund' row linked to a
+ * purchase is what the tier calculation treats as "this purchase was returned",
+ * and a compensation is the opposite of that. 'adjustment' is also the only
+ * suitable existing enum value - a new one cannot be added, because
+ * ALTER TYPE ... ADD VALUE is illegal inside the migrator's single transaction.
+ *
+ * The compensating lot inherits the original lot's expiry. Credits live in lots
+ * with their own expiry and are consumed FIFO by expires_at, so a fresh lot with
+ * no expiry would silently extend the customer's window.
  */
-async function restorePackCredits(
+async function compensateDisputedPacks(
   client: Pick<pg.PoolClient, 'query'>,
-  order: Order
+  order: Order,
+  disputeId: string
 ): Promise<void> {
   await lockAccountForBalanceChange(client, order.user_id);
 
-  // Pair each revoked purchase row with the audit row that recorded what it held.
-  const entries = await client.query<{ ledger_id: string; restore_amount: number }>(
+  // Only lots revoked BY A DISPUTE, and only where no compensation for this
+  // dispute already exists. Matching on the revocation cause is what keeps a
+  // refund-caused revocation out of scope.
+  const entries = await client.query<{
+    ledger_id: string;
+    restore_amount: number;
+    expires_at: Date | null;
+    expiration_policy: string | null;
+  }>(
     `SELECT purchase.ledger_id,
-            COALESCE((audit.source_metadata->>'remaining_at_revocation')::int, 0) AS restore_amount
+            COALESCE((audit.source_metadata->>'remaining_at_revocation')::int, 0) AS restore_amount,
+            purchase.expires_at,
+            purchase.expiration_policy
        FROM credit_ledger purchase
-       JOIN credit_ledger audit ON audit.related_ledger_id = purchase.ledger_id
+       JOIN credit_ledger audit
+         ON audit.related_ledger_id = purchase.ledger_id
+        AND audit.source_type = 'refund'
+        AND audit.source_metadata->>'reason' = 'payment_disputed'
       WHERE purchase.user_id = $1
         AND purchase.source_type = 'purchase'
         AND purchase.status = 'revoked'
-        AND audit.source_type = 'refund'
         AND (purchase.source_reference_id = $2
              OR purchase.source_metadata->>'stripe_session_id' = $3)
+        AND NOT EXISTS (
+          SELECT 1 FROM credit_ledger compensation
+           WHERE compensation.related_ledger_id = purchase.ledger_id
+             AND compensation.source_type = 'adjustment'
+             AND compensation.source_metadata->>'dispute_id' = $4
+        )
       FOR UPDATE OF purchase`,
-    [order.user_id, order.order_id, order.stripe_checkout_session_id || null]
+    [order.user_id, order.order_id, order.stripe_checkout_session_id || null, disputeId]
   );
   if (entries.rows.length === 0) return;
 
-  let restored = 0;
+  let compensated = 0;
+  let skippedUnknownAmount = 0;
   for (const entry of entries.rows) {
-    if (entry.restore_amount <= 0) continue;
+    if (entry.restore_amount <= 0) {
+      // A lot revoked before remaining_at_revocation was recorded. There is no
+      // way to know what it held, so guessing would be inventing money in one
+      // direction or the other. Surfaced below rather than silently skipped.
+      skippedUnknownAmount += 1;
+      continue;
+    }
     await client.query(
-      `UPDATE credit_ledger
-       SET remaining_amount = $2, status = 'active', updated_at = NOW()
-       WHERE ledger_id = $1 AND status = 'revoked'`,
-      [entry.ledger_id, entry.restore_amount]
+      `INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, source_metadata, activated_at,
+         expires_at, expiration_policy, status, description, related_ledger_id
+       ) VALUES ($1, $2, $2, 'adjustment', $3, $4, NOW(), $5, $6, 'active', $7, $8)`,
+      [
+        order.user_id,
+        entry.restore_amount,
+        order.order_id,
+        JSON.stringify({
+          reason: 'dispute_resolved_in_our_favour',
+          order_id: order.order_id,
+          dispute_id: disputeId,
+          compensates_ledger_id: entry.ledger_id
+        }),
+        entry.expires_at,
+        entry.expiration_policy,
+        `Dispute resolved in our favour for ${order.order_id}`,
+        entry.ledger_id
+      ]
     );
-    restored += entry.restore_amount;
+    compensated += entry.restore_amount;
   }
-  if (restored === 0) return;
 
+  if (skippedUnknownAmount > 0) {
+    // Silence here would mean a customer who won a dispute quietly gets nothing.
+    await client.query(
+      `INSERT INTO commerce_operational_alerts
+         (order_id, alert_type, severity, details)
+       VALUES ($1, 'dispute_compensation_incomplete', 'warning', $2)
+       ON CONFLICT DO NOTHING`,
+      [
+        order.order_id,
+        JSON.stringify({ disputeId, lotsWithoutRecordedBalance: skippedUnknownAmount })
+      ]
+    );
+  }
+
+  if (compensated === 0) return;
+
+  // credits only. credits_purchased is lifetime spend and drives tier - a
+  // compensation is not a new purchase and must not inflate either.
   await client.query(
-    `UPDATE users
-     SET credits = credits + $1,
-         credits_purchased = credits_purchased + $2,
-         updated_at = NOW()
-     WHERE user_id = $3`,
-    [restored, order.credits || 0, order.user_id]
+    `UPDATE users SET credits = credits + $1, updated_at = NOW() WHERE user_id = $2`,
+    [compensated, order.user_id]
+  );
+
+  // Symmetry with revocation, which writes its own credit_transactions row.
+  // Without this the transaction ledger shows a debit with no matching credit.
+  // balance_after is read from users AFTER the update above, so the snapshot
+  // matches the balance this transaction produced.
+  await client.query(
+    `INSERT INTO credit_transactions (
+       user_id, amount, balance_after, type, reference_type, reference_id, description
+     ) SELECT $1::varchar, $2::int, credits, 'refund', 'order', $3::varchar, $4::text
+         FROM users WHERE user_id = $1::varchar`,
+    [
+      order.user_id,
+      compensated,
+      order.order_id,
+      `Dispute ${disputeId} resolved in our favour for ${order.order_id}`
+    ]
   );
 }
 
 /**
- * Lift a send block. Only ever called when a dispute resolves in our favour.
+ * Lift a send block after a dispute resolves in our favour.
+ *
+ * Scoped deliberately: the block is only lifted when the account has no OTHER
+ * dispute still open or lost. Keying on the reason alone would let a benign
+ * outcome on one order unlock a block that a different, still-standing
+ * chargeback had set.
  */
 async function unblockAccountSends(
   client: Pick<pg.PoolClient, 'query'>,
-  userId: string
+  userId: string,
+  resolvedDisputeId: string
 ): Promise<void> {
   await client.query(
     `UPDATE users
      SET sends_blocked_at = NULL, sends_blocked_reason = NULL, updated_at = NOW()
-     WHERE user_id = $1 AND sends_blocked_reason = 'payment_disputed'`,
-    [userId]
+     WHERE user_id = $1
+       AND sends_blocked_reason = 'payment_disputed'
+       AND NOT EXISTS (
+         SELECT 1 FROM stripe_disputes other
+          WHERE other.user_id = $1
+            AND other.dispute_id <> $2
+            AND other.status NOT IN ('won', 'prevented', 'warning_closed')
+       )`,
+    [userId, resolvedDisputeId]
   );
 }
 
@@ -1463,8 +1579,10 @@ async function recordDispute(
  * an account already blocked for an earlier dispute keeps its original
  * timestamp and reason, so a second chargeback cannot mask the first.
  *
- * The block is never lifted automatically, including when a dispute is won.
- * Restoring an account is an operator decision.
+ * Lifted automatically only when a dispute resolves in our favour AND the
+ * account has no other dispute still open or lost - see unblockAccountSends.
+ * Any other route back is an operator decision, and there is no tooling for it
+ * yet.
  */
 async function blockAccountSends(
   client: Pick<pg.PoolClient, 'query'>,
@@ -1561,18 +1679,18 @@ async function processDisputeEvent(
       const status = String(dispute.status || '');
       if (!NON_LOSS_DISPUTE_STATUSES.has(status)) {
         if (order.order_type === 'letter_pack') {
-          await revokePackCredits(client, order);
+          await revokePackCredits(client, order, 'payment_disputed', dispute.id);
         }
         await blockAccountSends(client, order.user_id, 'payment_disputed');
       } else if (closed && FAVOURABLE_DISPUTE_STATUSES.has(status)) {
         // Stripe always emits created before closed, so a win arrives AFTER the
         // packs were revoked and the account blocked. Declining to revoke again
-        // is not enough - without restoring, we keep the funds and the customer
-        // keeps nothing, permanently. Approved policy is to make them whole.
+        // is not enough - without compensating, we keep the funds and the
+        // customer keeps nothing, permanently.
         if (order.order_type === 'letter_pack') {
-          await restorePackCredits(client, order);
+          await compensateDisputedPacks(client, order, dispute.id);
         }
-        await unblockAccountSends(client, order.user_id);
+        await unblockAccountSends(client, order.user_id, dispute.id);
       }
 
       if (closed) {

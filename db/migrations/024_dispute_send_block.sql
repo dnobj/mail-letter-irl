@@ -42,6 +42,42 @@ CREATE INDEX IF NOT EXISTS idx_users_sends_blocked
   WHERE sends_blocked_at IS NOT NULL;
 
 COMMENT ON COLUMN users.sends_blocked_at IS
-  'Set when a dispute or chargeback restricts the account. NULL means sends are permitted. Cleared only by an operator after review; winning a dispute does not clear it automatically.';
+  'Set when a dispute or chargeback restricts the account. NULL means sends are permitted. Cleared automatically when a dispute resolves in our favour and no other dispute on the account is still open or lost; any other route back is an operator decision.';
 COMMENT ON COLUMN users.sends_blocked_reason IS
   'Stable machine-readable reason code, e.g. payment_disputed. Never free text and never customer PII.';
+
+-- ---------------------------------------------------------------------------
+-- Operational alert for incomplete dispute compensation
+-- ---------------------------------------------------------------------------
+--
+-- When a dispute resolves in our favour we compensate the customer for what the
+-- revocation took. A pack revoked before the balance-at-revocation was recorded
+-- has no recoverable amount, and guessing would invent money in one direction or
+-- the other. Silence would mean a customer who won a dispute quietly receives
+-- nothing, so the case raises an alert instead.
+--
+-- Extends the existing allow-list from 023 rather than replacing it; the full
+-- list has to be restated because CHECK constraints cannot be amended in place.
+--
+-- Guarded on the table existing, so this migration stays independent of arrival
+-- order the way 023 is of 022. commerce_operational_alerts is created by 023,
+-- and without the guard 024 would fail outright wherever 023 has not been
+-- applied - including the legacy-scenario integration tests, which deliberately
+-- stage a subset of migrations.
+
+DO $$
+BEGIN
+  IF to_regclass('commerce_operational_alerts') IS NOT NULL THEN
+    ALTER TABLE commerce_operational_alerts
+      DROP CONSTRAINT IF EXISTS valid_commerce_alert_type;
+    ALTER TABLE commerce_operational_alerts
+      ADD CONSTRAINT valid_commerce_alert_type CHECK (
+        alert_type IN (
+          'stripe_dispute_created', 'stripe_dispute_closed',
+          'mail_provider_outcome_ambiguous', 'refunded_mail_already_dispatched',
+          'stripe_money_event_unmatched',
+          'dispute_compensation_incomplete'
+        )
+      );
+  END IF;
+END $$;
