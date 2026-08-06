@@ -308,6 +308,14 @@ describe('mail outbox retries', () => {
       if (sql.includes("SET status = 'refund_pending'")) {
         return { rows: [{ order_id: 'order-1' }] };
       }
+      // The terminal job transition now claims the dispatch it belongs to, and
+      // everything after it - the letter, the order, the credit return - runs
+      // only if that claim matched. A mock that reports no rows models a job
+      // some other handler already settled, which would take this test down the
+      // superseded branch and leave it asserting nothing.
+      if (sql.includes('SET status = $1::varchar')) {
+        return { rows: [], rowCount: 1 };
+      }
       return { rows: [] };
     });
     sendLetter.mockResolvedValue({

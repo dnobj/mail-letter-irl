@@ -838,7 +838,13 @@ export async function getUsersWithExpiringCredits(
  *
  * Each returned lot inherits the expiry of the lot it came from. Credits live
  * in lots consumed FIFO by expires_at, so returning them into a fresh lot with
- * no expiry would quietly extend the customer's window.
+ * no expiry would quietly extend the customer's window. It inherits that lot's
+ * source reference too, which is what keeps a later refund able to claw the
+ * returned credit back - see the note at the insert.
+ *
+ * A lot the customer has already been refunded for in cash is skipped: issue
+ * #150's revocation zeroes and revokes those lots, and returning against one
+ * would pay for the same pack twice.
  *
  * Exactly-once is enforced by refusing to act when a return already exists for
  * this letter. Callers must already hold the canonical locks down to the letter
@@ -888,9 +894,14 @@ export async function returnConsumedCreditsForLetter(
     amount: number;
     expires_at: Date | null;
     expiration_policy: string | null;
+    status: string;
+    source_reference_id: string | null;
+    stripe_session_id: string | null;
   }>(
     `SELECT consumption.ledger_id, consumption.amount,
-            lot.expires_at, lot.expiration_policy
+            lot.expires_at, lot.expiration_policy, lot.status,
+            lot.source_reference_id,
+            lot.source_metadata->>'stripe_session_id' AS stripe_session_id
        FROM credit_consumption consumption
        JOIN credit_transactions txn ON txn.transaction_id = consumption.transaction_id
        JOIN credit_ledger lot ON lot.ledger_id = consumption.ledger_id
@@ -905,6 +916,12 @@ export async function returnConsumedCreditsForLetter(
   let returned = 0;
   for (const lot of consumed.rows) {
     if (lot.amount <= 0) continue;
+    // A revoked lot was already paid back in cash. Refunding a pack zeroes its
+    // lots and claws the balance down (issue #150); minting a fresh credit from
+    // one of those lots would hand the customer the money and the credit for
+    // the same pack. The send failing after the refund does not owe them
+    // anything - the refund already covered the letter that never went.
+    if (lot.status === 'revoked') continue;
     await client.query(
       `INSERT INTO credit_ledger (
          user_id, initial_amount, remaining_amount, source_type,
@@ -914,7 +931,15 @@ export async function returnConsumedCreditsForLetter(
       [
         userId,
         lot.amount,
-        letterId,
+        // The returned credit belongs to whatever bought the lot it came from,
+        // so it carries that lot's reference rather than the letter's. A later
+        // refund or chargeback claws back by order id or checkout session
+        // (commerceService.revokePackCredits); a letter-referenced lot is
+        // invisible to that query, which would leave a refunded customer
+        // holding both the cash and the returned credit. The letter is still
+        // recorded in the metadata below, where the exactly-once marker reads
+        // it.
+        lot.source_reference_id,
         // failure_code is a stable classification, never the provider's own
         // error text. This row is durable and operator-visible, and this repo
         // bars provider internals and customer content from persisted
@@ -923,7 +948,10 @@ export async function returnConsumedCreditsForLetter(
           reason: 'send_failed',
           letter_id: letterId,
           failure_code: failureCode,
-          restores_ledger_id: lot.ledger_id
+          restores_ledger_id: lot.ledger_id,
+          // Carried for the same reason as the reference above: the claw-back's
+          // other arm matches on the checkout session.
+          ...(lot.stripe_session_id ? { stripe_session_id: lot.stripe_session_id } : {})
         }),
         lot.expires_at,
         lot.expiration_policy,

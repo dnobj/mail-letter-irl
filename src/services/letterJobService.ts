@@ -248,16 +248,25 @@ async function holdAmbiguousDispatch(job: LetterJob, error: unknown): Promise<vo
     if (orderId) await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [orderId]);
     await client.query('SELECT letter_id FROM letters WHERE letter_id = $1 FOR UPDATE', [job.letter_id]);
     await client.query('SELECT job_id FROM letter_jobs WHERE job_id = $1 FOR UPDATE', [job.job_id]);
+    // 'failed' joins 'completed' as a state this may not reverse. A job that
+    // already reached a terminal failure has been compensated - the pack went
+    // back, or the order moved to refund_pending - and un-failing it puts the
+    // letter back within reach of a resend that re-deducts nothing. The stale
+    // claimant whose provider call throws long after another handler finished
+    // the job is exactly the caller this refuses. The alert below still fires,
+    // so a late signal against a settled job reaches an operator rather than
+    // silently reopening it.
     await client.query(
       `UPDATE letter_jobs SET status = 'held', provider_outcome = 'ambiguous',
          held_at = NOW(), hold_reason = 'provider_outcome_ambiguous', locked_at = NULL,
          last_error = $2, error_message = $2, updated_at = NOW()
-       WHERE job_id = $1 AND status <> 'completed'`,
+       WHERE job_id = $1 AND status NOT IN ('completed', 'failed')`,
       [job.job_id, errorClass]
     );
     await client.query(
       `UPDATE letters SET status = 'held', updated_at = NOW()
-       WHERE letter_id = $1 AND status NOT IN ('accepted','sent','in_transit','delivered','returned')`,
+       WHERE letter_id = $1
+         AND status NOT IN ('accepted','sent','in_transit','delivered','returned','failed')`,
       [job.letter_id]
     );
     if (orderId) {
@@ -591,15 +600,36 @@ async function failOrRescheduleJob(
     // definite rejection, so the throw was caught upstream as a post-dispatch
     // error and the job was held as ambiguous - the terminal branch below,
     // including the credit return, could never run.
-    await client.query(
+    // The predicate is the dispatch this result belongs to. A provider call can
+    // outlive its own claim: the lock ages out, maintenance quarantines the job
+    // as ambiguous, an operator resolves that hold - and only then does the
+    // original call return. Without this, that late result overwrites whatever
+    // the operator decided. The dangerous shape is an operator-confirmed
+    // acceptance: the terminal write would flip completed to failed and hand
+    // the pack back for a piece that is physically in the mail. Every other
+    // terminal writer in this file carries the same kind of guard
+    // (completeJob's eligibility check, holdAmbiguousDispatch's status
+    // predicate); this one did not, and its transition only became reachable
+    // when the casts above started working.
+    const owned = await client.query(
       `UPDATE letter_jobs
        SET status = $1::varchar, next_attempt_at = $2, locked_at = NULL,
            completed_at = CASE WHEN $1::varchar = 'failed' THEN NOW() ELSE NULL END,
            provider_outcome = CASE WHEN $1::varchar = 'failed' THEN 'definite_failure' ELSE provider_outcome END,
            last_error = $3, error_message = $3, updated_at = NOW()
-       WHERE job_id = $4`,
+       WHERE job_id = $4 AND status = 'processing' AND provider_outcome = 'dispatching'`,
       [terminal ? 'failed' : 'pending', nextAttemptAt, error, job.job_id]
     );
+    // Nothing below may run on a job this result no longer owns - not the
+    // letter transition, not the order's move to refund_pending, and above all
+    // not the credit return.
+    if (!owned.rowCount) {
+      writeDiagnostic('warn', 'outbox.terminal_transition_superseded', {
+        jobId: job.job_id,
+        errorClass: classifyDiagnosticError(new Error(error), 'provider_error')
+      });
+      return;
+    }
     await client.query(
       `UPDATE letters SET status = $1, updated_at = NOW() WHERE letter_id = $2`,
       [terminal ? 'failed' : 'queued', job.letter_id]
@@ -644,7 +674,7 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
   const errorClass = classifyDiagnosticError(error, 'unknown_error');
   await transaction(async client => {
     const fundingOrderId = await lockFundingGraph(client, job);
-    await client.query(
+    const owned = await client.query(
       // Cast every use of $2, for the reason given in failOrRescheduleJob: the
       // uncast form is rejected by PostgreSQL, which threw this whole
       // transaction away on every pre-dispatch failure, retryable or terminal.
@@ -655,6 +685,18 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
       [job.job_id, retryable ? 'pending' : 'failed',
         new Date(Date.now() + retryDelayMilliseconds(job.attempts, random)), errorClass]
     );
+    // The job predicate above already refuses a job that has since been
+    // dispatched; the writes below have to answer to it rather than run anyway.
+    // A stale claimant that loses the predicate would otherwise walk a letter
+    // back to 'queued' after another worker failed it, and call the return on
+    // a letter it no longer owns.
+    if (!owned.rowCount) {
+      writeDiagnostic('warn', 'outbox.pre_dispatch_transition_superseded', {
+        jobId: job.job_id,
+        errorClass
+      });
+      return;
+    }
     await client.query(
       `UPDATE letters SET status = $2, updated_at = NOW()
        WHERE letter_id = $1 AND status NOT IN ('held','cancelled')`,
@@ -1045,6 +1087,21 @@ export async function resolveAmbiguousLetterJobAsAdmin(
       throw new AdminMailResolutionError(currentLetter?.user_id === params.expectedUserId
         ? 'invalid_state'
         : 'not_found');
+    }
+
+    // Issue #151. Once the pack is back, only 'rejected' is still safe - and it
+    // is a no-op the return absorbs. 'retry' resends a letter the customer has
+    // been compensated for and nothing re-deducts on the way back through the
+    // outbox; 'accepted' asserts the mail exists while the refund stands. This
+    // mirrors the guard on the admin retry path. holdAmbiguousDispatch now
+    // refuses to reopen a terminal job, so reaching here with a returned pack
+    // should be impossible; the guard stays because the cost of being wrong is
+    // mail the customer was refunded for.
+    if (params.decision !== 'rejected' && await hasReturnedCreditsForLetter(client, {
+      letterId: ids.letter_id,
+      userId: params.expectedUserId
+    })) {
+      throw new AdminMailResolutionError('invalid_state');
     }
 
     let orderStatus = order?.status || null;

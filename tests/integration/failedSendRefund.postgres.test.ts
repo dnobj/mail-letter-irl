@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import type Stripe from 'stripe';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { migrate } from '../../src/cli/migrate.js';
 import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/disposableDatabase.js';
@@ -285,6 +286,7 @@ describePostgres('failed send returns the pack', () => {
   // ran at all. Each test below has been checked by mutation for that reason.
   describe('through the real outbox', () => {
     let jobs: typeof import('../../src/services/letterJobService.js');
+    let commerce: typeof import('../../src/services/commerceService.js');
 
     beforeAll(async () => {
       await installStubProvider();
@@ -298,7 +300,115 @@ describePostgres('failed send returns the pack', () => {
         [STUB_PROVIDER_NAME]
       );
       jobs = await import('../../src/services/letterJobService.js');
+      commerce = await import('../../src/services/commerceService.js');
     });
+
+    /**
+     * A pack bought through a real order, then spent on a letter.
+     *
+     * seedSpentLetter's lots carry synthetic references, which is enough for the
+     * return itself but cannot exercise the refund claw-back: that matches lots
+     * by order id or checkout session (commerceService.revokePackCredits). The
+     * two systems meet on the lot the return posts, so the seam needs a real
+     * order standing behind the credits.
+     */
+    async function seedPackOrderLetter(options: { credits: number; spend: number }): Promise<{
+      userId: string;
+      letterId: string;
+      orderId: string;
+      paymentIntentId: string;
+    }> {
+      const userId = `user_${randomUUID()}`;
+      const orderId = `order_${randomUUID()}`;
+      const paymentIntentId = `pi_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+      const letterId = randomUUID();
+
+      await pool.query(
+        `INSERT INTO users (user_id, email, credits, credits_purchased)
+         VALUES ($1, $2, $3, $3)`,
+        [userId, `${userId}@test.invalid`, options.credits]
+      );
+      await pool.query(
+        `INSERT INTO orders (
+           order_id, user_id, credits, amount_cents, currency,
+           stripe_payment_intent_id, status, order_type, product_code, idempotency_key
+         ) VALUES ($1, $2, $3, 1999, 'USD', $4, 'fulfilled', 'letter_pack', 'starter', $5)`,
+        [orderId, userId, options.credits, paymentIntentId, `idem_${orderId}`]
+      );
+      const lot = await pool.query<{ ledger_id: string }>(
+        `INSERT INTO credit_ledger (
+           user_id, initial_amount, remaining_amount, source_type,
+           source_reference_id, activated_at, expires_at, expiration_policy, status
+         ) VALUES ($1, $2, $2, 'purchase', $3, NOW(), NOW() + INTERVAL '730 days',
+                   'days_from_activation', 'active')
+         RETURNING ledger_id`,
+        [userId, options.credits, orderId]
+      );
+      await pool.query(
+        `INSERT INTO letters (
+           letter_id, user_id, content, recipient, credits_cost, status, funding_type
+         ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, 'queued', 'prepaid_balance')`,
+        [
+          letterId,
+          userId,
+          JSON.stringify({ body: 'test' }),
+          JSON.stringify({ name: 'R' }),
+          options.spend
+        ]
+      );
+      const txn = await pool.query<{ transaction_id: number }>(
+        `INSERT INTO credit_transactions (
+           user_id, amount, balance_after, type, reference_type, reference_id, description
+         ) VALUES ($1, $2, $3, 'deduction', 'letter', $4, 'send')
+         RETURNING transaction_id`,
+        [userId, -options.spend, options.credits - options.spend, letterId]
+      );
+      await pool.query(
+        `UPDATE credit_ledger SET remaining_amount = remaining_amount - $2 WHERE ledger_id = $1`,
+        [lot.rows[0].ledger_id, options.spend]
+      );
+      await pool.query(
+        `INSERT INTO credit_consumption (transaction_id, ledger_id, amount, ledger_remaining_after)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          txn.rows[0].transaction_id,
+          lot.rows[0].ledger_id,
+          options.spend,
+          options.credits - options.spend
+        ]
+      );
+      await pool.query(
+        `UPDATE users SET credits = credits - $2, credits_used = $2 WHERE user_id = $1`,
+        [userId, options.spend]
+      );
+      return { userId, letterId, orderId, paymentIntentId };
+    }
+
+    /** A full refund of the pack, shaped for the fields the handler reads. */
+    function refundedChargeEvent(paymentIntentId: string): Stripe.Event {
+      const charge = {
+        id: `ch_${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+        object: 'charge',
+        payment_intent: paymentIntentId,
+        amount: 1999,
+        amount_refunded: 1999
+      } as unknown as Stripe.Charge;
+      return {
+        id: `evt_${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+        type: 'charge.refunded',
+        data: { object: charge }
+      } as unknown as Stripe.Event;
+    }
+
+    async function liveLots(userId: string): Promise<number> {
+      const result = await pool.query(
+        `SELECT 1 FROM credit_ledger
+          WHERE user_id = $1 AND source_type IN ('purchase', 'adjustment')
+            AND status <> 'revoked'`,
+        [userId]
+      );
+      return result.rowCount ?? 0;
+    }
 
     async function queueJob(letterId: string, maxAttempts = 3): Promise<string> {
       const jobId = randomUUID();
@@ -593,6 +703,300 @@ describePostgres('failed send returns the pack', () => {
       );
       expect(job.rows[0].status).toBe('failed');
       expect(job.rows[0].provider_outcome).toBe('definite_failure');
+    }, 60_000);
+
+    /**
+     * The same race, resolved the other way - and this is the expensive one.
+     *
+     * The operator has evidence the piece really was accepted, so the customer
+     * keeps neither the pack nor a grievance. Then the original dispatch, still
+     * in flight, returns its own authoritative rejection. Both are true: the
+     * provider refused one submission and accepted another. If the late result
+     * wins, a job that is completed and mail that is physically posted get
+     * rewritten as a failure and the pack goes back - the customer has the
+     * letter and the credit.
+     */
+    it('does not overturn an operator-confirmed acceptance when the dispatch finally answers', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId);
+
+      stubProvider.nextResult = definiteRejection('stub refused');
+      stubProvider.onSend = async () => {
+        await pool.query(
+          `UPDATE letter_jobs SET locked_at = NOW() - INTERVAL '30 minutes' WHERE job_id = $1`,
+          [jobId]
+        );
+        await jobs.processDueLetterJobs(10);
+        await jobs.resolveAmbiguousLetterJobAsAdmin({
+          jobId,
+          expectedUserId: userId,
+          actorId: 'operator_test',
+          idempotencyKey: `accept-race-${jobId}`,
+          decision: 'accepted',
+          resolution: 'provider_confirmed_accepted',
+          providerName: 'dummy',
+          providerTrackingId: `stub-tracking-${jobId}`
+        });
+      };
+
+      await jobs.processLetterJob(jobId);
+
+      // Premise: the operator really did settle this job mid-dispatch, and the
+      // dispatch really did come back afterwards with a rejection to apply.
+      expect(stubProvider.calls.length).toBe(1);
+      const job = await pool.query<{ status: string; provider_outcome: string }>(
+        'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(job.rows[0].status).toBe('completed');
+      expect(job.rows[0].provider_outcome).toBe('accepted');
+      const letter = await pool.query<{ status: string }>(
+        'SELECT status FROM letters WHERE letter_id = $1', [letterId]
+      );
+      expect(letter.rows[0].status).toBe('accepted');
+      expect(await credits(userId)).toBe(4);
+      expect(await adjustmentLots(userId)).toBe(0);
+    }, 60_000);
+
+    /**
+     * The retry branch of the same race. The operator has requeued the letter,
+     * so a late terminal write would both fail a job that is pending again and
+     * return a pack for a send that is about to be reattempted.
+     */
+    it('does not overturn an operator-ordered retry when the dispatch finally answers', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId);
+
+      stubProvider.nextResult = definiteRejection('stub refused');
+      stubProvider.onSend = async () => {
+        await pool.query(
+          `UPDATE letter_jobs SET locked_at = NOW() - INTERVAL '30 minutes' WHERE job_id = $1`,
+          [jobId]
+        );
+        await jobs.processDueLetterJobs(10);
+        await jobs.resolveAmbiguousLetterJobAsAdmin({
+          jobId,
+          expectedUserId: userId,
+          actorId: 'operator_test',
+          idempotencyKey: `retry-race-${jobId}`,
+          decision: 'retry',
+          resolution: 'provider_confirmed_rejected_retry',
+          providerName: 'dummy'
+        });
+      };
+
+      await jobs.processLetterJob(jobId);
+
+      expect(stubProvider.calls.length).toBe(1);
+      const job = await pool.query<{ status: string; provider_outcome: string }>(
+        'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(job.rows[0].status).toBe('pending');
+      expect(job.rows[0].provider_outcome).toBe('not_dispatched');
+      // The pack is still spent, because the letter is still going out.
+      expect(await credits(userId)).toBe(4);
+      expect(await adjustmentLots(userId)).toBe(0);
+
+      // This test is the only one that leaves a job the outbox would still
+      // claim. Park it, or a later test's maintenance sweep dispatches it and
+      // that test's provider-call count stops meaning what it says.
+      await pool.query(
+        `UPDATE letter_jobs SET next_attempt_at = NOW() + INTERVAL '1 day' WHERE job_id = $1`,
+        [jobId]
+      );
+    }, 60_000);
+
+    /**
+     * A settled job must stay settled when its own dispatch dies late.
+     *
+     * The pack has gone back and the job is terminal. Then the in-flight call
+     * throws - a transport failure, which the outbox treats as ambiguous and
+     * quarantines. Reopening the job here would put a compensated letter back
+     * in front of an operator, who could resolve it as a retry and send mail the
+     * customer was refunded for. The alert still fires: a late signal against a
+     * settled job is worth a human's attention, it just is not worth the job.
+     */
+    it('does not reopen a settled job when its own dispatch throws late', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId);
+
+      stubProvider.throwOnSend = new Error('stub transport failure');
+      stubProvider.onSend = async () => {
+        await pool.query(
+          `UPDATE letter_jobs SET locked_at = NOW() - INTERVAL '30 minutes' WHERE job_id = $1`,
+          [jobId]
+        );
+        await jobs.processDueLetterJobs(10);
+        await jobs.resolveAmbiguousLetterJobAsAdmin({
+          jobId,
+          expectedUserId: userId,
+          actorId: 'operator_test',
+          idempotencyKey: `settled-${jobId}`,
+          decision: 'rejected',
+          resolution: 'provider_confirmed_rejected_refund',
+          providerName: 'dummy'
+        });
+      };
+
+      await jobs.processLetterJob(jobId);
+
+      // Premise: the operator settled it and the pack went back before the
+      // throw arrived.
+      expect(stubProvider.calls.length).toBe(1);
+      expect(await credits(userId)).toBe(6);
+      expect(await adjustmentLots(userId)).toBe(1);
+
+      const job = await pool.query<{ status: string; provider_outcome: string }>(
+        'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(job.rows[0].status).toBe('failed');
+      expect(job.rows[0].provider_outcome).toBe('definite_failure');
+
+      // Two: one when maintenance quarantined the stale dispatch, one for the
+      // late throw itself. The second is the point - the job was refused, the
+      // signal was not.
+      const alerts = await pool.query(
+        `SELECT 1 FROM commerce_operational_alerts
+          WHERE alert_type = 'mail_provider_outcome_ambiguous'
+            AND details->>'jobId' = $1`,
+        [jobId]
+      );
+      expect(alerts.rowCount).toBe(2);
+
+      // And the door the reopening would have opened stays shut.
+      await expect(jobs.resolveAmbiguousLetterJobAsAdmin({
+        jobId,
+        expectedUserId: userId,
+        actorId: 'operator_test',
+        idempotencyKey: `settled-retry-${jobId}`,
+        decision: 'retry',
+        resolution: 'provider_confirmed_rejected_retry',
+        providerName: 'dummy'
+      })).rejects.toMatchObject({ code: 'invalid_state' });
+      expect(stubProvider.calls.length).toBe(1);
+      expect(await credits(userId)).toBe(6);
+    }, 60_000);
+
+    /**
+     * The guard behind that door, tested directly.
+     *
+     * holdAmbiguousDispatch now refuses to reopen a terminal job, so the outbox
+     * can no longer produce a held job whose pack has been returned - which is
+     * exactly why this constructs the row by hand. The guard is the second line
+     * of a defence whose first line is one predicate wide, and it is the line
+     * that decides whether mail goes out.
+     */
+    it('refuses a retry or an acceptance on a held letter whose pack came back', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId);
+
+      stubProvider.nextResult = definiteRejection('stub refused');
+      await jobs.processLetterJob(jobId);
+      expect(await credits(userId)).toBe(6);
+      expect(await adjustmentLots(userId)).toBe(1);
+
+      await pool.query(
+        `UPDATE letter_jobs SET status = 'held', provider_outcome = 'ambiguous',
+           held_at = NOW(), hold_reason = 'provider_outcome_ambiguous',
+           completed_at = NULL WHERE job_id = $1`,
+        [jobId]
+      );
+      await pool.query(
+        `UPDATE letters SET status = 'held' WHERE letter_id = $1`, [letterId]
+      );
+
+      await expect(jobs.resolveAmbiguousLetterJobAsAdmin({
+        jobId,
+        expectedUserId: userId,
+        actorId: 'operator_test',
+        idempotencyKey: `guard-retry-${jobId}`,
+        decision: 'retry',
+        resolution: 'provider_confirmed_rejected_retry',
+        providerName: 'dummy'
+      })).rejects.toMatchObject({ code: 'invalid_state' });
+
+      await expect(jobs.resolveAmbiguousLetterJobAsAdmin({
+        jobId,
+        expectedUserId: userId,
+        actorId: 'operator_test',
+        idempotencyKey: `guard-accept-${jobId}`,
+        decision: 'accepted',
+        resolution: 'provider_confirmed_accepted',
+        providerName: 'dummy',
+        providerTrackingId: `stub-tracking-guard-${jobId}`
+      })).rejects.toMatchObject({ code: 'invalid_state' });
+
+      // Refused, and refused without side effects.
+      expect(stubProvider.calls.length).toBe(1);
+      expect(await credits(userId)).toBe(6);
+      expect(await adjustmentLots(userId)).toBe(1);
+      const letter = await pool.query<{ status: string }>(
+        'SELECT status FROM letters WHERE letter_id = $1', [letterId]
+      );
+      expect(letter.rows[0].status).toBe('held');
+    }, 60_000);
+
+    /**
+     * Where #151 meets #150, in both orders.
+     *
+     * The return posts a new lot. A later refund of the pack claws back by order
+     * id or checkout session, so a lot that referenced the letter instead would
+     * be invisible to it - the customer would keep the cash and the credit. The
+     * returned lot therefore carries the reference of the lot it came from.
+     */
+    it('claws back a returned credit when the pack is refunded afterwards', async () => {
+      resetStubProvider();
+      const { userId, letterId, paymentIntentId } = await seedPackOrderLetter({
+        credits: 6, spend: 2
+      });
+      const jobId = await queueJob(letterId);
+
+      stubProvider.nextResult = definiteRejection('stub refused');
+      await jobs.processLetterJob(jobId);
+      expect(await credits(userId)).toBe(6);
+      expect(await adjustmentLots(userId)).toBe(1);
+
+      await commerce.processStripeWebhookEvent(refundedChargeEvent(paymentIntentId));
+
+      // The money went back, so no credit from that pack may survive - the
+      // returned one included.
+      expect(await credits(userId)).toBe(0);
+      expect(await liveLots(userId)).toBe(0);
+    }, 60_000);
+
+    /**
+     * The same seam in the opposite order: refunded first, then the send fails.
+     *
+     * The refund already made the customer whole for a letter that never went.
+     * Returning against a revoked lot would pay for the same pack twice.
+     */
+    it('returns nothing when the pack was already refunded in cash', async () => {
+      resetStubProvider();
+      const { userId, letterId, paymentIntentId } = await seedPackOrderLetter({
+        credits: 6, spend: 2
+      });
+      const jobId = await queueJob(letterId);
+
+      await commerce.processStripeWebhookEvent(refundedChargeEvent(paymentIntentId));
+      expect(await credits(userId)).toBe(0);
+      expect(await liveLots(userId)).toBe(0);
+
+      stubProvider.nextResult = definiteRejection('stub refused');
+      await jobs.processLetterJob(jobId);
+
+      // Premise: this really did reach the terminal branch that returns packs.
+      expect(stubProvider.calls.length).toBe(1);
+      const job = await pool.query<{ status: string; provider_outcome: string }>(
+        'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(job.rows[0].status).toBe('failed');
+      expect(job.rows[0].provider_outcome).toBe('definite_failure');
+
+      expect(await credits(userId)).toBe(0);
+      expect(await adjustmentLots(userId)).toBe(0);
     }, 60_000);
   });
 
