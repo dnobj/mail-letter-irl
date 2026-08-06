@@ -264,17 +264,29 @@ describePostgres('failed send returns the pack', () => {
    */
   // NOT YET PASSING - deliberately skipped rather than left red or deleted.
   //
-  // The harness itself is proven: routing resolves to the stub and the outbox
-  // calls it ("Routing text_only_letter -> test-stub", "Initialized provider by
-  // name: test-stub"). What does not yet happen is the credit return, so
-  // something between the provider result and returnPrepaidCreditsForFailedLetter
-  // is not firing - most likely the fixture leaves the job or letter in a state
-  // that diverts before the terminal branch, or the deduction rows the return
-  // reads are not matched.
+  // DIAGNOSED, not yet fixed. The harness works: routing resolves to the stub
+  // and it is called exactly once. But the job ends
   //
-  // Unskip and debug before this lands. The wiring these cover is the weakest
-  // part of issue #151: the money logic is proven by the tests above, but
-  // "the terminal path calls it" currently rests on reading two call sites.
+  //     job_status='held'  provider_outcome='ambiguous'  last_error='provider_error'
+  //
+  // so a definite_rejection is being classified ambiguous and held, and the
+  // terminal branch - the one that returns the pack - is never reached.
+  //
+  // The tell is last_error: it holds the CLASSIFIED string 'provider_error'
+  // rather than the stub's own message, which means the result travelled
+  // through errorResult(). That path is only taken when the send THROWS, so
+  // something after the stub returns is throwing and submitToProviderOnce is
+  // converting it into an ambiguous outcome. Likely the dispatch code
+  // dereferences a field of the result or of the seeded letter that this
+  // fixture does not populate.
+  //
+  // Consequence worth noting before trusting any of these: the ambiguous test
+  // below currently passes for the WRONG reason - everything is ambiguous right
+  // now, so it would pass even if ambiguity handling were broken.
+  //
+  // Next step: log the result object letterJobService receives, or make the
+  // stub return a success and see whether the job completes - that separates
+  // "plumbing broken" from "rejection classification broken".
   describe.skip('through the real outbox', () => {
     let jobs: typeof import('../../src/services/letterJobService.js');
 
