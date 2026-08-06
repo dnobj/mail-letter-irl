@@ -262,31 +262,13 @@ describePostgres('failed send returns the pack', () => {
    * these prove the terminal paths actually reach it, which reading the two call
    * sites cannot establish.
    */
-  // NOT YET PASSING - deliberately skipped rather than left red or deleted.
-  //
-  // DIAGNOSED, not yet fixed. The harness works: routing resolves to the stub
-  // and it is called exactly once. But the job ends
-  //
-  //     job_status='held'  provider_outcome='ambiguous'  last_error='provider_error'
-  //
-  // so a definite_rejection is being classified ambiguous and held, and the
-  // terminal branch - the one that returns the pack - is never reached.
-  //
-  // The tell is last_error: it holds the CLASSIFIED string 'provider_error'
-  // rather than the stub's own message, which means the result travelled
-  // through errorResult(). That path is only taken when the send THROWS, so
-  // something after the stub returns is throwing and submitToProviderOnce is
-  // converting it into an ambiguous outcome. Likely the dispatch code
-  // dereferences a field of the result or of the seeded letter that this
-  // fixture does not populate.
-  //
-  // Consequence worth noting before trusting any of these: the ambiguous test
-  // below currently passes for the WRONG reason - everything is ambiguous right
-  // now, so it would pass even if ambiguity handling were broken.
-  //
-  // Next step: log the result object letterJobService receives, or make the
-  // stub return a success and see whether the job completes - that separates
-  // "plumbing broken" from "rejection classification broken".
+  // Worth knowing when reading these: they were skipped and red for a while
+  // because PostgreSQL rejected the terminal UPDATE outright - one parameter was
+  // bound both to a VARCHAR column and to a text comparison - so every definite
+  // rejection was caught upstream and held as ambiguous instead. Two lessons
+  // stuck: a mocked database would have proved nothing here, and an assertion
+  // that "the pack was not returned" passes just as happily when the code never
+  // ran at all. Each test below has been checked by mutation for that reason.
   describe('through the real outbox', () => {
     let jobs: typeof import('../../src/services/letterJobService.js');
 
@@ -304,16 +286,24 @@ describePostgres('failed send returns the pack', () => {
       jobs = await import('../../src/services/letterJobService.js');
     });
 
-    async function queueJob(letterId: string): Promise<string> {
+    async function queueJob(letterId: string, maxAttempts = 3): Promise<string> {
       const jobId = randomUUID();
       await pool.query(
         `INSERT INTO letter_jobs (
            job_id, letter_id, status, attempts, max_attempts,
            scheduled_at, idempotency_key, next_attempt_at
-         ) VALUES ($1, $2, 'pending', 0, 3, NOW(), $2, NOW())`,
-        [jobId, letterId]
+         ) VALUES ($1, $2, 'pending', 0, $3, NOW(), $2, NOW())`,
+        [jobId, letterId, maxAttempts]
       );
       return jobId;
+    }
+
+    async function adjustmentLots(userId: string): Promise<number> {
+      const result = await pool.query(
+        `SELECT 1 FROM credit_ledger WHERE user_id = $1 AND source_type = 'adjustment'`,
+        [userId]
+      );
+      return result.rowCount ?? 0;
     }
 
     it('returns the pack when the provider definitively rejects the piece', async () => {
@@ -409,6 +399,183 @@ describePostgres('failed send returns the pack', () => {
         [userId]
       );
       expect(returns.rows[0].n).toBe('1');
+    }, 60_000);
+
+    /**
+     * Attempts exhausted BEFORE the provider was reached.
+     *
+     * The claim succeeds and then the pre-dispatch guard refuses the piece - the
+     * shape of a letter cancelled or held between claim and dispatch. The job
+     * never leaves provider_outcome='not_dispatched', so no mail can exist and
+     * the pack must come back on the last attempt.
+     */
+    it('returns the pack when attempts are exhausted before dispatch', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId, 1);
+      // Not dispatchable: markProviderDispatch accepts only queued/processing.
+      await pool.query(`UPDATE letters SET status = 'draft' WHERE letter_id = $1`, [letterId]);
+
+      await jobs.processLetterJob(jobId);
+
+      // The premise: this failed before the provider, not at it. Without this
+      // the test would still pass if the piece had actually been submitted.
+      expect(stubProvider.calls.length).toBe(0);
+      const job = await pool.query<{ status: string; provider_outcome: string }>(
+        'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(job.rows[0].status).toBe('failed');
+      expect(job.rows[0].provider_outcome).toBe('not_dispatched');
+      expect(await credits(userId)).toBe(6);
+    }, 60_000);
+
+    /**
+     * Crash boundary: the process died after dispatching to the provider.
+     *
+     * The piece may well have been printed and posted - the crash destroyed the
+     * only record of what the provider said. Maintenance must quarantine it for
+     * reconciliation and must NOT return the pack, because a refund here is a
+     * letter given away free.
+     */
+    it('holds a job that crashed after dispatch, and returns nothing', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = randomUUID();
+      // The durable trace of a process that died between provider_dispatch and
+      // recording the outcome: claimed, marked dispatching, then the lock aged out.
+      await pool.query(
+        `INSERT INTO letter_jobs (
+           job_id, letter_id, status, attempts, max_attempts, scheduled_at,
+           idempotency_key, next_attempt_at, provider_outcome,
+           provider_dispatch_started_at, locked_at
+         ) VALUES ($1, $2, 'processing', 1, 3, NOW(), $2, NOW(), 'dispatching',
+                   NOW() - INTERVAL '30 minutes', NOW() - INTERVAL '30 minutes')`,
+        [jobId, letterId]
+      );
+      await pool.query(`UPDATE letters SET status = 'processing' WHERE letter_id = $1`, [letterId]);
+
+      await jobs.processDueLetterJobs(10);
+
+      const job = await pool.query<{ status: string; provider_outcome: string }>(
+        'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(job.rows[0].status).toBe('held');
+      expect(job.rows[0].provider_outcome).toBe('ambiguous');
+      // Never resubmitted: an ambiguous piece must not be mailed a second time.
+      expect(stubProvider.calls.length).toBe(0);
+      expect(await credits(userId)).toBe(4);
+      expect(await adjustmentLots(userId)).toBe(0);
+    }, 60_000);
+
+    /**
+     * Manual reconciliation. An operator with conclusive evidence closes out an
+     * ambiguous hold, and a prepaid customer must be treated exactly as the
+     * automatic path treats them: confirmed rejection returns the pack,
+     * confirmed acceptance does not.
+     */
+    it('returns the pack when an operator confirms the piece was rejected', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId);
+
+      stubProvider.nextResult = ambiguousFailure('stub timeout');
+      await jobs.processLetterJob(jobId);
+      // Held, and deliberately not refunded yet - that is the state an operator
+      // is asked to resolve.
+      expect(await credits(userId)).toBe(4);
+      expect(await adjustmentLots(userId)).toBe(0);
+
+      await jobs.resolveAmbiguousLetterJobAsAdmin({
+        jobId,
+        expectedUserId: userId,
+        actorId: 'operator_test',
+        idempotencyKey: `resolve-${jobId}`,
+        decision: 'rejected',
+        resolution: 'provider_confirmed_rejected_refund',
+        providerName: 'dummy'
+      });
+
+      expect(await credits(userId)).toBe(6);
+      expect(await adjustmentLots(userId)).toBe(1);
+    }, 60_000);
+
+    it('returns nothing when an operator confirms the piece was accepted', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId);
+
+      stubProvider.nextResult = ambiguousFailure('stub timeout');
+      await jobs.processLetterJob(jobId);
+
+      await jobs.resolveAmbiguousLetterJobAsAdmin({
+        jobId,
+        expectedUserId: userId,
+        actorId: 'operator_test',
+        idempotencyKey: `resolve-accepted-${jobId}`,
+        decision: 'accepted',
+        resolution: 'provider_confirmed_accepted',
+        providerName: 'dummy',
+        providerTrackingId: 'stub-tracking-1'
+      });
+
+      // The mail exists. Refunding it would give the letter away.
+      expect(await credits(userId)).toBe(4);
+      expect(await adjustmentLots(userId)).toBe(0);
+      const letter = await pool.query<{ status: string }>(
+        'SELECT status FROM letters WHERE letter_id = $1', [letterId]
+      );
+      expect(letter.rows[0].status).toBe('accepted');
+    }, 60_000);
+
+    /**
+     * Two handlers reaching a terminal transition for the same letter at once.
+     *
+     * The interleaving is the dangerous one and it is real: a dispatch runs long
+     * enough for its lock to age out, maintenance quarantines the job as
+     * ambiguous, an operator resolves that hold as a confirmed rejection and the
+     * pack goes back - and only THEN does the original dispatch return, carrying
+     * an authoritative rejection of its own, and commit its own terminal
+     * transition. Two independent terminal handlers, one letter. The customer is
+     * owed exactly one pack.
+     */
+    it('returns one pack when a concurrent operator resolution races the dispatch', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId);
+
+      stubProvider.nextResult = definiteRejection('stub refused');
+      stubProvider.onSend = async () => {
+        // Age the lock out from under the in-flight dispatch, exactly as a slow
+        // provider call does, then let maintenance take it over.
+        await pool.query(
+          `UPDATE letter_jobs SET locked_at = NOW() - INTERVAL '30 minutes' WHERE job_id = $1`,
+          [jobId]
+        );
+        await jobs.processDueLetterJobs(10);
+        await jobs.resolveAmbiguousLetterJobAsAdmin({
+          jobId,
+          expectedUserId: userId,
+          actorId: 'operator_test',
+          idempotencyKey: `race-${jobId}`,
+          decision: 'rejected',
+          resolution: 'provider_confirmed_rejected_refund',
+          providerName: 'dummy'
+        });
+      };
+
+      await jobs.processLetterJob(jobId);
+
+      // The premise: the concurrent handler really did reach a terminal
+      // transition and really did return the pack before the dispatch finished.
+      // If it had not, this test would be asserting nothing.
+      expect(stubProvider.calls.length).toBe(1);
+      expect(await credits(userId)).toBe(6);
+      expect(await adjustmentLots(userId)).toBe(1);
+      const job = await pool.query<{ status: string; provider_outcome: string }>(
+        'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(job.rows[0].status).toBe('failed');
+      expect(job.rows[0].provider_outcome).toBe('definite_failure');
     }, 60_000);
   });
 

@@ -1116,6 +1116,19 @@ export async function resolveAmbiguousLetterJobAsAdmin(
          WHERE job_id = $1`,
         [params.jobId, params.resolution]
       );
+      // Issue #151. This decision is the operator asserting conclusive evidence
+      // that the provider refused the piece, so it is the same terminal state
+      // failOrRescheduleJob reaches on a definite rejection and it owes the
+      // customer the same compensation. A pay-per-send order gets that below by
+      // moving to refund_pending; without this a prepaid customer got nothing,
+      // and reconciliation was the ONLY route to a terminal failure that never
+      // returned the pack. Ordering holds: the funding order, letter and job are
+      // already locked above, and the account lock is taken last, as on the
+      // automatic path. Exactly-once is enforced inside the return itself, so an
+      // automatic handler racing this resolution cannot pay twice.
+      await returnPrepaidCreditsForFailedLetter(
+        client, ids.letter_id, 'operator_confirmed_rejection'
+      );
       if (ids.funding_order_id && order?.status === 'held' &&
           ['provider_outcome_ambiguous', 'legacy_processing_outcome_unknown'].includes(order.hold_reason || '')) {
         await client.query(
