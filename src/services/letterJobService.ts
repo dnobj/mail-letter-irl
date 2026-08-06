@@ -18,6 +18,7 @@ import type {
   PostcardSize,
 } from './providers/types.js';
 import type { Letter, LetterJob } from './types.js';
+import { returnConsumedCreditsForLetter } from './creditLedgerService.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
@@ -527,6 +528,34 @@ async function recoverProviderAcceptancePersistence(
   }
 }
 
+/**
+ * Return a prepaid send's credits when the job ends terminally.
+ *
+ * Only for prepaid_balance letters: jit_order funding is compensated by moving
+ * the order to refund_pending, which the Stripe path then settles.
+ *
+ * Idempotent inside returnConsumedCreditsForLetter, so replayed failure
+ * handling, a re-run of maintenance, or two concurrent handlers that both reach
+ * a terminal transition cannot return the pack twice.
+ */
+async function returnPrepaidCreditsForFailedLetter(
+  client: Pick<pg.PoolClient, 'query'>,
+  letterId: string,
+  failureCode: string
+): Promise<void> {
+  const letter = await client.query<{ user_id: string; funding_type: string }>(
+    'SELECT user_id, funding_type FROM letters WHERE letter_id = $1',
+    [letterId]
+  );
+  const row = letter.rows[0];
+  if (!row || row.funding_type !== 'prepaid_balance') return;
+  await returnConsumedCreditsForLetter(client, {
+    letterId,
+    userId: row.user_id,
+    failureCode
+  });
+}
+
 async function failOrRescheduleJob(
   job: LetterJob,
   result: ProviderResult,
@@ -585,6 +614,16 @@ async function failOrRescheduleJob(
         );
       }
     }
+
+    // Issue #151. A pay-per-send order moves to refund_pending above, but a
+    // prepaid send previously returned nothing - the pack was consumed before
+    // the provider was called and never came back, so the customer paid and got
+    // no letter. Safe to return here and only here: this branch is reached only
+    // on an explicit definite_rejection, so no mail was accepted. Ambiguous
+    // outcomes are held above and never reach it.
+    if (terminal && !fundingOrderId) {
+      await returnPrepaidCreditsForFailedLetter(client, job.letter_id, 'provider_definite_rejection');
+    }
   });
 
   return !terminal;
@@ -627,6 +666,13 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
           [refundOrder.rows[0].order_id, JSON.stringify({ errorClass })]
         );
       }
+    }
+
+    // Issue #151, prepaid equivalent. Safe unconditionally on this path: the
+    // job never reached the provider (the guard above requires
+    // provider_outcome = 'not_dispatched'), so no mail can exist.
+    if (!retryable && !fundingOrderId) {
+      await returnPrepaidCreditsForFailedLetter(client, job.letter_id, errorClass);
     }
   });
   return retryable;

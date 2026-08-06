@@ -22,6 +22,7 @@ const REQUIRED = [
   'adminFoundationDatabase.test.ts',
   'adminMigrationOrder.test.ts',
   'disputeRevocation.postgres.test.ts',
+  'failedSendRefund.postgres.test.ts',
 ];
 
 /**
