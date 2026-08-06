@@ -1429,10 +1429,17 @@ async function compensateDisputedPacks(
         -- Keyed per LOT, not per (lot, dispute). A lot can only ever be
         -- compensated once: entitlement belongs to the lot, so keying on the
         -- dispute would grant again for each new dispute touching the order.
+        --
+        -- The reason is part of the key. Any adjustment lot linked to this
+        -- purchase used to read as "already compensated", and issue #151 posts
+        -- one: a returned Letter Pack links to the lot it came from. Without
+        -- this line a customer who won a dispute on a pack that had funded a
+        -- failed send got nothing back at all.
         AND NOT EXISTS (
           SELECT 1 FROM credit_ledger compensation
            WHERE compensation.related_ledger_id = purchase.ledger_id
              AND compensation.source_type = 'adjustment'
+             AND compensation.source_metadata->>'reason' = 'dispute_resolved_in_our_favour'
         )
       FOR UPDATE OF purchase`,
     [order.user_id, order.order_id, order.stripe_checkout_session_id || null, disputeId]
