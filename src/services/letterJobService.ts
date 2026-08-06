@@ -581,14 +581,21 @@ async function failOrRescheduleJob(
 
   await transaction(async (client) => {
     const fundingOrderId = await lockFundingGraph(client, job);
+    // Every use of the status parameter is cast. Assigning it to status (a
+    // VARCHAR column) deduces varchar, while comparing it to an untyped literal
+    // deduces text, and PostgreSQL rejects the statement outright with
+    // "inconsistent types deduced for parameter $1". That threw here on EVERY
+    // definite rejection, so the throw was caught upstream as a post-dispatch
+    // error and the job was held as ambiguous - the terminal branch below,
+    // including the credit return, could never run.
     await client.query(
       `UPDATE letter_jobs
-       SET status = $1, next_attempt_at = $2, locked_at = NULL,
-           completed_at = CASE WHEN $1 = 'failed' THEN NOW() ELSE NULL END,
-           provider_outcome = CASE WHEN $1 = 'failed' THEN 'definite_failure' ELSE provider_outcome END,
-           last_error = $4, error_message = $4, updated_at = NOW()
-       WHERE job_id = $5`,
-      [terminal ? 'failed' : 'pending', nextAttemptAt, false, error, job.job_id]
+       SET status = $1::varchar, next_attempt_at = $2, locked_at = NULL,
+           completed_at = CASE WHEN $1::varchar = 'failed' THEN NOW() ELSE NULL END,
+           provider_outcome = CASE WHEN $1::varchar = 'failed' THEN 'definite_failure' ELSE provider_outcome END,
+           last_error = $3, error_message = $3, updated_at = NOW()
+       WHERE job_id = $4`,
+      [terminal ? 'failed' : 'pending', nextAttemptAt, error, job.job_id]
     );
     await client.query(
       `UPDATE letters SET status = $1, updated_at = NOW() WHERE letter_id = $2`,
@@ -635,8 +642,11 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
   await transaction(async client => {
     const fundingOrderId = await lockFundingGraph(client, job);
     await client.query(
-      `UPDATE letter_jobs SET status = $2, next_attempt_at = $3, locked_at = NULL,
-         completed_at = CASE WHEN $2 = 'failed' THEN NOW() ELSE NULL END,
+      // Cast every use of $2, for the reason given in failOrRescheduleJob: the
+      // uncast form is rejected by PostgreSQL, which threw this whole
+      // transaction away on every pre-dispatch failure, retryable or terminal.
+      `UPDATE letter_jobs SET status = $2::varchar, next_attempt_at = $3, locked_at = NULL,
+         completed_at = CASE WHEN $2::varchar = 'failed' THEN NOW() ELSE NULL END,
          last_error = $4, error_message = $4, updated_at = NOW()
        WHERE job_id = $1 AND provider_outcome = 'not_dispatched'`,
       [job.job_id, retryable ? 'pending' : 'failed',
@@ -788,10 +798,11 @@ export async function updateJobStatus(
   error?: string
 ): Promise<void> {
   await query(
+    // Cast every use of $1, for the reason given in failOrRescheduleJob.
     `UPDATE letter_jobs
-     SET status = $1, last_error = $2, error_message = $2,
-         locked_at = CASE WHEN $1 = 'processing' THEN NOW() ELSE NULL END,
-         completed_at = CASE WHEN $1 IN ('completed', 'failed', 'cancelled') THEN NOW() ELSE NULL END,
+     SET status = $1::varchar, last_error = $2, error_message = $2,
+         locked_at = CASE WHEN $1::varchar = 'processing' THEN NOW() ELSE NULL END,
+         completed_at = CASE WHEN $1::varchar IN ('completed', 'failed', 'cancelled') THEN NOW() ELSE NULL END,
          updated_at = NOW()
      WHERE job_id = $3`,
     [status, error || null, jobId]

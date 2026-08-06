@@ -287,7 +287,7 @@ describePostgres('failed send returns the pack', () => {
   // Next step: log the result object letterJobService receives, or make the
   // stub return a success and see whether the job completes - that separates
   // "plumbing broken" from "rejection classification broken".
-  describe.skip('through the real outbox', () => {
+  describe('through the real outbox', () => {
     let jobs: typeof import('../../src/services/letterJobService.js');
 
     beforeAll(async () => {
@@ -353,18 +353,62 @@ describePostgres('failed send returns the pack', () => {
       expect(returns.rowCount).toBe(0);
     }, 60_000);
 
-    it('returns the pack once when the same failed job is processed repeatedly', async () => {
+    /**
+     * Exactly-once, proved against a terminal path that genuinely runs TWICE.
+     *
+     * Re-running maintenance alone does not prove this: after a terminal failure
+     * the job is status='failed' with provider_outcome='definite_failure', which
+     * the claim predicate excludes, so further calls do nothing and the
+     * assertion would hold even with the exactly-once guard deleted. Verified -
+     * with the guard disabled, a maintenance-only version of this test stays
+     * green.
+     *
+     * The operator retry is the real second run. It is the one supported way a
+     * letter returns to a claimable state after a definite rejection, so it is
+     * also the one way the terminal branch, and the credit return inside it, can
+     * be reached twice for the same letter.
+     */
+    it('returns the pack once when the terminal path runs again after an operator retry', async () => {
       resetStubProvider();
       const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
       const jobId = await queueJob(letterId);
 
       stubProvider.defaultResult = definiteRejection('stub refused');
       await jobs.processLetterJob(jobId);
-      // Re-running maintenance must not pay the customer twice.
+      expect(await credits(userId)).toBe(6);
+
+      // A plain re-run must not re-dispatch a terminally failed job at all.
       await jobs.processLetterJob(jobId);
       await jobs.processDueLetterJobs(10);
+      expect(stubProvider.calls.length).toBe(1);
 
+      await jobs.retryLetterJobAsAdmin({
+        jobId,
+        expectedUserId: userId,
+        actorId: 'operator_test',
+        reason: 'confirmed rejection, resending',
+        idempotencyKey: `retry-${jobId}`
+      });
+      await jobs.processLetterJob(jobId);
+
+      // The premise of everything below: the retry really did put the piece back
+      // through the provider, and it really did fail terminally a second time.
+      // Without this the test could pass because nothing happened.
+      expect(stubProvider.calls.length).toBe(2);
+      const job = await pool.query<{ status: string; provider_outcome: string }>(
+        'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(job.rows[0].status).toBe('failed');
+      expect(job.rows[0].provider_outcome).toBe('definite_failure');
+
+      // Two terminal failures, one pack. The customer was owed one letter.
       expect(await credits(userId)).toBe(6);
+      const returns = await pool.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM credit_ledger
+          WHERE user_id = $1 AND source_type = 'adjustment'`,
+        [userId]
+      );
+      expect(returns.rows[0].n).toBe('1');
     }, 60_000);
   });
 

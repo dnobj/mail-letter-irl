@@ -27,11 +27,14 @@
 // pointed DATABASE_URL at its disposable schema. The registry is imported
 // dynamically inside installStubProvider instead.
 import type {
+  CostEstimate,
   LetterFulfillmentProvider,
   LetterParams,
   LetterResult,
+  LetterStatus,
   PostcardParams,
-  PostcardResult
+  PostcardResult,
+  ProviderConfig
 } from '../../../src/services/providers/types.js';
 
 export const STUB_PROVIDER_NAME = 'test-stub';
@@ -58,7 +61,7 @@ export function definiteRejection(error = 'Stub rejection'): LetterResult {
     trackingId: '',
     error,
     metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
-  } as LetterResult;
+  };
 }
 
 /** A result the outbox must treat as ambiguous - the piece may have been mailed. */
@@ -68,7 +71,7 @@ export function ambiguousFailure(error = 'Stub timeout'): LetterResult {
     trackingId: '',
     error,
     metadata: { retryable: false, submissionOutcome: 'ambiguous' }
-  } as LetterResult;
+  };
 }
 
 /** A successful send. */
@@ -77,7 +80,7 @@ export function providerSuccess(trackingId = 'stub-tracking'): LetterResult {
     success: true,
     trackingId,
     metadata: { submissionOutcome: 'accepted' }
-  } as LetterResult;
+  };
 }
 
 export const stubProvider: StubProvider = {
@@ -112,8 +115,22 @@ function take(): AnyResult {
  * matters for the registration itself.
  */
 export async function installStubProvider(): Promise<void> {
-  const instance: LetterFulfillmentProvider = {
+  // Annotated, never cast. An earlier version of this file asserted the object
+  // literal with `as LetterFulfillmentProvider` and omitted `config`, which the
+  // interface requires. The outbox reads `provider.config.name` AFTER the send
+  // returns and outside submitToProviderOnce's try, so every dispatch threw
+  // TypeError, landed in the post-dispatch catch, and was held as ambiguous -
+  // a definite rejection could never reach the terminal branch. The annotation
+  // makes that class of omission a compile error instead of a runtime one.
+  const config: ProviderConfig = {
     name: STUB_PROVIDER_NAME,
+    displayName: 'Test Stub Provider',
+    enabled: true,
+    features: { colorPrinting: true, doubleSided: true, tracking: true }
+  };
+
+  const instance: LetterFulfillmentProvider = {
+    config,
     async sendLetter(params: LetterParams): Promise<LetterResult> {
       stubProvider.calls.push({ mailType: 'letter', params });
       await stubProvider.onSend?.();
@@ -125,8 +142,19 @@ export async function installStubProvider(): Promise<void> {
       await stubProvider.onSend?.();
       if (stubProvider.throwOnSend) throw stubProvider.throwOnSend;
       return take() as PostcardResult;
+    },
+    // The outbox never calls these, but the interface requires them and a stub
+    // that silently no-ops would hide a caller that started to depend on one.
+    async getStatus(trackingId: string): Promise<LetterStatus> {
+      throw new Error(`stub provider does not track mail: ${trackingId}`);
+    },
+    async estimateCost(): Promise<CostEstimate> {
+      throw new Error('stub provider does not estimate cost');
+    },
+    async validateConnection(): Promise<boolean> {
+      return true;
     }
-  } as LetterFulfillmentProvider;
+  };
 
   const { registerProvider } = await import('../../../src/services/providers/index.js');
   registerProvider(STUB_PROVIDER_NAME, () => instance);
