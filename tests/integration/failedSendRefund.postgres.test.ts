@@ -157,35 +157,46 @@ describePostgres('failed send returns the pack', () => {
 
   it('returns the consumed credits, split across the original lots', async () => {
     const { userId, letterId, expiryA, expiryB } = await seedSpentLetter({
-      lotA: 2, lotB: 5, spend: 4
+      lotA: 2, lotB: 5, spend: 5
     });
-    expect(await credits(userId)).toBe(3);
+    expect(await credits(userId)).toBe(2);
 
     const client = await pool.connect();
     try {
       const returned = await ledger.returnConsumedCreditsForLetter(client, {
         letterId, userId, failureCode: 'provider_definite_rejection'
       });
-      expect(returned).toBe(4);
+      expect(returned).toBe(5);
     } finally {
       client.release();
     }
 
     expect(await credits(userId)).toBe(7);
 
-    // The spend took 2 from lot A and 2 from lot B, so the return must mirror
+    // The spend took 2 from lot A and 3 from lot B, so the return must mirror
     // that split - and each returned lot must carry ITS OWN source lot's expiry.
     // Collapsing them into one lot would silently move credits between expiry
-    // windows, and they are consumed FIFO by expiry.
-    const returnedLots = await pool.query<{ initial_amount: number; expires_at: Date }>(
-      `SELECT initial_amount, expires_at FROM credit_ledger
+    // windows, and they are consumed FIFO by expiry. The takes are deliberately
+    // UNEQUAL: with 2 and 2 the amounts and expiries would still line up if the
+    // two returned lots had each other's expiry, and the test would prove
+    // nothing about the pairing.
+    const returnedLots = await pool.query<{
+      initial_amount: number; remaining_amount: number; status: string; expires_at: Date;
+    }>(
+      `SELECT initial_amount, remaining_amount, status, expires_at FROM credit_ledger
         WHERE user_id = $1 AND source_type = 'adjustment'
         ORDER BY expires_at`,
       [userId]
     );
-    expect(returnedLots.rows.map(r => r.initial_amount)).toEqual([2, 2]);
+    expect(returnedLots.rows.map(r => r.initial_amount)).toEqual([2, 3]);
     expect(returnedLots.rows[0].expires_at).toEqual(expiryA);
     expect(returnedLots.rows[1].expires_at).toEqual(expiryB);
+    // users.credits is a cache; reconcileBalances recomputes it by summing
+    // remaining_amount over ACTIVE lots. A returned lot that is inactive or has
+    // no remaining balance would restore the customer's balance right up until
+    // the next reconciliation quietly took it away again.
+    expect(returnedLots.rows.map(r => r.remaining_amount)).toEqual([2, 3]);
+    expect(returnedLots.rows.map(r => r.status)).toEqual(['active', 'active']);
   }, 60_000);
 
   it('returns exactly once however many times failure handling replays', async () => {
@@ -254,7 +265,10 @@ describePostgres('failed send returns the pack', () => {
       [userId]
     );
     expect(txn.rows[0].amount).toBe(2);
-    expect(txn.rows[0].balance_after).toBe(await credits(userId));
+    // A literal, not `await credits(userId)`: comparing the ledger against the
+    // balance it is supposed to describe passes even if neither was updated.
+    expect(txn.rows[0].balance_after).toBe(7);
+    expect(await credits(userId)).toBe(7);
   }, 60_000);
 
   /**
@@ -332,6 +346,17 @@ describePostgres('failed send returns the pack', () => {
       stubProvider.nextResult = ambiguousFailure('stub timeout');
       await jobs.processLetterJob(jobId);
 
+      // Premise first. Every assertion below is a negative, and a negative is
+      // equally satisfied by a job that was never claimed, a routing regression
+      // that never reached this stub, or a pre-dispatch failure - none of which
+      // exercise ambiguity handling at all.
+      expect(stubProvider.calls.length).toBe(1);
+      const held = await pool.query<{ status: string; provider_outcome: string }>(
+        'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(held.rows[0].status).toBe('held');
+      expect(held.rows[0].provider_outcome).toBe('ambiguous');
+
       // The piece may have been printed and posted. Returning the pack here
       // would be paying twice for mail that physically exists, which is why the
       // outbox holds ambiguous outcomes for reconciliation instead.
@@ -344,21 +369,21 @@ describePostgres('failed send returns the pack', () => {
     }, 60_000);
 
     /**
-     * Exactly-once, proved against a terminal path that genuinely runs TWICE.
+     * Once the pack is back, the letter must not be resent.
      *
-     * Re-running maintenance alone does not prove this: after a terminal failure
-     * the job is status='failed' with provider_outcome='definite_failure', which
-     * the claim predicate excludes, so further calls do nothing and the
-     * assertion would hold even with the exactly-once guard deleted. Verified -
-     * with the guard disabled, a maintenance-only version of this test stays
-     * green.
+     * Nothing re-deducts on the way back through the outbox, so a retry after a
+     * return hands the customer the pack AND the letter. The pay-per-send path
+     * has always refused a retry once the money went back; this is the prepaid
+     * equivalent, and it only became necessary when the prepaid return started
+     * working at all.
      *
-     * The operator retry is the real second run. It is the one supported way a
-     * letter returns to a claimable state after a definite rejection, so it is
-     * also the one way the terminal branch, and the credit return inside it, can
-     * be reached twice for the same letter.
+     * The exactly-once property itself is proved by the concurrent-resolution
+     * test below, which drives two terminal handlers over one letter. Re-running
+     * maintenance cannot prove it: a terminally failed job is excluded by the
+     * claim predicate, so the calls do nothing and the assertion would hold even
+     * with the exactly-once guard deleted. Verified by mutation.
      */
-    it('returns the pack once when the terminal path runs again after an operator retry', async () => {
+    it('refuses an operator retry once the pack has been returned', async () => {
       resetStubProvider();
       const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
       const jobId = await queueJob(letterId);
@@ -371,34 +396,26 @@ describePostgres('failed send returns the pack', () => {
       await jobs.processLetterJob(jobId);
       await jobs.processDueLetterJobs(10);
       expect(stubProvider.calls.length).toBe(1);
+      expect(await credits(userId)).toBe(6);
 
-      await jobs.retryLetterJobAsAdmin({
+      await expect(jobs.retryLetterJobAsAdmin({
         jobId,
         expectedUserId: userId,
         actorId: 'operator_test',
         reason: 'confirmed rejection, resending',
         idempotencyKey: `retry-${jobId}`
-      });
-      await jobs.processLetterJob(jobId);
+      })).rejects.toMatchObject({ code: 'invalid_state' });
 
-      // The premise of everything below: the retry really did put the piece back
-      // through the provider, and it really did fail terminally a second time.
-      // Without this the test could pass because nothing happened.
-      expect(stubProvider.calls.length).toBe(2);
+      // Refused, and refused without side effects: the job stays terminal, the
+      // pack stays returned exactly once, and nothing was sent.
       const job = await pool.query<{ status: string; provider_outcome: string }>(
         'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
       );
       expect(job.rows[0].status).toBe('failed');
       expect(job.rows[0].provider_outcome).toBe('definite_failure');
-
-      // Two terminal failures, one pack. The customer was owed one letter.
+      expect(stubProvider.calls.length).toBe(1);
       expect(await credits(userId)).toBe(6);
-      const returns = await pool.query<{ n: string }>(
-        `SELECT count(*)::text AS n FROM credit_ledger
-          WHERE user_id = $1 AND source_type = 'adjustment'`,
-        [userId]
-      );
-      expect(returns.rows[0].n).toBe('1');
+      expect(await adjustmentLots(userId)).toBe(1);
     }, 60_000);
 
     /**

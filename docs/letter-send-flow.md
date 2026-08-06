@@ -58,6 +58,8 @@ Three paths reach it, and all three are guarded by the same exactly-once check, 
 - a terminal failure *before* dispatch, where the job never left `provider_outcome = 'not_dispatched'` and no mail can exist;
 - an operator resolving an ambiguous hold as a confirmed rejection.
 
+Once a pack has been returned, an operator retry of that job is refused. Nothing re-deducts on the way back through the outbox, so resending would give the customer the pack and the letter; selling them a new send is a deliberate decision rather than a side effect of a retry.
+
 An ambiguous outcome returns nothing. The piece may physically exist, and an unnecessary hold is recoverable while refunding posted mail is not.
 
 ## Hourly Recovery

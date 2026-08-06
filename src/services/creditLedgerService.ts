@@ -847,6 +847,30 @@ export async function getUsersWithExpiringCredits(
  * Returns the number of credits returned - zero when there is nothing to return
  * or a return has already happened.
  */
+/**
+ * Whether this letter's pack has already been returned.
+ *
+ * The marker is the compensating lot itself, which makes the check and the
+ * thing it guards impossible to get out of step. Two callers need it: the
+ * return below, for exactly-once, and any operator action that would be unsafe
+ * on a letter the customer has already been compensated for.
+ */
+export async function hasReturnedCreditsForLetter(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: { letterId: string; userId: string }
+): Promise<boolean> {
+  const existing = await client.query(
+    `SELECT 1 FROM credit_ledger
+      WHERE user_id = $1
+        AND source_type = 'adjustment'
+        AND source_metadata->>'letter_id' = $2
+        AND source_metadata->>'reason' = 'send_failed'
+      LIMIT 1`,
+    [params.userId, params.letterId]
+  );
+  return Boolean(existing.rowCount);
+}
+
 export async function returnConsumedCreditsForLetter(
   client: Pick<pg.PoolClient, 'query'>,
   params: { letterId: string; userId: string; failureCode: string }
@@ -854,16 +878,7 @@ export async function returnConsumedCreditsForLetter(
   const { letterId, userId, failureCode } = params;
   await lockAccountForBalanceChange(client, userId);
 
-  const alreadyReturned = await client.query(
-    `SELECT 1 FROM credit_ledger
-      WHERE user_id = $1
-        AND source_type = 'adjustment'
-        AND source_metadata->>'letter_id' = $2
-        AND source_metadata->>'reason' = 'send_failed'
-      LIMIT 1`,
-    [userId, letterId]
-  );
-  if (alreadyReturned.rowCount) return 0;
+  if (await hasReturnedCreditsForLetter(client, { letterId, userId })) return 0;
 
   // credit_consumption records exactly which lots the deduction drew from and
   // how much came from each, so the return mirrors the original split rather

@@ -18,7 +18,10 @@ import type {
   PostcardSize,
 } from './providers/types.js';
 import type { Letter, LetterJob } from './types.js';
-import { returnConsumedCreditsForLetter } from './creditLedgerService.js';
+import {
+  hasReturnedCreditsForLetter,
+  returnConsumedCreditsForLetter
+} from './creditLedgerService.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
@@ -1266,6 +1269,20 @@ export async function retryLetterJobAsAdmin(params: {
         current.operator_resolution || letter.rows[0]?.user_id !== params.expectedUserId ||
         letter.rows[0]?.status !== 'failed' ||
         (ids.funding_order_id && orderStatus !== 'fulfillment_pending' && !retryableJitRefund)) {
+      throw new AdminJobRetryError('invalid_state');
+    }
+    // Issue #151. A prepaid letter whose pack has already been returned must not
+    // be resent: nothing re-deducts on the way back through the outbox, so the
+    // customer would keep the pack AND get the letter. The pay-per-send
+    // equivalent is already guarded by retryableJitRefund above, which refuses
+    // once the money has actually gone back; a returned pack is immediate and
+    // irreversible, so the prepaid answer is always to refuse. Sending anyway
+    // means selling the customer a new one, which is a deliberate decision
+    // rather than a silent side effect of a retry.
+    if (await hasReturnedCreditsForLetter(client, {
+      letterId: ids.letter_id,
+      userId: params.expectedUserId
+    })) {
       throw new AdminJobRetryError('invalid_state');
     }
     if (ids.funding_order_id && retryableJitRefund) {
