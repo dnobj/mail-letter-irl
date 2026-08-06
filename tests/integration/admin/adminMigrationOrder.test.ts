@@ -364,10 +364,19 @@ describeWithDatabase("admin migration arrival order compatibility", () => {
     }
   }
 
+  // These scenarios are about the 021/022/023 arrival order and nothing else.
+  // Bound every predicate to that range: without this, `notAdminAudit` and
+  // `notJitRecovery` accept ANY file that is not the one they name, so each new
+  // migration silently joins the staged set and changes the expected ledger.
+  // 024_dispute_send_block.sql did exactly that and broke all three scenarios.
+  const inArrivalOrderScope = (file: string) => file <= JIT_RECOVERY_MIGRATION;
+
   const upToJit = (file: string) => file <= JIT_FOUNDATION_MIGRATION;
-  const notAdminAudit = (file: string) => file !== ADMIN_AUDIT_MIGRATION;
-  const notJitRecovery = (file: string) => file !== JIT_RECOVERY_MIGRATION;
-  const everything = () => true;
+  const notAdminAudit = (file: string) =>
+    inArrivalOrderScope(file) && file !== ADMIN_AUDIT_MIGRATION;
+  const notJitRecovery = (file: string) =>
+    inArrivalOrderScope(file) && file !== JIT_RECOVERY_MIGRATION;
+  const everything = inArrivalOrderScope;
 
   let sliceOne: Fingerprint;
   let recoveryFirst: Fingerprint;

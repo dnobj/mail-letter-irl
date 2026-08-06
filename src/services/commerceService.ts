@@ -515,6 +515,26 @@ export async function createJitCheckout(
       code: 'JIT_DISABLED'
     });
   }
+
+  // Issue #150: refuse a restricted account BEFORE taking payment.
+  //
+  // The send-path block in mailSendService deliberately exempts jit_order
+  // funding, because that path runs during fulfilment - after Stripe has already
+  // charged the customer. Blocking there would take the money and refuse the
+  // send in the same transaction, stranding funds that would then need a refund.
+  // This is the correct gate for Pay & Send: no charge is created at all.
+  const blocked = await query<{ sends_blocked_reason: string | null }>(
+    'SELECT sends_blocked_reason FROM users WHERE user_id = $1',
+    [params.userId]
+  );
+  const blockedReason = blocked.rows[0]?.sends_blocked_reason;
+  if (blockedReason) {
+    throw Object.assign(
+      new Error(`Sending is disabled on this account (${blockedReason}). Contact support.`),
+      { code: 'ACCOUNT_SENDS_BLOCKED' }
+    );
+  }
+
   const prepared = await prepareJitOrder(params);
   if (prepared.order.status !== 'checkout_pending' || prepared.order.checkout_url) {
     return asCheckoutResult(prepared.order, true);
@@ -1012,9 +1032,21 @@ async function processCheckoutSessionEvent(
   });
 }
 
+/**
+ * Why a pack was revoked. Stamped into the audit row so a later compensation can
+ * tell a dispute-caused revocation from a refund-caused one.
+ *
+ * Without this the two are byte-identical, and a compensation cannot know which
+ * revocation it is answering - which would let a favourable dispute close undo a
+ * legitimate refund and hand the customer both the money and the credits.
+ */
+type RevocationCause = 'payment_refunded' | 'payment_disputed';
+
 async function revokePackCredits(
   client: Pick<pg.PoolClient, 'query'>,
-  order: Order
+  order: Order,
+  cause: RevocationCause = 'payment_refunded',
+  disputeId?: string
 ): Promise<void> {
   // Canonical account lock order: users -> credit_ledger -> image_entitlements.
   // Reversal must take the account lock first so it cannot deadlock against a
@@ -1024,9 +1056,15 @@ async function revokePackCredits(
     ledger_id: string;
     initial_amount: number;
     remaining_amount: number;
+    source_type: string;
   }>(
-    `SELECT ledger_id, initial_amount, remaining_amount FROM credit_ledger
-     WHERE user_id = $1 AND source_type = 'purchase'
+    // 'adjustment' is included deliberately. A dispute compensation posts an
+    // adjustment lot against this order, and without it here that lot would sit
+    // outside the scope of every later claw-back: the purchase lot stays
+    // 'revoked' so this query would find nothing and return, leaving a customer
+    // who was later refunded holding both the money and the compensated credits.
+    `SELECT ledger_id, initial_amount, remaining_amount, source_type FROM credit_ledger
+     WHERE user_id = $1 AND source_type IN ('purchase', 'adjustment')
        AND (source_reference_id = $2 OR source_metadata->>'stripe_session_id' = $3)
        AND status <> 'revoked'
      FOR UPDATE`,
@@ -1053,12 +1091,27 @@ async function revokePackCredits(
         order.user_id,
         entry.initial_amount,
         order.order_id,
-        JSON.stringify({ reason: 'payment_refunded', order_id: order.order_id }),
+        // remaining_at_revocation is what a later restore must put back. The
+        // revocation zeroes remaining_amount on the original row, so without
+        // recording it here the pre-revocation balance is unrecoverable and a
+        // won dispute could not be undone. initial_amount is the original grant,
+        // not what was left.
+        JSON.stringify({
+          reason: cause,
+          order_id: order.order_id,
+          remaining_at_revocation: entry.remaining_amount,
+          ...(disputeId ? { dispute_id: disputeId } : {})
+        }),
         `Payment refund for ${order.order_id}`,
         entry.ledger_id
       ]
     );
   }
+  // credits_purchased is lifetime spend and must be decremented once per order,
+  // not once per revocation. Revoking a compensation lot is a second claw-back
+  // of the same order; subtracting again understates the customer's lifetime
+  // total. Only the revocation that takes the original purchase adjusts it.
+  const revokedAPurchase = entries.rows.some(entry => entry.source_type === 'purchase');
   const user = await client.query<{ credits: number }>(
     `UPDATE users
      SET credits = GREATEST(credits - $1, 0),
@@ -1066,7 +1119,7 @@ async function revokePackCredits(
          updated_at = NOW()
      WHERE user_id = $3
      RETURNING credits`,
-    [remaining, order.credits || 0, order.user_id]
+    [remaining, revokedAPurchase ? order.credits || 0 : 0, order.user_id]
   );
   if (remaining > 0 && user.rows[0]) {
     await client.query(
@@ -1276,6 +1329,310 @@ async function processRefundEvent(
   });
 }
 
+/**
+ * Stripe dispute statuses that mean no money was, or will be, taken from us.
+ *
+ * The status enum is not two-valued. `warning_*` are card-network inquiries -
+ * a bank asking a question - where funds are never withdrawn. Treating those as
+ * chargebacks would confiscate a paying customer's balance because someone
+ * queried a charge. `won` and `prevented` are outright favourable outcomes.
+ *
+ * Anything not listed here is treated as a loss and revokes, which is the
+ * correct default for an unrecognised or future status.
+ */
+const NON_LOSS_DISPUTE_STATUSES = new Set([
+  'won',
+  'prevented',
+  'warning_needs_response',
+  'warning_under_review',
+  'warning_closed'
+]);
+
+/**
+ * Outcomes that positively compensate a previously revoked pack, not merely
+ * decline to revoke.
+ *
+ * `warning_closed` is deliberately NOT here despite being a non-loss status. An
+ * inquiry never revokes anything, so it has nothing of its own to compensate -
+ * its only reachable effect would be to trigger a compensation for a revocation
+ * that something else caused.
+ */
+const FAVOURABLE_DISPUTE_STATUSES = new Set(['won', 'prevented']);
+
+/**
+ * Make a customer whole after a dispute resolves in our favour.
+ *
+ * Posts a NEW compensating grant rather than reversing the revocation. The
+ * revocation stays in history as an honest record of what happened, and the
+ * compensation is a separate, linked entry - so `related_ledger_id` on the
+ * original purchase row answers "was this ever revoked, and was it made good?"
+ * in a single indexed lookup.
+ *
+ * Reversal was tried first and rejected: identifying WHICH revocation to undo
+ * from audit rows that look identical for refunds and disputes let a favourable
+ * dispute silently undo a legitimate refund.
+ *
+ * Uses source_type 'adjustment', not 'refund'. A 'refund' row linked to a
+ * purchase is what the tier calculation treats as "this purchase was returned",
+ * and a compensation is the opposite of that. 'adjustment' is also the only
+ * suitable existing enum value - a new one cannot be added, because
+ * ALTER TYPE ... ADD VALUE is illegal inside the migrator's single transaction.
+ *
+ * The compensating lot inherits the original lot's expiry. Credits live in lots
+ * with their own expiry and are consumed FIFO by expires_at, so a fresh lot with
+ * no expiry would silently extend the customer's window.
+ */
+async function compensateDisputedPacks(
+  client: Pick<pg.PoolClient, 'query'>,
+  order: Order,
+  disputeId: string
+): Promise<void> {
+  // A refunded order must never be compensated. Stripe can deliver a delayed
+  // closed(won) after a refund has already been processed; the refund's own
+  // claw-back no-ops against lots the dispute already revoked, so compensating
+  // afterwards would hand the customer the refund AND the credits with nothing
+  // left to reverse it. The legitimate won-then-refunded order is unaffected:
+  // there compensation happens first and the later refund claws it back.
+  if (order.status === 'refunded' || order.status === 'refund_pending') {
+    return;
+  }
+
+  await lockAccountForBalanceChange(client, order.user_id);
+
+  // Only lots revoked BY A DISPUTE, and only where no compensation for this
+  // dispute already exists. Matching on the revocation cause is what keeps a
+  // refund-caused revocation out of scope.
+  const entries = await client.query<{
+    ledger_id: string;
+    restore_amount: number;
+    expires_at: Date | null;
+    expiration_policy: string | null;
+  }>(
+    `SELECT purchase.ledger_id,
+            COALESCE((audit.source_metadata->>'remaining_at_revocation')::int, 0) AS restore_amount,
+            purchase.expires_at,
+            purchase.expiration_policy
+       FROM credit_ledger purchase
+       JOIN credit_ledger audit
+         ON audit.related_ledger_id = purchase.ledger_id
+        AND audit.source_type = 'refund'
+        AND audit.source_metadata->>'reason' = 'payment_disputed'
+        -- Pinned to the dispute that actually caused this revocation. Matching
+        -- any dispute-caused revocation would let a second, unrelated dispute
+        -- closing favourably compensate a lot the first one took.
+        AND audit.source_metadata->>'dispute_id' = $4
+      WHERE purchase.user_id = $1
+        AND purchase.source_type = 'purchase'
+        AND purchase.status = 'revoked'
+        AND (purchase.source_reference_id = $2
+             OR purchase.source_metadata->>'stripe_session_id' = $3)
+        -- Keyed per LOT, not per (lot, dispute). A lot can only ever be
+        -- compensated once: entitlement belongs to the lot, so keying on the
+        -- dispute would grant again for each new dispute touching the order.
+        AND NOT EXISTS (
+          SELECT 1 FROM credit_ledger compensation
+           WHERE compensation.related_ledger_id = purchase.ledger_id
+             AND compensation.source_type = 'adjustment'
+        )
+      FOR UPDATE OF purchase`,
+    [order.user_id, order.order_id, order.stripe_checkout_session_id || null, disputeId]
+  );
+  if (entries.rows.length === 0) return;
+
+  let compensated = 0;
+  let skippedUnknownAmount = 0;
+  for (const entry of entries.rows) {
+    if (entry.restore_amount <= 0) {
+      // A lot revoked before remaining_at_revocation was recorded. There is no
+      // way to know what it held, so guessing would be inventing money in one
+      // direction or the other. Surfaced below rather than silently skipped.
+      skippedUnknownAmount += 1;
+      continue;
+    }
+    await client.query(
+      `INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, source_metadata, activated_at,
+         expires_at, expiration_policy, status, description, related_ledger_id
+       ) VALUES ($1, $2, $2, 'adjustment', $3, $4, NOW(), $5, $6, 'active', $7, $8)`,
+      [
+        order.user_id,
+        entry.restore_amount,
+        order.order_id,
+        JSON.stringify({
+          reason: 'dispute_resolved_in_our_favour',
+          order_id: order.order_id,
+          dispute_id: disputeId,
+          compensates_ledger_id: entry.ledger_id
+        }),
+        entry.expires_at,
+        entry.expiration_policy,
+        `Dispute resolved in our favour for ${order.order_id}`,
+        entry.ledger_id
+      ]
+    );
+    compensated += entry.restore_amount;
+  }
+
+  if (skippedUnknownAmount > 0) {
+    // Silence here would mean a customer who won a dispute quietly gets nothing.
+    await client.query(
+      `INSERT INTO commerce_operational_alerts
+         (order_id, alert_type, severity, details)
+       VALUES ($1, 'dispute_compensation_incomplete', 'warning', $2)
+       ON CONFLICT DO NOTHING`,
+      [
+        order.order_id,
+        JSON.stringify({ disputeId, lotsWithoutRecordedBalance: skippedUnknownAmount })
+      ]
+    );
+  }
+
+  if (compensated === 0) return;
+
+  // credits only. credits_purchased is lifetime spend and drives tier - a
+  // compensation is not a new purchase and must not inflate either.
+  await client.query(
+    `UPDATE users SET credits = credits + $1, updated_at = NOW() WHERE user_id = $2`,
+    [compensated, order.user_id]
+  );
+
+  // Symmetry with revocation, which writes its own credit_transactions row.
+  // Without this the transaction ledger shows a debit with no matching credit.
+  // balance_after is read from users AFTER the update above, so the snapshot
+  // matches the balance this transaction produced.
+  await client.query(
+    `INSERT INTO credit_transactions (
+       user_id, amount, balance_after, type, reference_type, reference_id, description
+     ) SELECT $1::varchar, $2::int, credits, 'refund', 'order', $3::varchar, $4::text
+         FROM users WHERE user_id = $1::varchar`,
+    [
+      order.user_id,
+      compensated,
+      order.order_id,
+      `Dispute ${disputeId} resolved in our favour for ${order.order_id}`
+    ]
+  );
+}
+
+/**
+ * Lift a send block after a dispute resolves in our favour.
+ *
+ * Scoped deliberately: the block is only lifted when the account has no OTHER
+ * dispute that would itself justify a block. Keying on the reason alone would
+ * let a benign outcome on one order unlock a block a different, still-standing
+ * chargeback had set.
+ *
+ * "Would justify a block" means exactly the statuses that revoke - the inverse
+ * of NON_LOSS_DISPUTE_STATUSES. Counting inquiries here was a dead end: an open
+ * inquiry never blocks anything, but it would veto the unblock, and when it
+ * later closed warning_closed that status is not favourable so no further
+ * unblock is attempted. A customer who won their chargeback stayed blocked
+ * forever, with no tooling to clear it.
+ */
+async function unblockAccountSends(
+  client: Pick<pg.PoolClient, 'query'>,
+  userId: string,
+  resolvedDisputeId: string
+): Promise<void> {
+  await client.query(
+    `UPDATE users
+     SET sends_blocked_at = NULL, sends_blocked_reason = NULL, updated_at = NOW()
+     WHERE user_id = $1
+       AND sends_blocked_reason = 'payment_disputed'
+       AND NOT EXISTS (
+         SELECT 1 FROM stripe_disputes other
+          WHERE other.user_id = $1
+            AND other.dispute_id <> $2
+            AND NOT (other.status = ANY($3::text[]))
+       )`,
+    [userId, resolvedDisputeId, [...NON_LOSS_DISPUTE_STATUSES]]
+  );
+}
+
+/**
+ * Persist the dispute lifecycle idempotently.
+ *
+ * Keyed on Stripe's dispute id, so replayed, reordered or concurrently
+ * delivered events converge on one row rather than accumulating duplicates.
+ * Reordering is handled explicitly: a late-arriving `created` must not
+ * overwrite the resolution written by a `closed` that already landed, so
+ * `resolved_at` is only ever set, never cleared.
+ */
+async function recordDispute(
+  client: Pick<pg.PoolClient, 'query'>,
+  dispute: Stripe.Dispute,
+  userId: string | null,
+  closed: boolean
+): Promise<void> {
+  const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
+  const paymentIntentId = typeof dispute.payment_intent === 'string'
+    ? dispute.payment_intent
+    : dispute.payment_intent?.id;
+
+  await client.query(
+    `INSERT INTO stripe_disputes (
+       dispute_id, charge_id, payment_intent_id, user_id, amount_cents, currency,
+       reason, status, evidence_due_by, stripe_created_at, resolved_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     ON CONFLICT (dispute_id) DO UPDATE SET
+       charge_id = EXCLUDED.charge_id,
+       payment_intent_id = COALESCE(EXCLUDED.payment_intent_id, stripe_disputes.payment_intent_id),
+       user_id = COALESCE(EXCLUDED.user_id, stripe_disputes.user_id),
+       amount_cents = EXCLUDED.amount_cents,
+       currency = EXCLUDED.currency,
+       reason = COALESCE(EXCLUDED.reason, stripe_disputes.reason),
+       status = EXCLUDED.status,
+       evidence_due_by = COALESCE(EXCLUDED.evidence_due_by, stripe_disputes.evidence_due_by),
+       stripe_created_at = COALESCE(EXCLUDED.stripe_created_at, stripe_disputes.stripe_created_at),
+       -- Never clear a resolution: a replayed created event arriving after a
+       -- closed one would otherwise reopen a settled dispute.
+       resolved_at = COALESCE(stripe_disputes.resolved_at, EXCLUDED.resolved_at),
+       updated_at = NOW()`,
+    [
+      dispute.id,
+      chargeId || '',
+      paymentIntentId || null,
+      userId,
+      dispute.amount,
+      dispute.currency,
+      dispute.reason || null,
+      String(dispute.status || 'open'),
+      dispute.evidence_details?.due_by ? new Date(dispute.evidence_details.due_by * 1000) : null,
+      dispute.created ? new Date(dispute.created * 1000) : null,
+      closed ? new Date() : null
+    ]
+  );
+}
+
+/**
+ * Restrict an account from sending further mail.
+ *
+ * Approved policy for issue #150: a dispute zeroes the pack balance and blocks
+ * sends pending operator review. Deliberately idempotent and non-clobbering -
+ * an account already blocked for an earlier dispute keeps its original
+ * timestamp and reason, so a second chargeback cannot mask the first.
+ *
+ * Lifted automatically only when a dispute resolves in our favour AND the
+ * account has no other dispute still open or lost - see unblockAccountSends.
+ * Any other route back is an operator decision, and there is no tooling for it
+ * yet.
+ */
+async function blockAccountSends(
+  client: Pick<pg.PoolClient, 'query'>,
+  userId: string,
+  reason: string
+): Promise<void> {
+  await client.query(
+    `UPDATE users
+     SET sends_blocked_at = COALESCE(sends_blocked_at, NOW()),
+         sends_blocked_reason = COALESCE(sends_blocked_reason, $2),
+         updated_at = NOW()
+     WHERE user_id = $1`,
+    [userId, reason]
+  );
+}
+
 async function processDisputeEvent(
   eventId: string,
   eventType: 'charge.dispute.created' | 'charge.dispute.closed',
@@ -1303,6 +1660,10 @@ async function processDisputeEvent(
         )
       : { rows: [] as Order[] };
     const order = orderResult.rows[0];
+    // Persist before the unmatched-order branch returns. An unmatched dispute is
+    // still money leaving the account, and the operator reviewing it needs the
+    // record regardless of whether we could tie it to an order.
+    await recordDispute(client, dispute, order?.user_id ?? null, closed);
     if (!order) {
       await client.query(
         `UPDATE stripe_webhook_events SET processing_status = 'unmatched'
@@ -1334,6 +1695,38 @@ async function processDisputeEvent(
       await recordOrderEvent(client, order.order_id, eventType, order.status, 'disputed', {
         disputeStatus: dispute.status
       });
+
+      // Issue #150, approved policy. A refund absorbs packs the customer already
+      // spent and leaves the account alone; a dispute is adversarial and does
+      // neither. Zero the pack balance and restrict sends pending review.
+      //
+      // Not applied for outcomes where no money was or will be taken. That is
+      // NOT just 'won': the warning_* statuses are card-network inquiries where
+      // funds are never withdrawn, and treating a bank's question as a
+      // chargeback would confiscate a paying customer's balance. Anything
+      // unrecognised is treated as a loss, which is the safe default.
+      //
+      // Applied on created AND on any losing close, because Stripe can deliver
+      // these out of order and a close arriving without its create must still
+      // revoke rather than leave the packs quietly spendable. Both operations
+      // are idempotent, so the second event is a no-op.
+      const status = String(dispute.status || '');
+      if (!NON_LOSS_DISPUTE_STATUSES.has(status)) {
+        if (order.order_type === 'letter_pack') {
+          await revokePackCredits(client, order, 'payment_disputed', dispute.id);
+        }
+        await blockAccountSends(client, order.user_id, 'payment_disputed');
+      } else if (closed && FAVOURABLE_DISPUTE_STATUSES.has(status)) {
+        // Stripe always emits created before closed, so a win arrives AFTER the
+        // packs were revoked and the account blocked. Declining to revoke again
+        // is not enough - without compensating, we keep the funds and the
+        // customer keeps nothing, permanently.
+        if (order.order_type === 'letter_pack') {
+          await compensateDisputedPacks(client, order, dispute.id);
+        }
+        await unblockAccountSends(client, order.user_id, dispute.id);
+      }
+
       if (closed) {
         const resolutionCode = `stripe_dispute_${String(dispute.status || 'unknown')
           .toLowerCase()

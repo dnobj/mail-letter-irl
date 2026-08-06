@@ -21,6 +21,7 @@ const REQUIRED = [
   'migrateConcurrency.postgres.test.ts',
   'adminFoundationDatabase.test.ts',
   'adminMigrationOrder.test.ts',
+  'disputeRevocation.postgres.test.ts',
 ];
 
 /**

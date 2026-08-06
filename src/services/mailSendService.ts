@@ -127,6 +127,32 @@ export async function createMailOrderFromDraftWithClient(
     };
   }
 
+  // Issue #150: a disputed or charged-back payment restricts the account until an
+  // operator reviews it.
+  //
+  // Checked here rather than at the top of the function so a replay of an
+  // already-consumed draft still returns its existing mail item - blocking must
+  // stop new sends, not break idempotency on completed ones.
+  //
+  // jit_order funding is exempt because this function runs during Pay & Send
+  // FULFILMENT, after Stripe has already charged the customer. Refusing here
+  // would take the money and withhold the send in the same transaction. Pay &
+  // Send is blocked earlier instead, in createJitCheckout, before any charge
+  // exists. Prepaid sends have no such problem: no money moves at this point.
+  if (funding.type !== 'jit_order') {
+    const blockResult = await client.query<{ sends_blocked_reason: string | null }>(
+      'SELECT sends_blocked_reason FROM users WHERE user_id = $1',
+      [params.userId]
+    );
+    const blockedReason = blockResult.rows[0]?.sends_blocked_reason;
+    if (blockedReason) {
+      throw draftError(
+        'ACCOUNT_SENDS_BLOCKED',
+        `Sending is disabled on this account (${blockedReason}). Contact support.`
+      );
+    }
+  }
+
   if (draft.status === 'expired' || new Date(draft.expires_at).getTime() <= Date.now()) {
     throw draftError('DRAFT_EXPIRED', `Draft expired: ${params.draftId}`);
   }
