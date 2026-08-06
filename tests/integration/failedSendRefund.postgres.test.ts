@@ -997,6 +997,19 @@ describePostgres('failed send returns the pack', () => {
 
       expect(await credits(userId)).toBe(0);
       expect(await adjustmentLots(userId)).toBe(0);
+
+      // Declining the return leaves no compensating lot, so the marker that
+      // normally refuses a retry is not there. The customer has still been paid
+      // for this letter, so an operator retry must still be refused - on the
+      // revoked lots themselves rather than on a marker that was never written.
+      await expect(jobs.retryLetterJobAsAdmin({
+        jobId,
+        expectedUserId: userId,
+        actorId: 'operator_test',
+        reason: 'resend after refund',
+        idempotencyKey: `refunded-retry-${jobId}`
+      })).rejects.toMatchObject({ code: 'invalid_state' });
+      expect(stubProvider.calls.length).toBe(1);
     }, 60_000);
   });
 

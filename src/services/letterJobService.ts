@@ -19,7 +19,7 @@ import type {
 } from './providers/types.js';
 import type { Letter, LetterJob } from './types.js';
 import {
-  hasReturnedCreditsForLetter,
+  isLetterAlreadyCompensated,
   returnConsumedCreditsForLetter
 } from './creditLedgerService.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
@@ -1097,7 +1097,7 @@ export async function resolveAmbiguousLetterJobAsAdmin(
     // refuses to reopen a terminal job, so reaching here with a returned pack
     // should be impossible; the guard stays because the cost of being wrong is
     // mail the customer was refunded for.
-    if (params.decision !== 'rejected' && await hasReturnedCreditsForLetter(client, {
+    if (params.decision !== 'rejected' && await isLetterAlreadyCompensated(client, {
       letterId: ids.letter_id,
       userId: params.expectedUserId
     })) {
@@ -1335,8 +1335,10 @@ export async function retryLetterJobAsAdmin(params: {
     // once the money has actually gone back; a returned pack is immediate and
     // irreversible, so the prepaid answer is always to refuse. Sending anyway
     // means selling the customer a new one, which is a deliberate decision
-    // rather than a silent side effect of a retry.
-    if (await hasReturnedCreditsForLetter(client, {
+    // rather than a silent side effect of a retry. A pack refunded in cash
+    // counts the same way, and leaves no compensating lot to find - see
+    // isLetterAlreadyCompensated.
+    if (await isLetterAlreadyCompensated(client, {
       letterId: ids.letter_id,
       userId: params.expectedUserId
     })) {

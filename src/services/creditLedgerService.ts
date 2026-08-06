@@ -857,9 +857,9 @@ export async function getUsersWithExpiringCredits(
  * Whether this letter's pack has already been returned.
  *
  * The marker is the compensating lot itself, which makes the check and the
- * thing it guards impossible to get out of step. Two callers need it: the
- * return below, for exactly-once, and any operator action that would be unsafe
- * on a letter the customer has already been compensated for.
+ * thing it guards impossible to get out of step. It answers exactly-once for
+ * the return below; operator actions ask isLetterAlreadyCompensated instead,
+ * which also covers the pack that was refunded in cash rather than returned.
  */
 export async function hasReturnedCreditsForLetter(
   client: Pick<pg.PoolClient, 'query'>,
@@ -875,6 +875,38 @@ export async function hasReturnedCreditsForLetter(
     [params.userId, params.letterId]
   );
   return Boolean(existing.rowCount);
+}
+
+/**
+ * Whether this letter has already been paid for in the customer's favour.
+ *
+ * Two routes lead there and an operator action must refuse on either. The pack
+ * came back as a compensating lot (issue #151), or the pack itself was refunded
+ * in cash and its lots revoked (issue #150) - in which case the return below
+ * correctly declines and leaves no marker of its own. Nothing re-deducts on the
+ * way back through the outbox, so a retry from either state posts mail nobody
+ * is paying for.
+ *
+ * bool_and over no rows is NULL, so a letter that consumed no credits - every
+ * pay-per-send letter - answers false and keeps its own JIT guards.
+ */
+export async function isLetterAlreadyCompensated(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: { letterId: string; userId: string }
+): Promise<boolean> {
+  if (await hasReturnedCreditsForLetter(client, params)) return true;
+  const consumed = await client.query<{ all_revoked: boolean | null }>(
+    `SELECT bool_and(lot.status = 'revoked') AS all_revoked
+       FROM credit_consumption consumption
+       JOIN credit_transactions txn ON txn.transaction_id = consumption.transaction_id
+       JOIN credit_ledger lot ON lot.ledger_id = consumption.ledger_id
+      WHERE txn.reference_type = 'letter'
+        AND txn.reference_id = $1
+        AND txn.type = 'deduction'
+        AND txn.user_id = $2`,
+    [params.letterId, params.userId]
+  );
+  return consumed.rows[0]?.all_revoked === true;
 }
 
 export async function returnConsumedCreditsForLetter(
