@@ -83,7 +83,7 @@ master/main (production) ──────────────────�
 | Stripe Mode | Live (`sk_live_`) | Test (`sk_test_`) |
 | PostGrid | Live (real mail) | Dummy (no mail) |
 | Admin Routes | Disabled | Disabled |
-| API URL | `api.letterirl.com` | Railway dev environment |
+| API URL | `api.letterirl.com` | `letter-irl-api-development.up.railway.app` |
 | Website URL | `letterirl.com` | `mail-letter-irl-website-development.up.railway.app` |
 
 ---
@@ -460,7 +460,7 @@ CREATE TABLE example (
 **Development Environment:**
 - API Branch: `dev`
 - Website Branch: `dev`
-- API URL: Railway dev environment
+- API URL: `https://letter-irl-api-development.up.railway.app`
 - Website URL: `https://mail-letter-irl-website-development.up.railway.app`
 - Test credentials (test Stripe, dummy PostGrid)
 - Admin routes disabled

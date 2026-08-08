@@ -1,6 +1,6 @@
 # Infrastructure Overview
 
-Last updated: July 19, 2026
+Last updated: August 8, 2026
 
 This file is the source of truth for Letter IRL's cloud topology. Keep secrets and private billing records out of Git.
 
@@ -18,6 +18,8 @@ Letter IRL uses one Railway project with two isolated Railway environments and o
 | Stripe | live mode | test mode |
 | PostGrid | live mode | test/dummy mode |
 | Runtime policy | API and website stay warm | API and website use Railway Serverless (health acceptance passed) |
+| API URL | `https://api.letterirl.com` | `https://letter-irl-api-development.up.railway.app` |
+| Website URL | `https://letterirl.com` | `https://mail-letter-irl-website-development.up.railway.app` |
 
 Railway project ID: `b31314d8-fd09-4582-9c0d-52a36f879228`
 
