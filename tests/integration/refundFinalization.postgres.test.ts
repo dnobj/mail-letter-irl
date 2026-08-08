@@ -205,6 +205,19 @@ describePostgres('refund finalization', () => {
     const operations = refundOperations('succeeded');
 
     await commerce.requestRefund(orderId, 'customer asked', operations);
+
+    // Make the claim depend on the settled status and nothing else. The
+    // retry-delay throttle would otherwise refuse the replay on its own, and
+    // the assertion below would hold even with the settled-status predicate
+    // deleted - proving the throttle rather than the thing it names. Backdating
+    // updated_at does not work: migration 021 puts a BEFORE UPDATE trigger on
+    // orders that rewrites it. Zeroing the attempt counter satisfies the
+    // throttle's other arm instead.
+    await pool.query(
+      `UPDATE orders SET refund_attempts = 0 WHERE order_id = $1`,
+      [orderId]
+    );
+
     // A retry after the order has settled must find nothing left to claim: the
     // claim predicate requires refund_pending. Replay is where a refund path
     // pays twice, so it is asserted rather than assumed.
