@@ -14,6 +14,7 @@
 import { transaction, query } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
+import { lockAccountForBalanceChange } from './accountLock.js';
 import {
   User,
   CreditTransaction,
@@ -819,4 +820,200 @@ export async function getUsersWithExpiringCredits(
     expiringCredits: parseInt(row.expiring_credits, 10),
     expiresAt: row.earliest_expiry,
   }));
+}
+
+/**
+ * Return the credits a failed send consumed, exactly once.
+ *
+ * Issue #151. A confirmed send deducts the pack before the provider is called.
+ * When the job terminally fails, a pay-per-send order transitions to
+ * refund_pending, but a prepaid send previously returned nothing at all - the
+ * customer paid and received no letter.
+ *
+ * Posts NEW compensating lots rather than putting the consumed amounts back
+ * into the originals, matching the approach settled in issue #150: the
+ * consumption stays in history as a record of what happened, and the return is
+ * a separate linked entry. `related_ledger_id` on the consumed lot answers
+ * "was this taken, and was it given back?" in one indexed lookup.
+ *
+ * Each returned lot inherits the expiry of the lot it came from. Credits live
+ * in lots consumed FIFO by expires_at, so returning them into a fresh lot with
+ * no expiry would quietly extend the customer's window. It inherits that lot's
+ * source reference too, which is what keeps a later refund able to claw the
+ * returned credit back - see the note at the insert.
+ *
+ * A lot the customer has already been refunded for in cash is skipped: issue
+ * #150's revocation zeroes and revokes those lots, and returning against one
+ * would pay for the same pack twice.
+ *
+ * Exactly-once is enforced by refusing to act when a return already exists for
+ * this letter. Callers must already hold the canonical locks down to the letter
+ * row; this takes the account lock itself, which is the next step in that order.
+ *
+ * Returns the number of credits returned - zero when there is nothing to return
+ * or a return has already happened.
+ */
+/**
+ * Whether this letter's pack has already been returned.
+ *
+ * The marker is the compensating lot itself, which makes the check and the
+ * thing it guards impossible to get out of step. It answers exactly-once for
+ * the return below; operator actions ask isLetterAlreadyCompensated instead,
+ * which also covers the pack that was refunded in cash rather than returned.
+ */
+export async function hasReturnedCreditsForLetter(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: { letterId: string; userId: string }
+): Promise<boolean> {
+  const existing = await client.query(
+    `SELECT 1 FROM credit_ledger
+      WHERE user_id = $1
+        AND source_type = 'adjustment'
+        AND source_metadata->>'letter_id' = $2
+        AND source_metadata->>'reason' = 'send_failed'
+      LIMIT 1`,
+    [params.userId, params.letterId]
+  );
+  return Boolean(existing.rowCount);
+}
+
+/**
+ * Whether this letter has already been paid for in the customer's favour.
+ *
+ * Two routes lead there and an operator action must refuse on either. The pack
+ * came back as a compensating lot (issue #151), or the pack itself was refunded
+ * in cash and its lots revoked (issue #150) - in which case the return below
+ * correctly declines and leaves no marker of its own. Nothing re-deducts on the
+ * way back through the outbox, so a retry from either state posts mail nobody
+ * is paying for.
+ *
+ * bool_and over no rows is NULL, so a letter that consumed no credits - every
+ * pay-per-send letter - answers false and keeps its own JIT guards.
+ */
+export async function isLetterAlreadyCompensated(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: { letterId: string; userId: string }
+): Promise<boolean> {
+  if (await hasReturnedCreditsForLetter(client, params)) return true;
+  const consumed = await client.query<{ all_revoked: boolean | null }>(
+    `SELECT bool_and(lot.status = 'revoked') AS all_revoked
+       FROM credit_consumption consumption
+       JOIN credit_transactions txn ON txn.transaction_id = consumption.transaction_id
+       JOIN credit_ledger lot ON lot.ledger_id = consumption.ledger_id
+      WHERE txn.reference_type = 'letter'
+        AND txn.reference_id = $1
+        AND txn.type = 'deduction'
+        AND txn.user_id = $2`,
+    [params.letterId, params.userId]
+  );
+  return consumed.rows[0]?.all_revoked === true;
+}
+
+export async function returnConsumedCreditsForLetter(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: { letterId: string; userId: string; failureCode: string }
+): Promise<number> {
+  const { letterId, userId, failureCode } = params;
+  await lockAccountForBalanceChange(client, userId);
+
+  if (await hasReturnedCreditsForLetter(client, { letterId, userId })) return 0;
+
+  // credit_consumption records exactly which lots the deduction drew from and
+  // how much came from each, so the return mirrors the original split rather
+  // than guessing from letters.credits_cost.
+  const consumed = await client.query<{
+    ledger_id: string;
+    amount: number;
+    expires_at: Date | null;
+    expiration_policy: string | null;
+    status: string;
+    source_reference_id: string | null;
+    stripe_session_id: string | null;
+  }>(
+    `SELECT consumption.ledger_id, consumption.amount,
+            lot.expires_at, lot.expiration_policy, lot.status,
+            lot.source_reference_id,
+            lot.source_metadata->>'stripe_session_id' AS stripe_session_id
+       FROM credit_consumption consumption
+       JOIN credit_transactions txn ON txn.transaction_id = consumption.transaction_id
+       JOIN credit_ledger lot ON lot.ledger_id = consumption.ledger_id
+      WHERE txn.reference_type = 'letter'
+        AND txn.reference_id = $1
+        AND txn.type = 'deduction'
+        AND txn.user_id = $2`,
+    [letterId, userId]
+  );
+  if (consumed.rows.length === 0) return 0;
+
+  let returned = 0;
+  for (const lot of consumed.rows) {
+    if (lot.amount <= 0) continue;
+    // A revoked lot was already paid back in cash. Refunding a pack zeroes its
+    // lots and claws the balance down (issue #150); minting a fresh credit from
+    // one of those lots would hand the customer the money and the credit for
+    // the same pack. The send failing after the refund does not owe them
+    // anything - the refund already covered the letter that never went.
+    if (lot.status === 'revoked') continue;
+    await client.query(
+      `INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, source_metadata, activated_at,
+         expires_at, expiration_policy, status, description, related_ledger_id
+       ) VALUES ($1, $2, $2, 'adjustment', $3, $4, NOW(), $5, $6, 'active', $7, $8)`,
+      [
+        userId,
+        lot.amount,
+        // The returned credit belongs to whatever bought the lot it came from,
+        // so it carries that lot's reference rather than the letter's. A later
+        // refund or chargeback claws back by order id or checkout session
+        // (commerceService.revokePackCredits); a letter-referenced lot is
+        // invisible to that query, which would leave a refunded customer
+        // holding both the cash and the returned credit. The letter is still
+        // recorded in the metadata below, where the exactly-once marker reads
+        // it.
+        lot.source_reference_id,
+        // failure_code is a stable classification, never the provider's own
+        // error text. This row is durable and operator-visible, and this repo
+        // bars provider internals and customer content from persisted
+        // diagnostics.
+        JSON.stringify({
+          reason: 'send_failed',
+          letter_id: letterId,
+          failure_code: failureCode,
+          restores_ledger_id: lot.ledger_id,
+          // Carried for the same reason as the reference above: the claw-back's
+          // other arm matches on the checkout session.
+          ...(lot.stripe_session_id ? { stripe_session_id: lot.stripe_session_id } : {})
+        }),
+        lot.expires_at,
+        lot.expiration_policy,
+        `Returned after failed send ${letterId}`,
+        lot.ledger_id
+      ]
+    );
+    returned += lot.amount;
+  }
+  if (returned === 0) return 0;
+
+  await client.query(
+    `UPDATE users SET credits = credits + $1, updated_at = NOW() WHERE user_id = $2`,
+    [returned, userId]
+  );
+
+  // balance_after is read after the update above, so the snapshot matches the
+  // balance this transaction produced.
+  await client.query(
+    `INSERT INTO credit_transactions (
+       user_id, amount, balance_after, type, reference_type, reference_id, description
+     ) SELECT $1::varchar, $2::int, credits, 'refund', 'letter', $3::varchar, $4::text
+         FROM users WHERE user_id = $1::varchar`,
+    [userId, returned, letterId, `Returned after failed send ${letterId}`]
+  );
+
+  writeDiagnostic('info', 'credits.returned_after_failed_send', {
+    creditsReturned: returned,
+    lotsRestored: consumed.rows.length
+  });
+
+  return returned;
 }

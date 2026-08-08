@@ -344,6 +344,66 @@ describePostgres('dispute and refund pack revocation', () => {
     expect((await readAccount(userId)).sends_blocked_at).toBeNull();
   }, 60_000);
 
+  /**
+   * Where #150 meets #151.
+   *
+   * A prepaid send that terminally fails returns the pack as an adjustment lot
+   * linked to the purchase lot it came from. The "already compensated" marker
+   * matched any linked adjustment, so that returned lot made the purchase lot
+   * look compensated - and a customer who then won a dispute got nothing back.
+   */
+  it('restores the purchase lot on a won dispute even when a failed send returned part of the pack', async () => {
+    const { userId, orderId, paymentIntentId } = await seedPackHolder({ credits: 10, spent: 2 });
+    const purchaseLot = await pool.query<{ ledger_id: string }>(
+      `SELECT ledger_id FROM credit_ledger WHERE user_id = $1 AND source_type = 'purchase'`,
+      [userId]
+    );
+    await pool.query(
+      `INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, source_metadata, activated_at,
+         expires_at, expiration_policy, status, description, related_ledger_id
+       ) VALUES ($1, 2, 2, 'adjustment', $2, $3, NOW(), NOW() + INTERVAL '730 days',
+                 'days_from_activation', 'active', 'Returned after failed send', $4)`,
+      [
+        userId,
+        orderId,
+        JSON.stringify({
+          reason: 'send_failed',
+          letter_id: randomUUID(),
+          failure_code: 'provider_definite_rejection',
+          restores_ledger_id: purchaseLot.rows[0].ledger_id
+        }),
+        purchaseLot.rows[0].ledger_id
+      ]
+    );
+    await pool.query(
+      `UPDATE users SET credits = credits + 2 WHERE user_id = $1`, [userId]
+    );
+    expect((await readAccount(userId)).credits).toBe(10);
+
+    const disputeId = `dp_${randomUUID().slice(0, 8)}`;
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.created', disputeFixture({
+        id: disputeId, payment_intent: paymentIntentId, status: 'needs_response'
+      }))
+    );
+    // The dispute takes everything the order paid for, the returned lot
+    // included.
+    expect((await readAccount(userId)).credits).toBe(0);
+
+    await commerceService.processStripeWebhookEvent(
+      disputeEvent('charge.dispute.closed', disputeFixture({
+        id: disputeId, payment_intent: paymentIntentId, status: 'won'
+      }))
+    );
+
+    // The purchase lot's 8 come back. The returned 2 do not - compensation
+    // restores purchase lots only - which is a known gap, filed separately.
+    // Before the reason was part of the marker, this was 0.
+    expect((await readAccount(userId)).credits).toBe(8);
+  }, 60_000);
+
   it('does NOT compensate a revocation that a refund caused', async () => {
     const { userId, orderId, paymentIntentId } = await seedPackHolder({ credits: 10, spent: 4 });
 

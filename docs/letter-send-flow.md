@@ -1,6 +1,6 @@
 # Letter and Postcard Send Flow
 
-Last updated: July 16, 2026
+Last updated: August 5, 2026
 
 This document describes the current draft, payment, outbox, and provider workflow for letters and postcards.
 
@@ -38,13 +38,29 @@ Database constraints enforce one outbox row and one stable idempotency key per l
 
 After the transaction commits, the send tool claims its outbox row and submits it immediately. The PostGrid request uses the Letter IRL `letter_id` as `Idempotency-Key`.
 
-Transient `429`, `5xx`, network, and timeout failures receive a small bounded retry with exponential delay and jitter. A successful response records the provider order ID and marks the job completed. A retryable failure returns a pending status and schedules `next_attempt_at`. A non-retryable or exhausted failure becomes terminal.
+A claimed job is submitted to the provider exactly once. A successful response records the provider order ID and marks the job completed. Any outcome that does not prove what happened — `5xx`, timeout, transport loss, an unreadable body — may mean the piece was accepted and physically mailed, so it is never resubmitted: the job is held with `provider_outcome = 'ambiguous'` for operator reconciliation. Only an explicit provider rejection, which proves no mail exists, is terminal.
 
 The tool response reports one of:
 
 - `accepted`: provider submission completed;
 - `pending`: the transaction committed and recovery is scheduled;
 - `failed`: provider submission reached a terminal failure.
+
+## Terminal Failure and the Letter Pack
+
+A confirmed send consumes the Letter Pack before the provider is called, so a terminal failure owes the customer compensation. A pay-per-send order moves to `refund_pending` and Stripe settles it. A prepaid send has its pack returned to the credit ledger.
+
+The return posts new compensating lots rather than reversing the original ones. It mirrors the original per-lot split recorded in `credit_consumption`, and each returned lot inherits its source lot's expiry, because credits are consumed FIFO by `expires_at` and collapsing them would silently move credits between expiry windows. It stores a stable failure code, never provider text.
+
+Three paths reach it, and all three are guarded by the same exactly-once check, so replayed failure handling, an operator retry that fails again, and two concurrent handlers all return one pack:
+
+- an explicit provider rejection during dispatch;
+- a terminal failure *before* dispatch, where the job never left `provider_outcome = 'not_dispatched'` and no mail can exist;
+- an operator resolving an ambiguous hold as a confirmed rejection.
+
+Once a pack has been returned, an operator retry of that job is refused. Nothing re-deducts on the way back through the outbox, so resending would give the customer the pack and the letter; selling them a new send is a deliberate decision rather than a side effect of a retry.
+
+An ambiguous outcome returns nothing. The piece may physically exist, and an unnecessary hold is recoverable while refunding posted mail is not.
 
 ## Hourly Recovery
 
@@ -66,7 +82,8 @@ Generated images receive a capability URL backed by a private Railway bucket. Th
 
 - duplicate and concurrent send calls create one order and one deduction;
 - insufficient balance rolls back all effects;
-- `429`, `503`, timeout, and network failures schedule/retry correctly;
+- `429`, `503`, timeout, and network failures are held as ambiguous rather than resubmitted;
+- a terminal failure returns the customer's Letter Pack exactly once, and an ambiguous one never does;
 - a process restart after provider submission does not create a second provider order;
 - hourly maintenance recovers due and stale rows;
 - generated images remain available after API restart for 15 minutes;
