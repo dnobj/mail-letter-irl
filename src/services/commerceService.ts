@@ -1944,7 +1944,33 @@ export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
   });
 }
 
-export async function requestRefund(orderId: string, reason: string): Promise<boolean> {
+/**
+ * The Stripe calls this path makes, injectable for tests.
+ *
+ * Issue #188. The defect below was a statement PostgreSQL refuses to plan, and
+ * it survived because nothing could reach it: the refund path needs a live
+ * Stripe client before it touches the database, so every test of it stopped at
+ * the vendor boundary. This is the same default-parameter seam
+ * `reconcileStripePayments` already uses, and it substitutes the vendor only -
+ * the database, the transaction and the revocation stay real.
+ */
+export interface RefundOperations {
+  retrieveRefund: typeof retrieveRefund;
+  findPaymentRefund: typeof findPaymentRefund;
+  createPaymentRefund: typeof createPaymentRefund;
+}
+
+const liveRefundOperations: RefundOperations = {
+  retrieveRefund,
+  findPaymentRefund,
+  createPaymentRefund
+};
+
+export async function requestRefund(
+  orderId: string,
+  reason: string,
+  stripeRefunds: RefundOperations = liveRefundOperations
+): Promise<boolean> {
   const retryLimit = integerSetting('JIT_REFUND_RETRY_LIMIT', 5);
   if (retryLimit === 0) return false;
   const claimed = await query<RefundClaim>(
@@ -1979,7 +2005,7 @@ export async function requestRefund(orderId: string, reason: string): Promise<bo
     let refund: Stripe.Refund | null = null;
     if (order.stripe_refund_id) {
       try {
-        const existingRefund = await retrieveRefund(order.stripe_refund_id);
+        const existingRefund = await stripeRefunds.retrieveRefund(order.stripe_refund_id);
         if (!['failed', 'canceled'].includes(existingRefund.status || '')) {
           refund = existingRefund;
         }
@@ -1988,7 +2014,7 @@ export async function requestRefund(orderId: string, reason: string): Promise<bo
         // covers a persisted stale ID without risking a duplicate refund.
       }
     }
-    refund ??= await findPaymentRefund(order.stripe_payment_intent_id, order.order_id);
+    refund ??= await stripeRefunds.findPaymentRefund(order.stripe_payment_intent_id, order.order_id);
     if (!refund) {
       let attempt = order.refund_attempts;
       if (order.stripe_refund_id) {
@@ -2008,7 +2034,7 @@ export async function requestRefund(orderId: string, reason: string): Promise<bo
         );
         if (previousAttempts >= retryLimit) return false;
       }
-      refund = await createPaymentRefund(
+      refund = await stripeRefunds.createPaymentRefund(
         order.stripe_payment_intent_id,
         order.order_id,
         attempt
@@ -2020,10 +2046,18 @@ export async function requestRefund(orderId: string, reason: string): Promise<bo
       // finalized the same refund while Stripe was in flight, its transaction
       // wins and this path becomes a no-op instead of replaying revocations.
       await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [orderId]);
+      // Every use of $3 is cast. Assigning it to status (a VARCHAR column)
+      // deduces varchar while comparing it to an untyped literal deduces text,
+      // and PostgreSQL rejects the statement outright with "inconsistent types
+      // deduced for parameter $3". This threw on EVERY refund, after Stripe had
+      // already sent the customer their money: the catch below recorded
+      // REFUND_REQUEST_FAILED, the order stayed refund_pending, and the pack
+      // revocation and entitlement revocation under it never ran. The other two
+      // statements writing this column already carried the cast.
       const finalized = await client.query<{ order_id: string }>(
         `UPDATE orders
-         SET stripe_refund_id = $2, status = $3,
-             refunded_at = CASE WHEN $3 = 'refunded' THEN NOW() ELSE refunded_at END,
+         SET stripe_refund_id = $2, status = $3::varchar,
+             refunded_at = CASE WHEN $3::varchar = 'refunded' THEN NOW() ELSE refunded_at END,
              updated_at = NOW()
          WHERE order_id = $1 AND status = 'refund_pending'
          RETURNING order_id`,
