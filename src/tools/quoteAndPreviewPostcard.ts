@@ -45,7 +45,7 @@ interface QuoteAndPreviewPostcardInput {
   imageUrl?: string;
 }
 
-interface QuoteAndPreviewPostcardOutput {
+export interface QuoteAndPreviewPostcardOutput {
   previewFrontHtml: string;
   previewBackHtml: string;
   lettersRequired: number;  // Number of letters from balance (always 1 for postcard)

@@ -17,6 +17,7 @@ import {
   validateCharacterLimit,
 } from "../services/previewService.js";
 import { createDraft } from "../services/draftService.js";
+import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 import {
   DELIVERY_CLASS,
   DELIVERY_DISCLAIMER,
@@ -50,6 +51,13 @@ export interface LetterQuoteOutput {
   lettersRequired: number;
   canSendNow: boolean;
   reasonCannotSend?: string;
+  // Required by quoteAndPreviewOutputZ, which every letter preview tool is
+  // registered with. Omitting it here made the field impossible to forget in
+  // quoteAndPreview.ts and impossible to remember in this builder: the MCP
+  // layer rejected the response with -32602 before a draftId ever reached the
+  // caller, so no letter could be sent through any of the three tools that
+  // build their output here. See tests/unit/tools/outputSchemaConformance.test.ts.
+  sendEligibility: SendEligibility;
   deliveryClass: string;
   estimatedDeliveryDays?: number;
   deliveryEstimate?: string;
@@ -545,6 +553,7 @@ export async function createLetterDraftAndBuildOutput(
     lettersRequired,
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
+    sendEligibility: getSendEligibility(available, requiredCredits, "letter"),
     deliveryClass: DELIVERY_CLASS,
     deliveryEstimate: DELIVERY_ESTIMATE,
     deliveryDisclaimer: DELIVERY_DISCLAIMER,

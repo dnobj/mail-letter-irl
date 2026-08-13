@@ -37,7 +37,7 @@ interface QuoteAndPreviewInput {
   inlineImageUrl?: string;           // URL of inline image (after signature)
 }
 
-interface QuoteAndPreviewOutput {
+export interface QuoteAndPreviewOutput {
   previewHtml: string;
   lettersRequired: number;  // Letters required from balance (always 1 for standard)
   canSendNow: boolean;
