@@ -24,6 +24,7 @@ const REQUIRED = [
   'disputeRevocation.postgres.test.ts',
   'failedSendRefund.postgres.test.ts',
   'refundFinalization.postgres.test.ts',
+  'commerceAlertTransition.postgres.test.ts',
 ];
 
 /**
