@@ -1408,40 +1408,45 @@ async function compensateDisputedPacks(
     expires_at: Date | null;
     expiration_policy: string | null;
   }>(
-    `SELECT purchase.ledger_id,
+    `SELECT revoked.ledger_id,
             COALESCE((audit.source_metadata->>'remaining_at_revocation')::int, 0) AS restore_amount,
-            purchase.expires_at,
-            purchase.expiration_policy
-       FROM credit_ledger purchase
+            revoked.expires_at,
+            revoked.expiration_policy
+       FROM credit_ledger revoked
        JOIN credit_ledger audit
-         ON audit.related_ledger_id = purchase.ledger_id
+         ON audit.related_ledger_id = revoked.ledger_id
         AND audit.source_type = 'refund'
         AND audit.source_metadata->>'reason' = 'payment_disputed'
         -- Pinned to the dispute that actually caused this revocation. Matching
         -- any dispute-caused revocation would let a second, unrelated dispute
         -- closing favourably compensate a lot the first one took.
         AND audit.source_metadata->>'dispute_id' = $4
-      WHERE purchase.user_id = $1
-        AND purchase.source_type = 'purchase'
-        AND purchase.status = 'revoked'
-        AND (purchase.source_reference_id = $2
-             OR purchase.source_metadata->>'stripe_session_id' = $3)
+      WHERE revoked.user_id = $1
+        -- Every lot the dispute took, not just the purchase. A dispute revokes
+        -- adjustment lots too, and the customer held them: issue #151's
+        -- returned Letter Pack, and any earlier dispute's own compensation.
+        -- Restoring only the purchase left the customer short by exactly the
+        -- part a failed send had given back (issue #192).
+        AND revoked.source_type IN ('purchase', 'adjustment')
+        AND revoked.status = 'revoked'
+        AND (revoked.source_reference_id = $2
+             OR revoked.source_metadata->>'stripe_session_id' = $3)
         -- Keyed per LOT, not per (lot, dispute). A lot can only ever be
         -- compensated once: entitlement belongs to the lot, so keying on the
         -- dispute would grant again for each new dispute touching the order.
         --
-        -- The reason is part of the key. Any adjustment lot linked to this
-        -- purchase used to read as "already compensated", and issue #151 posts
-        -- one: a returned Letter Pack links to the lot it came from. Without
-        -- this line a customer who won a dispute on a pack that had funded a
-        -- failed send got nothing back at all.
+        -- The reason is part of the key. Any adjustment lot linked to this one
+        -- used to read as "already compensated", and issue #151 posts one: a
+        -- returned Letter Pack links to the lot it came from. Without this line
+        -- a customer who won a dispute on a pack that had funded a failed send
+        -- got nothing back at all.
         AND NOT EXISTS (
           SELECT 1 FROM credit_ledger compensation
-           WHERE compensation.related_ledger_id = purchase.ledger_id
+           WHERE compensation.related_ledger_id = revoked.ledger_id
              AND compensation.source_type = 'adjustment'
              AND compensation.source_metadata->>'reason' = 'dispute_resolved_in_our_favour'
         )
-      FOR UPDATE OF purchase`,
+      FOR UPDATE OF revoked`,
     [order.user_id, order.order_id, order.stripe_checkout_session_id || null, disputeId]
   );
   if (entries.rows.length === 0) return;

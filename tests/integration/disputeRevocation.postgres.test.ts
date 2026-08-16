@@ -301,14 +301,27 @@ describePostgres('dispute and refund pack revocation', () => {
       );
     }
 
-    // Entitlement belongs to the lot. Keying idempotency on the dispute instead
-    // would grant a fresh 6 for every new dispute that closed favourably.
-    const compensations = await pool.query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM credit_ledger
-        WHERE user_id = $1 AND source_type = 'adjustment'`,
+    // Entitlement belongs to the lot: no lot is ever compensated twice. Each
+    // new dispute revokes what the account holds and its favourable close
+    // restores what THAT dispute took, so the balance returns to what the
+    // customer paid for and never climbs above it.
+    //
+    // This asserted a count of one adjustment lot before issue #192. That count
+    // was the shape of a defect rather than an invariant: compensation ignored
+    // adjustment lots, so the second dispute revoked the first dispute's own
+    // compensation and gave nothing back, leaving a customer who won both
+    // disputes holding nothing. The balance is the honest invariant, and the
+    // no-free-credits property is held by the per-lot key below.
+    expect((await readAccount(userId)).credits).toBe(6);
+
+    const compensations = await pool.query<{ related_ledger_id: string }>(
+      `SELECT related_ledger_id FROM credit_ledger
+        WHERE user_id = $1 AND source_type = 'adjustment'
+          AND source_metadata->>'reason' = 'dispute_resolved_in_our_favour'`,
       [userId]
     );
-    expect(compensations.rows[0].n).toBe('1');
+    const restoredLots = compensations.rows.map(row => row.related_ledger_id);
+    expect(new Set(restoredLots).size).toBe(restoredLots.length);
   }, 60_000);
 
   it('lifts the block on a win even while an unrelated inquiry is open', async () => {
@@ -352,7 +365,7 @@ describePostgres('dispute and refund pack revocation', () => {
    * matched any linked adjustment, so that returned lot made the purchase lot
    * look compensated - and a customer who then won a dispute got nothing back.
    */
-  it('restores the purchase lot on a won dispute even when a failed send returned part of the pack', async () => {
+  it('restores every lot a dispute took, including one a failed send returned', async () => {
     const { userId, orderId, paymentIntentId } = await seedPackHolder({ credits: 10, spent: 2 });
     const purchaseLot = await pool.query<{ ledger_id: string }>(
       `SELECT ledger_id FROM credit_ledger WHERE user_id = $1 AND source_type = 'purchase'`,
@@ -398,10 +411,22 @@ describePostgres('dispute and refund pack revocation', () => {
       }))
     );
 
-    // The purchase lot's 8 come back. The returned 2 do not - compensation
-    // restores purchase lots only - which is a known gap, filed separately.
-    // Before the reason was part of the marker, this was 0.
-    expect((await readAccount(userId)).credits).toBe(8);
+    // Everything the dispute took comes back: the purchase lot's 8 and the
+    // returned lot's 2. Two earlier versions of this code got it wrong in two
+    // different ways - 0, when any linked adjustment read as "already
+    // compensated", and 8, when compensation restored purchase lots only.
+    expect((await readAccount(userId)).credits).toBe(10);
+
+    // One compensation lot per restored lot, each linked to what it restores.
+    const compensations = await pool.query<{ related_ledger_id: string; initial_amount: number }>(
+      `SELECT related_ledger_id, initial_amount FROM credit_ledger
+        WHERE user_id = $1 AND source_type = 'adjustment'
+          AND source_metadata->>'reason' = 'dispute_resolved_in_our_favour'
+        ORDER BY initial_amount`,
+      [userId]
+    );
+    expect(compensations.rows.map(row => row.initial_amount)).toEqual([2, 8]);
+    expect(new Set(compensations.rows.map(row => row.related_ledger_id)).size).toBe(2);
   }, 60_000);
 
   it('does NOT compensate a revocation that a refund caused', async () => {
