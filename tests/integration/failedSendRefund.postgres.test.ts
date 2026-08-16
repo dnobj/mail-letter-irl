@@ -8,6 +8,7 @@ import {
   ambiguousFailure,
   definiteRejection,
   installStubProvider,
+  providerSuccess,
   resetStubProvider,
   stubProvider,
   STUB_PROVIDER_NAME
@@ -937,6 +938,86 @@ describePostgres('failed send returns the pack', () => {
         'SELECT status FROM letters WHERE letter_id = $1', [letterId]
       );
       expect(letter.rows[0].status).toBe('held');
+    }, 60_000);
+
+    /**
+     * The crash between claim and dispatch, on the last attempt (issue #190).
+     *
+     * claimJob spends an attempt as it claims, and its stale-lock reclaim sits
+     * underneath `attempts < max_attempts` - so a process that dies here on the
+     * final attempt leaves a job nothing can reach: not the claim, and not the
+     * stale-dispatch sweep, which only covers crashes AFTER dispatch. The
+     * premise is asserted below rather than assumed, because "the sweep settled
+     * it" proves nothing if the job was reclaimable all along.
+     */
+    it('settles a job whose process died between claim and dispatch', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId, 1);
+      expect(await credits(userId)).toBe(4);
+
+      // Exactly what a crash in that window leaves behind: claimed, attempt
+      // spent, lock aged out, provider never called.
+      await pool.query(
+        `UPDATE letter_jobs
+            SET status = 'processing', provider_outcome = 'not_dispatched',
+                attempts = max_attempts, locked_at = NOW() - INTERVAL '30 minutes'
+          WHERE job_id = $1`,
+        [jobId]
+      );
+
+      // The premise: nothing can claim it.
+      const reclaim = await jobs.processLetterJob(jobId);
+      expect(reclaim.claimed).toBe(false);
+      expect(stubProvider.calls.length).toBe(0);
+
+      await jobs.processDueLetterJobs(10);
+
+      // Terminal, and compensated. No mail can exist - the job never reached
+      // the provider - so the pack comes back.
+      const job = await pool.query<{ status: string; provider_outcome: string }>(
+        'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(job.rows[0].status).toBe('failed');
+      expect(job.rows[0].provider_outcome).toBe('not_dispatched');
+      expect(stubProvider.calls.length).toBe(0);
+      expect(await credits(userId)).toBe(6);
+      expect(await adjustmentLots(userId)).toBe(1);
+    }, 60_000);
+
+    /**
+     * A job with attempts left must be retried, not settled.
+     *
+     * The sweep is bounded to exhausted attempts for this reason: below that,
+     * claimJob's own stale-lock reclaim already recovers the job and the letter
+     * still goes out. Settling it here would turn a recoverable send into a
+     * terminal failure and refund a customer who was about to get their letter.
+     */
+    it('leaves a crashed job with attempts remaining to the normal reclaim', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId, 3);
+
+      await pool.query(
+        `UPDATE letter_jobs
+            SET status = 'processing', provider_outcome = 'not_dispatched',
+                attempts = 1, locked_at = NOW() - INTERVAL '30 minutes'
+          WHERE job_id = $1`,
+        [jobId]
+      );
+
+      stubProvider.defaultResult = providerSuccess('stub-tracking-reclaim');
+      await jobs.processDueLetterJobs(10);
+
+      // Reclaimed and sent, not settled and refunded.
+      expect(stubProvider.calls.length).toBe(1);
+      const job = await pool.query<{ status: string; provider_outcome: string }>(
+        'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(job.rows[0].status).toBe('completed');
+      expect(job.rows[0].provider_outcome).toBe('accepted');
+      expect(await credits(userId)).toBe(4);
+      expect(await adjustmentLots(userId)).toBe(0);
     }, 60_000);
 
     /**

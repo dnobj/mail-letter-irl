@@ -824,6 +824,43 @@ export async function processDueLetterJobs(
     await holdAmbiguousDispatch(job, new Error('process_interrupted_after_provider_dispatch'));
   }
 
+  // The crash boundary one step earlier: claimed, then the process died before
+  // the provider was called. claimJob increments attempts as it claims, and its
+  // own stale-lock reclaim sits underneath `attempts < max_attempts` - so on the
+  // LAST attempt the claim spends the final one and then nothing can ever pick
+  // the job up again. The sweep above does not see it either: that one is scoped
+  // to provider_outcome = 'dispatching', which is the crash AFTER dispatch.
+  //
+  // Left alone the job sits in 'processing' forever. No mail, no terminal state,
+  // no alert, and for a prepaid send the pack is neither spent on a letter nor
+  // returned - the exact hole issue #151 exists to close, reached by a route it
+  // did not cover.
+  //
+  // Bounded to attempts >= max_attempts on purpose. Below that the job is still
+  // reclaimable by claimJob and will simply be retried, which is the better
+  // outcome; stealing it here would convert a recoverable job into a terminal
+  // failure and a refund the customer did not need.
+  const staleUndispatched = await query<LetterJob>(
+    `SELECT * FROM letter_jobs
+     WHERE status = 'processing' AND provider_outcome = 'not_dispatched'
+       AND attempts >= max_attempts
+       AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
+     ORDER BY locked_at LIMIT $1`,
+    [limit]
+  );
+  for (const job of staleUndispatched.rows) {
+    // failBeforeDispatch reads retryable from the job's own attempts, which are
+    // spent here, so this settles terminally and compensates: the pack comes
+    // back for a prepaid send, and a pay-per-send order moves to refund_pending.
+    // Safe unconditionally - provider_outcome = 'not_dispatched' is the proof
+    // that no mail can exist.
+    await failBeforeDispatch(
+      job,
+      new Error('process_interrupted_before_provider_dispatch'),
+      options.random ?? Math.random
+    );
+  }
+
   while (summary.processed < limit) {
     const job = await claimJob();
     if (!job) break;
