@@ -11,6 +11,44 @@ count before and after, browser/mobile platform, result, and evidence link for
 each case. Never capture tokens, authorization codes, addresses, letter content,
 or raw request bodies.
 
+### Current status
+
+The cases below are definitions. This table is the standing result, transcribed
+from the sanitized evidence recorded on
+[#160](https://github.com/dnobj/mail-letter-irl/issues/160) — where the real
+detail lives, including client counts, timestamps and conversation links.
+
+It exists because the definitions alone read as though nothing had been done.
+Most of this has been done, some of it twice.
+
+| Case | Status | What remains |
+| --- | --- | --- |
+| CIMD-01 fresh link | **PASS** | — |
+| CIMD-02 reconnect, revoke, client count | **PASS** | Two additions below are not yet exercised |
+| CIMD-03 tool exposure and `get_started` | **PASS** | — |
+| CIMD-04 image generation and widget | **PASS** | — |
+| CIMD-05 scope enforcement | **PASS** | — |
+| CIMD-06 account switch | **GATED** | A second authorized DEV test account, and a human to make the account choice |
+| CIMD-07 web and mobile | **PARTIAL** | Compact viewport after reconnect, and native mobile. Desktop passes |
+| CIMD-08 sensitive logs | **PARTIAL** | An owner decision on Auth0 `seacft.details.code`, and a Railway DEV log review |
+| CIMD-09 Claude/PAT regression | **GATED** | An already-approved DEV PAT placed by the owner, or the case descoped |
+| CIMD-10 rollback drill | **GATED** | Coordinated DEV Railway/Auth0 access; the last recommendation was explicitly NO-GO |
+
+Two notes worth carrying, because both cost time to establish:
+
+**CIMD-05 took four attempts and the first three are instructive.** Driving it
+through ChatGPT does not work: a reduced grant makes ChatGPT loop on
+reauthorization rather than surface the challenge, so the run is undiagnostic
+even though the server behaves correctly. It passed only through a temporary
+DEV Native PKCE client that exposes the MCP challenge directly, run once per
+withheld scope, with the temporary client deleted afterwards.
+
+**CIMD-08's open item is a policy question, not a test.** Auth0's own
+authorization-code-exchange audit events (`seacft`) carry a non-empty
+`details.code`. Nothing in this codebase writes it and nothing can redact it.
+Either Auth0-managed security audit logs are explicitly exempt from the
+acceptance wording, or the wording needs changing. Someone has to decide which.
+
 ### CIMD-01 — Fresh link
 
 - [ ] Unlink the DEV app, revoke its stale Auth0 grant, and use a fresh/clean
@@ -29,6 +67,22 @@ or raw request bodies.
 - [ ] Revoke the Auth0 grant and verify the next tool call requires linking.
 - [ ] Confirm the client count did not increase and no DCR registration request
       or new Auth0 application was created.
+
+The two below are not covered by the PASS above. They exist because the DEV
+connection was observed expiring twice in about three hours on 2026-08-14,
+each recovery needing a human to re-consent — which also means no unattended
+test of this surface survives a token lifetime. `offline_access` is not in the
+advertised scopes, so no refresh token is issued and re-consent is the only
+route back. If that changes, these are what prove it changed safely.
+
+- [ ] A session survives access-token expiry without re-consent — wait past the
+      access token's lifetime, then make a tool call and confirm it succeeds
+      with no reconnect prompt.
+- [ ] Revocation still forces a re-link after refresh is enabled — revoke the
+      Auth0 grant and confirm the next tool call requires linking rather than
+      being served from a refresh token. This is the half that keeps the other
+      one honest: the point of refresh is fewer prompts, and the risk is a
+      grant outliving the user's intent.
 
 ### CIMD-03 — Tool exposure and `get_started`
 
