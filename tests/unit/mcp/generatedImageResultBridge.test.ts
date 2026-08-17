@@ -145,6 +145,31 @@ describe("generated image result bridge", () => {
     expect(result._meta).toEqual({});
   });
 
+  /**
+   * The compressed previews are the pair the letter card actually renders, and
+   * they are the counterpart to the test above: heavy *ImageData is dropped
+   * from both channels, the small *ImagePreview is forwarded to the widget.
+   *
+   * They used to reach neither. The output schema does not declare them, so
+   * zod stripped them from structuredContent, and nothing put them in `_meta` -
+   * so every letter with a header or inline image rendered its card without
+   * one, and nothing anywhere said so.
+   */
+  it("forwards the compressed image previews to the widget, not to the model", () => {
+    const result = partitionToolResult({
+      message: "Preview ready",
+      headerImagePreview: "header-preview-base64",
+      inlineImagePreview: "inline-preview-base64",
+      headerImageData: "header-full-base64"
+    });
+
+    expect(result.structuredContent).toEqual({ message: "Preview ready" });
+    expect(result._meta).toEqual({
+      headerImagePreview: "header-preview-base64",
+      inlineImagePreview: "inline-preview-base64"
+    });
+  });
+
   it("validates the real structured result and requires a generated image URL", () => {
     const validResult = {
       message: "Image ready",
