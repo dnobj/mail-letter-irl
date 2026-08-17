@@ -588,9 +588,15 @@
         `;
 
         // Header image (if applicable)
-        // Prefer the small preview image (headerImagePreview) for faster widget loading
-        // Fall back to full-quality headerImageData if preview not available
-        const headerImage = state.headerImagePreview || state.headerImageData;
+        // The compressed preview arrives in toolResponseMetadata, the same
+        // channel as previewHtml above: partitionToolResult keeps widget-only
+        // payloads out of the model's context. There is deliberately no
+        // fallback to headerImageData - that field is dropped from BOTH
+        // channels by design (it is the full-quality original, which the draft
+        // holds), so reading it here only ever yielded undefined.
+        const headerImage =
+          window.openai?.toolResponseMetadata?.headerImagePreview ??
+          state.headerImagePreview;
         if (layoutType === "header_image" && headerImage) {
           mockupHtml += `
             <div class="header-image-wrapper">
@@ -607,10 +613,11 @@
           mockupHtml += `<div class="sign-off">${escapeHtml(truncateText(signOff, 50))}</div>`;
         }
 
-        // Inline image (if applicable)
-        // Prefer the small preview image (inlineImagePreview) for faster widget loading
-        // Fall back to full-quality inlineImageData if preview not available
-        const inlineImage = state.inlineImagePreview || state.inlineImageData;
+        // Inline image (if applicable). Same channel and same reasoning as the
+        // header image above.
+        const inlineImage =
+          window.openai?.toolResponseMetadata?.inlineImagePreview ??
+          state.inlineImagePreview;
         if (layoutType === "inline_image" && inlineImage) {
           mockupHtml += `
             <div class="inline-image-wrapper">

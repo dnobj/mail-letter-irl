@@ -175,19 +175,21 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       'inlineImageData',
       'headerImageData',
       'frontImageData',
-      'generatedImagePreview'
+      'generatedImagePreview',
+      'headerImagePreview',
+      'inlineImagePreview'
     ]);
 
     /**
-     * Reads that cannot be satisfied today: not declared in the output schema,
-     * so zod strips them, and not in the `_meta` partition either. Recorded
-     * rather than fixed because confirming what the card does without them
-     * needs a renderer - see #206. The list is asserted exactly, so a new
-     * violation fails this test instead of joining a growing allowance.
+     * Reads that no channel can satisfy. Empty, and asserted exactly so it
+     * stays that way: a new violation fails this test rather than joining a
+     * growing allowance.
+     *
+     * It held LetterPreviewCard's headerImagePreview and inlineImagePreview
+     * until those were routed through `_meta` - the card had been rendering
+     * every image letter without its image.
      */
-    const KNOWN_UNDELIVERABLE: Record<string, string[]> = {
-      LetterPreviewCard: ['headerImagePreview', 'inlineImagePreview']
-    };
+    const KNOWN_UNDELIVERABLE: Record<string, string[]> = {};
 
     function widgetToolNames(): Map<string, string> {
       const byWidget = new Map<string, string>();

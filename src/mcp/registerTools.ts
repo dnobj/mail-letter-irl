@@ -407,6 +407,8 @@ export function partitionToolResult(
     headerImageData,
     frontImageData,
     generatedImagePreview,
+    headerImagePreview,
+    inlineImagePreview,
     ...modelFacingData
   } = result;
 
@@ -418,6 +420,18 @@ export function partitionToolResult(
       ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
       ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
       ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
+      // The letter card's images. Small by construction - the builder
+      // compresses them to roughly 3KB for exactly this trip - so unlike the
+      // *ImageData fields above they are forwarded rather than dropped. They
+      // travel here rather than in structuredContent for the same reason as
+      // everything else in this list: a widget needs them, the model does not.
+      //
+      // Before this they were in neither channel. The output schema does not
+      // declare them, so zod stripped them from structuredContent, and nothing
+      // put them in _meta - a letter with a header or inline image rendered its
+      // card without one, silently.
+      ...(headerImagePreview !== undefined ? { headerImagePreview } : {}),
+      ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {}),
       ...(modelFacingData.generatedImageUrl !== undefined
         ? { generatedImageUrl: modelFacingData.generatedImageUrl }
         : {})
