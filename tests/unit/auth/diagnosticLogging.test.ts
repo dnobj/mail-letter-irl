@@ -125,6 +125,7 @@ describe("privacy-safe authentication diagnostics", () => {
       "src/api/patApiHandler.ts",
       "src/api/creditApiHandler.ts",
       "src/api/returnAddressApiHandler.ts",
+      "src/api/middleware/restAuth.ts",
       "src/api/dashboardApiHandler.ts",
       "src/api/adminApiHandler.ts",
       "src/api/middleware/rateLimit.ts",
