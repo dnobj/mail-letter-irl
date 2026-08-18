@@ -3,15 +3,32 @@
  *
  * JWT validation for HTTP requests
  * Validates Auth0 JWT tokens and returns user info
+ *
+ * Issue #209, second instance. This was the fourth copy of the bearer check
+ * reading LETTER_IRL_OAUTH_AUDIENCE straight from the environment as a single
+ * value, and it was missed when the other three were consolidated because it
+ * answers with different wording ("Invalid or expired token" rather than
+ * "Missing or invalid Authorization header"). Its one caller is the Stripe
+ * checkout route, so the symptom was: the dashboard loads, and Buy Now does
+ * nothing.
+ *
+ * It now delegates to validateJWTToken, the validator the MCP layer and the
+ * REST handlers share, so the accepted audience set has one source of truth.
+ * The response contract is unchanged: same status codes, same bodies, so the
+ * website's proxy and its client see exactly what they saw before.
  */
 
 import http from 'node:http';
-import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { AuthenticatedUser } from '../../services/types.js';
 import { parseCookies } from '../../utils/cookies.js';
+import { validateJWTToken } from '../../auth/tokenValidator.js';
 
-const jwksUri = process.env.LETTER_IRL_OAUTH_JWKS_URI;
-const JWKS = jwksUri ? createRemoteJWKSet(new URL(jwksUri)) : null;
+function respond(res: http.ServerResponse | undefined, statusCode: number, body: Record<string, unknown>): void {
+  if (!res) return;
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(body));
+}
 
 /**
  * Authenticate HTTP request - works with both Bearer tokens and cookies
@@ -25,64 +42,46 @@ export async function authenticateHttpRequest(
   req: http.IncomingMessage,
   res?: http.ServerResponse
 ): Promise<AuthenticatedUser | null> {
+  let token: string | null = null;
+
+  // Try to get token from Authorization header first
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7);
+  }
+
+  // If no bearer token, try to get from cookie
+  if (!token) {
+    const cookies = parseCookies(req.headers.cookie);
+    token = cookies.access_token || null;
+  }
+
+  if (!token) {
+    respond(res, 401, { error: 'Authentication required' });
+    return null;
+  }
+
   try {
-    if (!JWKS) {
-      if (res) {
-        res.statusCode = 503;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: 'Authentication is not configured' }));
-      }
-      return null;
-    }
-    let token: string | null = null;
-
-    // Try to get token from Authorization header first
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      token = authHeader.substring(7);
-    }
-
-    // If no bearer token, try to get from cookie
-    if (!token) {
-      const cookies = parseCookies(req.headers.cookie);
-      token = cookies.access_token || null;
-    }
-
-    if (!token) {
-      if (res) {
-        res.statusCode = 401;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: 'Authentication required' }));
-      }
-      return null;
-    }
-
-    // Verify JWT with Auth0
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer: process.env.LETTER_IRL_OAUTH_ISSUER,
-      audience: process.env.LETTER_IRL_OAUTH_AUDIENCE
-    });
-
+    const user = await validateJWTToken(token);
     return {
-      userId: payload.sub!,
-      email: payload.email as string | undefined
+      userId: user.userId,
+      email: typeof user.claims.email === 'string' ? user.claims.email : undefined
     };
-  } catch (error: any) {
-    console.error('Authentication failed');
-
-    if (res) {
-      res.statusCode = 401;
-      res.setHeader('Content-Type', 'application/json');
-
-      if (error.code === 'ERR_JWT_EXPIRED') {
-        res.end(JSON.stringify({ error: 'Token expired' }));
-      } else if (error.code === 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED') {
-        res.end(JSON.stringify({ error: 'Invalid token signature' }));
-      } else {
-        res.end(JSON.stringify({ error: 'Invalid or expired token' }));
-      }
+  } catch (error: unknown) {
+    // validateJWTToken already emitted the structured diagnostic.
+    const message = error instanceof Error ? error.message : '';
+    if (message === 'OAuth validation not configured') {
+      respond(res, 503, { error: 'Authentication is not configured' });
+      return null;
     }
-
+    const code = (error as { code?: string })?.code;
+    if (code === 'ERR_JWT_EXPIRED') {
+      respond(res, 401, { error: 'Token expired' });
+    } else if (code === 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED') {
+      respond(res, 401, { error: 'Invalid token signature' });
+    } else {
+      respond(res, 401, { error: 'Invalid or expired token' });
+    }
     return null;
   }
 }

@@ -11,7 +11,7 @@
 
 import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'http';
-import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { validateJWTToken } from '../../auth/tokenValidator.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../../utils/diagnosticLog.js';
 
 // Admin feature flags
@@ -19,11 +19,6 @@ import { classifyDiagnosticError, writeDiagnostic } from '../../utils/diagnostic
 // ADMIN_LOCAL_ONLY: If 'true', only localhost can access admin routes
 const ADMIN_ENABLED = process.env.ADMIN_ENABLED === 'true';
 const ADMIN_LOCAL_ONLY = process.env.ADMIN_LOCAL_ONLY === 'true';
-
-// Create JWKS client for Auth0 (only if admin is enabled)
-const JWKS = ADMIN_ENABLED && process.env.LETTER_IRL_OAUTH_JWKS_URI
-  ? createRemoteJWKSet(new URL(process.env.LETTER_IRL_OAUTH_JWKS_URI))
-  : null;
 
 // Admin user IDs (comma-separated in .env)
 // Example: LETTER_IRL_ADMIN_USER_IDS=auth0|123,auth0|456
@@ -99,16 +94,13 @@ export async function authenticateAdmin(
   let email: string | undefined;
 
   try {
-    if (!JWKS) {
-      throw new Error('JWKS not configured');
-    }
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer: process.env.LETTER_IRL_OAUTH_ISSUER,
-      audience: process.env.LETTER_IRL_OAUTH_AUDIENCE
-    });
-
-    userId = payload.sub!;
-    email = payload.email as string | undefined;
+    // Issue #209: validate through the shared validator so the accepted
+    // audience set has one source of truth. This was the fifth copy of a raw
+    // single-value audience check; the operator interface (#162) would have
+    // rejected every website-audience token the moment it authenticated one.
+    const user = await validateJWTToken(token);
+    userId = user.userId;
+    email = typeof user.claims.email === 'string' ? user.claims.email : undefined;
   } catch (error) {
     writeDiagnostic('error', 'auth.admin_validation_failed', {
       errorClass: classifyDiagnosticError(error, 'authorization_error')
