@@ -8,52 +8,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { jwtVerify, createRemoteJWKSet } from 'jose';
 import {
   getReturnAddress,
   setReturnAddress,
   clearReturnAddress
 } from '../services/returnAddressService.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
-
-const jwksUri = process.env.LETTER_IRL_OAUTH_JWKS_URI;
-const JWKS = jwksUri ? createRemoteJWKSet(new URL(jwksUri)) : null;
-
-interface AuthInfo {
-  userId: string;
-  email?: string;
-}
-
-/**
- * Authenticate request and extract user info from JWT
- */
-async function authenticateRequest(req: IncomingMessage): Promise<AuthInfo | null> {
-  if (!JWKS) return null;
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const token = authHeader.substring(7);
-
-  try {
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer: process.env.LETTER_IRL_OAUTH_ISSUER,
-      audience: process.env.LETTER_IRL_OAUTH_AUDIENCE
-    });
-
-    return {
-      userId: payload.sub!,
-      email: payload.email as string | undefined
-    };
-  } catch (error) {
-    writeDiagnostic('warn', 'auth.return_address_rejected', {
-      errorClass: classifyDiagnosticError(error, 'authorization_error')
-    });
-    return null;
-  }
-}
+import { authenticateRestRequest, type RestAuthInfo as AuthInfo } from './middleware/restAuth.js';
 
 /**
  * Send JSON response
@@ -99,14 +60,12 @@ export async function handleReturnAddressApiRequest(
   }
 
   // Authenticate request
-  const authInfo = await authenticateRequest(req);
-  if (!authInfo) {
-    sendJson(res, 401, {
-      error: 'Unauthorized',
-      message: 'Missing or invalid Authorization header'
-    });
+  const auth = await authenticateRestRequest(req);
+  if (!auth.ok) {
+    sendJson(res, 401, { error: 'Unauthorized', message: auth.message });
     return true;
   }
+  const authInfo = auth.user;
 
   const userId = authInfo.userId;
 

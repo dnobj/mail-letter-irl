@@ -6,73 +6,8 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { query } from '../db/index.js';
-
-const jwksUri = process.env.LETTER_IRL_OAUTH_JWKS_URI;
-const JWKS = jwksUri ? createRemoteJWKSet(new URL(jwksUri)) : null;
-
-interface AuthInfo {
-  userId: string;
-  email?: string;
-}
-
-/**
- * Authenticate request and extract user info from JWT
- */
-async function authenticateRequest(req: IncomingMessage): Promise<AuthInfo | null> {
-  if (!JWKS) return null;
-  const authHeader = req.headers.authorization;
-
-  // Try Bearer token first
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
-
-    try {
-      const { payload } = await jwtVerify(token, JWKS, {
-        issuer: process.env.LETTER_IRL_OAUTH_ISSUER,
-        audience: process.env.LETTER_IRL_OAUTH_AUDIENCE
-      });
-
-      return {
-        userId: payload.sub!,
-        email: payload.email as string | undefined
-      };
-    } catch (error) {
-      console.error('JWT validation failed');
-      return null;
-    }
-  }
-
-  // Try cookie-based auth (access_token cookie)
-  const cookies = req.headers.cookie;
-  if (cookies) {
-    const accessToken = cookies
-      .split(';')
-      .map(c => c.trim())
-      .find(c => c.startsWith('access_token='));
-
-    if (accessToken) {
-      const token = accessToken.substring('access_token='.length);
-      try {
-        const { payload } = await jwtVerify(token, JWKS, {
-          issuer: process.env.LETTER_IRL_OAUTH_ISSUER,
-          audience: process.env.LETTER_IRL_OAUTH_AUDIENCE
-        });
-
-        return {
-          userId: payload.sub!,
-          email: payload.email as string | undefined
-        };
-      } catch (error) {
-        console.error('Cookie JWT validation failed');
-        return null;
-      }
-    }
-  }
-
-  return null;
-}
+import { authenticateRestRequest, type RestAuthInfo as AuthInfo } from './middleware/restAuth.js';
 
 /**
  * Send JSON response
@@ -98,14 +33,12 @@ export async function handleLetterApiRequest(
   }
 
   // Authenticate request
-  const authInfo = await authenticateRequest(req);
-  if (!authInfo) {
-    sendJson(res, 401, {
-      error: 'Unauthorized',
-      message: 'Missing or invalid Authorization header'
-    });
+  const auth = await authenticateRestRequest(req);
+  if (!auth.ok) {
+    sendJson(res, 401, { error: 'Unauthorized', message: auth.message });
     return true;
   }
+  const authInfo = auth.user;
 
   // Route handlers
   try {
