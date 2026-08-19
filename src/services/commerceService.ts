@@ -326,6 +326,13 @@ async function attachCheckout(
 
 export class PackAmountNotConfiguredError extends Error {
   readonly code = 'PACK_AMOUNT_NOT_CONFIGURED';
+  // A missing STRIPE_*_AMOUNT_CENTS is a configuration fault, not a database
+  // one. This guard throws before any query runs, so the checkout handler's
+  // catch has no query to blame and defaults an uncarried error to
+  // database_error - which is exactly what sent issue #213 on a schema hunt for
+  // a config problem. Carrying the real class makes the log name the right
+  // subsystem, the same mechanism #214 gave the Stripe-call path.
+  readonly diagnosticClass = 'configuration_error';
   constructor(readonly productCode: string) {
     super(`Pack amount is not configured for ${productCode}`);
     this.name = 'PackAmountNotConfiguredError';
@@ -351,8 +358,20 @@ export async function createPackCheckout(
   params: CreatePackCheckoutParams
 ): Promise<CommerceCheckoutResult> {
   const product = getPackProductConfig(params.productId);
-  if (!product) throw new Error(`Invalid product ID: ${params.productId}`);
-  if (!product.priceId) throw new Error(`Price ID not configured for ${params.productId}`);
+  // Both guards throw before any query, so an uncarried error would take the
+  // handler catch's database_error default and mislabel a non-database fault -
+  // the #213 trap. An unknown product is bad input; a missing price id is
+  // configuration. Naming each truthfully keeps the checkout log honest.
+  if (!product) {
+    throw Object.assign(new Error(`Invalid product ID: ${params.productId}`), {
+      diagnosticClass: 'validation_error'
+    });
+  }
+  if (!product.priceId) {
+    throw Object.assign(new Error(`Price ID not configured for ${params.productId}`), {
+      diagnosticClass: 'configuration_error'
+    });
+  }
   // A missing STRIPE_*_AMOUNT_CENTS must fail before any authoritative order
   // exists. Persisting a zero amount would make the order unreconcilable
   // against Stripe and would leave any later refund without a trusted amount.
