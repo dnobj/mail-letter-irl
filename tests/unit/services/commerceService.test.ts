@@ -471,6 +471,33 @@ describe('commerceService', () => {
     expect(mocks.createPackSession).not.toHaveBeenCalled();
   });
 
+  it('carries the Stripe failure class up when the checkout session cannot be created', async () => {
+    // Issue #213: when Stripe rejects the session (e.g. a Price ID that does
+    // not exist in this account), the thrown error must carry the resolved
+    // class so the handler's catch logs the real cause rather than defaulting
+    // to a database label.
+    mocks.getPackProduct.mockReturnValue({
+      productCode: 'credit-pack-4',
+      priceId: 'price-pack',
+      amountCents: 500,
+      currency: 'usd',
+      name: 'Starter Pack',
+      description: 'Two prepaid letters'
+    });
+    mocks.query.mockResolvedValue({ rows: [{ order_id: 'order-1' }] });
+    mocks.createPackSession.mockResolvedValue({
+      success: false,
+      errorCode: 'PROVIDER_ERROR',
+      diagnosticClass: 'resource_missing',
+      error: 'Failed to create checkout session'
+    });
+
+    await expect(createPackCheckout({
+      userId: 'user-1', userEmail: 'user@example.test', productId: 'credit-pack-4',
+      successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no'
+    } as never)).rejects.toMatchObject({ diagnosticClass: 'resource_missing' });
+  });
+
   it('records the required durable resolution code when a Stripe dispute closes', async () => {
     const disputedOrder = { ...baseOrder, status: 'disputed', stripe_payment_intent_id: 'pi-1' };
     mocks.query.mockImplementation(async (sql: string, params: unknown[]) => {

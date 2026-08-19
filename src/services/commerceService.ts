@@ -388,7 +388,13 @@ export async function createPackCheckout(
   });
   if (!checkout.success || !checkout.sessionId) {
     await markCheckoutCreationFailure(orderId, checkout.error || 'Unknown Stripe error');
-    throw new Error(checkout.error || 'Failed to create checkout session');
+    // Carry the resolved provider class up to the handler's catch, so the log
+    // there names the real cause (e.g. resource_missing) instead of defaulting
+    // to database_error and pointing at the wrong subsystem. Issue #213.
+    throw Object.assign(
+      new Error(checkout.error || 'Failed to create checkout session'),
+      { diagnosticClass: checkout.diagnosticClass ?? 'provider_error' }
+    );
   }
   const order = await attachCheckout(
     orderId,

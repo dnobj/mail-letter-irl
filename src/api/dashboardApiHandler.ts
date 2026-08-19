@@ -161,8 +161,20 @@ export async function handleCreateCheckoutSession(
       }
     }
   } catch (error: unknown) {
+    // Prefer a class the failing layer already resolved. createPackCheckout
+    // carries the Stripe error's own class (e.g. resource_missing) here, which
+    // is what #213 needed: without it a Stripe misconfiguration reached this
+    // catch as a bare Error and took the database_error default, sending the
+    // investigation on a schema hunt. The default stays database_error because
+    // the *uncarried* errors that reach here are genuine database operations -
+    // the user-email lookup above and the order INSERT inside createPackCheckout.
+    const carried =
+      error && typeof error === 'object' && 'diagnosticClass' in error &&
+      typeof (error as { diagnosticClass?: unknown }).diagnosticClass === 'string'
+        ? (error as { diagnosticClass: string }).diagnosticClass
+        : undefined;
     writeDiagnostic('error', 'credits.checkout_creation_failed', {
-      errorClass: classifyDiagnosticError(error, 'database_error')
+      errorClass: carried ?? classifyDiagnosticError(error, 'database_error')
     });
 
     res.statusCode = 500;

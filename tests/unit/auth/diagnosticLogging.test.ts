@@ -88,6 +88,38 @@ describe("privacy-safe authentication diagnostics", () => {
     ).toBe("ETIMEDOUT");
   });
 
+  it("surfaces a Stripe error's own code and type, not a misleading default", () => {
+    // The #213 case: a checkout against a Price ID that does not exist in this
+    // account/mode. Stripe's code must survive, not collapse to the caller's
+    // default of a different subsystem.
+    expect(
+      classifyDiagnosticError(
+        Object.assign(new Error("No such price: price_123"), {
+          code: "resource_missing",
+          type: "StripeInvalidRequestError"
+        }),
+        "database_error"
+      )
+    ).toBe("resource_missing");
+
+    // Auth failures carry no code, only a type - that must still be legible.
+    expect(
+      classifyDiagnosticError(
+        Object.assign(new Error("Invalid API Key"), { type: "StripeAuthenticationError" }),
+        "database_error"
+      )
+    ).toBe("StripeAuthenticationError");
+
+    // An unrecognized code or type still falls to the caller's default, so the
+    // allowlist stays a floor and not a leak.
+    expect(
+      classifyDiagnosticError(
+        Object.assign(new Error("x"), { code: "something_unlisted", type: "NotAStripeType" }),
+        "provider_error"
+      )
+    ).toBe("provider_error");
+  });
+
   it("defers account creation without logging the raw subject", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const authInfo: AuthenticatedUser = {

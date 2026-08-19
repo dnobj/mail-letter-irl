@@ -121,6 +121,13 @@ export interface CheckoutSessionResult {
   error?: string;
   /** Stable, non-PII classification for configuration failures. */
   errorCode?: 'PRICE_ID_NOT_CONFIGURED' | 'PACK_AMOUNT_NOT_CONFIGURED' | 'PROVIDER_ERROR';
+  /**
+   * The resolved diagnostic class for a provider failure - the Stripe error's
+   * own code or type (e.g. `resource_missing`), already sanitized through
+   * classifyDiagnosticError. Carried so the caller's own catch can log the real
+   * cause rather than relabelling it. Issue #213.
+   */
+  diagnosticClass?: string;
 }
 
 interface HostedCheckoutParams {
@@ -180,11 +187,14 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
       expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : params.expiresAt
     };
   } catch (error) {
+    const diagnosticClass = classifyDiagnosticError(error, 'provider_error');
     writeDiagnostic('error', 'stripe.checkout_creation_failed', {
-      errorClass: classifyDiagnosticError(error, 'provider_error')
+      errorClass: diagnosticClass
     });
     return {
       success: false,
+      errorCode: 'PROVIDER_ERROR',
+      diagnosticClass,
       error: 'Failed to create checkout session'
     };
   }

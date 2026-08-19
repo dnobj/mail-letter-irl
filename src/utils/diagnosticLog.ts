@@ -22,7 +22,34 @@ const SAFE_ERROR_CODES = new Set([
   // lock_timeout expiry. Surfaced verbatim so a failed deploy says "another
   // migrator holds the migration lock" instead of the useless generic
   // "database_error"; the code itself carries no user or secret data.
-  "55P03"
+  "55P03",
+  // Stripe's documented error-code taxonomy, same footing as the JOSE codes
+  // above: a fixed public enum carrying no PII or secret. Surfaced so a failed
+  // checkout says "resource_missing" (the Price ID does not exist in this
+  // account/mode) instead of collapsing to a default that names the wrong
+  // subsystem entirely - the exact ambiguity that cost issue #213 a full
+  // investigation. See https://stripe.com/docs/error-codes.
+  "resource_missing",
+  "api_key_expired",
+  "amount_too_small",
+  "amount_too_large",
+  "parameter_missing",
+  "parameter_invalid_integer",
+  "testmode_charges_only"
+]);
+
+// Stripe error TYPES, checked when no allowlisted `code` is present - card,
+// auth, connection and rate-limit failures carry a stable `.type` even when
+// `.code` is absent. Also a fixed public enum.
+const SAFE_ERROR_TYPES = new Set([
+  "StripeCardError",
+  "StripeInvalidRequestError",
+  "StripeAPIError",
+  "StripeConnectionError",
+  "StripeAuthenticationError",
+  "StripeRateLimitError",
+  "StripePermissionError",
+  "StripeIdempotencyError"
 ]);
 
 export type DiagnosticErrorCategory =
@@ -46,8 +73,16 @@ export function classifyDiagnosticError(
   const candidate = "code" in error && typeof error.code === "string"
     ? error.code
     : undefined;
+  if (candidate && SAFE_ERROR_CODES.has(candidate)) return candidate;
 
-  return candidate && SAFE_ERROR_CODES.has(candidate) ? candidate : fallback;
+  // Fall back to a Stripe error's `.type` when its `.code` is absent or not
+  // recognized. Both are fixed public enums; neither carries data.
+  const type = "type" in error && typeof error.type === "string"
+    ? error.type
+    : undefined;
+  if (type && SAFE_ERROR_TYPES.has(type)) return type;
+
+  return fallback;
 }
 
 export function writeDiagnostic(
