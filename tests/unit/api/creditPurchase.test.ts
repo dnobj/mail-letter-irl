@@ -286,7 +286,15 @@ describe('Checkout Session Error Handling', () => {
 
     const output = diagnostic.mock.calls.flat().map(String).join('\n');
     expect(output).toContain('"event":"stripe.checkout_creation_failed"');
-    expect(result).toEqual({ success: false, error: 'Failed to create checkout session' });
+    // The result now carries a stable, non-PII classification for the caller's
+    // own catch (issue #213). For a bare Error with no Stripe code/type that is
+    // 'provider_error'; the raw message is never surfaced.
+    expect(result).toEqual({
+      success: false,
+      errorCode: 'PROVIDER_ERROR',
+      diagnosticClass: 'provider_error',
+      error: 'Failed to create checkout session'
+    });
     expect(output).not.toContain(sensitive);
     expect(JSON.stringify(result)).not.toContain(sensitive);
   });

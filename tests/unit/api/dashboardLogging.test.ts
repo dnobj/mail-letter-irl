@@ -91,6 +91,30 @@ describe("dashboard runtime logging privacy", () => {
     expect(body).not.toContain(sensitive);
   });
 
+  it("logs the real failure class a thrown checkout carries, not a database default", async () => {
+    // Issue #213: createPackCheckout attaches the resolved provider class to the
+    // error it throws. The handler must log THAT, so a Stripe misconfiguration
+    // does not masquerade as a database error - the exact mislabel that made the
+    // 500 undiagnosable. The neighbouring test proves a genuine database error
+    // (the user-email lookup) still classifies as database_error, so the two
+    // paths are now distinct rather than collapsed.
+    createPackCheckout.mockRejectedValue(
+      Object.assign(new Error("No such price"), { diagnosticClass: "resource_missing" })
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const req = {
+      headers: {},
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+    };
+    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+    await handleCreateCheckoutSession(req as never, res as never);
+
+    const logged = error.mock.calls.flat().map(String).join("\n");
+    expect(logged).toContain('"errorClass":"resource_missing"');
+    expect(logged).not.toContain("database_error");
+  });
+
   it("classifies known checkout configuration failures", async () => {
     createPackCheckout.mockResolvedValue({ success: false, error: "STRIPE_SECRET_KEY not configured" });
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
