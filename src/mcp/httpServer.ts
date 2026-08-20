@@ -48,6 +48,7 @@ import {
   validatePublicServerAdminConfiguration
 } from "../admin/config.js";
 import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
+import { getReadiness } from "./readiness.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -397,6 +398,20 @@ export async function startHttpServer() {
       res.setHeader("X-Build-Branch", BUILD_BRANCH);
       res.setHeader("Cache-Control", "no-store");
       res.end("ok");
+      return;
+    }
+
+    if (url.pathname === "/readyz") {
+      // Readiness as distinct from liveness (issue #155): configured, database
+      // reachable, mail routing pointed at real providers. /healthz stays a
+      // pure process probe - its body is contractually pinned to "ok".
+      const readiness = await getReadiness();
+      res.statusCode = readiness.statusCode;
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("X-Build-Commit", BUILD_COMMIT);
+      res.setHeader("X-Build-Branch", BUILD_BRANCH);
+      res.setHeader("Cache-Control", "no-store");
+      res.end(readiness.body);
       return;
     }
 
