@@ -167,9 +167,11 @@ async function resolveIds(token: string, environment: string): Promise<RailwayId
   const findService = (needle: string): string => {
     const matches = serviceNodes.filter(node => node.name.toLowerCase().includes(needle));
     if (matches.length !== 1) {
+      // Count only - service names are Railway response text, and everything
+      // this script prints stays response-free (round 2 tightened this to
+      // match the GraphQL-error treatment).
       throw new Error(
-        `Expected exactly one service name containing "${needle}"; found ${matches.length} ` +
-          `among: ${serviceNodes.map(node => node.name).join(', ')}`
+        `Expected exactly one service name containing "${needle}"; found ${matches.length} of ${serviceNodes.length} services - check the project in the Railway dashboard`
       );
     }
     return matches[0].id;
