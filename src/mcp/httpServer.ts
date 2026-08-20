@@ -47,6 +47,8 @@ import {
   findCoupledFeatureFlagWarnings,
   validatePublicServerAdminConfiguration
 } from "../admin/config.js";
+import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
+import { getReadiness } from "./readiness.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -76,16 +78,10 @@ const PUBLIC_BASE_URL =
 const REQUIRE_AUTH = process.env.LETTER_IRL_REQUIRE_AUTH !== "false";
 const DEBUG_ENABLED = isDebugEnabled();
 
-// Environment variable validation
-const REQUIRED_ENV_VARS = [
-  'DATABASE_URL',
-];
-
-// Only require these in production (not for local admin mode)
-const PRODUCTION_ENV_VARS = [
-  'STRIPE_SECRET_KEY',
-  'STRIPE_WEBHOOK_SECRET',
-];
+// Environment validation lives in src/config/deploymentConfig.ts (issue #155):
+// one validator, shared with the maintenance entrypoint, that fails a
+// misconfigured production boot instead of letting it serve /healthz and fake
+// its way through fulfillment.
 
 /**
  * Build identity, for verifying which revision is actually serving.
@@ -112,27 +108,28 @@ export function validateEnvironment() {
     );
   }
 
-  const missing: string[] = [];
-
-  for (const envVar of REQUIRED_ENV_VARS) {
-    if (!process.env[envVar]) {
-      missing.push(envVar);
-    }
+  // Fail closed on invalid deployment configuration (issue #155). Throws with
+  // every problem named at once; the entrypoint's catch turns that into a
+  // non-zero exit, so a misconfigured deploy never serves traffic. Warnings
+  // are printed except under test, where the pinned boot-validation contract
+  // counts warn lines exactly (tests/unit/mcp/legacyAdminRoutes.test.ts).
+  let deployment;
+  try {
+    deployment = assertValidDeploymentConfig(process.env, 'server');
+  } catch (error) {
+    // Print the validator's message HERE, where the failure is known to be
+    // configuration and the message is value-free by construction (it names
+    // variables, never values). The entrypoint's catch deliberately logs only
+    // an error class - correct for arbitrary runtime errors, which may carry
+    // sensitive detail, but it would leave the operator with one word and no
+    // variable names for a config failure (review round 1).
+    console.error(error instanceof Error ? error.message : String(error));
+    throw error;
   }
-
-  // Check production vars unless ADMIN_ENABLED is true (local admin mode)
-  if (process.env.ADMIN_ENABLED !== 'true') {
-    for (const envVar of PRODUCTION_ENV_VARS) {
-      if (!process.env[envVar]) {
-        missing.push(envVar);
-      }
+  if (deployment.mode !== 'test') {
+    for (const warning of deployment.warnings) {
+      console.warn(`[config] ${warning}`);
     }
-  }
-
-  if (missing.length > 0) {
-    console.error('❌ Missing required environment variables:');
-    missing.forEach(v => console.error(`   - ${v}`));
-    throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
   }
 
   if (REQUIRE_AUTH && isCimdEnforcementEnabled()) {
@@ -413,6 +410,20 @@ export async function startHttpServer() {
       res.setHeader("X-Build-Branch", BUILD_BRANCH);
       res.setHeader("Cache-Control", "no-store");
       res.end("ok");
+      return;
+    }
+
+    if (url.pathname === "/readyz") {
+      // Readiness as distinct from liveness (issue #155): configured, database
+      // reachable, mail routing pointed at real providers. /healthz stays a
+      // pure process probe - its body is contractually pinned to "ok".
+      const readiness = await getReadiness();
+      res.statusCode = readiness.statusCode;
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("X-Build-Commit", BUILD_COMMIT);
+      res.setHeader("X-Build-Branch", BUILD_BRANCH);
+      res.setHeader("Cache-Control", "no-store");
+      res.end(readiness.body);
       return;
     }
 

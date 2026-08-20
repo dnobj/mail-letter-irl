@@ -368,15 +368,30 @@ function postcardParams(letter: Letter, job: LetterJob): PostcardParams {
   };
 }
 
+/**
+ * Resolve the fulfillment provider for a letter WITHOUT contacting it.
+ *
+ * Called before markProviderDispatch on purpose: a provider that cannot even
+ * be constructed (missing key, or refused outright in production - the issue
+ * #155 guards) has contacted nobody, so the failure must land on the
+ * retryable pre-dispatch path. Resolving it after the dispatch marker routed
+ * these to holdAmbiguousDispatch - job, letter, and funding order held plus a
+ * critical alert - for an outcome that was never ambiguous (review round 1).
+ */
+async function resolveProviderForLetter(letter: Letter) {
+  const content = letter.content as Record<string, any>;
+  const mailType = letter.mail_type || 'letter';
+  const routingType = determineMailType(mailType, content.layoutType);
+  return getProviderForMailType(routingType);
+}
+
 async function submitToProvider(
+  provider: Awaited<ReturnType<typeof getProviderForMailType>>,
   letter: Letter,
   job: LetterJob,
   options: ProcessLetterJobOptions
 ): Promise<{ result: ProviderResult; providerName: string }> {
-  const content = letter.content as Record<string, any>;
   const mailType = letter.mail_type || 'letter';
-  const routingType = determineMailType(mailType, content.layoutType);
-  const provider = await getProviderForMailType(routingType);
 
   const result = await submitToProviderOnce(async () => {
     if (mailType === 'postcard') {
@@ -740,10 +755,15 @@ async function processClaimedJob(
   const random = options.random ?? Math.random;
   let dispatched = false;
   try {
-    await loadLetter(job.letter_id);
+    const preview = await loadLetter(job.letter_id);
+    // Resolve the provider BEFORE the dispatch marker: a construction failure
+    // or production refusal (issue #155 guards) has contacted no provider, so
+    // it belongs on the retryable failBeforeDispatch path below, not in an
+    // ambiguous hold.
+    const provider = await resolveProviderForLetter(preview);
     const letter = await markProviderDispatch(job);
     dispatched = true;
-    const { result, providerName } = await submitToProvider(letter, job, options);
+    const { result, providerName } = await submitToProvider(provider, letter, job, options);
 
     if (result.success) {
       try {
