@@ -369,6 +369,12 @@
               },
               "file_id": {
                 "type": "string"
+              },
+              "mime_type": {
+                "type": "string"
+              },
+              "file_name": {
+                "type": "string"
               }
             },
             "required": [
@@ -654,6 +660,12 @@
                 "type": "string"
               },
               "file_id": {
+                "type": "string"
+              },
+              "mime_type": {
+                "type": "string"
+              },
+              "file_name": {
                 "type": "string"
               }
             },
@@ -1391,6 +1403,12 @@
                 "type": "string"
               },
               "file_id": {
+                "type": "string"
+              },
+              "mime_type": {
+                "type": "string"
+              },
+              "file_name": {
                 "type": "string"
               }
             },

@@ -50,9 +50,16 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
     image: {
       type: "object",
       description: "Header image file attachment (recommended method)",
+      // The Apps SDK file-param contract requires ALL FOUR properties declared
+      // and ONLY download_url + file_id required; a deviating schema is
+      // silently rejected by the platform's tool scan, which disables the
+      // file transform entirely and leaves the model improvising bare
+      // strings (issue #227's tool-call evidence).
       properties: {
         download_url: { type: "string" },
-        file_id: { type: "string" }
+        file_id: { type: "string" },
+        mime_type: { type: "string" },
+        file_name: { type: "string" }
       },
       required: ["download_url", "file_id"]
     },
@@ -80,9 +87,12 @@ export const quoteAndPreviewLetterWithImageInputSchema: JsonSchema = {
     image: {
       type: "object",
       description: "Image file attachment (recommended method)",
+      // Same four-property contract as the header-image schema above.
       properties: {
         download_url: { type: "string" },
-        file_id: { type: "string" }
+        file_id: { type: "string" },
+        mime_type: { type: "string" },
+        file_name: { type: "string" }
       },
       required: ["download_url", "file_id"]
     },
@@ -440,9 +450,12 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
     image: {
       type: "object",
       description: "Image file attachment for postcard front (recommended method)",
+      // Same four-property contract as the letter image schemas above.
       properties: {
         download_url: { type: "string" },
-        file_id: { type: "string" }
+        file_id: { type: "string" },
+        mime_type: { type: "string" },
+        file_name: { type: "string" }
       },
       required: ["download_url", "file_id"]
     },
