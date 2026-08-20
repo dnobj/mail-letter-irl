@@ -78,12 +78,16 @@ const JIT_VARS = [
   { price: 'STRIPE_JIT_POSTCARD_PRICE_ID', amount: 'JIT_POSTCARD_AMOUNT_CENTS' }
 ] as const;
 
-/** Every PostGrid credential the provider layer can read. */
-const PROVIDER_KEY_VARS = [
-  'LETTER_PROVIDER_API_KEY',
-  'POSTGRID_API_KEY',
-  'POSTGRID_ADDRESS_VERIFICATION_API_KEY'
-] as const;
+/**
+ * Every PostGrid credential the provider layer can read. SEND-capable keys
+ * dispatch real mail; the address-verification key can only verify addresses,
+ * so a live one outside production is a cost concern, never a mail-safety
+ * one - dev has legitimately run live address verification all along, and the
+ * first deployed boot of this validator proved it by refusing to start.
+ */
+const PROVIDER_SEND_KEY_VARS = ['LETTER_PROVIDER_API_KEY', 'POSTGRID_API_KEY'] as const;
+const PROVIDER_VERIFY_KEY_VARS = ['POSTGRID_ADDRESS_VERIFICATION_API_KEY'] as const;
+const PROVIDER_KEY_VARS = [...PROVIDER_SEND_KEY_VARS, ...PROVIDER_VERIFY_KEY_VARS] as const;
 
 export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
   {
@@ -351,6 +355,11 @@ function validateProvider(
   for (const keyVar of PROVIDER_KEY_VARS) {
     const value = env[keyVar];
     if (!value) continue;
+    // A live SEND key outside production can dispatch real mail: error. A
+    // live VERIFICATION key outside production only spends verification
+    // credits: warn, don't refuse - dev intentionally verifies against live
+    // address data because test-mode verification returns canned results.
+    const sendCapable = (PROVIDER_SEND_KEY_VARS as readonly string[]).includes(keyVar);
     if (production && value.startsWith('test_')) {
       findings.push({
         severity: 'error',
@@ -359,9 +368,11 @@ function validateProvider(
       });
     } else if (!production && value.startsWith('live_')) {
       findings.push({
-        severity: 'error',
+        severity: sendCapable ? 'error' : 'warning',
         rule: 'provider.live_key_outside_production',
-        message: `${keyVar} is a live-mode key; only production may hold one`
+        message: sendCapable
+          ? `${keyVar} is a live-mode key; only production may hold one`
+          : `${keyVar} is a live-mode key; verification-only, so permitted outside production, but be aware it spends real verification credits`
       });
     } else if (production && !value.startsWith('live_')) {
       findings.push({
