@@ -581,8 +581,12 @@ export function assertValidDeploymentConfig(
 ): DeploymentValidation {
   const validation = validateDeploymentConfig(env, surface);
   if (validation.errors.length > 0) {
-    throw new Error(
-      `Invalid deployment configuration:\n- ${validation.errors.join('\n- ')}`
+    // Carry the truthful class so any catch that logs this (the maintenance
+    // failure diagnostic, notably) names configuration instead of defaulting
+    // to a category that points at the wrong subsystem - the #213 trap.
+    throw Object.assign(
+      new Error(`Invalid deployment configuration:\n- ${validation.errors.join('\n- ')}`),
+      { diagnosticClass: 'configuration_error' }
     );
   }
   return validation;

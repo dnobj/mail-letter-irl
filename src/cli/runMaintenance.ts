@@ -9,13 +9,22 @@ import { runStatusSync } from '../workers/statusSyncWorker.js';
 import { runCommerceMaintenance } from '../services/commerceService.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import { assertValidDeploymentConfig } from '../config/deploymentConfig.js';
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 export function writeMaintenanceFailure(error: unknown): void {
+  // Prefer a class the failing layer already resolved (the deployment
+  // validator carries configuration_error), so a config failure does not
+  // masquerade as unknown_error - the mislabel that made #213 expensive.
+  const carried =
+    error && typeof error === 'object' && 'diagnosticClass' in error &&
+    typeof (error as { diagnosticClass?: unknown }).diagnosticClass === 'string'
+      ? (error as { diagnosticClass: string }).diagnosticClass
+      : undefined;
   writeDiagnostic('error', 'maintenance.run_failed', {
-    errorClass: classifyDiagnosticError(error, 'unknown_error')
+    errorClass: carried ?? classifyDiagnosticError(error, 'unknown_error')
   });
 }
 
@@ -49,7 +58,19 @@ export async function runMaintenance(): Promise<void> {
   console.log(`[Maintenance] Daily cleanup ${daily.ran ? 'completed' : 'not due'}`);
 }
 
-async function main(): Promise<void> {
+/**
+ * Entry wrapper: validate the deployment configuration before touching the
+ * database, Stripe, the mail provider, or the image bucket (issue #155).
+ * Maintenance is the surface most exposed to the silent-dummy failure - the
+ * status sync uses the environment-default provider - and it previously ran
+ * with no validation at all. A misconfigured cron run now fails loudly through
+ * the existing maintenance.run_failed diagnostic instead of half-running.
+ *
+ * Exported separately from runMaintenance() so tests can exercise the
+ * validation gate without executing a real maintenance pass.
+ */
+export async function maintenanceEntry(): Promise<void> {
+  assertValidDeploymentConfig(process.env, 'maintenance');
   try {
     await runMaintenance();
     console.log(`[Maintenance] Finished at ${new Date().toISOString()}`);
@@ -60,7 +81,7 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => {
+  maintenanceEntry().catch((error) => {
     writeMaintenanceFailure(error);
     process.exitCode = 1;
   });
