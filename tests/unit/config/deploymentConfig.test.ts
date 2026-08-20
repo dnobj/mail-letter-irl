@@ -228,9 +228,22 @@ describe('validateDeploymentConfig outside production', () => {
     expect(ruleIds(liveInDev, 'error')).toContain('stripe.live_key_outside_production');
   });
 
-  it('rejects a live provider key outside production', () => {
+  it('rejects a live SEND-capable provider key outside production', () => {
     const liveInDev = env({ POSTGRID_API_KEY: 'live_sk_unit_fixture' }, VALID_DEV);
     expect(ruleIds(liveInDev, 'error')).toContain('provider.live_key_outside_production');
+  });
+
+  it('permits a live ADDRESS-VERIFICATION key outside production, with a warning', () => {
+    // The first deployed boot of the validator refused dev over exactly this:
+    // dev legitimately verifies against live address data, and the
+    // verification key cannot send mail. Live send keys stay errors; live
+    // verification keys warn about spend and boot.
+    const liveVerifyInDev = env(
+      { POSTGRID_ADDRESS_VERIFICATION_API_KEY: 'live_sk_unit_fixture' },
+      VALID_DEV
+    );
+    expect(ruleIds(liveVerifyInDev, 'error')).not.toContain('provider.live_key_outside_production');
+    expect(ruleIds(liveVerifyInDev, 'warning')).toContain('provider.live_key_outside_production');
   });
 
   it('reports incomplete pack config as a warning in development, never an error', () => {
