@@ -10,16 +10,32 @@ const addressSchema = z.object({
   country: z.string()
 });
 
-// Image file param schema - OpenAI Apps SDK requires explicit definition
-// Union allows both object (valid image) and string (empty from ChatGPT mobile)
-// ChatGPT mobile sends image: '' when no file is attached instead of omitting the field
-const imageFileParamSchema = z.union([
-  z.object({
-    download_url: z.string(),
-    file_id: z.string()
-  }),
-  z.string()
-]);
+// Image file param schema - the OpenAI Apps SDK file-param contract requires
+// the SERVED JSON schema to be exactly an object declaring all four of
+// download_url/file_id/mime_type/file_name with only the first two required.
+// Anything else - including the anyOf this used to serialize to as a
+// union-with-string - is silently rejected by the platform's tool scan, which
+// strips the property's schema to {} and disables the file transform for the
+// tool entirely (issue #227: ChatGPT's stored schema literally showed
+// "image": {}, and the model could only improvise bare id/path strings).
+//
+// The union existed because ChatGPT mobile sends strings ('' when nothing is
+// attached, and per openai-apps-sdk-examples#185 also 'chat_upload' /
+// 'chat_upload://image_N') instead of file objects. That tolerance now lives
+// in the preprocess step, which zod-to-json-schema serializes as the INNER
+// object (contract-conformant) while at runtime coercing any string to
+// undefined - landing on the handlers' existing graceful no-image fallback.
+const imageFileParamSchema = z.preprocess(
+  (value) => (typeof value === "string" ? undefined : value),
+  z
+    .object({
+      download_url: z.string(),
+      file_id: z.string(),
+      mime_type: z.string().optional(),
+      file_name: z.string().optional()
+    })
+    .optional()
+);
 
 export const toolInputSchemas = {
   // Letter tools - three separate tools for different layouts
