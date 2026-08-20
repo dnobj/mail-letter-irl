@@ -424,9 +424,9 @@
         }
 
         function scrubMessage(err) {
-          var msg = (err && err.message) || "Unknown error";
+          var msg = (err && err.message) || err || "Unknown error";
           // Host error strings can embed signed URLs; keep diagnostics URL-free.
-          return String(msg).replace(/https?:\/\/\S+/g, "[url]");
+          return String(msg).replace(/(?:https?:\/\/|blob:|data:)\S+/g, "[url]");
         }
 
         function debugLog(message, data) {
@@ -505,12 +505,8 @@
             debugLog("sendFollowUpMessage.success");
             debugBeacon("sendFollowUpMessage.success");
           } catch (e) {
-            debugLog("sendFollowUpMessage.error", {
-              message: (e && e.message) || "Unknown error"
-            });
-            debugBeacon("sendFollowUpMessage.error", {
-              message: (e && e.message) || "Unknown error"
-            });
+            debugLog("sendFollowUpMessage.error", { message: scrubMessage(e) });
+            debugBeacon("sendFollowUpMessage.error", { message: scrubMessage(e) });
           }
         }
 
@@ -593,12 +589,8 @@
               debugLog("callTool.success", { toolName: "confirm_uploaded_image" });
               debugBeacon("callTool.success", { toolName: "confirm_uploaded_image" });
             } catch (callErr) {
-              debugLog("callTool.error", {
-                message: (callErr && callErr.message) || "Unknown error"
-              });
-              debugBeacon("callTool.error", {
-                message: (callErr && callErr.message) || "Unknown error"
-              });
+              debugLog("callTool.error", { message: scrubMessage(callErr) });
+              debugBeacon("callTool.error", { message: scrubMessage(callErr) });
             }
           } else {
             debugLog("callTool.unavailable");
@@ -612,6 +604,10 @@
 
         // --- Upload via OpenAI SDK ---
         async function uploadAndSend() {
+          // Invalidate-only bump: no generation is captured here. Once the
+          // uploading state renders there are no clickable controls left, so
+          // nothing can race this flow - the bump exists only to discard a
+          // library pick still pending from before this click.
           flowGen++;
 
           if (libraryFile && libraryFile.fileId) {
@@ -619,27 +615,38 @@
             // The pick-time URL is a temporary cache URL and the pick-to-confirm
             // gap is user-paced, so re-resolve a fresh one from the durable
             // fileId now instead of handing off a possibly expired link.
+            var libFileId = libraryFile.fileId;
             showState("uploading");
-            debugLog("library.use", { fileId: libraryFile.fileId });
-            debugBeacon("library.use", { fileId: libraryFile.fileId });
+            debugLog("library.use", { fileId: libFileId });
+            debugBeacon("library.use", { fileId: libFileId });
 
-            var freshUrl = null;
             try {
-              var freshResult = await window.openai.getFileDownloadUrl({ fileId: libraryFile.fileId });
-              freshUrl = (freshResult && (freshResult.downloadUrl || freshResult.download_url)) || null;
-              debugLog("library.refreshDownloadUrl.success", { hasDownloadUrl: !!freshUrl });
-              debugBeacon("library.refreshDownloadUrl.success", { hasDownloadUrl: !!freshUrl });
-            } catch (refreshErr) {
-              debugLog("library.refreshDownloadUrl.error", { message: scrubMessage(refreshErr) });
-              debugBeacon("library.refreshDownloadUrl.error", { message: scrubMessage(refreshErr) });
-            }
+              var freshUrl = null;
+              try {
+                var freshResult = await window.openai.getFileDownloadUrl({ fileId: libFileId });
+                freshUrl = (freshResult && (freshResult.downloadUrl || freshResult.download_url)) || null;
+                debugLog("library.refreshDownloadUrl.success", { hasDownloadUrl: !!freshUrl });
+                debugBeacon("library.refreshDownloadUrl.success", { hasDownloadUrl: !!freshUrl });
+              } catch (refreshErr) {
+                debugLog("library.refreshDownloadUrl.error", { message: scrubMessage(refreshErr) });
+                debugBeacon("library.refreshDownloadUrl.error", { message: scrubMessage(refreshErr) });
+              }
 
-            if (!freshUrl) {
-              showError("Could not refresh the link for that library photo. Please choose it again.");
-              return;
-            }
+              if (!freshUrl) {
+                // Routine failure (temporary URLs age out), so recover to the
+                // two-button select state instead of the dead-end error state.
+                libraryFile = null;
+                showState("select");
+                showLibraryStatus("That link expired — please pick the photo again.");
+                return;
+              }
 
-            await finishWithDownloadUrl(freshUrl, freshUrl, "library_pick_complete");
+              await finishWithDownloadUrl(freshUrl, freshUrl, "library_pick_complete");
+            } catch (libErr) {
+              debugLog("uploadAndSend.error", { message: scrubMessage(libErr) });
+              debugBeacon("uploadAndSend.error", { message: scrubMessage(libErr) });
+              showError("Something went wrong with that library photo. Please try again.");
+            }
             return;
           }
 
@@ -659,6 +666,7 @@
             debugBeacon("uploadFile.success", { fileId: fileId || null });
 
             if (!fileId) {
+              debugLog("uploadFile.missingFileId");
               debugBeacon("uploadFile.missingFileId");
               showError("Upload failed — no file ID returned.");
               return;
@@ -674,6 +682,7 @@
             debugBeacon("getFileDownloadUrl.success", { hasDownloadUrl: !!downloadUrl });
 
             if (!downloadUrl) {
+              debugLog("getFileDownloadUrl.missingUrl", { fileId: fileId });
               debugBeacon("getFileDownloadUrl.missingUrl", { fileId: fileId });
               showError("Upload succeeded but could not get download URL.");
               return;
@@ -681,14 +690,10 @@
 
             await finishWithDownloadUrl(downloadUrl, previewDataUrl, "upload_complete");
           } catch (err) {
-            debugLog("uploadAndSend.error", {
-              message: (err && err.message) || "Unknown error"
-            });
-            debugBeacon("uploadAndSend.error", {
-              message: (err && err.message) || "Unknown error"
-            });
-            var errMsg = (err && err.message) || "Upload failed. Please try again.";
-            showError(errMsg);
+            debugLog("uploadAndSend.error", { message: scrubMessage(err) });
+            debugBeacon("uploadAndSend.error", { message: scrubMessage(err) });
+            var errMsg = scrubMessage(err);
+            showError(errMsg === "Unknown error" ? "Upload failed. Please try again." : errMsg);
           }
         }
 
@@ -705,6 +710,15 @@
           showLibraryStatus("Opening your ChatGPT library…");
           debugLog("selectFiles.start");
           debugBeacon("selectFiles.start");
+
+          // Escape hatch: selectFiles is user-paced (someone can browse their
+          // library for minutes), so we never time the promise out - but if
+          // the host API is broken and never settles, re-enable the button so
+          // the user can retry. A retry bumps flowGen, which discards this
+          // pick if it ever resolves after all.
+          var stuckTimer = setTimeout(function () {
+            btnLibrary.disabled = false;
+          }, 20000);
 
           try {
             var files;
@@ -773,19 +787,24 @@
 
             selectedFile = null;
             previewDataUrl = null;
-            libraryFile = { fileId: fileId, fileName: fileName, mimeType: mimeType, downloadUrl: downloadUrl };
+            // Deliberately no downloadUrl here: the confirm path re-resolves a
+            // fresh one from the durable fileId, and keeping the pick-time URL
+            // around would be a trap for a future edit to hand it off stale.
+            libraryFile = { fileId: fileId, fileName: fileName, mimeType: mimeType };
 
             var pickedNote = files.length > 1 ? " · using the first of " + files.length + " selected" : "";
+            var baseInfo = fileName + (mimeType ? " · " + mimeType : "") + " · from your ChatGPT library" + pickedNote;
             previewImg.onerror = function () {
               debugLog("library.previewImage.error");
               debugBeacon("library.previewImage.error");
-              fileInfo.textContent = fileName + " · preview could not be displayed. You can still try this photo, or choose a different one.";
+              fileInfo.textContent = baseInfo + " · preview could not be displayed; you can still try this photo, or choose a different one.";
             };
             previewImg.src = downloadUrl;
-            fileInfo.textContent = fileName + (mimeType ? " · " + mimeType : "") + " · from your ChatGPT library" + pickedNote;
+            fileInfo.textContent = baseInfo;
             showLibraryStatus("");
             showState("preview");
           } finally {
+            clearTimeout(stuckTimer);
             btnLibrary.disabled = false;
           }
         }
