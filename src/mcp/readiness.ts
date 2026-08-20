@@ -16,6 +16,7 @@
 
 import { query } from '../db/index.js';
 import {
+  APPROVED_LIVE_PROVIDERS,
   isProductionEnv,
   validateDeploymentConfig
 } from '../config/deploymentConfig.js';
@@ -49,15 +50,19 @@ async function checkDatabase(): Promise<boolean> {
 
 /**
  * Every enabled routing row must name a registered provider, and production
- * must not route any mail type to the dummy provider. This is the check boot
- * validation cannot do: provider_routing lives in the database and overrides
- * the environment.
+ * must route every mail type to an APPROVED live provider - not just
+ * non-dummy: DIY is manual print, an explicit operator act the runtime does
+ * not refuse, but an environment routing production mail to it is not "ready"
+ * and must say so here (review round 1). This is the check boot validation
+ * cannot do: provider_routing lives in the database and overrides the
+ * environment.
  */
 async function checkRouting(
   env: NodeJS.ProcessEnv
 ): Promise<{ ok: boolean; offenders: string[] }> {
   try {
     const registered = new Set(listProviders());
+    const approved = new Set<string>(APPROVED_LIVE_PROVIDERS);
     const result = await query<{ mail_type: string; provider: string }>(
       'SELECT mail_type, provider FROM provider_routing WHERE enabled = true'
     );
@@ -65,7 +70,7 @@ async function checkRouting(
     const offenders = result.rows
       .filter(row => {
         const provider = String(row.provider).toLowerCase();
-        return !registered.has(provider) || (production && provider === 'dummy');
+        return !registered.has(provider) || (production && !approved.has(provider));
       })
       .map(row => String(row.mail_type));
     return { ok: offenders.length === 0, offenders };
@@ -96,16 +101,21 @@ export async function getReadiness(
 
   let report: ReadinessReport;
   if (failing.length === 0) {
+    // The #155 requirement that a development deploy's dummy behavior be
+    // explicit and visible: name the mode and the default provider, and
+    // nothing else about the configuration. Reflect only a KNOWN provider
+    // name - this route is unauthenticated, and echoing an arbitrary env
+    // value would serve anything accidentally pasted into LETTER_PROVIDER
+    // to anonymous callers (review round 1).
+    const configured = (env.LETTER_PROVIDER || 'dummy').toLowerCase();
+    const provider = new Set(listProviders()).has(configured) ? configured : 'unrecognized';
     report = {
       ready: true,
       statusCode: 200,
       body: JSON.stringify({
         ready: true,
-        // The #155 requirement that a development deploy's dummy behavior be
-        // explicit and visible: name the mode and the default provider, and
-        // nothing else about the configuration.
         mode: validation.mode,
-        provider: (env.LETTER_PROVIDER || 'dummy').toLowerCase(),
+        provider,
         checks: { config: 'ok', database: 'ok', routing: 'ok' }
       })
     };

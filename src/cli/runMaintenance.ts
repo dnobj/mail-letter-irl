@@ -70,7 +70,18 @@ export async function runMaintenance(): Promise<void> {
  * validation gate without executing a real maintenance pass.
  */
 export async function maintenanceEntry(): Promise<void> {
-  assertValidDeploymentConfig(process.env, 'maintenance');
+  try {
+    assertValidDeploymentConfig(process.env, 'maintenance');
+  } catch (error) {
+    // Print the validator's message here, where the failure is known to be
+    // configuration and the message is value-free by construction.
+    // writeMaintenanceFailure deliberately logs only an error class - right
+    // for arbitrary runtime errors, which may carry sensitive detail, but it
+    // would leave the operator with one word and no variable names for a
+    // config failure (review round 1).
+    console.error(error instanceof Error ? error.message : String(error));
+    throw error;
+  }
   try {
     await runMaintenance();
     console.log(`[Maintenance] Finished at ${new Date().toISOString()}`);

@@ -58,9 +58,12 @@ export interface EnvVarRequirement {
 }
 
 /**
- * Providers approved to fulfill real production mail. 'dummy' fakes success,
- * 'diy' is manual print, 'lob' is display-name-only and never registered -
- * none of them may be what production silently runs on.
+ * Providers approved to fulfill production mail unattended. 'dummy' fakes
+ * success and is refused outright in production (boot rule + runtime guard).
+ * 'diy' is manual print: a provider_routing row naming it is treated as an
+ * explicit operator act and is not refused at runtime, but /readyz reports the
+ * environment not-ready while it stands, so it can never be the silent state.
+ * 'lob' is display-name-only and never registered.
  */
 export const APPROVED_LIVE_PROVIDERS = ['postgrid'] as const;
 
@@ -220,6 +223,16 @@ function resolveAliased(
  * to production anyway, because an unlabeled production-built deploy must get
  * the full production rules, plus an error demanding the label. Unrecognized
  * identity values also fail closed to production.
+ *
+ * ACCEPTED RESIDUAL RISK, named deliberately: the identity label is trusted.
+ * A production service mislabeled "development" skips every production rule.
+ * The cross-signal that catches the likely version of that mistake is the
+ * pair of live-key-outside-production rules - a mislabeled service still
+ * carrying its live Stripe or PostGrid keys fails boot loudly. What remains
+ * uncaught is a service mislabeled AND fully populated with development
+ * config; it would serve dummy fulfillment, though test-mode Stripe cannot
+ * charge real cards. Catching that would require an out-of-band signal
+ * (e.g. Railway environment identity) that the process does not have.
  */
 export function resolveDeploymentMode(
   env: NodeJS.ProcessEnv = process.env
@@ -481,12 +494,22 @@ function validateBucket(
 }
 
 function validatePlaceholders(env: NodeJS.ProcessEnv, findings: ConfigFinding[]): void {
-  for (const entry of ENV_VAR_MANIFEST) {
-    if (!entry.secret) continue;
+  // Secret manifest entries, plus the optional provider keys the send path
+  // prefers over the validated one (POSTGRID_API_KEY outranks
+  // LETTER_PROVIDER_API_KEY in getProviderByName) - a placeholder there boots
+  // clean and then fails every send (review round 1).
+  const candidates: Array<Pick<EnvVarRequirement, 'name' | 'aliases'>> = [
+    ...ENV_VAR_MANIFEST.filter(entry => entry.secret),
+    ...PROVIDER_KEY_VARS.map(name => ({ name }))
+  ];
+  const reported = new Set<string>();
+  for (const entry of candidates) {
+    if (reported.has(entry.name)) continue;
     const value = resolveAliased(entry, env);
     if (value && isPlaceholder(value)) {
       // Catches .env.example's literal "sk_live_..." pasted into a real
       // environment. An unmistakably fake credential is an error everywhere.
+      reported.add(entry.name);
       findings.push({
         severity: 'error',
         rule: 'config.placeholder_value',
@@ -507,8 +530,14 @@ export function validateDeploymentConfig(
   // Generic presence pass over manifest entries that no dedicated rule owns.
   // Semantics preserved from the original httpServer loops: DATABASE_URL in
   // every mode; Stripe presence in every mode unless local admin mode.
+  // The surface maps to the manifest's services field, so the validator and
+  // the preflight parity script demand the same set per service - review
+  // round 1 found them disagreeing about STRIPE_WEBHOOK_SECRET on the
+  // maintenance cron, which never verifies a webhook.
+  const service = surface === 'maintenance' ? 'maintenance' : 'api';
   for (const entry of ENV_VAR_MANIFEST) {
     if (entry.checkedBy) continue;
+    if (!entry.services.includes(service)) continue;
     if (entry.requiredIn === 'production' && !production) continue;
     if (entry.condition === 'unless-admin' && adminMode) continue;
     if (entry.condition === 'when-jit-enabled' && env.JIT_PURCHASE_ENABLED !== 'true') continue;
@@ -532,7 +561,11 @@ export function validateDeploymentConfig(
   }
 
   validateProvider(env, mode, findings);
-  if (!adminMode) validateStripe(env, mode, findings);
+  // Not gated on admin mode: the key-location rules must fire everywhere. A
+  // pasted sk_live_ key in local admin tooling is exactly the "live key
+  // outside production" scenario the rule exists for (review round 1). The
+  // pack/JIT completeness checks inside are admin-gated individually.
+  validateStripe(env, mode, findings);
   validateBucket(env, mode, findings);
   validatePlaceholders(env, findings);
 
