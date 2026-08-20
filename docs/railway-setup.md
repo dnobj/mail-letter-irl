@@ -44,7 +44,8 @@ TEMP_IMAGE_BUCKET_SECRET_ACCESS_KEY=<reference to bucket secret>
 enforcement need it), so it cannot identify the environment.
 `LETTER_IRL_DEPLOYMENT_ENVIRONMENT` is the identity signal the boot validator
 (issue #155) resolves; an unlabeled service resolves to production mode,
-fail-closed, and refuses to boot on development keys.
+fail-closed, and **refuses to boot regardless of its other variables** — the
+missing label is itself a fatal validation error.
 
 Purchase and fulfillment variables the validator requires in production (and
 warns about in development):
@@ -52,23 +53,31 @@ warns about in development):
 ```env
 LETTER_PROVIDER=postgrid
 LETTER_PROVIDER_API_KEY=<live PostGrid key in production; test key in development>
-LETTER_PROVIDER_CONFIG={"mode":"live"}   # {"mode":"test"} in development
+LETTER_PROVIDER_CONFIG={"mode":"live"}
 STRIPE_SECRET_KEY=<sk_live_ in production; sk_test_ in development - never crossed>
 STRIPE_WEBHOOK_SECRET=<whsec_ for that environment's webhook endpoint>
-STRIPE_PRICE_STARTER=<price_ id> ; STRIPE_STARTER_AMOUNT_CENTS=<matching unit amount>
-STRIPE_PRICE_REGULAR=<price_ id> ; STRIPE_REGULAR_AMOUNT_CENTS=<matching unit amount>
-STRIPE_PRICE_POWER=<price_ id>   ; STRIPE_POWER_AMOUNT_CENTS=<matching unit amount>
-# When JIT_PURCHASE_ENABLED=true, also:
-STRIPE_JIT_LETTER_PRICE_ID / JIT_LETTER_AMOUNT_CENTS
-STRIPE_JIT_POSTCARD_PRICE_ID / JIT_POSTCARD_AMOUNT_CENTS
+STRIPE_PRICE_STARTER=<price_ id>
+STRIPE_STARTER_AMOUNT_CENTS=<that Price's unit amount in cents>
+STRIPE_PRICE_REGULAR=<price_ id>
+STRIPE_REGULAR_AMOUNT_CENTS=<that Price's unit amount in cents>
+STRIPE_PRICE_POWER=<price_ id>
+STRIPE_POWER_AMOUNT_CENTS=<that Price's unit amount in cents>
 ```
+
+In development set `LETTER_PROVIDER_CONFIG={"mode":"test"}`. When
+`JIT_PURCHASE_ENABLED=true`, also set `STRIPE_JIT_LETTER_PRICE_ID` with
+`JIT_LETTER_AMOUNT_CENTS` and `STRIPE_JIT_POSTCARD_PRICE_ID` with
+`JIT_POSTCARD_AMOUNT_CENTS`.
 
 Every `*_AMOUNT_CENTS` must equal the Stripe Price's unit amount for that
 environment's mode: the webhook refuses fulfillment (and moves the order to
-`refund_pending`) on an amount mismatch. Verify the pairing with
-`npm run preflight:cutover -- --env <environment>` before deploying, and
-remember that committed variables require an explicit service **Redeploy** to
-reach the running instance (issue #213).
+`refund_pending`) on an amount mismatch. **No automated check verifies that
+equality before payment time.** The preflight
+(`npm run preflight:cutover -- --env <environment>`) verifies both variables of
+each pair are *set* — it reads names, never values — and the boot validator
+checks only that the amount is a positive integer. Read the amount off the
+Stripe Price itself when setting it. Committed variables require an explicit
+service **Redeploy** to reach the running instance (issue #213).
 
 Use Railway variable references to the bucket service. Do not copy bucket credentials into Git, screenshots, logs, or documentation. The application also accepts Railway's standard `BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` names.
 

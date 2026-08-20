@@ -105,6 +105,9 @@ Still verified by a human, without printing secret values:
 
 - `DATABASE_URL` points to the correct environment's Neon pooled hostname
   (the validator checks presence, not which environment it belongs to).
+- `TEMP_IMAGE_STORE=bucket` is set in **deployed development** too: the boot
+  validator and preflight enforce bucket config only in production mode, so a
+  development gap would otherwise surface at the first image operation.
 - Bucket variables reference the private `letter-irl-images` service.
 - Public base URLs, Auth0 issuer/audience, CORS origins, and Stripe webhook
   URLs match the environment.
@@ -318,13 +321,14 @@ See [`tests/integration/README.md`](../tests/integration/README.md) for how to s
 
 ## Production Promotion
 
-1. Run the preflight against production and set every missing variable **before**
-   merging, then redeploy is not required yet (the old image ignores new
-   variables) but the gaps must be closed:
-   `RAILWAY_API_TOKEN=... npm run preflight:cutover -- --env production`.
-   This includes `LETTER_IRL_DEPLOYMENT_ENVIRONMENT=production` on both the API
-   and maintenance services — without it the new image resolves the environment
-   correctly anyway (fail-closed) but boots with an error demanding the label.
+1. Run the preflight against production and close every gap it reports **before**
+   merging: `RAILWAY_API_TOKEN=... npm run preflight:cutover -- --env production`.
+   Setting the variables now is safe — the old image ignores variables it never
+   reads — and mandatory: the new image **refuses to boot** while any of them is
+   missing. That includes `LETTER_IRL_DEPLOYMENT_ENVIRONMENT=production` on both
+   the API and maintenance services; an unlabeled service resolves to production
+   mode (fail-closed) and the missing label is itself a fatal validation error,
+   regardless of how correct the other variables are.
 2. Review the `dev` to `master` backend diff and the `dev` to `main` website diff.
 3. Confirm no development URLs, test keys, or dummy-provider settings enter production.
    The boot validator enforces the key-mode and provider rules; the review still
