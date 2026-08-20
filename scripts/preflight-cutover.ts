@@ -95,7 +95,8 @@ export function diffManifest(
 
 interface RailwayIds {
   environmentId: string;
-  services: { api: string; maintenance: string };
+  /** null = no matching service instance exists in this environment. */
+  services: { api: string | null; maintenance: string | null };
 }
 
 async function railwayGraphQL<T>(
@@ -141,16 +142,37 @@ async function railwayGraphQL<T>(
 async function resolveIds(token: string, environment: string): Promise<RailwayIds> {
   interface ProjectData {
     project: {
-      environments: { edges: Array<{ node: { id: string; name: string } }> };
-      services: { edges: Array<{ node: { id: string; name: string } }> };
+      environments: {
+        edges: Array<{
+          node: {
+            id: string;
+            name: string;
+            serviceInstances: { edges: Array<{ node: { serviceId: string; serviceName: string } }> };
+          };
+        }>;
+      };
     };
   }
+  // Resolve services through the environment's OWN instances, not the
+  // project-level service list: the project carries per-environment service
+  // twins (letter-irl-maintenance and letter-irl-maintenance-dev), so a
+  // project-wide substring match is ambiguous - the first live run tripped
+  // exactly there. An environment's instance list is unambiguous, and a
+  // service with no instance in the target environment is itself a preflight
+  // finding (production has no maintenance instance today), not a crash.
   const data = await railwayGraphQL<ProjectData>(
     token,
     `query project($id: String!) {
        project(id: $id) {
-         environments { edges { node { id name } } }
-         services { edges { node { id name } } }
+         environments {
+           edges {
+             node {
+               id
+               name
+               serviceInstances { edges { node { serviceId serviceName } } }
+             }
+           }
+         }
        }
      }`,
     { id: PROJECT_ID }
@@ -163,18 +185,17 @@ async function resolveIds(token: string, environment: string): Promise<RailwayId
     throw new Error(`No Railway environment named "${environment}" in the project`);
   }
 
-  const serviceNodes = data.project.services.edges.map(edge => edge.node);
-  const findService = (needle: string): string => {
-    const matches = serviceNodes.filter(node => node.name.toLowerCase().includes(needle));
-    if (matches.length !== 1) {
+  const instances = environmentNode.serviceInstances.edges.map(edge => edge.node);
+  const findInstance = (needle: string): string | null => {
+    const matches = instances.filter(node => node.serviceName.toLowerCase().includes(needle));
+    if (matches.length > 1) {
       // Count only - service names are Railway response text, and everything
-      // this script prints stays response-free (round 2 tightened this to
-      // match the GraphQL-error treatment).
+      // this script prints stays response-free.
       throw new Error(
-        `Expected exactly one service name containing "${needle}"; found ${matches.length} of ${serviceNodes.length} services - check the project in the Railway dashboard`
+        `Expected at most one "${needle}" service instance in ${environment}; found ${matches.length} of ${instances.length} - check the project in the Railway dashboard`
       );
     }
-    return matches[0].id;
+    return matches[0]?.serviceId ?? null;
   };
 
   return {
@@ -182,8 +203,8 @@ async function resolveIds(token: string, environment: string): Promise<RailwayId
     services: {
       // The API service is named e.g. "letter-irl-api"; "maintenance" matches
       // the maintenance cron service regardless of environment suffixes.
-      api: findService('api'),
-      maintenance: findService('maintenance')
+      api: findInstance('api'),
+      maintenance: findInstance('maintenance')
     }
   };
 }
@@ -224,7 +245,18 @@ async function main(): Promise<void> {
   let failures = 0;
 
   for (const service of ['api', 'maintenance'] as const) {
-    const names = await fetchVariableNames(token, ids.environmentId, ids.services[service]);
+    const serviceId = ids.services[service];
+    if (!serviceId) {
+      // A service that does not exist in the environment cannot hold any
+      // variables - the gap is the whole service. Production has no
+      // maintenance instance today; the cutover must create it.
+      failures += 1;
+      console.error(
+        `❌ ${environment}/${service}: no ${service} service instance exists in this environment - create and configure it before cutover`
+      );
+      continue;
+    }
+    const names = await fetchVariableNames(token, ids.environmentId, serviceId);
     const diff = diffManifest(names, { environment, service });
     if (diff.missing.length === 0) {
       console.log(`✅ ${environment}/${service}: all ${
