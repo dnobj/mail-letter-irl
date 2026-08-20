@@ -164,9 +164,13 @@ describe("legacy public admin route denial", () => {
     );
 
     expect(validationIndex).toBeGreaterThan(-1);
-    expect(validationIndex).toBeLessThan(
-      source.indexOf("const missing: string[] = []"),
+    // The rest of environment validation is the centralized deployment
+    // validator (issue #155); the admin guard must still run ahead of it.
+    const deploymentValidationIndex = source.indexOf(
+      "assertValidDeploymentConfig(process.env, 'server')",
     );
+    expect(deploymentValidationIndex).toBeGreaterThan(-1);
+    expect(validationIndex).toBeLessThan(deploymentValidationIndex);
   });
 
   it("classifies coupled feature flags", async () => {

@@ -47,6 +47,7 @@ import {
   findCoupledFeatureFlagWarnings,
   validatePublicServerAdminConfiguration
 } from "../admin/config.js";
+import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -76,16 +77,10 @@ const PUBLIC_BASE_URL =
 const REQUIRE_AUTH = process.env.LETTER_IRL_REQUIRE_AUTH !== "false";
 const DEBUG_ENABLED = isDebugEnabled();
 
-// Environment variable validation
-const REQUIRED_ENV_VARS = [
-  'DATABASE_URL',
-];
-
-// Only require these in production (not for local admin mode)
-const PRODUCTION_ENV_VARS = [
-  'STRIPE_SECRET_KEY',
-  'STRIPE_WEBHOOK_SECRET',
-];
+// Environment validation lives in src/config/deploymentConfig.ts (issue #155):
+// one validator, shared with the maintenance entrypoint, that fails a
+// misconfigured production boot instead of letting it serve /healthz and fake
+// its way through fulfillment.
 
 /**
  * Build identity, for verifying which revision is actually serving.
@@ -112,27 +107,16 @@ export function validateEnvironment() {
     );
   }
 
-  const missing: string[] = [];
-
-  for (const envVar of REQUIRED_ENV_VARS) {
-    if (!process.env[envVar]) {
-      missing.push(envVar);
+  // Fail closed on invalid deployment configuration (issue #155). Throws with
+  // every problem named at once; the entrypoint's catch turns that into a
+  // non-zero exit, so a misconfigured deploy never serves traffic. Warnings
+  // are printed except under test, where the pinned boot-validation contract
+  // counts warn lines exactly (tests/unit/mcp/legacyAdminRoutes.test.ts).
+  const deployment = assertValidDeploymentConfig(process.env, 'server');
+  if (deployment.mode !== 'test') {
+    for (const warning of deployment.warnings) {
+      console.warn(`[config] ${warning}`);
     }
-  }
-
-  // Check production vars unless ADMIN_ENABLED is true (local admin mode)
-  if (process.env.ADMIN_ENABLED !== 'true') {
-    for (const envVar of PRODUCTION_ENV_VARS) {
-      if (!process.env[envVar]) {
-        missing.push(envVar);
-      }
-    }
-  }
-
-  if (missing.length > 0) {
-    console.error('❌ Missing required environment variables:');
-    missing.forEach(v => console.error(`   - ${v}`));
-    throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
   }
 
   if (REQUIRE_AUTH && isCimdEnforcementEnabled()) {
