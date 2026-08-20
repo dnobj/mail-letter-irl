@@ -57,14 +57,57 @@ The build produces Next.js standalone output and copies `public` plus `.next/sta
 
 ## Required Environment Checks
 
-Before every deployment, verify without printing secret values:
+Most environment verification is executable (issue #155). Three layers, in the
+order they catch problems:
 
-- `DATABASE_URL` points to the correct environment and contains a Neon pooled hostname.
-- Production uses PostGrid live mode and Stripe live mode.
-- Development uses PostGrid test/dummy mode and Stripe test mode.
-- `TEMP_IMAGE_STORE=bucket` is set in deployed environments.
+1. **Before deploying — the preflight parity check.** With a Railway API token:
+
+   ```bash
+   RAILWAY_API_TOKEN=... npm run preflight:cutover -- --env production
+   ```
+
+   It diffs each service's variable *names* (never values) against
+   `ENV_VAR_MANIFEST` in `src/config/deploymentConfig.ts` and exits non-zero on
+   gaps. Run it against `development` after environment changes and against
+   `production` before every promotion. Committed Railway variables do not
+   reach a running instance until the service is explicitly **redeployed**
+   (Deployments → ⋮ → Redeploy); a variable that looks set in the UI can still
+   be absent from the running process (issue #213).
+
+2. **At boot — the deployment validator.** `validateEnvironment()` asserts
+   `src/config/deploymentConfig.ts` rules before the server accepts traffic,
+   and the maintenance entrypoint asserts the same before touching anything.
+   In production it refuses: a missing/unapproved `LETTER_PROVIDER` (the
+   implicit dummy default included), test-mode PostGrid or Stripe keys,
+   `LETTER_PROVIDER_CONFIG` without `"mode": "live"`, missing pack
+   prices/amounts, incomplete JIT config while `JIT_PURCHASE_ENABLED=true`,
+   memory image storage or incomplete bucket credentials, and
+   placeholder-shaped credentials. Outside production it refuses live-mode
+   keys. A failed validation exits non-zero, so Railway keeps the previous
+   image serving.
+
+3. **After deploying — `/readyz`.** Returns `200` with
+   `{"ready":true,"mode":...,"provider":...}` when configuration is valid, the
+   database answers, and every enabled `provider_routing` row names a
+   registered (in production: non-dummy) provider; `503` with check names
+   otherwise. Detail is in the server log under `readiness.failed`.
+
+**Rollout ordering warning:** set an environment's variables *before* deploying
+code that validates them. New variables are inert to a running image, but a
+crash-restart of an already-running service whose config has become invalid
+will boot-loop. In particular, `LETTER_IRL_DEPLOYMENT_ENVIRONMENT` must be set
+on every deployed service (`development` on dev API and maintenance,
+`production` on their production counterparts) **before** the validator ships
+there: both Railway environments run `NODE_ENV=production`, and an unlabeled
+environment resolves to production mode.
+
+Still verified by a human, without printing secret values:
+
+- `DATABASE_URL` points to the correct environment's Neon pooled hostname
+  (the validator checks presence, not which environment it belongs to).
 - Bucket variables reference the private `letter-irl-images` service.
-- Public base URLs, Auth0 issuer/audience, CORS origins, and Stripe webhook URLs match the environment.
+- Public base URLs, Auth0 issuer/audience, CORS origins, and Stripe webhook
+  URLs match the environment.
 - `LETTER_IRL_OAUTH_CIMD_ENFORCEMENT=true` only after all exact CIMD values are
   present in that environment.
 - `ADMIN_ENABLED` is unset or `false` in cloud environments; `true` is a startup error and cannot
@@ -85,11 +128,13 @@ As of July 16, 2026, development has the transactional-outbox release and hourly
    development branch. Do not apply 022 as a substitute for or copy of issue #69's migration 021.
    Confirm the migration content identities in
    [Migration 021/022/023 integration gate](#migration-021022023-integration-gate) still match.
-4. Check `/healthz`, OAuth metadata, manifest, MCP connection, and website `/api/health`.
+4. Check `/healthz`, `/readyz`, OAuth metadata, manifest, MCP connection, and website `/api/health`.
    `/healthz` still returns `200` with body `ok`, and additionally carries `X-Build-Commit` and
    `X-Build-Branch` from Railway's injected git variables. Assert those against the commit you
    expect: a successful HTTP response proves the service is up, not that your deployment replaced
    the previous image. A failed pre-deploy leaves the old build serving and every other check green.
+   `/readyz` must return `200` with `"mode":"development"` — a `503` names the failing check
+   (config, database, routing) and the detail is in the deploy log under `readiness.failed`.
 5. Run the automated suites in both repositories.
 6. Run the manual checks in [manual-tests.md](manual-tests.md), including zero balance, simulated purchase, confirmed send, status retrieval, image generation, and restart persistence.
 7. Confirm Serverless is enabled, leave development idle for more than ten minutes, and confirm both API and website sleep.
@@ -273,13 +318,26 @@ See [`tests/integration/README.md`](../tests/integration/README.md) for how to s
 
 ## Production Promotion
 
-1. Review the `dev` to `master` backend diff and the `dev` to `main` website diff.
-2. Confirm no development URLs, test keys, or dummy-provider settings enter production.
-3. Merge backend `dev` into `master` and website `dev` into `main` through reviewed PRs.
-4. Confirm migrations complete before the new API deployment becomes active.
-5. Run production smoke tests without creating a real charge or real mail order unless explicitly planned.
-6. Confirm API and website remain warm and the hourly maintenance run exits cleanly.
-7. Observe errors, memory, CPU, and Neon activity for at least one hour after release.
+1. Run the preflight against production and set every missing variable **before**
+   merging, then redeploy is not required yet (the old image ignores new
+   variables) but the gaps must be closed:
+   `RAILWAY_API_TOKEN=... npm run preflight:cutover -- --env production`.
+   This includes `LETTER_IRL_DEPLOYMENT_ENVIRONMENT=production` on both the API
+   and maintenance services — without it the new image resolves the environment
+   correctly anyway (fail-closed) but boots with an error demanding the label.
+2. Review the `dev` to `master` backend diff and the `dev` to `main` website diff.
+3. Confirm no development URLs, test keys, or dummy-provider settings enter production.
+   The boot validator enforces the key-mode and provider rules; the review still
+   catches URLs and anything outside the validator's reach.
+4. Merge backend `dev` into `master` and website `dev` into `main` through reviewed PRs.
+5. Confirm migrations complete before the new API deployment becomes active.
+6. Confirm `/readyz` returns `200` with `"mode":"production","provider":"postgrid"` on the
+   new image (`X-Build-Commit` proves which image answered).
+7. Run production smoke tests without creating a real charge or real mail order unless explicitly planned.
+8. Confirm API and website remain warm and the hourly maintenance run exits cleanly —
+   the maintenance entrypoint now validates configuration first, so a config gap
+   shows up as `maintenance.run_failed` with `errorClass:"configuration_error"`.
+9. Observe errors, memory, CPU, and Neon activity for at least one hour after release.
 
 ## Rollback
 
