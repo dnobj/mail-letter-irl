@@ -371,6 +371,9 @@ database URL in `.env`.
    `/api/admin/users`; verify each returns `404`, contains no user/admin data, and sends no CORS allow
    header.
 3. [ ] Open `/healthz`; verify `200` and body `ok`.
+   Then open `/readyz`; verify `200` with `"ready":true` and `"mode":"development"` (issue #155).
+   A `503` names the failing check — config, database, or routing — with detail in the deploy log
+   under `readiness.failed`.
 4. [ ] Open `/`; verify the existing public service status response remains successful.
 5. [ ] Open the manifest and OAuth metadata routes used by the development deployment; verify their
    existing public behavior remains successful and contains no admin route advertisement.
