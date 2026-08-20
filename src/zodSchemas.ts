@@ -22,13 +22,32 @@ export const quoteAndPreviewInputZ = z.object({
 // Letter with Image Schemas (for fileParams support)
 // ============================================================================
 
-// Image file param schema - INTENTIONALLY PERMISSIVE for runtime validation
-// Note: The JSON schema (schemas.ts) uses strict typing to tell OpenAI how to transform files.
-// This Zod schema is permissive to gracefully handle edge cases at runtime:
-// - Mobile sends "attached" string instead of file object (platform limitation)
-// - Empty strings or undefined values
-// Actual validation happens in tool handlers with graceful error messages.
-const imageFileParamZ = z.any();
+// Image file param schema - THIS IS THE SERVED LAYER. registerTools builds
+// the MCP tools/list input schemas from these zod objects (zodInputSchemas),
+// so what zod-to-json-schema emits here is exactly what ChatGPT's tool scan
+// reads. The scan enforces the Apps SDK file-param contract - an object
+// declaring all four of download_url/file_id/mime_type/file_name with only
+// the first two required - and STRIPS any deviating property schema to {},
+// disabling the file transform for the whole tool. z.any() serialized to {}
+// and did precisely that (issue #227: ChatGPT's stored schema showed
+// "image": {} and the model could only improvise bare id/path strings).
+//
+// The permissiveness existed for runtime edge cases - mobile sends strings
+// ("attached", "", "chat_upload://image_N") instead of file objects. That
+// tolerance now lives in the preprocess step: serialization uses the inner
+// object (contract-conformant), while any string coerces to undefined at
+// runtime and lands on the handlers' existing graceful no-image fallback.
+const imageFileParamZ = z.preprocess(
+  (value) => (typeof value === "string" ? undefined : value),
+  z
+    .object({
+      download_url: z.string(),
+      file_id: z.string(),
+      mime_type: z.string().optional(),
+      file_name: z.string().optional()
+    })
+    .optional()
+);
 
 // Letter with header image (image at top, like letterhead)
 export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
