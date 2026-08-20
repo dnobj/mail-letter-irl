@@ -1,6 +1,6 @@
 # UI Widgets
 
-**Last Updated:** May 30, 2026
+**Last Updated:** August 20, 2026
 
 Letter IRL registers five OpenAI Apps SDK widgets as MCP resources with `ui://` URIs and `text/html;profile=mcp-app`. Tool results keep model-facing data in `structuredContent` and send large render payloads, such as preview HTML and generated image thumbnails, through widget-only `_meta`.
 
@@ -9,7 +9,7 @@ Letter IRL registers five OpenAI Apps SDK widgets as MCP resources with `ui://` 
 - `LetterPreviewCard`: Shows text-only, header-image, and enclosed-image letter drafts. Reads letter preview HTML from `_meta.previewHtml`, displays delivery/cost context, and can call `send_letter` only after the user explicitly confirms.
 - `PostcardPreviewCard`: Shows postcard front and back previews from `_meta.previewFrontHtml` and `_meta.previewBackHtml`, then can call `send_postcard` only after explicit user confirmation.
 - `GenerateImageCard`: Shows a lightweight generated-image preview from `_meta.generatedImagePreview` and relays the generated image URL for use with postcard or letter preview tools.
-- `ImageUploadCard`: Opens a file picker fallback for image handoff problems, uploads a photo, and calls `confirm_uploaded_image` with the resulting `imageUrl`. When the host exposes `window.openai.selectFiles` (plan/region-gated), it also offers a "Choose from Library" button that picks a file already in the user's ChatGPT Library, resolves its URL via `getFileDownloadUrl`, and reuses the same confirm/follow-up handoff without re-uploading.
+- `ImageUploadCard`: Opens a file picker fallback for image handoff problems, uploads a photo, and calls `confirm_uploaded_image` with the resulting `imageUrl`. When the host exposes `window.openai.selectFiles` (plan/region-gated), it also offers a "Choose from Library" button that picks a file already in the user's ChatGPT Library and reuses the same confirm/follow-up handoff without re-uploading; because pick-time download URLs are temporary, a fresh URL is re-resolved via `getFileDownloadUrl` when the user confirms.
 - `GetStartedCard`: Presents onboarding guidance, purchase prerequisite messaging, and example prompts for new users.
 
 ## Runtime Bridge Notes

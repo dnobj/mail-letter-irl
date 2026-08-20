@@ -200,15 +200,18 @@ const WIDGET_REDIRECT_ORIGINS = Array.from(
  * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
  * @see US-MCP-07: Widget Resources
  */
+// *.oaiusercontent.com covers ChatGPT file-attachment download URLs
+// (getFileDownloadUrl / fileParams), which ImageUploadCard renders as the
+// preview for Library picks.
 export const WIDGET_CSP_CANONICAL = {
   connectDomains: ["https://chatgpt.com", WIDGET_API_ORIGIN],
-  resourceDomains: ["https://*.oaistatic.com", WIDGET_API_ORIGIN],
+  resourceDomains: ["https://*.oaistatic.com", "https://*.oaiusercontent.com", WIDGET_API_ORIGIN],
   redirectDomains: WIDGET_REDIRECT_ORIGINS
 };
 
 export const WIDGET_CSP_LEGACY = {
   connect_domains: ["https://chatgpt.com", WIDGET_API_ORIGIN],
-  resource_domains: ["https://*.oaistatic.com", WIDGET_API_ORIGIN],
+  resource_domains: ["https://*.oaistatic.com", "https://*.oaiusercontent.com", WIDGET_API_ORIGIN],
   // frame_domains not included - we don't use iframes
   redirect_domains: WIDGET_REDIRECT_ORIGINS
 };

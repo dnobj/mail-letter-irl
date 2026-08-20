@@ -121,6 +121,11 @@
         background: var(--bg-secondary);
       }
 
+      .btn[disabled] {
+        opacity: 0.6;
+        cursor: default;
+      }
+
       /* State: Preview (before upload) */
       .preview-state {
         padding: 1rem;
@@ -365,6 +370,11 @@
         // lives in ChatGPT's file store, so "Use This Photo" skips uploadFile
         // and goes straight to the confirm/follow-up handoff with its URL.
         var libraryFile = null;
+        // Monotonic guard: every user-initiated source action bumps this, and
+        // a library pick that resolves late (the picker is user-paced) checks
+        // its captured generation before touching state, so a stale resolve
+        // can never clobber a newer local selection or in-flight upload.
+        var flowGen = 0;
         var debugEnabled = false;
         var debugEndpoint = "";
         var debugSessionId = "upload-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
@@ -411,6 +421,12 @@
         function showLibraryStatus(msg) {
           libraryStatus.textContent = msg || "";
           libraryStatus.classList.toggle("hidden", !msg);
+        }
+
+        function scrubMessage(err) {
+          var msg = (err && err.message) || "Unknown error";
+          // Host error strings can embed signed URLs; keep diagnostics URL-free.
+          return String(msg).replace(/https?:\/\/\S+/g, "[url]");
         }
 
         function debugLog(message, data) {
@@ -596,11 +612,34 @@
 
         // --- Upload via OpenAI SDK ---
         async function uploadAndSend() {
-          if (libraryFile && libraryFile.downloadUrl) {
+          flowGen++;
+
+          if (libraryFile && libraryFile.fileId) {
             // Library files already live in ChatGPT's store; no upload needed.
+            // The pick-time URL is a temporary cache URL and the pick-to-confirm
+            // gap is user-paced, so re-resolve a fresh one from the durable
+            // fileId now instead of handing off a possibly expired link.
+            showState("uploading");
             debugLog("library.use", { fileId: libraryFile.fileId });
             debugBeacon("library.use", { fileId: libraryFile.fileId });
-            await finishWithDownloadUrl(libraryFile.downloadUrl, libraryFile.downloadUrl, "library_pick_complete");
+
+            var freshUrl = null;
+            try {
+              var freshResult = await window.openai.getFileDownloadUrl({ fileId: libraryFile.fileId });
+              freshUrl = (freshResult && (freshResult.downloadUrl || freshResult.download_url)) || null;
+              debugLog("library.refreshDownloadUrl.success", { hasDownloadUrl: !!freshUrl });
+              debugBeacon("library.refreshDownloadUrl.success", { hasDownloadUrl: !!freshUrl });
+            } catch (refreshErr) {
+              debugLog("library.refreshDownloadUrl.error", { message: scrubMessage(refreshErr) });
+              debugBeacon("library.refreshDownloadUrl.error", { message: scrubMessage(refreshErr) });
+            }
+
+            if (!freshUrl) {
+              showError("Could not refresh the link for that library photo. Please choose it again.");
+              return;
+            }
+
+            await finishWithDownloadUrl(freshUrl, freshUrl, "library_pick_complete");
             return;
           }
 
@@ -658,75 +697,102 @@
         // ChatGPT-GENERATED images (not just uploads)? Every phase beacons so
         // dev runs leave a server-side trail either way.
         async function pickFromLibrary() {
+          if (btnLibrary.disabled) {
+            return;
+          }
+          var gen = ++flowGen;
+          btnLibrary.disabled = true;
           showLibraryStatus("Opening your ChatGPT library…");
           debugLog("selectFiles.start");
           debugBeacon("selectFiles.start");
 
-          var files;
           try {
-            files = await window.openai.selectFiles();
-          } catch (e) {
-            debugLog("selectFiles.error", { message: (e && e.message) || "Unknown error" });
-            debugBeacon("selectFiles.error", { message: (e && e.message) || "Unknown error" });
-            showLibraryStatus("Library selection failed or was canceled.");
-            return;
+            var files;
+            try {
+              files = await window.openai.selectFiles();
+            } catch (e) {
+              debugLog("selectFiles.error", { message: scrubMessage(e) });
+              debugBeacon("selectFiles.error", { message: scrubMessage(e) });
+              if (gen === flowGen) {
+                showLibraryStatus("Library selection failed or was canceled.");
+              }
+              return;
+            }
+            if (gen !== flowGen) {
+              return;
+            }
+
+            if (!files || !files.length) {
+              debugLog("selectFiles.empty");
+              debugBeacon("selectFiles.empty");
+              showLibraryStatus("No file was selected.");
+              return;
+            }
+
+            var picked = files[0] || {};
+            var fileId = picked.fileId || picked.file_id;
+            var fileName = picked.fileName || picked.file_name || "Library file";
+            var mimeType = picked.mimeType || picked.mime_type || "";
+            debugLog("selectFiles.success", { count: files.length, fileId: fileId || null, mimeType: mimeType || null });
+            debugBeacon("selectFiles.success", { count: files.length, fileId: fileId || null, mimeType: mimeType || null, fileName: fileName });
+
+            if (!fileId) {
+              debugLog("selectFiles.missingFileId");
+              debugBeacon("selectFiles.missingFileId");
+              showLibraryStatus("The library did not return a usable file ID.");
+              return;
+            }
+
+            if (mimeType && ACCEPTED_TYPES.indexOf(mimeType) === -1) {
+              debugLog("selectFiles.unsupportedType", { mimeType: mimeType });
+              debugBeacon("selectFiles.unsupportedType", { mimeType: mimeType });
+              showLibraryStatus("Unsupported format (" + mimeType + "). Please pick a JPEG, PNG, or WebP image.");
+              return;
+            }
+
+            var downloadUrl = null;
+            try {
+              debugLog("library.getFileDownloadUrl.start", { fileId: fileId });
+              debugBeacon("library.getFileDownloadUrl.start", { fileId: fileId });
+              var urlResult = await window.openai.getFileDownloadUrl({ fileId: fileId });
+              downloadUrl = (urlResult && (urlResult.downloadUrl || urlResult.download_url)) || null;
+              debugLog("library.getFileDownloadUrl.success", { hasDownloadUrl: !!downloadUrl });
+              debugBeacon("library.getFileDownloadUrl.success", { hasDownloadUrl: !!downloadUrl });
+            } catch (e) {
+              debugLog("library.getFileDownloadUrl.error", { message: scrubMessage(e) });
+              debugBeacon("library.getFileDownloadUrl.error", { message: scrubMessage(e) });
+            }
+            if (gen !== flowGen) {
+              return;
+            }
+
+            if (!downloadUrl) {
+              showLibraryStatus("Could not get a download link for that library file.");
+              return;
+            }
+
+            selectedFile = null;
+            previewDataUrl = null;
+            libraryFile = { fileId: fileId, fileName: fileName, mimeType: mimeType, downloadUrl: downloadUrl };
+
+            var pickedNote = files.length > 1 ? " · using the first of " + files.length + " selected" : "";
+            previewImg.onerror = function () {
+              debugLog("library.previewImage.error");
+              debugBeacon("library.previewImage.error");
+              fileInfo.textContent = fileName + " · preview could not be displayed. You can still try this photo, or choose a different one.";
+            };
+            previewImg.src = downloadUrl;
+            fileInfo.textContent = fileName + (mimeType ? " · " + mimeType : "") + " · from your ChatGPT library" + pickedNote;
+            showLibraryStatus("");
+            showState("preview");
+          } finally {
+            btnLibrary.disabled = false;
           }
-
-          if (!files || !files.length) {
-            debugBeacon("selectFiles.empty");
-            showLibraryStatus("No file was selected.");
-            return;
-          }
-
-          var picked = files[0] || {};
-          var fileId = picked.fileId || picked.file_id;
-          var fileName = picked.fileName || picked.file_name || "Library file";
-          var mimeType = picked.mimeType || picked.mime_type || "";
-          debugLog("selectFiles.success", { count: files.length, fileId: fileId || null, mimeType: mimeType || null });
-          debugBeacon("selectFiles.success", { count: files.length, fileId: fileId || null, mimeType: mimeType || null, fileName: fileName });
-
-          if (!fileId) {
-            debugBeacon("selectFiles.missingFileId");
-            showLibraryStatus("The library did not return a usable file ID.");
-            return;
-          }
-
-          if (mimeType && ACCEPTED_TYPES.indexOf(mimeType) === -1) {
-            debugBeacon("selectFiles.unsupportedType", { mimeType: mimeType });
-            showLibraryStatus("Unsupported format (" + mimeType + "). Please pick a JPEG, PNG, or WebP image.");
-            return;
-          }
-
-          var downloadUrl = null;
-          try {
-            debugBeacon("library.getFileDownloadUrl.start", { fileId: fileId });
-            var urlResult = await window.openai.getFileDownloadUrl({ fileId: fileId });
-            downloadUrl = (urlResult && (urlResult.downloadUrl || urlResult.download_url)) || null;
-            debugBeacon("library.getFileDownloadUrl.success", { hasDownloadUrl: !!downloadUrl });
-          } catch (e) {
-            debugBeacon("library.getFileDownloadUrl.error", { message: (e && e.message) || "Unknown error" });
-          }
-
-          if (!downloadUrl) {
-            showLibraryStatus("Could not get a download link for that library file.");
-            return;
-          }
-
-          selectedFile = null;
-          previewDataUrl = null;
-          libraryFile = { fileId: fileId, fileName: fileName, mimeType: mimeType, downloadUrl: downloadUrl };
-
-          previewImg.onerror = function () {
-            debugBeacon("library.previewImage.error");
-          };
-          previewImg.src = downloadUrl;
-          fileInfo.textContent = fileName + (mimeType ? " · " + mimeType : "") + " · from your ChatGPT library";
-          showLibraryStatus("");
-          showState("preview");
         }
 
         // --- Event handlers ---
         btnSelect.addEventListener("click", function () {
+          showLibraryStatus("");
           fileInput.click();
         });
 
@@ -736,18 +802,27 @@
 
         fileInput.addEventListener("change", function () {
           if (fileInput.files && fileInput.files[0]) {
+            flowGen++;
             libraryFile = null;
+            showLibraryStatus("");
             onFileSelected(fileInput.files[0]);
           }
         });
 
         btnChange.addEventListener("click", function () {
+          // A library pick returns to the two-button select state; only the
+          // local-file path re-opens the file dialog straight away.
+          var fromLibrary = !!libraryFile;
+          flowGen++;
           fileInput.value = "";
           selectedFile = null;
           previewDataUrl = null;
           libraryFile = null;
+          showLibraryStatus("");
           showState("select");
-          fileInput.click();
+          if (!fromLibrary) {
+            fileInput.click();
+          }
         });
 
         btnUse.addEventListener("click", function () {
