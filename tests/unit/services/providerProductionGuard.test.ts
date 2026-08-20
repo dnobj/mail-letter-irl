@@ -65,10 +65,11 @@ describe('provider production guards', () => {
   });
 
   it('refuses the dummy provider in an UNLABELED production environment', () => {
-    // Only NODE_ENV says production; the identity var is unset. Mode
-    // resolution fails closed to production, and the guard must follow it -
-    // a guard reading the identity var alone would miss this (mutation gap
-    // from review round 1).
+    // Only NODE_ENV says production; the identity var is EXPLICITLY unset
+    // (hermetic against ambient env - round 2). Mode resolution fails closed
+    // to production, and the guard must follow it - a guard reading the
+    // identity var alone would miss this (mutation gap from review round 1).
+    vi.stubEnv('LETTER_IRL_DEPLOYMENT_ENVIRONMENT', '');
     vi.stubEnv('NODE_ENV', 'production');
     expect(() => getProviderByName('dummy')).toThrow(/not allowed in production/);
   });

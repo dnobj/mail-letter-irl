@@ -12,29 +12,60 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 describe('boot configuration logging', () => {
+  // Every variable any validator rule reads. All are cleared in beforeEach so
+  // a developer's ambient shell or .env (dotenv runs on the dynamic import)
+  // cannot satisfy a rule these tests assert as failing - round 2 flagged the
+  // hermeticity gap.
   const OWNED_KEYS = [
     'NODE_ENV',
     'LETTER_IRL_DEPLOYMENT_ENVIRONMENT',
     'LETTER_IRL_REQUIRE_AUTH',
     'DATABASE_URL',
+    'ADMIN_ENABLED',
     'STRIPE_SECRET_KEY',
     'STRIPE_WEBHOOK_SECRET',
+    'STRIPE_PRICE_STARTER',
+    'STRIPE_STARTER_AMOUNT_CENTS',
+    'STRIPE_PRICE_REGULAR',
+    'STRIPE_REGULAR_AMOUNT_CENTS',
+    'STRIPE_PRICE_POWER',
+    'STRIPE_POWER_AMOUNT_CENTS',
     'LETTER_PROVIDER',
     'LETTER_PROVIDER_API_KEY',
     'LETTER_PROVIDER_CONFIG',
+    'POSTGRID_API_KEY',
+    'POSTGRID_ADDRESS_VERIFICATION_API_KEY',
     'JIT_PURCHASE_ENABLED',
-    'IMAGE_TRIAL_ENABLED'
+    'IMAGE_TRIAL_ENABLED',
+    'TEMP_IMAGE_STORE',
+    'TEMP_IMAGE_BUCKET_NAME',
+    'TEMP_IMAGE_BUCKET_ENDPOINT',
+    'TEMP_IMAGE_BUCKET_REGION',
+    'TEMP_IMAGE_BUCKET_ACCESS_KEY_ID',
+    'TEMP_IMAGE_BUCKET_SECRET_ACCESS_KEY',
+    'AWS_S3_BUCKET_NAME',
+    'AWS_ENDPOINT_URL_S3',
+    'AWS_ENDPOINT_URL',
+    'AWS_REGION',
+    'AWS_DEFAULT_REGION',
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    'BUCKET',
+    'ENDPOINT',
+    'REGION',
+    'ACCESS_KEY_ID',
+    'SECRET_ACCESS_KEY',
+    'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT'
   ] as const;
 
   let saved: Record<string, string | undefined>;
 
   beforeEach(() => {
     saved = Object.fromEntries(OWNED_KEYS.map(key => [key, process.env[key]]));
+    for (const key of OWNED_KEYS) delete process.env[key];
     // Module-level constants capture env at import time (same constraint the
     // boot-validation suite documents), so set before the dynamic import.
     process.env.LETTER_IRL_REQUIRE_AUTH = 'false';
-    delete process.env.JIT_PURCHASE_ENABLED;
-    delete process.env.IMAGE_TRIAL_ENABLED;
   });
 
   afterEach(() => {

@@ -190,6 +190,13 @@ describe('mail outbox retries', () => {
     const result = await processLetterJob('job-1', {});
 
     expect(result).toMatchObject({ claimed: true, completed: false, retryScheduled: true });
+    // Round 2 caught this test passing with the fix reverted: under these
+    // mocks markProviderDispatch fails on its unmatched relation query and
+    // lands on the same retryable path, so the rejection above was never even
+    // consumed. Pinning that resolution actually RAN is what kills the
+    // resolve-after-marker mutant - with the old order, the marker throws
+    // first and this counter stays at zero.
+    expect(getProviderForMailType).toHaveBeenCalledTimes(1);
     expect(sendLetter).not.toHaveBeenCalled();
     expect(clientQuery).not.toHaveBeenCalledWith(
       expect.stringContaining("SET status = 'held'"),

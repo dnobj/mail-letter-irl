@@ -146,14 +146,18 @@ describe('parity with the boot validator', () => {
    * integers, mode:"live" - are boot-only by design; presence is the shared
    * contract.)
    */
-  function validValueFor(name: string): string {
+  function validValueFor(name: string, environment: 'production' | 'development'): string {
+    const production = environment === 'production';
     if (name === 'DATABASE_URL') return 'postgresql://user:pass@fixture.example/db';
-    if (name === 'STRIPE_SECRET_KEY') return 'sk_live_parity_fixture';
+    // Round 2 caught the identity value hardcoded to 'production', which made
+    // the development rows validate the wrong mode. Every mode-sensitive
+    // value now follows the row's environment.
+    if (name === 'LETTER_IRL_DEPLOYMENT_ENVIRONMENT') return environment;
+    if (name === 'STRIPE_SECRET_KEY') return production ? 'sk_live_parity_fixture' : 'sk_test_parity_fixture';
     if (name === 'STRIPE_WEBHOOK_SECRET') return 'whsec_parity_fixture';
-    if (name === 'LETTER_IRL_DEPLOYMENT_ENVIRONMENT') return 'production';
     if (name === 'LETTER_PROVIDER') return 'postgrid';
-    if (name === 'LETTER_PROVIDER_API_KEY') return 'live_sk_parity_fixture';
-    if (name === 'LETTER_PROVIDER_CONFIG') return '{"mode":"live"}';
+    if (name === 'LETTER_PROVIDER_API_KEY') return production ? 'live_sk_parity_fixture' : 'test_sk_parity_fixture';
+    if (name === 'LETTER_PROVIDER_CONFIG') return production ? '{"mode":"live"}' : '{"mode":"test"}';
     if (name.startsWith('STRIPE_PRICE_') || name.endsWith('_PRICE_ID')) return `price_${name.toLowerCase()}`;
     if (name.endsWith('_AMOUNT_CENTS')) return '500';
     return `parity-fixture-${name.toLowerCase()}`;
@@ -173,14 +177,14 @@ describe('parity with the boot validator', () => {
       NODE_ENV: 'production', // both Railway environments run this
       LETTER_IRL_DEPLOYMENT_ENVIRONMENT: environment
     };
-    for (const entry of complete) env[entry.name] = validValueFor(entry.name);
+    for (const entry of complete) env[entry.name] = validValueFor(entry.name, environment);
     // ...add the shape-owned production requirements the preflight cannot see
     // (it checks names; the validator checks values), so only PRESENCE parity
     // is under test here.
     if (environment === 'production') {
       for (const entry of ENV_VAR_MANIFEST) {
         if (entry.services.includes(service === 'api' ? 'api' : 'maintenance') && !env[entry.name] && !entry.condition) {
-          env[entry.name] = validValueFor(entry.name);
+          env[entry.name] = validValueFor(entry.name, environment);
         }
       }
       env.TEMP_IMAGE_STORE = 'bucket';
@@ -188,8 +192,13 @@ describe('parity with the boot validator', () => {
     }
 
     const surface = service === 'api' ? 'server' : 'maintenance';
-    const presenceErrors = validateDeploymentConfig(env, surface)
-      .findings.filter(f => f.severity === 'error' && f.rule.startsWith('presence.'));
+    const validation = validateDeploymentConfig(env, surface);
+    // The row must validate in ITS OWN mode - round 2 caught the development
+    // rows silently running in production mode.
+    expect(validation.mode).toBe(environment);
+    const presenceErrors = validation.findings.filter(
+      f => f.severity === 'error' && f.rule.startsWith('presence.')
+    );
     expect(presenceErrors).toEqual([]);
   });
 
@@ -206,7 +215,7 @@ describe('parity with the boot validator', () => {
       NODE_ENV: 'production',
       LETTER_IRL_DEPLOYMENT_ENVIRONMENT: 'development'
     };
-    for (const name of maintenanceNames) env[name] = validValueFor(name);
+    for (const name of maintenanceNames) env[name] = validValueFor(name, 'development');
     // Development identity var comes from the diff itself.
     env.LETTER_IRL_DEPLOYMENT_ENVIRONMENT = 'development';
     env.STRIPE_SECRET_KEY = 'sk_test_parity_fixture'; // dev holds a test key
