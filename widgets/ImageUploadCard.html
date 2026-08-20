@@ -80,6 +80,13 @@
         margin: 0.75rem 0 0;
       }
 
+      .select-actions {
+        display: flex;
+        gap: 0.5rem;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+
       /* Buttons */
       .btn {
         display: inline-flex;
@@ -276,7 +283,11 @@
         <div class="select-icon">&#x1F4F7;</div>
         <p class="select-title">Upload a Photo</p>
         <p id="guidance-text" class="select-guidance">Select a photo to use in your letter or postcard.</p>
-        <button class="btn btn-primary" id="btn-select" type="button">Select Photo</button>
+        <div class="select-actions">
+          <button class="btn btn-primary" id="btn-select" type="button">Select Photo</button>
+          <button class="btn btn-secondary hidden" id="btn-library" type="button">Choose from Library</button>
+        </div>
+        <p id="library-status" class="select-formats hidden"></p>
         <p class="select-formats">JPEG, PNG, or WebP &middot; Max 10 MB</p>
         <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp" class="hidden" />
       </div>
@@ -301,7 +312,7 @@
 
       <!-- Done State (after upload) -->
       <div id="state-done" class="done-state hidden">
-        <p class="done-label">Uploaded Photo</p>
+        <p id="done-label" class="done-label">Uploaded Photo</p>
         <div class="done-image-container">
           <img id="done-img" src="" alt="Uploaded photo" />
         </div>
@@ -333,12 +344,15 @@
         var stateError = document.getElementById("state-error");
 
         var btnSelect = document.getElementById("btn-select");
+        var btnLibrary = document.getElementById("btn-library");
+        var libraryStatus = document.getElementById("library-status");
         var btnChange = document.getElementById("btn-change");
         var btnUse = document.getElementById("btn-use");
         var btnCopy = document.getElementById("btn-copy");
         var fileInput = document.getElementById("file-input");
         var previewImg = document.getElementById("preview-img");
         var doneImg = document.getElementById("done-img");
+        var doneLabel = document.getElementById("done-label");
         var fileInfo = document.getElementById("file-info");
         var guidanceText = document.getElementById("guidance-text");
         var errorMessage = document.getElementById("error-message");
@@ -346,6 +360,11 @@
 
         var selectedFile = null;
         var previewDataUrl = null;
+        // Set when the pending preview came from the ChatGPT Library picker
+        // (window.openai.selectFiles) instead of a local file. The file already
+        // lives in ChatGPT's file store, so "Use This Photo" skips uploadFile
+        // and goes straight to the confirm/follow-up handoff with its URL.
+        var libraryFile = null;
         var debugEnabled = false;
         var debugEndpoint = "";
         var debugSessionId = "upload-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
@@ -375,6 +394,24 @@
           } catch (e) { /* ignore */ }
         }
         hydrateFromToolOutput();
+
+        // --- ChatGPT Library picker availability ---
+        // selectFiles is plan/region-gated and typed optional on the host
+        // bridge, so the button only appears when the API is actually there.
+        // Re-checked on openai:set_globals because bridge globals can arrive
+        // after initial load.
+        function selectFilesAvailable() {
+          return !!(window.openai && typeof window.openai.selectFiles === "function");
+        }
+
+        function updateLibraryAvailability() {
+          btnLibrary.classList.toggle("hidden", !selectFilesAvailable());
+        }
+
+        function showLibraryStatus(msg) {
+          libraryStatus.textContent = msg || "";
+          libraryStatus.classList.toggle("hidden", !msg);
+        }
 
         function debugLog(message, data) {
           if (!debugEnabled) return;
@@ -432,7 +469,10 @@
           } else {
             nextStep = 'call a preview tool with imageUrl "' + downloadUrl + '"';
           }
-          return "Image upload completed. Please " + nextStep + ".";
+          var lead = reason === "library_pick_complete"
+            ? "Image selected from the ChatGPT library."
+            : "Image upload completed.";
+          return lead + " Please " + nextStep + ".";
         }
 
         async function sendFollowUpFallback(downloadUrl, reason) {
@@ -504,6 +544,7 @@
           var reader = new FileReader();
           reader.onload = function (e) {
             previewDataUrl = e.target.result;
+            previewImg.onerror = null;
             previewImg.src = previewDataUrl;
             fileInfo.textContent = file.name + " \u00B7 " + formatFileSize(file.size);
             showState("preview");
@@ -514,8 +555,55 @@
           reader.readAsDataURL(file);
         }
 
+        // --- Shared handoff tail (local upload + Library pick both land here) ---
+        async function finishWithDownloadUrl(downloadUrl, previewSrc, reason) {
+          // Show done state with image preview + URL
+          doneLabel.textContent = reason === "library_pick_complete" ? "Selected Photo" : "Uploaded Photo";
+          doneImg.src = previewSrc || "";
+          urlText.textContent = downloadUrl;
+          showState("done");
+
+          // callTool stores the URL server-side but does NOT create a new
+          // ChatGPT conversation turn. We always need sendFollowUpMessage
+          // to prompt ChatGPT to act on the uploaded image.
+          if (window.openai && window.openai.callTool) {
+            try {
+              debugLog("callTool.start", { toolName: "confirm_uploaded_image" });
+              debugBeacon("callTool.start", { toolName: "confirm_uploaded_image" });
+              await window.openai.callTool("confirm_uploaded_image", {
+                imageUrl: downloadUrl,
+                context: uploadContext || undefined
+              });
+              debugLog("callTool.success", { toolName: "confirm_uploaded_image" });
+              debugBeacon("callTool.success", { toolName: "confirm_uploaded_image" });
+            } catch (callErr) {
+              debugLog("callTool.error", {
+                message: (callErr && callErr.message) || "Unknown error"
+              });
+              debugBeacon("callTool.error", {
+                message: (callErr && callErr.message) || "Unknown error"
+              });
+            }
+          } else {
+            debugLog("callTool.unavailable");
+            debugBeacon("callTool.unavailable");
+          }
+
+          // Always send a follow-up message so ChatGPT knows the image
+          // is ready and has the URL to act on.
+          await sendFollowUpFallback(downloadUrl, reason);
+        }
+
         // --- Upload via OpenAI SDK ---
         async function uploadAndSend() {
+          if (libraryFile && libraryFile.downloadUrl) {
+            // Library files already live in ChatGPT's store; no upload needed.
+            debugLog("library.use", { fileId: libraryFile.fileId });
+            debugBeacon("library.use", { fileId: libraryFile.fileId });
+            await finishWithDownloadUrl(libraryFile.downloadUrl, libraryFile.downloadUrl, "library_pick_complete");
+            return;
+          }
+
           if (!selectedFile) {
             showError("No file selected.");
             return;
@@ -552,40 +640,7 @@
               return;
             }
 
-            // Show done state with image preview + URL
-            doneImg.src = previewDataUrl || "";
-            urlText.textContent = downloadUrl;
-            showState("done");
-
-            // callTool stores the URL server-side but does NOT create a new
-            // ChatGPT conversation turn. We always need sendFollowUpMessage
-            // to prompt ChatGPT to act on the uploaded image.
-            if (window.openai && window.openai.callTool) {
-              try {
-                debugLog("callTool.start", { toolName: "confirm_uploaded_image" });
-                debugBeacon("callTool.start", { toolName: "confirm_uploaded_image" });
-                await window.openai.callTool("confirm_uploaded_image", {
-                  imageUrl: downloadUrl,
-                  context: uploadContext || undefined
-                });
-                debugLog("callTool.success", { toolName: "confirm_uploaded_image" });
-                debugBeacon("callTool.success", { toolName: "confirm_uploaded_image" });
-              } catch (callErr) {
-                debugLog("callTool.error", {
-                  message: (callErr && callErr.message) || "Unknown error"
-                });
-                debugBeacon("callTool.error", {
-                  message: (callErr && callErr.message) || "Unknown error"
-                });
-              }
-            } else {
-              debugLog("callTool.unavailable");
-              debugBeacon("callTool.unavailable");
-            }
-
-            // Always send a follow-up message so ChatGPT knows the upload
-            // is complete and has the URL to act on.
-            await sendFollowUpFallback(downloadUrl, "upload_complete");
+            await finishWithDownloadUrl(downloadUrl, previewDataUrl, "upload_complete");
           } catch (err) {
             debugLog("uploadAndSend.error", {
               message: (err && err.message) || "Unknown error"
@@ -598,13 +653,90 @@
           }
         }
 
+        // --- Pick from the ChatGPT Library (window.openai.selectFiles) ---
+        // The decisive #227 experiment: does the Library picker expose
+        // ChatGPT-GENERATED images (not just uploads)? Every phase beacons so
+        // dev runs leave a server-side trail either way.
+        async function pickFromLibrary() {
+          showLibraryStatus("Opening your ChatGPT library…");
+          debugLog("selectFiles.start");
+          debugBeacon("selectFiles.start");
+
+          var files;
+          try {
+            files = await window.openai.selectFiles();
+          } catch (e) {
+            debugLog("selectFiles.error", { message: (e && e.message) || "Unknown error" });
+            debugBeacon("selectFiles.error", { message: (e && e.message) || "Unknown error" });
+            showLibraryStatus("Library selection failed or was canceled.");
+            return;
+          }
+
+          if (!files || !files.length) {
+            debugBeacon("selectFiles.empty");
+            showLibraryStatus("No file was selected.");
+            return;
+          }
+
+          var picked = files[0] || {};
+          var fileId = picked.fileId || picked.file_id;
+          var fileName = picked.fileName || picked.file_name || "Library file";
+          var mimeType = picked.mimeType || picked.mime_type || "";
+          debugLog("selectFiles.success", { count: files.length, fileId: fileId || null, mimeType: mimeType || null });
+          debugBeacon("selectFiles.success", { count: files.length, fileId: fileId || null, mimeType: mimeType || null, fileName: fileName });
+
+          if (!fileId) {
+            debugBeacon("selectFiles.missingFileId");
+            showLibraryStatus("The library did not return a usable file ID.");
+            return;
+          }
+
+          if (mimeType && ACCEPTED_TYPES.indexOf(mimeType) === -1) {
+            debugBeacon("selectFiles.unsupportedType", { mimeType: mimeType });
+            showLibraryStatus("Unsupported format (" + mimeType + "). Please pick a JPEG, PNG, or WebP image.");
+            return;
+          }
+
+          var downloadUrl = null;
+          try {
+            debugBeacon("library.getFileDownloadUrl.start", { fileId: fileId });
+            var urlResult = await window.openai.getFileDownloadUrl({ fileId: fileId });
+            downloadUrl = (urlResult && (urlResult.downloadUrl || urlResult.download_url)) || null;
+            debugBeacon("library.getFileDownloadUrl.success", { hasDownloadUrl: !!downloadUrl });
+          } catch (e) {
+            debugBeacon("library.getFileDownloadUrl.error", { message: (e && e.message) || "Unknown error" });
+          }
+
+          if (!downloadUrl) {
+            showLibraryStatus("Could not get a download link for that library file.");
+            return;
+          }
+
+          selectedFile = null;
+          previewDataUrl = null;
+          libraryFile = { fileId: fileId, fileName: fileName, mimeType: mimeType, downloadUrl: downloadUrl };
+
+          previewImg.onerror = function () {
+            debugBeacon("library.previewImage.error");
+          };
+          previewImg.src = downloadUrl;
+          fileInfo.textContent = fileName + (mimeType ? " · " + mimeType : "") + " · from your ChatGPT library";
+          showLibraryStatus("");
+          showState("preview");
+        }
+
         // --- Event handlers ---
         btnSelect.addEventListener("click", function () {
           fileInput.click();
         });
 
+        btnLibrary.addEventListener("click", function () {
+          pickFromLibrary();
+        });
+
         fileInput.addEventListener("change", function () {
           if (fileInput.files && fileInput.files[0]) {
+            libraryFile = null;
             onFileSelected(fileInput.files[0]);
           }
         });
@@ -613,6 +745,7 @@
           fileInput.value = "";
           selectedFile = null;
           previewDataUrl = null;
+          libraryFile = null;
           showState("select");
           fileInput.click();
         });
@@ -632,7 +765,11 @@
 
         // --- Initialize ---
         showState("select");
-        window.addEventListener("openai:set_globals", hydrateFromToolOutput);
+        updateLibraryAvailability();
+        window.addEventListener("openai:set_globals", function () {
+          hydrateFromToolOutput();
+          updateLibraryAvailability();
+        });
       })();
     </script>
   </body>
