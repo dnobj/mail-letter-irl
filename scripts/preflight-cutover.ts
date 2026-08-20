@@ -116,9 +116,23 @@ async function railwayGraphQL<T>(
     // Never echo the response body: error payloads can quote the request.
     throw new Error(`Railway API returned ${response.status}`);
   }
-  const payload = (await response.json()) as { data?: T; errors?: Array<{ message: string }> };
+  // The variables response carries name:value content, and a JSON parse
+  // failure embeds a body excerpt in its SyntaxError message - which main()'s
+  // catch would print. Replace it with a fixed, value-free message (review
+  // round 1).
+  let payload: { data?: T; errors?: Array<{ message: string }> };
+  try {
+    payload = (await response.json()) as typeof payload;
+  } catch {
+    throw new Error('Railway API returned a response that is not valid JSON');
+  }
   if (payload.errors?.length) {
-    throw new Error(`Railway API error: ${payload.errors.map(e => e.message).join('; ')}`);
+    // GraphQL error strings are third-party text; the names-only contract is
+    // absolute, so none of it reaches stdout - the count and the dashboard
+    // are enough to act on (review round 1).
+    throw new Error(
+      `Railway API reported ${payload.errors.length} GraphQL error(s); check the token's access to the project in the Railway dashboard`
+    );
   }
   if (!payload.data) throw new Error('Railway API returned no data');
   return payload.data;
