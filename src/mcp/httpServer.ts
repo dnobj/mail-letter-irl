@@ -113,7 +113,19 @@ export function validateEnvironment() {
   // non-zero exit, so a misconfigured deploy never serves traffic. Warnings
   // are printed except under test, where the pinned boot-validation contract
   // counts warn lines exactly (tests/unit/mcp/legacyAdminRoutes.test.ts).
-  const deployment = assertValidDeploymentConfig(process.env, 'server');
+  let deployment;
+  try {
+    deployment = assertValidDeploymentConfig(process.env, 'server');
+  } catch (error) {
+    // Print the validator's message HERE, where the failure is known to be
+    // configuration and the message is value-free by construction (it names
+    // variables, never values). The entrypoint's catch deliberately logs only
+    // an error class - correct for arbitrary runtime errors, which may carry
+    // sensitive detail, but it would leave the operator with one word and no
+    // variable names for a config failure (review round 1).
+    console.error(error instanceof Error ? error.message : String(error));
+    throw error;
+  }
   if (deployment.mode !== 'test') {
     for (const warning of deployment.warnings) {
       console.warn(`[config] ${warning}`);

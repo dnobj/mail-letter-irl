@@ -64,12 +64,37 @@ describe('provider production guards', () => {
     expect(getProviderByName('dummy').config.name).toBe('dummy');
   });
 
-  it('does not serve production a provider cached before the environment changed', () => {
-    stubDevelopment();
-    expect(getProviderByName('dummy').config.name).toBe('dummy');
-
-    resetProvider(); // must clear the by-name cache, not only the default cache
-    stubProduction();
+  it('refuses the dummy provider in an UNLABELED production environment', () => {
+    // Only NODE_ENV says production; the identity var is unset. Mode
+    // resolution fails closed to production, and the guard must follow it -
+    // a guard reading the identity var alone would miss this (mutation gap
+    // from review round 1).
+    vi.stubEnv('NODE_ENV', 'production');
     expect(() => getProviderByName('dummy')).toThrow(/not allowed in production/);
+  });
+
+  it('refuses the dummy provider when only the identity label says production', () => {
+    // NODE_ENV stays "test" (vitest); identity alone must be enough - a guard
+    // reading NODE_ENV alone would miss this (the other half of the same
+    // mutation gap).
+    vi.stubEnv('LETTER_IRL_DEPLOYMENT_ENVIRONMENT', 'production');
+    expect(() => getProviderByName('dummy')).toThrow(/not allowed in production/);
+  });
+
+  it('really clears the by-name cache on reset, not just the default cache', () => {
+    // Review round 1: the previous version of this test passed through the
+    // dummy guard's short-circuit, which runs before the cache lookup, so
+    // deleting the clear() survived it. This version pins the cache itself:
+    // postgrid built while a key existed must not survive a reset into an
+    // environment without one.
+    stubDevelopment();
+    vi.stubEnv('POSTGRID_API_KEY', 'test_sk_unit_fixture');
+    expect(getProviderByName('postgrid').config.name).toBe('postgrid');
+
+    resetProvider();
+    vi.stubEnv('POSTGRID_API_KEY', '');
+    // Fresh construction now fails (no key) and development falls back to the
+    // default provider - proof the cached postgrid instance is gone.
+    expect(getProviderByName('postgrid').config.name).toBe('dummy');
   });
 });
