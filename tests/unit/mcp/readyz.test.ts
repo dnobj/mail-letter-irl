@@ -117,6 +117,40 @@ describe('/readyz readiness report', () => {
     expect(report.statusCode).toBe(200);
   });
 
+  it('fails routing when production mail is routed to DIY, which is registered but not approved', async () => {
+    // DIY is manual print - an explicit operator act the runtime does not
+    // refuse, but an environment routing production mail to it is not ready
+    // and must say so (review round 1: only dummy was flagged).
+    routableDb([{ mail_type: 'postcard', provider: 'diy' }]);
+    const report = await getReadiness(READY_PROD);
+    expect(report.statusCode).toBe(503);
+    expect(JSON.parse(report.body)).toEqual({ ready: false, failing: ['routing'] });
+  });
+
+  it('never reflects an unrecognized LETTER_PROVIDER value to anonymous callers', async () => {
+    // The route is unauthenticated; echoing an arbitrary env value would
+    // serve anything accidentally pasted into LETTER_PROVIDER (review r1).
+    routableDb([{ mail_type: 'postcard', provider: 'postgrid' }]);
+    const pasted = { ...READY_DEV, LETTER_PROVIDER: 'accidentally-pasted-secret-9x7' };
+    const report = await getReadiness(pasted);
+    expect(report.statusCode).toBe(200);
+    expect(JSON.parse(report.body).provider).toBe('unrecognized');
+    expect(report.body).not.toContain('accidentally-pasted-secret-9x7');
+  });
+
+  it('is actually registered as a route in the HTTP server, before auth with /healthz', async () => {
+    // getReadiness alone passing says nothing if the route block is deleted
+    // (mutation gap from review round 1).
+    const source = await readFile('src/mcp/httpServer.ts', 'utf8');
+    const healthzIndex = source.indexOf('url.pathname === "/healthz"');
+    const readyzIndex = source.indexOf('url.pathname === "/readyz"');
+    expect(healthzIndex).toBeGreaterThan(-1);
+    expect(readyzIndex).toBeGreaterThan(healthzIndex);
+    const block = source.slice(readyzIndex, source.indexOf('return;', readyzIndex));
+    expect(block).toContain('await getReadiness()');
+    expect(block).toContain('readiness.statusCode');
+  });
+
   it('fails routing on a routing row naming an unregistered provider, in any mode', async () => {
     routableDb([{ mail_type: 'postcard', provider: 'lob' }]);
     const report = await getReadiness(READY_DEV);

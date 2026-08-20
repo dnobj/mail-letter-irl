@@ -129,9 +129,18 @@ describe('validateDeploymentConfig in production', () => {
     ['test-prefixed POSTGRID_API_KEY', { POSTGRID_API_KEY: 'test_sk_unit_fixture' }, 'provider.test_key_in_production'],
     ['memory image store', { TEMP_IMAGE_STORE: 'memory' }, 'bucket.config_required'],
     ['missing bucket name and aliases', { TEMP_IMAGE_BUCKET_NAME: undefined }, 'bucket.config_required'],
+    ['missing bucket endpoint and aliases', { TEMP_IMAGE_BUCKET_ENDPOINT: undefined }, 'bucket.config_required'],
+    ['missing bucket access key and aliases', { TEMP_IMAGE_BUCKET_ACCESS_KEY_ID: undefined }, 'bucket.config_required'],
     ['missing bucket secret and aliases', { TEMP_IMAGE_BUCKET_SECRET_ACCESS_KEY: undefined }, 'bucket.config_required'],
     ['placeholder Stripe key', { STRIPE_SECRET_KEY: 'sk_live_...' }, 'config.placeholder_value'],
     ['placeholder provider key', { LETTER_PROVIDER_API_KEY: 'your_live_key_here' }, 'config.placeholder_value'],
+    // The send path prefers POSTGRID_API_KEY over the validated variable, so
+    // a placeholder there boots clean and then fails every send (review r1).
+    ['placeholder POSTGRID_API_KEY', { POSTGRID_API_KEY: 'your_live_key_here' }, 'config.placeholder_value'],
+    ['changeme placeholder', { STRIPE_SECRET_KEY: 'changeme' }, 'config.placeholder_value'],
+    ['placeholder literal', { LETTER_PROVIDER_API_KEY: 'placeholder' }, 'config.placeholder_value'],
+    ['xxx placeholder', { TEMP_IMAGE_BUCKET_SECRET_ACCESS_KEY: 'xxx' }, 'config.placeholder_value'],
+    ['test-prefixed address-verification key', { POSTGRID_ADDRESS_VERIFICATION_API_KEY: 'test_sk_unit_fixture' }, 'provider.test_key_in_production'],
     ['ADMIN_ENABLED in production', { ADMIN_ENABLED: 'true' }, 'admin.enabled_in_production']
   ])('%s is an error', (_description, overrides, expectedRule) => {
     expect(ruleIds(env(overrides), 'error')).toContain(expectedRule);
@@ -277,6 +286,35 @@ describe('validateDeploymentConfig outside production', () => {
       ADMIN_ENABLED: 'true'
     };
     expect(validateDeploymentConfig(adminLocal, 'server').errors).toEqual([]);
+  });
+
+  it('still rejects a live Stripe key in local admin mode', () => {
+    // Admin mode exempts presence and pack/JIT completeness, never the
+    // key-location rules: a pasted sk_live_ key in local admin tooling is
+    // exactly the live-key-outside-production scenario (review round 1).
+    const adminWithLiveKey: NodeJS.ProcessEnv = {
+      NODE_ENV: 'test',
+      DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+      ADMIN_ENABLED: 'true',
+      STRIPE_SECRET_KEY: 'sk_live_unit_fixture'
+    };
+    expect(ruleIds(adminWithLiveKey, 'error')).toContain('stripe.live_key_outside_production');
+  });
+});
+
+describe('validation surfaces', () => {
+  it('does not demand the webhook secret of the maintenance surface, matching the manifest', () => {
+    // Review round 1: the preflight honored the manifest's services field
+    // while the validator ignored it, so a maintenance service provisioned
+    // exactly per a green preflight failed every cron run. The surface now
+    // maps to the manifest's services, keeping the two in parity.
+    const noWebhook = env({ STRIPE_WEBHOOK_SECRET: undefined }, VALID_DEV);
+    expect(
+      validateDeploymentConfig(noWebhook, 'maintenance').errors
+    ).toEqual([]);
+    expect(
+      validateDeploymentConfig(noWebhook, 'server').findings.map(f => f.rule)
+    ).toContain('presence.stripe_webhook_secret');
   });
 });
 

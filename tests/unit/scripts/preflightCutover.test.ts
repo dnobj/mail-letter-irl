@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { diffManifest } from '../../../scripts/preflight-cutover.js';
-import { ENV_VAR_MANIFEST } from '../../../src/config/deploymentConfig.js';
+import {
+  ENV_VAR_MANIFEST,
+  validateDeploymentConfig
+} from '../../../src/config/deploymentConfig.js';
 
 /**
  * Issue #155. diffManifest is the pure core of the preflight parity check:
@@ -130,5 +133,84 @@ describe('diffManifest', () => {
     expect(names).toContain('STRIPE_STARTER_AMOUNT_CENTS');
     const diff = diffManifest(names, { environment: 'production', service: 'api' });
     expect(diff.missing).toEqual([]);
+  });
+});
+
+describe('parity with the boot validator', () => {
+  /**
+   * Review round 1's central finding: the preflight said a maintenance
+   * service without STRIPE_WEBHOOK_SECRET was complete while the validator
+   * failed every cron boot demanding it. This pins the two against each
+   * other: an environment the preflight passes must produce ZERO presence
+   * errors from the validator on the same surface. (Shape rules - prefixes,
+   * integers, mode:"live" - are boot-only by design; presence is the shared
+   * contract.)
+   */
+  function validValueFor(name: string): string {
+    if (name === 'DATABASE_URL') return 'postgresql://user:pass@fixture.example/db';
+    if (name === 'STRIPE_SECRET_KEY') return 'sk_live_parity_fixture';
+    if (name === 'STRIPE_WEBHOOK_SECRET') return 'whsec_parity_fixture';
+    if (name === 'LETTER_IRL_DEPLOYMENT_ENVIRONMENT') return 'production';
+    if (name === 'LETTER_PROVIDER') return 'postgrid';
+    if (name === 'LETTER_PROVIDER_API_KEY') return 'live_sk_parity_fixture';
+    if (name === 'LETTER_PROVIDER_CONFIG') return '{"mode":"live"}';
+    if (name.startsWith('STRIPE_PRICE_') || name.endsWith('_PRICE_ID')) return `price_${name.toLowerCase()}`;
+    if (name.endsWith('_AMOUNT_CENTS')) return '500';
+    return `parity-fixture-${name.toLowerCase()}`;
+  }
+
+  it.each([
+    ['production', 'api'],
+    ['production', 'maintenance'],
+    ['development', 'api'],
+    ['development', 'maintenance']
+  ] as const)('a preflight-complete %s/%s environment boots with no presence errors', (environment, service) => {
+    // Build exactly the environment the preflight considers complete...
+    const complete = ENV_VAR_MANIFEST.filter(
+      entry => diffManifest([], { environment, service }).missing.some(m => m.name === entry.name)
+    );
+    const env: NodeJS.ProcessEnv = {
+      NODE_ENV: 'production', // both Railway environments run this
+      LETTER_IRL_DEPLOYMENT_ENVIRONMENT: environment
+    };
+    for (const entry of complete) env[entry.name] = validValueFor(entry.name);
+    // ...add the shape-owned production requirements the preflight cannot see
+    // (it checks names; the validator checks values), so only PRESENCE parity
+    // is under test here.
+    if (environment === 'production') {
+      for (const entry of ENV_VAR_MANIFEST) {
+        if (entry.services.includes(service === 'api' ? 'api' : 'maintenance') && !env[entry.name] && !entry.condition) {
+          env[entry.name] = validValueFor(entry.name);
+        }
+      }
+      env.TEMP_IMAGE_STORE = 'bucket';
+      env.LETTER_IRL_OAUTH_CIMD_ENFORCEMENT = 'true';
+    }
+
+    const surface = service === 'api' ? 'server' : 'maintenance';
+    const presenceErrors = validateDeploymentConfig(env, surface)
+      .findings.filter(f => f.severity === 'error' && f.rule.startsWith('presence.'));
+    expect(presenceErrors).toEqual([]);
+  });
+
+  it('the maintenance surface accepts exactly what the preflight demands of it - the round-1 divergence', () => {
+    // No webhook secret anywhere: preflight says the maintenance service is
+    // complete, and the validator must agree.
+    const maintenanceNames = diffManifest([], {
+      environment: 'development',
+      service: 'maintenance'
+    }).missing.map(entry => entry.name);
+    expect(maintenanceNames).not.toContain('STRIPE_WEBHOOK_SECRET');
+
+    const env: NodeJS.ProcessEnv = {
+      NODE_ENV: 'production',
+      LETTER_IRL_DEPLOYMENT_ENVIRONMENT: 'development'
+    };
+    for (const name of maintenanceNames) env[name] = validValueFor(name);
+    // Development identity var comes from the diff itself.
+    env.LETTER_IRL_DEPLOYMENT_ENVIRONMENT = 'development';
+    env.STRIPE_SECRET_KEY = 'sk_test_parity_fixture'; // dev holds a test key
+
+    expect(validateDeploymentConfig(env, 'maintenance').errors).toEqual([]);
   });
 });

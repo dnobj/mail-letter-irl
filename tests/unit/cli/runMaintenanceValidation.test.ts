@@ -61,6 +61,7 @@ describe('maintenance deployment validation', () => {
   });
 
   it('rejects an invalid production configuration before any maintenance work runs', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.stubEnv('LETTER_IRL_DEPLOYMENT_ENVIRONMENT', 'production');
     vi.stubEnv('NODE_ENV', 'production');
     // Deliberately unconfigured beyond identity: everything should fail.
@@ -71,6 +72,13 @@ describe('maintenance deployment validation', () => {
     expect(services.runCommerceMaintenance).not.toHaveBeenCalled();
     expect(services.cleanupExpiredImages).not.toHaveBeenCalled();
     expect(services.runMaintenanceTaskIfDue).not.toHaveBeenCalled();
+
+    // Review round 1: the class-only failure diagnostic left the operator
+    // with one word. The config failure itself must name its variables on
+    // stderr (the message is value-free by construction).
+    const logged = errorSpy.mock.calls.flat().map(String).join('\n');
+    expect(logged).toContain('LETTER_PROVIDER');
+    expect(logged).toContain('STRIPE_SECRET_KEY');
   });
 
   it('runs a valid development maintenance pass end to end', async () => {

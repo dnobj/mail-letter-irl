@@ -27,6 +27,7 @@ import {
   retryLetterJobAsAdmin,
   submitToProviderOnce,
 } from '../../../src/services/letterJobService.js';
+import { getProviderForMailType } from '../../../src/services/providers/index.js';
 
 const job = {
   job_id: 'job-1',
@@ -158,6 +159,46 @@ describe('mail outbox retries', () => {
     expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: 'letter-1',
     }));
+  });
+
+  it('retries, not holds, when the provider cannot even be resolved', async () => {
+    // Issue #155's runtime guards make getProviderForMailType throw in
+    // production (dummy refused, construction failure rethrown). The provider
+    // was never contacted, so the outcome is not ambiguous: the failure must
+    // land on the retryable pre-dispatch path, never as a held job + funding
+    // order + critical alert. Review round 1 caught the resolution happening
+    // after the dispatch marker, which routed exactly there.
+    mockClaims();
+    vi.mocked(getProviderForMailType).mockRejectedValueOnce(
+      new Error('The dummy provider is not allowed in production')
+    );
+    // failBeforeDispatch runs under the canonical funding-graph lock; satisfy
+    // its lock queries for an unfunded prepaid letter.
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT funding_order_id FROM letters')) {
+        return { rows: [{ funding_order_id: null }] };
+      }
+      if (sql.includes('SELECT letter_id FROM letter_jobs')) {
+        return { rows: [{ letter_id: 'letter-1' }] };
+      }
+      if (sql.includes('UPDATE letter_jobs SET status =')) {
+        return { rows: [{ job_id: 'job-1' }], rowCount: 1 };
+      }
+      return { rows: [] };
+    });
+
+    const result = await processLetterJob('job-1', {});
+
+    expect(result).toMatchObject({ claimed: true, completed: false, retryScheduled: true });
+    expect(sendLetter).not.toHaveBeenCalled();
+    expect(clientQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'held'"),
+      expect.anything()
+    );
+    expect(clientQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining("'mail_provider_outcome_ambiguous'"),
+      expect.anything()
+    );
   });
 
   it('allows only one concurrent claimant to create a provider order', async () => {
