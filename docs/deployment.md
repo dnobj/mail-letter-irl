@@ -324,8 +324,11 @@ See [`tests/integration/README.md`](../tests/integration/README.md) for how to s
 1. Run the preflight against production and close every gap it reports **before**
    merging: `RAILWAY_API_TOKEN=... npm run preflight:cutover -- --env production`.
    Setting the variables now is safe — the old image ignores variables it never
-   reads — and mandatory: the new image **refuses to boot** while any of them is
-   missing. That includes `LETTER_IRL_DEPLOYMENT_ENVIRONMENT=production` on both
+   reads — and the new image **refuses to boot** while any boot-required one is
+   missing. (The one preflight-only case: with `JIT_PURCHASE_ENABLED` present but
+   `false`, the preflight still demands the JIT variables — it reads names, not
+   values — while boot tolerates their absence; close those gaps anyway.) The
+   requirements include `LETTER_IRL_DEPLOYMENT_ENVIRONMENT=production` on both
    the API and maintenance services; an unlabeled service resolves to production
    mode (fail-closed) and the missing label is itself a fatal validation error,
    regardless of how correct the other variables are.
