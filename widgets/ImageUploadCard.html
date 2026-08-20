@@ -426,7 +426,20 @@
         function scrubMessage(err) {
           var msg = (err && err.message) || err || "Unknown error";
           // Host error strings can embed signed URLs; keep diagnostics URL-free.
-          return String(msg).replace(/(?:https?:\/\/|blob:|data:)\S+/g, "[url]");
+          // (blob: URLs embed an https origin, so the first alternative covers
+          // them; data: requires a mime-ish continuation to spare plain prose.)
+          return String(msg).replace(/(?:https?:\/\/|data:[\w.+-]+\/)\S+/gi, "[url]");
+        }
+
+        function displayMessage(err, fallback) {
+          // Only surface host text to the user when it is an actual message;
+          // "[object Object]" from a non-Error rejection is beacon material,
+          // not UI copy.
+          if (!(err instanceof Error || typeof err === "string")) {
+            return fallback;
+          }
+          var msg = scrubMessage(err);
+          return msg === "Unknown error" ? fallback : msg;
         }
 
         function debugLog(message, data) {
@@ -633,18 +646,19 @@
               }
 
               if (!freshUrl) {
-                // Routine failure (temporary URLs age out), so recover to the
+                // Routine failure (temporary URLs age out, but this branch
+                // also covers network/bridge errors), so recover to the
                 // two-button select state instead of the dead-end error state.
                 libraryFile = null;
                 showState("select");
-                showLibraryStatus("That link expired — please pick the photo again.");
+                showLibraryStatus("Couldn't get a fresh link for that photo — please pick it again.");
                 return;
               }
 
               await finishWithDownloadUrl(freshUrl, freshUrl, "library_pick_complete");
             } catch (libErr) {
-              debugLog("uploadAndSend.error", { message: scrubMessage(libErr) });
-              debugBeacon("uploadAndSend.error", { message: scrubMessage(libErr) });
+              debugLog("library.use.error", { message: scrubMessage(libErr) });
+              debugBeacon("library.use.error", { message: scrubMessage(libErr) });
               showError("Something went wrong with that library photo. Please try again.");
             }
             return;
@@ -692,8 +706,7 @@
           } catch (err) {
             debugLog("uploadAndSend.error", { message: scrubMessage(err) });
             debugBeacon("uploadAndSend.error", { message: scrubMessage(err) });
-            var errMsg = scrubMessage(err);
-            showError(errMsg === "Unknown error" ? "Upload failed. Please try again." : errMsg);
+            showError(displayMessage(err, "Upload failed. Please try again."));
           }
         }
 
@@ -715,10 +728,16 @@
           // library for minutes), so we never time the promise out - but if
           // the host API is broken and never settles, re-enable the button so
           // the user can retry. A retry bumps flowGen, which discards this
-          // pick if it ever resolves after all.
+          // pick if it ever resolves after all. Two minutes keeps the hatch
+          // out of the way of legitimate slow browsing.
           var stuckTimer = setTimeout(function () {
+            debugLog("selectFiles.stuck");
+            debugBeacon("selectFiles.stuck");
+            if (gen === flowGen) {
+              showLibraryStatus("Still waiting for the library… if nothing opened, try again.");
+            }
             btnLibrary.disabled = false;
-          }, 20000);
+          }, 120000);
 
           try {
             var files;
