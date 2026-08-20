@@ -471,6 +471,46 @@ describe('commerceService', () => {
     expect(mocks.createPackSession).not.toHaveBeenCalled();
   });
 
+  it('labels an unconfigured pack amount configuration_error, not a database fault', async () => {
+    // Issue #213: this guard throws before any query runs, so the handler's
+    // catch has no statement to blame and defaults an uncarried error to
+    // database_error - the mislabel that turned a missing
+    // STRIPE_STARTER_AMOUNT_CENTS into a schema hunt for a config problem.
+    mocks.getPackProduct.mockReturnValue({
+      productCode: 'credit-pack-4', priceId: 'price-pack', amountCents: 0,
+      currency: 'usd', name: 'Starter Pack', description: 'Two prepaid letters', credits: 4
+    });
+
+    const error = await createPackCheckout({
+      userId: 'user-1', userEmail: 'user@example.test', productId: 'credit-pack-4',
+      successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no'
+    } as never).catch(e => e);
+
+    expect(error).toBeInstanceOf(PackAmountNotConfiguredError);
+    expect(error).toMatchObject({ diagnosticClass: 'configuration_error' });
+  });
+
+  it('labels an unconfigured pack price id configuration_error before any order write', async () => {
+    // The sibling guard, same #213 trap: a missing STRIPE_PRICE_* threw a bare
+    // error that also read as database_error.
+    mocks.getPackProduct.mockReturnValue({
+      productCode: 'credit-pack-4', priceId: '', amountCents: 500,
+      currency: 'usd', name: 'Starter Pack', description: 'Two prepaid letters', credits: 4
+    });
+
+    const error = await createPackCheckout({
+      userId: 'user-1', userEmail: 'user@example.test', productId: 'credit-pack-4',
+      successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no'
+    } as never).catch(e => e);
+
+    expect(error).toMatchObject({ diagnosticClass: 'configuration_error' });
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO orders'),
+      expect.anything()
+    );
+    expect(mocks.createPackSession).not.toHaveBeenCalled();
+  });
+
   it('carries the Stripe failure class up when the checkout session cannot be created', async () => {
     // Issue #213: when Stripe rejects the session (e.g. a Price ID that does
     // not exist in this account), the thrown error must carry the resolved
