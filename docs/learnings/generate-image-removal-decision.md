@@ -213,3 +213,18 @@ Infra consequences: `imageGenerationService` and its OPENAI_API_KEY return
 temp-image store has a writer again, so #240 resolves as "keep" and the four
 TEMP_IMAGE_* vars remain on the #158 cutover checklist.
 
+### Addendum 3 follow-up: the mode flag (Aug 21, evening)
+
+The owner's original intent for the redirect card was the ONLY behavior (copy
+field regurgitating the request; no server-side generation) - the hybrid
+shipped both. Resolution: keep both, switchable without deploys via
+`LETTER_IRL_IMAGE_GEN_MODE` (`on` | `off` | `mobile_only`, default `on`).
+Desktop web WAS verified to spend credits when the tool is invoked there
+(mention or explicit ask; log-proven `mobile: false` call consuming a credit),
+which is why `mobile_only` exists: the `_meta["openai/userAgent"]` channel is
+log-verified to distinguish surfaces (native app reports `mobile: true`), and
+unknown surfaces fail closed to the free redirect path. The generated card
+also now carries an attribution note ("Created by Letter IRL... ask again
+without @Letter IRL and ChatGPT will generate free") so users learn the free
+path even when credits flow.
+

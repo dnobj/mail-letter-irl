@@ -61,6 +61,19 @@ interface GenerateImageForMailOutput {
 
 const PREVIEW_CONFIG = { maxWidth: 400, jpegQuality: 60 } as const;
 
+type ImageGenMode = "on" | "off" | "mobile_only";
+
+function imageGenMode(): ImageGenMode {
+  // Owner-facing product switch, separate from the spend kill switch
+  // (LETTER_IRL_IMAGE_DAILY_CEILING=0): "off" turns the tool into the pure
+  // redirect-card experience everywhere; "mobile_only" generates only where
+  // the mention-scoped toolset makes it irreplaceable (isMobile detection is
+  // log-verified: desktop web reports false, the native app true). Unknown
+  // surfaces count as NOT mobile, failing closed toward the free path.
+  const raw = (process.env.LETTER_IRL_IMAGE_GEN_MODE ?? "on").toLowerCase();
+  return raw === "off" || raw === "mobile_only" ? (raw as ImageGenMode) : "on";
+}
+
 function dailyCeiling(): number {
   // 0 is a KILL SWITCH (block all generation), not "disabled" - an operator
   // zeroing the ceiling during a spend incident must stop spend, not open it.
@@ -195,6 +208,24 @@ async function handler(
       input,
       "generation_unconfigured",
       "Letter IRL in-turn generation is not configured here. ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL."
+    );
+  }
+
+  const mode = imageGenMode();
+  if (mode === "off" || (mode === "mobile_only" && context.isMobile !== true)) {
+    context.logger.info(
+      {
+        correlationId: context.correlationId,
+        event: "generate_image.mode_redirect",
+        mode,
+        isMobile: context.isMobile === true
+      },
+      "Image generation disabled for this surface by mode flag"
+    );
+    return redirectOutput(
+      input,
+      mode === "off" ? "generation_disabled" : "generation_mobile_only",
+      "Letter IRL routed this to ChatGPT's built-in generation, which creates the image free - resend the prompt without mentioning Letter IRL."
     );
   }
 
