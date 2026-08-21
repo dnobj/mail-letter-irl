@@ -415,7 +415,8 @@ export const generateImageForMailOutputZ = z.object({
   suggestedNextStep: z.string(),
   prompt: z.string().optional(),
   generatedImageUrl: z.string().optional(),
-  generationsRemaining: z.number().int().optional()
+  generationsRemaining: z.number().int().optional(),
+  redirectStyle: z.enum(["resend", "handoff"]).optional()
 });
 
 export const confirmUploadedImageOutputZ = z.object({

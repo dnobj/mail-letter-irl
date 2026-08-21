@@ -57,6 +57,7 @@ interface GenerateImageForMailOutput {
   generatedImagePreview?: string;
   generatedImageUrl?: string;
   generationsRemaining?: number;
+  redirectStyle?: "resend" | "handoff";
 }
 
 const PREVIEW_CONFIG = { maxWidth: 400, jpegQuality: 60 } as const;
@@ -119,16 +120,31 @@ function buildNextStep(context: string | undefined, imageUrl: string): string {
 
 function redirectOutput(
   input: GenerateImageForMailInput,
+  context: ToolContext,
   statusCode: string,
-  userNote: string
+  reason: string
 ): GenerateImageForMailOutput {
+  const prompt = input?.prompt?.trim();
+  // Surface-aware routing: on confirmed desktop web, @-mentions do NOT scope
+  // the turn's toolset, so built-in image_gen is available in this same turn
+  // and the model can hand off immediately. Mention-scoped surfaces (native
+  // app, mobile web) and unknown surfaces get the resend card instead - the
+  // only path that works when image_gen is absent from the turn.
+  const handoff = Boolean(prompt) && context.isMobile === false;
+  const tail = !prompt
+    ? "ChatGPT's built-in generation is always available without mentioning Letter IRL."
+    : handoff
+      ? "ChatGPT's built-in generation is creating it free in this turn instead - no resend needed."
+      : "ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL.";
   return {
     mode: "redirect",
     prompt: input?.prompt,
     status: statusCode,
-    message: userNote,
-    suggestedNextStep:
-      "Relay the card's guidance briefly: the user can copy the prompt shown and send it WITHOUT mentioning Letter IRL, and ChatGPT's built-in image generation will create it free. Do not apologize at length."
+    message: `${reason} ${tail}`,
+    suggestedNextStep: handoff
+      ? "IMPORTANT: Built-in image generation is available in this turn on this surface. Generate the image NOW in this same turn from this prompt - it is free and uses no Letter IRL credit. Do not ask the user to resend anything."
+      : "Relay the card's guidance briefly: the user can copy the prompt shown and send it WITHOUT mentioning Letter IRL, and ChatGPT's built-in image generation will create it free. Do not apologize at length.",
+    ...(prompt ? { redirectStyle: handoff ? ("handoff" as const) : ("resend" as const) } : {})
   };
 }
 
@@ -185,8 +201,9 @@ async function handler(
   if (!prompt) {
     return redirectOutput(
       input,
+      context,
       "no_prompt",
-      "Letter IRL needs a description to route an image request. ChatGPT's built-in generation is always available without mentioning Letter IRL."
+      "Letter IRL needs a description to route an image request."
     );
   }
 
@@ -206,8 +223,9 @@ async function handler(
     );
     return redirectOutput(
       input,
+      context,
       "generation_unconfigured",
-      "Letter IRL in-turn generation is not configured here. ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL."
+      "Letter IRL in-turn generation is not configured here."
     );
   }
 
@@ -224,8 +242,9 @@ async function handler(
     );
     return redirectOutput(
       input,
+      context,
       mode === "off" ? "generation_disabled" : "generation_mobile_only",
-      "Letter IRL routed this to ChatGPT's built-in generation, which creates the image free - resend the prompt without mentioning Letter IRL."
+      "Letter IRL routed this to ChatGPT's built-in generation for this request."
     );
   }
 
@@ -255,8 +274,9 @@ async function handler(
       );
       return redirectOutput(
         input,
+        context,
         "daily_ceiling_reached",
-        "Letter IRL's in-turn generation is taking a breather today. ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL."
+        "Letter IRL's in-turn generation is taking a breather today."
       );
     }
   } catch {
@@ -277,15 +297,17 @@ async function handler(
     );
     return redirectOutput(
       input,
+      context,
       "generation_failed",
-      "Letter IRL's in-turn generation hit a snag and no credit was used. ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL."
+      "Letter IRL's in-turn generation hit a snag and no credit was used."
     );
   }
   if (!reservation.reserved) {
     return redirectOutput(
       input,
+      context,
       "no_credits",
-      "This account has no Letter IRL image generations left. ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL. Letter packs and letter purchases include in-turn generations."
+      "This account has no Letter IRL image generations left. Letter packs and letter purchases include in-turn generations."
     );
   }
 
@@ -380,10 +402,11 @@ async function handler(
 
     return redirectOutput(
       input,
+      context,
       "generation_failed",
       ambiguousProviderOutcome
-        ? "Letter IRL's in-turn generation hit a snag. If a credit was used without an image arriving, maintenance reconciles it automatically. ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL."
-        : "Letter IRL's in-turn generation hit a snag and no credit was used. ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL."
+        ? "Letter IRL's in-turn generation hit a snag. If a credit was used without an image arriving, maintenance reconciles it automatically."
+        : "Letter IRL's in-turn generation hit a snag and no credit was used."
     );
   }
 }
@@ -422,7 +445,8 @@ export const generateImageForMailTool: McpToolDefinition<
       suggestedNextStep: { type: "string" },
       prompt: { type: "string" },
       generatedImageUrl: { type: "string" },
-      generationsRemaining: { type: "integer" }
+      generationsRemaining: { type: "integer" },
+      redirectStyle: { type: "string", enum: ["resend", "handoff"] }
     }
   },
   meta: {

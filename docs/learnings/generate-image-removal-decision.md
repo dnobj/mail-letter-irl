@@ -228,3 +228,21 @@ also now carries an attribution note ("Created by Letter IRL... ask again
 without @Letter IRL and ChatGPT will generate free") so users learn the free
 path even when credits flow.
 
+### Surface-aware redirects (Aug 21, late)
+
+The owner's target config is `LETTER_IRL_IMAGE_GEN_MODE=off` with per-surface
+redirect behavior, so `redirectOutput` now branches on the log-verified
+`isMobile` signal for EVERY redirect status (mode gate, no_credits, ceiling,
+unconfigured, failures): confirmed desktop (`isMobile === false`) returns
+`redirectStyle: "handoff"` - suggestedNextStep instructs the model to run
+built-in generation NOW in the same turn (valid because desktop mentions do
+not scope the toolset; the trampoline experiments showed in-turn native
+generation works wherever image_gen is present), and the card renders as a
+quiet fallback ("ChatGPT is generating this image") with the prompt+Copy row
+retained for non-compliance. Mobile (`true`) and unknown (`undefined`)
+surfaces return `redirectStyle: "resend"` with the original copy-field card,
+the only path that works inside mention-scoped turns. no_prompt has no
+style (nothing to hand off). Widget template v8. The tool cannot be hidden
+per-surface at all: ChatGPT ingests tools/list once per connector at Refresh,
+so per-surface behavior can only live in the response.
+

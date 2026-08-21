@@ -312,8 +312,50 @@ describe("generate_image_for_mail (hybrid)", () => {
 
     expect(result.mode).toBe("redirect");
     expect(result.status).toBe("generation_disabled");
+    expect(result.redirectStyle).toBe("resend");
     expect(limitService.ensureStarterGrant).not.toHaveBeenCalled();
     expect(limitService.reserveGeneration).not.toHaveBeenCalled();
+  });
+
+  it("mode off on confirmed desktop: handoff redirect instructs in-turn built-in generation", async () => {
+    process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
+    const desktopContext = { ...context, isMobile: false } as never;
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, desktopContext);
+
+    expect(result.mode).toBe("redirect");
+    expect(result.status).toBe("generation_disabled");
+    expect(result.redirectStyle).toBe("handoff");
+    expect(result.suggestedNextStep).toContain("NOW in this same turn");
+    expect(result.message).toContain("no resend needed");
+    expect(limitService.reserveGeneration).not.toHaveBeenCalled();
+  });
+
+  it("mode off on mobile: resend card (built-in generation absent from mention-scoped turns)", async () => {
+    process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
+    const mobileContext = { ...context, isMobile: true } as never;
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, mobileContext);
+
+    expect(result.mode).toBe("redirect");
+    expect(result.redirectStyle).toBe("resend");
+    expect(result.suggestedNextStep).toContain("WITHOUT mentioning Letter IRL");
+  });
+
+  it("no_credits on confirmed desktop: handoff style applies beyond the mode gate", async () => {
+    const desktopContext = { ...context, isMobile: false } as never;
+    vi.mocked(limitService.reserveGeneration).mockResolvedValue({
+      reserved: false,
+      remaining: 0,
+      used: 3,
+      allowance: 3
+    } as never);
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, desktopContext);
+
+    expect(result.status).toBe("no_credits");
+    expect(result.redirectStyle).toBe("handoff");
+    expect(result.suggestedNextStep).toContain("NOW in this same turn");
   });
 
   it("mode mobile_only: redirects on non-mobile surfaces (fails closed when unknown)", async () => {
