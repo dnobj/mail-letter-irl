@@ -9,7 +9,7 @@
  * calls this tool to put the URL into a server-side tool response that
  * ChatGPT can see and act on (with explicit next-step instructions).
  *
- * This mirrors the generate_image_fallback pattern where suggestedNextStep tells
+ * suggestedNextStep tells
  * ChatGPT exactly which preview tool to call with the imageUrl.
  */
 

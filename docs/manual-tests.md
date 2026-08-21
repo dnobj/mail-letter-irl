@@ -37,14 +37,14 @@ or raw request bodies.
 - [ ] Confirm the Letter IRL `get_started` tool is invoked and `GetStartedCard`
       renders; record the tool evidence.
 
-### CIMD-04 — Letter IRL fallback image generation and widget
+### CIMD-04 — Image routing and upload widget
 
-- [ ] Run: `My image won't attach. Have Letter IRL itself generate an image of a vivid sunset over mountain peaks for a postcard.`
-- [ ] Confirm Letter IRL's `generate_image_fallback` tool is invoked and
-      `GenerateImageCard` renders.
-- [ ] Separately run a generic `Generate an image of a sunset` with the app
-      attached and confirm ChatGPT uses NATIVE image generation, not the
-      fallback tool (steering check, issue #227).
+- [ ] Run a generic `Generate an image of a sunset` with the app attached and
+      confirm ChatGPT uses NATIVE image generation and NO Letter IRL tool is
+      invoked (Letter IRL's generator was removed Aug 2026; decision record:
+      docs/learnings/generate-image-removal-decision.md).
+- [ ] Run `Open the Letter IRL photo upload widget for a postcard` and confirm
+      `upload_image` is invoked and `ImageUploadCard` renders.
 - [ ] Continue into a postcard preview/edit and confirm `mail:draft` behavior.
 
 ### CIMD-05 — Scope enforcement
@@ -114,7 +114,7 @@ tokens, and request content must never be used as an error class.
 | [ChatGPT Integration](#chatgpt-integration) | After auth/MCP changes | ~10 min |
 | [Payment Flow](#payment-flow) | After Stripe changes | ~10 min |
 | [Full User Journey](#full-user-journey) | Before major releases | ~20 min |
-| [Image Generation](#image-generation) | After image generation changes | ~5 min |
+| [Image Generation Routing](#image-generation-routing) | After image-routing or upload-widget changes | ~5 min |
 | [Idle and Recovery](#idle-and-recovery-verification) | After runtime/infrastructure changes | 20+ min idle time |
 
 ---
@@ -281,47 +281,29 @@ Test the complete letter journey.
 
 ---
 
-## Image Generation
+## Image Generation Routing
 
-Test server-side fallback image generation via the `generate_image_fallback`
-tool. The PRIMARY image path is ChatGPT's built-in generation (its images
-attach to previews directly, issue #227); this tool exists for the corner
-cases where that path is unavailable or fails.
+Letter IRL no longer generates images (removed Aug 2026; decision record:
+`docs/learnings/generate-image-removal-decision.md`). ChatGPT's built-in
+generation is the only path, and its images attach to previews directly
+(issue #227). These checks pin the two things that must stay true.
 
 ### Prerequisites
 - [ ] (DEV) Letter IRL app activated in ChatGPT chat (type `@` → select "(DEV) Letter IRL")
 - [ ] Authenticated / connected to the app
 
-### Steering (Issue #227)
+### Native Generation Routing (Issue #227)
 1. [ ] Ask a generic "Generate an image of a sunset over mountains for a postcard" with the app attached
-2. [ ] Confirm ChatGPT uses NATIVE image generation, not `generate_image_fallback`
+2. [ ] Confirm ChatGPT uses NATIVE image generation (no Letter IRL tool call, no consent dialog)
+3. [ ] Repeat on the native mobile app with an @-mention ("@(DEV) Letter IRL generate an image of …") and confirm native generation runs. If the model claims image generation is unavailable, reply "try it anyway" — that claim is a known hallucination and must not reach a Letter IRL tool
+4. [ ] Ask ChatGPT to use the generated image in `quote_and_preview_postcard`; confirm the postcard front renders the same image (fileParams handoff, no manual URL copying)
 
-### Basic Fallback Generation (US-IMG-01)
-1. [ ] Explicitly invoke the fallback (e.g. "My image can't be attached — have Letter IRL generate a sunset over mountains for a postcard")
-2. [ ] `generate_image_fallback` tool is invoked
-3. [ ] GenerateImageCard widget appears in chat
-4. [ ] Widget shows a loading/spinner state initially
-5. [ ] Preview image renders in the widget
-6. [ ] Image matches the prompt description
-
-### Result Bridge and Chaining (Issue #169)
-1. [ ] Confirm Letter IRL's `generate_image_fallback` tool is used for the explicit fallback invocation
-2. [ ] Confirm the widget displays the generated preview without exposing base64 data in the conversation
-3. [ ] Ask ChatGPT to use the image in `quote_and_preview_postcard` without copying or re-entering its URL
-4. [ ] Confirm the postcard front renders the same generated image
-5. [ ] Refresh the DEV app (Refresh re-ingests schemas; Reconnect only re-auths) and repeat the generate-to-postcard flow to guard against cached widget resources
-5a. [ ] On the native iOS/Android app: force-quit and reopen ChatGPT after the web Refresh, then confirm widgets render (the native apps cache widget templates aggressively - the versioned ui://…@vN URIs exist to bust this, issue #235)
-6. [ ] Repeat at a narrow mobile viewport and in dark mode; loading, preview, URL, and error states must remain readable without overflow
-7. [ ] Confirm server and browser logs contain no bearer tokens, complete temporary image URLs, capability tokens, or base64 image bodies
-
-### Context-Specific Dimensions (US-IMG-03)
-- [ ] Postcard context → landscape image (1536×1024)
-- [ ] Header image context → landscape image (1536×1024)
-- [ ] Inline image context → square image (1024×1024)
-
-### Error Handling (US-IMG-04)
-- [ ] Empty prompt → clear error message
-- [ ] Content policy violation prompt → appropriate error
+### Image Recovery Path (upload widget)
+1. [ ] Ask to pick a different photo; confirm `upload_image` renders the ImageUploadCard
+2. [ ] Desktop/mobile web: confirm "Choose from Library" is present and lists generated images; native app: confirm "Select Photo" (local upload) is present — `selectFiles` does not exist on the native host, which is expected
+3. [ ] Refresh the DEV app after widget changes (Refresh re-ingests schemas; Reconnect only re-auths); on the native iOS/Android app force-quit and reopen after the web Refresh (the native apps cache widget templates aggressively - the versioned ui://…@vN URIs exist to bust this, issue #235)
+4. [ ] Repeat at a narrow mobile viewport and in dark mode; states must remain readable without overflow
+5. [ ] Confirm server and browser logs contain no bearer tokens, complete temporary image URLs, capability tokens, or base64 image bodies
 
 ---
 

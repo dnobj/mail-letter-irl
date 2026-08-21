@@ -5,7 +5,7 @@
 
 The runtime MCP registry is the source of truth. The checked-in `manifest.json` is generated from that registry with `npm run manifest:generate`, and submission-facing tests verify that the manifest, widget list, and runtime tool registry stay aligned.
 
-Letter IRL currently exposes **17 tools**:
+Letter IRL currently exposes **18 tools**:
 
 ## Onboarding
 
@@ -34,7 +34,6 @@ Letter IRL currently exposes **17 tools**:
 
 ## Images
 
-- `generate_image_fallback`: FALLBACK ONLY — generates artwork through Letter IRL when ChatGPT's built-in image generation is unavailable, has failed, or its image could not be handed off (or when the user explicitly asks Letter IRL to generate). Normal image requests should use built-in generation. Returns a widget preview and an image URL path for follow-up preview tools. Uses the versioned `GenerateImageCard` widget template.
 - `upload_image`: Open the image upload widget as a fallback when direct attachment or `imageUrl` handoff does not work. Uses `ui://widgets/ImageUploadCard.html@v<N>`.
 - `confirm_uploaded_image`: Internal widget relay that confirms an uploaded image and returns the `imageUrl` plus next-step guidance.
 
@@ -49,7 +48,7 @@ Letter IRL currently exposes **17 tools**:
 - Tool responses split data intentionally:
   - `structuredContent`: compact model-facing fields validated by the runtime output schema.
   - `content`: short model narration.
-  - `_meta`: widget-only fields such as preview HTML and generated image previews.
+  - `_meta`: widget-only fields such as preview HTML and compressed letter-image previews.
 - Preview tools create database draft records, so they are write tools even though they do not send mail or charge the user.
 - Send tools require a draft and explicit confirmation. The assistant must not claim mail was sent unless the corresponding send tool succeeds.
 

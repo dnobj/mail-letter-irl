@@ -52,25 +52,16 @@ describe("Compatibility manifest", () => {
     );
   });
 
-  it("should advertise generate_image_fallback as fallback-only with built-in generation preferred", () => {
-    const generateImageTool = buildManifest().tools.find((tool) => tool.name === "generate_image_fallback");
-
-    expect(generateImageTool?.description).toContain("FALLBACK ONLY");
-    expect(generateImageTool?.description).toContain("built-in image generation instead");
-    // The old description invited eager use ("Use this even if the user has
-    // not yet asked to mail it") - the demotion replaced it with an explicit
-    // only-when scope. Pin the scoping clause so it cannot silently regress.
-    expect(generateImageTool?.description).toContain(
-      "only when built-in image generation is unavailable, has failed"
-    );
-  });
-
-  it("should keep generate_image_fallback inside the first 12 registered tools for ChatGPT exposure", () => {
-    const firstTwelveToolNames = new LetterIrlServer()
-      .listTools()
-      .slice(0, 12)
-      .map((tool) => tool.name);
-
-    expect(firstTwelveToolNames).toContain("generate_image_fallback");
+  it("does not advertise any image-generation tool", () => {
+    // generate_image (later generate_image_fallback) was REMOVED after the
+    // #227 investigation: ChatGPT's built-in generation handles every image
+    // request on every surface, and the app tool was winning routing it
+    // should not win. Pin the absence so a bad merge or revert cannot
+    // silently resurrect it. Decision record:
+    // docs/learnings/generate-image-removal-decision.md
+    const toolNames = buildManifest().tools.map((tool) => tool.name);
+    expect(toolNames).not.toContain("generate_image_fallback");
+    expect(toolNames).not.toContain("generate_image");
+    expect(toolNames.some((name) => /generate.*image|image.*generate/.test(name))).toBe(false);
   });
 });

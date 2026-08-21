@@ -17,6 +17,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
   buildWidgetResourceMeta,
+  partitionToolResult,
+  normalizeHttpsOrigin,
   getZodOutputShape,
   WIDGET_DEFINITIONS,
   WIDGET_MIME_TYPE
@@ -44,8 +46,15 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
     );
 
-    it('should have 5 widgets defined', () => {
-      expect(WIDGET_DEFINITIONS.length).toBe(5);
+    it('should have 4 widgets defined', () => {
+      expect(WIDGET_DEFINITIONS.length).toBe(4);
+    });
+
+    it('does not define the removed GenerateImageCard widget', () => {
+      // generate_image_fallback and its widget were removed (decision record:
+      // docs/learnings/generate-image-removal-decision.md). Pin the removal so
+      // a merge or revert cannot silently resurrect it.
+      expect(WIDGET_DEFINITIONS.map((widget) => widget.name)).not.toContain('GenerateImageCard');
     });
 
     it('versions every widget template URI (issue #235 cache-bust)', () => {
@@ -70,8 +79,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 3,
-        digest: '88446a052edf'
+        version: 4,
+        digest: '102f5c3499c8'
       });
     });
   });
@@ -205,7 +214,6 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       'inlineImageData',
       'headerImageData',
       'frontImageData',
-      'generatedImagePreview',
       'headerImagePreview',
       'inlineImagePreview'
     ]);
@@ -284,12 +292,11 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 
 describe('registerWidgetResources implementation', () => {
   it('should register all widget resources', () => {
-    expect(WIDGET_DEFINITIONS.length).toBe(5);
+    expect(WIDGET_DEFINITIONS.length).toBe(4);
     expect(WIDGET_DEFINITIONS.map((widget) => widget.name)).toEqual([
       'LetterPreviewCard',
       'PostcardPreviewCard',
       'ImageUploadCard',
-      'GenerateImageCard',
       'GetStartedCard'
     ]);
   });
@@ -302,5 +309,65 @@ describe('registerWidgetResources implementation', () => {
       const uri = `ui://widgets/${nonExistentWidget.name}.html`;
       return uri;
     }).not.toThrow();
+  });
+});
+
+// Rescued from the deleted generatedImageResultBridge.test.ts (its widget was
+// removed; these pins are widget-independent and must survive).
+describe('widget image CSP', () => {
+  it('publishes canonical and legacy CSP with the exact API origin', () => {
+    const meta = buildWidgetResourceMeta('Test widget');
+
+    expect(meta.ui.csp).toEqual({
+      connectDomains: ['https://chatgpt.com', 'https://api.letterirl.com'],
+      resourceDomains: ['https://*.oaistatic.com', 'https://*.oaiusercontent.com', 'https://api.letterirl.com'],
+      redirectDomains: ['https://checkout.stripe.com', 'https://letterirl.com']
+    });
+    expect(meta['openai/widgetCSP']).toEqual({
+      connect_domains: ['https://chatgpt.com', 'https://api.letterirl.com'],
+      resource_domains: ['https://*.oaistatic.com', 'https://*.oaiusercontent.com', 'https://api.letterirl.com'],
+      redirect_domains: ['https://checkout.stripe.com', 'https://letterirl.com']
+    });
+  });
+
+  it('normalizes a configured API URL to an HTTPS origin', () => {
+    expect(normalizeHttpsOrigin('https://dev.example.com/mcp?ignored=true'))
+      .toBe('https://dev.example.com');
+    expect(normalizeHttpsOrigin('http://dev.example.com/mcp'))
+      .toBe('https://api.letterirl.com');
+  });
+});
+
+
+// Rescued from the deleted generatedImageResultBridge.test.ts: these pin
+// still-live partitionToolResult behavior with a documented silent-failure
+// history (header/inline letters once rendered cards without their images
+// because the previews reached neither channel).
+describe('partitionToolResult channel contract', () => {
+  it('omits absent metadata and all heavy model-facing image fields', () => {
+    const result = partitionToolResult({
+      message: 'Preview ready',
+      inlineImageData: 'inline-base64',
+      headerImageData: 'header-base64',
+      frontImageData: 'front-base64'
+    });
+
+    expect(result.structuredContent).toEqual({ message: 'Preview ready' });
+    expect(result._meta).toEqual({});
+  });
+
+  it('forwards the compressed image previews to the widget, not to the model', () => {
+    const result = partitionToolResult({
+      message: 'Preview ready',
+      headerImagePreview: 'header-preview-base64',
+      inlineImagePreview: 'inline-preview-base64',
+      headerImageData: 'header-full-base64'
+    });
+
+    expect(result.structuredContent).toEqual({ message: 'Preview ready' });
+    expect(result._meta).toEqual({
+      headerImagePreview: 'header-preview-base64',
+      inlineImagePreview: 'inline-preview-base64'
+    });
   });
 });

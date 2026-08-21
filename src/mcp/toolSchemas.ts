@@ -132,11 +132,6 @@ export const toolInputSchemas = {
   upload_image: z.object({
     context: z.string().optional()
   }),
-  // Image generation tool
-  generate_image_fallback: z.object({
-    prompt: z.string(),
-    context: z.enum(["postcard", "header_image", "inline_image"]).optional()
-  }),
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: z.object({
     imageUrl: z.string(),

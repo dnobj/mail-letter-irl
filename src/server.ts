@@ -24,8 +24,6 @@ import {
   getStartedTool,
   // Image upload tool
   uploadImageTool,
-  // Image generation tool
-  generateImageTool,
   // Confirm uploaded image tool (widget relay)
   confirmUploadedImageTool
 } from "./tools/index.js";
@@ -40,9 +38,8 @@ import { classifyDiagnosticError } from "./utils/diagnosticLog.js";
 
 const tools: McpToolDefinition<any, any>[] = [
   // ChatGPT currently appears to expose only the first 12 registered actions
-  // for this dev app. Keep core preview/send/status and the fallback image
-  // generator inside that first page of tools (it must stay exposed to be
-  // usable as a fallback); place auxiliary/internal tools later.
+  // for this dev app. Keep core preview/send/status inside that first page of
+  // tools; place auxiliary/internal tools later.
   // Letter tools - three separate tools for different layouts
   quoteAndPreviewLetterTextOnlyTool,
   quoteAndPreviewLetterWithHeaderImageTool,
@@ -57,8 +54,6 @@ const tools: McpToolDefinition<any, any>[] = [
   // Postcard tools
   quoteAndPreviewPostcardTool,
   sendPostcardTool,
-  // Image generation tool
-  generateImageTool,
   // Keep saved return address setup in the primary exposed set.
   setReturnAddressTool,
   getReturnAddressTool,

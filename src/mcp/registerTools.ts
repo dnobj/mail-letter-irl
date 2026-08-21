@@ -7,7 +7,6 @@ import { fileURLToPath } from "url";
 import { LetterIrlServer } from "../server.js";
 import { toolInputSchemas } from "./toolSchemas.js";
 import { widgetTemplateUri } from "./widgetUris.js";
-import { STEERING_COPY_REV } from "./steeringRev.js";
 import {
   quoteAndPreviewInputZ,
   quoteAndPreviewLetterWithHeaderImageInputZ,
@@ -26,7 +25,6 @@ import {
   submitFeatureRequestInputZ,
   getStartedInputZ,
   uploadImageInputZ,
-  generateImageInputZ,
   confirmUploadedImageInputZ,
   quoteAndPreviewOutputZ,
   sendLetterOutputZ,
@@ -43,7 +41,6 @@ import {
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
   uploadImageOutputZ,
-  generateImageOutputZ,
   confirmUploadedImageOutputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
@@ -101,8 +98,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'send_letter',
     'send_postcard',
     'create_mail_checkout',
-    'set_return_address',  // Validates address via PostGrid
-    'generate_image_fallback' // Calls OpenAI Images API
+    'set_return_address'  // Validates address via PostGrid
   ];
 
   // Tools where repeated calls with same args have no additional effect
@@ -141,7 +137,6 @@ export const WIDGET_DEFINITIONS = [
   { name: "LetterPreviewCard", description: "Shows letter preview with cost, delivery info, and status" },
   { name: "PostcardPreviewCard", description: "Shows postcard front/back preview with cost, delivery info, and status" },
   { name: "ImageUploadCard", description: "File picker widget for uploading photos to use in letters or postcards" },
-  { name: "GenerateImageCard", description: "Preview widget for AI-generated images with upload to use in letters or postcards" },
   { name: "GetStartedCard", description: "Getting-started guide for new users with setup steps and example prompts" },
 ];
 
@@ -363,8 +358,6 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_started: getStartedInputZ,
   // Image upload tool
   upload_image: uploadImageInputZ,
-  // Image generation tool
-  generate_image_fallback: generateImageInputZ,
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageInputZ
 };
@@ -392,8 +385,6 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_started: getStartedOutputZ,
   // Image upload tool
   upload_image: uploadImageOutputZ,
-  // Image generation tool
-  generate_image_fallback: generateImageOutputZ,
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageOutputZ
 };
@@ -425,7 +416,6 @@ export function partitionToolResult(
     inlineImageData,
     headerImageData,
     frontImageData,
-    generatedImagePreview,
     headerImagePreview,
     inlineImagePreview,
     ...modelFacingData
@@ -438,7 +428,6 @@ export function partitionToolResult(
       ...(previewHtml !== undefined ? { previewHtml } : {}),
       ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
       ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
-      ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
       // The letter card's images. Small by construction - the builder
       // compresses them to roughly 3KB for exactly this trip - so unlike the
       // *ImageData fields above they are forwarded rather than dropped. They
@@ -450,10 +439,7 @@ export function partitionToolResult(
       // put them in _meta - a letter with a header or inline image rendered its
       // card without one, silently.
       ...(headerImagePreview !== undefined ? { headerImagePreview } : {}),
-      ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {}),
-      ...(modelFacingData.generatedImageUrl !== undefined
-        ? { generatedImageUrl: modelFacingData.generatedImageUrl }
-        : {})
+      ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {})
     }
   };
 }
@@ -542,17 +528,6 @@ export async function registerLetterTools(
           result as Record<string, unknown>,
           meta
         );
-
-        if (tool.name === "generate_image_fallback") {
-          // Widget-only breadcrumb (issue #235): the card footer shows which
-          // steering-copy revision the SERVER was on when this render was
-          // produced, alongside the template's own baked version.
-          _meta.steeringRev = STEERING_COPY_REV;
-        }
-
-        if (tool.name === "generate_image_fallback") {
-          generateImageOutputZ.parse(structuredContent);
-        }
 
         const response = {
           structuredContent,
@@ -665,10 +640,6 @@ function summarizeToolResult(
     case "upload_image": {
       const message = result.message as string;
       return message || "Photo picker ready. Waiting for user to select a photo.";
-    }
-    case "generate_image_fallback": {
-      const message = result.message as string;
-      return message || "Image generated. Use the imageUrl with a preview tool.";
     }
     case "confirm_uploaded_image": {
       const suggestedNextStep = result.suggestedNextStep as string;

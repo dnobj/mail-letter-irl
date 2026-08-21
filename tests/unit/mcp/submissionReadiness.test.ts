@@ -45,7 +45,7 @@ describe("Submission readiness checks", () => {
 
   it("should copy securitySchemes into tool metadata", () => {
     const meta = buildToolMeta(
-      "generate_image_fallback",
+      "quote_and_preview_letter",
       {
         "openai/outputTemplate": widgetTemplateUri("LetterPreviewCard"),
         "openai/widgetAccessible": true
