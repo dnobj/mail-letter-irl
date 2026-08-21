@@ -285,7 +285,6 @@ export function buildWidgetResourceMeta(description: string) {
  */
 async function registerWidgetResources(mcpServer: McpServer) {
   for (const widget of WIDGET_DEFINITIONS) {
-    const uri = widgetTemplateUri(widget.name);
     const filePath = path.join(DEFAULT_WIDGET_DIR, `${widget.name}.html`);
 
     // Check if widget file exists before registering
@@ -296,28 +295,43 @@ async function registerWidgetResources(mcpServer: McpServer) {
       continue;
     }
 
-    // Register widget resource with canonical ui.* metadata and
-    // legacy openai/* aliases for compatibility.
-    mcpServer.registerResource(
-      widget.name,
-      uri,
-      {},  // Empty options per docs
-      async () => {
-        console.log(`🎨 Widget resource requested: ${uri}`);
-        const html = await fs.readFile(filePath, "utf-8");
-        console.log(`🎨 Returning widget HTML (${html.length} bytes)`);
-        return {
-          contents: [{
-            uri,
-            mimeType: WIDGET_MIME_TYPE,
-            text: html,
-            _meta: buildWidgetResourceMeta(widget.description)
-          }]
-        };
-      }
-    );
+    // Register the versioned URI plus the legacy unversioned URI as a
+    // transition alias: native mobile clients hold cached tool lists whose
+    // outputTemplate still points at the unversioned form, and resources/read
+    // is an exact-string lookup - without the alias those clients would get
+    // ResourceNotFound (no widget at all) instead of a stale widget. Remove
+    // the alias once cached tool lists have aged out (issue #235).
+    const versionedUri = widgetTemplateUri(widget.name);
+    const legacyUri = `ui://widgets/${widget.name}.html`;
+    const registrations: Array<[string, string]> = [
+      [widget.name, versionedUri],
+      [`${widget.name}-legacy`, legacyUri]
+    ];
 
-    console.log(`📦 Registered widget resource: ${uri}`);
+    for (const [registrationName, uri] of registrations) {
+      // Register widget resource with canonical ui.* metadata and
+      // legacy openai/* aliases for compatibility.
+      mcpServer.registerResource(
+        registrationName,
+        uri,
+        {},  // Empty options per docs
+        async () => {
+          console.log(`🎨 Widget resource requested: ${uri}`);
+          const html = await fs.readFile(filePath, "utf-8");
+          console.log(`🎨 Returning widget HTML (${html.length} bytes)`);
+          return {
+            contents: [{
+              uri,
+              mimeType: WIDGET_MIME_TYPE,
+              text: html,
+              _meta: buildWidgetResourceMeta(widget.description)
+            }]
+          };
+        }
+      );
+
+      console.log(`📦 Registered widget resource: ${uri}`);
+    }
   }
 }
 
@@ -483,7 +497,7 @@ export async function registerLetterTools(
     mcpServer.registerTool(
       tool.name,
       {
-        title: tool.description,  // Use description as title
+        title: tool.title ?? tool.description,  // Short label when provided; description otherwise
         description: tool.description,
         inputSchema: inputShape,
         outputSchema: outputShape,

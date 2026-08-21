@@ -317,6 +317,7 @@ export const generateImageTool: McpToolDefinition<
   GenerateImageOutput
 > = {
   name: "generate_image_fallback",
+  title: "Generate image (Letter IRL fallback)",
   description: "FALLBACK ONLY — do not use for normal image requests. When the user asks to create or generate an image, artwork, or an illustration, use ChatGPT's built-in image generation instead; its images can be attached to Letter IRL postcards and letters directly. Call this tool only when built-in image generation is unavailable, has failed, or its image could not be handed to Letter IRL — or when the user explicitly asks Letter IRL itself to generate the image. Returns a preview widget and an imageUrl to pass to a preview tool. If the user already has an uploaded, attached, or previously generated image in this conversation, reuse that existing image instead of calling this tool. Context may be postcard, header_image, or inline_image.",
   readOnly: false,
   inputSchema: generateImageInputSchema,

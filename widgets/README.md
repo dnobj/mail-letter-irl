@@ -19,7 +19,7 @@ Receives data via `window.openai.toolOutput` from the `quote_and_preview_letter`
 
 - Uses `openai:set_globals` event to receive data (data arrives after widget loads)
 - Shows loading shimmer animation until data arrives
-- Registered as MCP resource with `ui://widgets/LetterPreviewCard.html` URI
+- Registered as MCP resource with `ui://widgets/LetterPreviewCard.html@v<N>` URI
 - Uses `text/html+skybridge` MIME type for ChatGPT runtime injection
 
 See `docs/learnings/widget-debugging-notes.md` for implementation details.

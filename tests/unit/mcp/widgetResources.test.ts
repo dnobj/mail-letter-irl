@@ -21,7 +21,8 @@ import {
   WIDGET_DEFINITIONS,
   WIDGET_MIME_TYPE
 } from '../../../src/mcp/registerTools.js';
-import { widgetTemplateUri } from '../../../src/mcp/widgetUris.js';
+import { createHash } from 'crypto';
+import { widgetTemplateUri, WIDGET_TEMPLATE_VERSION } from '../../../src/mcp/widgetUris.js';
 import { LetterIrlServer } from '../../../src/server.js';
 
 describe('Widget Resource Registration (US-MCP-07)', () => {
@@ -45,6 +46,33 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 
     it('should have 5 widgets defined', () => {
       expect(WIDGET_DEFINITIONS.length).toBe(5);
+    });
+
+    it('versions every widget template URI (issue #235 cache-bust)', () => {
+      // Literal shape assertion, deliberately NOT helper-vs-helper: if someone
+      // strips the @vN suffix from widgetTemplateUri, this reddens.
+      expect(widgetTemplateUri('LetterPreviewCard')).toMatch(
+        /^ui:\/\/widgets\/LetterPreviewCard\.html@v\d+$/
+      );
+    });
+
+    it('WIDGET_TEMPLATE_VERSION was bumped when widget HTML last changed', async () => {
+      // Self-maintaining #235 invariant: this digest is recorded alongside the
+      // version. When widget HTML changes this test fails; the fix is to bump
+      // WIDGET_TEMPLATE_VERSION in src/mcp/widgetUris.ts AND re-record the
+      // digest printed in the failure message. Bumping only the digest ships
+      // stale widgets to native mobile caches - always bump both.
+      const widgetDir = path.resolve(__dirname, '../../../widgets');
+      const parts: string[] = [];
+      for (const { name } of [...WIDGET_DEFINITIONS].sort((a, b) => a.name.localeCompare(b.name))) {
+        const content = await fs.readFile(path.join(widgetDir, `${name}.html`), 'utf-8');
+        parts.push(`${name}:${createHash('sha256').update(content).digest('hex')}`);
+      }
+      const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
+      expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
+        version: 2,
+        digest: '68694ec0e3ce'
+      });
     });
   });
 
@@ -198,7 +226,10 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       for (const tool of new LetterIrlServer().listTools()) {
         const template = tool.meta?.['openai/outputTemplate'];
         if (typeof template !== 'string') continue;
-        const widget = template.replace(/^ui:\/\/widgets\//, '').replace(/\.html(@v\d+)?$/, '');
+        // Version suffix is REQUIRED here: an unversioned outputTemplate keeps
+        // ".html" in the key and fails the binding test below, so removing the
+        // #235 cache-bust cannot slip through silently.
+        const widget = template.replace(/^ui:\/\/widgets\//, '').replace(/\.html@v\d+$/, '');
         if (!byWidget.has(widget)) byWidget.set(widget, tool.name);
       }
       return byWidget;

@@ -309,7 +309,8 @@ cases where that path is unavailable or fails.
 2. [ ] Confirm the widget displays the generated preview without exposing base64 data in the conversation
 3. [ ] Ask ChatGPT to use the image in `quote_and_preview_postcard` without copying or re-entering its URL
 4. [ ] Confirm the postcard front renders the same generated image
-5. [ ] Reconnect or refresh the DEV app and repeat the generate-to-postcard flow to guard against cached widget resources
+5. [ ] Refresh the DEV app (Refresh re-ingests schemas; Reconnect only re-auths) and repeat the generate-to-postcard flow to guard against cached widget resources
+5a. [ ] On the native iOS/Android app: force-quit and reopen ChatGPT after the web Refresh, then confirm widgets render (the native apps cache widget templates aggressively - the versioned ui://…@vN URIs exist to bust this, issue #235)
 6. [ ] Repeat at a narrow mobile viewport and in dark mode; loading, preview, URL, and error states must remain readable without overflow
 7. [ ] Confirm server and browser logs contain no bearer tokens, complete temporary image URLs, capability tokens, or base64 image bodies
 

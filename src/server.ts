@@ -194,6 +194,7 @@ export class LetterIrlServer {
   listTools() {
     return tools.map((tool) => ({
       name: tool.name,
+      title: tool.title,
       description: tool.description,
       readOnly: tool.readOnly,
       inputSchema: tool.inputSchema,

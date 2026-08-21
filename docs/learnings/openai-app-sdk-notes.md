@@ -5,7 +5,7 @@
 
 ## Current Status
 
-Letter IRL is integrated as an MCP-backed ChatGPT app with OAuth, Streamable HTTP, server-side tool registration, and custom Apps SDK widgets. The development app has verified visibility for 17 tools, including `generate_image`, `upload_image`, `get_started`, postcard tools, letter tools, account/order tools, return-address tools, and feature-request capture.
+Letter IRL is integrated as an MCP-backed ChatGPT app with OAuth, Streamable HTTP, server-side tool registration, and custom Apps SDK widgets. The development app has verified visibility for 17 tools, including `generate_image` (since renamed `generate_image_fallback`), `upload_image`, `get_started`, postcard tools, letter tools, account/order tools, return-address tools, and feature-request capture.
 
 ## Recent Learnings
 
