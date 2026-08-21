@@ -192,7 +192,10 @@ Cost containment, in layers:
   mentioning Letter IRL; only vandalism remains, and it is capped.
 - **Global daily ceiling** (`LETTER_IRL_IMAGE_DAILY_CEILING`, default 200
   =~ $10/day worst case at gpt-image-1.5 medium): past it, everyone degrades
-  to the redirect card. Absolute spend bound regardless of account count.
+  to the redirect card. `0` is a kill switch (blocks all generation). The
+  check is advisory (read-before-reserve, so N concurrent requests can
+  overshoot by ~N) and the day boundary is the DB server's timezone (UTC on
+  hosted Postgres) - both acceptable for a soft spend cap.
 - **Atomic reservations** (pre-existing): no concurrent overspend; ambiguous
   provider outcomes preserved for maintenance reconciliation.
 - Model/quality remain env-tunable (`OPENAI_IMAGE_MODEL`, `OPENAI_IMAGE_QUALITY`;

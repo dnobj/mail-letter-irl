@@ -10,7 +10,8 @@ vi.mock("../../../src/services/imageGenerationService.js", () => ({
   generateImage: vi.fn(),
   ImageGenerationError: class ImageGenerationError extends Error {
     code = "PROVIDER_ERROR";
-    outcome: "definite" | "ambiguous" = "definite";
+    // Must mirror the real union exactly (imageGenerationService.ts):
+    outcome: "definite_failure" | "ambiguous" = "definite_failure";
     userMessage = "boom";
     providerRequestId?: string;
   }
@@ -27,7 +28,8 @@ vi.mock("../../../src/services/imageGenerationLimitService.js", () => ({
 }));
 
 vi.mock("../../../src/services/tempImageStore.js", () => ({
-  storeImage: vi.fn()
+  storeImage: vi.fn(),
+  isTempImageStoreConfigured: vi.fn()
 }));
 
 import { generateImageForMailTool } from "../../../src/tools/generateImageForMail.js";
@@ -35,6 +37,7 @@ import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import * as genService from "../../../src/services/imageGenerationService.js";
 import * as limitService from "../../../src/services/imageGenerationLimitService.js";
 import * as tempStore from "../../../src/services/tempImageStore.js";
+const tempStoreModule = tempStore;
 
 const context = {
   user: { userId: "user-1" },
@@ -54,6 +57,7 @@ beforeEach(() => {
   process.env.LETTER_IRL_IMAGE_DAILY_CEILING = "200";
   vi.mocked(limitService.ensureStarterGrant).mockResolvedValue(undefined);
   vi.mocked(limitService.countGenerationsToday).mockResolvedValue(0);
+  vi.mocked(tempStore.isTempImageStoreConfigured).mockReturnValue(true as never);
 });
 
 describe("generate_image_for_mail (hybrid)", () => {
@@ -196,5 +200,107 @@ describe("generate_image_for_mail (hybrid)", () => {
     const result = await generateImageForMailTool.handler({}, context);
     expect(result.mode).toBe("redirect");
     expect(result.status).toBe("no_prompt");
+  });
+
+  it("marks ambiguous when the commit fails AFTER provider success (billable)", async () => {
+    vi.mocked(limitService.reserveGeneration).mockResolvedValue({
+      reserved: true,
+      reservationId: "res-4",
+      remaining: 1,
+      used: 2,
+      allowance: 3
+    } as never);
+    vi.mocked(limitService.markGenerationDispatched).mockResolvedValue(true as never);
+    vi.mocked(limitService.commitGenerationReservation).mockResolvedValue(false as never);
+    vi.mocked(genService.generateImage).mockImplementation(async (_prompt, opts) => {
+      await (opts as { beforeDispatch: () => Promise<void> }).beforeDispatch();
+      return { base64Data: TINY_JPEG_BASE64, providerRequestId: "prov-4" } as never;
+    });
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, context);
+
+    expect(result.mode).toBe("redirect");
+    // Provider succeeded, so the credit must be PRESERVED for reconciliation,
+    // never released back as if unspent.
+    expect(limitService.markGenerationReservationAmbiguous).toHaveBeenCalledWith(
+      "user-1",
+      "res-4",
+      "provider_succeeded_persistence_unknown",
+      "prov-4"
+    );
+    expect(limitService.releaseGenerationReservation).not.toHaveBeenCalled();
+    // The honest copy branch: no "no credit was used" claim on ambiguous paths.
+    expect(result.message).not.toContain("no credit was used");
+  });
+
+  it("releases on a post-dispatch DEFINITE provider failure", async () => {
+    vi.mocked(limitService.reserveGeneration).mockResolvedValue({
+      reserved: true,
+      reservationId: "res-5",
+      remaining: 1,
+      used: 2,
+      allowance: 3
+    } as never);
+    vi.mocked(limitService.markGenerationDispatched).mockResolvedValue(true as never);
+    vi.mocked(genService.generateImage).mockImplementation(async (_prompt, opts) => {
+      await (opts as { beforeDispatch: () => Promise<void> }).beforeDispatch();
+      const err = new genService.ImageGenerationError("content policy");
+      (err as { outcome: string }).outcome = "definite_failure";
+      throw err;
+    });
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, context);
+
+    expect(result.mode).toBe("redirect");
+    expect(limitService.releaseGenerationReservation).toHaveBeenCalledWith(
+      "user-1",
+      "res-5",
+      "provider_definite_failure"
+    );
+    expect(limitService.markGenerationReservationAmbiguous).not.toHaveBeenCalled();
+    expect(result.message).toContain("no credit was used");
+  });
+
+  it("marks ambiguous when the temp store throws after the credit is consumed", async () => {
+    vi.mocked(limitService.reserveGeneration).mockResolvedValue({
+      reserved: true,
+      reservationId: "res-6",
+      remaining: 1,
+      used: 2,
+      allowance: 3
+    } as never);
+    vi.mocked(limitService.markGenerationDispatched).mockResolvedValue(true as never);
+    vi.mocked(limitService.commitGenerationReservation).mockResolvedValue(true as never);
+    vi.mocked(genService.generateImage).mockImplementation(async (_prompt, opts) => {
+      await (opts as { beforeDispatch: () => Promise<void> }).beforeDispatch();
+      return { base64Data: TINY_JPEG_BASE64, providerRequestId: "prov-6" } as never;
+    });
+    vi.mocked(tempStore.storeImage).mockRejectedValue(new Error("bucket down"));
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, context);
+
+    expect(result.mode).toBe("redirect");
+    expect(limitService.markGenerationReservationAmbiguous).toHaveBeenCalled();
+    expect(limitService.releaseGenerationReservation).not.toHaveBeenCalled();
+  });
+
+  it("redirects instead of hard-failing when the reservation itself rejects", async () => {
+    vi.mocked(limitService.reserveGeneration).mockRejectedValue(new Error("pool exhausted"));
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, context);
+
+    expect(result.mode).toBe("redirect");
+    expect(result.status).toBe("generation_failed");
+    expect(genService.generateImage).not.toHaveBeenCalled();
+  });
+
+  it("redirects with generation_unconfigured when the temp store is not configured", async () => {
+    vi.mocked(tempStoreModule.isTempImageStoreConfigured).mockReturnValue(false as never);
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, context);
+
+    expect(result.mode).toBe("redirect");
+    expect(result.status).toBe("generation_unconfigured");
+    expect(limitService.reserveGeneration).not.toHaveBeenCalled();
   });
 });

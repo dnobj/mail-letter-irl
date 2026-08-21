@@ -41,7 +41,7 @@ import {
   releaseGenerationReservation,
   reserveGeneration
 } from "../services/imageGenerationLimitService.js";
-import { storeImage } from "../services/tempImageStore.js";
+import { isTempImageStoreConfigured, storeImage } from "../services/tempImageStore.js";
 
 interface GenerateImageForMailInput {
   prompt?: string;
@@ -62,6 +62,8 @@ interface GenerateImageForMailOutput {
 const PREVIEW_CONFIG = { maxWidth: 400, jpegQuality: 60 } as const;
 
 function dailyCeiling(): number {
+  // 0 is a KILL SWITCH (block all generation), not "disabled" - an operator
+  // zeroing the ceiling during a spend incident must stop spend, not open it.
   const parsed = Number.parseInt(
     process.env.LETTER_IRL_IMAGE_DAILY_CEILING ?? "200",
     10
@@ -175,7 +177,20 @@ async function handler(
     );
   }
 
-  if (!process.env.OPENAI_API_KEY) {
+  if (!process.env.OPENAI_API_KEY || !isTempImageStoreConfigured()) {
+    // Preflight BOTH paid-path dependencies before any credit is reserved: a
+    // missing temp store would otherwise burn the credit and the provider
+    // charge, then fail at persistence (PR #247 review blocker).
+    context.logger.warn(
+      {
+        correlationId: context.correlationId,
+        event: "generate_image.unconfigured",
+        errorClass: "configuration_error",
+        missingKey: !process.env.OPENAI_API_KEY,
+        missingTempStore: !isTempImageStoreConfigured()
+      },
+      "Image generation not configured; degrading to redirect"
+    );
     return redirectOutput(
       input,
       "generation_unconfigured",
@@ -202,7 +217,7 @@ async function handler(
   // accounts exist. Past the ceiling everyone degrades to redirect mode.
   try {
     const ceiling = dailyCeiling();
-    if (ceiling > 0 && (await countGenerationsToday()) >= ceiling) {
+    if (ceiling === 0 || (await countGenerationsToday()) >= ceiling) {
       context.logger.warn(
         { correlationId: context.correlationId, event: "generate_image.daily_ceiling_reached" },
         "Global image generation ceiling reached"
@@ -217,7 +232,24 @@ async function handler(
     // Ceiling check trouble must not block paid users; fall through.
   }
 
-  const reservation = await reserveGeneration(userId);
+  let reservation: Awaited<ReturnType<typeof reserveGeneration>>;
+  try {
+    reservation = await reserveGeneration(userId);
+  } catch {
+    context.logger.error(
+      {
+        correlationId: context.correlationId,
+        event: "generate_image.reserve_failed",
+        errorClass: "database_error"
+      },
+      "Credit reservation failed; degrading to redirect"
+    );
+    return redirectOutput(
+      input,
+      "generation_failed",
+      "Letter IRL's in-turn generation hit a snag and no credit was used. ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL."
+    );
+  }
   if (!reservation.reserved) {
     return redirectOutput(
       input,
@@ -228,6 +260,7 @@ async function handler(
 
   let providerDispatched = false;
   let providerSucceeded = false;
+  let providerRequestId: string | undefined;
   try {
     const result = await generateImage(prompt, {
       context: input.context as ImageContext | undefined,
@@ -243,6 +276,7 @@ async function handler(
       }
     });
     providerSucceeded = true;
+    providerRequestId = result.providerRequestId;
 
     // Provider usage is billable once generation succeeds; consume the
     // reservation before any downstream persistence can fail-and-retry free.
@@ -290,7 +324,10 @@ async function handler(
         userId,
         reservation.reservationId,
         providerSucceeded ? "provider_succeeded_persistence_unknown" : "provider_outcome_unknown",
-        error instanceof ImageGenerationError ? error.providerRequestId : undefined
+        // Prefer the id captured from a successful provider response (lost on
+        // the commit-failure path if we only read it off ImageGenerationError).
+        providerRequestId ??
+          (error instanceof ImageGenerationError ? error.providerRequestId : undefined)
       );
     } else {
       await releaseReservedGeneration(
@@ -313,7 +350,9 @@ async function handler(
     return redirectOutput(
       input,
       "generation_failed",
-      "Letter IRL's in-turn generation hit a snag (no credit was wasted if the image did not arrive). ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL."
+      ambiguousProviderOutcome
+        ? "Letter IRL's in-turn generation hit a snag. If a credit was used without an image arriving, maintenance reconciles it automatically. ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL."
+        : "Letter IRL's in-turn generation hit a snag and no credit was used. ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL."
     );
   }
 }
@@ -336,7 +375,8 @@ export const generateImageForMailTool: McpToolDefinition<
       },
       context: {
         type: "string",
-        description: "Optional mail context: postcard, header_image, or inline_image."
+        enum: ["postcard", "header_image", "inline_image"],
+        description: "Optional mail context."
       }
     },
     required: []

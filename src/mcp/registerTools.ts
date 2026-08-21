@@ -100,7 +100,8 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'send_letter',
     'send_postcard',
     'create_mail_checkout',
-    'set_return_address'  // Validates address via PostGrid
+    'set_return_address',  // Validates address via PostGrid
+    'generate_image_for_mail' // Calls the OpenAI Images API when credits allow
   ];
 
   // Tools where repeated calls with same args have no additional effect
@@ -140,7 +141,7 @@ export const WIDGET_DEFINITIONS = [
   { name: "PostcardPreviewCard", description: "Shows postcard front/back preview with cost, delivery info, and status" },
   { name: "ImageUploadCard", description: "File picker widget for uploading photos to use in letters or postcards" },
   { name: "GetStartedCard", description: "Getting-started guide for new users with setup steps and example prompts" },
-  { name: "ImageRoutingCard", description: "Explains image-generation routing and offers a one-tap ChatGPT generation request" },
+  { name: "ImageRoutingCard", description: "Shows a generated image with its credit line, or image-routing guidance with a copy-ready prompt" },
 ];
 
 /**

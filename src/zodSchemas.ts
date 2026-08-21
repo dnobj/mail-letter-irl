@@ -169,7 +169,7 @@ export const uploadImageInputZ = z.object({
 
 export const generateImageForMailInputZ = z.object({
   prompt: z.string().optional(),
-  context: z.string().optional()
+  context: z.enum(["postcard", "header_image", "inline_image"]).optional()
 });
 
 // ============================================================================

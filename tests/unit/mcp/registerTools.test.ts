@@ -273,12 +273,12 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       expect(writeCount).toBe(13);
     });
 
-    it('should have 8 open-world tools (call external APIs)', () => {
+    it('should have 9 open-world tools (call external APIs)', () => {
       const openWorldCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.openWorldHint === true;
       }).length;
-      expect(openWorldCount).toBe(8);
+      expect(openWorldCount).toBe(9);
     });
 
     it('should have 6 idempotent tools (send + checkout + address management + upload relay)', () => {

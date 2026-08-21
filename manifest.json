@@ -1714,7 +1714,12 @@
           },
           "context": {
             "type": "string",
-            "description": "Optional mail context: postcard, header_image, or inline_image."
+            "enum": [
+              "postcard",
+              "header_image",
+              "inline_image"
+            ],
+            "description": "Optional mail context."
           }
         },
         "required": []

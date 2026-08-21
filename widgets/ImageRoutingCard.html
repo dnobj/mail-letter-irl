@@ -106,6 +106,13 @@
   </head>
   <body>
     <div class="card">
+      <!-- LOADING: default until toolOutput carries a mode, so users never
+           read "no credits" while their credit is in fact being spent. -->
+      <div id="state-loading">
+        <h2>Working on your image&hellip;</h2>
+        <p class="explain">Letter IRL is preparing your image request.</p>
+      </div>
+
       <!-- GENERATED mode: image created in-turn with a Letter IRL credit -->
       <div id="state-generated" class="hidden">
         <h2>Your image is ready</h2>
@@ -120,7 +127,7 @@
       </div>
 
       <!-- REDIRECT mode: explanation + copy-ready prompt -->
-      <div id="state-redirect">
+      <div id="state-redirect" class="hidden">
         <h2>Generate this with ChatGPT</h2>
         <p class="explain" id="explain-text">
           Letter IRL image credits aren't available for this request, but
@@ -161,35 +168,50 @@
               btn.textContent = "Copied!";
               setTimeout(function () { btn.textContent = "Copy"; }, 1600);
             };
+            var fail = function () {
+              btn.textContent = "Copy failed";
+              setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+            };
             if (navigator.clipboard && navigator.clipboard.writeText) {
               navigator.clipboard.writeText(text).then(done, function () {
-                fallbackCopy(text, done);
+                fallbackCopy(text, done, fail);
               });
             } else {
-              fallbackCopy(text, done);
+              fallbackCopy(text, done, fail);
             }
           });
         }
 
         // execCommand fallback for webviews without the async clipboard API.
-        function fallbackCopy(text, done) {
-          var field = document.getElementById("prompt-field");
-          var prior = field.value;
-          field.value = text;
-          field.focus();
-          field.select();
-          try { document.execCommand("copy"); } catch (e) { /* best effort */ }
-          field.value = prior;
-          done();
+        // Uses a transient off-screen textarea (NOT display:none - hidden
+        // elements cannot hold a selection) and only reports success when the
+        // copy actually took.
+        function fallbackCopy(text, done, fail) {
+          var scratch = document.createElement("textarea");
+          scratch.value = text;
+          scratch.setAttribute("readonly", "");
+          scratch.style.position = "fixed";
+          scratch.style.left = "-9999px";
+          scratch.style.top = "0";
+          document.body.appendChild(scratch);
+          scratch.focus();
+          scratch.select();
+          var ok = false;
+          try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+          document.body.removeChild(scratch);
+          if (ok) done(); else fail();
         }
 
         function render() {
           var out = toolOutput();
           var meta = hiddenMeta();
-          var generated = out.mode === "generated";
+          var mode = out.mode === "generated" || out.mode === "redirect" ? out.mode : null;
+          var generated = mode === "generated";
 
+          document.getElementById("state-loading").classList.toggle("hidden", mode !== null);
           document.getElementById("state-generated").classList.toggle("hidden", !generated);
-          document.getElementById("state-redirect").classList.toggle("hidden", generated);
+          document.getElementById("state-redirect").classList.toggle("hidden", mode !== "redirect");
+          if (mode === null) return;
 
           if (generated) {
             var preview = nonEmptyString(meta.generatedImagePreview);
@@ -208,12 +230,21 @@
                 : "Created with a Letter IRL image credit";
           } else {
             var p = nonEmptyString(out.prompt);
+            var row = document.querySelector(".prompt-row");
+            var hint = document.querySelector(".hint");
             if (p) {
+              row.classList.remove("hidden");
+              hint.classList.remove("hidden");
               document.getElementById("prompt-field").value = p.trim();
               document.getElementById("explain-text").textContent =
                 "Letter IRL image credits aren't available for this request, but ChatGPT's own generator is free. Copy the prompt and send it as a new message - without mentioning Letter IRL. Then say \"make it a postcard.\"";
             } else {
-              document.getElementById("prompt-field").value = "";
+              // No prompt to copy (status no_prompt) - an empty copy field
+              // with a dead button would be worse than none.
+              row.classList.add("hidden");
+              hint.classList.add("hidden");
+              document.getElementById("explain-text").textContent =
+                "Tell me what image you want, or just ask ChatGPT directly - without mentioning Letter IRL - and it will generate it free.";
             }
           }
         }

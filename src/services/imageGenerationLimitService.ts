@@ -194,6 +194,21 @@ export async function ensureStarterGrant(userId: string): Promise<void> {
   );
   const quantity = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
   if (quantity === 0) return;
+  // Cheap non-locking existence check first: the grant path takes the account
+  // row lock and performs a speculative insert even on conflict, which is
+  // needless churn for every call after the first. The race between two
+  // first-calls is still settled by ON CONFLICT DO NOTHING.
+  const existing = await query(
+    `SELECT 1 FROM image_entitlements
+     WHERE source_type = 'starter' AND source_reference_id = $1
+     LIMIT 1`,
+    [userId]
+  );
+  if (existing.rows.length > 0) return;
+  // NOTE: accounts whose users row does not exist yet (identity defers
+  // creation until a verified email arrives) fail the FK here; the caller
+  // swallows that into a warn and the user simply has no starter grant until
+  // their account row exists. Deliberate, not accidental.
   await grantImageEntitlement({
     userId,
     sourceType: 'starter',
@@ -203,9 +218,12 @@ export async function ensureStarterGrant(userId: string): Promise<void> {
 }
 
 /**
- * Global generations dispatched today, across all users - the input to the
- * daily spend ceiling. Counts reservations that reached the provider
- * (anything past 'pending' except a pre-dispatch release).
+ * Global generations today, across all users - the input to the daily spend
+ * ceiling. Statuses are reserved|dispatched|consumed|released|ambiguous;
+ * everything except 'released' counts (in-flight 'reserved' rows count too,
+ * which over-counts slightly and errs toward spending less). Day boundary is
+ * the DB server's timezone (UTC on hosted Postgres). Served by
+ * idx_image_generation_reservations_created_at (migration 025).
  */
 export async function countGenerationsToday(): Promise<number> {
   const result = await query<{ count: string }>(

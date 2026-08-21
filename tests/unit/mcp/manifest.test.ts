@@ -54,10 +54,10 @@ describe("Compatibility manifest", () => {
 
   it("does not advertise any server-side image GENERATOR", () => {
     // generate_image (later generate_image_fallback) was REMOVED after the
-    // #227 investigation. Pin the absence so a bad merge or revert cannot
-    // silently resurrect it. generate_image_for_mail is deliberately NOT in
-    // this pin: it is an intent ROUTER that generates nothing (no OpenAI
-    // call, no quota) - it redirects the model to built-in generation.
+    // #227 investigation; the HYBRID generate_image_for_mail that replaced it
+    // (Addendum 3) generates only against the user's entitlements and is
+    // deliberately NOT in this pin. The pin guards against the old
+    // unconditional generator names returning via a bad merge or revert.
     // Decision record: docs/learnings/generate-image-removal-decision.md
     const toolNames = buildManifest().tools.map((tool) => tool.name);
     expect(toolNames).not.toContain("generate_image_fallback");
