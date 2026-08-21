@@ -99,3 +99,24 @@ Kept deliberately:
 - Manual tests (CIMD-04) now check the two things that must stay true: generic
   and @-mention image requests route to NATIVE generation, and the upload
   widget remains the image-recovery path.
+
+## Post-removal addendum: the act-don't-explain ceiling (r5, Aug 21)
+
+After removal, a native-app conversation OPENED with '@(DEV) Letter IRL
+generate an image of X' sometimes produced a first-turn narration ('the app
+doesn't expose an image-generation tool, so I can't...') instead of falling
+through to image_gen; a one-line user nudge always produced the image.
+Instructions r5 scripted the fallthrough explicitly ('generate immediately...
+never pause to explain'). The mcp.client_request logs prove the device
+received r5 (tools/list, steeringRev 5, 20:00:22Z) and the very next
+first-turn @-mention ask still narrated (bear test, 20:01Z).
+
+**Conclusion: server-instruction copy cannot override the native app's
+first-turn treatment of an @-mention-addressed generate request.** This is
+host/model behavior. Scope is narrow: it affects only the first turn of a
+conversation opened by @-mentioning the app AND asking it to generate; plain
+requests, desktop chip attachment, later turns, and the natural
+generate-first flow all reach image_gen without friction. Accepted as a known
+papercut; r5's directive is kept (harmless, may help other tiers), and the
+clean repro + logs are available if this is ever escalated to OpenAI as
+model-behavior feedback.
