@@ -137,3 +137,18 @@ This does not reopen the removal: nothing generates server-side, and the
 "no server-side generator" regression pin stands (narrowed to exclude the
 router by name).
 
+### Addendum 2 result (on-device, Aug 21)
+
+The trampoline works as designed - 6s consent-free call, and the model ACTS on
+the redirect ('Letter IRL handed this off to ChatGPT's built-in image
+generation'), ending the capability narration. It then exposed the true
+bottom: **the native app cannot chain an app tool call into image_gen within
+the same turn.** Every same-turn attempt across every steering variant
+reported image_gen 'unavailable'; every cross-turn attempt succeeded. One
+natural nudge ('try again') completes the flow, every time. Web never routes
+to the trampoline for plain requests (native gen fires directly), so the tool
+only activates where it helps. Accepted end state: accurate attempt +
+one-nudge recovery on native first turns; the only conceivable further step
+is a widget on the router that fires sendFollowUpMessage as an auto-nudge -
+deliberately NOT built (adds a visible synthetic turn, render weight, and a
+flaky-API dependency for a papercut this small).
