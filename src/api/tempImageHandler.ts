@@ -2,7 +2,7 @@
  * Temporary Image Handler
  *
  * Serves generated images from the private temporary image store.
- * Images are stored when the generate_image_fallback tool runs and served here
+ * Images were stored by the removed generate_image_fallback tool and served here; the endpoint remains for any unexpired tokens and possible future writers (see docs/learnings/generate-image-removal-decision.md)
  * so the preview tools can download them via imageUrl.
  *
  * Route: GET /api/temp-image/:token

@@ -26,7 +26,6 @@ export { getStartedTool } from "./getStarted.js";
 export { uploadImageTool } from "./uploadImage.js";
 
 // Image generation tool (AI-generated images via OpenAI)
-export { generateImageTool } from "./generateImage.js";
 
 // Confirm uploaded image tool (widget relay for upload URL)
 export { confirmUploadedImageTool } from "./confirmUploadedImage.js";

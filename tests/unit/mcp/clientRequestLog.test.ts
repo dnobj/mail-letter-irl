@@ -23,7 +23,7 @@ describe("classifyClient", () => {
 });
 
 describe("logMcpClientRequests", () => {
-  const knownTools = new Set(["generate_image_fallback", "upload_image"]);
+  const knownTools = new Set(["upload_image", "get_started"]);
   let writeSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -51,7 +51,7 @@ describe("logMcpClientRequests", () => {
   it("logs tools/call with registry names and collapses unknown names", () => {
     logMcpClientRequests(
       [
-        { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "generate_image_fallback" } },
+        { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "upload_image" } },
         { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "totally_made_up" } }
       ],
       "Mozilla/5.0",
@@ -60,7 +60,7 @@ describe("logMcpClientRequests", () => {
     expect(writeSpy).toHaveBeenNthCalledWith(1, "info", "mcp.client_request", {
       rpcMethod: "tools/call",
       clientClass: "web",
-      toolName: "generate_image_fallback"
+      toolName: "upload_image"
     });
     expect(writeSpy).toHaveBeenNthCalledWith(2, "info", "mcp.client_request", {
       rpcMethod: "tools/call",
@@ -72,7 +72,7 @@ describe("logMcpClientRequests", () => {
   it("logs resources/read uris only for our ui:// templates", () => {
     logMcpClientRequests(
       [
-        { jsonrpc: "2.0", id: 1, method: "resources/read", params: { uri: "ui://widgets/GenerateImageCard.html@v3" } },
+        { jsonrpc: "2.0", id: 1, method: "resources/read", params: { uri: "ui://widgets/ImageUploadCard.html@v4" } },
         { jsonrpc: "2.0", id: 2, method: "resources/read", params: { uri: "https://evil.example/x" } }
       ],
       undefined,
@@ -81,7 +81,7 @@ describe("logMcpClientRequests", () => {
     expect(writeSpy).toHaveBeenNthCalledWith(1, "info", "mcp.client_request", {
       rpcMethod: "resources/read",
       clientClass: "other",
-      resourceUri: "ui://widgets/GenerateImageCard.html@v3"
+      resourceUri: "ui://widgets/ImageUploadCard.html@v4"
     });
     expect(writeSpy).toHaveBeenNthCalledWith(2, "info", "mcp.client_request", {
       rpcMethod: "resources/read",

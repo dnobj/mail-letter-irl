@@ -1,16 +1,18 @@
 /**
- * Revision counter for the generate_image_fallback steering copy (issue #227).
+ * Revision counter for the image-routing guidance copy (issue #227).
  *
- * Bump this whenever the fallback tool's description or the image-routing
- * server instructions change. The value is appended to the served tool
- * description ("[copy rN]"), logged with every tools/list response, and
- * surfaced in the GenerateImageCard footer - so a client whose cached tool
- * list predates a copy change is identifiable from logs and screenshots
- * instead of guesswork (the native mobile apps cache tool metadata
- * aggressively; see issue #235).
+ * Bump this whenever the server instructions' image-routing guidance
+ * changes. The value is logged with every tools/list response
+ * (mcp.client_request), so a client whose cached metadata predates a copy
+ * change is identifiable from logs instead of guesswork (the native mobile
+ * apps cache tool metadata aggressively; see issue #235).
  *
- * r1: FALLBACK ONLY description (PR #236)
+ * r1: FALLBACK ONLY description on generate_image_fallback (PR #236)
  * r2: prohibition-first + image_gen named + chip-selection clause (PR #237)
- * r3: @-mention alone does not count as an explicit ask (this revision)
+ * r3: @-mention alone does not count as an explicit ask (PR #238)
+ * r4: generate_image_fallback REMOVED - native generation is the only
+ *     image-generation path; guidance now lives solely in server
+ *     instructions. Decision record:
+ *     docs/learnings/generate-image-removal-decision.md
  */
-export const STEERING_COPY_REV = 3;
+export const STEERING_COPY_REV = 4;

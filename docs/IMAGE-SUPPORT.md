@@ -216,7 +216,7 @@ Each tool:
 
 **Superseded guidance** (kept for history — accurate before the August 2026 schema fixes):
 - ~~Generated images "cannot pass directly to MCP tools"; workaround was Code Interpreter resize/crop to mint a passable file reference.~~ No longer needed on any tested surface. The Code Interpreter resize still works and remains harmless if a model chooses it.
-- Desktop timing (app selected before upload) and mobile flakiness remain worth watching; when a handoff DOES fail, the recovery path is `upload_image` — its widget's "Choose from Library" picker lists generated images and preserves the exact image the user approved (PR #234). `generate_image_fallback` is last-resort only (it generates a NEW image).
+- Desktop timing (app selected before upload) and mobile flakiness remain worth watching; when a handoff DOES fail, the recovery path is `upload_image` — its widget's "Choose from Library" picker lists generated images and preserves the exact image the user approved (PR #234). Letter IRL's own generator was removed entirely in Aug 2026 (docs/learnings/generate-image-removal-decision.md).
 
 **References**:
 - Issue #227 (full evidence trail: experiments, schema fixes, per-surface verification)

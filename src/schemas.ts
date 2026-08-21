@@ -461,7 +461,7 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
     },
     imageUrl: {
       type: "string",
-      description: "REQUIRED when using a generated image: set this to the generatedImageUrl value returned by the generate_image_fallback tool. This is the URL of the image for the postcard front."
+      description: "REQUIRED when using a hosted image: set this to the imageUrl returned by confirm_uploaded_image (the upload widget flow) or another publicly accessible image URL. This is the URL of the image for the postcard front."
     }
   }
 };
@@ -658,49 +658,6 @@ export const uploadImageOutputSchema: JsonSchema = {
     debugEndpoint: {
       type: "string",
       description: "Optional absolute URL for debug beacon ingestion"
-    }
-  }
-};
-
-// ============================================================================
-// Generate Image Schemas (AI image generation via OpenAI)
-// ============================================================================
-
-export const generateImageInputSchema: JsonSchema = {
-  type: "object",
-  required: ["prompt"],
-  properties: {
-    prompt: {
-      type: "string",
-      description: "Description of the image to generate (e.g., 'a sunset over mountains')"
-    },
-    context: {
-      type: "string",
-      enum: ["postcard", "header_image", "inline_image"],
-      description: "What the image will be used for. Determines optimal dimensions."
-    }
-  }
-};
-
-export const generateImageOutputSchema: JsonSchema = {
-  type: "object",
-  required: ["message", "suggestedNextStep", "generatedImageUrl", "generationsRemaining"],
-  properties: {
-    message: {
-      type: "string",
-      description: "Human-friendly summary message"
-    },
-    suggestedNextStep: {
-      type: "string",
-      description: "Guidance on what tool to call next with the imageUrl"
-    },
-    generatedImageUrl: {
-      type: "string",
-      description: "Model-visible capability URL for the full-resolution generated image. The widget-only base64 thumbnail is returned separately in tool-result _meta."
-    },
-    generationsRemaining: {
-      type: "integer",
-      description: "Number of explicit image-entitlement units remaining"
     }
   }
 };

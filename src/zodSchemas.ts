@@ -164,15 +164,6 @@ export const uploadImageInputZ = z.object({
 });
 
 // ============================================================================
-// Generate Image Schema (AI image generation via OpenAI)
-// ============================================================================
-
-export const generateImageInputZ = z.object({
-  prompt: z.string(),
-  context: z.enum(["postcard", "header_image", "inline_image"]).optional()
-});
-
-// ============================================================================
 // Confirm Uploaded Image Schema (Widget relay for upload URL)
 // ============================================================================
 
@@ -406,13 +397,6 @@ export const uploadImageOutputZ = z.object({
   context: z.string(),
   debugEnabled: z.boolean(),
   debugEndpoint: z.string().optional()
-});
-
-export const generateImageOutputZ = z.object({
-  message: z.string(),
-  suggestedNextStep: z.string(),
-  generationsRemaining: z.number().int(),
-  generatedImageUrl: z.string().url()
 });
 
 export const confirmUploadedImageOutputZ = z.object({
