@@ -152,3 +152,22 @@ one-nudge recovery on native first turns; the only conceivable further step
 is a widget on the router that fires sendFollowUpMessage as an auto-nudge -
 deliberately NOT built (adds a visible synthetic turn, render weight, and a
 flaky-API dependency for a papercut this small).
+
+### Mechanism correction (owner-hypothesized, on-device confirmed, Aug 21)
+
+The earlier 'same-turn tool-chaining restriction' framing was wrong in detail.
+Discriminating test: in a conversation where image_gen had just succeeded
+(fox, turn 2, no mention), a fresh @-mentioned generate request on turn 3
+failed again - the model saying 'the built-in image generator isn't available
+to me in this turn'. The failure follows the MENTION, not the turn number and
+not a preceding tool call (the rocket case failed with a mention and no tool
+call at all).
+
+**Confirmed mechanism: on the native ChatGPT app, an @-mentioned message
+scopes that turn's toolset to the app - image_gen is genuinely absent from
+mention turns.** The web chip does not scope this way (native gen fired in
+chip-attached turns). Every 'unavailable' claim was the model accurately
+reporting its per-turn toolset, not hallucinating. Consequences: no
+server-side design can make generation happen inside a mention turn (the tool
+is not there); the trampoline's value is converting that turn into an
+accurate, actionable handoff; the following unmentioned turn always succeeds.
