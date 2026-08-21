@@ -18,6 +18,7 @@
 
 import sharp from "sharp";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
+import { STEERING_COPY_REV } from "../mcp/steeringRev.js";
 import { McpToolDefinition, ToolContext } from "../contracts/types.js";
 import {
   generateImageInputSchema,
@@ -318,7 +319,7 @@ export const generateImageTool: McpToolDefinition<
 > = {
   name: "generate_image_fallback",
   title: "Letter IRL last-resort image fallback",
-  description: "FALLBACK ONLY — NOT for image requests. When the user asks to generate, create, draw, or make an image — even with the Letter IRL app selected — do not call this tool: use ChatGPT's own built-in image generation instead (the image_gen tool); its images can be attached to Letter IRL postcards and letters directly. Having Letter IRL selected is not a reason to use this tool. This last-resort generator may be called only when built-in image generation is unavailable, has failed in this conversation, or the user explicitly asks Letter IRL itself to generate the image. Returns a preview widget and an imageUrl to pass to a preview tool. If the user already has an uploaded, attached, or previously generated image in this conversation, reuse that existing image instead of calling this tool. Context may be postcard, header_image, or inline_image.",
+  description: "FALLBACK ONLY — NOT for image requests. When the user asks to generate, create, draw, or make an image — even with the Letter IRL app selected or @-mentioned — do not call this tool: use ChatGPT's own built-in image generation instead (the image_gen tool); its images can be attached to Letter IRL postcards and letters directly. Selecting or @-mentioning Letter IRL while asking for an image is NOT a request for Letter IRL to generate it. This last-resort generator may be called only when built-in image generation is unavailable, has failed in this conversation, or the user explicitly says Letter IRL should do the generating (for example 'have Letter IRL generate it'). Returns a preview widget and an imageUrl to pass to a preview tool. If the user already has an uploaded, attached, or previously generated image in this conversation, reuse that existing image instead of calling this tool. Context may be postcard, header_image, or inline_image. [copy r" + STEERING_COPY_REV + "]",
   readOnly: false,
   inputSchema: generateImageInputSchema,
   outputSchema: generateImageOutputSchema,

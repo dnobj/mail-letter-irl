@@ -10,6 +10,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { LetterIrlServer } from "../server.js";
 import { registerLetterTools } from "./registerTools.js";
+import { logMcpClientRequests } from "./clientRequestLog.js";
 import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
 import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
 import { stringifyManifest } from "./manifest.js";
@@ -257,6 +258,7 @@ export async function startHttpServer() {
   validateEnvironment();
 
   const letterServer = new LetterIrlServer();
+  let cachedToolNames: Set<string> | null = null;
   const sseSessions = new Map<string, SseSession>();
   const allowedHosts = getAllowedHosts();
   const allowedOrigins = getAllowedOrigins();
@@ -831,6 +833,9 @@ export async function startHttpServer() {
         return; // Rate limited
       }
 
+      // Cached once: the registry is static for the process lifetime.
+      cachedToolNames ??= new Set(letterServer.listTools().map((tool) => tool.name));
+
       if (!req.headers.origin) {
         req.headers.origin = FALLBACK_ORIGIN;
       }
@@ -871,6 +876,14 @@ export async function startHttpServer() {
 
         const parsedBody = body ? JSON.parse(body) : undefined;
         writeDiagnostic("info", "mcp.request_parsed");
+
+        // Issue #235 observability: which client class asked for what, and
+        // which metadata revisions a tools/list response served.
+        logMcpClientRequests(
+          parsedBody,
+          req.headers["user-agent"],
+          cachedToolNames ?? new Set()
+        );
 
         await sessionTransport.handleRequest(req, res, parsedBody);
         console.log(`Request handled successfully`);
