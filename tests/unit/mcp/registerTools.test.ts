@@ -66,7 +66,7 @@ const otherWriteTools = [
   { name: 'confirm_uploaded_image', readOnly: false },
   { name: 'submit_feature_request', readOnly: false },
   { name: 'upload_image', readOnly: false },
-  { name: 'generate_image_for_mail', readOnly: true },
+  { name: 'generate_image_for_mail', readOnly: false },
 ];
 
 // Destructive tools: delete user data
@@ -257,20 +257,20 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       expect(checkedToolNames).toEqual(runtimeToolNames);
     });
 
-    it('should have 7 read-only tools', () => {
+    it('should have 6 read-only tools', () => {
       const readOnlyCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === true;
       }).length;
-      expect(readOnlyCount).toBe(7);
+      expect(readOnlyCount).toBe(6);
     });
 
-    it('should have 12 write tools (non-read-only)', () => {
+    it('should have 13 write tools (non-read-only)', () => {
       const writeCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === false;
       }).length;
-      expect(writeCount).toBe(12);
+      expect(writeCount).toBe(13);
     });
 
     it('should have 8 open-world tools (call external APIs)', () => {

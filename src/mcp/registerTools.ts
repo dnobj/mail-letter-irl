@@ -84,7 +84,6 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
   // Read-only tools: only retrieve data, no modifications
   const readOnlyTools = [
     'get_started',
-    'generate_image_for_mail',
     'get_account_balance',
     'list_orders',
     'get_order_status',
@@ -422,6 +421,7 @@ export function partitionToolResult(
     inlineImageData,
     headerImageData,
     frontImageData,
+    generatedImagePreview,
     headerImagePreview,
     inlineImagePreview,
     ...modelFacingData
@@ -445,7 +445,11 @@ export function partitionToolResult(
       // put them in _meta - a letter with a header or inline image rendered its
       // card without one, silently.
       ...(headerImagePreview !== undefined ? { headerImagePreview } : {}),
-      ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {})
+      ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {}),
+      ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
+      ...(modelFacingData.generatedImageUrl !== undefined
+        ? { generatedImageUrl: modelFacingData.generatedImageUrl }
+        : {})
     }
   };
 }
@@ -648,11 +652,15 @@ function summarizeToolResult(
       return message || "Photo picker ready. Waiting for user to select a photo.";
     }
     case "generate_image_for_mail": {
-      // The redirect IS the payload: surface suggestedNextStep as the
-      // model-visible narration so the generate-natively directive rides the
-      // strongest channel.
+      // Generated mode narrates the credit-spend message (which embeds the
+      // IMPORTANT chain-to-preview directive); redirect mode rides
+      // suggestedNextStep - the strongest steering channel either way.
+      if (result.mode === "generated") {
+        const message = result.message as string;
+        return message || "Image generated. Use the imageUrl with a preview tool.";
+      }
       const suggestedNextStep = result.suggestedNextStep as string;
-      return suggestedNextStep || "Generate the image with built-in image generation, then offer to mail it.";
+      return suggestedNextStep || "Guide the user to resend the prompt without mentioning Letter IRL.";
     }
     case "confirm_uploaded_image": {
       const suggestedNextStep = result.suggestedNextStep as string;

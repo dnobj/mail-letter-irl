@@ -182,6 +182,41 @@ export async function getGenerationQuota(userId: string): Promise<GenerationQuot
   );
 }
 
+/**
+ * One-time starter allowance per user (issue #227 hybrid). Idempotent by the
+ * (source_type, source_reference_id) uniqueness - the reference is the user
+ * id, so at most one starter grant can ever exist per account.
+ */
+export async function ensureStarterGrant(userId: string): Promise<void> {
+  const parsed = Number.parseInt(
+    process.env.LETTER_IRL_IMAGE_STARTER_CREDITS ?? '3',
+    10
+  );
+  const quantity = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  if (quantity === 0) return;
+  await grantImageEntitlement({
+    userId,
+    sourceType: 'starter',
+    sourceReferenceId: userId,
+    quantity
+  });
+}
+
+/**
+ * Global generations dispatched today, across all users - the input to the
+ * daily spend ceiling. Counts reservations that reached the provider
+ * (anything past 'pending' except a pre-dispatch release).
+ */
+export async function countGenerationsToday(): Promise<number> {
+  const result = await query<{ count: string }>(
+    `SELECT COUNT(*) AS count
+     FROM image_generation_reservations
+     WHERE created_at >= date_trunc('day', NOW())
+       AND status <> 'released'`
+  );
+  return Number.parseInt(result.rows[0]?.count ?? '0', 10) || 0;
+}
+
 export async function checkGenerationLimit(userId: string): Promise<GenerationLimitCheck> {
   const quota = await getGenerationQuota(userId);
   return { ...quota, allowed: quota.remaining > 0 };

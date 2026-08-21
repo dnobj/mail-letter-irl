@@ -34,7 +34,7 @@ Letter IRL currently exposes **19 tools**:
 
 ## Images
 
-- `generate_image_for_mail`: intent router for image-generation requests addressed to Letter IRL. Generates nothing - returns guidance directing the model to ChatGPT's built-in image generation, then to attach the result to a preview (see docs/learnings/generate-image-removal-decision.md, Addendum 2).
+- `generate_image_for_mail`: hybrid image tool for requests addressed to Letter IRL. With Letter IRL image credits (pack/JIT grants plus a one-time starter allowance) it generates in-turn via the OpenAI Images API and returns an imageUrl for previews; without credits, or past the global daily ceiling, it returns a redirect card with a copy-ready prompt for free built-in generation. Never hard-fails. See docs/learnings/generate-image-removal-decision.md Addendum 3.
 - `upload_image`: Open the image upload widget as a fallback when direct attachment or `imageUrl` handoff does not work. Uses `ui://widgets/ImageUploadCard.html@v<N>`.
 - `confirm_uploaded_image`: Internal widget relay that confirms an uploaded image and returns the `imageUrl` plus next-step guidance.
 

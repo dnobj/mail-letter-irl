@@ -888,7 +888,7 @@ async function transitionPaidCheckout(
       sourceType: 'jit_order',
       sourceReferenceId: order.order_id,
       sourceOrderId: order.order_id,
-      quantity: integerSetting('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', 1)
+      quantity: integerSetting('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', 2)
     });
     await client.query('RELEASE SAVEPOINT jit_fulfillment');
     await recordOrderEvent(
@@ -1942,7 +1942,7 @@ export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
         sourceType: 'jit_order',
         sourceReferenceId: order.order_id,
         sourceOrderId: order.order_id,
-        quantity: integerSetting('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', 1)
+        quantity: integerSetting('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', 2)
       });
       await client.query('RELEASE SAVEPOINT recovery_fulfillment');
       await recordOrderEvent(

@@ -283,20 +283,22 @@ Test the complete letter journey.
 
 ## Image Generation Routing
 
-Letter IRL no longer generates images (removed Aug 2026; decision record:
-`docs/learnings/generate-image-removal-decision.md`). ChatGPT's built-in
-generation is the only path, and its images attach to previews directly
-(issue #227). These checks pin the two things that must stay true.
+`generate_image_for_mail` is a HYBRID (decision record Addendum 3): with
+Letter IRL image credits (pack/JIT grants plus a one-time starter allowance)
+it generates in-turn; without credits it returns a redirect card with a
+copy-ready prompt for free built-in generation. Unmentioned requests still
+route to built-in generation directly.
 
 ### Prerequisites
 - [ ] (DEV) Letter IRL app activated in ChatGPT chat (type `@` → select "(DEV) Letter IRL")
 - [ ] Authenticated / connected to the app
 
-### Native Generation Routing (Issue #227)
-1. [ ] Ask a generic "Generate an image of a sunset over mountains for a postcard" with the app attached
-2. [ ] Confirm ChatGPT produces a NATIVE image (a fast generate_image_for_mail routing call is acceptable and consent-free; server-side generation no longer exists)
-3. [ ] Repeat on the native mobile app with an @-mention ("@(DEV) Letter IRL generate an image of …") and confirm native generation runs. If the model claims image generation is unavailable, reply "try it anyway" — that claim is a known hallucination and must not reach a Letter IRL tool
-4. [ ] Ask ChatGPT to use the generated image in `quote_and_preview_postcard`; confirm the postcard front renders the same image (fileParams handoff, no manual URL copying)
+### Hybrid Image Tool (Issue #227, Addendum 3)
+1. [ ] With credits available (fresh accounts receive the starter allowance on first use): `@(DEV) Letter IRL generate an image of ...` → confirm the ImageRoutingCard shows the GENERATED image in-turn with the credit line, and the model chains the imageUrl into `quote_and_preview_postcard`
+2. [ ] With credits exhausted: repeat → confirm the REDIRECT card shows the explanation plus a copy-ready prompt field with a working Copy button; pasting the prompt WITHOUT the mention generates natively
+3. [ ] Unmentioned generic request ("Generate an image of a sunset") → confirm NATIVE generation runs with no Letter IRL tool call
+4. [ ] Ask ChatGPT to use a natively generated image in `quote_and_preview_postcard`; confirm the postcard front renders the same image (fileParams handoff, no manual URL copying)
+5. [ ] Confirm generations appear in `image_generation_reservations` (feeds the `LETTER_IRL_IMAGE_DAILY_CEILING` count) and no secrets or prompts leak into diagnostics
 
 ### Image Recovery Path (upload widget)
 1. [ ] Ask to pick a different photo; confirm `upload_image` renders the ImageUploadCard

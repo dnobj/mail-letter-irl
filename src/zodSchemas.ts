@@ -409,10 +409,13 @@ export const uploadImageOutputZ = z.object({
 });
 
 export const generateImageForMailOutputZ = z.object({
+  mode: z.enum(["generated", "redirect"]),
   status: z.string(),
   message: z.string(),
   suggestedNextStep: z.string(),
-  prompt: z.string().optional()
+  prompt: z.string().optional(),
+  generatedImageUrl: z.string().optional(),
+  generationsRemaining: z.number().int().optional()
 });
 
 export const confirmUploadedImageOutputZ = z.object({
