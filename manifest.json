@@ -1757,6 +1757,13 @@
           },
           "generationsRemaining": {
             "type": "integer"
+          },
+          "redirectStyle": {
+            "type": "string",
+            "enum": [
+              "resend",
+              "handoff"
+            ]
           }
         }
       }

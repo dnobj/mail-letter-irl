@@ -553,7 +553,11 @@ boot-fails), `OPENAI_IMAGE_MODEL`/`OPENAI_IMAGE_QUALITY` (cost dials),
 blocks all generation**), `LETTER_IRL_IMAGE_GEN_MODE` (`on` | `off` |
 `mobile_only`, default `on` - the product switch for whether @Letter IRL
 requests may generate server-side at all; `mobile_only` limits spend to the
-surface where built-in generation is genuinely unavailable),
+surface where built-in generation is genuinely unavailable). Redirect responses
+are surface-aware on every path: confirmed desktop gets a "handoff" card
+(the model is instructed to run built-in generation in the same turn, since
+desktop mentions do not scope the toolset), while mobile and unknown
+surfaces get the resend card with the copy-ready prompt,
 `IMAGE_ENTITLEMENTS_PER_JIT_ORDER` (default 2).
 The temp-image store (TEMP_IMAGE_* vars) is a hard dependency of the
 generated path and is preflighted before any credit is reserved.
