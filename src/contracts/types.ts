@@ -94,6 +94,8 @@ export interface JsonSchema {
 
 export interface McpToolDefinition<Input, Output> {
   name: string;
+  /** Short human-readable label for tool lists and consent surfaces. Falls back to description when absent. */
+  title?: string;
   description: string;
   readOnly: boolean;
   inputSchema: JsonSchema;

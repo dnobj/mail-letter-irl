@@ -12,6 +12,7 @@
  */
 
 import { McpToolDefinition, ToolContext } from "../contracts/types.js";
+import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import {
   uploadImageInputSchema,
   uploadImageOutputSchema
@@ -88,7 +89,7 @@ export const uploadImageTool: McpToolDefinition<
   inputSchema: uploadImageInputSchema,
   outputSchema: uploadImageOutputSchema,
   meta: {
-    "openai/outputTemplate": "ui://widgets/ImageUploadCard.html",
+    "openai/outputTemplate": widgetTemplateUri("ImageUploadCard"),
     "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Opening photo picker...",
     "openai/toolInvocation/invoked": "Photo picker ready",

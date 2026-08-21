@@ -16,7 +16,7 @@ const TOOL_SCOPES: Record<string, ProductScope> = {
   set_return_address: "mail:draft",
   clear_return_address: "mail:draft",
   upload_image: "mail:draft",
-  generate_image: "mail:draft",
+  generate_image_fallback: "mail:draft",
   confirm_uploaded_image: "mail:draft",
   submit_feature_request: "mail:draft",
   create_mail_checkout: "mail:send",

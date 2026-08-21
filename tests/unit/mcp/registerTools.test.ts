@@ -15,6 +15,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import { LetterIrlServer } from '../../../src/server.js';
 import {
   buildAnnotations,
@@ -65,7 +66,7 @@ const otherWriteTools = [
   { name: 'confirm_uploaded_image', readOnly: false },
   { name: 'submit_feature_request', readOnly: false },
   { name: 'upload_image', readOnly: false },
-  { name: 'generate_image', readOnly: false },
+  { name: 'generate_image_fallback', readOnly: false },
 ];
 
 // Destructive tools: delete user data
@@ -358,7 +359,7 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
         buildToolMeta(
           'quote_and_preview_letter',
           {
-            'openai/outputTemplate': 'ui://widgets/LetterPreviewCard.html',
+            'openai/outputTemplate': widgetTemplateUri('LetterPreviewCard'),
             'openai/widgetAccessible': true
           },
           true
@@ -372,7 +373,7 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
         ],
         'openai/widgetAccessible': true,
         ui: {
-          resourceUri: 'ui://widgets/LetterPreviewCard.html',
+          resourceUri: widgetTemplateUri('LetterPreviewCard'),
           widgetAccessible: true
         }
       });

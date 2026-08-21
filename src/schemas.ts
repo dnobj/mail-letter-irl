@@ -461,7 +461,7 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
     },
     imageUrl: {
       type: "string",
-      description: "REQUIRED when using a generated image: set this to the generatedImageUrl value returned by the generate_image tool. This is the URL of the image for the postcard front."
+      description: "REQUIRED when using a generated image: set this to the generatedImageUrl value returned by the generate_image_fallback tool. This is the URL of the image for the postcard front."
     }
   }
 };

@@ -37,12 +37,14 @@ or raw request bodies.
 - [ ] Confirm the Letter IRL `get_started` tool is invoked and `GetStartedCard`
       renders; record the tool evidence.
 
-### CIMD-04 — Letter IRL image generation and widget
+### CIMD-04 — Letter IRL fallback image generation and widget
 
-- [ ] Run: `Use Letter IRL to generate an image of a vivid sunset over mountain peaks for a postcard.`
-- [ ] Confirm Letter IRL's `generate_image` tool is invoked and
+- [ ] Run: `My image won't attach. Have Letter IRL itself generate an image of a vivid sunset over mountain peaks for a postcard.`
+- [ ] Confirm Letter IRL's `generate_image_fallback` tool is invoked and
       `GenerateImageCard` renders.
-- [ ] Confirm ChatGPT does not fall back to native image generation.
+- [ ] Separately run a generic `Generate an image of a sunset` with the app
+      attached and confirm ChatGPT uses NATIVE image generation, not the
+      fallback tool (steering check, issue #227).
 - [ ] Continue into a postcard preview/edit and confirm `mail:draft` behavior.
 
 ### CIMD-05 — Scope enforcement
@@ -281,26 +283,34 @@ Test the complete letter journey.
 
 ## Image Generation
 
-Test server-side image generation via the `generate_image` tool.
+Test server-side fallback image generation via the `generate_image_fallback`
+tool. The PRIMARY image path is ChatGPT's built-in generation (its images
+attach to previews directly, issue #227); this tool exists for the corner
+cases where that path is unavailable or fails.
 
 ### Prerequisites
 - [ ] (DEV) Letter IRL app activated in ChatGPT chat (type `@` → select "(DEV) Letter IRL")
 - [ ] Authenticated / connected to the app
 
-### Basic Generation (US-IMG-01)
-1. [ ] Ask ChatGPT to generate an image (e.g. "Generate an image of a sunset over mountains for a postcard")
-2. [ ] `generate_image` tool is invoked
+### Steering (Issue #227)
+1. [ ] Ask a generic "Generate an image of a sunset over mountains for a postcard" with the app attached
+2. [ ] Confirm ChatGPT uses NATIVE image generation, not `generate_image_fallback`
+
+### Basic Fallback Generation (US-IMG-01)
+1. [ ] Explicitly invoke the fallback (e.g. "My image can't be attached — have Letter IRL generate a sunset over mountains for a postcard")
+2. [ ] `generate_image_fallback` tool is invoked
 3. [ ] GenerateImageCard widget appears in chat
 4. [ ] Widget shows a loading/spinner state initially
 5. [ ] Preview image renders in the widget
 6. [ ] Image matches the prompt description
 
 ### Result Bridge and Chaining (Issue #169)
-1. [ ] Confirm Letter IRL's `generate_image` tool is used, not native ChatGPT image generation
+1. [ ] Confirm Letter IRL's `generate_image_fallback` tool is used for the explicit fallback invocation
 2. [ ] Confirm the widget displays the generated preview without exposing base64 data in the conversation
 3. [ ] Ask ChatGPT to use the image in `quote_and_preview_postcard` without copying or re-entering its URL
 4. [ ] Confirm the postcard front renders the same generated image
-5. [ ] Reconnect or refresh the DEV app and repeat the generate-to-postcard flow to guard against cached widget resources
+5. [ ] Refresh the DEV app (Refresh re-ingests schemas; Reconnect only re-auths) and repeat the generate-to-postcard flow to guard against cached widget resources
+5a. [ ] On the native iOS/Android app: force-quit and reopen ChatGPT after the web Refresh, then confirm widgets render (the native apps cache widget templates aggressively - the versioned ui://…@vN URIs exist to bust this, issue #235)
 6. [ ] Repeat at a narrow mobile viewport and in dark mode; loading, preview, URL, and error states must remain readable without overflow
 7. [ ] Confirm server and browser logs contain no bearer tokens, complete temporary image URLs, capability tokens, or base64 image bodies
 

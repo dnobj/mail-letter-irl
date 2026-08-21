@@ -40,8 +40,9 @@ import { classifyDiagnosticError } from "./utils/diagnosticLog.js";
 
 const tools: McpToolDefinition<any, any>[] = [
   // ChatGPT currently appears to expose only the first 12 registered actions
-  // for this dev app. Keep core preview/send/status and image generation
-  // inside that first page of tools; place auxiliary/internal tools later.
+  // for this dev app. Keep core preview/send/status and the fallback image
+  // generator inside that first page of tools (it must stay exposed to be
+  // usable as a fallback); place auxiliary/internal tools later.
   // Letter tools - three separate tools for different layouts
   quoteAndPreviewLetterTextOnlyTool,
   quoteAndPreviewLetterWithHeaderImageTool,
@@ -193,6 +194,7 @@ export class LetterIrlServer {
   listTools() {
     return tools.map((tool) => ({
       name: tool.name,
+      title: tool.title,
       description: tool.description,
       readOnly: tool.readOnly,
       inputSchema: tool.inputSchema,

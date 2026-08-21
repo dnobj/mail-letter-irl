@@ -6,6 +6,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { LetterIrlServer } from "../server.js";
 import { toolInputSchemas } from "./toolSchemas.js";
+import { widgetTemplateUri } from "./widgetUris.js";
 import {
   quoteAndPreviewInputZ,
   quoteAndPreviewLetterWithHeaderImageInputZ,
@@ -100,7 +101,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'send_postcard',
     'create_mail_checkout',
     'set_return_address',  // Validates address via PostGrid
-    'generate_image'       // Calls OpenAI Images API
+    'generate_image_fallback' // Calls OpenAI Images API
   ];
 
   // Tools where repeated calls with same args have no additional effect
@@ -284,7 +285,6 @@ export function buildWidgetResourceMeta(description: string) {
  */
 async function registerWidgetResources(mcpServer: McpServer) {
   for (const widget of WIDGET_DEFINITIONS) {
-    const uri = `ui://widgets/${widget.name}.html`;
     const filePath = path.join(DEFAULT_WIDGET_DIR, `${widget.name}.html`);
 
     // Check if widget file exists before registering
@@ -295,28 +295,43 @@ async function registerWidgetResources(mcpServer: McpServer) {
       continue;
     }
 
-    // Register widget resource with canonical ui.* metadata and
-    // legacy openai/* aliases for compatibility.
-    mcpServer.registerResource(
-      widget.name,
-      uri,
-      {},  // Empty options per docs
-      async () => {
-        console.log(`🎨 Widget resource requested: ${uri}`);
-        const html = await fs.readFile(filePath, "utf-8");
-        console.log(`🎨 Returning widget HTML (${html.length} bytes)`);
-        return {
-          contents: [{
-            uri,
-            mimeType: WIDGET_MIME_TYPE,
-            text: html,
-            _meta: buildWidgetResourceMeta(widget.description)
-          }]
-        };
-      }
-    );
+    // Register the versioned URI plus the legacy unversioned URI as a
+    // transition alias: native mobile clients hold cached tool lists whose
+    // outputTemplate still points at the unversioned form, and resources/read
+    // is an exact-string lookup - without the alias those clients would get
+    // ResourceNotFound (no widget at all) instead of a stale widget. Remove
+    // the alias once cached tool lists have aged out (issue #235).
+    const versionedUri = widgetTemplateUri(widget.name);
+    const legacyUri = `ui://widgets/${widget.name}.html`;
+    const registrations: Array<[string, string]> = [
+      [widget.name, versionedUri],
+      [`${widget.name}-legacy`, legacyUri]
+    ];
 
-    console.log(`📦 Registered widget resource: ${uri}`);
+    for (const [registrationName, uri] of registrations) {
+      // Register widget resource with canonical ui.* metadata and
+      // legacy openai/* aliases for compatibility.
+      mcpServer.registerResource(
+        registrationName,
+        uri,
+        {},  // Empty options per docs
+        async () => {
+          console.log(`🎨 Widget resource requested: ${uri}`);
+          const html = await fs.readFile(filePath, "utf-8");
+          console.log(`🎨 Returning widget HTML (${html.length} bytes)`);
+          return {
+            contents: [{
+              uri,
+              mimeType: WIDGET_MIME_TYPE,
+              text: html,
+              _meta: buildWidgetResourceMeta(widget.description)
+            }]
+          };
+        }
+      );
+
+      console.log(`📦 Registered widget resource: ${uri}`);
+    }
   }
 }
 
@@ -348,7 +363,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Image upload tool
   upload_image: uploadImageInputZ,
   // Image generation tool
-  generate_image: generateImageInputZ,
+  generate_image_fallback: generateImageInputZ,
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageInputZ
 };
@@ -377,7 +392,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Image upload tool
   upload_image: uploadImageOutputZ,
   // Image generation tool
-  generate_image: generateImageOutputZ,
+  generate_image_fallback: generateImageOutputZ,
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageOutputZ
 };
@@ -482,7 +497,7 @@ export async function registerLetterTools(
     mcpServer.registerTool(
       tool.name,
       {
-        title: tool.description,  // Use description as title
+        title: tool.title ?? tool.description,  // Short label when provided; description otherwise
         description: tool.description,
         inputSchema: inputShape,
         outputSchema: outputShape,
@@ -527,7 +542,7 @@ export async function registerLetterTools(
           meta
         );
 
-        if (tool.name === "generate_image") {
+        if (tool.name === "generate_image_fallback") {
           generateImageOutputZ.parse(structuredContent);
         }
 
@@ -643,7 +658,7 @@ function summarizeToolResult(
       const message = result.message as string;
       return message || "Photo picker ready. Waiting for user to select a photo.";
     }
-    case "generate_image": {
+    case "generate_image_fallback": {
       const message = result.message as string;
       return message || "Image generated. Use the imageUrl with a preview tool.";
     }

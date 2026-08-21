@@ -52,19 +52,25 @@ describe("Compatibility manifest", () => {
     );
   });
 
-  it("should advertise generate_image as a fallback when native image generation is unavailable", () => {
-    const generateImageTool = buildManifest().tools.find((tool) => tool.name === "generate_image");
+  it("should advertise generate_image_fallback as fallback-only with built-in generation preferred", () => {
+    const generateImageTool = buildManifest().tools.find((tool) => tool.name === "generate_image_fallback");
 
-    expect(generateImageTool?.description).toContain("native ChatGPT image generation is unavailable");
-    expect(generateImageTool?.description).toContain("Use this even if the user has not yet asked to mail it");
+    expect(generateImageTool?.description).toContain("FALLBACK ONLY");
+    expect(generateImageTool?.description).toContain("built-in image generation instead");
+    // The old description invited eager use ("Use this even if the user has
+    // not yet asked to mail it") - the demotion replaced it with an explicit
+    // only-when scope. Pin the scoping clause so it cannot silently regress.
+    expect(generateImageTool?.description).toContain(
+      "only when built-in image generation is unavailable, has failed"
+    );
   });
 
-  it("should keep generate_image inside the first 12 registered tools for ChatGPT exposure", () => {
+  it("should keep generate_image_fallback inside the first 12 registered tools for ChatGPT exposure", () => {
     const firstTwelveToolNames = new LetterIrlServer()
       .listTools()
       .slice(0, 12)
       .map((tool) => tool.name);
 
-    expect(firstTwelveToolNames).toContain("generate_image");
+    expect(firstTwelveToolNames).toContain("generate_image_fallback");
   });
 });
