@@ -17,6 +17,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
   buildWidgetResourceMeta,
+  partitionToolResult,
   normalizeHttpsOrigin,
   getZodOutputShape,
   WIDGET_DEFINITIONS,
@@ -213,7 +214,6 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       'inlineImageData',
       'headerImageData',
       'frontImageData',
-      'generatedImagePreview',
       'headerImagePreview',
       'inlineImagePreview'
     ]);
@@ -335,5 +335,39 @@ describe('widget image CSP', () => {
       .toBe('https://dev.example.com');
     expect(normalizeHttpsOrigin('http://dev.example.com/mcp'))
       .toBe('https://api.letterirl.com');
+  });
+});
+
+
+// Rescued from the deleted generatedImageResultBridge.test.ts: these pin
+// still-live partitionToolResult behavior with a documented silent-failure
+// history (header/inline letters once rendered cards without their images
+// because the previews reached neither channel).
+describe('partitionToolResult channel contract', () => {
+  it('omits absent metadata and all heavy model-facing image fields', () => {
+    const result = partitionToolResult({
+      message: 'Preview ready',
+      inlineImageData: 'inline-base64',
+      headerImageData: 'header-base64',
+      frontImageData: 'front-base64'
+    });
+
+    expect(result.structuredContent).toEqual({ message: 'Preview ready' });
+    expect(result._meta).toEqual({});
+  });
+
+  it('forwards the compressed image previews to the widget, not to the model', () => {
+    const result = partitionToolResult({
+      message: 'Preview ready',
+      headerImagePreview: 'header-preview-base64',
+      inlineImagePreview: 'inline-preview-base64',
+      headerImageData: 'header-full-base64'
+    });
+
+    expect(result.structuredContent).toEqual({ message: 'Preview ready' });
+    expect(result._meta).toEqual({
+      headerImagePreview: 'header-preview-base64',
+      inlineImagePreview: 'inline-preview-base64'
+    });
   });
 });

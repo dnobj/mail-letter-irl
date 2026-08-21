@@ -1,3 +1,9 @@
+> **HISTORICAL (Aug 2026):** the generate_image tool, GenerateImageCard widget,
+> and generation service described below were REMOVED - see
+> `docs/learnings/generate-image-removal-decision.md`. This plan is kept as the
+> most detailed write-up of the _meta partitioning contract, which lives on in
+> `partitionToolResult` for letter/postcard previews.
+
 # Generated image result bridge repair
 
 Status: implementation-ready

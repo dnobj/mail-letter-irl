@@ -358,7 +358,6 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_started: getStartedInputZ,
   // Image upload tool
   upload_image: uploadImageInputZ,
-  // Image generation tool
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageInputZ
 };
@@ -386,7 +385,6 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_started: getStartedOutputZ,
   // Image upload tool
   upload_image: uploadImageOutputZ,
-  // Image generation tool
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageOutputZ
 };
@@ -418,7 +416,6 @@ export function partitionToolResult(
     inlineImageData,
     headerImageData,
     frontImageData,
-    generatedImagePreview,
     headerImagePreview,
     inlineImagePreview,
     ...modelFacingData
@@ -431,7 +428,6 @@ export function partitionToolResult(
       ...(previewHtml !== undefined ? { previewHtml } : {}),
       ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
       ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
-      ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
       // The letter card's images. Small by construction - the builder
       // compresses them to roughly 3KB for exactly this trip - so unlike the
       // *ImageData fields above they are forwarded rather than dropped. They
@@ -443,10 +439,7 @@ export function partitionToolResult(
       // put them in _meta - a letter with a header or inline image rendered its
       // card without one, silently.
       ...(headerImagePreview !== undefined ? { headerImagePreview } : {}),
-      ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {}),
-      ...(modelFacingData.generatedImageUrl !== undefined
-        ? { generatedImageUrl: modelFacingData.generatedImageUrl }
-        : {})
+      ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {})
     }
   };
 }

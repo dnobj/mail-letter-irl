@@ -12,7 +12,7 @@ Letter IRL is integrated as an MCP-backed ChatGPT app with OAuth, Streamable HTT
 - ChatGPT can cache an app's visible tool list after reconnect. Using the app detail panel's Refresh action may be necessary before newly deployed tools appear.
 - Mobile widget rendering can appear delayed on Android; in observed tests, switching away from and back to the conversation caused the widget to render. Keep this in mind when testing widget lifecycle issues.
 - (Historical) While `generate_image_fallback` existed it was kept early in the runtime tool order because ChatGPT appears more likely to expose and use earlier tools in constrained surfaces. The tool was removed Aug 2026 (docs/learnings/generate-image-removal-decision.md); the first-12 exposure observation still applies to the remaining tools.
-- Runtime `outputSchema` should describe `structuredContent`, not widget-only `_meta`. Letter IRL deliberately sends preview HTML and image preview blobs through `_meta` to keep model context small. The small generated-image capability URL remains in `structuredContent` so the model can chain it into a postcard or letter preview.
+- Runtime `outputSchema` should describe `structuredContent`, not widget-only `_meta`. Letter IRL deliberately sends preview HTML and image preview blobs through `_meta` to keep model context small. (While generation existed, its small capability URL stayed in `structuredContent` so the model could chain it into previews.)
 - Server instructions are now part of the MCP initialization surface and should contain durable, concise behavior rules rather than long marketing copy.
 
 ## Widget Bridge Notes

@@ -305,15 +305,6 @@ generation is the only path, and its images attach to previews directly
 4. [ ] Repeat at a narrow mobile viewport and in dark mode; states must remain readable without overflow
 5. [ ] Confirm server and browser logs contain no bearer tokens, complete temporary image URLs, capability tokens, or base64 image bodies
 
-### Context-Specific Dimensions (US-IMG-03)
-- [ ] Postcard context → landscape image (1536×1024)
-- [ ] Header image context → landscape image (1536×1024)
-- [ ] Inline image context → square image (1024×1024)
-
-### Error Handling (US-IMG-04)
-- [ ] Empty prompt → clear error message
-- [ ] Content policy violation prompt → appropriate error
-
 ---
 
 ## Promo Code Flow

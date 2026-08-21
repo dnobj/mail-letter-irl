@@ -69,8 +69,9 @@ good intent experience."*
 Removed: `src/tools/generateImage.ts`, `widgets/GenerateImageCard.html`,
 `src/services/imageGenerationService.ts` (OpenAI Images API caller, sole
 consumer was the tool), the three schema-layer entries, scope mapping, widget
-registration, and all direct tests. `OPENAI_API_KEY` is no longer read by any
-code path.
+registration, and all direct tests. `OPENAI_API_KEY` is no longer read by any runtime
+server code path (the app-registration script `scripts/create-app.sh` still
+uses it for the unrelated OpenAI Apps API).
 
 Kept deliberately:
 - **`imageGenerationLimitService` and the entitlement plumbing** (commerce
@@ -79,8 +80,12 @@ Kept deliberately:
   filed for a separate decision.
 - **Temp-image store + `/api/temp-image/` endpoint** — nothing writes to it
   anymore; kept for unexpired tokens and as a candidate for the same follow-up
-  (its bucket configuration feeds the #158 production preflight, so removing
-  it simplifies the cutover and deserves its own review).
+  (its bucket
+  configuration feeds the #158 production preflight: deploymentConfig still
+  hard-errors production boot without the four TEMP_IMAGE_* vars, two of them
+  secrets, for a store whose only writer is now gone. Removing it would
+  simplify the cutover; that removal deserves its own review, hence the
+  follow-up issue rather than riding along here).
 - `STEERING_COPY_REV` (now r4) and the `mcp.client_request` logging — the
   observability outlives the tool it was built to debug.
 

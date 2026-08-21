@@ -5,7 +5,7 @@
 
 The runtime MCP registry is the source of truth. The checked-in `manifest.json` is generated from that registry with `npm run manifest:generate`, and submission-facing tests verify that the manifest, widget list, and runtime tool registry stay aligned.
 
-Letter IRL currently exposes **17 tools**:
+Letter IRL currently exposes **18 tools**:
 
 ## Onboarding
 
@@ -48,7 +48,7 @@ Letter IRL currently exposes **17 tools**:
 - Tool responses split data intentionally:
   - `structuredContent`: compact model-facing fields validated by the runtime output schema.
   - `content`: short model narration.
-  - `_meta`: widget-only fields such as preview HTML and generated image previews.
+  - `_meta`: widget-only fields such as preview HTML and compressed letter-image previews.
 - Preview tools create database draft records, so they are write tools even though they do not send mail or charge the user.
 - Send tools require a draft and explicit confirmation. The assistant must not claim mail was sent unless the corresponding send tool succeeds.
 
