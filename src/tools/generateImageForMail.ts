@@ -1,4 +1,5 @@
 import { McpToolDefinition } from "../contracts/types.js";
+import { widgetTemplateUri } from "../mcp/widgetUris.js";
 
 /**
  * Intent trampoline for image-generation requests addressed to Letter IRL
@@ -26,6 +27,7 @@ interface GenerateImageForMailOutput {
   status: string;
   message: string;
   suggestedNextStep: string;
+  prompt?: string;
 }
 
 export const generateImageForMailTool: McpToolDefinition<
@@ -57,10 +59,12 @@ export const generateImageForMailTool: McpToolDefinition<
     properties: {
       status: { type: "string" },
       message: { type: "string" },
-      suggestedNextStep: { type: "string" }
+      suggestedNextStep: { type: "string" },
+      prompt: { type: "string" }
     }
   },
   meta: {
+    "openai/outputTemplate": widgetTemplateUri("ImageRoutingCard"),
     "openai/toolInvocation/invoking": "Routing image request...",
     "openai/toolInvocation/invoked": "Image request routed",
     readOnlyHint: true
@@ -76,6 +80,7 @@ export const generateImageForMailTool: McpToolDefinition<
           ? "letter"
           : "postcard or letter";
     return {
+      prompt: input?.prompt,
       status: "use_builtin_generation",
       message:
         "Letter IRL does not generate images. ChatGPT's built-in image generation handles this, and the result attaches to Letter IRL mail directly.",

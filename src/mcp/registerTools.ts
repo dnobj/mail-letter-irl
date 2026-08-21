@@ -141,6 +141,7 @@ export const WIDGET_DEFINITIONS = [
   { name: "PostcardPreviewCard", description: "Shows postcard front/back preview with cost, delivery info, and status" },
   { name: "ImageUploadCard", description: "File picker widget for uploading photos to use in letters or postcards" },
   { name: "GetStartedCard", description: "Getting-started guide for new users with setup steps and example prompts" },
+  { name: "ImageRoutingCard", description: "Explains image-generation routing and offers a one-tap ChatGPT generation request" },
 ];
 
 /**

@@ -46,8 +46,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
     );
 
-    it('should have 4 widgets defined', () => {
-      expect(WIDGET_DEFINITIONS.length).toBe(4);
+    it('should have 5 widgets defined', () => {
+      expect(WIDGET_DEFINITIONS.length).toBe(5);
     });
 
     it('does not define the removed GenerateImageCard widget', () => {
@@ -79,8 +79,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 4,
-        digest: '102f5c3499c8'
+        version: 5,
+        digest: '4d8e99ab5f4f'
       });
     });
   });
@@ -292,12 +292,13 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 
 describe('registerWidgetResources implementation', () => {
   it('should register all widget resources', () => {
-    expect(WIDGET_DEFINITIONS.length).toBe(4);
+    expect(WIDGET_DEFINITIONS.length).toBe(5);
     expect(WIDGET_DEFINITIONS.map((widget) => widget.name)).toEqual([
       'LetterPreviewCard',
       'PostcardPreviewCard',
       'ImageUploadCard',
-      'GetStartedCard'
+      'GetStartedCard',
+      'ImageRoutingCard'
     ]);
   });
 

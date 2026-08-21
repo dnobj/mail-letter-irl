@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image Routing</title>
+    <style>
+      :root {
+        --bg-primary: #1a2332;
+        --bg-secondary: #141b28;
+        --text-primary: #e8edf4;
+        --text-secondary: #9aa7ba;
+        --accent: #4a90d9;
+        --border: #2a3548;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: transparent;
+        color: var(--text-primary);
+      }
+      .card {
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.25rem;
+        max-width: 100%;
+      }
+      h2 { font-size: 1rem; margin-bottom: 0.5rem; }
+      p.explain {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        line-height: 1.5;
+        margin-bottom: 1rem;
+      }
+      .btn {
+        display: block;
+        width: 100%;
+        padding: 0.7rem 1rem;
+        border-radius: 8px;
+        border: none;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        background: var(--accent);
+        color: #fff;
+      }
+      .btn[disabled] { opacity: 0.6; cursor: default; }
+      #status {
+        font-size: 0.78rem;
+        color: var(--text-secondary);
+        margin-top: 0.6rem;
+        min-height: 1em;
+        word-break: break-word;
+      }
+      .rev-tag {
+        margin: 0.5rem 0 0;
+        font-size: 0.625rem;
+        opacity: 0.45;
+        text-align: right;
+        color: var(--text-secondary);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2>Generate this with ChatGPT</h2>
+      <p class="explain" id="explain-text">
+        Letter IRL doesn't generate images. When you mention Letter IRL, this
+        conversation turn only has Letter IRL's tools &mdash; but ChatGPT's own
+        image generator is free and its images attach to postcards and letters
+        directly. Tap below and ChatGPT will generate it for you.
+      </p>
+      <button class="btn" id="btn-generate" type="button">Generate with ChatGPT</button>
+      <p id="status"></p>
+      <!-- EXPERIMENT (issue #227 follow-through): validates widget-initiated
+           sendFollowUpMessage on the native app. The status line reports the
+           API outcome verbatim so a device screenshot is the measurement. -->
+      <p class="rev-tag">routing t5</p>
+    </div>
+
+    <script>
+      (function () {
+        var btn = document.getElementById("btn-generate");
+        var status = document.getElementById("status");
+
+        function toolOutput() {
+          return (window.openai && window.openai.toolOutput) || {};
+        }
+
+        function promptText() {
+          var out = toolOutput();
+          return typeof out.prompt === "string" && out.prompt.trim()
+            ? out.prompt.trim()
+            : null;
+        }
+
+        function render() {
+          var p = promptText();
+          if (p) {
+            document.getElementById("explain-text").textContent =
+              "Letter IRL doesn't generate images - but ChatGPT's own generator is free and its images attach to postcards and letters directly. Tap below and ChatGPT will generate \"" + p + "\" for you.";
+          }
+        }
+
+        btn.addEventListener("click", function () {
+          var p = promptText() || "the image I described";
+          btn.disabled = true;
+          status.textContent = "Asking ChatGPT to generate…";
+          if (!window.openai || typeof window.openai.sendFollowUpMessage !== "function") {
+            status.textContent = "sendFollowUpMessage: NOT AVAILABLE on this host";
+            btn.disabled = false;
+            return;
+          }
+          Promise.resolve(
+            window.openai.sendFollowUpMessage({
+              prompt: "Generate an image of " + p + " using your built-in image generation."
+            })
+          )
+            .then(function () {
+              status.textContent = "sendFollowUpMessage: RESOLVED — request sent.";
+            })
+            .catch(function (err) {
+              status.textContent =
+                "sendFollowUpMessage: REJECTED — " +
+                ((err && err.message) || String(err)).replace(/https?:\/\/\S+/g, "[url]");
+              btn.disabled = false;
+            });
+        });
+
+        render();
+        window.addEventListener("openai:set_globals", render);
+      })();
+    </script>
+  </body>
+</html>
