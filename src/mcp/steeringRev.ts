@@ -18,5 +18,8 @@
  *     ask sometimes produced "Letter IRL can't generate images" instead
  *     of falling through to image_gen; r5 scripts the fallthrough
  *     ("generate immediately... never pause to explain").
+ * r6: generate_image_for_mail intent-trampoline tool added - matches
+ *     @-mention generate requests and redirects to image_gen in-turn,
+ *     replacing the first-turn capability narration.
  */
-export const STEERING_COPY_REV = 5;
+export const STEERING_COPY_REV = 6;

@@ -24,6 +24,8 @@ import {
   getStartedTool,
   // Image upload tool
   uploadImageTool,
+  // Image-intent router (returns routing guidance; does not generate)
+  generateImageForMailTool,
   // Confirm uploaded image tool (widget relay)
   confirmUploadedImageTool
 } from "./tools/index.js";
@@ -54,6 +56,9 @@ const tools: McpToolDefinition<any, any>[] = [
   // Postcard tools
   quoteAndPreviewPostcardTool,
   sendPostcardTool,
+  // Image-intent router: must stay inside the exposed set so @-mention
+  // generate requests land on it instead of a capability narration.
+  generateImageForMailTool,
   // Keep saved return address setup in the primary exposed set.
   setReturnAddressTool,
   getReturnAddressTool,

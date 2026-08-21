@@ -5,7 +5,7 @@
 
 The runtime MCP registry is the source of truth. The checked-in `manifest.json` is generated from that registry with `npm run manifest:generate`, and submission-facing tests verify that the manifest, widget list, and runtime tool registry stay aligned.
 
-Letter IRL currently exposes **18 tools**:
+Letter IRL currently exposes **19 tools**:
 
 ## Onboarding
 
@@ -34,6 +34,7 @@ Letter IRL currently exposes **18 tools**:
 
 ## Images
 
+- `generate_image_for_mail`: intent router for image-generation requests addressed to Letter IRL. Generates nothing - returns guidance directing the model to ChatGPT's built-in image generation, then to attach the result to a preview (see docs/learnings/generate-image-removal-decision.md, Addendum 2).
 - `upload_image`: Open the image upload widget as a fallback when direct attachment or `imageUrl` handoff does not work. Uses `ui://widgets/ImageUploadCard.html@v<N>`.
 - `confirm_uploaded_image`: Internal widget relay that confirms an uploaded image and returns the `imageUrl` plus next-step guidance.
 

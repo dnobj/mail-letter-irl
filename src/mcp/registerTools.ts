@@ -25,6 +25,7 @@ import {
   submitFeatureRequestInputZ,
   getStartedInputZ,
   uploadImageInputZ,
+  generateImageForMailInputZ,
   confirmUploadedImageInputZ,
   quoteAndPreviewOutputZ,
   sendLetterOutputZ,
@@ -41,6 +42,7 @@ import {
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
   uploadImageOutputZ,
+  generateImageForMailOutputZ,
   confirmUploadedImageOutputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
@@ -82,6 +84,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
   // Read-only tools: only retrieve data, no modifications
   const readOnlyTools = [
     'get_started',
+    'generate_image_for_mail',
     'get_account_balance',
     'list_orders',
     'get_order_status',
@@ -358,6 +361,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_started: getStartedInputZ,
   // Image upload tool
   upload_image: uploadImageInputZ,
+  generate_image_for_mail: generateImageForMailInputZ,
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageInputZ
 };
@@ -385,6 +389,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_started: getStartedOutputZ,
   // Image upload tool
   upload_image: uploadImageOutputZ,
+  generate_image_for_mail: generateImageForMailOutputZ,
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageOutputZ
 };
@@ -640,6 +645,13 @@ function summarizeToolResult(
     case "upload_image": {
       const message = result.message as string;
       return message || "Photo picker ready. Waiting for user to select a photo.";
+    }
+    case "generate_image_for_mail": {
+      // The redirect IS the payload: surface suggestedNextStep as the
+      // model-visible narration so the generate-natively directive rides the
+      // strongest channel.
+      const suggestedNextStep = result.suggestedNextStep as string;
+      return suggestedNextStep || "Generate the image with built-in image generation, then offer to mail it.";
     }
     case "confirm_uploaded_image": {
       const suggestedNextStep = result.suggestedNextStep as string;

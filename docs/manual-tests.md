@@ -294,7 +294,7 @@ generation is the only path, and its images attach to previews directly
 
 ### Native Generation Routing (Issue #227)
 1. [ ] Ask a generic "Generate an image of a sunset over mountains for a postcard" with the app attached
-2. [ ] Confirm ChatGPT uses NATIVE image generation (no Letter IRL tool call, no consent dialog)
+2. [ ] Confirm ChatGPT produces a NATIVE image (a fast generate_image_for_mail routing call is acceptable and consent-free; server-side generation no longer exists)
 3. [ ] Repeat on the native mobile app with an @-mention ("@(DEV) Letter IRL generate an image of …") and confirm native generation runs. If the model claims image generation is unavailable, reply "try it anyway" — that claim is a known hallucination and must not reach a Letter IRL tool
 4. [ ] Ask ChatGPT to use the generated image in `quote_and_preview_postcard`; confirm the postcard front renders the same image (fileParams handoff, no manual URL copying)
 

@@ -66,6 +66,7 @@ const otherWriteTools = [
   { name: 'confirm_uploaded_image', readOnly: false },
   { name: 'submit_feature_request', readOnly: false },
   { name: 'upload_image', readOnly: false },
+  { name: 'generate_image_for_mail', readOnly: true },
 ];
 
 // Destructive tools: delete user data
@@ -248,20 +249,20 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
   });
 
   describe('Tool Classification Summary', () => {
-    it('should cover all 18 registered tools in annotation checks', () => {
+    it('should cover all 19 registered tools in annotation checks', () => {
       const runtimeToolNames = new LetterIrlServer().listTools().map((tool) => tool.name).sort();
       const checkedToolNames = allTools.map((tool) => tool.name).sort();
 
-      expect(allTools.length).toBe(18);
+      expect(allTools.length).toBe(19);
       expect(checkedToolNames).toEqual(runtimeToolNames);
     });
 
-    it('should have 6 read-only tools', () => {
+    it('should have 7 read-only tools', () => {
       const readOnlyCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === true;
       }).length;
-      expect(readOnlyCount).toBe(6);
+      expect(readOnlyCount).toBe(7);
     });
 
     it('should have 12 write tools (non-read-only)', () => {

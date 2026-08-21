@@ -132,6 +132,11 @@ export const toolInputSchemas = {
   upload_image: z.object({
     context: z.string().optional()
   }),
+  // Image-intent router (does not generate)
+  generate_image_for_mail: z.object({
+    prompt: z.string().optional(),
+    context: z.string().optional()
+  }),
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: z.object({
     imageUrl: z.string(),

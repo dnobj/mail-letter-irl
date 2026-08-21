@@ -52,16 +52,21 @@ describe("Compatibility manifest", () => {
     );
   });
 
-  it("does not advertise any image-generation tool", () => {
+  it("does not advertise any server-side image GENERATOR", () => {
     // generate_image (later generate_image_fallback) was REMOVED after the
-    // #227 investigation: ChatGPT's built-in generation handles every image
-    // request on every surface, and the app tool was winning routing it
-    // should not win. Pin the absence so a bad merge or revert cannot
-    // silently resurrect it. Decision record:
-    // docs/learnings/generate-image-removal-decision.md
+    // #227 investigation. Pin the absence so a bad merge or revert cannot
+    // silently resurrect it. generate_image_for_mail is deliberately NOT in
+    // this pin: it is an intent ROUTER that generates nothing (no OpenAI
+    // call, no quota) - it redirects the model to built-in generation.
+    // Decision record: docs/learnings/generate-image-removal-decision.md
     const toolNames = buildManifest().tools.map((tool) => tool.name);
     expect(toolNames).not.toContain("generate_image_fallback");
     expect(toolNames).not.toContain("generate_image");
-    expect(toolNames.some((name) => /generate.*image|image.*generate/.test(name))).toBe(false);
+  });
+
+  it("advertises the image-intent router as a non-generating redirect", () => {
+    const router = buildManifest().tools.find((tool) => tool.name === "generate_image_for_mail");
+    expect(router?.description).toContain("does not generate images itself");
+    expect(router?.description).toContain("built-in image generation");
   });
 });
