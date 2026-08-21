@@ -34,7 +34,7 @@ Letter IRL currently exposes **17 tools**:
 
 ## Images
 
-- `generate_image`: Generate artwork through Letter IRL when this app is selected and native ChatGPT image generation is unavailable or blocked. Returns a widget preview and an image URL path for follow-up preview tools. Uses `ui://widgets/GenerateImageCard.html`.
+- `generate_image_fallback`: FALLBACK ONLY — generates artwork through Letter IRL when ChatGPT's built-in image generation is unavailable, has failed, or its image could not be handed off (or when the user explicitly asks Letter IRL to generate). Normal image requests should use built-in generation. Returns a widget preview and an image URL path for follow-up preview tools. Uses the versioned `GenerateImageCard` widget template.
 - `upload_image`: Open the image upload widget as a fallback when direct attachment or `imageUrl` handoff does not work. Uses `ui://widgets/ImageUploadCard.html`.
 - `confirm_uploaded_image`: Internal widget relay that confirms an uploaded image and returns the `imageUrl` plus next-step guidance.
 

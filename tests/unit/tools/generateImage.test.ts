@@ -1,5 +1,5 @@
 /**
- * Unit tests for generate_image tool
+ * Unit tests for generate_image_fallback tool
  *
  * Tests the tool handler with mocked image generation service and Sharp.
  * Verifies correct output shape, context-based next-step guidance,
@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import type { ToolContext } from "../../../src/contracts/types.js";
 
 // Mock the image generation service
@@ -97,7 +98,7 @@ const createMockContext = (): ToolContext => ({
   persist: vi.fn()
 });
 
-describe("generate_image tool", () => {
+describe("generate_image_fallback tool", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
@@ -123,12 +124,17 @@ describe("generate_image tool", () => {
 
   describe("tool definition", () => {
     it("should have correct name", () => {
-      expect(generateImageTool.name).toBe("generate_image");
+      expect(generateImageTool.name).toBe("generate_image_fallback");
     });
 
     it("should describe reusing an existing image instead of regenerating", () => {
       expect(generateImageTool.description).toContain("imageUrl to pass to a preview tool");
-      expect(generateImageTool.description).toContain("use that existing image instead of calling this tool again");
+      expect(generateImageTool.description).toContain("reuse that existing image instead of calling this tool");
+    });
+
+    it("should steer normal image requests to built-in generation", () => {
+      expect(generateImageTool.description).toContain("FALLBACK ONLY");
+      expect(generateImageTool.description).toContain("built-in image generation instead");
     });
 
     it("should not be readOnly", () => {
@@ -137,7 +143,7 @@ describe("generate_image tool", () => {
 
     it("should reference GenerateImageCard widget", () => {
       expect(generateImageTool.meta["openai/outputTemplate"]).toBe(
-        "ui://widgets/GenerateImageCard.html"
+        widgetTemplateUri("GenerateImageCard")
       );
     });
 

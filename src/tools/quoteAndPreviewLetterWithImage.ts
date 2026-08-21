@@ -8,6 +8,7 @@
  */
 
 import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
+import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import {
   quoteAndPreviewLetterWithImageInputSchema,
   quoteAndPreviewOutputSchema
@@ -45,7 +46,7 @@ interface QuoteAndPreviewLetterWithImageInput {
 // Constants
 // ============================================================================
 
-const OUTPUT_TEMPLATE = "ui://widgets/LetterPreviewCard.html";
+const OUTPUT_TEMPLATE = widgetTemplateUri("LetterPreviewCard");
 
 // ============================================================================
 // Handler

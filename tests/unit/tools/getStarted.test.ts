@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import { getStartedTool } from "../../../src/tools/getStarted.js";
 
 describe("get_started tool", () => {
@@ -8,7 +9,7 @@ describe("get_started tool", () => {
 
   it("should render the onboarding widget", () => {
     expect(getStartedTool.meta["openai/outputTemplate"]).toBe(
-      "ui://widgets/GetStartedCard.html"
+      widgetTemplateUri("GetStartedCard")
     );
   });
 

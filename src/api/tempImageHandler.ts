@@ -2,7 +2,7 @@
  * Temporary Image Handler
  *
  * Serves generated images from the private temporary image store.
- * Images are stored when the generate_image tool runs and served here
+ * Images are stored when the generate_image_fallback tool runs and served here
  * so the preview tools can download them via imageUrl.
  *
  * Route: GET /api/temp-image/:token

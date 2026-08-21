@@ -1,6 +1,7 @@
 import { McpToolDefinition } from "../contracts/types.js";
+import { widgetTemplateUri } from "../mcp/widgetUris.js";
 
-const OUTPUT_TEMPLATE = "ui://widgets/GetStartedCard.html";
+const OUTPUT_TEMPLATE = widgetTemplateUri("GetStartedCard");
 
 interface GetStartedInput {}
 

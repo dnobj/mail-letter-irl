@@ -1,4 +1,5 @@
 import { Address, McpToolDefinition, ToolContext, LetterLayoutType } from "../contracts/types.js";
+import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import {
   quoteAndPreviewInputSchema,
   quoteAndPreviewOutputSchema
@@ -72,7 +73,7 @@ export interface QuoteAndPreviewOutput {
   };
 }
 
-const OUTPUT_TEMPLATE = "ui://widgets/LetterPreviewCard.html";
+const OUTPUT_TEMPLATE = widgetTemplateUri("LetterPreviewCard");
 
 async function handler(
   input: QuoteAndPreviewInput,

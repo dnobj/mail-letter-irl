@@ -6,6 +6,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { LetterIrlServer } from "../server.js";
 import { toolInputSchemas } from "./toolSchemas.js";
+import { widgetTemplateUri } from "./widgetUris.js";
 import {
   quoteAndPreviewInputZ,
   quoteAndPreviewLetterWithHeaderImageInputZ,
@@ -100,7 +101,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'send_postcard',
     'create_mail_checkout',
     'set_return_address',  // Validates address via PostGrid
-    'generate_image'       // Calls OpenAI Images API
+    'generate_image_fallback' // Calls OpenAI Images API
   ];
 
   // Tools where repeated calls with same args have no additional effect
@@ -284,7 +285,7 @@ export function buildWidgetResourceMeta(description: string) {
  */
 async function registerWidgetResources(mcpServer: McpServer) {
   for (const widget of WIDGET_DEFINITIONS) {
-    const uri = `ui://widgets/${widget.name}.html`;
+    const uri = widgetTemplateUri(widget.name);
     const filePath = path.join(DEFAULT_WIDGET_DIR, `${widget.name}.html`);
 
     // Check if widget file exists before registering
@@ -348,7 +349,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Image upload tool
   upload_image: uploadImageInputZ,
   // Image generation tool
-  generate_image: generateImageInputZ,
+  generate_image_fallback: generateImageInputZ,
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageInputZ
 };
@@ -377,7 +378,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Image upload tool
   upload_image: uploadImageOutputZ,
   // Image generation tool
-  generate_image: generateImageOutputZ,
+  generate_image_fallback: generateImageOutputZ,
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageOutputZ
 };
@@ -527,7 +528,7 @@ export async function registerLetterTools(
           meta
         );
 
-        if (tool.name === "generate_image") {
+        if (tool.name === "generate_image_fallback") {
           generateImageOutputZ.parse(structuredContent);
         }
 
@@ -643,7 +644,7 @@ function summarizeToolResult(
       const message = result.message as string;
       return message || "Photo picker ready. Waiting for user to select a photo.";
     }
-    case "generate_image": {
+    case "generate_image_fallback": {
       const message = result.message as string;
       return message || "Image generated. Use the imageUrl with a preview tool.";
     }

@@ -21,6 +21,7 @@ import {
   WIDGET_DEFINITIONS,
   WIDGET_MIME_TYPE
 } from '../../../src/mcp/registerTools.js';
+import { widgetTemplateUri } from '../../../src/mcp/widgetUris.js';
 import { LetterIrlServer } from '../../../src/server.js';
 
 describe('Widget Resource Registration (US-MCP-07)', () => {
@@ -31,10 +32,11 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
     it.each(WIDGET_DEFINITIONS)(
       '$name is addressable at the ui:// path a tool would reference',
       async ({ name }) => {
-        const uri = `ui://widgets/${name}.html`;
+        const uri = widgetTemplateUri(name);
+        // The versioned URI (…html@vN) maps to the unversioned file on disk.
         const file = path.join(
           path.resolve(__dirname, '../../../widgets'),
-          uri.replace(/^ui:\/\/widgets\//, '')
+          uri.replace(/^ui:\/\/widgets\//, '').replace(/@v\d+$/, '')
         );
         const exists = await fs.access(file).then(() => true).catch(() => false);
         expect(exists, `${uri} resolves to no file`).toBe(true);
@@ -88,7 +90,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
     );
 
     it('quote_and_preview_letter references the LetterPreviewCard widget', () => {
-      expect(templates.get('quote_and_preview_letter')).toBe('ui://widgets/LetterPreviewCard.html');
+      expect(templates.get('quote_and_preview_letter')).toBe(widgetTemplateUri('LetterPreviewCard'));
     });
 
     it.each([
@@ -196,7 +198,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       for (const tool of new LetterIrlServer().listTools()) {
         const template = tool.meta?.['openai/outputTemplate'];
         if (typeof template !== 'string') continue;
-        const widget = template.replace(/^ui:\/\/widgets\//, '').replace(/\.html$/, '');
+        const widget = template.replace(/^ui:\/\/widgets\//, '').replace(/\.html(@v\d+)?$/, '');
         if (!byWidget.has(widget)) byWidget.set(widget, tool.name);
       }
       return byWidget;

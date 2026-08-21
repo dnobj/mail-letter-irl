@@ -29,7 +29,7 @@
 ## 2026-05-31 Security Review Notes
 
 - OpenAI image generation uses a server-side `OPENAI_API_KEY`; the key must remain only in Railway environment variables and must never be emitted in tool output, widget metadata, manifests, docs, or logs.
-- Image-generation spend protection requires atomic quota reservation. The `generate_image` tool should reserve one generation in the database before calling OpenAI and release that reservation if generation or preview handoff fails.
+- Image-generation spend protection requires atomic quota reservation. The `generate_image_fallback` tool should reserve one generation in the database before calling OpenAI and release that reservation if generation or preview handoff fails.
 - Remote image URLs are untrusted input. Image processing must require HTTPS, block localhost/private/link-local/reserved IP ranges, validate DNS results before fetch, limit redirects, apply request timeouts, and enforce download size caps even when `Content-Length` is missing.
 - Dependency audits are part of the submission readiness checklist. `npm audit --omit=dev` should report zero vulnerabilities before OpenAI app submission and before production deploys that touch MCP/App SDK dependencies.
 - Capability URLs for temporary generated images should remain short-lived and should not be logged in full. Prefer token suffixes, hashes, or correlation IDs in logs.

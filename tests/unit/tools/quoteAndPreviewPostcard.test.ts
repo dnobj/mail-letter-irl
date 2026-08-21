@@ -18,6 +18,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import { testUsers } from '../../fixtures/users.js';
 import { testAddresses } from '../../fixtures/letters.js';
 import {
@@ -352,10 +353,10 @@ describe('quote_and_preview_postcard Tool', () => {
     it('should specify PostcardPreviewCard widget in _meta', () => {
       // Tool should declare output template
       const toolMeta = {
-        'openai/outputTemplate': 'ui://widgets/PostcardPreviewCard.html',
+        'openai/outputTemplate': widgetTemplateUri('PostcardPreviewCard'),
       };
 
-      expect(toolMeta['openai/outputTemplate']).toBe('ui://widgets/PostcardPreviewCard.html');
+      expect(toolMeta['openai/outputTemplate']).toBe(widgetTemplateUri('PostcardPreviewCard'));
     });
   });
 });

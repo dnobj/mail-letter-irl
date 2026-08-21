@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import { getOpenIdConfiguration } from "../../../src/auth/metadata.js";
 import {
   buildWwwAuthenticateChallenge,
@@ -44,9 +45,9 @@ describe("Submission readiness checks", () => {
 
   it("should copy securitySchemes into tool metadata", () => {
     const meta = buildToolMeta(
-      "generate_image",
+      "generate_image_fallback",
       {
-        "openai/outputTemplate": "ui://widgets/LetterPreviewCard.html",
+        "openai/outputTemplate": widgetTemplateUri("LetterPreviewCard"),
         "openai/widgetAccessible": true
       },
       true
@@ -59,7 +60,7 @@ describe("Submission readiness checks", () => {
     ]);
     expect(meta["openai/widgetAccessible"]).toBe(true);
     expect(meta.ui).toMatchObject({
-      resourceUri: "ui://widgets/LetterPreviewCard.html",
+      resourceUri: widgetTemplateUri("LetterPreviewCard"),
       widgetAccessible: true
     });
   });

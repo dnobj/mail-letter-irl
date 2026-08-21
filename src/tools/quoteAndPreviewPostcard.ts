@@ -10,6 +10,7 @@
  */
 
 import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
+import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import {
   quoteAndPreviewPostcardInputSchema,
   quoteAndPreviewPostcardOutputSchema
@@ -97,7 +98,7 @@ export interface QuoteAndPreviewPostcardOutput {
 // Constants
 // ============================================================================
 
-const OUTPUT_TEMPLATE = "ui://widgets/PostcardPreviewCard.html";
+const OUTPUT_TEMPLATE = widgetTemplateUri("PostcardPreviewCard");
 const MAX_MESSAGE_LENGTH = 500;
 const POSTCARD_CREDITS_COST = 2; // 2 internal credits = 1 letter/postcard
 
