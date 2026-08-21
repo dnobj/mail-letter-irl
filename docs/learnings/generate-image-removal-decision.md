@@ -171,3 +171,45 @@ reporting its per-turn toolset, not hallucinating. Consequences: no
 server-side design can make generation happen inside a mention turn (the tool
 is not there); the trampoline's value is converting that turn into an
 accurate, actionable handoff; the following unmentioned turn always succeeds.
+
+## Addendum 3: the hybrid (r7, Aug 21) - generation returns, entitlement-gated
+
+Owner decision after the trampoline experiments: `generate_image_for_mail`
+becomes a HYBRID. When the user has Letter IRL image credits it generates
+in-turn (the only way an image can appear inside a mention-scoped turn);
+otherwise it returns a redirect card with a copy-ready prompt. This is a
+principled partial reversal of the #239 removal: generation exists only as an
+entitlement-gated, explicitly-addressed feature - never a generic tool the
+router can waste.
+
+Cost containment, in layers:
+- **Credits are the gate**: pack purchases (existing `packImageGrant`), JIT
+  orders (`IMAGE_ENTITLEMENTS_PER_JIT_ORDER`, default raised 1 -> 2), and a
+  one-time starter allowance (`LETTER_IRL_IMAGE_STARTER_CREDITS`, default 3,
+  granted lazily on first use, idempotent via the entitlement table's
+  source uniqueness). Rationale for free starter credits: the rational abuser
+  does not exist - generated images are free in ChatGPT by simply not
+  mentioning Letter IRL; only vandalism remains, and it is capped.
+- **Global daily ceiling** (`LETTER_IRL_IMAGE_DAILY_CEILING`, default 200
+  =~ $10/day worst case at gpt-image-1.5 medium): past it, everyone degrades
+  to the redirect card. `0` is a kill switch (blocks all generation). The
+  check is advisory (read-before-reserve, so N concurrent requests can
+  overshoot by ~N) and the day boundary is the DB server's timezone (UTC on
+  hosted Postgres) - both acceptable for a soft spend cap.
+- **Atomic reservations** (pre-existing): no concurrent overspend; ambiguous
+  provider outcomes preserved for maintenance reconciliation.
+- Model/quality remain env-tunable (`OPENAI_IMAGE_MODEL`, `OPENAI_IMAGE_QUALITY`;
+  ~3.4-5.0 cents per medium generation as of Aug 2026).
+
+Failure philosophy: the tool NEVER hard-fails the model. No prompt, no key,
+no credits, ceiling reached, or provider failure all land on the redirect
+card, because built-in generation always exists one unmentioned message away.
+The redirect card's affordance is a **copy-to-clipboard prompt field** - the
+sendFollowUpMessage auto-nudge was dropped after the on-device experiment
+showed it RESOLVES without ever posting the message (false positive).
+
+Infra consequences: `imageGenerationService` and its OPENAI_API_KEY return
+(key absence degrades gracefully to redirect, never boot-fails); the
+temp-image store has a writer again, so #240 resolves as "keep" and the four
+TEMP_IMAGE_* vars remain on the #158 cutover checklist.
+

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Image Routing</title>
+    <title>Image for Mail</title>
     <style>
       :root {
         --bg-primary: #1a2332;
@@ -26,32 +26,74 @@
         padding: 1.25rem;
         max-width: 100%;
       }
+      .hidden { display: none !important; }
       h2 { font-size: 1rem; margin-bottom: 0.5rem; }
       p.explain {
         font-size: 0.85rem;
         color: var(--text-secondary);
         line-height: 1.5;
-        margin-bottom: 1rem;
+        margin-bottom: 0.9rem;
       }
-      .btn {
-        display: block;
-        width: 100%;
-        padding: 0.7rem 1rem;
+      .prompt-row {
+        display: flex;
+        gap: 0.5rem;
+        align-items: stretch;
+        margin-bottom: 0.35rem;
+      }
+      .prompt-row input {
+        flex: 1;
+        min-width: 0;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
         border-radius: 8px;
-        border: none;
-        font-size: 0.9rem;
-        font-weight: 600;
-        cursor: pointer;
-        background: var(--accent);
-        color: #fff;
+        color: var(--text-primary);
+        font-size: 0.82rem;
+        padding: 0.55rem 0.7rem;
       }
-      .btn[disabled] { opacity: 0.6; cursor: default; }
-      #status {
-        font-size: 0.78rem;
+      .btn-copy {
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border-radius: 8px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        padding: 0 0.9rem;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .hint {
+        font-size: 0.72rem;
         color: var(--text-secondary);
+      }
+      /* generated mode */
+      .preview-wrap { text-align: center; }
+      .preview-wrap img {
+        max-width: 100%;
+        max-height: 320px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+      }
+      .credit-line {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        margin-top: 0.5rem;
+      }
+      .url-row {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.45rem 0.6rem;
         margin-top: 0.6rem;
-        min-height: 1em;
-        word-break: break-word;
+      }
+      .url-row code {
+        flex: 1;
+        font-size: 0.72rem;
+        color: var(--text-secondary);
+        word-break: break-all;
+        text-align: left;
       }
       .rev-tag {
         margin: 0.5rem 0 0;
@@ -64,68 +106,154 @@
   </head>
   <body>
     <div class="card">
-      <h2>Generate this with ChatGPT</h2>
-      <p class="explain" id="explain-text">
-        Letter IRL doesn't generate images. When you mention Letter IRL, this
-        conversation turn only has Letter IRL's tools &mdash; but ChatGPT's own
-        image generator is free and its images attach to postcards and letters
-        directly. Tap below and ChatGPT will generate it for you.
-      </p>
-      <button class="btn" id="btn-generate" type="button">Generate with ChatGPT</button>
-      <p id="status"></p>
-      <!-- EXPERIMENT (issue #227 follow-through): validates widget-initiated
-           sendFollowUpMessage on the native app. The status line reports the
-           API outcome verbatim so a device screenshot is the measurement. -->
-      <p class="rev-tag">routing t5</p>
+      <!-- LOADING: default until toolOutput carries a mode, so users never
+           read "no credits" while their credit is in fact being spent. -->
+      <div id="state-loading">
+        <h2>Working on your image&hellip;</h2>
+        <p class="explain">Letter IRL is preparing your image request.</p>
+      </div>
+
+      <!-- GENERATED mode: image created in-turn with a Letter IRL credit -->
+      <div id="state-generated" class="hidden">
+        <h2>Your image is ready</h2>
+        <div class="preview-wrap">
+          <img id="preview-img" src="" alt="Generated image preview" />
+        </div>
+        <p class="credit-line" id="credit-line"></p>
+        <div class="url-row">
+          <code id="url-text"></code>
+          <button class="btn-copy" id="btn-copy-url" type="button">Copy</button>
+        </div>
+      </div>
+
+      <!-- REDIRECT mode: explanation + copy-ready prompt -->
+      <div id="state-redirect" class="hidden">
+        <h2>Generate this with ChatGPT</h2>
+        <p class="explain" id="explain-text">
+          Letter IRL image credits aren't available for this request, but
+          ChatGPT's own generator is free. Copy the prompt below and send it
+          as a new message &mdash; without mentioning Letter IRL &mdash; and
+          ChatGPT will create it. Then say "make it a postcard."
+        </p>
+        <div class="prompt-row">
+          <input id="prompt-field" type="text" readonly value="" />
+          <button class="btn-copy" id="btn-copy-prompt" type="button">Copy</button>
+        </div>
+        <p class="hint">Tip: paste it as your next message, with no @Letter IRL.</p>
+      </div>
+
+      <p class="rev-tag">routing t6</p>
     </div>
 
     <script>
       (function () {
-        var btn = document.getElementById("btn-generate");
-        var status = document.getElementById("status");
+        function nonEmptyString(value) {
+          return typeof value === "string" && value.trim() ? value : null;
+        }
 
         function toolOutput() {
           return (window.openai && window.openai.toolOutput) || {};
         }
 
-        function promptText() {
-          var out = toolOutput();
-          return typeof out.prompt === "string" && out.prompt.trim()
-            ? out.prompt.trim()
-            : null;
+        function hiddenMeta() {
+          return (window.openai && window.openai.toolResponseMetadata) || {};
+        }
+
+        function wireCopy(buttonId, getText) {
+          var btn = document.getElementById(buttonId);
+          btn.addEventListener("click", function () {
+            var text = getText();
+            if (!text) return;
+            var done = function () {
+              btn.textContent = "Copied!";
+              setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+            };
+            var fail = function () {
+              btn.textContent = "Copy failed";
+              setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(done, function () {
+                fallbackCopy(text, done, fail);
+              });
+            } else {
+              fallbackCopy(text, done, fail);
+            }
+          });
+        }
+
+        // execCommand fallback for webviews without the async clipboard API.
+        // Uses a transient off-screen textarea (NOT display:none - hidden
+        // elements cannot hold a selection) and only reports success when the
+        // copy actually took.
+        function fallbackCopy(text, done, fail) {
+          var scratch = document.createElement("textarea");
+          scratch.value = text;
+          scratch.setAttribute("readonly", "");
+          scratch.style.position = "fixed";
+          scratch.style.left = "-9999px";
+          scratch.style.top = "0";
+          document.body.appendChild(scratch);
+          scratch.focus();
+          scratch.select();
+          var ok = false;
+          try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+          document.body.removeChild(scratch);
+          if (ok) done(); else fail();
         }
 
         function render() {
-          var p = promptText();
-          if (p) {
-            document.getElementById("explain-text").textContent =
-              "Letter IRL doesn't generate images - but ChatGPT's own generator is free and its images attach to postcards and letters directly. Tap below and ChatGPT will generate \"" + p + "\" for you.";
+          var out = toolOutput();
+          var meta = hiddenMeta();
+          var mode = out.mode === "generated" || out.mode === "redirect" ? out.mode : null;
+          var generated = mode === "generated";
+
+          document.getElementById("state-loading").classList.toggle("hidden", mode !== null);
+          document.getElementById("state-generated").classList.toggle("hidden", !generated);
+          document.getElementById("state-redirect").classList.toggle("hidden", mode !== "redirect");
+          if (mode === null) return;
+
+          if (generated) {
+            var preview = nonEmptyString(meta.generatedImagePreview);
+            var url = nonEmptyString(out.generatedImageUrl) || nonEmptyString(meta.generatedImageUrl);
+            var img = document.getElementById("preview-img");
+            if (preview) {
+              img.src = "data:image/jpeg;base64," + preview;
+            } else if (url) {
+              img.src = url;
+            }
+            document.getElementById("url-text").textContent = url || "";
+            var remaining = out.generationsRemaining;
+            document.getElementById("credit-line").textContent =
+              typeof remaining === "number"
+                ? "Used 1 Letter IRL image credit · " + remaining + " remaining"
+                : "Created with a Letter IRL image credit";
+          } else {
+            var p = nonEmptyString(out.prompt);
+            var row = document.querySelector(".prompt-row");
+            var hint = document.querySelector(".hint");
+            if (p) {
+              row.classList.remove("hidden");
+              hint.classList.remove("hidden");
+              document.getElementById("prompt-field").value = p.trim();
+              document.getElementById("explain-text").textContent =
+                "Letter IRL image credits aren't available for this request, but ChatGPT's own generator is free. Copy the prompt and send it as a new message - without mentioning Letter IRL. Then say \"make it a postcard.\"";
+            } else {
+              // No prompt to copy (status no_prompt) - an empty copy field
+              // with a dead button would be worse than none.
+              row.classList.add("hidden");
+              hint.classList.add("hidden");
+              document.getElementById("explain-text").textContent =
+                "Tell me what image you want, or just ask ChatGPT directly - without mentioning Letter IRL - and it will generate it free.";
+            }
           }
         }
 
-        btn.addEventListener("click", function () {
-          var p = promptText() || "the image I described";
-          btn.disabled = true;
-          status.textContent = "Asking ChatGPT to generate…";
-          if (!window.openai || typeof window.openai.sendFollowUpMessage !== "function") {
-            status.textContent = "sendFollowUpMessage: NOT AVAILABLE on this host";
-            btn.disabled = false;
-            return;
-          }
-          Promise.resolve(
-            window.openai.sendFollowUpMessage({
-              prompt: "Generate an image of " + p + " using your built-in image generation."
-            })
-          )
-            .then(function () {
-              status.textContent = "sendFollowUpMessage: RESOLVED — request sent.";
-            })
-            .catch(function (err) {
-              status.textContent =
-                "sendFollowUpMessage: REJECTED — " +
-                ((err && err.message) || String(err)).replace(/https?:\/\/\S+/g, "[url]");
-              btn.disabled = false;
-            });
+        wireCopy("btn-copy-prompt", function () {
+          return document.getElementById("prompt-field").value;
+        });
+        wireCopy("btn-copy-url", function () {
+          return document.getElementById("url-text").textContent;
         });
 
         render();

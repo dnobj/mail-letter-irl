@@ -182,6 +182,59 @@ export async function getGenerationQuota(userId: string): Promise<GenerationQuot
   );
 }
 
+/**
+ * One-time starter allowance per user (issue #227 hybrid). Idempotent by the
+ * (source_type, source_reference_id) uniqueness - the reference is the user
+ * id, so at most one starter grant can ever exist per account.
+ */
+export async function ensureStarterGrant(userId: string): Promise<void> {
+  const parsed = Number.parseInt(
+    process.env.LETTER_IRL_IMAGE_STARTER_CREDITS ?? '3',
+    10
+  );
+  const quantity = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  if (quantity === 0) return;
+  // Cheap non-locking existence check first: the grant path takes the account
+  // row lock and performs a speculative insert even on conflict, which is
+  // needless churn for every call after the first. The race between two
+  // first-calls is still settled by ON CONFLICT DO NOTHING.
+  const existing = await query(
+    `SELECT 1 FROM image_entitlements
+     WHERE source_type = 'starter' AND source_reference_id = $1
+     LIMIT 1`,
+    [userId]
+  );
+  if (existing.rows.length > 0) return;
+  // NOTE: accounts whose users row does not exist yet (identity defers
+  // creation until a verified email arrives) fail the FK here; the caller
+  // swallows that into a warn and the user simply has no starter grant until
+  // their account row exists. Deliberate, not accidental.
+  await grantImageEntitlement({
+    userId,
+    sourceType: 'starter',
+    sourceReferenceId: userId,
+    quantity
+  });
+}
+
+/**
+ * Global generations today, across all users - the input to the daily spend
+ * ceiling. Statuses are reserved|dispatched|consumed|released|ambiguous;
+ * everything except 'released' counts (in-flight 'reserved' rows count too,
+ * which over-counts slightly and errs toward spending less). Day boundary is
+ * the DB server's timezone (UTC on hosted Postgres). Served by
+ * idx_image_generation_reservations_created_at (migration 025).
+ */
+export async function countGenerationsToday(): Promise<number> {
+  const result = await query<{ count: string }>(
+    `SELECT COUNT(*) AS count
+     FROM image_generation_reservations
+     WHERE created_at >= date_trunc('day', NOW())
+       AND status <> 'released'`
+  );
+  return Number.parseInt(result.rows[0]?.count ?? '0', 10) || 0;
+}
+
 export async function checkGenerationLimit(userId: string): Promise<GenerationLimitCheck> {
   const quota = await getGenerationQuota(userId);
   return { ...quota, allowed: quota.remaining > 0 };

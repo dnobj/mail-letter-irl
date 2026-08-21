@@ -54,19 +54,22 @@ describe("Compatibility manifest", () => {
 
   it("does not advertise any server-side image GENERATOR", () => {
     // generate_image (later generate_image_fallback) was REMOVED after the
-    // #227 investigation. Pin the absence so a bad merge or revert cannot
-    // silently resurrect it. generate_image_for_mail is deliberately NOT in
-    // this pin: it is an intent ROUTER that generates nothing (no OpenAI
-    // call, no quota) - it redirects the model to built-in generation.
+    // #227 investigation; the HYBRID generate_image_for_mail that replaced it
+    // (Addendum 3) generates only against the user's entitlements and is
+    // deliberately NOT in this pin. The pin guards against the old
+    // unconditional generator names returning via a bad merge or revert.
     // Decision record: docs/learnings/generate-image-removal-decision.md
     const toolNames = buildManifest().tools.map((tool) => tool.name);
     expect(toolNames).not.toContain("generate_image_fallback");
     expect(toolNames).not.toContain("generate_image");
   });
 
-  it("advertises the image-intent router as a non-generating redirect", () => {
-    const router = buildManifest().tools.find((tool) => tool.name === "generate_image_for_mail");
-    expect(router?.description).toContain("does not generate images itself");
-    expect(router?.description).toContain("built-in image generation");
+  it("advertises the hybrid image tool honestly", () => {
+    const tool = buildManifest().tools.find((t) => t.name === "generate_image_for_mail");
+    // Generates only against the user's Letter IRL credits; otherwise routes
+    // to built-in generation. Both halves must stay stated.
+    expect(tool?.description).toContain("Letter IRL image credits");
+    expect(tool?.description).toContain("built-in image generation");
+    expect(tool?.description).toContain("Never refuse an image request");
   });
 });

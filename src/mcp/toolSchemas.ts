@@ -132,10 +132,10 @@ export const toolInputSchemas = {
   upload_image: z.object({
     context: z.string().optional()
   }),
-  // Image-intent router (does not generate)
+  // Hybrid image tool (generates with credits; routes otherwise)
   generate_image_for_mail: z.object({
     prompt: z.string().optional(),
-    context: z.string().optional()
+    context: z.enum(["postcard", "header_image", "inline_image"]).optional()
   }),
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: z.object({

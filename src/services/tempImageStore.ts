@@ -39,6 +39,21 @@ function bucketConfig(): BucketConfig | null {
   return { bucket, endpoint, region, accessKeyId, secretAccessKey };
 }
 
+/**
+ * Non-throwing probe for callers that must degrade gracefully instead of
+ * erroring mid-flight (generate_image_for_mail preflights this BEFORE
+ * reserving a credit or calling the paid provider - review finding on
+ * PR #247: a prod misconfig here must not burn money silently).
+ */
+export function isTempImageStoreConfigured(): boolean {
+  try {
+    storageMode();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function storageMode(): 'bucket' | 'memory' {
   const configured = bucketConfig();
   const requested = process.env.TEMP_IMAGE_STORE;

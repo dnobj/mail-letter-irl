@@ -21,5 +21,10 @@
  * r6: generate_image_for_mail intent-trampoline tool added - matches
  *     @-mention generate requests and redirects to image_gen in-turn,
  *     replacing the first-turn capability narration.
+ * r7: HYBRID - generate_image_for_mail generates in-turn with the user's
+ *     Letter IRL image credits (starter/JIT/pack grants, global daily
+ *     ceiling) and degrades to a copy-the-prompt redirect card otherwise.
+ *     sendFollowUpMessage auto-nudge was dropped: on-device it resolved
+ *     without ever posting the message (false positive).
  */
-export const STEERING_COPY_REV = 6;
+export const STEERING_COPY_REV = 7;
