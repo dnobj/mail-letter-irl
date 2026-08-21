@@ -137,6 +137,17 @@ describe("generate_image_fallback tool", () => {
       expect(generateImageTool.description).toContain("built-in image generation instead");
     });
 
+    it("should scope out bare @-mentions and carry the copy revision tag", () => {
+      // r3 (#227): on mobile, app attachment IS an @-mention, so the
+      // explicit-ask clause must not treat a mention alone as an ask.
+      expect(generateImageTool.description).toContain(
+        "Selecting or @-mentioning Letter IRL while asking for an image is NOT a request"
+      );
+      // The [copy rN] tag makes stale cached tool lists identifiable from
+      // the ChatGPT dev panel and correlates with mcp.client_request logs.
+      expect(generateImageTool.description).toMatch(/\[copy r\d+\]$/);
+    });
+
     it("should not be readOnly", () => {
       expect(generateImageTool.readOnly).toBe(false);
     });

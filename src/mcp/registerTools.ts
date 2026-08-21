@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import { LetterIrlServer } from "../server.js";
 import { toolInputSchemas } from "./toolSchemas.js";
 import { widgetTemplateUri } from "./widgetUris.js";
+import { STEERING_COPY_REV } from "./steeringRev.js";
 import {
   quoteAndPreviewInputZ,
   quoteAndPreviewLetterWithHeaderImageInputZ,
@@ -541,6 +542,13 @@ export async function registerLetterTools(
           result as Record<string, unknown>,
           meta
         );
+
+        if (tool.name === "generate_image_fallback") {
+          // Widget-only breadcrumb (issue #235): the card footer shows which
+          // steering-copy revision the SERVER was on when this render was
+          // produced, alongside the template's own baked version.
+          _meta.steeringRev = STEERING_COPY_REV;
+        }
 
         if (tool.name === "generate_image_fallback") {
           generateImageOutputZ.parse(structuredContent);

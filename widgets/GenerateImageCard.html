@@ -115,6 +115,14 @@
         margin-top: 0.75rem;
       }
 
+      .rev-tag {
+        margin: 0.4rem 0 0;
+        font-size: 0.625rem;
+        opacity: 0.45;
+        text-align: right;
+        color: var(--text-secondary);
+      }
+
       .url-display code {
         flex: 1;
         font-size: 0.75rem;
@@ -178,6 +186,10 @@
           <code id="url-text"></code>
           <button class="btn-copy" id="btn-copy" type="button">Copy</button>
         </div>
+        <!-- Staleness breadcrumb (issue #235): "t3" is baked into this template,
+             so seeing it proves which template version the client rendered;
+             the server's steering-copy revision is appended from _meta. -->
+        <p id="rev-tag" class="rev-tag">t3</p>
       </div>
 
       <!-- Error State -->
@@ -244,13 +256,18 @@
           previewData: nonEmptyString(hiddenMeta?.generatedImagePreview),
           generatedImageUrl: nonEmptyString(output?.generatedImageUrl)
             ?? nonEmptyString(hiddenMeta?.generatedImageUrl),
+          steeringRev: hiddenMeta?.steeringRev,
           resultArrived: Boolean(output || responseMetadata || notificationResult)
         };
       }
 
       function render() {
-        const { output, previewData, generatedImageUrl, resultArrived } = resolveWidgetData();
+        const { output, previewData, generatedImageUrl, steeringRev, resultArrived } = resolveWidgetData();
         imageUrl = generatedImageUrl;
+
+        if (steeringRev !== undefined && steeringRev !== null) {
+          document.getElementById("rev-tag").textContent = "t3 · r" + steeringRev;
+        }
 
         if (previewData) {
           dataLoaded = true;
