@@ -1703,6 +1703,43 @@
       }
     },
     {
+      "name": "generate_image_for_mail",
+      "description": "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. Letter IRL does not generate images itself; this tool returns the correct next step (generate with ChatGPT's built-in image generation, then attach the result to a postcard or letter preview). Free, instant, and safe to call for any image-generation request.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "The image the user asked for, in their words."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional mail context: postcard, header_image, or inline_image."
+          }
+        },
+        "required": []
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "status",
+          "message",
+          "suggestedNextStep"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "suggestedNextStep": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
       "name": "set_return_address",
       "description": "Save your preferred return address for future letters and postcards. The address is validated before saving, corrected when possible, and used automatically when you omit a sender address. U.S. addresses only.",
       "inputSchema": {

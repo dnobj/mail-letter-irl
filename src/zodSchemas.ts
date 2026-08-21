@@ -164,6 +164,15 @@ export const uploadImageInputZ = z.object({
 });
 
 // ============================================================================
+// Generate Image For Mail Schema (intent router - does not generate)
+// ============================================================================
+
+export const generateImageForMailInputZ = z.object({
+  prompt: z.string().optional(),
+  context: z.string().optional()
+});
+
+// ============================================================================
 // Confirm Uploaded Image Schema (Widget relay for upload URL)
 // ============================================================================
 
@@ -397,6 +406,12 @@ export const uploadImageOutputZ = z.object({
   context: z.string(),
   debugEnabled: z.boolean(),
   debugEndpoint: z.string().optional()
+});
+
+export const generateImageForMailOutputZ = z.object({
+  status: z.string(),
+  message: z.string(),
+  suggestedNextStep: z.string()
 });
 
 export const confirmUploadedImageOutputZ = z.object({

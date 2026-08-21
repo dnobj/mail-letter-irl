@@ -120,3 +120,20 @@ generate-first flow all reach image_gen without friction. Accepted as a known
 papercut; r5's directive is kept (harmless, may help other tiers), and the
 clean repro + logs are available if this is ever escalated to OpenAI as
 model-behavior feedback.
+
+## Addendum 2: the intent trampoline (r6, Aug 21)
+
+Rather than accept the first-turn narration, the owner asked for "a tool that
+responds with instructions instead of just failing." `generate_image_for_mail`
+does exactly that: it MATCHES generate-intent by name (exploiting the same
+@-mention routing pull that motivated the removal), costs nothing (no OpenAI
+call, no quota, no widget, read-only and PII-free so no consent dialog), and
+returns a suggestedNextStep directing the model to generate with image_gen in
+the same turn and then offer the mail flow. The redirect rides the tool-output
+channel - empirically the strongest steering surface (the old tool's
+"IMPORTANT: now call quote_and_preview_postcard" chained near-perfectly).
+
+This does not reopen the removal: nothing generates server-side, and the
+"no server-side generator" regression pin stands (narrowed to exclude the
+router by name).
+

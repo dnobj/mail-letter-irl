@@ -24,6 +24,7 @@ export { getStartedTool } from "./getStarted.js";
 
 // Image upload tool (US-POSTCARD-04: Widget-based upload)
 export { uploadImageTool } from "./uploadImage.js";
+export { generateImageForMailTool } from "./generateImageForMail.js";
 
 // Confirm uploaded image tool (widget relay for upload URL)
 export { confirmUploadedImageTool } from "./confirmUploadedImage.js";
