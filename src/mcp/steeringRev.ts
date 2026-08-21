@@ -14,5 +14,9 @@
  *     image-generation path; guidance now lives solely in server
  *     instructions. Decision record:
  *     docs/learnings/generate-image-removal-decision.md
+ * r5: act-don't-explain directive - post-removal, a native-app @-mention
+ *     ask sometimes produced "Letter IRL can't generate images" instead
+ *     of falling through to image_gen; r5 scripts the fallthrough
+ *     ("generate immediately... never pause to explain").
  */
-export const STEERING_COPY_REV = 4;
+export const STEERING_COPY_REV = 5;
