@@ -55,6 +55,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.OPENAI_API_KEY = "sk-test";
   process.env.LETTER_IRL_IMAGE_DAILY_CEILING = "200";
+  process.env.LETTER_IRL_IMAGE_GEN_MODE = "on";
   vi.mocked(limitService.ensureStarterGrant).mockResolvedValue(undefined);
   vi.mocked(limitService.countGenerationsToday).mockResolvedValue(0);
   vi.mocked(tempStore.isTempImageStoreConfigured).mockReturnValue(true as never);
@@ -302,5 +303,54 @@ describe("generate_image_for_mail (hybrid)", () => {
     expect(result.mode).toBe("redirect");
     expect(result.status).toBe("generation_unconfigured");
     expect(limitService.reserveGeneration).not.toHaveBeenCalled();
+  });
+
+  it("mode off: always redirects, grants nothing, spends nothing", async () => {
+    process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, context);
+
+    expect(result.mode).toBe("redirect");
+    expect(result.status).toBe("generation_disabled");
+    expect(limitService.ensureStarterGrant).not.toHaveBeenCalled();
+    expect(limitService.reserveGeneration).not.toHaveBeenCalled();
+  });
+
+  it("mode mobile_only: redirects on non-mobile surfaces (fails closed when unknown)", async () => {
+    process.env.LETTER_IRL_IMAGE_GEN_MODE = "mobile_only";
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, context);
+
+    expect(result.mode).toBe("redirect");
+    expect(result.status).toBe("generation_mobile_only");
+    expect(limitService.reserveGeneration).not.toHaveBeenCalled();
+  });
+
+  it("mode mobile_only: generates on mobile surfaces", async () => {
+    process.env.LETTER_IRL_IMAGE_GEN_MODE = "mobile_only";
+    const mobileContext = {
+      user: { userId: "user-1" },
+      correlationId: "test",
+      isMobile: true,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    } as never;
+    vi.mocked(limitService.reserveGeneration).mockResolvedValue({
+      reserved: true,
+      reservationId: "res-7",
+      remaining: 1,
+      used: 2,
+      allowance: 3
+    } as never);
+    vi.mocked(limitService.markGenerationDispatched).mockResolvedValue(true as never);
+    vi.mocked(limitService.commitGenerationReservation).mockResolvedValue(true as never);
+    vi.mocked(genService.generateImage).mockImplementation(async (_prompt, opts) => {
+      await (opts as { beforeDispatch: () => Promise<void> }).beforeDispatch();
+      return { base64Data: TINY_JPEG_BASE64, providerRequestId: "prov-7" } as never;
+    });
+    vi.mocked(tempStore.storeImage).mockResolvedValue("token-7" as never);
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, mobileContext);
+
+    expect(result.mode).toBe("generated");
   });
 });

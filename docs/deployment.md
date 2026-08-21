@@ -550,7 +550,11 @@ Env: `OPENAI_API_KEY` (absence degrades to the redirect card - never
 boot-fails), `OPENAI_IMAGE_MODEL`/`OPENAI_IMAGE_QUALITY` (cost dials),
 `LETTER_IRL_IMAGE_STARTER_CREDITS` (default 3, one-time per user),
 `LETTER_IRL_IMAGE_DAILY_CEILING` (default 200; **0 is a kill switch that
-blocks all generation**), `IMAGE_ENTITLEMENTS_PER_JIT_ORDER` (default 2).
+blocks all generation**), `LETTER_IRL_IMAGE_GEN_MODE` (`on` | `off` |
+`mobile_only`, default `on` - the product switch for whether @Letter IRL
+requests may generate server-side at all; `mobile_only` limits spend to the
+surface where built-in generation is genuinely unavailable),
+`IMAGE_ENTITLEMENTS_PER_JIT_ORDER` (default 2).
 The temp-image store (TEMP_IMAGE_* vars) is a hard dependency of the
 generated path and is preflighted before any credit is reserved.
 
