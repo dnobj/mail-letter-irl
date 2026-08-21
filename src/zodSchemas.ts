@@ -411,7 +411,8 @@ export const uploadImageOutputZ = z.object({
 export const generateImageForMailOutputZ = z.object({
   status: z.string(),
   message: z.string(),
-  suggestedNextStep: z.string()
+  suggestedNextStep: z.string(),
+  prompt: z.string().optional()
 });
 
 export const confirmUploadedImageOutputZ = z.object({

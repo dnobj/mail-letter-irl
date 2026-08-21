@@ -1735,6 +1735,9 @@
           },
           "suggestedNextStep": {
             "type": "string"
+          },
+          "prompt": {
+            "type": "string"
           }
         }
       }
@@ -2073,7 +2076,8 @@
       "LetterPreviewCard",
       "PostcardPreviewCard",
       "ImageUploadCard",
-      "GetStartedCard"
+      "GetStartedCard",
+      "ImageRoutingCard"
     ]
   },
   "servers": [
