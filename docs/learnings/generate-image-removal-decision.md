@@ -288,3 +288,13 @@ this free" with the reply-go-ahead fallback before the copy-field one.
 Handoff remains the right desktop style - its one-word recovery still beats
 the resend card - and executes in-turn on unmentioned invocations.
 
+### Streamlining the double narration (t10, Aug 22)
+
+The badger test showed card + narration saying the same thing twice (both
+explained free routing and the "go ahead" recovery). Contract now: the CARD
+is the single source of guidance; suggestedNextStep instructs the model to
+add at most ONE short sentence (and to say nothing about routing at all when
+it generates in-turn), never restating the card. The card itself lost its
+redundant fallback hint row and both explains were tightened to one
+sentence plus the postcard chain hint.
+

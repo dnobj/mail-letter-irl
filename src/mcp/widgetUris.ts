@@ -10,7 +10,7 @@
  * metadata changes. Tool outputTemplate references and the registered
  * resource URIs must always agree, so both go through widgetTemplateUri().
  */
-export const WIDGET_TEMPLATE_VERSION = 9;
+export const WIDGET_TEMPLATE_VERSION = 10;
 
 export function widgetTemplateUri(name: string): string {
   return `ui://widgets/${name}.html@v${WIDGET_TEMPLATE_VERSION}`;
