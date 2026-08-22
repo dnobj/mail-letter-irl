@@ -246,3 +246,27 @@ style (nothing to hand off). Widget template v8. The tool cannot be hidden
 per-surface at all: ChatGPT ingests tools/list once per connector at Refresh,
 so per-surface behavior can only live in the response.
 
+### On-device verification of surface-aware `off` (Aug 21, 9:22-9:29 PM, S25 Ultra)
+
+With `LETTER_IRL_IMAGE_GEN_MODE=off` on the Railway dev API service and the
+connector Refreshed (required after the v8 template bump - before the
+Refresh the card rendered as a blank box because the platform still
+requested the retired @v7 URI):
+
+1. Fresh native-app conversation, "@Letter IRL draw a hedgehog sipping tea"
+   -> tool redirected in ~8s, no credit spent, no reservation taken.
+2. The v8 resend card rendered fully: "Generate this with ChatGPT" title,
+   explanation, prompt field carrying the model's enriched prompt, Copy
+   button, tip line, "routing t8" footer.
+3. Copy button -> "Copied!" state AND Android's own "Copied." toast
+   (OS-level clipboard write confirmed).
+4. Prompt pasted into an unmentioned message (KEYCODE_PASTE) -> ChatGPT's
+   built-in image_gen generated the hedgehog free. The known finished-
+   generation display-stall occurred and recovered on conversation
+   re-entry, as documented.
+
+The Refresh action moved in the ChatGPT "Plugins" UI generation: Settings
+-> Plugins -> connector -> scroll the detail panel to the Information
+section's Refresh button. The "..." menus offer only Reconnect (still
+re-auth only).
+
