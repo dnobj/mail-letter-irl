@@ -270,3 +270,21 @@ The Refresh action moved in the ChatGPT "Plugins" UI generation: Settings
 section's Refresh button. The "..." menus offer only Reconnect (still
 re-auth only).
 
+### Desktop handoff test falsified the scoping assumption (Aug 21, otter)
+
+Desktop web, fresh chat, typed "@Letter IRL draw an otter juggling acorns"
+with mode=off: the handoff card rendered perfectly (t8), no credit spent -
+but the model reported built-in generation was NOT available in that turn.
+**A typed @-mention scopes the toolset on desktop web too**; the earlier
+"desktop doesn't scope" conclusion was specific to chip attach. The
+recovery was one unmentioned reply ("ok go ahead and generate it") - the
+model reused the prompt from context and image_gen produced the otter free,
+no copy/paste needed.
+
+Consequence (this revision, widget t9): handoff copy is hedged. The model
+instruction is conditional (generate NOW if image_gen is present, otherwise
+say a "go ahead" reply completes it); the card says "ChatGPT will generate
+this free" with the reply-go-ahead fallback before the copy-field one.
+Handoff remains the right desktop style - its one-word recovery still beats
+the resend card - and executes in-turn on unmentioned invocations.
+

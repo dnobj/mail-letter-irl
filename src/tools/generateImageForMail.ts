@@ -125,16 +125,16 @@ function redirectOutput(
   reason: string
 ): GenerateImageForMailOutput {
   const prompt = input?.prompt?.trim();
-  // Surface-aware routing: on confirmed desktop web, @-mentions do NOT scope
-  // the turn's toolset, so built-in image_gen is available in this same turn
-  // and the model can hand off immediately. Mention-scoped surfaces (native
-  // app, mobile web) and unknown surfaces get the resend card instead - the
-  // only path that works when image_gen is absent from the turn.
+  // Surface-aware routing: typed @-mentions scope the turn's toolset on EVERY
+  // surface (otter test, Aug 21) - only desktop chip attach was ever
+  // non-scoping - so even desktop handoff must be conditional. Desktop still
+  // gets handoff style because its recovery is one unmentioned reply ("go
+  // ahead"), where mention-scoped mobile needs the copy-field resend card.
   const handoff = Boolean(prompt) && context.isMobile === false;
   const tail = !prompt
     ? "ChatGPT's built-in generation is always available without mentioning Letter IRL."
     : handoff
-      ? "ChatGPT's built-in generation is creating it free in this turn instead - no resend needed."
+      ? "ChatGPT's built-in generation creates it free instead - if it doesn't appear in this turn, replying 'go ahead' is enough."
       : "ChatGPT's built-in generation creates the image free - resend the prompt without mentioning Letter IRL.";
   return {
     mode: "redirect",
@@ -142,7 +142,7 @@ function redirectOutput(
     status: statusCode,
     message: `${reason} ${tail}`,
     suggestedNextStep: handoff
-      ? "IMPORTANT: Built-in image generation is available in this turn on this surface. Generate the image NOW in this same turn from this prompt - it is free and uses no Letter IRL credit. Do not ask the user to resend anything."
+      ? "IMPORTANT: If built-in image generation is available in this turn, generate the image NOW in this same turn from this prompt - free, no Letter IRL credit. If it is not available in this turn, tell the user that replying 'go ahead' is all it takes, then generate on that turn. Never ask the user to re-paste or resend the prompt."
       : "Relay the card's guidance briefly: the user can copy the prompt shown and send it WITHOUT mentioning Letter IRL, and ChatGPT's built-in image generation will create it free. Do not apologize at length.",
     ...(prompt ? { redirectStyle: handoff ? ("handoff" as const) : ("resend" as const) } : {})
   };
