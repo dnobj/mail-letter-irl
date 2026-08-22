@@ -142,8 +142,8 @@ function redirectOutput(
     status: statusCode,
     message: `${reason} ${tail}`,
     suggestedNextStep: handoff
-      ? "IMPORTANT: If built-in image generation is available in this turn, generate the image NOW in this same turn from this prompt - free, no Letter IRL credit. If it is not available in this turn, tell the user that replying 'go ahead' is all it takes, then generate on that turn. Never ask the user to re-paste or resend the prompt."
-      : "Relay the card's guidance briefly: the user can copy the prompt shown and send it WITHOUT mentioning Letter IRL, and ChatGPT's built-in image generation will create it free. Do not apologize at length.",
+      ? "IMPORTANT: If built-in image generation is available in this turn, generate the image NOW in this same turn from this prompt - free, no Letter IRL credit - and do not mention routing at all. If it is not available this turn, the card above already explains everything: reply with ONE short sentence only, like \"Just reply 'go ahead' and I'll create it.\" Never restate the card's contents, never explain the routing, never apologize, never ask the user to re-paste the prompt."
+      : "The card above already shows the prompt with a Copy button and full instructions. Reply with ONE short sentence only, like \"Copy the prompt above and resend it WITHOUT mentioning Letter IRL - ChatGPT will generate it free.\" Never restate the card's contents and never apologize.",
     ...(prompt ? { redirectStyle: handoff ? ("handoff" as const) : ("resend" as const) } : {})
   };
 }

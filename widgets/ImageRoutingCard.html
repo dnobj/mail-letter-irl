@@ -140,10 +140,9 @@
           <input id="prompt-field" type="text" readonly value="" />
           <button class="btn-copy" id="btn-copy-prompt" type="button">Copy</button>
         </div>
-        <p class="hint" id="redirect-hint">Tip: paste it as your next message, with no @Letter IRL.</p>
       </div>
 
-      <p class="rev-tag">routing t9</p>
+      <p class="rev-tag">routing t10</p>
     </div>
 
     <script>
@@ -235,31 +234,24 @@
             // this same turn; the card is a fallback, not an instruction.
             var handoff = out.redirectStyle === "handoff";
             var row = document.querySelector(".prompt-row");
-            var hint = document.getElementById("redirect-hint");
             var title = document.getElementById("redirect-title");
             var explain = document.getElementById("explain-text");
             if (p) {
               row.classList.remove("hidden");
-              hint.classList.remove("hidden");
               document.getElementById("prompt-field").value = p.trim();
               if (handoff) {
                 title.textContent = "ChatGPT will generate this free";
                 explain.textContent =
-                  "ChatGPT's built-in generator can create this free - no Letter IRL credit needed. If the image doesn't appear in this turn, just reply \"go ahead\" - or copy the prompt below and send it as a new message without @Letter IRL.";
-                hint.textContent =
-                  "Fallback: reply \"go ahead\", or paste as a new message with no @Letter IRL.";
+                  "No Letter IRL credit needed. Reply \"go ahead\" to generate it - or copy the prompt and send it without @Letter IRL.";
               } else {
                 title.textContent = "Generate this with ChatGPT";
                 explain.textContent =
-                  "Letter IRL image credits aren't available for this request, but ChatGPT's own generator is free. Copy the prompt and send it as a new message - without mentioning Letter IRL. Then say \"make it a postcard.\"";
-                hint.textContent =
-                  "Tip: paste it as your next message, with no @Letter IRL.";
+                  "Letter IRL credits aren't available for this, but ChatGPT's own generator is free: copy the prompt and resend it without @Letter IRL. Then say \"make it a postcard.\"";
               }
             } else {
               // No prompt to copy (status no_prompt) - an empty copy field
               // with a dead button would be worse than none.
               row.classList.add("hidden");
-              hint.classList.add("hidden");
               explain.textContent =
                 "Tell me what image you want, or just ask ChatGPT directly - without mentioning Letter IRL - and it will generate it free.";
             }
