@@ -143,7 +143,7 @@
         <p class="hint" id="redirect-hint">Tip: paste it as your next message, with no @Letter IRL.</p>
       </div>
 
-      <p class="rev-tag">routing t8</p>
+      <p class="rev-tag">routing t9</p>
     </div>
 
     <script>
@@ -243,11 +243,11 @@
               hint.classList.remove("hidden");
               document.getElementById("prompt-field").value = p.trim();
               if (handoff) {
-                title.textContent = "ChatGPT is generating this image";
+                title.textContent = "ChatGPT will generate this free";
                 explain.textContent =
-                  "ChatGPT's built-in generator is creating this free - no Letter IRL credit needed and no resend required. If the image doesn't appear, copy the prompt below and send it as a new message without @Letter IRL.";
+                  "ChatGPT's built-in generator can create this free - no Letter IRL credit needed. If the image doesn't appear in this turn, just reply \"go ahead\" - or copy the prompt below and send it as a new message without @Letter IRL.";
                 hint.textContent =
-                  "Fallback: paste as a new message (no @Letter IRL) if no image appears.";
+                  "Fallback: reply \"go ahead\", or paste as a new message with no @Letter IRL.";
               } else {
                 title.textContent = "Generate this with ChatGPT";
                 explain.textContent =

@@ -327,7 +327,7 @@ describe("generate_image_for_mail (hybrid)", () => {
     expect(result.status).toBe("generation_disabled");
     expect(result.redirectStyle).toBe("handoff");
     expect(result.suggestedNextStep).toContain("NOW in this same turn");
-    expect(result.message).toContain("no resend needed");
+    expect(result.message).toContain("replying 'go ahead' is enough");
     expect(limitService.reserveGeneration).not.toHaveBeenCalled();
   });
 

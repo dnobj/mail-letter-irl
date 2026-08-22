@@ -555,9 +555,10 @@ blocks all generation**), `LETTER_IRL_IMAGE_GEN_MODE` (`on` | `off` |
 requests may generate server-side at all; `mobile_only` limits spend to the
 surface where built-in generation is genuinely unavailable). Redirect responses
 are surface-aware on every path: confirmed desktop gets a "handoff" card
-(the model is instructed to run built-in generation in the same turn, since
-desktop mentions do not scope the toolset), while mobile and unknown
-surfaces get the resend card with the copy-ready prompt,
+(the model generates in the same turn when built-in generation is present;
+on mention-scoped turns it tells the user a bare "go ahead" reply
+completes it), while mobile and unknown surfaces get the resend card with
+the copy-ready prompt,
 `IMAGE_ENTITLEMENTS_PER_JIT_ORDER` (default 2).
 The temp-image store (TEMP_IMAGE_* vars) is a hard dependency of the
 generated path and is preflighted before any credit is reserved.
