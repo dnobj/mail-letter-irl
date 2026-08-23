@@ -34,7 +34,10 @@ describe("Submission readiness checks", () => {
     expect(buildToolSecuritySchemes("send_letter", true)).toEqual([
       {
         type: "oauth2",
-        scopes: ["mail:send"]
+        // offline_access is requested here, never enforced: ChatGPT unions
+        // these per-tool lists to build its authorization request rather than
+        // reading scopes_supported (issue #160).
+        scopes: ["mail:send", "offline_access"]
       }
     ]);
   });
@@ -55,7 +58,7 @@ describe("Submission readiness checks", () => {
     expect(meta.securitySchemes).toEqual([
       {
         type: "oauth2",
-        scopes: ["mail:draft"]
+        scopes: ["mail:draft", "offline_access"]
       }
     ]);
     expect(meta["openai/widgetAccessible"]).toBe(true);

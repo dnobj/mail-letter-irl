@@ -20,6 +20,7 @@ import {
   IDENTITY_SCOPES
 } from '../../../src/auth/oauthConfig.js';
 import { TOOL_SCOPES, getRequiredToolScopes } from '../../../src/auth/toolScopes.js';
+import { buildToolSecuritySchemes } from '../../../src/mcp/registerTools.js';
 
 describe('session scopes (issue #160)', () => {
   it('advertises offline_access, so Auth0 issues a refresh token', () => {
@@ -56,5 +57,69 @@ describe('session scopes (issue #160)', () => {
     for (const scope of PRODUCT_SCOPES) {
       expect(enforced.has(scope), `no tool enforces the advertised scope "${scope}"`).toBe(true);
     }
+  });
+});
+
+/**
+ * The channel that actually carries the request (issue #160).
+ *
+ * ChatGPT does not build its authorization request from `scopes_supported`.
+ * It unions the `securitySchemes` scopes across the tools in scope for the
+ * turn. offline_access was advertised in the protected-resource metadata, in
+ * openid-configuration, and in the 401 challenge - and requested from none of
+ * them, because it appeared in no tool's securitySchemes. Every Auth0 grant
+ * recorded exactly "mail:draft mail:read mail:send".
+ *
+ * So a session scope has to be asked for per-tool while still being enforced
+ * nowhere. These two tests are the halves of that, and they must both hold:
+ * drop the first and no refresh token is ever issued; drop the second and PAT
+ * callers are denied permanently.
+ */
+describe('session scopes are requested per tool but never enforced', () => {
+  it('asks for every session scope on every tool', () => {
+    // Every tool, not just some: a typed @-mention scopes the turn's toolset,
+    // so a session scope carried by only part of the toolset would be
+    // requested only on turns that happen to include one of those tools.
+    for (const toolName of Object.keys(TOOL_SCOPES)) {
+      const schemes = buildToolSecuritySchemes(toolName, true) as Array<{
+        type: string;
+        scopes?: string[];
+      }>;
+      const requested = schemes.flatMap(scheme => scheme.scopes ?? []);
+      for (const scope of SESSION_SCOPES) {
+        expect(
+          requested,
+          `${toolName} does not request the session scope "${scope}", so a turn ` +
+            `scoped to it would authorize without one`
+        ).toContain(scope);
+      }
+    }
+  });
+
+  it('still enforces only the product scopes it did before', () => {
+    // The counterpart: asking for more must not quietly gate more.
+    const sessionScopes = new Set<string>(SESSION_SCOPES);
+    for (const toolName of Object.keys(TOOL_SCOPES)) {
+      const enforced = getRequiredToolScopes(toolName);
+      const requested = (
+        buildToolSecuritySchemes(toolName, true) as Array<{ scopes?: string[] }>
+      ).flatMap(scheme => scheme.scopes ?? []);
+
+      for (const scope of enforced) {
+        expect(sessionScopes.has(scope)).toBe(false);
+        expect(requested).toContain(scope);
+      }
+      // Requested minus enforced must be exactly the session scopes - nothing
+      // else may sneak into the consent screen.
+      const extra = requested.filter(scope => !enforced.includes(scope));
+      expect(new Set(extra)).toEqual(new Set(SESSION_SCOPES));
+    }
+  });
+
+  it('requests nothing at all when auth is disabled', () => {
+    const schemes = buildToolSecuritySchemes('get_account_balance', false) as Array<{
+      type: string;
+    }>;
+    expect(schemes).toEqual([{ type: 'noauth' }]);
   });
 });
