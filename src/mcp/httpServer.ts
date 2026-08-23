@@ -36,7 +36,8 @@ import { isDebugEnabled } from "../utils/debug.js";
 import {
   assertValidOAuthConfig,
   getOAuthConfig,
-  isCimdEnforcementEnabled
+  isCimdEnforcementEnabled,
+  SUPPORTED_GRANT_TYPES
 } from "../auth/oauthConfig.js";
 import { classifyOAuthRoute } from "../auth/oauthRoutes.js";
 import {
@@ -739,7 +740,7 @@ export async function startHttpServer() {
         client_id: staticClientId,
         client_id_issued_at: Math.floor(Date.now() / 1000),
         token_endpoint_auth_method: "none",
-        grant_types: ["authorization_code", "refresh_token"],
+        grant_types: [...SUPPORTED_GRANT_TYPES],
         response_types: ["code"],
         redirect_uris: oauthConfig.staticRedirectUris
       };

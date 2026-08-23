@@ -3,6 +3,7 @@ import {
   getOpenIdConfiguration,
   getProtectedResourceMetadata
 } from "../../../src/auth/metadata.js";
+import { SUPPORTED_GRANT_TYPES } from "../../../src/auth/oauthConfig.js";
 
 const issuer = "https://dev-test.auth0.com/";
 const resource = "https://letter-irl-api-development.up.railway.app/mcp";
@@ -49,7 +50,12 @@ describe("OAuth metadata", () => {
     >;
 
     expect(metadata.code_challenge_methods_supported).toEqual(["S256"]);
-    expect(metadata.grant_types_supported).toEqual(["authorization_code"]);
+    // Both grants, and refresh_token for a concrete reason: this document is
+    // the authorization-server metadata in static-DCR mode, and a client that
+    // reads no refresh_token grant will not request offline_access, so the
+    // connection dies at access-token expiry (issue #160). It must also stay
+    // consistent with the /oauth/register response, which already claims both.
+    expect(metadata.grant_types_supported).toEqual([...SUPPORTED_GRANT_TYPES]);
     expect(metadata.token_endpoint_auth_methods_supported).toEqual(["none"]);
     expect(metadata).not.toHaveProperty("client_id_metadata_document_supported");
     expect(metadata).not.toHaveProperty("registration_endpoint");
@@ -70,5 +76,34 @@ describe("OAuth metadata", () => {
       getProtectedResourceMetadata("https://dev-api.example.com")
         .authorization_servers
     ).toEqual(["https://dev-api.example.com"]);
+  });
+});
+
+/**
+ * The bug this guards (issue #160): the metadata document advertised
+ * `["authorization_code"]` while /oauth/register simultaneously told the client
+ * it could use `refresh_token`. In static-DCR mode this document is the
+ * authorization-server metadata ChatGPT reads, so it took the server at its
+ * word, never requested `offline_access`, and every session died at
+ * access-token expiry - recoverable only by a human clicking Reconnect and
+ * re-consenting, which also meant no unattended test outlived a token lifetime.
+ *
+ * Advertising `offline_access` in scopes_supported is necessary but not
+ * sufficient: a client will not ask for a refresh token from a server that says
+ * it cannot redeem one.
+ */
+describe("refresh-token grant advertisement (issue #160)", () => {
+  it("advertises the refresh_token grant, so clients request offline_access", () => {
+    expect(SUPPORTED_GRANT_TYPES).toContain("refresh_token");
+    expect(SUPPORTED_GRANT_TYPES).toContain("authorization_code");
+  });
+
+  it("advertises offline_access alongside it, since one is useless without the other", () => {
+    const metadata = getOpenIdConfiguration(resource.replace(/\/mcp$/, "")) as Record<
+      string,
+      unknown
+    >;
+    expect(metadata.scopes_supported).toContain("offline_access");
+    expect(metadata.grant_types_supported).toContain("refresh_token");
   });
 });

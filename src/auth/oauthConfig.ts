@@ -9,6 +9,20 @@ export const PRODUCT_SCOPES = ["mail:read", "mail:draft", "mail:send"] as const;
 export const IDENTITY_SCOPES = ["openid", "profile", "email"] as const;
 
 /**
+ * Grant types this deployment supports, advertised in authorization-server
+ * metadata and echoed by the static registration response.
+ *
+ * These two had drifted apart: /oauth/register claimed refresh_token while
+ * the metadata document advertised authorization_code alone. In static-DCR
+ * mode that metadata IS the authorization-server document ChatGPT reads, so
+ * it concluded refreshing was unsupported and never requested offline_access
+ * - which is why every DEV session died at access-token expiry and only a
+ * human re-consent brought it back (issue #160). Both call sites now read
+ * this list, so they cannot disagree again.
+ */
+export const SUPPORTED_GRANT_TYPES = ["authorization_code", "refresh_token"] as const;
+
+/**
  * Session scopes: requested from Auth0, never demanded by a tool.
  *
  * `offline_access` is what makes Auth0 issue a refresh token. Without it the
