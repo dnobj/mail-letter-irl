@@ -587,6 +587,10 @@ function summarizeToolResult(
       if (usedSaved) {
         summary += " Using your saved return address.";
       }
+      const warnings = result.addressWarnings as string[] | undefined;
+      if (warnings?.length) {
+        summary += ` Note: ${warnings.join(' ')}`;
+      }
       return summary;
     }
     case "send_letter": {
@@ -627,6 +631,10 @@ function summarizeToolResult(
       let summary = `Postcard preview ready: requires ${lettersRequired ?? 1} ${lettersRequired === 1 ? 'letter' : 'letters'} from balance (${canSend}).`;
       if (usedSaved) {
         summary += " Using your saved return address.";
+      }
+      const warnings = result.addressWarnings as string[] | undefined;
+      if (warnings?.length) {
+        summary += ` Note: ${warnings.join(' ')}`;
       }
       return summary;
     }

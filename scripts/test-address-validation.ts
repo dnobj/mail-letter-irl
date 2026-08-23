@@ -6,7 +6,11 @@
  * 1. Valid address (should verify)
  * 2. Address needing correction (should correct)
  * 3. Invalid address (should fail)
+ * 4. Highrise suite not on USPS file (issue #200: policy classifies as
+ *    secondary-unit, tools proceed with a warning)
+ * 5. Residential apartment not on USPS file (same class)
  */
+import { assessValidation } from '../src/services/addressVerificationPolicy.js';
 
 import 'dotenv/config';
 import { getLetterProvider } from '../src/services/providers/index.js';
@@ -121,12 +125,55 @@ async function testAddressValidation() {
 
     console.log('');
 
+    // Test 4: Suite not in USPS data (issue #200 repro) - proceeds with warning
+    console.log('━'.repeat(40));
+    console.log('Test 4: Highrise Suite Not On File (Should Proceed With Warning)\n');
+    const suiteAddress: AddressValidationInput = {
+      line1: '350 5th Ave',
+      line2: 'Suite 8701',
+      city: 'New York',
+      state: 'NY',
+      postalCode: '10118',
+      country: 'US'
+    };
+    console.log('Input:', suiteAddress);
+    const result4 = await provider.validateAddress(suiteAddress);
+    const assessment4 = assessValidation('Recipient', result4);
+    console.log(`  Status: ${result4.status} | DPV: ${result4.details?.usMailingsDpvConfirmationIndicator ?? '(none)'}`);
+    console.log(`  Policy outcome: ${assessment4.outcome}`);
+    if (assessment4.warning) console.log(`  Warning: ${assessment4.warning}`);
+    console.log('');
+
+    // Test 5: Residential apartment not on file - same class
+    console.log('━'.repeat(40));
+    console.log('Test 5: Apartment Not On File (Should Proceed With Warning)\n');
+    const aptAddress: AddressValidationInput = {
+      line1: '129 W 81st St',
+      line2: 'Apt 5A',
+      city: 'New York',
+      state: 'NY',
+      postalCode: '10024',
+      country: 'US'
+    };
+    console.log('Input:', aptAddress);
+    const result5 = await provider.validateAddress(aptAddress);
+    const assessment5 = assessValidation('Recipient', result5);
+    console.log(`  Status: ${result5.status} | DPV: ${result5.details?.usMailingsDpvConfirmationIndicator ?? '(none)'}`);
+    console.log(`  Policy outcome: ${assessment5.outcome}`);
+    if (assessment5.warning) console.log(`  Warning: ${assessment5.warning}`);
+    console.log('');
+
     // Summary
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('Summary:\n');
-    console.log(`Test 1 (Valid): ${result1.status} - ${result1.isValid ? '✅' : '❌'}`);
+    // 145 Mulberry St is itself a multi-unit building: live DPV returns
+    // "Missing Value: Suite identifier" (class D), which policy proceeds on.
+    const assessment1 = assessValidation('Recipient', result1);
+    console.log(`Test 1 (Valid multi-unit): ${result1.status}/${assessment1.outcome} - ${result1.isValid || assessment1.outcome === 'unverified' ? '✅' : '❌'}`);
     console.log(`Test 2 (Needs Correction): ${result2.status} - ${result2.isValid ? '✅' : '❌'}`);
     console.log(`Test 3 (Invalid): ${result3.status} - ${!result3.isValid ? '✅ (correctly rejected)' : '❌'}`);
+    console.log(`Test 4 (Suite not on file): ${assessment4.outcome} - ${assessment4.outcome === 'unverified' ? 'PASS (proceeds with warning)' : 'FAIL'}`);
+    console.log(`Test 5 (Apt not on file): ${assessment5.outcome} - ${assessment5.outcome === 'unverified' ? 'PASS (proceeds with warning)' : 'FAIL'}`);
 
     console.log('\n✅ Address validation tests complete!\n');
 

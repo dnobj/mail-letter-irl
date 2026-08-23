@@ -67,7 +67,7 @@ async function handler(
   validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context);
 
   // Validate with PostGrid provider
-  const { senderValidation, recipientValidation } = await validateAddressesWithProvider(
+  const { senderValidation, recipientValidation, addressWarnings } = await validateAddressesWithProvider(
     sender,
     input.recipient,
     context
@@ -84,6 +84,7 @@ async function handler(
     savedReturnAddressNote,
     senderValidation,
     recipientValidation,
+    addressWarnings,
     context
   });
 }

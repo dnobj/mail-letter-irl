@@ -3,7 +3,7 @@ import { z } from "zod";
 export const addressZ = z.object({
   name: z.string(),
   addressLine1: z.string(),
-  addressLine2: z.string().optional(),
+  addressLine2: z.string().optional().describe('Apartment, suite, or unit, e.g. "Suite 8701" - never fold it into addressLine1.'),
   city: z.string(),
   state: z.string(),
   postalCode: z.string(),
@@ -190,8 +190,20 @@ export const confirmUploadedImageInputZ = z.object({
 // Large HTML previews and generated image blobs are moved into _meta by
 // registerTools.ts so they do not inflate the model context.
 
+const validatedAddressZ = z.object({
+  name: z.string().optional(),
+  addressLine1: z.string().optional(),
+  addressLine2: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  postalCode: z.string().optional(),
+  country: z.string().optional()
+});
+
 const addressValidationZ = z.object({
-  status: z.enum(["verified", "corrected", "failed"]).optional(),
+  status: z.enum(["verified", "corrected", "failed", "unverified"]).optional(),
+  originalAddress: validatedAddressZ.optional(),
+  verifiedAddress: validatedAddressZ.optional(),
   errors: z.array(z.string()).optional(),
   suggestions: z.string().optional()
 });
@@ -245,7 +257,8 @@ export const quoteAndPreviewOutputZ = z.object({
   senderName: z.string().optional(),
   recipientName: z.string().optional(),
   senderAddressValidation: addressValidationZ.optional(),
-  recipientAddressValidation: addressValidationZ.optional()
+  recipientAddressValidation: addressValidationZ.optional(),
+  addressWarnings: z.array(z.string()).optional()
 });
 
 export const sendLetterOutputZ = z.object({
@@ -365,11 +378,22 @@ export const quoteAndPreviewPostcardOutputZ = z.object({
   draftExpiresAt: z.string(),
   message: z.string().optional(),
   recipientName: z.string().optional(),
+  recipientAddressLine1: z.string().optional(),
+  recipientAddressLine2: z.string().optional(),
+  recipientCity: z.string().optional(),
+  recipientState: z.string().optional(),
+  recipientPostalCode: z.string().optional(),
   senderName: z.string().optional(),
+  senderAddressLine1: z.string().optional(),
+  senderAddressLine2: z.string().optional(),
+  senderCity: z.string().optional(),
+  senderState: z.string().optional(),
+  senderPostalCode: z.string().optional(),
   usedSavedReturnAddress: z.boolean().optional(),
   savedReturnAddressNote: z.string().optional(),
   senderAddressValidation: addressValidationZ.optional(),
-  recipientAddressValidation: addressValidationZ.optional()
+  recipientAddressValidation: addressValidationZ.optional(),
+  addressWarnings: z.array(z.string()).optional()
 });
 
 export const sendPostcardOutputZ = z.object({

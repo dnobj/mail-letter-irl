@@ -251,6 +251,9 @@ Test the complete letter journey.
 - [ ] Non-US address → "Only supports US" error
 - [ ] Text-only body over 1,600 characters or 24 lines returns a clear limit error
 - [ ] Invalid address → suggestions returned
+- [ ] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200)
+- [ ] Same building with no unit given → draft IS created with an "add the unit if you have it" note
+- [ ] Garbage street (123 Fake Street, Nowhere) → still refused, message says what to check
 
 ### Send (US-LETTER-02)
 - [ ] Use draft ID from preview

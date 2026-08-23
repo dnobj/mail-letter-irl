@@ -86,6 +86,8 @@ async function handler(
   let message: string;
   if (result.wasAutoCorrected) {
     message = `Return address saved! Note: The address was auto-corrected for deliverability. ${result.correctionDetails}`;
+  } else if (result.warning) {
+    message = `Return address saved. Note: ${result.warning}`;
   } else {
     message = `Return address saved successfully! This address will be used as the default sender for your letters.`;
   }

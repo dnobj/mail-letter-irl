@@ -10,12 +10,12 @@
  */
 
 import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
+import { validateAddressesWithProvider, outputValidationStatus } from "./letterHelpers.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import {
   quoteAndPreviewPostcardInputSchema,
   quoteAndPreviewPostcardOutputSchema
 } from "../schemas.js";
-import { getLetterProvider } from "../services/providers/index.js";
 import type { AddressValidationInput, AddressValidationResult } from "../services/providers/types.js";
 import { createPostcardDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
@@ -65,28 +65,31 @@ export interface QuoteAndPreviewPostcardOutput {
   // Recipient info (for display in widget)
   recipientName: string;
   recipientAddressLine1: string;
+  recipientAddressLine2?: string;
   recipientCity: string;
   recipientState: string;
   recipientPostalCode: string;
   // Sender info (for return address in widget)
   senderName: string;
   senderAddressLine1: string;
+  senderAddressLine2?: string;
   senderCity: string;
   senderState: string;
   senderPostalCode: string;
   // Saved return address used (when sender not provided)
   usedSavedReturnAddress?: boolean;
   savedReturnAddressNote?: string;
+  addressWarnings?: string[];
   // Address validation results
   senderAddressValidation?: {
-    status: 'verified' | 'corrected' | 'failed';
+    status: 'verified' | 'corrected' | 'failed' | 'unverified';
     originalAddress: Address;
     verifiedAddress?: Address;
     errors?: string[];
     suggestions?: string;
   };
   recipientAddressValidation?: {
-    status: 'verified' | 'corrected' | 'failed';
+    status: 'verified' | 'corrected' | 'failed' | 'unverified';
     originalAddress: Address;
     verifiedAddress?: Address;
     errors?: string[];
@@ -373,106 +376,11 @@ async function handler(
     throw error;
   }
 
-  // Validate addresses using provider if available
-  const provider = getLetterProvider();
-  let senderValidation: AddressValidationResult | undefined;
-  let recipientValidation: AddressValidationResult | undefined;
-
-  if (provider.validateAddress) {
-    context.logger.info(
-      {
-        correlationId: context.correlationId,
-        event: "quote.postcard.validating_addresses"
-      },
-      "Validating addresses with provider"
-    );
-
-    const senderAddressInput: AddressValidationInput = {
-      line1: sender.addressLine1,
-      line2: sender.addressLine2,
-      city: sender.city,
-      state: sender.state,
-      postalCode: sender.postalCode,
-      country: sender.country
-    };
-
-    senderValidation = await provider.validateAddress(senderAddressInput);
-
-    const recipientAddressInput: AddressValidationInput = {
-      line1: input.recipient.addressLine1,
-      line2: input.recipient.addressLine2,
-      city: input.recipient.city,
-      state: input.recipient.state,
-      postalCode: input.recipient.postalCode,
-      country: input.recipient.country
-    };
-
-    recipientValidation = await provider.validateAddress(recipientAddressInput);
-
-    context.logger.info(
-      {
-        correlationId: context.correlationId,
-        event: "quote.postcard.addresses_validated",
-        senderStatus: senderValidation.status,
-        recipientStatus: recipientValidation.status
-      },
-      "Address validation complete"
-    );
-
-    // Check for failed addresses
-    const hasFailures = senderValidation.status === 'failed' || recipientValidation.status === 'failed';
-
-    if (hasFailures) {
-      const errorParts: string[] = [];
-
-      if (senderValidation.status === 'failed') {
-        const errorMsg = senderValidation.errors?.map(e => e.message).join('; ') || 'Address is invalid or undeliverable';
-        errorParts.push(`Sender address is INVALID: ${errorMsg}`);
-      }
-
-      if (recipientValidation.status === 'failed') {
-        const errorMsg = recipientValidation.errors?.map(e => e.message).join('; ') || 'Address is invalid or undeliverable';
-        errorParts.push(`Recipient address is INVALID: ${errorMsg}`);
-      }
-
-      context.logger.warn(
-        {
-          correlationId: context.correlationId,
-          event: "quote.postcard.address_validation_failed",
-          senderStatus: senderValidation.status,
-          recipientStatus: recipientValidation.status
-        },
-        "Address validation failed - invalid addresses"
-      );
-
-      throw new Error(
-        `Address validation failed:\n\n${errorParts.join('\n\n')}\n\nPlease correct the invalid address(es) and try again.`
-      );
-    }
-
-    // Auto-apply corrected addresses
-    if (senderValidation.status === 'corrected' && senderValidation.verifiedAddress) {
-      sender.addressLine1 = senderValidation.verifiedAddress.line1;
-      sender.addressLine2 = senderValidation.verifiedAddress.line2;
-      sender.city = senderValidation.verifiedAddress.city;
-      sender.state = senderValidation.verifiedAddress.state;
-      sender.postalCode = senderValidation.verifiedAddress.postalCode;
-      if (senderValidation.verifiedAddress.country) {
-        sender.country = senderValidation.verifiedAddress.country;
-      }
-    }
-
-    if (recipientValidation.status === 'corrected' && recipientValidation.verifiedAddress) {
-      input.recipient.addressLine1 = recipientValidation.verifiedAddress.line1;
-      input.recipient.addressLine2 = recipientValidation.verifiedAddress.line2;
-      input.recipient.city = recipientValidation.verifiedAddress.city;
-      input.recipient.state = recipientValidation.verifiedAddress.state;
-      input.recipient.postalCode = recipientValidation.verifiedAddress.postalCode;
-      if (recipientValidation.verifiedAddress.country) {
-        input.recipient.country = recipientValidation.verifiedAddress.country;
-      }
-    }
-  }
+  // Validate addresses via the shared policy-aware helper (issue #200):
+  // secondary-unit and verification-outage failures proceed with a warning,
+  // genuine address failures throw before any draft exists.
+  const { senderValidation, recipientValidation, addressWarnings } =
+    await validateAddressesWithProvider(sender, input.recipient, context, "quote.postcard");
 
   // Check credits
   const requiredCredits = POSTCARD_CREDITS_COST;
@@ -538,22 +446,25 @@ async function handler(
     message: input.message,
     recipientName: input.recipient.name,
     recipientAddressLine1: input.recipient.addressLine1,
+    recipientAddressLine2: input.recipient.addressLine2,
     recipientCity: input.recipient.city,
     recipientState: input.recipient.state,
     recipientPostalCode: input.recipient.postalCode,
     senderName: sender.name,
     senderAddressLine1: sender.addressLine1,
+    senderAddressLine2: sender.addressLine2,
     senderCity: sender.city,
     senderState: sender.state,
     senderPostalCode: sender.postalCode,
     usedSavedReturnAddress: usedSavedReturnAddress || undefined,
     savedReturnAddressNote: savedReturnAddressNote,
+    addressWarnings,
   };
 
   // Add address validation results if available
   if (senderValidation) {
     output.senderAddressValidation = {
-      status: senderValidation.status,
+      status: outputValidationStatus(senderValidation),
       originalAddress: sender,
       verifiedAddress: senderValidation.verifiedAddress ? {
         name: sender.name,
@@ -573,7 +484,7 @@ async function handler(
 
   if (recipientValidation) {
     output.recipientAddressValidation = {
-      status: recipientValidation.status,
+      status: outputValidationStatus(recipientValidation),
       originalAddress: input.recipient,
       verifiedAddress: recipientValidation.verifiedAddress ? {
         name: input.recipient.name,
