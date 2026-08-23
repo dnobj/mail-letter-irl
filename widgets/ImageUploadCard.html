@@ -86,6 +86,7 @@
         <div class="imgbox">
           <img id="done-img" src="" alt="Uploaded photo" />
         </div>
+        <p id="done-note" class="hint hidden"></p>
         <div class="url">
           <code id="url-text"></code>
           <button class="btnc" id="btn-copy" type="button">Copy</button>
@@ -98,7 +99,7 @@
         <p class="hint">Ask again in the conversation to retry.</p>
       </div>
 
-      <p class="rev">upload t13</p>
+      <p class="rev">upload t14</p>
     </div>
 
     <script>
@@ -127,10 +128,21 @@
         var previewImg = document.getElementById("preview-img");
         var doneImg = document.getElementById("done-img");
         var doneLabel = document.getElementById("done-label");
+        var doneNote = document.getElementById("done-note");
         var fileInfo = document.getElementById("file-info");
         var guidanceText = document.getElementById("guidance-text");
         var errorMessage = document.getElementById("error-message");
         var urlText = document.getElementById("url-text");
+
+        // Under an enforced widget CSP, a ChatGPT Library pick's download URL
+        // is served from a blob host that is deliberately NOT in
+        // resourceDomains (issue #228), so the browser refuses to paint the
+        // thumbnail. Nothing else about the pick is affected: the URL travels
+        // to the server over the window.openai bridge, and the preview tool
+        // fetches the image from Node, where page CSP does not apply. So this
+        // is a routine, expected state rather than a failure - say so.
+        var THUMBNAIL_UNAVAILABLE =
+          "Thumbnail can't be shown here - your photo will appear in the preview.";
 
         var selectedFile = null;
         var previewDataUrl = null;
@@ -353,6 +365,15 @@
         async function finishWithDownloadUrl(downloadUrl, previewSrc, reason) {
           // Show done state with image preview + URL
           doneLabel.textContent = reason === "library_pick_complete" ? "Selected Photo" : "Uploaded Photo";
+          doneNote.classList.add("hidden");
+          doneImg.classList.remove("hidden");
+          doneImg.onerror = function () {
+            doneImg.classList.add("hidden");
+            doneNote.textContent = THUMBNAIL_UNAVAILABLE;
+            doneNote.classList.remove("hidden");
+            debugLog("doneImage.blocked");
+            debugBeacon("doneImage.blocked", { reason: reason });
+          };
           doneImg.src = previewSrc || "";
           urlText.textContent = downloadUrl;
           showState("done");
@@ -585,7 +606,7 @@
             previewImg.onerror = function () {
               debugLog("library.previewImage.error");
               debugBeacon("library.previewImage.error");
-              fileInfo.textContent = baseInfo + " · preview could not be displayed; you can still try this photo, or choose a different one.";
+              fileInfo.textContent = baseInfo + " · " + THUMBNAIL_UNAVAILABLE;
             };
             previewImg.src = downloadUrl;
             fileInfo.textContent = baseInfo;

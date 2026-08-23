@@ -72,7 +72,8 @@ npm run build
 - [x] Confirm your OpenAI Platform account has the `Owner` role for the submitting organization. `dnicholl@objective.works` is listed as Organization Owner.
 - [x] Confirm the OpenAI project used for submission has global data residency. Dashboard `GEOGRAPHY` column shows `Global`.
 - [x] Verify the production MCP server and OAuth endpoints are live on the public domains you will submit. May 31, 2026 check: `api.letterirl.com` manifest, OAuth metadata, MCP CORS preflight, and unauthenticated auth challenge all advertise the canonical production domain.
-- [ ] Review the production widget CSP and confirm it allows only the exact required domains
+- [x] Review the production widget CSP and confirm it allows only the exact required domains (issue #228; one deliberate exclusion - the Azure blob host behind Library picks - recorded in `docs/learnings/widget-csp-enforcement.md`)
+- [ ] After the app leaves dev mode, confirm the widget header no longer shows the "CSP off" pill. This cannot be checked on a dev-mode connector, where enforcement is off regardless of what we declare.
 - [ ] Review submission copy for Letter Packs / pre-paid letter sends wording and remove generic credit/token framing from user-facing materials
 - [ ] Capture final submission assets: logo, screenshots, app description, company URL, privacy policy URL, support contact, and localization fields
 - [ ] Locate and review final demo videos using `docs/app-submission/owner-checklist.md`

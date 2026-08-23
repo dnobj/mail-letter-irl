@@ -144,15 +144,6 @@ export const WIDGET_DEFINITIONS = [
   { name: "ImageRoutingCard", description: "Shows a generated image with its credit line, or image-routing guidance with a copy-ready prompt" },
 ];
 
-/**
- * Widget domain for CSP isolation.
- * Per OpenAI examples, this should be https://chatgpt.com for widgets
- * running in the ChatGPT environment.
- * Required for app submission.
- *
- * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
- */
-const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? "https://api.letterirl.com";
 
 /**
  * Backend API URL for widget CSP.
@@ -182,6 +173,26 @@ export function normalizeHttpsOrigin(
 }
 
 const WIDGET_API_ORIGIN = normalizeHttpsOrigin(WIDGET_API_URL);
+
+/**
+ * Widget domain, published as `ui.domain` and `openai/widgetDomain`.
+ * Required for app submission.
+ *
+ * Defined below WIDGET_API_ORIGIN so it can default to the same origin the
+ * CSP lists. It used to hardcode api.letterirl.com, which made dev
+ * self-contradictory: the connector panel showed `domain:
+ * "https://api.letterirl.com"` beside CSP entries that were all the Railway
+ * dev host. An explicit LETTER_IRL_WIDGET_DOMAIN still overrides.
+ *
+ * The previous comment here claimed this "should be https://chatgpt.com per
+ * OpenAI examples". Not acted on: ChatGPT demonstrably accepts the current
+ * value - the connector panel renders our `ui` block, CSP and all - so
+ * changing a submission-relevant field on the strength of an old comment
+ * would be a guess with a regression attached (issue #228).
+ *
+ * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+ */
+const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? WIDGET_API_ORIGIN;
 const WIDGET_PACKS_ORIGIN = normalizeHttpsOrigin(
   process.env.LETTER_IRL_PACKS_URL ??
     process.env.LETTER_IRL_PUBLIC_BASE_URL ??

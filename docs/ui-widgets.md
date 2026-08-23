@@ -15,7 +15,24 @@ Letter IRL registers four OpenAI Apps SDK widgets as MCP resources with `ui://` 
 
 - Widgets currently use the `window.openai` compatibility bridge, including `toolOutput`, `toolResponseMetadata`, `callTool`, and `sendFollowUpMessage` where needed.
 - Current OpenAI guidance prefers MCP Apps bridge notifications for new widget work, including tool-result and tool-input notifications. Treat a future bridge migration as a focused widget task, not as part of routine tool changes.
-- Widget resource metadata includes canonical `ui` metadata plus legacy `openai/*` aliases for compatibility.
+- Widget resource metadata includes canonical `ui` metadata plus legacy `openai/*` aliases for compatibility. The connector detail panel renders our `ui.csp` back verbatim, which is how we know the canonical key is the one being read (issue #228).
+
+### Content Security Policy
+
+The declared policy (`WIDGET_CSP_CANONICAL` in `src/mcp/registerTools.ts`) allows
+only what a widget genuinely loads: our API origin (the upload widget's
+diagnostic beacon, and the temp-image URL the image card can fall back to),
+OpenAI's static and user-content hosts, and Stripe plus the letter-pack origin as
+redirect targets. Everything else a widget displays is a `data:` URI produced
+server-side, so it needs no host at all.
+
+One host is **deliberately excluded**: the Azure blob host behind ChatGPT Library
+picks. Trusting it would mean trusting all of Azure blob storage for a thumbnail
+that the next screen renders anyway, so `ImageUploadCard` degrades to an
+explanatory line instead. The picked image is unaffected - it reaches the server
+over the `window.openai` bridge and is fetched from Node, outside CSP's reach.
+See `docs/learnings/widget-csp-enforcement.md` for the evidence and for how to
+reproduce enforcement locally (dev-mode ChatGPT never enforces it).
 
 ## UX and Safety Guidelines
 
