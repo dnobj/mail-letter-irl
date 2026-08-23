@@ -425,6 +425,14 @@ export function partitionToolResult(
     generatedImagePreview,
     headerImagePreview,
     inlineImagePreview,
+    // get_started's card copy. Display-only: the model does not act on any of
+    // it, and when it could see it, it restated the whole card in prose
+    // directly beneath a card already showing it. Same reasoning as the
+    // preview HTML above - a widget needs it, the model does not.
+    title,
+    overview,
+    purchaseStep,
+    examplePrompts,
     ...modelFacingData
   } = result;
 
@@ -447,6 +455,10 @@ export function partitionToolResult(
       // in _meta - a letter with a header or inline image rendered its card
       // without one, silently. (The filtering is client-side: at SDK 1.29.0
       // the server validates the result and ships it unstripped. Issue #257.)
+      ...(title !== undefined ? { title } : {}),
+      ...(overview !== undefined ? { overview } : {}),
+      ...(purchaseStep !== undefined ? { purchaseStep } : {}),
+      ...(examplePrompts !== undefined ? { examplePrompts } : {}),
       ...(headerImagePreview !== undefined ? { headerImagePreview } : {}),
       ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {}),
       ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),

@@ -117,7 +117,12 @@ type MetaPartitioned =
   | "generatedImagePreview"
   | "headerImageData"
   | "inlineImageData"
-  | "frontImageData";
+  | "frontImageData"
+  // get_started's card copy
+  | "title"
+  | "overview"
+  | "purchaseStep"
+  | "examplePrompts";
 
 type UndeclaredKeys<Output, Schema> = Exclude<keyof Output, keyof Schema | MetaPartitioned>;
 
