@@ -22,8 +22,10 @@ import {
   buildToolMeta,
   buildToolSecuritySchemes,
   getZodInputShape,
-  getZodOutputShape
+  getZodOutputShape,
+  summarizeToolResult
 } from '../../../src/mcp/registerTools.js';
+import { getStartedTool } from '../../../src/tools/index.js';
 
 /**
  * Tool definitions matching the actual tools in the codebase.
@@ -428,6 +430,30 @@ describe('OpenAI Apps SDK Submission Compliance', () => {
     it('clear_return_address has destructiveHint: true', () => {
       const annotations = buildAnnotations({ name: 'clear_return_address', readOnly: false });
       expect(annotations.destructiveHint).toBe(true);
+    });
+  });
+
+  describe('tool summaries do not duplicate their widget', () => {
+    /**
+     * The summary is the model's account of what the tool did. When it is the
+     * card's own copy, the model restates the card immediately below a card
+     * already showing it - which is exactly what get_started did: the summary
+     * was `result.overview`, and the reply re-explained the app and re-listed
+     * all three example prompts under a card containing both.
+     *
+     * Same contract as the image routing card: the widget is the single voice,
+     * the model adds at most one sentence.
+     */
+    it('get_started tells the model the card already speaks, and does not echo it', async () => {
+      const output = await getStartedTool.handler({}, {} as never);
+      const summary = summarizeToolResult('get_started', output as unknown as Record<string, unknown>);
+
+      expect(summary).not.toContain(output.overview);
+      expect(summary).not.toContain(output.purchaseStep);
+      for (const prompt of output.examplePrompts) {
+        expect(summary, `summary re-lists the example prompt "${prompt}"`).not.toContain(prompt);
+      }
+      expect(summary.toLowerCase()).toContain('one short sentence');
     });
   });
 });

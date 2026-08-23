@@ -563,7 +563,7 @@ export async function registerLetterTools(
 
 }
 
-function summarizeToolResult(
+export function summarizeToolResult(
   toolName: string,
   result: Record<string, unknown>
 ): string {
@@ -655,8 +655,17 @@ function summarizeToolResult(
       return message || "Feature request submitted.";
     }
     case "get_started": {
-      const overview = result.overview as string | undefined;
-      return overview || "Letter IRL getting-started guide ready.";
+      // The summary used to be the card's own `overview` sentence, so the
+      // model received the card's copy as its account of what happened and
+      // dutifully restated it - overview, purchase step, and all three example
+      // prompts, immediately below a card already showing them. Same fix as
+      // the image routing card: the card is the single voice, and the model
+      // adds at most one sentence.
+      return (
+        "The getting-started card is displayed above and already shows the overview, " +
+        "the pre-pay step, and example prompts. Add at most ONE short sentence of your " +
+        "own, or nothing at all. Never restate the card's contents or re-list the examples."
+      );
     }
     case "upload_image": {
       const message = result.message as string;
