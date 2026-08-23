@@ -47,17 +47,40 @@ client reused) and https://github.com/dnobj/mail-letter-irl/issues/160#issuecomm
 
 #### CIMD-02a - Session survives access-token expiry (refresh tokens)
 
-Added 2026-08-23. Before `offline_access` was advertised, no refresh token was
+Added 2026-08-23. Before `offline_access` was requested, no refresh token was
 issued, so an expired access token could only be recovered by a human clicking
-**Reconnect** and re-consenting - observed twice in three hours on 8 Aug and
-again on 23 Aug. This case is the proof that the fix works.
+**Reconnect** and re-consenting. This case is the proof that the fix works.
 
-- [ ] Confirm the consent screen requests offline access, and that Auth0 records
+**Passed 2026-08-23 on DEV.** Verified with the API's access-token lifetime
+temporarily lowered to 300s (restored afterwards to 86400 / 7200 for web).
+
+- [x] Confirm the consent screen requests offline access, and that Auth0 records
       a refresh token issued on the code exchange.
-- [ ] Leave the connection idle past the access-token lifetime, then invoke any
+      Consent screen listed **Allow offline access**; the authorize event
+      recorded `scope: "mail:read mail:draft mail:send offline_access"`.
+- [x] Leave the connection idle past the access-token lifetime, then invoke any
       read tool (for example `get_account_balance`).
-- [ ] Confirm the tool call succeeds with **no** "connection has expired" prompt
+      Token issued 21:53:30Z (300s life, expiring 21:58:30Z); tool invoked
+      ~22:18Z - roughly 22 minutes past expiry.
+- [x] Confirm the tool call succeeds with **no** "connection has expired" prompt
       and no human re-consent.
+      Call returned the balance. Auth0 logged
+      `Successful Refresh Token exchange` at 22:18:12Z with
+      `policy_used: refresh_token_user_grant` and `tokenCounter: 2`, confirming
+      rotation is active. Baseline before the fix was **zero** refresh
+      exchanges of any kind, ever.
+
+**Two traps worth knowing before re-running this:**
+
+1. The scope must appear in each tool's `securitySchemes`, not merely in
+   `scopes_supported`. ChatGPT builds its authorization request from the union
+   of the per-tool lists (issue #160).
+2. A deploy alone does not reach ChatGPT - the connector holds a pinned
+   app-version snapshot, and only **Refresh** re-ingests tool schemas.
+   **Refresh is not rendered while the connector is in the disconnected
+   state**, so it must be clicked while connected. Reading the tool's
+   `SECURITY SCHEMES` block on the connector page is the way to confirm a
+   refresh actually landed; the App Version Id does not change.
 - [ ] Confirm rotation: the refresh token used is replaced, and Auth0 shows no
       growth in client or grant count.
 
