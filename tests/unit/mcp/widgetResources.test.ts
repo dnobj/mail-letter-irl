@@ -244,6 +244,10 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
         headerImagePreview: 'x',
         inlineImagePreview: 'x',
         generatedImagePreview: 'x',
+        title: 'x',
+        overview: 'x',
+        purchaseStep: 'x',
+        examplePrompts: ['x'],
         // Control: a field partitionToolResult must leave alone, so this
         // derivation fails loudly if it ever stops removing anything.
         draftId: 'x'

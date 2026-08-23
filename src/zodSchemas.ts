@@ -409,12 +409,10 @@ export const submitFeatureRequestOutputZ = z.object({
   category: z.string()
 });
 
-export const getStartedOutputZ = z.object({
-  title: z.string(),
-  overview: z.string(),
-  purchaseStep: z.string(),
-  examplePrompts: z.array(z.string())
-});
+// Deliberately empty: every field of the getting-started guide is card copy,
+// routed to _meta by partitionToolResult so the model cannot restate it. The
+// model learns what happened from the tool summary instead.
+export const getStartedOutputZ = z.object({});
 
 export const uploadImageOutputZ = z.object({
   status: z.string(),
