@@ -27,7 +27,6 @@ import type {
   quoteAndPreviewPostcardOutputZ
 } from "../zodSchemas.js";
 import type { LetterQuoteOutput } from "../tools/letterHelpers.js";
-import type { QuoteAndPreviewOutput } from "../tools/quoteAndPreview.js";
 import type { QuoteAndPreviewPostcardOutput } from "../tools/quoteAndPreviewPostcard.js";
 
 /**
@@ -42,11 +41,6 @@ type MustSatisfy<Schema, Output extends Schema> = Output;
 export type LetterHelpersConforms = MustSatisfy<
   z.infer<typeof quoteAndPreviewOutputZ>,
   LetterQuoteOutput
->;
-
-export type QuoteAndPreviewConforms = MustSatisfy<
-  z.infer<typeof quoteAndPreviewOutputZ>,
-  QuoteAndPreviewOutput
 >;
 
 export type PostcardConforms = MustSatisfy<
