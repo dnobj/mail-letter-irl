@@ -4,342 +4,109 @@
     <meta charset="utf-8" />
     <title>ImageUploadCard</title>
     <style>
-      :root {
-        --bg-primary: #ffffff;
-        --bg-secondary: #f8fafc;
-        --text-primary: #1f2933;
-        --text-secondary: #61748f;
-        --border-color: #e2e8f0;
-        --accent-warning: #b91c1c;
-        --accent-warning-bg: #fee2e2;
-        --accent-primary: #2563eb;
-        --accent-primary-hover: #1d4ed8;
-
-        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: transparent;
-        color: var(--text-primary);
-      }
-
-      .dark {
-        --bg-primary: #1e293b;
-        --bg-secondary: #0f172a;
-        --text-primary: #f1f5f9;
-        --text-secondary: #94a3b8;
-        --border-color: #334155;
-        --accent-warning: #f87171;
-        --accent-warning-bg: #7f1d1d;
-        --accent-primary: #3b82f6;
-        --accent-primary-hover: #60a5fa;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        padding: 1rem;
-        background: transparent;
-      }
-
-      .card {
-        width: 100%;
-        border-radius: 12px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border-color);
-        overflow: hidden;
-      }
-
-      /* State: Select */
-      .select-state {
-        padding: 1.5rem;
-        text-align: center;
-      }
-
-      .select-icon {
-        font-size: 2.5rem;
-        margin-bottom: 0.75rem;
-      }
-
-      .select-title {
-        font-size: 1rem;
-        font-weight: 600;
-        margin: 0 0 0.25rem;
-        color: var(--text-primary);
-      }
-
-      .select-guidance {
-        font-size: 0.85rem;
-        color: var(--text-secondary);
-        margin: 0 0 1rem;
-      }
-
-      .select-formats {
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-        margin: 0.75rem 0 0;
-      }
-
-      .select-actions {
-        display: flex;
-        gap: 0.5rem;
-        justify-content: center;
-        flex-wrap: wrap;
-      }
-
-      /* Buttons */
-      .btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.4rem;
-        padding: 0.6rem 1.25rem;
-        border-radius: 8px;
-        font-size: 0.9rem;
-        font-weight: 600;
-        cursor: pointer;
-        border: none;
-        transition: background 0.15s ease;
-      }
-
-      .btn-primary {
-        background: var(--accent-primary);
-        color: #fff;
-      }
-
-      .btn-primary:hover {
-        background: var(--accent-primary-hover);
-      }
-
-      .btn-secondary {
-        background: transparent;
-        color: var(--accent-primary);
-        border: 1px solid var(--border-color);
-      }
-
-      .btn-secondary:hover {
-        background: var(--bg-secondary);
-      }
-
-      .btn[disabled] {
-        opacity: 0.6;
-        cursor: default;
-      }
-
-      /* State: Preview (before upload) */
-      .preview-state {
-        padding: 1rem;
-      }
-
-      .preview-image-container {
-        width: 100%;
-        border-radius: 8px;
-        overflow: hidden;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-color);
-        margin-bottom: 0.75rem;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        max-height: 250px;
-      }
-
-      .preview-image-container img {
-        max-width: 100%;
-        max-height: 250px;
-        object-fit: contain;
-        display: block;
-      }
-
-      .preview-file-info {
-        font-size: 0.8rem;
-        color: var(--text-secondary);
-        margin-bottom: 0.75rem;
-      }
-
-      .preview-actions {
-        display: flex;
-        gap: 0.5rem;
-      }
-
-      .preview-actions .btn {
-        flex: 1;
-      }
-
-      /* State: Uploading */
-      .uploading-state {
-        padding: 2rem 1.5rem;
-        text-align: center;
-      }
-
-      .spinner {
-        width: 32px;
-        height: 32px;
-        border: 3px solid var(--border-color);
-        border-top-color: var(--accent-primary);
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-        margin: 0 auto 0.75rem;
-      }
-
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
-
-      .uploading-text {
-        font-size: 0.9rem;
-        color: var(--text-secondary);
-        margin: 0;
-      }
-
-      /* State: Done (after upload) */
-      .done-state {
-        padding: 1rem;
-      }
-
-      .done-label {
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin: 0 0 0.5rem;
-      }
-
-      .done-image-container {
-        width: 100%;
-        border-radius: 8px;
-        overflow: hidden;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-color);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        max-height: 250px;
-      }
-
-      .done-image-container img {
-        max-width: 100%;
-        max-height: 250px;
-        object-fit: contain;
-        display: block;
-      }
-
-      /* URL display */
-      .url-display {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-color);
-        border-radius: 8px;
-        padding: 0.5rem 0.75rem;
-        margin-top: 0.75rem;
-      }
-
-      .url-display code {
-        flex: 1;
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-        word-break: break-all;
-        font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
-      }
-
-      .btn-copy {
-        flex-shrink: 0;
-        background: transparent;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        padding: 0.3rem 0.6rem;
-        font-size: 0.7rem;
-        color: var(--text-secondary);
-        cursor: pointer;
-        transition: background 0.15s ease;
-      }
-
-      .btn-copy:hover {
-        background: var(--bg-primary);
-      }
-
-      /* State: Error */
-      .error-state {
-        padding: 1.5rem;
-        text-align: center;
-      }
-
-      .error-message {
-        font-size: 0.85rem;
-        color: var(--accent-warning);
-        background: var(--accent-warning-bg);
-        padding: 0.75rem 1rem;
-        border-radius: 8px;
-        margin: 0;
-      }
-
-      /* Utility */
-      .hidden {
-        display: none !important;
-      }
+      /* Letter IRL design system (widget-design-package, Aug 2026). */
+      :root{--sf:#fff;--sf2:#fafafa;--bd:#e4e4e7;--bd2:#f0f0f2;--tx:#111113;--tb:#3f3f46;--mut:#71717a;--faint:#a1a1aa;--pri:#111113;--prit:#fff;--er:#dc2626;--erbg:#fef2f2}
+      .dark{--sf:#2a2a2e;--sf2:#232327;--bd:#3a3a40;--bd2:#323238;--tx:#f4f4f5;--tb:#d4d4d8;--mut:#a1a1aa;--faint:#71717a;--pri:#f4f4f5;--prit:#111113;--er:#f87171;--erbg:rgba(248,113,113,.12)}
+      *{box-sizing:border-box}
+      body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--tb)}
+      .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;overflow:hidden;max-width:100%}
+      .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
+      .logo{width:17px;height:11px;background:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAVCAYAAAAnzezqAAAFEUlEQVR4AcyUe1BVVRTGf/tyRXm/BPIxaipiOSGDRiPJ24LGJzqpaIiVGSgzkY6BomlIxqgNGiGK5JTKkIQpJqlBphgJ4gsUyJBhuAMIDi9R4PI8nUMC3tHSP5hqz/72Xuustfb6Zp21t4r/ePxPCWRJ7mxP28PqqAY+2FXH2thG1sU0EfppLUGb/iAw/Azuy46yT3JSCjgc/BPtOX7DiYzf7UkvfolTN104V+hGTpEnuUVu5BW6kntL3jXu5Bc7kazEKXi8Ap+VhbFrayZZPwZzv8mctkZLWurNuN9oQnOrFZ3Cho4uZ2a/XcR0zHHwTB9igJ80iNHteoxsGYJtowrrmm4sq7swa9Ri3dbJcFRMGKxiUlM7Dtpu3Hg4dAmE50ZRkBTNUAs1Lj47CQh1Ze8WQfxmwd5PBPujBImR5iRt92atx1HiPvKhsmCooewt45KTP4FO+UydJsM7BwevKPxdLjLW8XX8xlSR2VZFp2EbdAmMHuaXefVKl6XpFB6LwMQEokLWs2H+Ol4b/muvWWcX4ipCXKe5xQarkTdatZw8X4v7yYMseNRPeHIdeWRn4JvajONYOK/uor69k2ZpJT2/r78Cp48sp7USxgzfiY2IluOePu8ZPI/drFGlHQSNVpFX1criemciegOlIJyvziSxuJs1qnHcVoewm0EU1HdQhx5C8esnUFYaiKklTLNLUwzPhPZWW4ZaWyi+ERoCRhmRm1xHcI0TOyRvZnATz7paFr1sSsVbs4inEwz0qWgViqREQT+BLnM1g4eBp+OTy/6Xv+6q31zDkBpjJOlVxfDGVRYOM+GXc1r8L9eScKWJSMtWjCfrc1SEcUKsIbNBwkbfAEMskJQYlbL0oE0WtXKH9CjPuLS3T2ZId5Xs3SGjZ/p5EmtrxIUHanC0INdoEI0ZpYRIzixRHNSmmAhDjBVZgZxV2WQYGBfQXAdhScGy9vSZKoXLFTNHMitEiEu9ASKGSx55+HtMYIWeP2H2Xmy5Y4WU0C7/lmC2DnoOG8lMJvCQsqo3kPFTk9E2QlFuUN+3fxJy0gNRm0F1edGT3EQyZ0UQF5nEtWVT2DZuMKQXsFHooZaLLaGlS4nrJ7DhhWhsbbNpqHXgzegMxfi3iNFEoMmfiIFxCSn79pYuwL/Yg+Vy4/lKE5kt2eIl6TFTMmYhkYznCvXeHVwwaYKSckZYq8gWseQr5/cTULT12zcwxvk+NWUzsF/0rfLpMaRIAfwcH0VnB8R9uGKOBcGxeWw+cpt3NuazM7qK9fH3iPhSEBHbwsYEDeEnrhGWc5cpXVo0ei2c9RjP7t5zdQk4iSy8VqWiL/eI6dg7vU59+3tZxzkUdRCVGhaErsJEZBk1jKjz1Rh8bFfBfucH7PDWY4+fFfGuI0j0GUnsfHN2uBgSM8GSaE8LQt0u4iM+p6/CugSUTNnfLcFIvo6R204rag/mZa7EK7KBW8fmotKHlZHvstQ8XrElU5niS2vKUjg0V8s3zg0cHlZJqmM5B+w17LeulXGXBKsCvpJb9ZgS8yh0CfwgTaPi9mBMx8NQ7Aj57Xu8N0lUp+5DW23OmFcOkRYmmCUOMEBDl0Dc6jnUauTOvilfx7BYbiT5oSc/XxPd04iO8+Xg4mUDlLfvGF0CxRnTaZLflca7Zaj1D/Oi+/tEb3Pka/95uIkzfVEDKOgSKC9xpeSUIO+LsfwUFUD8wgScRM91GcCcOkfpEtAx/TvKnwAAAP//nawiBAAAAAZJREFUAwDrp8M6TfC7jQAAAABJRU5ErkJggg==") center/contain no-repeat;flex:none}
+      .dark .logo{background-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAVCAYAAAAnzezqAAAFZElEQVR4AcxUCVCVVRT+znvPB7L5RH2QOrnklrilxpjrWJaalUv57kPHNRVxcjQnBxFLAnKYoDGGARWRMkHffQphacKgVogDiIpSMhM2EqsU20N23nL7f2IRQ3OGaerO/e75/3POd+53z78o8B+P/6mANDGPfXs9ih1LrGFfflfFTiSbWNz5B/rjiZUsxpDPIuNTWEBkArskpsoN9NbpvC7vZElFe1hq2Q52vvQD3YXiD/U/FAewzJKP9VmlASy7eL8+q0yyFQHsdqkfOyXzZPytA/qkP3xZduJF5OX4oLlJA3ODK1rq+6Gp0Vk0mwfAqtDCKjxp2rw87g4N2x143s6OlttUGGZRYGizGm71RINMQriabOjXYBaDWq0YDBJj+hA8mi2YJN3PlTeX0U0AO5kfLArTQ+DsqBKjJ4fZZi2ewzevJL7pHWqz3oy4t07Dt69+xfCGRwLLiF9I1YUD1QrM7KvAtRED+bqRoXz6WAkTg/mkCfO519hgPnK4ki8fVC0ummtgUVsAG8FR3lyGQl7acF3MRsl1f/S1B1+20M+4wnP36Smu6W2xRxeimyC6hZYWrXAZ8JPZgnM/12Hezfvs7YdTaT5uQRr5VrYoq5WmaAk/Km2otljRII6wtsfXKYAVZqxHazXEQNcwaClE4v3jpEb1COE27dnweL51EFF2jRn6hr3Mv4MoYlZ63gthMSUCu8hN/KocwcOhRG6DFVVQSH2QEjsFoKJ8Hfo6QYx55qzkf6oprK1u5OzcX05eEWVYM8AeWen18DH56kJFkG4BipTz6+vAnnNAyRwH4yFI7VerqMRM8pXMAroE2BxVUGlwesKwntv+V363lZQtv0NdK6kWs+TACyFc19+Ovs8zk9e9Ooq+1yQCnVrhNEyFBPLFN7QLFxuF0CrVcEDBaSFzugRIsiA9TNn5tBBWy2ShtpVJ+WYJbfNFiyHCxR5XmggY5ogsOwVMueV4T+zVr5ITyIGcoYYT2keXALV9LlqkfsVf9WmPPdGwTLEHqv4asjncAdG1jmQ6iGsTDnAvj6GKTUp37jvYxgNMziQuWUSoiNEHKTVCK53fCe2SuwS4jToFcyNQmr+1o9gTbX7OOigdIGoq8nrKo+2nLtNWZMADOXNrDQe0KiCnSOwjgkr6Xwg0wyrzOgXwFYND0K/fVdTXTWIHk1Ll4OPAzlX6o+q3cVDb3TXu2nK4PEznVRKoXy+CvBaJ93Vvik1eLwu9folYp9Phhm4UNPrqiTZcsZfOV16JIVJDrlIEbsv1OwXIN3ze6r3QjqpDbcUCtvNzg+x7FPpMsQZ3UoNhs4KvXbLp0w3MJ6WA9mfcFxt5oS3srEnhl9ps9U8h+Cc3075LlbTnRoHwvVuLaTYzihQtuDy+3BjeUbebAEylNIx/7QxU9kBf9/sdSR2WReclibTEr0ASbcbr2+BMaXYN/asmV/T5yL2Gjo5qEqEesEV5uigOjXO1xUweICI8nUTomD446O5IIR5OtPP5YL6QPkNnh6VKHeXbbX7mKthpIBhLbveAheVuYYEJNSjLXgpSQSzQvctnOR6S4zuMh41TjHHGOQbDienxxuOjvzDGaaIMZ4ZHGmMHRxmPuhyVEMOjXcIMx+gTw9cy52F0E7DypngJ1eV20ulhNGO0LvaXRBbEBUxZR2A2aaAdfYLvXkrGqRT7cJHeXHcToEiOfQsPKgFTMdiFkxFUlL5c+mUCQ8af5a9uXMS3zVzbm8164nYTQKW5s9FUAzTWFpBSFYchHt58sX4K95m1DHMppacCvfV1E2CIDJ/Dw/2IH9gw0uDP1vDNM6KlF7Ptc+ntRo/jdxPwuKR/0/8nAAAA//8kY9sVAAAABklEQVQDAK2sKkm5ajuuAAAAAElFTkSuQmCC")}
+      .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
+      .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
+      .bd{padding:14px}
+      h3{margin:0;font-size:15px;font-weight:600;color:var(--tx);letter-spacing:-.01em}
+      .ex{font-size:12.5px;line-height:1.55;color:var(--mut);margin:5px 0 0}
+      .btn{display:flex;width:100%;justify-content:center;align-items:center;gap:7px;border-radius:999px;padding:9px 16px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;box-sizing:border-box;border:none;transition:opacity .15s ease,background .15s ease}
+      .btn-p{background:var(--pri);color:var(--prit)}
+      .btn-s{background:transparent;color:var(--tx);border:1px solid var(--bd)}
+      .btn-s:hover{background:var(--sf2)}
+      .btn[disabled]{opacity:.45;cursor:default}
+      .tile{width:40px;height:40px;border-radius:11px;border:1px solid var(--bd);background:var(--sf2);display:flex;align-items:center;justify-content:center;color:var(--tx);margin:2px auto 10px}
+      .imgbox{background:var(--sf2);border:1px solid var(--bd);border-radius:10px;overflow:hidden;display:flex;justify-content:center;align-items:center;max-height:250px}
+      .imgbox img{max-width:100%;max-height:250px;object-fit:contain;display:block}
+      .finfo{font-size:11.5px;color:var(--mut);text-align:center;margin:9px 0 0}
+      .hint{font-size:11px;color:var(--faint);line-height:1.5;margin:9px 0 0;text-align:center}
+      .status{font-size:11.5px;color:var(--mut);text-align:center;margin:8px 0 0}
+      .ulabel{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 8px}
+      .url{display:flex;gap:8px;align-items:center;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:6px 6px 6px 10px;margin-top:11px}
+      .url code{flex:1;font-size:10.5px;color:var(--mut);word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+      .btnc{border:1px solid var(--bd);background:var(--sf);color:var(--tx);border-radius:8px;font-size:12px;font-weight:600;padding:6px 12px;cursor:pointer;flex:none;font-family:inherit}
+      .btnc:hover{background:var(--sf2)}
+      .errp{background:var(--erbg);border:1px solid rgba(220,38,38,.25);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.5;color:var(--er);text-align:center}
+      .spin{width:26px;height:26px;border:3px solid var(--bd);border-top-color:var(--tx);border-radius:50%;animation:rot 1s linear infinite;margin:6px auto 10px}
+      @keyframes rot{to{transform:rotate(360deg)}}
+      .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
+      .hidden{display:none !important}
     </style>
   </head>
   <body>
-    <div class="card">
+    <div class="w">
+      <div class="hd"><span class="logo"></span><b>Letter IRL</b><span class="ctx">Photo</span></div>
+
       <!-- Select State -->
-      <div id="state-select" class="select-state">
-        <div class="select-icon">&#x1F4F7;</div>
-        <p class="select-title">Upload a Photo</p>
-        <p id="guidance-text" class="select-guidance">Select a photo to use in your letter or postcard.</p>
-        <div class="select-actions">
-          <button class="btn btn-primary" id="btn-select" type="button">Select Photo</button>
-          <button class="btn btn-secondary hidden" id="btn-library" type="button">Choose from Library</button>
+      <div id="state-select" class="bd" style="text-align:center">
+        <div class="tile"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>
+        <h3>Upload a Photo</h3>
+        <p id="guidance-text" class="ex">Select a photo to use in your letter or postcard.</p>
+        <div style="display:grid;gap:8px;margin-top:13px">
+          <button class="btn btn-p" id="btn-select" type="button">Select Photo</button>
+          <button class="btn btn-s hidden" id="btn-library" type="button">Choose from Library</button>
         </div>
-        <p id="library-status" class="select-formats hidden"></p>
-        <p class="select-formats">JPEG, PNG, or WebP &middot; Max 10 MB</p>
+        <p id="library-status" class="status hidden"></p>
+        <p class="hint">JPEG, PNG, or WebP &middot; Max 10 MB</p>
         <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp" class="hidden" />
       </div>
 
       <!-- Preview State (before upload) -->
-      <div id="state-preview" class="preview-state hidden">
-        <div class="preview-image-container">
+      <div id="state-preview" class="bd hidden">
+        <div class="imgbox">
           <img id="preview-img" src="" alt="Selected photo preview" />
         </div>
-        <p id="file-info" class="preview-file-info"></p>
-        <div class="preview-actions">
-          <button class="btn btn-secondary" id="btn-change" type="button">Choose Different</button>
-          <button class="btn btn-primary" id="btn-use" type="button">Use This Photo</button>
+        <p id="file-info" class="finfo"></p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+          <button class="btn btn-s" id="btn-change" type="button">Choose Different</button>
+          <button class="btn btn-p" id="btn-use" type="button">Use This Photo</button>
         </div>
       </div>
 
       <!-- Uploading State -->
-      <div id="state-uploading" class="uploading-state hidden">
-        <div class="spinner"></div>
-        <p class="uploading-text">Uploading...</p>
+      <div id="state-uploading" class="bd hidden" style="text-align:center;padding:26px 14px">
+        <div class="spin"></div>
+        <h3 style="font-size:14px">Uploading&hellip;</h3>
+        <p class="ex">Adding your photo to ChatGPT's files.</p>
       </div>
 
       <!-- Done State (after upload) -->
-      <div id="state-done" class="done-state hidden">
-        <p id="done-label" class="done-label">Uploaded Photo</p>
-        <div class="done-image-container">
+      <div id="state-done" class="bd hidden">
+        <p id="done-label" class="ulabel">Uploaded Photo</p>
+        <div class="imgbox">
           <img id="done-img" src="" alt="Uploaded photo" />
         </div>
-        <div class="url-display">
+        <div class="url">
           <code id="url-text"></code>
-          <button class="btn-copy" id="btn-copy" type="button">Copy</button>
+          <button class="btnc" id="btn-copy" type="button">Copy</button>
         </div>
       </div>
 
       <!-- Error State -->
-      <div id="state-error" class="error-state hidden">
-        <p id="error-message" class="error-message"></p>
+      <div id="state-error" class="bd hidden">
+        <p id="error-message" class="errp"></p>
+        <p class="hint">Ask again in the conversation to retry.</p>
       </div>
+
+      <p class="rev">upload t12</p>
     </div>
 
     <script>
       (function () {
-        // --- Theme ---
-        var theme = (window.openai && window.openai.theme) ? window.openai.theme : "light";
-        if (theme === "dark") {
-          document.documentElement.classList.add("dark");
+        // --- Theme (re-applied on set_globals: globals can arrive late) ---
+        function applyTheme() {
+          var theme = (window.openai && window.openai.theme) ? window.openai.theme : "light";
+          document.documentElement.classList.toggle("dark", theme === "dark");
         }
+        applyTheme();
 
         // --- DOM refs ---
         var stateSelect = document.getElementById("state-select");
@@ -571,7 +338,7 @@
             previewDataUrl = e.target.result;
             previewImg.onerror = null;
             previewImg.src = previewDataUrl;
-            fileInfo.textContent = file.name + " \u00B7 " + formatFileSize(file.size);
+            fileInfo.textContent = file.name + " · " + formatFileSize(file.size);
             showState("preview");
           };
           reader.onerror = function () {
@@ -880,6 +647,7 @@
         showState("select");
         updateLibraryAvailability();
         window.addEventListener("openai:set_globals", function () {
+          applyTheme();
           hydrateFromToolOutput();
           updateLibraryAvailability();
         });

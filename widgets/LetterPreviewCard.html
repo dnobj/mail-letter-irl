@@ -4,438 +4,112 @@
     <meta charset="utf-8" />
     <title>LetterPreviewCard</title>
     <style>
-      :root {
-        --bg-primary: #ffffff;
-        --bg-secondary: #f8fafc;
-        --text-primary: #1f2933;
-        --text-secondary: #61748f;
-        --border-color: #e2e8f0;
-        --accent-success: #065f46;
-        --accent-success-bg: #d1fae5;
-        --accent-warning: #b91c1c;
-        --accent-warning-bg: #fee2e2;
-        --accent-primary: #2563eb;
-        --accent-primary-hover: #1d4ed8;
-        --accent-primary-disabled: #93c5fd;
-        --letter-bg: #fffef8;
-        --address-window-bg: #f0f0f0;
+      /* Letter IRL design system (widget-design-package, Aug 2026). The
+         letter page is a paper artifact: cream in both themes - printed
+         mail stays paper, and in dark mode the page is the hero. */
+      :root{--sf:#fff;--sf2:#fafafa;--bd:#e4e4e7;--bd2:#f0f0f2;--tx:#111113;--tb:#3f3f46;--mut:#71717a;--faint:#a1a1aa;--pri:#111113;--prit:#fff;--ok:#16a34a;--okbg:#f0fdf4;--er:#dc2626;--erbg:#fef2f2}
+      .dark{--sf:#2a2a2e;--sf2:#232327;--bd:#3a3a40;--bd2:#323238;--tx:#f4f4f5;--tb:#d4d4d8;--mut:#a1a1aa;--faint:#71717a;--pri:#f4f4f5;--prit:#111113;--ok:#34d399;--okbg:rgba(52,211,153,.13);--er:#f87171;--erbg:rgba(248,113,113,.12)}
+      *{box-sizing:border-box}
+      body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--tb)}
+      .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;overflow:hidden;max-width:100%}
+      .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
+      .logo{width:17px;height:11px;background:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAVCAYAAAAnzezqAAAFEUlEQVR4AcyUe1BVVRTGf/tyRXm/BPIxaipiOSGDRiPJ24LGJzqpaIiVGSgzkY6BomlIxqgNGiGK5JTKkIQpJqlBphgJ4gsUyJBhuAMIDi9R4PI8nUMC3tHSP5hqz/72Xuustfb6Zp21t4r/ePxPCWRJ7mxP28PqqAY+2FXH2thG1sU0EfppLUGb/iAw/Azuy46yT3JSCjgc/BPtOX7DiYzf7UkvfolTN104V+hGTpEnuUVu5BW6kntL3jXu5Bc7kazEKXi8Ap+VhbFrayZZPwZzv8mctkZLWurNuN9oQnOrFZ3Cho4uZ2a/XcR0zHHwTB9igJ80iNHteoxsGYJtowrrmm4sq7swa9Ri3dbJcFRMGKxiUlM7Dtpu3Hg4dAmE50ZRkBTNUAs1Lj47CQh1Ze8WQfxmwd5PBPujBImR5iRt92atx1HiPvKhsmCooewt45KTP4FO+UydJsM7BwevKPxdLjLW8XX8xlSR2VZFp2EbdAmMHuaXefVKl6XpFB6LwMQEokLWs2H+Ol4b/muvWWcX4ipCXKe5xQarkTdatZw8X4v7yYMseNRPeHIdeWRn4JvajONYOK/uor69k2ZpJT2/r78Cp48sp7USxgzfiY2IluOePu8ZPI/drFGlHQSNVpFX1criemciegOlIJyvziSxuJs1qnHcVoewm0EU1HdQhx5C8esnUFYaiKklTLNLUwzPhPZWW4ZaWyi+ERoCRhmRm1xHcI0TOyRvZnATz7paFr1sSsVbs4inEwz0qWgViqREQT+BLnM1g4eBp+OTy/6Xv+6q31zDkBpjJOlVxfDGVRYOM+GXc1r8L9eScKWJSMtWjCfrc1SEcUKsIbNBwkbfAEMskJQYlbL0oE0WtXKH9CjPuLS3T2ZId5Xs3SGjZ/p5EmtrxIUHanC0INdoEI0ZpYRIzixRHNSmmAhDjBVZgZxV2WQYGBfQXAdhScGy9vSZKoXLFTNHMitEiEu9ASKGSx55+HtMYIWeP2H2Xmy5Y4WU0C7/lmC2DnoOG8lMJvCQsqo3kPFTk9E2QlFuUN+3fxJy0gNRm0F1edGT3EQyZ0UQF5nEtWVT2DZuMKQXsFHooZaLLaGlS4nrJ7DhhWhsbbNpqHXgzegMxfi3iNFEoMmfiIFxCSn79pYuwL/Yg+Vy4/lKE5kt2eIl6TFTMmYhkYznCvXeHVwwaYKSckZYq8gWseQr5/cTULT12zcwxvk+NWUzsF/0rfLpMaRIAfwcH0VnB8R9uGKOBcGxeWw+cpt3NuazM7qK9fH3iPhSEBHbwsYEDeEnrhGWc5cpXVo0ei2c9RjP7t5zdQk4iSy8VqWiL/eI6dg7vU59+3tZxzkUdRCVGhaErsJEZBk1jKjz1Rh8bFfBfucH7PDWY4+fFfGuI0j0GUnsfHN2uBgSM8GSaE8LQt0u4iM+p6/CugSUTNnfLcFIvo6R204rag/mZa7EK7KBW8fmotKHlZHvstQ8XrElU5niS2vKUjg0V8s3zg0cHlZJqmM5B+w17LeulXGXBKsCvpJb9ZgS8yh0CfwgTaPi9mBMx8NQ7Aj57Xu8N0lUp+5DW23OmFcOkRYmmCUOMEBDl0Dc6jnUauTOvilfx7BYbiT5oSc/XxPd04iO8+Xg4mUDlLfvGF0CxRnTaZLflca7Zaj1D/Oi+/tEb3Pka/95uIkzfVEDKOgSKC9xpeSUIO+LsfwUFUD8wgScRM91GcCcOkfpEtAx/TvKnwAAAP//nawiBAAAAAZJREFUAwDrp8M6TfC7jQAAAABJRU5ErkJggg==") center/contain no-repeat;flex:none}
+      .dark .logo{background-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAVCAYAAAAnzezqAAAFZElEQVR4AcxUCVCVVRT+znvPB7L5RH2QOrnklrilxpjrWJaalUv57kPHNRVxcjQnBxFLAnKYoDGGARWRMkHffQphacKgVogDiIpSMhM2EqsU20N23nL7f2IRQ3OGaerO/e75/3POd+53z78o8B+P/6mANDGPfXs9ih1LrGFfflfFTiSbWNz5B/rjiZUsxpDPIuNTWEBkArskpsoN9NbpvC7vZElFe1hq2Q52vvQD3YXiD/U/FAewzJKP9VmlASy7eL8+q0yyFQHsdqkfOyXzZPytA/qkP3xZduJF5OX4oLlJA3ODK1rq+6Gp0Vk0mwfAqtDCKjxp2rw87g4N2x143s6OlttUGGZRYGizGm71RINMQriabOjXYBaDWq0YDBJj+hA8mi2YJN3PlTeX0U0AO5kfLArTQ+DsqBKjJ4fZZi2ewzevJL7pHWqz3oy4t07Dt69+xfCGRwLLiF9I1YUD1QrM7KvAtRED+bqRoXz6WAkTg/mkCfO519hgPnK4ki8fVC0ummtgUVsAG8FR3lyGQl7acF3MRsl1f/S1B1+20M+4wnP36Smu6W2xRxeimyC6hZYWrXAZ8JPZgnM/12Hezfvs7YdTaT5uQRr5VrYoq5WmaAk/Km2otljRII6wtsfXKYAVZqxHazXEQNcwaClE4v3jpEb1COE27dnweL51EFF2jRn6hr3Mv4MoYlZ63gthMSUCu8hN/KocwcOhRG6DFVVQSH2QEjsFoKJ8Hfo6QYx55qzkf6oprK1u5OzcX05eEWVYM8AeWen18DH56kJFkG4BipTz6+vAnnNAyRwH4yFI7VerqMRM8pXMAroE2BxVUGlwesKwntv+V363lZQtv0NdK6kWs+TACyFc19+Ovs8zk9e9Ooq+1yQCnVrhNEyFBPLFN7QLFxuF0CrVcEDBaSFzugRIsiA9TNn5tBBWy2ShtpVJ+WYJbfNFiyHCxR5XmggY5ogsOwVMueV4T+zVr5ITyIGcoYYT2keXALV9LlqkfsVf9WmPPdGwTLEHqv4asjncAdG1jmQ6iGsTDnAvj6GKTUp37jvYxgNMziQuWUSoiNEHKTVCK53fCe2SuwS4jToFcyNQmr+1o9gTbX7OOigdIGoq8nrKo+2nLtNWZMADOXNrDQe0KiCnSOwjgkr6Xwg0wyrzOgXwFYND0K/fVdTXTWIHk1Ll4OPAzlX6o+q3cVDb3TXu2nK4PEznVRKoXy+CvBaJ93Vvik1eLwu9folYp9Phhm4UNPrqiTZcsZfOV16JIVJDrlIEbsv1OwXIN3ze6r3QjqpDbcUCtvNzg+x7FPpMsQZ3UoNhs4KvXbLp0w3MJ6WA9mfcFxt5oS3srEnhl9ps9U8h+Cc3075LlbTnRoHwvVuLaTYzihQtuDy+3BjeUbebAEylNIx/7QxU9kBf9/sdSR2WReclibTEr0ASbcbr2+BMaXYN/asmV/T5yL2Gjo5qEqEesEV5uigOjXO1xUweICI8nUTomD446O5IIR5OtPP5YL6QPkNnh6VKHeXbbX7mKthpIBhLbveAheVuYYEJNSjLXgpSQSzQvctnOR6S4zuMh41TjHHGOQbDienxxuOjvzDGaaIMZ4ZHGmMHRxmPuhyVEMOjXcIMx+gTw9cy52F0E7DypngJ1eV20ulhNGO0LvaXRBbEBUxZR2A2aaAdfYLvXkrGqRT7cJHeXHcToEiOfQsPKgFTMdiFkxFUlL5c+mUCQ8af5a9uXMS3zVzbm8164nYTQKW5s9FUAzTWFpBSFYchHt58sX4K95m1DHMppacCvfV1E2CIDJ/Dw/2IH9gw0uDP1vDNM6KlF7Ptc+ntRo/jdxPwuKR/0/8nAAAA//8kY9sVAAAABklEQVQDAK2sKkm5ajuuAAAAAElFTkSuQmCC")}
+      .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
+      .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
+      .bd{padding:14px}
 
-        font-family:
-          "Inter",
-          system-ui,
-          -apple-system,
-          BlinkMacSystemFont,
-          "Segoe UI",
-          sans-serif;
-        background: transparent;
-        color: var(--text-primary);
-      }
+      /* Letter page mockup - paper artifact, cream in both themes.
+         Class names are generated by renderLetterMockup(). */
+      .letter-mockup-container{display:flex;justify-content:center}
+      .letter-mockup{width:222px;max-width:100%;aspect-ratio:8.5/11;background:#fdfcf8;border:1px solid #e6e0d2;border-radius:4px;box-shadow:0 2px 10px rgba(43,36,29,.12);overflow:hidden;display:flex;flex-direction:column;position:relative;color:#2b241d}
+      .address-window{height:30%;background:rgba(128,113,90,.06);display:flex;flex-direction:column;justify-content:flex-start;padding:9px 11px;border-bottom:1px dashed #d9cdb8;position:relative}
+      .return-address{font-family:Georgia,"Times New Roman",serif;font-size:6.5px;line-height:1.45;color:#8a7a64;text-transform:uppercase;letter-spacing:.02em}
+      .recipient-address{font-family:Georgia,"Times New Roman",serif;font-size:7.5px;line-height:1.5;color:#2b241d;text-transform:uppercase;margin:9px 0 0 34%}
+      .address-window-label{font-size:8px;color:#a8916b;text-transform:uppercase;letter-spacing:.08em;text-align:center;align-self:center;margin:auto}
+      .letter-content{flex:1;padding:9px 13px;overflow:hidden;display:flex;flex-direction:column;font-family:Georgia,"Times New Roman",serif;font-size:7.8px;line-height:1.65;color:#3f3a33}
+      .header-image-wrapper{width:100%;max-height:20%;margin-bottom:5px;display:flex;justify-content:center}
+      .header-image-wrapper img{max-width:100%;max-height:100%;object-fit:contain;border-radius:3px}
+      .body-text{overflow:hidden;white-space:pre-wrap;word-wrap:break-word;display:-webkit-box;-webkit-line-clamp:20;-webkit-box-orient:vertical}
+      .sign-off{margin-top:5px;white-space:pre-wrap;font-size:7.2px}
+      .inline-image-wrapper{width:100%;max-height:25%;margin-top:5px;display:flex;justify-content:center}
+      .inline-image-wrapper img{max-width:100%;max-height:100%;object-fit:contain;border-radius:3px}
 
-      .dark {
-        --bg-primary: #1e293b;
-        --bg-secondary: #0f172a;
-        --text-primary: #f1f5f9;
-        --text-secondary: #94a3b8;
-        --border-color: #334155;
-        --accent-success: #34d399;
-        --accent-success-bg: #064e3b;
-        --accent-warning: #f87171;
-        --accent-warning-bg: #7f1d1d;
-        --accent-primary: #3b82f6;
-        --accent-primary-hover: #60a5fa;
-        --accent-primary-disabled: #1e3a5f;
-        --letter-bg: #2d3748;
-        --address-window-bg: #374151;
-      }
+      /* Layout badge - production color semantics kept */
+      .layout-badge{position:absolute;top:7px;right:7px;font-size:6.5px;font-weight:700;letter-spacing:.1em;padding:2.5px 7px;border-radius:4px;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+      .layout-badge.text-only{background:#e9e5dc;color:#6b5f4d}
+      .layout-badge.header-image{background:#ede9fe;color:#6d28d9}
+      .layout-badge.inline-image{background:#dcfce7;color:#15803d}
 
-      /* Dark mode scrollbar styling */
-      .dark ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
+      /* Meta info rows */
+      .meta{padding:0 14px 14px}
+      .rows{margin:12px 0 0}
+      .info-row{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--bd2);font-size:12.5px}
+      .info-row:last-of-type{border-bottom:none}
+      .info-label{color:var(--mut);flex:none}
+      .info-value{color:var(--tx);font-weight:500;text-align:right}
+      .info-value.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+      .status-pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;border-radius:999px;padding:2px 9px}
+      .status-pill.ok{color:var(--ok);background:var(--okbg)}
+      .status-pill.alert{color:var(--er);background:var(--erbg)}
 
-      .dark ::-webkit-scrollbar-track {
-        background: var(--bg-secondary);
-        border-radius: 4px;
-      }
+      .note{background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--mut);line-height:1.45;margin-top:10px}
 
-      .dark ::-webkit-scrollbar-thumb {
-        background: var(--border-color);
-        border-radius: 4px;
-      }
-
-      .dark ::-webkit-scrollbar-thumb:hover {
-        background: var(--text-secondary);
-      }
-
-      /* Firefox scrollbar support */
-      .dark * {
-        scrollbar-width: thin;
-        scrollbar-color: var(--border-color) var(--bg-secondary);
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        padding: 1rem;
-        background: transparent;
-      }
-
-      .card {
-        width: 100%;
-        border-radius: 12px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border-color);
-        overflow: hidden;
-      }
-
-      /* Letter Mockup - Visual representation of letter */
-      .letter-mockup-container {
-        padding: 1rem;
-        background: var(--bg-secondary);
-        border-bottom: 1px solid var(--border-color);
-        display: flex;
-        justify-content: center;
-      }
-
-      .letter-mockup {
-        width: 100%;
-        max-width: 300px;
-        aspect-ratio: 8.5 / 11;
-        background: var(--letter-bg);
-        border-radius: 4px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        position: relative;
-      }
-
-      /* Address window area (top portion) - mimics PostGrid layout */
-      .address-window {
-        height: 30%;
-        background: var(--address-window-bg);
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        padding: 0.4rem;
-        border-bottom: 1px dashed var(--border-color);
-        position: relative;
-      }
-
-      .return-address {
-        font-family: "Times New Roman", Georgia, serif;
-        font-size: 0.45rem;
-        line-height: 1.3;
-        color: var(--text-primary);
-        text-transform: uppercase;
-      }
-
-      .recipient-address {
-        font-family: "Times New Roman", Georgia, serif;
-        font-size: 0.5rem;
-        line-height: 1.3;
-        color: var(--text-primary);
-        text-transform: uppercase;
-        margin-left: 0.8rem;
-      }
-
-      .address-window-label {
-        font-size: 0.65rem;
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        text-align: center;
-        align-self: center;
-        margin: auto;
-      }
-
-      /* Letter content area */
-      .letter-content {
-        flex: 1;
-        padding: 0.5rem;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        font-family: "Times New Roman", Georgia, serif;
-        font-size: 0.55rem;
-        line-height: 1.6; /* Match PostGrid line-height */
-        color: var(--text-primary);
-      }
-
-      /* Header image layout */
-      .header-image-wrapper {
-        width: 100%;
-        max-height: 20%;
-        margin-bottom: 0.3rem;
-        display: flex;
-        justify-content: center;
-      }
-
-      .header-image-wrapper img {
-        max-width: 100%;
-        max-height: 100%;
-        object-fit: contain;
-      }
-
-      /* Body text */
-      .body-text {
-        overflow: hidden;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        display: -webkit-box;
-        -webkit-line-clamp: 20; /* Show more lines - content is already validated */
-        -webkit-box-orient: vertical;
-      }
-
-      /* Sign-off */
-      .sign-off {
-        margin-top: 0.3rem;
-        white-space: pre-wrap;
-        font-size: 0.5rem;
-      }
-
-      /* Inline image layout */
-      .inline-image-wrapper {
-        width: 100%;
-        max-height: 25%;
-        margin-top: 0.3rem;
-        display: flex;
-        justify-content: center;
-      }
-
-      .inline-image-wrapper img {
-        max-width: 100%;
-        max-height: 100%;
-        object-fit: contain;
-      }
-
-      /* Layout badge */
-      .layout-badge {
-        position: absolute;
-        top: 0.3rem;
-        right: 0.3rem;
-        font-size: 0.5rem;
-        padding: 0.15rem 0.3rem;
-        background: var(--accent-primary);
-        color: white;
-        border-radius: 3px;
-        text-transform: uppercase;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-      }
-
-      .layout-badge.text-only {
-        background: #6b7280;
-      }
-
-      .layout-badge.header-image {
-        background: #8b5cf6;
-      }
-
-      .layout-badge.inline-image {
-        background: #10b981;
-      }
-
-      /* Meta section */
-      .meta {
-        padding: 1rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-      }
-
-      .info-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 0.9rem;
-      }
-
-      .info-label {
-        color: var(--text-secondary);
-      }
-
-      .info-value {
-        font-weight: 600;
-        color: var(--text-primary);
-      }
-
-      .status-pill {
-        display: inline-flex;
-        align-items: center;
-        padding: 0.35rem 0.65rem;
-        border-radius: 999px;
-        font-size: 0.8rem;
-        font-weight: 600;
-      }
-
-      .status-pill.ok {
-        background: var(--accent-success-bg);
-        color: var(--accent-success);
-      }
-
-      .status-pill.alert {
-        background: var(--accent-warning-bg);
-        color: var(--accent-warning);
-      }
-
-      .note {
-        font-size: 0.85rem;
-        color: var(--text-secondary);
-        padding: 0.75rem;
-        background: var(--bg-secondary);
-        border-radius: 8px;
-        border: 1px solid var(--border-color);
-      }
-
-      /* Send button styles */
-      .send-button {
-        width: 100%;
-        padding: 0.75rem 1rem;
-        font-size: 1rem;
-        font-weight: 600;
-        color: #ffffff;
-        background: var(--accent-primary);
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: background 0.15s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-      }
-
-      .send-button:hover:not(:disabled) {
-        background: var(--accent-primary-hover);
-      }
-
-      .send-button:disabled {
-        background: var(--accent-primary-disabled);
-        cursor: not-allowed;
-        opacity: 0.7;
-      }
-
-      .send-button.loading {
-        pointer-events: none;
-      }
-
-      .send-button .spinner {
-        width: 1rem;
-        height: 1rem;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: #ffffff;
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-      }
-
-      .purchase-actions {
-        display: grid;
-        gap: 0.6rem;
-      }
-
-      .send-button.secondary {
-        color: var(--accent-primary);
-        background: transparent;
-        border: 1px solid var(--accent-primary);
-      }
-
-      .send-button.secondary:hover:not(:disabled) {
-        background: var(--bg-secondary);
-      }
-
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
+      /* Action buttons: primary ink pill (inverts in dark), secondary outline */
+      .send-button{display:flex;width:100%;justify-content:center;align-items:center;gap:7px;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;box-sizing:border-box;border:none;margin-top:12px;background:var(--pri);color:var(--prit);transition:opacity .15s ease}
+      .send-button:hover:not(:disabled){opacity:.88}
+      .send-button:disabled{opacity:.45;cursor:not-allowed}
+      .send-button.loading{pointer-events:none}
+      .send-button .spinner{width:1rem;height:1rem;border:2px solid rgba(128,128,128,.35);border-top-color:currentColor;border-radius:50%;animation:spin .8s linear infinite}
+      .purchase-actions{display:grid;gap:0}
+      .send-button.secondary{color:var(--tx);background:transparent;border:1px solid var(--bd);margin-top:8px}
+      .send-button.secondary:hover:not(:disabled){background:var(--sf2);opacity:1}
+      @keyframes spin{to{transform:rotate(360deg)}}
 
       /* Success/Error states */
-      .send-result {
-        padding: 0.75rem;
-        border-radius: 8px;
-        font-size: 0.9rem;
-        text-align: center;
-      }
+      .send-result{border-radius:8px;font-size:12px;line-height:1.5;text-align:center;padding:9px 11px;margin-top:11px}
+      .send-result.success{background:var(--okbg);color:var(--ok)}
+      .send-result.error{background:var(--erbg);border:1px solid rgba(220,38,38,.25);color:var(--er)}
 
-      .send-result.success {
-        background: var(--accent-success-bg);
-        color: var(--accent-success);
-      }
-
-      .send-result.error {
-        background: var(--accent-warning-bg);
-        color: var(--accent-warning);
-      }
-
-      /* Loading state */
+      /* Loading shimmer */
       .loading .info-value,
-      .loading .status-pill {
-        background: linear-gradient(
-          90deg,
-          var(--bg-secondary) 25%,
-          var(--border-color) 50%,
-          var(--bg-secondary) 75%
-        );
-        background-size: 200% 100%;
-        animation: shimmer 1.5s infinite;
-        color: transparent;
-        border-radius: 4px;
-        min-width: 60px;
-      }
-
-      .loading .status-pill {
-        min-width: 100px;
-      }
-
-      @keyframes shimmer {
-        0% {
-          background-position: 200% 0;
-        }
-        100% {
-          background-position: -200% 0;
-        }
-      }
-
-      .preview-loading {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 200px;
-        color: var(--text-secondary);
-        font-style: italic;
-      }
+      .loading .status-pill{background:linear-gradient(90deg,var(--bd2) 25%,var(--bd) 50%,var(--bd2) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;color:transparent;border-radius:4px;min-width:60px}
+      .loading .status-pill{min-width:100px}
+      @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+      .preview-loading{display:flex;align-items:center;justify-content:center;min-height:200px;color:var(--faint);font-size:11.5px;width:100%}
+      .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
     </style>
   </head>
   <body>
-    <div class="card" id="card">
-      <div class="letter-mockup-container" id="mockup-container">
-        <div class="preview-loading">Loading letter preview...</div>
+    <div class="w" id="card">
+      <div class="hd"><span class="logo"></span><b>Letter IRL</b><span class="ctx">Letter</span></div>
+      <div class="bd">
+        <div class="letter-mockup-container" id="mockup-container">
+          <div class="preview-loading">Loading letter preview&hellip;</div>
+        </div>
       </div>
       <div class="meta">
-        <div class="info-row">
-          <span class="info-label">Layout</span>
-          <span class="info-value" id="layout-type">—</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">Cost</span>
-          <span class="info-value" id="cost">—</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">Delivery</span>
-          <span class="info-value" id="delivery">—</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">Status</span>
-          <span class="status-pill" id="status-pill">Loading...</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label" id="id-label">Draft</span>
-          <span class="info-value" id="id-value">—</span>
+        <div class="rows">
+          <div class="info-row">
+            <span class="info-label">Layout</span>
+            <span class="info-value" id="layout-type">&mdash;</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Cost</span>
+            <span class="info-value" id="cost">&mdash;</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Delivery</span>
+            <span class="info-value" id="delivery">&mdash;</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Status</span>
+            <span class="status-pill" id="status-pill">Loading...</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label" id="id-label">Draft</span>
+            <span class="info-value mono" id="id-value">&mdash;</span>
+          </div>
         </div>
         <div class="note" id="note" style="display: none"></div>
         <!-- Send button - US-MCP-08 -->
@@ -453,6 +127,7 @@
           <button class="send-button secondary" id="buy-pack-button">
             Buy a Letter Pack
           </button>
+          <div class="note">Checkout opens in your browser. This card updates automatically once payment completes.</div>
         </div>
         <div
           id="error-message"
@@ -460,6 +135,7 @@
           style="display: none"
         ></div>
       </div>
+      <p class="rev">letter t12</p>
     </div>
 
     <script type="module">
@@ -474,6 +150,11 @@
       let currentEligibility = null;
       let sendInProgress = false;
       let checkoutInProgress = false;
+
+      function applyTheme() {
+        const theme = window.openai?.theme ?? "light";
+        document.documentElement.classList.toggle("dark", theme === "dark");
+      }
 
       function escapeHtml(text) {
         if (!text) return "";
@@ -640,7 +321,7 @@
 
         // Show loading state
         document.getElementById("mockup-container").innerHTML =
-          '<div class="preview-loading">Loading letter preview...</div>';
+          '<div class="preview-loading">Loading letter preview…</div>';
         document.getElementById("layout-type").textContent = "—";
         document.getElementById("cost").textContent = "—";
         document.getElementById("delivery").textContent = "—";
@@ -657,6 +338,7 @@
       }
 
       function render() {
+        applyTheme();
         const state = window.openai?.toolOutput;
 
         // Check if we have actual data
@@ -934,12 +616,6 @@
       document
         .getElementById("buy-pack-button")
         .addEventListener("click", handleBuyPack);
-
-      // Apply theme
-      const theme = window.openai?.theme ?? "light";
-      if (theme === "dark") {
-        document.documentElement.classList.add("dark");
-      }
 
       // Initial render (will show loading state)
       render();
