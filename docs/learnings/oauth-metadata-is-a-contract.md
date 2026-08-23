@@ -1,86 +1,112 @@
-# The client believes your OAuth metadata
+# Where the client actually reads your scopes
 
 **Date:** 2026-08-23
-**Context:** issue #160, PR #266
+**Context:** issue #160, PRs #266 and follow-up
 
 ## What happened
 
-The DEV connection died every time the access token expired. Recovery required a
-human clicking Reconnect and re-consenting, which also meant no unattended test
-of this surface could outlive a token lifetime.
+The DEV connection died every time the access token expired. Recovery required
+a human clicking Reconnect and re-consenting, which also meant no unattended
+test of this surface could outlive a token lifetime.
 
-The diagnosis looked obvious. Refresh tokens require `offline_access`, and
-`offline_access` appeared nowhere in `src/`. So: enable *Allow Offline Access*
-on the Auth0 API, add the scope to the advertised list, redeploy, reconnect.
+Refresh tokens require `offline_access`, and `offline_access` appeared nowhere
+in `src/`. So the fix looked obvious. It took **three attempts** to find the
+real cause, and the two wrong ones are the useful part of this note.
 
-It did not work. The session expired anyway.
+### Attempt 1 — the tenant
 
-The Auth0 authorize log recorded what the client had actually asked for:
+Enabled *Allow Offline Access* on the Auth0 API (it was off), advertised
+`offline_access` in `scopes_supported`, redeployed, revoked the grant,
+reconnected.
 
-```json
-"grantInfo": {
-  "audience": "https://letter-irl-api-development.up.railway.app/mcp",
-  "scope": "mail:draft mail:read mail:send"
-}
-```
-
-No `offline_access` — despite the server advertising it, and the consent screen
-confirmed it: only Read, Draft, Send.
-
-## The actual cause
-
-DEV runs in static-DCR compatibility mode, which makes
-`/.well-known/oauth-protected-resource` name **this server** as the
-authorization server:
+Still expired. The Auth0 authorize log showed what the client had actually
+asked for:
 
 ```json
-"authorization_servers": ["https://letter-irl-api-development.up.railway.app"]
+"grantInfo": { "scope": "mail:draft mail:read mail:send" }
 ```
 
-So ChatGPT reads *our* `/.well-known/openid-configuration` to learn what the
-authorization server can do — not Auth0's. And ours said:
+### Attempt 2 — the authorization-server metadata
 
-```json
-"grant_types_supported": ["authorization_code"]
+DEV runs static-DCR compatibility, so `oauth-protected-resource` names *this
+server* as the authorization server and ChatGPT reads our
+`openid-configuration` for the server's capabilities. It said
+`grant_types_supported: ["authorization_code"]` — no `refresh_token` — while
+`/oauth/register` was simultaneously telling the same client
+`["authorization_code", "refresh_token"]`. Two hand-written lists that had
+drifted, and nothing compared them.
+
+A real defect, worth fixing, and **not the cause**. Fixed, deployed, refreshed
+the connector, revoked, reconnected.
+
+Still expired. Same grant scope.
+
+### What it actually was
+
+The connector settings page, per tool:
+
+```
+clear_return_address   Required scopes  mail:draft
+SECURITY SCHEMES { "type": "oauth2", "scopes": ["mail:draft"] }
 ```
 
-A client told the server cannot redeem a refresh token has no reason to ask for
-one. It was behaving correctly. We were the ones declining a capability we had.
+**ChatGPT builds its authorization request from the union of the per-tool
+`securitySchemes` scopes — not from `scopes_supported`.**
 
-Worse, `/oauth/register` was telling the same client the opposite in the same
-session: `grant_types: ["authorization_code", "refresh_token"]`. Two lists,
-authored independently, drifted apart, and nothing compared them.
+That union was exactly `mail:read mail:draft mail:send`. Exactly what every
+grant recorded. It also explains something that had been true and unremarked
+for months: `openid`, `profile`, and `email` were advertised and never
+requested either, because no tool declares them.
 
-## The lesson
+`offline_access` was advertised in three places the client does not consult for
+this purpose — protected-resource metadata, `openid-configuration`, and the 401
+`WWW-Authenticate` challenge — and requested from none of them.
 
-**Advertised capability is a contract, and a well-behaved client will hold you
-to it — including by declining to ask for things you said you cannot do.**
+Downstream: no `offline_access` → Auth0 issues no refresh token → at expiry
+ChatGPT has nothing to refresh with, so it never calls the token endpoint at
+all. The Auth0 log recorded **zero** refresh exchanges, successful or failed.
+That silence was the strongest single piece of evidence, and it is the thing to
+look for first next time: *did the client even try?*
 
-That makes a certain class of bug invisible from the server side: nothing errors,
-nothing logs, the client simply and silently does less. The symptom surfaces
-somewhere else entirely (here: a connection that "randomly" expires), which is
-why the first diagnosis went to the tenant configuration instead of to our own
-metadata document.
+## The lessons
 
-Two habits fall out of it:
+**1. Advertising a capability is not the same as being asked for it. Find the
+channel the client actually reads.** Three correct-looking advertisements
+achieved nothing. The one that mattered was a per-tool field. When a client
+isn't asking for something, enumerate every place it could be learning what to
+ask for, and check which one its behaviour actually matches — here the
+requested set matched the tool union *exactly*, which was the fingerprint that
+cracked it.
 
-1. **When a client isn't doing something you expect, check what you told it you
-   support** before checking the thing you expect it to do. The metadata
-   endpoints are cheap to `curl` and are the client's entire picture of you.
-2. **Any capability declared in two places must be declared once and read
-   twice.** `SUPPORTED_GRANT_TYPES` now feeds both the metadata document and the
-   registration response. The contradiction is not merely fixed; it is no longer
-   expressible.
+**2. Prefer evidence of absence over evidence of configuration.** Attempts 1
+and 2 both ended with "the config is now correct" and a failing test. What
+finally moved things was a log that showed the client making *no request at
+all*.
 
-## Corollary about the first fix
+**3. One function answering two questions is a latent bug.**
+`getRequiredToolScopes` was serving both "what does this tool enforce on every
+call" and "what does the client ask the user to grant." Those diverge the
+moment you need a scope that is requested but never enforced. Session scopes
+are exactly that, and there was no way to express one.
 
-`offline_access` in `scopes_supported` was necessary but inert on its own. Two
-settings that only work as a pair, in different files, with no test binding
-them, is a trap — so the regression test asserts both together and explains why
-either alone does nothing.
+**4. Fixing a real defect is not evidence that you fixed *the* defect.** The
+`grant_types_supported` contradiction was genuine and is now impossible to
+reintroduce (both sites read `SUPPORTED_GRANT_TYPES`). It also had nothing to
+do with the symptom. Correct-and-irrelevant is a common and seductive outcome;
+only the behavioural test distinguishes it from correct-and-sufficient.
+
+## The shape of the fix
+
+- `securitySchemes` scopes = enforced scopes **+** session scopes.
+- `getRequiredToolScopes` unchanged — PAT callers authorize with no scopes at
+  all, so a tool demanding `offline_access` would deny them permanently.
+- Applied to every tool: a typed @-mention scopes the turn's toolset, so a
+  session scope on only some tools would be requested only sometimes.
+- Both halves pinned by tests, because dropping either breaks a different thing
+  in a way that is quiet.
 
 ## Related
 
 - `docs/learnings/dcr-static-client-workaround.md` — why DEV is in static-DCR mode
 - `docs/learnings/chatgpt-auth0-oauth-learnings.md`
-- `docs/auth0-tenant-configuration.md` — the tenant half of the fix
+- `docs/auth0-tenant-configuration.md` — the tenant half
