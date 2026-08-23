@@ -347,7 +347,10 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       expect(buildToolSecuritySchemes('get_account_balance', true)).toEqual([
         {
           type: 'oauth2',
-          scopes: ['mail:read']
+          // offline_access rides along on every tool because ChatGPT builds
+          // its authorization request from the union of these lists, not from
+          // scopes_supported (issue #160). It is requested, never enforced.
+          scopes: ['mail:read', 'offline_access']
         }
       ]);
     });
@@ -370,7 +373,7 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
         securitySchemes: [
           {
             type: 'oauth2',
-              scopes: ['mail:draft']
+            scopes: ['mail:draft', 'offline_access']
           }
         ],
         'openai/widgetAccessible': true,

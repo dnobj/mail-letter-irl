@@ -49,6 +49,7 @@ import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
 import { ToolMeta } from "../contracts/types.js";
 import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
+import { SESSION_SCOPES } from "../auth/oauthConfig.js";
 import { prepareAuthenticatedUser } from "../auth/identity.js";
 import {
   classifyDiagnosticError,
@@ -244,7 +245,28 @@ export function buildToolSecuritySchemes(
   return [
     {
       type: "oauth2",
-      scopes: getRequiredToolScopes(toolName)
+      // Two different questions, and they must not be conflated:
+      //
+      //   getRequiredToolScopes  - what this tool ENFORCES on every call
+      //   this list              - what the client ASKS THE USER TO GRANT
+      //
+      // ChatGPT builds its authorization request from the union of these
+      // per-tool lists, not from scopes_supported. That was the whole of the
+      // #160 refresh-token bug: offline_access was advertised in the
+      // protected-resource metadata, in openid-configuration, and in the 401
+      // challenge, and requested from none of them - because it appeared in no
+      // tool's securitySchemes. Every grant recorded exactly
+      // "mail:draft mail:read mail:send", the union of the enforced scopes.
+      //
+      // Session scopes go here and nowhere else. They must never reach
+      // getRequiredToolScopes: PAT callers authorize with no scopes at all, so
+      // a tool demanding one would deny them permanently
+      // (tests/unit/auth/sessionScopes.test.ts pins that).
+      //
+      // Applied to every tool deliberately. A typed @-mention scopes the turn's
+      // toolset, so a session scope carried by only some tools would be
+      // requested only sometimes.
+      scopes: [...getRequiredToolScopes(toolName), ...SESSION_SCOPES]
     }
   ];
 }
