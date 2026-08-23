@@ -90,10 +90,29 @@ Added 2026-08-23. The counterpart to CIMD-02a: refresh tokens exist to remove
 prompts, and the risk they introduce is a grant that outlives the user's intent.
 A grant that survives revocation would be the real defect.
 
-- [ ] Revoke the ChatGPT grant in the Auth0 dashboard.
-- [ ] Invoke any Letter IRL tool in ChatGPT.
-- [ ] Confirm the call fails closed and a fresh link/consent is required - the
+**Passed 2026-08-23 on DEV.** Run it with the access token already expired,
+otherwise the call succeeds on the still-valid access token and proves nothing
+about the refresh token - a revoked grant does not invalidate an access token
+that has already been issued.
+
+- [x] Revoke the ChatGPT grant in the Auth0 dashboard.
+      Revoked 22:37:27Z (`API Operation - Delete a grant by id`).
+- [x] Invoke any Letter IRL tool in ChatGPT.
+      `get_account_balance` at ~22:38, with the access token expired since
+      22:23:12Z, so the call had to go through the refresh token.
+- [x] Confirm the call fails closed and a fresh link/consent is required - the
       stored refresh token must not silently resurrect the session.
+      ChatGPT showed the "connection has expired" prompt and returned **no
+      account data**.
+
+The positive evidence is on the Auth0 side, and it matters: at 22:38:34Z the log
+recorded `Failed Exchange - Token could not be decoded or is missing in DB` for
+ChatGPT. So the client did present its refresh token and the authorization
+server rejected it, rather than the client merely declining to try. Successful
+refresh exchanges stayed at 3 across the test; the failed count went 0 to 1.
+
+Note the connector is left **disconnected** by this test and must be
+reconnected before further manual cases.
 
 ### CIMD-03 — Tool exposure and `get_started`
 
