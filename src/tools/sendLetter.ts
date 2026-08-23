@@ -33,7 +33,6 @@ interface SendLetterOutput {
   statusTimeline: { timestampISO: string; statusText: string }[];
   recipientSummary: { name: string; city: string; state: string };
   lettersRemaining: number;
-  previewFirstPageHtml?: string;
   isRetry?: boolean;
   suggestSaveReturnAddress?: boolean;
   saveReturnAddressNote?: string;
@@ -185,7 +184,6 @@ async function handler(
     ],
     recipientSummary: orderRecord.recipientSummary,
     lettersRemaining: Math.floor(created.creditsRemaining / 2),
-    previewFirstPageHtml: orderRecord.previewFirstPageHtml,
     isRetry: false,
     suggestSaveReturnAddress,
     saveReturnAddressNote,

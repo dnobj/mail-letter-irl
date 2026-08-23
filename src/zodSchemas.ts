@@ -254,8 +254,6 @@ export const quoteAndPreviewOutputZ = z.object({
   layoutType: z.enum(["text_only", "header_image", "inline_image"]),
   usedSavedReturnAddress: z.boolean().optional(),
   savedReturnAddressNote: z.string().optional(),
-  senderName: z.string().optional(),
-  recipientName: z.string().optional(),
   senderAddressValidation: addressValidationZ.optional(),
   recipientAddressValidation: addressValidationZ.optional(),
   addressWarnings: z.array(z.string()).optional()
@@ -335,12 +333,8 @@ export const listOrdersOutputZ = z.object({
   orders: z.array(z.object({
     orderId: z.string(),
     recipient: recipientSummaryZ.optional(),
-    recipientName: z.string().optional(),
-    mailType: z.string().optional(),
     status: z.string().optional(),
-    currentStatus: z.string().optional(),
-    sentAt: z.string().optional(),
-    createdAt: z.string().optional()
+    sentAt: z.string().optional()
   })),
   total: z.number()
 });

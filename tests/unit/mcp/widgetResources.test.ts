@@ -23,6 +23,7 @@ import {
   WIDGET_DEFINITIONS,
   WIDGET_MIME_TYPE
 } from '../../../src/mcp/registerTools.js';
+import type { z } from 'zod';
 import { createHash } from 'crypto';
 import { widgetTemplateUri, WIDGET_TEMPLATE_VERSION } from '../../../src/mcp/widgetUris.js';
 import { LetterIrlServer } from '../../../src/server.js';
@@ -193,32 +194,66 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
    *
    * Two things can stop a field arriving. partitionToolResult deliberately
    * moves the large ones into `_meta`, where the widget must read them from
-   * `toolResponseMetadata` instead. And structuredContent is validated against
-   * the tool's zod output schema, which strips anything the schema does not
-   * declare. A field in neither place cannot reach the widget by any route.
+   * `toolResponseMetadata` instead. And ChatGPT filters structuredContent
+   * against the JSON Schema the server published on `tools/list` - built from
+   * the tool's zod output schema - so a field the schema does not declare is
+   * dropped before the widget ever sees it. (The drop is client-side: at SDK
+   * 1.29.0 the server validates and ships the result unstripped. See
+   * src/contracts/outputConformance.ts, which guards the same contract from
+   * the producing side.) A field in neither place cannot reach the widget by
+   * any route.
    *
-   * This replaced a test that asserted four string literals were strings. It
-   * named this contract and checked none of it, and the contract it named was
-   * already stale - `requiredCredits` is not a top-level field of the letter
-   * preview output.
+   * This check has now missed two live bugs, and the misses were all in how it
+   * read the HTML rather than in the rule it enforced:
    *
-   * Reading the widget's field access out of its HTML is crude, and it is what
-   * is available until something can actually render a widget (issue #206).
+   *   1. It matched only `state.foo`, so the destructuring both preview cards
+   *      actually use (`const { recipientName, ... } = state`) was invisible -
+   *      3 of ~25 reads seen in PostcardPreviewCard. That is how the flat
+   *      address fields shipped undeclared.
+   *   2. It captured only the first path segment, so
+   *      `state.senderAddressValidation?.originalAddress` passed on the parent
+   *      key alone. That is how `originalAddress` shipped undeclared, leaving
+   *      the letter card's address window empty on every preview.
+   *   3. It assumed the alias was named `state`. ImageRoutingCard reads `out.`
+   *      and ImageUploadCard reads `output.`, so both asserted nothing at all.
+   *
+   * So the extraction now discovers each widget's own alias for the output
+   * object, follows destructuring, and validates dotted paths against the
+   * nested schema.
+   *
+   * Reading field access out of HTML is still crude, and it is what is
+   * available until something can actually render a widget (issue #206).
    */
   describe('widget data contract', () => {
     const widgetDir = path.resolve(__dirname, '../../../widgets');
 
-    /** Moved to `_meta` by partitionToolResult; legitimately absent from structuredContent. */
-    const META_PARTITIONED = new Set([
-      'previewHtml',
-      'previewFrontHtml',
-      'previewBackHtml',
-      'inlineImageData',
-      'headerImageData',
-      'frontImageData',
-      'headerImagePreview',
-      'inlineImagePreview'
-    ]);
+    /**
+     * Moved out of structuredContent by partitionToolResult and legitimately
+     * absent from the schema. Derived from the real function rather than
+     * hand-copied: the previous copy had already drifted, omitting
+     * generatedImagePreview.
+     */
+    const META_PARTITIONED = (() => {
+      const probe: Record<string, unknown> = {
+        previewHtml: 'x',
+        previewFrontHtml: 'x',
+        previewBackHtml: 'x',
+        inlineImageData: 'x',
+        headerImageData: 'x',
+        frontImageData: 'x',
+        headerImagePreview: 'x',
+        inlineImagePreview: 'x',
+        generatedImagePreview: 'x',
+        // Control: a field partitionToolResult must leave alone, so this
+        // derivation fails loudly if it ever stops removing anything.
+        draftId: 'x'
+      };
+      const { structuredContent } = partitionToolResult({ ...probe });
+      const removed = Object.keys(probe).filter(key => !(key in structuredContent));
+      expect(removed).toContain('generatedImagePreview');
+      expect(removed).not.toContain('draftId');
+      return new Set(removed);
+    })();
 
     /**
      * Reads that no channel can satisfy. Empty, and asserted exactly so it
@@ -245,11 +280,128 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       return byWidget;
     }
 
+    /**
+     * The identifiers a widget uses for the tool output. Seeded from any
+     * declaration whose initializer mentions toolOutput (covering
+     * `= window.openai.toolOutput` and `= toolOutput()` alike), then extended
+     * through spreads so GetStartedCard's `{ ...responseMeta, ...output }`
+     * merge is followed too.
+     */
+    function outputAliases(html: string): Set<string> {
+      const aliases = new Set<string>();
+      const declarations = [
+        ...html.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]*)/g)
+      ];
+      for (const [, name, init] of declarations) {
+        if (/\btoolOutput\b/.test(init)) aliases.add(name);
+      }
+      // Transitive: an object literal spreading an alias also carries its fields.
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const [, name, init] of declarations) {
+          if (aliases.has(name)) continue;
+          const spreads = [...init.matchAll(/\.\.\.\s*([A-Za-z_$][\w$]*)/g)].map(m => m[1]);
+          if (spreads.some(spread => aliases.has(spread))) {
+            aliases.add(name);
+            grew = true;
+          }
+        }
+      }
+      return aliases;
+    }
+
+    /** Dotted field paths a widget reads off any of its output aliases. */
+    function fieldReads(html: string, aliases: Set<string>): Set<string> {
+      const paths = new Set<string>();
+      for (const alias of aliases) {
+        const escaped = alias.replace(/\$/g, '\\$');
+        // Member access, following optional chains: alias.a?.b.c
+        const member = new RegExp(
+          `\\b${escaped}((?:\\s*\\??\\.\\s*[A-Za-z_$][\\w$]*)+)`,
+          'g'
+        );
+        for (const match of html.matchAll(member)) {
+          const segments = match[1]
+            .split(/\??\./)
+            .map(segment => segment.trim())
+            .filter(Boolean);
+          if (segments.length) paths.add(segments.join('.'));
+        }
+        // Destructuring, including multiline and renames: const { a, b: c } = alias
+        const destructure = new RegExp(
+          `\\{([^{}]*)\\}\\s*=\\s*${escaped}\\b`,
+          'gs'
+        );
+        for (const match of html.matchAll(destructure)) {
+          for (const entry of match[1].split(',')) {
+            const key = entry.split(':')[0].trim().replace(/^\.\.\./, '');
+            if (/^[A-Za-z_$][\w$]*$/.test(key)) paths.add(key);
+          }
+        }
+      }
+      return paths;
+    }
+
+    /**
+     * Walks a dotted path through the zod shape, unwrapping optionals and
+     * stepping into arrays, so a nested read is checked against the nested
+     * schema instead of passing on its parent key.
+     */
+    function pathIsDeclared(shape: Record<string, z.ZodTypeAny>, dotted: string): boolean {
+      const [head, ...rest] = dotted.split('.');
+      let current: z.ZodTypeAny | undefined = shape[head];
+      if (!current) return false;
+      for (const segment of rest) {
+        // Unwrap optional/nullable/default wrappers, then arrays.
+        for (let i = 0; i < 8; i += 1) {
+          const candidate = current as unknown as {
+            unwrap?: () => z.ZodTypeAny;
+            element?: z.ZodTypeAny;
+            shape?: Record<string, z.ZodTypeAny>;
+          };
+          if (candidate?.shape) break;
+          if (typeof candidate?.unwrap === 'function') {
+            current = candidate.unwrap();
+            continue;
+          }
+          if (candidate?.element) {
+            current = candidate.element;
+            continue;
+          }
+          break;
+        }
+        const objectShape = (current as unknown as { shape?: Record<string, z.ZodTypeAny> })?.shape;
+        // A read one level into a non-object (or a passthrough record) cannot
+        // be proven wrong; treat the parent's declaration as sufficient.
+        if (!objectShape) return true;
+        current = objectShape[segment];
+        if (!current) return false;
+      }
+      return true;
+    }
+
     it('binds every widget to a tool that declares it', () => {
       const bound = widgetToolNames();
       expect(bound.size).toBeGreaterThan(0);
       for (const widget of bound.keys()) {
         expect(WIDGET_DEFINITIONS.map(definition => definition.name)).toContain(widget);
+      }
+    });
+
+    it('finds the output alias every widget actually uses', async () => {
+      // Guards hole 3 directly: if a widget renames its output variable and
+      // the discovery stops seeing it, the contract test below would go
+      // vacuously green instead of failing.
+      const bound = widgetToolNames();
+      for (const widget of bound.keys()) {
+        const html = await fs.readFile(path.join(widgetDir, `${widget}.html`), 'utf-8');
+        const aliases = outputAliases(html);
+        expect(aliases.size, `${widget}: no window.openai.toolOutput alias found`).toBeGreaterThan(0);
+        expect(
+          fieldReads(html, aliases).size,
+          `${widget}: alias found but no field reads extracted`
+        ).toBeGreaterThan(0);
       }
     });
 
@@ -261,11 +413,12 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
         const shape = getZodOutputShape(toolName);
         if (!shape) continue;
         const html = await fs.readFile(path.join(widgetDir, `${widget}.html`), 'utf-8');
-        const read = new Set(
-          [...html.matchAll(/\bstate\.([a-zA-Z_][a-zA-Z0-9_]*)/g)].map(match => match[1])
-        );
-        const missing = [...read]
-          .filter(field => !(field in shape) && !META_PARTITIONED.has(field))
+        const missing = [...fieldReads(html, outputAliases(html))]
+          .filter(
+            dotted =>
+              !pathIsDeclared(shape as Record<string, z.ZodTypeAny>, dotted) &&
+              !META_PARTITIONED.has(dotted.split('.')[0])
+          )
           .sort();
         if (missing.length) unaccounted[widget] = missing;
       }

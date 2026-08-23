@@ -442,9 +442,11 @@ export function partitionToolResult(
       // everything else in this list: a widget needs them, the model does not.
       //
       // Before this they were in neither channel. The output schema does not
-      // declare them, so zod stripped them from structuredContent, and nothing
-      // put them in _meta - a letter with a header or inline image rendered its
-      // card without one, silently.
+      // declare them, so ChatGPT dropped them when it filtered
+      // structuredContent against the published schema, and nothing put them
+      // in _meta - a letter with a header or inline image rendered its card
+      // without one, silently. (The filtering is client-side: at SDK 1.29.0
+      // the server validates the result and ships it unstripped. Issue #257.)
       ...(headerImagePreview !== undefined ? { headerImagePreview } : {}),
       ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {}),
       ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
