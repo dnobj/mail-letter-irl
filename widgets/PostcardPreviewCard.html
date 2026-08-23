@@ -4,439 +4,95 @@
     <meta charset="utf-8" />
     <title>PostcardPreviewCard</title>
     <style>
-      :root {
-        --bg-primary: #ffffff;
-        --bg-secondary: #f8fafc;
-        --text-primary: #1f2933;
-        --text-secondary: #61748f;
-        --border-color: #e2e8f0;
-        --accent-success: #065f46;
-        --accent-success-bg: #d1fae5;
-        --accent-warning: #b91c1c;
-        --accent-warning-bg: #fee2e2;
-        --accent-primary: #2563eb;
-        --accent-primary-hover: #1d4ed8;
-        --accent-primary-disabled: #93c5fd;
-        --preview-bg: #fefefe;
-
-        font-family:
-          "Inter",
-          system-ui,
-          -apple-system,
-          BlinkMacSystemFont,
-          "Segoe UI",
-          sans-serif;
-        background: transparent;
-        color: var(--text-primary);
-      }
-
-      .dark {
-        --bg-primary: #1e293b;
-        --bg-secondary: #0f172a;
-        --text-primary: #f1f5f9;
-        --text-secondary: #94a3b8;
-        --border-color: #334155;
-        --accent-success: #34d399;
-        --accent-success-bg: #064e3b;
-        --accent-warning: #f87171;
-        --accent-warning-bg: #7f1d1d;
-        --accent-primary: #3b82f6;
-        --accent-primary-hover: #60a5fa;
-        --accent-primary-disabled: #1e3a5f;
-        --preview-bg: #1e293b;
-      }
-
-      /* Dark mode scrollbar styling */
-      .dark ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-
-      .dark ::-webkit-scrollbar-track {
-        background: var(--bg-secondary);
-        border-radius: 4px;
-      }
-
-      .dark ::-webkit-scrollbar-thumb {
-        background: var(--border-color);
-        border-radius: 4px;
-      }
-
-      .dark ::-webkit-scrollbar-thumb:hover {
-        background: var(--text-secondary);
-      }
-
-      /* Firefox scrollbar support */
-      .dark * {
-        scrollbar-width: thin;
-        scrollbar-color: var(--border-color) var(--bg-secondary);
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        padding: 1rem;
-        background: transparent;
-        overflow: hidden; /* Prevent scrollbars */
-      }
-
-      /* Override injected postcard-front styles (which have fixed pixel dimensions) */
-      .postcard-front {
-        width: 100% !important;
-        height: auto !important;
-        max-width: 100% !important;
-      }
-
-      .postcard-front img {
-        width: 100% !important;
-        height: auto !important;
-        aspect-ratio: 9 / 6;
-        object-fit: cover;
-      }
-
-      .card {
-        width: 100%;
-        border-radius: 12px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border-color);
-        overflow: hidden;
-      }
+      /* Letter IRL design system (widget-design-package, Aug 2026). The
+         postcard back and message box are paper artifacts: cream in both
+         themes - printed mail stays paper. */
+      :root{--sf:#fff;--sf2:#fafafa;--bd:#e4e4e7;--bd2:#f0f0f2;--tx:#111113;--tb:#3f3f46;--mut:#71717a;--faint:#a1a1aa;--pri:#111113;--prit:#fff;--ok:#16a34a;--okbg:#f0fdf4;--er:#dc2626;--erbg:#fef2f2}
+      .dark{--sf:#2a2a2e;--sf2:#232327;--bd:#3a3a40;--bd2:#323238;--tx:#f4f4f5;--tb:#d4d4d8;--mut:#a1a1aa;--faint:#71717a;--pri:#f4f4f5;--prit:#111113;--ok:#34d399;--okbg:rgba(52,211,153,.13);--er:#f87171;--erbg:rgba(248,113,113,.12)}
+      *{box-sizing:border-box}
+      body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--tb);overflow:hidden}
+      .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;overflow:hidden;max-width:100%}
+      .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
+      .logo{width:17px;height:11px;background:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAVCAYAAAAnzezqAAAFEUlEQVR4AcyUe1BVVRTGf/tyRXm/BPIxaipiOSGDRiPJ24LGJzqpaIiVGSgzkY6BomlIxqgNGiGK5JTKkIQpJqlBphgJ4gsUyJBhuAMIDi9R4PI8nUMC3tHSP5hqz/72Xuustfb6Zp21t4r/ePxPCWRJ7mxP28PqqAY+2FXH2thG1sU0EfppLUGb/iAw/Azuy46yT3JSCjgc/BPtOX7DiYzf7UkvfolTN104V+hGTpEnuUVu5BW6kntL3jXu5Bc7kazEKXi8Ap+VhbFrayZZPwZzv8mctkZLWurNuN9oQnOrFZ3Cho4uZ2a/XcR0zHHwTB9igJ80iNHteoxsGYJtowrrmm4sq7swa9Ri3dbJcFRMGKxiUlM7Dtpu3Hg4dAmE50ZRkBTNUAs1Lj47CQh1Ze8WQfxmwd5PBPujBImR5iRt92atx1HiPvKhsmCooewt45KTP4FO+UydJsM7BwevKPxdLjLW8XX8xlSR2VZFp2EbdAmMHuaXefVKl6XpFB6LwMQEokLWs2H+Ol4b/muvWWcX4ipCXKe5xQarkTdatZw8X4v7yYMseNRPeHIdeWRn4JvajONYOK/uor69k2ZpJT2/r78Cp48sp7USxgzfiY2IluOePu8ZPI/drFGlHQSNVpFX1criemciegOlIJyvziSxuJs1qnHcVoewm0EU1HdQhx5C8esnUFYaiKklTLNLUwzPhPZWW4ZaWyi+ERoCRhmRm1xHcI0TOyRvZnATz7paFr1sSsVbs4inEwz0qWgViqREQT+BLnM1g4eBp+OTy/6Xv+6q31zDkBpjJOlVxfDGVRYOM+GXc1r8L9eScKWJSMtWjCfrc1SEcUKsIbNBwkbfAEMskJQYlbL0oE0WtXKH9CjPuLS3T2ZId5Xs3SGjZ/p5EmtrxIUHanC0INdoEI0ZpYRIzixRHNSmmAhDjBVZgZxV2WQYGBfQXAdhScGy9vSZKoXLFTNHMitEiEu9ASKGSx55+HtMYIWeP2H2Xmy5Y4WU0C7/lmC2DnoOG8lMJvCQsqo3kPFTk9E2QlFuUN+3fxJy0gNRm0F1edGT3EQyZ0UQF5nEtWVT2DZuMKQXsFHooZaLLaGlS4nrJ7DhhWhsbbNpqHXgzegMxfi3iNFEoMmfiIFxCSn79pYuwL/Yg+Vy4/lKE5kt2eIl6TFTMmYhkYznCvXeHVwwaYKSckZYq8gWseQr5/cTULT12zcwxvk+NWUzsF/0rfLpMaRIAfwcH0VnB8R9uGKOBcGxeWw+cpt3NuazM7qK9fH3iPhSEBHbwsYEDeEnrhGWc5cpXVo0ei2c9RjP7t5zdQk4iSy8VqWiL/eI6dg7vU59+3tZxzkUdRCVGhaErsJEZBk1jKjz1Rh8bFfBfucH7PDWY4+fFfGuI0j0GUnsfHN2uBgSM8GSaE8LQt0u4iM+p6/CugSUTNnfLcFIvo6R204rag/mZa7EK7KBW8fmotKHlZHvstQ8XrElU5niS2vKUjg0V8s3zg0cHlZJqmM5B+w17LeulXGXBKsCvpJb9ZgS8yh0CfwgTaPi9mBMx8NQ7Aj57Xu8N0lUp+5DW23OmFcOkRYmmCUOMEBDl0Dc6jnUauTOvilfx7BYbiT5oSc/XxPd04iO8+Xg4mUDlLfvGF0CxRnTaZLflca7Zaj1D/Oi+/tEb3Pka/95uIkzfVEDKOgSKC9xpeSUIO+LsfwUFUD8wgScRM91GcCcOkfpEtAx/TvKnwAAAP//nawiBAAAAAZJREFUAwDrp8M6TfC7jQAAAABJRU5ErkJggg==") center/contain no-repeat;flex:none}
+      .dark .logo{background-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAVCAYAAAAnzezqAAAFZElEQVR4AcxUCVCVVRT+znvPB7L5RH2QOrnklrilxpjrWJaalUv57kPHNRVxcjQnBxFLAnKYoDGGARWRMkHffQphacKgVogDiIpSMhM2EqsU20N23nL7f2IRQ3OGaerO/e75/3POd+53z78o8B+P/6mANDGPfXs9ih1LrGFfflfFTiSbWNz5B/rjiZUsxpDPIuNTWEBkArskpsoN9NbpvC7vZElFe1hq2Q52vvQD3YXiD/U/FAewzJKP9VmlASy7eL8+q0yyFQHsdqkfOyXzZPytA/qkP3xZduJF5OX4oLlJA3ODK1rq+6Gp0Vk0mwfAqtDCKjxp2rw87g4N2x143s6OlttUGGZRYGizGm71RINMQriabOjXYBaDWq0YDBJj+hA8mi2YJN3PlTeX0U0AO5kfLArTQ+DsqBKjJ4fZZi2ewzevJL7pHWqz3oy4t07Dt69+xfCGRwLLiF9I1YUD1QrM7KvAtRED+bqRoXz6WAkTg/mkCfO519hgPnK4ki8fVC0ummtgUVsAG8FR3lyGQl7acF3MRsl1f/S1B1+20M+4wnP36Smu6W2xRxeimyC6hZYWrXAZ8JPZgnM/12Hezfvs7YdTaT5uQRr5VrYoq5WmaAk/Km2otljRII6wtsfXKYAVZqxHazXEQNcwaClE4v3jpEb1COE27dnweL51EFF2jRn6hr3Mv4MoYlZ63gthMSUCu8hN/KocwcOhRG6DFVVQSH2QEjsFoKJ8Hfo6QYx55qzkf6oprK1u5OzcX05eEWVYM8AeWen18DH56kJFkG4BipTz6+vAnnNAyRwH4yFI7VerqMRM8pXMAroE2BxVUGlwesKwntv+V363lZQtv0NdK6kWs+TACyFc19+Ovs8zk9e9Ooq+1yQCnVrhNEyFBPLFN7QLFxuF0CrVcEDBaSFzugRIsiA9TNn5tBBWy2ShtpVJ+WYJbfNFiyHCxR5XmggY5ogsOwVMueV4T+zVr5ITyIGcoYYT2keXALV9LlqkfsVf9WmPPdGwTLEHqv4asjncAdG1jmQ6iGsTDnAvj6GKTUp37jvYxgNMziQuWUSoiNEHKTVCK53fCe2SuwS4jToFcyNQmr+1o9gTbX7OOigdIGoq8nrKo+2nLtNWZMADOXNrDQe0KiCnSOwjgkr6Xwg0wyrzOgXwFYND0K/fVdTXTWIHk1Ll4OPAzlX6o+q3cVDb3TXu2nK4PEznVRKoXy+CvBaJ93Vvik1eLwu9folYp9Phhm4UNPrqiTZcsZfOV16JIVJDrlIEbsv1OwXIN3ze6r3QjqpDbcUCtvNzg+x7FPpMsQZ3UoNhs4KvXbLp0w3MJ6WA9mfcFxt5oS3srEnhl9ps9U8h+Cc3075LlbTnRoHwvVuLaTYzihQtuDy+3BjeUbebAEylNIx/7QxU9kBf9/sdSR2WReclibTEr0ASbcbr2+BMaXYN/asmV/T5yL2Gjo5qEqEesEV5uigOjXO1xUweICI8nUTomD446O5IIR5OtPP5YL6QPkNnh6VKHeXbbX7mKthpIBhLbveAheVuYYEJNSjLXgpSQSzQvctnOR6S4zuMh41TjHHGOQbDienxxuOjvzDGaaIMZ4ZHGmMHRxmPuhyVEMOjXcIMx+gTw9cy52F0E7DypngJ1eV20ulhNGO0LvaXRBbEBUxZR2A2aaAdfYLvXkrGqRT7cJHeXHcToEiOfQsPKgFTMdiFkxFUlL5c+mUCQ8af5a9uXMS3zVzbm8164nYTQKW5s9FUAzTWFpBSFYchHt58sX4K95m1DHMppacCvfV1E2CIDJ/Dw/2IH9gw0uDP1vDNM6KlF7Ptc+ntRo/jdxPwuKR/0/8nAAAA//8kY9sVAAAABklEQVQDAK2sKkm5ajuuAAAAAElFTkSuQmCC")}
+      .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
+      .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
 
       /* Preview tabs */
-      .preview-tabs {
-        display: flex;
-        border-bottom: 1px solid var(--border-color);
-      }
-
-      .preview-tab {
-        flex: 1;
-        padding: 0.75rem 1rem;
-        font-size: 0.9rem;
-        font-weight: 600;
-        text-align: center;
-        cursor: pointer;
-        background: transparent;
-        border: none;
-        color: var(--text-secondary);
-        transition: all 0.15s ease;
-      }
-
-      .preview-tab:hover {
-        color: var(--text-primary);
-        background: var(--bg-secondary);
-      }
-
-      .preview-tab.active {
-        color: var(--accent-primary);
-        border-bottom: 2px solid var(--accent-primary);
-        margin-bottom: -1px;
-      }
+      .preview-tabs{display:flex;border-bottom:1px solid var(--bd2)}
+      .preview-tab{flex:1;text-align:center;padding:9px 4px;font-size:12.5px;font-weight:600;color:var(--mut);border-bottom:2px solid transparent;background:transparent;border-top:none;border-left:none;border-right:none;cursor:pointer;font-family:inherit;transition:color .15s ease}
+      .preview-tab:hover{color:var(--tx)}
+      .preview-tab.active{color:var(--tx);border-bottom-color:var(--tx)}
 
       /* Preview panes */
-      .preview-container {
-        position: relative;
-        overflow: hidden; /* Prevent scrollbars on preview area */
-      }
+      .preview-container{position:relative;overflow:hidden}
+      .preview-pane{padding:14px 14px 0;overflow:hidden}
+      .preview-pane.hidden{display:none !important}
+      .preview-pane.front-preview{display:flex;justify-content:center;align-items:center}
+      /* Override injected postcard-front styles (fixed pixel dimensions) */
+      .postcard-front{width:100% !important;height:auto !important;max-width:100% !important}
+      .postcard-front img{width:100% !important;height:auto !important;aspect-ratio:9/6;object-fit:cover}
+      .preview-pane img{width:100%;max-width:100%;height:auto;border-radius:8px;border:1px solid var(--bd);aspect-ratio:9/6;object-fit:cover}
+      .preview-pane.back-preview{display:flex;justify-content:center;align-items:center}
 
-      .preview-pane {
-        padding: 0.75rem;
-        background: var(--preview-bg);
-        border-bottom: 1px solid var(--border-color);
-        overflow: hidden; /* Prevent scrollbars */
-      }
+      /* Postcard back mockup - paper artifact, cream in both themes */
+      .postcard-back-mockup{width:100%;aspect-ratio:9/6;background:#fdfcf8;border:1px solid #e6e0d2;border-radius:8px;box-shadow:0 2px 8px rgba(43,36,29,.1);display:flex;overflow:hidden;color:#2b241d}
+      .postcard-message-side{width:53%;padding:11px 12px;border-right:1px solid #e6e0d2;display:flex;align-items:flex-start}
+      .postcard-message-text{font-family:Georgia,"Times New Roman",serif;font-size:9.5px;line-height:1.6;color:#4a4036;white-space:pre-wrap;word-wrap:break-word}
+      .postcard-address-side{width:47%;padding:9px 10px;position:relative;display:flex;flex-direction:column;justify-content:flex-end}
+      .postcard-stamp{position:absolute;top:9px;right:10px;width:32px;height:38px;border:1.5px dashed #c8b393;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:6px;letter-spacing:.12em;color:#a8916b}
+      .postcard-recipient{font-family:"Courier New",monospace;font-size:8.5px;line-height:1.5;color:#2b241d;text-transform:uppercase;margin-bottom:5px}
+      .postcard-recipient .name{font-weight:700}
+      .postcard-return-address{position:absolute;top:9px;left:10px;font-family:"Courier New",monospace;font-size:6.5px;line-height:1.45;color:#8a7a64;text-transform:uppercase}
 
-      .preview-pane.hidden {
-        display: none !important;
-      }
+      /* Meta info rows */
+      .meta{padding:0 14px 14px}
+      .rows{margin:12px 0 0}
+      .info-row{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--bd2);font-size:12.5px}
+      .info-row:last-of-type{border-bottom:none}
+      .info-label{color:var(--mut);flex:none}
+      .info-value{color:var(--tx);font-weight:500;text-align:right}
+      .info-value.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+      .status-pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;border-radius:999px;padding:2px 9px}
+      .status-pill.ok{color:var(--ok);background:var(--okbg)}
+      .status-pill.alert{color:var(--er);background:var(--erbg)}
 
-      .preview-pane.front-preview {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-      }
+      /* Paper message box */
+      .message-box{background:#fdfcf8;border:1px solid #e6e0d2;border-radius:8px;padding:9px 11px;margin-top:11px}
+      .message-box .info-label{margin-bottom:4px;display:block;font-size:11px}
+      .message-text{font-family:Georgia,"Times New Roman",serif;font-size:11.5px;line-height:1.55;color:#4a4036;white-space:pre-wrap;word-wrap:break-word}
 
-      .preview-pane img {
-        width: 100%;
-        max-width: 100%;
-        height: auto;
-        border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        aspect-ratio: 9 / 6;
-        object-fit: cover;
-      }
+      .note{background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--mut);line-height:1.45;margin-top:10px}
 
-      .preview-pane.back-preview {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-      }
-
-      /* Postcard back mockup */
-      .postcard-back-mockup {
-        width: 100%;
-        aspect-ratio: 9 / 6;
-        background: #fffef8;
-        border-radius: 4px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-        display: flex;
-        overflow: hidden;
-      }
-
-      .postcard-message-side {
-        width: 50%;
-        padding: 12px;
-        border-right: 1px solid #ddd;
-        display: flex;
-        align-items: flex-start;
-      }
-
-      .postcard-message-text {
-        font-family: "Georgia", "Times New Roman", serif;
-        font-size: 0.75rem;
-        line-height: 1.5;
-        color: #333;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-      }
-
-      .postcard-address-side {
-        width: 50%;
-        padding: 12px;
-        position: relative;
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-end;
-      }
-
-      .postcard-stamp {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        width: 36px;
-        height: 44px;
-        border: 1.5px dashed #999;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 6px;
-        color: #999;
-        text-align: center;
-      }
-
-      .postcard-recipient {
-        font-family: "Courier New", monospace;
-        font-size: 0.65rem;
-        line-height: 1.4;
-        color: #333;
-      }
-
-      .postcard-recipient .name {
-        font-weight: bold;
-        text-transform: uppercase;
-      }
-
-      .postcard-return-address {
-        position: absolute;
-        top: 8px;
-        left: 8px;
-        font-family: "Courier New", monospace;
-        font-size: 0.55rem;
-        line-height: 1.3;
-        color: #555;
-      }
-
-      /* Message box in meta section */
-      .message-box {
-        padding: 0.75rem;
-        background: var(--bg-secondary);
-        border-radius: 8px;
-        border: 1px solid var(--border-color);
-      }
-
-      .message-text {
-        font-family: "Georgia", "Times New Roman", serif;
-        font-size: 0.9rem;
-        line-height: 1.5;
-        color: var(--text-primary);
-        white-space: pre-wrap;
-        word-wrap: break-word;
-      }
-
-      .meta {
-        padding: 1rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-      }
-
-      .info-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 0.9rem;
-      }
-
-      .info-label {
-        color: var(--text-secondary);
-      }
-
-      .info-value {
-        font-weight: 600;
-        color: var(--text-primary);
-      }
-
-      .status-pill {
-        display: inline-flex;
-        align-items: center;
-        padding: 0.35rem 0.65rem;
-        border-radius: 999px;
-        font-size: 0.8rem;
-        font-weight: 600;
-      }
-
-      .status-pill.ok {
-        background: var(--accent-success-bg);
-        color: var(--accent-success);
-      }
-
-      .status-pill.alert {
-        background: var(--accent-warning-bg);
-        color: var(--accent-warning);
-      }
-
-      .note {
-        font-size: 0.85rem;
-        color: var(--text-secondary);
-        padding: 0.75rem;
-        background: var(--bg-secondary);
-        border-radius: 8px;
-        border: 1px solid var(--border-color);
-      }
-
-      /* Send button styles */
-      .send-button {
-        width: 100%;
-        padding: 0.75rem 1rem;
-        font-size: 1rem;
-        font-weight: 600;
-        color: #ffffff;
-        background: var(--accent-primary);
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: background 0.15s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-      }
-
-      .send-button:hover:not(:disabled) {
-        background: var(--accent-primary-hover);
-      }
-
-      .send-button:disabled {
-        background: var(--accent-primary-disabled);
-        cursor: not-allowed;
-        opacity: 0.7;
-      }
-
-      .send-button.loading {
-        pointer-events: none;
-      }
-
-      .send-button .spinner {
-        width: 1rem;
-        height: 1rem;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: #ffffff;
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-      }
-
-      .purchase-actions {
-        display: grid;
-        gap: 0.6rem;
-      }
-
-      .send-button.secondary {
-        color: var(--accent-primary);
-        background: transparent;
-        border: 1px solid var(--accent-primary);
-      }
-
-      .send-button.secondary:hover:not(:disabled) {
-        background: var(--bg-secondary);
-      }
-
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
+      /* Action buttons: primary ink pill (inverts in dark), secondary outline */
+      .send-button{display:flex;width:100%;justify-content:center;align-items:center;gap:7px;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;box-sizing:border-box;border:none;margin-top:12px;background:var(--pri);color:var(--prit);transition:opacity .15s ease}
+      .send-button:hover:not(:disabled){opacity:.88}
+      .send-button:disabled{opacity:.45;cursor:not-allowed}
+      .send-button.loading{pointer-events:none}
+      .send-button .spinner{width:1rem;height:1rem;border:2px solid rgba(128,128,128,.35);border-top-color:currentColor;border-radius:50%;animation:spin .8s linear infinite}
+      .purchase-actions{display:grid;gap:0}
+      .send-button.secondary{color:var(--tx);background:transparent;border:1px solid var(--bd);margin-top:8px}
+      .send-button.secondary:hover:not(:disabled){background:var(--sf2);opacity:1}
+      @keyframes spin{to{transform:rotate(360deg)}}
 
       /* Success/Error states */
-      .send-result {
-        padding: 0.75rem;
-        border-radius: 8px;
-        font-size: 0.9rem;
-        text-align: center;
-      }
+      .send-result{border-radius:8px;font-size:12px;line-height:1.5;text-align:center;padding:9px 11px;margin-top:11px}
+      .send-result.success{background:var(--okbg);color:var(--ok)}
+      .send-result.error{background:var(--erbg);border:1px solid rgba(220,38,38,.25);color:var(--er)}
 
-      .send-result.success {
-        background: var(--accent-success-bg);
-        color: var(--accent-success);
-      }
-
-      .send-result.error {
-        background: var(--accent-warning-bg);
-        color: var(--accent-warning);
-      }
-
-      /* Loading state */
+      /* Loading shimmer */
       .loading .info-value,
-      .loading .status-pill {
-        background: linear-gradient(
-          90deg,
-          var(--bg-secondary) 25%,
-          var(--border-color) 50%,
-          var(--bg-secondary) 75%
-        );
-        background-size: 200% 100%;
-        animation: shimmer 1.5s infinite;
-        color: transparent;
-        border-radius: 4px;
-        min-width: 60px;
-      }
-
-      .loading .status-pill {
-        min-width: 100px;
-      }
-
-      @keyframes shimmer {
-        0% {
-          background-position: 200% 0;
-        }
-        100% {
-          background-position: -200% 0;
-        }
-      }
-
-      .preview-loading {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 100px;
-        color: var(--text-secondary);
-        font-style: italic;
-      }
+      .loading .status-pill{background:linear-gradient(90deg,var(--bd2) 25%,var(--bd) 50%,var(--bd2) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;color:transparent;border-radius:4px;min-width:60px}
+      .loading .status-pill{min-width:100px}
+      @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+      .preview-loading{display:flex;align-items:center;justify-content:center;min-height:100px;color:var(--faint);font-size:11.5px;width:100%}
+      .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
+      .hidden{display:none !important}
     </style>
   </head>
   <body>
-    <div class="card" id="card">
+    <div class="w" id="card">
+      <div class="hd"><span class="logo"></span><b>Letter IRL</b><span class="ctx">Postcard</span></div>
       <div class="preview-tabs">
         <button class="preview-tab active" id="tab-front" data-tab="front">
           Front (Image)
@@ -447,35 +103,37 @@
       </div>
       <div class="preview-container">
         <div class="preview-pane front-preview" id="preview-front">
-          <em>Loading preview...</em>
+          <div class="preview-loading">Loading postcard preview&hellip;</div>
         </div>
         <div class="preview-pane back-preview hidden" id="preview-back">
-          <em>Loading preview...</em>
+          <div class="preview-loading">Loading message preview&hellip;</div>
         </div>
       </div>
       <div class="meta">
-        <div class="info-row">
-          <span class="info-label">Cost</span>
-          <span class="info-value" id="cost"></span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">Delivery</span>
-          <span class="info-value" id="delivery"></span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">Status</span>
-          <span class="status-pill" id="status-pill"></span>
-        </div>
-        <div class="info-row">
-          <span class="info-label" id="id-label">Draft</span>
-          <span class="info-value" id="id-value"></span>
-        </div>
-        <div class="info-row" id="recipient-row" style="display: none">
-          <span class="info-label">To</span>
-          <span class="info-value" id="recipient-name"></span>
+        <div class="rows">
+          <div class="info-row">
+            <span class="info-label">Cost</span>
+            <span class="info-value" id="cost"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Delivery</span>
+            <span class="info-value" id="delivery"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Status</span>
+            <span class="status-pill" id="status-pill"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label" id="id-label">Draft</span>
+            <span class="info-value mono" id="id-value"></span>
+          </div>
+          <div class="info-row" id="recipient-row" style="display: none">
+            <span class="info-label">To</span>
+            <span class="info-value" id="recipient-name"></span>
+          </div>
         </div>
         <div class="message-box" id="message-box" style="display: none">
-          <div class="info-label" style="margin-bottom: 0.5rem">Message</div>
+          <span class="info-label">Message</span>
           <div class="message-text" id="message-text"></div>
         </div>
         <div class="note" id="note" style="display: none"></div>
@@ -494,6 +152,7 @@
           <button class="send-button secondary" id="buy-pack-button">
             Buy a Letter Pack
           </button>
+          <div class="note">Checkout opens in your browser. This card updates automatically once payment completes.</div>
         </div>
         <div
           id="error-message"
@@ -501,6 +160,7 @@
           style="display: none"
         ></div>
       </div>
+      <p class="rev">postcard t12</p>
     </div>
 
     <script type="module">
@@ -513,6 +173,11 @@
       let sendInProgress = false;
       let checkoutInProgress = false;
       let currentTab = "front";
+
+      function applyTheme() {
+        const theme = window.openai?.theme ?? "light";
+        document.documentElement.classList.toggle("dark", theme === "dark");
+      }
 
       // Tab switching
       function switchTab(tab) {
@@ -544,9 +209,9 @@
 
         // Show loading state
         document.getElementById("preview-front").innerHTML =
-          '<div class="preview-loading">Loading postcard preview...</div>';
+          '<div class="preview-loading">Loading postcard preview…</div>';
         document.getElementById("preview-back").innerHTML =
-          '<div class="preview-loading">Loading message preview...</div>';
+          '<div class="preview-loading">Loading message preview…</div>';
         document.getElementById("cost").textContent = "-";
         document.getElementById("delivery").textContent = "-";
 
@@ -568,6 +233,7 @@
       }
 
       function render() {
+        applyTheme();
         const state = window.openai?.toolOutput;
 
         // Check if we have actual data
@@ -626,7 +292,7 @@
         if (frontContent) {
           previewFront.innerHTML = frontContent;
         } else {
-          previewFront.innerHTML = "<em>No image preview available</em>";
+          previewFront.innerHTML = '<div class="preview-loading">No image preview available</div>';
         }
 
         // Render back preview (postcard mockup)
@@ -694,7 +360,7 @@
             </div>
           `;
         } else {
-          previewBack.innerHTML = "<em>No message preview available</em>";
+          previewBack.innerHTML = '<div class="preview-loading">No message preview available</div>';
         }
 
         // Show message and recipient in meta section
@@ -947,12 +613,6 @@
       document
         .getElementById("buy-pack-button")
         .addEventListener("click", handleBuyPack);
-
-      // Apply theme
-      const theme = window.openai?.theme ?? "light";
-      if (theme === "dark") {
-        document.documentElement.classList.add("dark");
-      }
 
       // Initial render (will show loading state)
       render();
