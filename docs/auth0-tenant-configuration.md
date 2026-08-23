@@ -330,6 +330,35 @@ canonical `/mcp` resource.
    - Identifier: exact canonical environment `/mcp` URL.
    - Permissions: `mail:read`, `mail:draft`, and `mail:send`.
    - Enable the resource-parameter compatibility profile when Auth0 requires it.
+   - **Allow Offline Access: enabled.** Without it Auth0 issues no refresh token
+     however the client asks, and the connection dies at access-token expiry with
+     a human re-consent as the only recovery (issue #160).
+
+2a. **Refresh token settings on the CIMD client** (owner decision, 2026-08-23)
+
+   Verified live in the DEV tenant on 2026-08-23. Rotation and both lifetimes
+   were already configured; only **Allow Offline Access** on the API above was
+   off, which is why no refresh token was ever issued.
+
+   | Setting | Value | Why |
+   |---|---|---|
+   | Allow Refresh Token Rotation | **Enabled** | Each use replaces the token; reuse of a retired one signals theft |
+   | Rotation Overlap Period | **0 seconds** | No window in which a retired token still works - the strictest setting |
+   | Maximum (absolute) lifetime | **30 days** (2592000s) | An abandoned grant dies within a month |
+   | Idle lifetime | **15 days** (1296000s) | A dormant connection lapses sooner than an active one |
+
+   The approved decision said 14 days idle; the tenant already had 15. The
+   difference is immaterial to the intent (roughly a fortnight) and the existing
+   value was deliberate, so reality is recorded here rather than adjusted to
+   match a round number.
+
+   These bound a real exposure: a refresh token carrying `mail:send` is a standing
+   ability to spend a customer's credits and post physical mail whenever their
+   ChatGPT account asks. Revocation must still take effect immediately - that is
+   CIMD-02b in docs/manual-tests.md, and it is the check that keeps this honest.
+
+   The same settings must be applied to the **production** tenant at cutover
+   (#158). They are not inherited from DEV.
 
 3. **Domain-Level Connections**
    - **All 5 connections** must have `is_domain_connection: true`

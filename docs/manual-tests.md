@@ -3,8 +3,14 @@
 ## Issue #160 — Auth0 public CIMD DEV acceptance
 
 Execution owner: `LIRL · Test · Browser`, after the implementation is deployed
-and the owner completes the DEV Auth0/OpenAI configuration gate. These are
-durable test definitions, not evidence that browser execution occurred.
+and the owner completes the DEV Auth0/OpenAI configuration gate.
+
+**Status (reconciled 2026-08-23).** CIMD-01 through CIMD-05 were executed against
+DEV in late July / early August and are ticked below, each against the issue
+comment carrying its sanitized evidence. CIMD-06, CIMD-07, CIMD-09, and CIMD-10
+remain open, and the reason each is blocked is recorded on the case itself.
+Ticks here mean an execution happened and was evidenced; they are not a claim
+that the case can never regress.
 
 Record the deployment/version, ChatGPT app/version IDs, redacted Auth0 client
 count before and after, browser/mobile platform, result, and evidence link for
@@ -13,49 +19,104 @@ or raw request bodies.
 
 ### CIMD-01 — Fresh link
 
-- [ ] Unlink the DEV app, revoke its stale Auth0 grant, and use a fresh/clean
+- [x] Unlink the DEV app, revoke its stale Auth0 grant, and use a fresh/clean
       test account.
-- [ ] Click **Sign in with (DEV) Letter IRL** and confirm Auth0 opens.
-- [ ] Confirm the OAuth client ID is the current HTTPS CIMD URL, the exact
+- [x] Click **Sign in with (DEV) Letter IRL** and confirm Auth0 opens.
+- [x] Confirm the OAuth client ID is the current HTTPS CIMD URL, the exact
       `https://chatgpt.com/connector/oauth/{callback_id}` callback is accepted,
       authorization code + PKCE S256 is used, and no client secret is sent.
-- [ ] Confirm consent identifies Letter IRL and requests only the expected
+- [x] Confirm consent identifies Letter IRL and requests only the expected
       identity and `mail:read`, `mail:draft`, `mail:send` scopes.
+
+Evidence: https://github.com/dnobj/mail-letter-irl/issues/160#issuecomment-5146200022 (link established, CIMD client imported) and
+https://github.com/dnobj/mail-letter-irl/issues/160#issuecomment-5147799259 (read-only audit: exact CIMD client ID and callback).
+**Re-run required** once `offline_access` is advertised - the consent screen will
+then also request offline access, so the last checkbox's expectation changes.
 
 ### CIMD-02 — Reconnect, revoke, and client-count/DCR
 
-- [ ] Record the Auth0 application/client count before testing.
-- [ ] Disconnect, reconnect, and re-consent twice.
-- [ ] Revoke the Auth0 grant and verify the next tool call requires linking.
-- [ ] Confirm the client count did not increase and no DCR registration request
+- [x] Record the Auth0 application/client count before testing.
+- [x] Disconnect, reconnect, and re-consent twice.
+- [x] Revoke the Auth0 grant and verify the next tool call requires linking.
+- [x] Confirm the client count did not increase and no DCR registration request
       or new Auth0 application was created.
+
+Evidence: https://github.com/dnobj/mail-letter-irl/issues/160#issuecomment-5146247529 (two reconnects, count stable at 7, same CIMD
+client reused) and https://github.com/dnobj/mail-letter-irl/issues/160#issuecomment-5148795945 (post-reconnect invariant: 7 clients,
+1 CIMD client, 1 grant, 0 DCR create events).
+
+#### CIMD-02a - Session survives access-token expiry (refresh tokens)
+
+Added 2026-08-23. Before `offline_access` was advertised, no refresh token was
+issued, so an expired access token could only be recovered by a human clicking
+**Reconnect** and re-consenting - observed twice in three hours on 8 Aug and
+again on 23 Aug. This case is the proof that the fix works.
+
+- [ ] Confirm the consent screen requests offline access, and that Auth0 records
+      a refresh token issued on the code exchange.
+- [ ] Leave the connection idle past the access-token lifetime, then invoke any
+      read tool (for example `get_account_balance`).
+- [ ] Confirm the tool call succeeds with **no** "connection has expired" prompt
+      and no human re-consent.
+- [ ] Confirm rotation: the refresh token used is replaced, and Auth0 shows no
+      growth in client or grant count.
+
+#### CIMD-02b - Revocation still forces a re-link
+
+Added 2026-08-23. The counterpart to CIMD-02a: refresh tokens exist to remove
+prompts, and the risk they introduce is a grant that outlives the user's intent.
+A grant that survives revocation would be the real defect.
+
+- [ ] Revoke the ChatGPT grant in the Auth0 dashboard.
+- [ ] Invoke any Letter IRL tool in ChatGPT.
+- [ ] Confirm the call fails closed and a fresh link/consent is required - the
+      stored refresh token must not silently resurrect the session.
 
 ### CIMD-03 — Tool exposure and `get_started`
 
-- [ ] Start a fresh ChatGPT conversation, select **(DEV) Letter IRL**, and run:
+- [x] Start a fresh ChatGPT conversation, select **(DEV) Letter IRL**, and run:
       `Use the selected DEV app's get_started tool and show me its onboarding card.`
-- [ ] Confirm the Letter IRL `get_started` tool is invoked and `GetStartedCard`
+- [x] Confirm the Letter IRL `get_started` tool is invoked and `GetStartedCard`
       renders; record the tool evidence.
+
+Evidence: https://github.com/dnobj/mail-letter-irl/issues/160#issuecomment-5148795945 (post-reconnect PASS, conversation linked).
+Re-confirmed repeatedly since, most recently 2026-08-23 during the widget
+redesign and the get_started narration fix.
 
 ### CIMD-04 — Image routing and upload widget
 
-- [ ] Run a generic `Generate an image of a sunset` with the app attached and
+- [x] Run a generic `Generate an image of a sunset` with the app attached and
       confirm ChatGPT uses NATIVE image generation and NO Letter IRL tool is
       invoked (Letter IRL's generator was removed Aug 2026; decision record:
       docs/learnings/generate-image-removal-decision.md).
-- [ ] Run `Open the Letter IRL photo upload widget for a postcard` and confirm
+- [x] Run `Open the Letter IRL photo upload widget for a postcard` and confirm
       `upload_image` is invoked and `ImageUploadCard` renders.
-- [ ] Continue into a postcard preview/edit and confirm `mail:draft` behavior.
+- [x] Continue into a postcard preview/edit and confirm `mail:draft` behavior.
+
+Evidence: https://github.com/dnobj/mail-letter-irl/issues/160#issuecomment-5147473811 (generate -> widget -> postcard preview reached
+Ready to send; nothing mailed or charged). Note the image-routing expectation was
+rewritten afterwards by the #227 arc - current behavior is governed by
+`LETTER_IRL_IMAGE_GEN_MODE` and documented in
+docs/learnings/generate-image-removal-decision.md.
 
 ### CIMD-05 — Scope enforcement
 
-- [ ] Use a controlled DEV token/grant missing each product scope in turn.
-- [ ] Verify read tools require `mail:read`, previews/images/address writes
+- [x] Use a controlled DEV token/grant missing each product scope in turn.
+- [x] Verify read tools require `mail:read`, previews/images/address writes
       require `mail:draft`, and physical sends require `mail:send`.
-- [ ] Confirm failures return `insufficient_scope` and a consistent
+- [x] Confirm failures return `insufficient_scope` and a consistent
       `WWW-Authenticate` challenge without exposing credentials.
 
+Evidence: https://github.com/dnobj/mail-letter-irl/issues/160#issuecomment-5148966534 (missing `mail:read`) and
+https://github.com/dnobj/mail-letter-irl/issues/160#issuecomment-5149023713 (missing `mail:draft`, missing `mail:send`). All three
+used temporary loopback PKCE clients that were removed afterwards; each guard
+fired before any handler, provider, charge, or mail action.
+
 ### CIMD-06 — Account switch and identity integrity
+
+**Blocked:** needs a second approved DEV test identity provisioned through the
+secure local test-account process (https://github.com/dnobj/mail-letter-irl/issues/160#issuecomment-5149106768). An arbitrary tenant
+user is not an approved test identity.
 
 - [ ] Link account A, inspect its balance/order identity, then disconnect.
 - [ ] Use the account-switch flow and link account B.
@@ -64,6 +125,10 @@ or raw request bodies.
       by a placeholder.
 
 ### CIMD-07 — Web and mobile
+
+**Partial.** The web half is covered by CIMD-01/03/04 above. Native-app coverage
+exists for widgets and image routing (Aug 2026 Android sessions recorded in the
+#227 evidence trail), but a mobile *fresh link* has not been executed.
 
 - [ ] Repeat fresh link, `get_started`, and image/widget flow on ChatGPT web.
 - [ ] Repeat the same core flow on each supported ChatGPT mobile client.
@@ -87,11 +152,20 @@ tokens, and request content must never be used as an error class.
 
 ### CIMD-09 — Claude/PAT regression
 
+**Blocked:** needs an already-approved DEV PAT placed in the documented
+gitignored test-credential location, or an existing PAT-compatible client
+configured locally (https://github.com/dnobj/mail-letter-irl/issues/160#issuecomment-5149106768). No PAT is to be created for this
+purpose, pasted into GitHub, or exposed in chat.
+
 - [ ] Connect the supported Claude/non-ChatGPT MCP path with a PAT.
 - [ ] Confirm PAT tool calls work and never call Auth0 userinfo.
 - [ ] Confirm the Claude/PAT path does not use or mutate the ChatGPT CIMD app.
 
 ### CIMD-10 — DEV rollback
+
+**Open:** preparation recorded in https://github.com/dnobj/mail-letter-irl/issues/160#issuecomment-5149106768; the exercise itself
+has not been run. Worth running before the production cutover (#158), since it is
+the only rehearsal of the rollback path.
 
 - [ ] Save the accepted CIMD configuration and deployment identifiers.
 - [ ] Enable `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY=true` in DEV only with

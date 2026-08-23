@@ -1,4 +1,4 @@
-import { getOAuthConfig } from "./oauthConfig.js";
+import { getOAuthConfig, SUPPORTED_GRANT_TYPES } from "./oauthConfig.js";
 
 export function getOpenIdConfiguration(baseUrl: string) {
   const config = getOAuthConfig();
@@ -11,7 +11,7 @@ export function getOpenIdConfiguration(baseUrl: string) {
       ? { registration_endpoint: `${baseUrl}/oauth/register` }
       : {}),
     response_types_supported: ["code"],
-    grant_types_supported: ["authorization_code"],
+    grant_types_supported: [...SUPPORTED_GRANT_TYPES],
     code_challenge_methods_supported: ["S256"],
     scopes_supported: config.scopes,
     token_endpoint_auth_methods_supported: ["none"],
