@@ -40,13 +40,39 @@ Address validation is integrated into the `quote_and_preview_letter` tool to cat
    → User can see what was changed
    ```
 
-   **c) Address(es) invalid ❌**
+   **c) Secondary unit unconfirmed ⚠️ (issue #200)**
    ```
-   Status: failed
+   Status: failed with USPS DPV indicator "S" or "D"
+   (details.usMailingsDpvConfirmationIndicator - building is confirmed
+   deliverable; the unit is not on USPS's file, or is required but missing)
+   → PROCEEDS with the preview and draft
+   → Output validation status reads "unverified"
+   → addressWarnings carries one sentence per address, surfaced in the
+     tool summary ("USPS couldn't confirm "STE 8701" ... mail will be
+     addressed exactly as entered")
+   Ordinary residential apartments land here - USPS does not enumerate
+   every unit in every building. See docs/learnings/suite-address-verification.md.
+   ```
+
+   **d) Verification unavailable ⚠️**
+   ```
+   Transport/API failure (timeout, 401, outage) - transportError: true
+   → PROCEEDS with a "couldn't verify right now" warning
+   → A verification outage never blocks sending
+   ```
+
+   **e) Address(es) invalid ❌**
+   ```
+   Status: failed, street did not resolve (no DPV indicator)
    → Does NOT proceed with preview
-   → Returns error with validation details
+   → Error names the problem, shows PostGrid's closest match when the
+     street resolved, and tells the user what to check
    → User must fix address and try again
    ```
+
+   Classification lives in `src/services/addressVerificationPolicy.ts`;
+   all four preview tools share `validateAddressesWithProvider`, and
+   return-address saving applies the same policy.
 
 ---
 

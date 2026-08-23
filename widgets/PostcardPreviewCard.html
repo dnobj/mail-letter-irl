@@ -604,11 +604,13 @@
           message,
           recipientName,
           recipientAddressLine1,
+          recipientAddressLine2,
           recipientCity,
           recipientState,
           recipientPostalCode,
           senderName,
           senderAddressLine1,
+          senderAddressLine2,
           senderCity,
           senderState,
           senderPostalCode,
@@ -644,6 +646,7 @@
           const escapedRecipientStreet = escapeHtml(
             recipientAddressLine1 || "",
           );
+          const escapedRecipientUnit = escapeHtml(recipientAddressLine2 || "");
           const escapedRecipientCityLine = escapeHtml(
             [recipientCity, recipientState, recipientPostalCode]
               .filter(Boolean)
@@ -654,6 +657,7 @@
           // Build full sender address
           const escapedSenderName = escapeHtml(senderName);
           const escapedSenderStreet = escapeHtml(senderAddressLine1 || "");
+          const escapedSenderUnit = escapeHtml(senderAddressLine2 || "");
           const escapedSenderCityLine = escapeHtml(
             [senderCity, senderState, senderPostalCode]
               .filter(Boolean)
@@ -674,6 +678,7 @@
                 <div class="postcard-return-address">
                   <div>${escapedSenderName}</div>
                   <div>${escapedSenderStreet}</div>
+                  ${escapedSenderUnit ? `<div>${escapedSenderUnit}</div>` : ""}
                   <div>${escapedSenderCityLine}</div>
                 </div>
                 `
@@ -682,6 +687,7 @@
                 <div class="postcard-recipient">
                   <div class="name">${escapedRecipientName}</div>
                   <div>${escapedRecipientStreet}</div>
+                  ${escapedRecipientUnit ? `<div>${escapedRecipientUnit}</div>` : ""}
                   <div>${escapedRecipientCityLine}</div>
                 </div>
               </div>

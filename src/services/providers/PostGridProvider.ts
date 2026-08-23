@@ -962,8 +962,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         originalAddress: address
       };
 
-      // Add verified/corrected address if available
-      if (result.isValid && addressData.line1) {
+      // Add the standardized address whenever PostGrid returns one - failed
+      // responses still carry USPS's closest match (e.g. "350 5th Ave Ste
+      // 8701" with ZIP+4), which downstream copy uses as the suggestion and
+      // the secondary-unit policy needs as evidence the building resolved.
+      if (addressData.line1) {
         result.verifiedAddress = {
           line1: addressData.line1,
           line2: addressData.line2,
@@ -1004,10 +1007,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         );
       }
 
-      // Return failed validation result
+      // Verification never judged the address; mark it so policy can treat
+      // "service unavailable" differently from "address invalid".
       return {
         status: 'failed',
         isValid: false,
+        transportError: true,
         originalAddress: address,
         errors: [{
           field: 'address',

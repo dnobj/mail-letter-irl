@@ -280,6 +280,12 @@ export interface AddressValidationResult {
     message: string;
   }>;
 
+  /**
+   * True when verification itself failed (network, auth, timeout) rather
+   * than the address - the address was never actually judged.
+   */
+  transportError?: boolean;
+
   /** Additional details (county, congressional district, etc.) */
   details?: Record<string, any>;
 

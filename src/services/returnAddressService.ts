@@ -6,6 +6,7 @@
  */
 
 import { query } from '../db/index.js';
+import { assessValidation } from './addressVerificationPolicy.js';
 import { getLetterProvider } from './providers/index.js';
 import type { AddressValidationInput, AddressValidationResult } from './providers/types.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
@@ -29,11 +30,13 @@ export interface ReturnAddress {
 export interface SetReturnAddressResult {
   success: boolean;
   address?: ReturnAddress;
-  validationStatus: 'verified' | 'corrected' | 'failed';
+  validationStatus: 'verified' | 'corrected' | 'failed' | 'unverified';
   wasAutoCorrected: boolean;
   originalAddress?: ReturnAddress;
   correctionDetails?: string;
   errors?: string[];
+  /** Present when the address was saved without full verification. */
+  warning?: string;
 }
 
 /**
@@ -129,18 +132,33 @@ export async function setReturnAddress(
     };
   }
 
-  // Handle validation result
+  // Handle validation result under the shared policy (issue #200):
+  // secondary-unit and verification-outage failures save the address as
+  // entered with a warning; only genuine address failures refuse.
   if (validation.status === 'failed') {
-    const errorMessages = validation.errors?.map(e => e.message) || ['Address is invalid or undeliverable'];
-    writeDiagnostic('info', 'address.validation_rejected', {
-      errorClass: 'validation_error'
-    });
+    const assessment = assessValidation('return', validation);
+    if (assessment.outcome === 'blocked') {
+      const errorMessages = validation.errors?.map(e => e.message) || ['Address is invalid or undeliverable'];
+      writeDiagnostic('info', 'address.validation_rejected', {
+        errorClass: 'validation_error'
+      });
+      return {
+        success: false,
+        validationStatus: 'failed',
+        wasAutoCorrected: false,
+        originalAddress: normalizedAddress,
+        errors: errorMessages
+      };
+    }
+
+    writeDiagnostic('info', 'address.saved_unverified');
+    await saveReturnAddress(userId, normalizedAddress);
     return {
-      success: false,
-      validationStatus: 'failed',
+      success: true,
+      address: normalizedAddress,
+      validationStatus: 'unverified',
       wasAutoCorrected: false,
-      originalAddress: normalizedAddress,
-      errors: errorMessages
+      warning: assessment.warning
     };
   }
 
