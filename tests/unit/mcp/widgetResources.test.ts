@@ -74,7 +74,9 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       const widgetDir = path.resolve(__dirname, '../../../widgets');
       const parts: string[] = [];
       for (const { name } of [...WIDGET_DEFINITIONS].sort((a, b) => a.name.localeCompare(b.name))) {
-        const content = await fs.readFile(path.join(widgetDir, `${name}.html`), 'utf-8');
+        // Normalize line endings: with core.autocrlf a Windows checkout
+        // materializes CRLF and the pin must not depend on that.
+        const content = (await fs.readFile(path.join(widgetDir, `${name}.html`), 'utf-8')).replace(/\r\n/g, '\n');
         parts.push(`${name}:${createHash('sha256').update(content).digest('hex')}`);
       }
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
