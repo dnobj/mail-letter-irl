@@ -95,6 +95,31 @@ reintroduce (both sites read `SUPPORTED_GRANT_TYPES`). It also had nothing to
 do with the symptom. Correct-and-irrelevant is a common and seductive outcome;
 only the behavioural test distinguishes it from correct-and-sufficient.
 
+## Confirmed
+
+Fixed and proven on DEV, 2026-08-23. With the access-token lifetime temporarily
+at 300s: consent screen showed **Allow offline access**, the grant recorded
+`mail:read mail:draft mail:send offline_access`, and a tool invoked ~22 minutes
+past expiry succeeded with no prompt - Auth0 logging
+`Successful Refresh Token exchange` (`policy_used: refresh_token_user_grant`,
+`tokenCounter: 2`, so rotation is live). The log had recorded **zero** refresh
+exchanges of any kind before this.
+
+## A second trap: a deploy does not reach the client
+
+After the fix deployed, the connector still advertised the old scopes. The
+connector holds a **pinned app-version snapshot**; only **Refresh** re-ingests
+tool schemas from the live server.
+
+The trap: **Refresh is not rendered while the connector is disconnected.**
+Several test cycles were spent clicking it in that state, doing nothing, so the
+schema stayed pinned to a July snapshot and none of the deploys reached ChatGPT
+at all. Reconnect first, then Refresh.
+
+Confirm by reading the tool's `SECURITY SCHEMES` block on the connector page.
+The App Version Id does **not** change when a refresh lands, so it is not a
+usable signal.
+
 ## The shape of the fix
 
 - `securitySchemes` scopes = enforced scopes **+** session scopes.
