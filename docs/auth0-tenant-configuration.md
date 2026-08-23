@@ -336,11 +336,21 @@ canonical `/mcp` resource.
 
 2a. **Refresh token settings on the CIMD client** (owner decision, 2026-08-23)
 
+   Verified live in the DEV tenant on 2026-08-23. Rotation and both lifetimes
+   were already configured; only **Allow Offline Access** on the API above was
+   off, which is why no refresh token was ever issued.
+
    | Setting | Value | Why |
    |---|---|---|
-   | Rotation | **Enabled** | Each use replaces the token; reuse of a retired one signals theft |
-   | Absolute lifetime | **30 days** (2592000s) | An abandoned grant dies within a month |
-   | Inactivity lifetime | **14 days** (1209600s) | A dormant connection lapses sooner than an active one |
+   | Allow Refresh Token Rotation | **Enabled** | Each use replaces the token; reuse of a retired one signals theft |
+   | Rotation Overlap Period | **0 seconds** | No window in which a retired token still works - the strictest setting |
+   | Maximum (absolute) lifetime | **30 days** (2592000s) | An abandoned grant dies within a month |
+   | Idle lifetime | **15 days** (1296000s) | A dormant connection lapses sooner than an active one |
+
+   The approved decision said 14 days idle; the tenant already had 15. The
+   difference is immaterial to the intent (roughly a fortnight) and the existing
+   value was deliberate, so reality is recorded here rather than adjusted to
+   match a round number.
 
    These bound a real exposure: a refresh token carrying `mail:send` is a standing
    ability to spend a customer's credits and post physical mail whenever their
