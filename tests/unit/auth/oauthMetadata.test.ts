@@ -18,7 +18,7 @@ describe("OAuth metadata", () => {
     vi.stubEnv("LETTER_IRL_OAUTH_AUDIENCE", resource);
     vi.stubEnv(
       "LETTER_IRL_OAUTH_SCOPES",
-      "openid profile email mail:read mail:draft mail:send"
+      "openid profile email offline_access mail:read mail:draft mail:send"
     );
     vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "false");
   });
@@ -33,6 +33,8 @@ describe("OAuth metadata", () => {
         "openid",
         "profile",
         "email",
+        // Requested so Auth0 issues a refresh token; never demanded by a tool.
+        "offline_access",
         "mail:read",
         "mail:draft",
         "mail:send"

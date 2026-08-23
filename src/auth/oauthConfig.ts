@@ -1,6 +1,35 @@
+/**
+ * The per-tool authorization vocabulary. Every tool maps to exactly one of
+ * these (src/auth/toolScopes.ts), and validateOAuthConfig requires all three to
+ * be advertised. Nothing else belongs here: a scope in this list is a scope a
+ * tool can demand.
+ */
 export const PRODUCT_SCOPES = ["mail:read", "mail:draft", "mail:send"] as const;
+
 export const IDENTITY_SCOPES = ["openid", "profile", "email"] as const;
-export const DEFAULT_OAUTH_SCOPES = [...IDENTITY_SCOPES, ...PRODUCT_SCOPES];
+
+/**
+ * Session scopes: requested from Auth0, never demanded by a tool.
+ *
+ * `offline_access` is what makes Auth0 issue a refresh token. Without it the
+ * connection simply died when the access token expired - observed twice in
+ * three hours on 8 Aug 2026 and again on 23 Aug - and the only recovery was a
+ * human clicking Reconnect and re-consenting, which also meant no unattended
+ * test of this surface could outlive a token lifetime (issue #160).
+ *
+ * It buys fewer prompts and costs a longer-lived grant: a refresh token
+ * carrying mail:send is a standing ability to spend a customer's credits and
+ * post physical mail. That exposure is bounded in the Auth0 tenant rather than
+ * here - rotation on, 30-day absolute, 14-day inactivity - and the revocation
+ * counter-test (CIMD-02b in docs/manual-tests.md) is what keeps it honest.
+ */
+export const SESSION_SCOPES = ["offline_access"] as const;
+
+export const DEFAULT_OAUTH_SCOPES = [
+  ...IDENTITY_SCOPES,
+  ...SESSION_SCOPES,
+  ...PRODUCT_SCOPES
+];
 
 export interface OAuthConfig {
   issuer: string;

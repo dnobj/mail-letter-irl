@@ -2,7 +2,7 @@ import { AuthenticatedUser, requireScopes } from "./tokenValidator.js";
 
 export type ProductScope = "mail:read" | "mail:draft" | "mail:send";
 
-const TOOL_SCOPES: Record<string, ProductScope> = {
+export const TOOL_SCOPES: Record<string, ProductScope> = {
   get_started: "mail:read",
   generate_image_for_mail: "mail:draft",
   get_account_balance: "mail:read",

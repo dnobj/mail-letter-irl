@@ -330,6 +330,25 @@ canonical `/mcp` resource.
    - Identifier: exact canonical environment `/mcp` URL.
    - Permissions: `mail:read`, `mail:draft`, and `mail:send`.
    - Enable the resource-parameter compatibility profile when Auth0 requires it.
+   - **Allow Offline Access: enabled.** Without it Auth0 issues no refresh token
+     however the client asks, and the connection dies at access-token expiry with
+     a human re-consent as the only recovery (issue #160).
+
+2a. **Refresh token settings on the CIMD client** (owner decision, 2026-08-23)
+
+   | Setting | Value | Why |
+   |---|---|---|
+   | Rotation | **Enabled** | Each use replaces the token; reuse of a retired one signals theft |
+   | Absolute lifetime | **30 days** (2592000s) | An abandoned grant dies within a month |
+   | Inactivity lifetime | **14 days** (1209600s) | A dormant connection lapses sooner than an active one |
+
+   These bound a real exposure: a refresh token carrying `mail:send` is a standing
+   ability to spend a customer's credits and post physical mail whenever their
+   ChatGPT account asks. Revocation must still take effect immediately - that is
+   CIMD-02b in docs/manual-tests.md, and it is the check that keeps this honest.
+
+   The same settings must be applied to the **production** tenant at cutover
+   (#158). They are not inherited from DEV.
 
 3. **Domain-Level Connections**
    - **All 5 connections** must have `is_domain_connection: true`

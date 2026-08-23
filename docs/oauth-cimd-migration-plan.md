@@ -101,7 +101,23 @@ OIDC identity scopes such as openid, profile, and email are not sufficient autho
 - mail:draft for previews, generated images, and draft or address writes;
 - mail:send for physical send operations.
 
-Keep openid, profile, and email for identity. Add offline_access only if refresh-token behavior is deliberately enabled and tested.
+Keep openid, profile, and email for identity.
+
+`offline_access` is advertised as of 2026-08-23 (issue #160). It was deliberately
+held back until refresh-token behaviour could be enabled and tested, and the cost
+of holding it became concrete: the DEV connection expired mid-request twice in
+three hours on 8 Aug and again on 23 Aug, each time recoverable only by a human
+clicking Reconnect and re-consenting. That also meant no unattended test of this
+surface could outlive a token lifetime.
+
+The exposure it introduces is bounded in the tenant, not in the resource server:
+a refresh token carrying `mail:send` is a standing ability to spend a customer's
+credits and post physical mail, so rotation is on with a 30-day absolute and
+14-day inactivity lifetime (owner decision, 2026-08-23; see
+docs/auth0-tenant-configuration.md). `offline_access` is a session scope only -
+it is never demanded by a tool, pinned by tests/unit/auth/sessionScopes.test.ts -
+and CIMD-02b in docs/manual-tests.md exists to prove a revoked grant still forces
+a re-link rather than being silently resurrected.
 
 Sensitive tools must fail closed when the required scope is absent. The WWW-Authenticate challenge, protected-resource metadata, Auth0 API permissions, and server-side checks must agree.
 

@@ -20,7 +20,7 @@ function validEnv(): NodeJS.ProcessEnv {
     LETTER_IRL_OAUTH_AUDIENCE: resource,
     LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS: "RS256",
     LETTER_IRL_OAUTH_SCOPES:
-      "openid profile email mail:read mail:draft mail:send"
+      "openid profile email offline_access mail:read mail:draft mail:send"
   };
 }
 
