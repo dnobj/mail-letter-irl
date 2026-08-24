@@ -370,19 +370,23 @@ canonical `/mcp` resource.
      still publishes `registration_endpoint` in its metadata either way - the DEV
      tenant does too - so the published document is NOT a way to check this. Read
      the setting.
-   - `Letter IRL API (Test Application)` is **retained deliberately, despite the
-     name.** It holds **Auth0 Management API access (4 of 273 permissions)** and
-     is the client `scripts/dev-sync.ts` authenticates as, via
-     `AUTH0_PROD_CLIENT_ID` / `AUTH0_PROD_CLIENT_SECRET`, to read production
-     users for the prod-to-dev sync. Deleting it would break that script.
+   - **`Prod-to-Dev Sync (Management API)`** - client id
+     `TZEuAJ6kTYFTXJRtu8fgUlPiqh9FAMMS`. Renamed 2026-08-24 from
+     `Letter IRL API (Test Application)`, which was actively misleading: it holds
+     **Auth0 Management API access (4 of 273 permissions)** and is the client
+     `scripts/dev-sync.ts` authenticates as, via `AUTH0_PROD_CLIENT_ID` /
+     `AUTH0_PROD_CLIENT_SECRET`, to read production users for the prod-to-dev
+     sync. Deleting it as the "test app" it appeared to be would have broken that
+     script silently - nothing in the repo names it, only an env var holding its
+     id, so searching the codebase for the app name finds nothing.
 
-     It holds **no** `mail:*` grants (0 of 3 on the MCP API), so it cannot mint
-     tokens carrying product scopes. The name is the problem, not the client:
-     Auth0 auto-creates a `(Test Application)` M2M client whenever an API is
-     created, and this one was later given Management API permissions without
-     being renamed. Renaming it to describe what it actually does is worth doing
-     - `AUTH0_PROD_CLIENT_ID` refers to it by id, so a rename is safe - but that
-     is an owner decision about a production identity, not a cleanup.
+     Its description now says the same thing inside the dashboard, so the next
+     person does not have to reconstruct it from grants.
+
+     The rename is safe because `AUTH0_PROD_CLIENT_ID` refers to it by id, and
+     the client id is unchanged. Grants verified unchanged afterwards. It holds
+     **no** `mail:*` grants (0 of 3 on the MCP API), so it cannot mint tokens
+     carrying product scopes.
 
      **Creating an API creates one of these every time.** The `Letter IRL MCP`
      API created earlier the same day produced `Letter IRL MCP (Test Application)`
