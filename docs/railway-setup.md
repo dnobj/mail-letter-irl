@@ -1,6 +1,6 @@
 # Railway Setup Guide
 
-Last updated: July 19, 2026
+Last updated: August 24, 2026
 
 Letter IRL uses one Railway project with `production` and `development` environments. Environment isolation is achieved with per-environment variables and branch deployment settings, not separate Railway projects.
 

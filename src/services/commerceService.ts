@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type Stripe from 'stripe';
 import { query, transaction } from '../db/index.js';
+import { ensurePriceCatalog } from './priceCatalog.js';
 import { lockAccountForBalanceChange } from './accountLock.js';
 import { addCreditsToLedgerWithClient } from './creditLedgerService.js';
 import { grantImageEntitlementWithClient } from './imageGenerationLimitService.js';
@@ -394,6 +395,9 @@ export function assertConfiguredAmount(
 export async function createPackCheckout(
   params: CreatePackCheckoutParams
 ): Promise<CommerceCheckoutResult> {
+  // Prices resolve lazily (#275 stage A); every entrypoint that can reach a
+  // product config awaits this first, so no process needs a bootstrap call.
+  await ensurePriceCatalog();
   const product = getPackProductConfig(params.productId);
   // Both guards throw before any query, so an uncarried error would take the
   // handler catch's database_error default and mislabel a non-database fault -
@@ -575,6 +579,7 @@ async function prepareJitOrder(
 export async function createJitCheckout(
   params: CreateJitCheckoutParams
 ): Promise<CommerceCheckoutResult> {
+  await ensurePriceCatalog();
   if (!isJitPurchaseEnabled()) {
     throw Object.assign(new Error('Pay & Send is not currently enabled'), {
       code: 'JIT_DISABLED'
@@ -977,6 +982,13 @@ async function processCheckoutSessionEvent(
   eventType: string,
   session: Stripe.Checkout.Session
 ): Promise<StripeEventProcessingResult> {
+  // BEFORE the transaction opens: createLegacyPackOrder inside it needs a
+  // priced product, and a network await must never run while holding a
+  // database connection (ACID standard). This is also what un-broke the
+  // maintenance cron, which adopts paid-but-unmatched sessions and priced
+  // everything at zero when resolution lived only in the HTTP entrypoint
+  // (#278 review).
+  await ensurePriceCatalog();
   return transaction(async client => {
     if (!(await claimStripeEvent(client, eventId, eventType, session.id))) {
       return { duplicate: true };

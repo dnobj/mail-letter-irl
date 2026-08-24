@@ -51,8 +51,7 @@ import {
 } from "../admin/config.js";
 import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
 import { getReadiness } from "./readiness.js";
-import { loadPriceCatalog } from "../services/priceCatalog.js";
-import { getConfiguredPriceIds } from "../services/stripeService.js";
+import { ensurePriceCatalog } from "../services/priceCatalog.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -260,13 +259,6 @@ export async function startHttpServer() {
   // Validate environment variables before starting server
   validateEnvironment();
 
-  // Resolve prices from Stripe once, before serving (#275 stage A). Never
-  // throws: an instance that cannot reach Stripe must still start and answer
-  // /healthz and /readyz, reporting itself unready, rather than crash-loop
-  // where nobody can ask it what is wrong. Purchases refuse in the meantime,
-  // because an unresolved price yields no amount and every caller's existing
-  // "not configured" guard fires.
-  await loadPriceCatalog(getConfiguredPriceIds());
 
   const letterServer = new LetterIrlServer();
   let cachedToolNames: Set<string> | null = null;
@@ -917,6 +909,13 @@ export async function startHttpServer() {
   await new Promise<void>((resolve) => {
     server.listen(DEFAULT_PORT, DEFAULT_HOST, () => {
       console.log(`Letter IRL MCP HTTP server listening on http://${DEFAULT_HOST}:${DEFAULT_PORT}`);
+      // Price warmup AFTER the port binds, fire-and-forget (#275 stage A). An
+      // earlier revision awaited this above, ~650 lines before listen, which
+      // meant a Stripe outage held the socket closed - a probe against a
+      // closed port cannot report "unready", so the comment promising /healthz
+      // would answer was false (#278 review). Resolution is lazy at every
+      // consuming path anyway; this only saves the first request the latency.
+      void ensurePriceCatalog();
       console.log(`  MCP endpoint: http://${DEFAULT_HOST}:${DEFAULT_PORT}${MCP_PATH}`);
       console.log(`  SSE stream: http://${DEFAULT_HOST}:${DEFAULT_PORT}${SSE_PATH}`);
       console.log(

@@ -23,9 +23,12 @@ const { mockSessionCreate, mockSessionList, mockConstructEvent, mockPriceRetriev
 }));
 
 /**
- * Amounts come from Stripe's Price, resolved once at startup (#275 stage A),
- * so these tests must load a catalog before any checkout can price anything.
- * The stub returns the figures this suite has always asserted.
+ * Amounts come from the resolved Stripe Price (#275 stage A), reached through
+ * the catalog's injectable retriever seam. Resolution is LAZY - the checkout
+ * functions ensure it themselves - so unlike the previous eager design there
+ * is no load-before-env-stub ordering hazard for a beforeEach to get wrong
+ * (which one describe in this file did, making its checkout tests vacuous:
+ * #278 review).
  */
 const PRICE_FIXTURES: Record<string, number> = {
   price_starter_mock: 500,
@@ -33,18 +36,24 @@ const PRICE_FIXTURES: Record<string, number> = {
   price_power_mock: 9000,
 };
 
-async function loadStubbedPrices(): Promise<void> {
-  const { loadPriceCatalog, resetPriceCatalog } = await import(
+async function configureStubbedPrices(): Promise<void> {
+  const { resetPriceCatalog, setPriceRetriever } = await import(
     '../../../src/services/priceCatalog.js'
   );
   resetPriceCatalog();
-  mockPriceRetrieve.mockImplementation(async (priceId: string) => ({
-    active: true,
-    unit_amount: PRICE_FIXTURES[priceId] ?? 0,
-    currency: 'usd',
-    product: `prod_${priceId}`,
-  }));
-  await loadPriceCatalog(Object.keys(PRICE_FIXTURES));
+  setPriceRetriever(async (priceId: string) => {
+    const unitAmount = PRICE_FIXTURES[priceId];
+    if (unitAmount === undefined) {
+      throw Object.assign(new Error('No such price'), { code: 'resource_missing' });
+    }
+    return {
+      id: priceId,
+      active: true,
+      unit_amount: unitAmount,
+      currency: 'usd',
+      product: `prod_${priceId}`,
+    } as never;
+  });
 }
 
 // Mock Stripe as a class constructor
@@ -84,18 +93,13 @@ import {
 describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    await loadStubbedPrices();
+    await configureStubbedPrices();
     // Set required environment variables
     vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
     vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_mock');
     vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
     vi.stubEnv('STRIPE_PRICE_REGULAR', 'price_regular_mock');
     vi.stubEnv('STRIPE_PRICE_POWER', 'price_power_mock');
-    // Without these the amounts resolve to 0 and every checkout here exits at
-    // PACK_AMOUNT_NOT_CONFIGURED two guards early - so these tests never
-    // reached the price verification at all, and passed while proving nothing
-    // about it. Nothing supplies them ambiently: .env.test does not exist, so
-    // tests/setup.ts's dotenv.config is a silent no-op.
   });
 
   afterEach(() => {
@@ -146,20 +150,33 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
       expect(mockSessionCreate).not.toHaveBeenCalled();
     });
 
-    // A Stripe Price ID is not evidence of an amount. Without the explicit
-    // amount variable the legacy pack path must disable the purchase rather
-    // than fall back to a hard-coded figure that a later refund would trust.
+    // A Stripe Price ID is not evidence of a USABLE amount. When the Price
+    // cannot be resolved to one - archived, tiered, absurd, or unreachable -
+    // the purchase must be disabled rather than fall back to a hard-coded
+    // figure a later refund would trust. These are the relocated forms of the
+    // old "pack amount missing/zero/non-numeric" boot errors.
     it.each([
-      ['missing', undefined],
-      ['zero', '0'],
-      ['non-numeric', 'free'],
-      ['negative', '-500'],
-    ])('should fail closed when the pack amount is %s', async (_label, amount) => {
-      if (amount === undefined) {
-        vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '');
-      } else {
-        vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', amount);
-      }
+      ['archived', { active: false, unit_amount: 500 }],
+      ['tiered (no unit amount)', { active: true, unit_amount: null }],
+      ['implausibly small', { active: true, unit_amount: 1 }],
+      ['unreachable', null],
+    ])('should fail closed when the starter price is %s', async (_label, price) => {
+      const { resetPriceCatalog, setPriceRetriever } = await import(
+        '../../../src/services/priceCatalog.js'
+      );
+      resetPriceCatalog();
+      setPriceRetriever(async (priceId: string) => {
+        if (priceId === 'price_starter_mock') {
+          if (price === null) throw new Error('down');
+          return { id: priceId, currency: 'usd', ...price } as never;
+        }
+        return {
+          id: priceId,
+          active: true,
+          unit_amount: PRICE_FIXTURES[priceId],
+          currency: 'usd',
+        } as never;
+      });
 
       const result = await createCheckoutSession({
         userId: 'user-123',
@@ -177,18 +194,19 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
       // Same intent as before #275 stage A - no hard-coded fallback amount can
       // reach a customer - at its new source. The amount used to come from
       // STRIPE_STARTER_AMOUNT_CENTS; it now comes from the Price itself.
-      const { loadPriceCatalog, resetPriceCatalog } = await import(
+      const { ensurePriceCatalog, resetPriceCatalog, setPriceRetriever } = await import(
         '../../../src/services/priceCatalog.js'
       );
 
       resetPriceCatalog();
-      mockPriceRetrieve.mockResolvedValue({
+      setPriceRetriever(async priceId => ({
+        id: priceId,
         active: true,
         unit_amount: 777,
         currency: 'usd',
         product: 'prod_starter'
-      });
-      await loadPriceCatalog(['price_starter_mock']);
+      }) as never);
+      await ensurePriceCatalog();
       expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 777 });
 
       // An unresolved price must yield an unusable amount rather than the
@@ -277,12 +295,9 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
 describe('Checkout Session Error Handling', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    // Before the catalog load: resolving a price needs a client, and a client
-    // needs the key. Without it every price fails to resolve and the checkout
-    // refuses two guards earlier than this suite is aiming at.
     vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
     vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
-    await loadStubbedPrices();
+    await configureStubbedPrices();
   });
 
   afterEach(() => {

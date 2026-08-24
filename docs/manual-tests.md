@@ -485,7 +485,7 @@ database URL in `.env`.
    header.
 3. [ ] Open `/healthz`; verify `200` and body `ok`.
    Then open `/readyz`; verify `200` with `"ready":true` and `"mode":"development"` (issue #155).
-   A `503` names the failing check — config, database, or routing — with detail in the deploy log
+   A `503` names the failing check — config, database, routing, or prices — with detail in the deploy log
    under `readiness.failed`.
 4. [ ] Open `/`; verify the existing public service status response remains successful.
 5. [ ] Open the manifest and OAuth metadata routes used by the development deployment; verify their

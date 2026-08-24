@@ -18,6 +18,7 @@ import {
   validateCharacterLimit,
 } from "../services/previewService.js";
 import { createDraft } from "../services/draftService.js";
+import { ensurePriceCatalog } from '../services/priceCatalog.js';
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 import {
   DELIVERY_CLASS,
@@ -491,6 +492,10 @@ export interface CreateLetterDraftParams {
 export async function createLetterDraftAndBuildOutput(
   params: CreateLetterDraftParams
 ): Promise<LetterQuoteOutput> {
+  // Quotes read the resolved price (#275 stage A); resolve lazily so the
+  // stdio server and flow harness work without a bootstrap call.
+  await ensurePriceCatalog();
+
   const {
     sender,
     recipient,

@@ -1,208 +1,230 @@
 /**
- * Issue #275. Stripe charges whatever the Price object says - the checkout
- * session is built from the price id alone, and STRIPE_*_AMOUNT_CENTS is never
- * sent. That amount is only what WE record, reconcile, and refund against.
+ * Issue #275. The amount charged and the amount booked both come from the
+ * resolved Stripe Price - there is no second copy to drift. What remains to
+ * guard at checkout is narrower and sharper:
  *
- * Nothing compared the two, so a drifted pair billed one figure and booked
- * another with no error and no log. The discovery event would have been a
- * refund that does not match its charge.
+ *  - an UNPRICEABLE product must refuse WITHOUT creating a session, carrying
+ *    WHY (configuration vs transient), because order cleanup keys off that;
+ *  - a priced checkout must still charge by price id, under an idempotency
+ *    key - the only thing between a client retry and a double charge.
  *
- * The tests that matter here are the refusal paths. A happy-path test passes
- * just as well with the verification deleted, which is precisely why this
- * defect survived: the working case looks identical either way.
+ * The stage-B comparator that used to live here compared the env amount to the
+ * Price; once the env amount WAS the Price it compared Stripe to itself and
+ * could never fire (#278 review), so it is gone and these tests guard what is
+ * real. Refusal tests assert the session was never created: returning an error
+ * while still charging would be the worst outcome available.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { priceFixture } from '../../mocks/stripe.js';
 
-const { mockSessionCreate, mockPriceRetrieve } = vi.hoisted(() => ({
-  mockSessionCreate: vi.fn(),
-  mockPriceRetrieve: vi.fn()
-}));
+const stripeMocks = vi.hoisted(() => {
+  // vi.hoisted runs before imports; inline the factory shape.
+  return {
+    sessionCreate: vi.fn(),
+    sessionList: vi.fn(),
+    priceRetrieve: vi.fn(),
+    refundList: vi.fn(),
+    refundCreate: vi.fn(),
+    refundRetrieve: vi.fn(),
+    constructEvent: vi.fn()
+  };
+});
 
 vi.mock('stripe', () => ({
   default: class MockStripe {
-    checkout = { sessions: { create: mockSessionCreate } };
-    prices = { retrieve: mockPriceRetrieve };
-    webhooks = { constructEvent: vi.fn() };
+    checkout = { sessions: { create: stripeMocks.sessionCreate, list: stripeMocks.sessionList } };
+    prices = { retrieve: stripeMocks.priceRetrieve };
+    refunds = {
+      list: stripeMocks.refundList,
+      create: stripeMocks.refundCreate,
+      retrieve: stripeMocks.refundRetrieve
+    };
+    webhooks = { constructEvent: stripeMocks.constructEvent };
+    static lastConstructorArgs: unknown[] | null = null;
+    constructor(...args: unknown[]) {
+      MockStripe.lastConstructorArgs = args;
+    }
   }
 }));
 
-const { createPackCheckoutSession, __clearPriceFactsCache } = await import(
+const { createPackCheckoutSession, createCheckoutSession } = await import(
   '../../../src/services/stripeService.js'
 );
-
-const PRODUCT = {
-  productCode: 'credit-pack-10',
-  priceId: 'price_test_regular',
-  amountCents: 1000,
-  currency: 'usd',
-  name: 'Regular Pack',
-  description: 'Five prepaid letters'
+const { resetPriceCatalog, ensurePriceCatalog } = await import(
+  '../../../src/services/priceCatalog.js'
+);
+const { resetStripeClient } = await import('../../../src/services/stripeClient.js');
+const StripeCtor = (await import('stripe')).default as unknown as {
+  lastConstructorArgs: unknown[] | null;
 };
 
-function checkout(product = PRODUCT) {
+function packEnv(): void {
+  vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_dummy');
+  vi.stubEnv('STRIPE_CURRENCY', 'usd');
+  vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter');
+  vi.stubEnv('STRIPE_PRICE_REGULAR', 'price_regular');
+  vi.stubEnv('STRIPE_PRICE_POWER', 'price_power');
+}
+
+const PRICE_AMOUNTS: Record<string, number> = {
+  price_starter: 500,
+  price_regular: 1000,
+  price_power: 9000
+};
+
+function serveHealthyPrices(): void {
+  stripeMocks.priceRetrieve.mockImplementation(async (priceId: string) =>
+    priceFixture({ id: priceId, unit_amount: PRICE_AMOUNTS[priceId] ?? 1000 })
+  );
+}
+
+function checkout(product: Record<string, unknown>) {
   return createPackCheckoutSession({
     orderId: 'order-1',
-    product,
+    product: product as never,
     successUrl: 'https://example.test/ok',
     cancelUrl: 'https://example.test/no',
     idempotencyKey: 'key-1'
   });
 }
 
-describe('checkout verifies the configured amount against the Stripe price (#275)', () => {
+describe('checkout pricing guards (#275)', () => {
   beforeEach(() => {
-    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_dummy');
-    mockSessionCreate.mockReset();
-    mockPriceRetrieve.mockReset();
-    // The price memo lives for the process, so it must not leak between cases.
-    __clearPriceFactsCache();
-    mockSessionCreate.mockResolvedValue({
+    vi.clearAllMocks();
+    resetPriceCatalog();
+    resetStripeClient();
+    packEnv();
+    stripeMocks.sessionCreate.mockResolvedValue({
       id: 'cs_test_1',
       url: 'https://checkout.test/session',
       expires_at: 1900000000
     });
   });
-  afterEach(() => vi.unstubAllEnvs());
-
-  it('refuses to charge when the price amount disagrees with the configured amount', async () => {
-    // The defect: Stripe would bill $12 while the ledger booked $10.
-    mockPriceRetrieve.mockResolvedValue({ unit_amount: 1200, currency: 'usd' });
-
-    const result = await checkout();
-
-    expect(result.success).toBe(false);
-    expect(result.errorCode).toBe('PRICE_CONFIG_MISMATCH');
-    // Must not transact. Returning an error while still creating the session
-    // would be the worst outcome: charged, and recorded as failed.
-    expect(mockSessionCreate).not.toHaveBeenCalled();
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetPriceCatalog();
   });
 
-  it('refuses on a currency mismatch even when the number matches', async () => {
-    // 1000 cents is not 1000 pence. Easier to introduce than an amount drift,
-    // and just as wrong.
-    mockPriceRetrieve.mockResolvedValue({ unit_amount: 1000, currency: 'gbp' });
+  it('charges by price id under the idempotency key when the product is priced', async () => {
+    serveHealthyPrices();
 
-    const result = await checkout();
+    // The legacy adapter is a real chokepoint: it must self-ensure the
+    // catalog, because older callers do not.
+    const result = await createCheckoutSession({
+      userId: 'user-1',
+      userEmail: 'person@example.test',
+      productId: 'credit-pack-10',
+      successUrl: 'https://example.test/ok',
+      cancelUrl: 'https://example.test/no'
+    });
 
-    expect(result.success).toBe(false);
-    expect(result.errorCode).toBe('PRICE_CONFIG_MISMATCH');
-    expect(mockSessionCreate).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
+    const [args, options] = stripeMocks.sessionCreate.mock.calls[0];
+    // Still charged from the price id - resolution changes what we refuse,
+    // never what Stripe is asked to bill.
+    expect(args.line_items).toEqual([{ price: 'price_regular', quantity: 1 }]);
+    // Nothing else in the repo pins this. It is the only thing between a
+    // client retry and a second charge.
+    expect(options).toMatchObject({ idempotencyKey: expect.stringContaining('legacy-pack:') });
   });
 
-  it('refuses when the price carries no unit amount', async () => {
-    // Tiered and metered prices report null. Unverifiable is not equal.
-    mockPriceRetrieve.mockResolvedValue({ unit_amount: null, currency: 'usd' });
+  it('refuses an unpriceable product without creating a session', async () => {
+    stripeMocks.priceRetrieve.mockImplementation(async (priceId: string) => {
+      if (priceId === 'price_regular') return priceFixture({ id: priceId, active: false });
+      return priceFixture({ id: priceId, unit_amount: PRICE_AMOUNTS[priceId] });
+    });
+    await ensurePriceCatalog();
 
-    const result = await checkout();
+    const result = await checkout({
+      productCode: 'credit-pack-10',
+      priceId: 'price_regular',
+      amountCents: 0,
+      currency: 'usd',
+      name: 'Regular Pack',
+      description: 'Five prepaid letters'
+    });
 
     expect(result.success).toBe(false);
-    expect(result.errorCode).toBe('PRICE_CONFIG_MISMATCH');
-    expect(mockSessionCreate).not.toHaveBeenCalled();
-  });
-
-  it('classifies a mismatch as a configuration fault, not a database one', async () => {
-    // #213 burned a schema hunt on a config problem because an uncarried error
-    // defaulted to database_error. The class has to name the right subsystem.
-    mockPriceRetrieve.mockResolvedValue({ unit_amount: 1200, currency: 'usd' });
-
-    const result = await checkout();
-
+    expect(result.errorCode).toBe('PACK_AMOUNT_NOT_CONFIGURED');
+    // Archived price = a human must change config; cleanup cancels the order.
     expect(result.diagnosticClass).toBe('configuration_error');
+    // Must not transact. Charged-but-recorded-failed is the worst outcome.
+    expect(stripeMocks.sessionCreate).not.toHaveBeenCalled();
   });
 
-  it('reports an unreachable price lookup as a provider error, not a mismatch', async () => {
-    // "Cannot verify" and "verified as wrong" are different failures and must
-    // not be conflated - one is transient, the other needs a human.
-    // stripe-node sets `type` to the CLASS name and relegates the wire string
-    // to `rawType` (node_modules/stripe/cjs/Error.js). A fake carrying
-    // type:'api_error' matches no allowlist and lands on the fallback, so it
-    // would pass even with the classification deleted.
-    mockPriceRetrieve.mockRejectedValue(
-      Object.assign(new Error('down'), { type: 'StripeAPIError', rawType: 'api_error' })
+  it('marks a transiently-unpriced product transient, so the order is not cancelled', async () => {
+    stripeMocks.priceRetrieve.mockRejectedValue(
+      Object.assign(new Error('down'), { type: 'StripeConnectionError' })
     );
+    await ensurePriceCatalog();
 
-    const result = await checkout();
-
-    expect(result.success).toBe(false);
-    expect(result.errorCode).toBe('PROVIDER_ERROR');
-    expect(result.diagnosticClass).toBe('StripeAPIError');
-    expect(mockSessionCreate).not.toHaveBeenCalled();
-  });
-
-  it('classifies a missing price by its Stripe code rather than the fallback', async () => {
-    // The likeliest real failure: STRIPE_*_PRICE_ID points at nothing.
-    mockPriceRetrieve.mockRejectedValue(
-      Object.assign(new Error('No such price'), { code: 'resource_missing' })
-    );
-
-    const result = await checkout();
-
-    expect(result.errorCode).toBe('PROVIDER_ERROR');
-    expect(result.diagnosticClass).toBe('resource_missing');
-  });
-
-  it('proceeds when amount and currency both agree', async () => {
-    mockPriceRetrieve.mockResolvedValue({ unit_amount: 1000, currency: 'usd' });
-
-    const result = await checkout();
-
-    expect(result.success).toBe(true);
-    expect(mockSessionCreate).toHaveBeenCalledTimes(1);
-    // Still charged from the price id - the verification changes what we
-    // refuse, never what Stripe is asked to bill.
-    const [args, options] = mockSessionCreate.mock.calls[0];
-    expect(args.line_items).toEqual([{ price: 'price_test_regular', quantity: 1 }]);
-    // Nothing else in the repo pins this. It is the only thing standing between
-    // a client retry and a second charge, and it sits in the call block this
-    // change edits - so deleting it would otherwise keep the suite green.
-    expect(options).toEqual({ idempotencyKey: 'key-1' });
-  });
-
-  it('reads each price once per process rather than on every checkout', async () => {
-    mockPriceRetrieve.mockResolvedValue({ unit_amount: 1000, currency: 'usd' });
-
-    await checkout();
-    await checkout();
-
-    expect(mockPriceRetrieve).toHaveBeenCalledTimes(1);
-    expect(mockSessionCreate).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not cache a lookup it could not read, so a fault is not sticky', async () => {
-    mockPriceRetrieve.mockRejectedValueOnce(new Error('transient'));
-    expect((await checkout()).errorCode).toBe('PROVIDER_ERROR');
-
-    mockPriceRetrieve.mockResolvedValue({ unit_amount: 1000, currency: 'usd' });
-    expect((await checkout()).success).toBe(true);
-  });
-
-  it('tolerates whitespace in the configured currency', async () => {
-    // STRIPE_CURRENCY is not trimmed by its producer nor validated at boot, so
-    // a stray space in a dashboard field would otherwise refuse every purchase
-    // while reporting an AMOUNT fault.
-    mockPriceRetrieve.mockResolvedValue({ unit_amount: 1000, currency: 'usd' });
-
-    const result = await checkout({ ...PRODUCT, currency: ' usd ' });
-
-    expect(result.success).toBe(true);
-  });
-
-  it('compares case-insensitively, so USD and usd are the same currency', async () => {
-    mockPriceRetrieve.mockResolvedValue({ unit_amount: 1000, currency: 'USD' });
-
-    const result = await checkout();
-
-    expect(result.success).toBe(true);
-  });
-
-  it('still refuses an unconfigured amount before ever calling Stripe', async () => {
-    // The pre-existing guard must keep firing first: an amount of 0 is a
-    // configuration fault we can detect without a round trip.
-    const result = await checkout({ ...PRODUCT, amountCents: 0 });
+    const result = await checkout({
+      productCode: 'credit-pack-10',
+      priceId: 'price_regular',
+      amountCents: 0,
+      currency: 'usd',
+      name: 'Regular Pack',
+      description: 'Five prepaid letters'
+    });
 
     expect(result.errorCode).toBe('PACK_AMOUNT_NOT_CONFIGURED');
-    expect(mockPriceRetrieve).not.toHaveBeenCalled();
-    expect(mockSessionCreate).not.toHaveBeenCalled();
+    // A Stripe blip must never cancel a customer's order (#276 cleanup
+    // semantics): the class is the signal order cleanup keys off.
+    expect(result.diagnosticClass).toBe('StripeConnectionError');
+    expect(stripeMocks.sessionCreate).not.toHaveBeenCalled();
+  });
+
+  it('refuses a missing price id as configuration, before any Stripe call', async () => {
+    const result = await checkout({
+      productCode: 'credit-pack-10',
+      priceId: '',
+      amountCents: 0,
+      currency: 'usd',
+      name: 'Regular Pack',
+      description: 'Five prepaid letters'
+    });
+
+    expect(result.errorCode).toBe('PRICE_ID_NOT_CONFIGURED');
+    expect(result.diagnosticClass).toBe('configuration_error');
+    expect(stripeMocks.sessionCreate).not.toHaveBeenCalled();
+  });
+
+  it('constructs the client with explicit timeout and retry bounds', async () => {
+    // stripe-node defaults to an 80s timeout with 2 retries; on the resolution
+    // path that compounded to minutes of hung boot, and on checkout it held a
+    // paying customer (#277, #278 review). Deleting these options would keep
+    // every other test green - this is the only pin.
+    serveHealthyPrices();
+    await ensurePriceCatalog();
+
+    const args = StripeCtor.lastConstructorArgs;
+    expect(args?.[1]).toMatchObject({ timeout: 10_000, maxNetworkRetries: 1 });
+  });
+
+  it('reports a checkout-time provider failure without leaking the raw error', async () => {
+    serveHealthyPrices();
+    await ensurePriceCatalog();
+    const sensitive = 'private failure cs_private';
+    stripeMocks.sessionCreate.mockRejectedValue(
+      Object.assign(new Error(sensitive), { type: 'StripeAPIError', rawType: 'api_error' })
+    );
+
+    const result = await checkout({
+      productCode: 'credit-pack-10',
+      priceId: 'price_regular',
+      amountCents: 1000,
+      currency: 'usd',
+      name: 'Regular Pack',
+      description: 'Five prepaid letters'
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: 'PROVIDER_ERROR',
+      diagnosticClass: 'StripeAPIError',
+      error: 'Failed to create checkout session'
+    });
+    expect(JSON.stringify(result)).not.toContain(sensitive);
   });
 });

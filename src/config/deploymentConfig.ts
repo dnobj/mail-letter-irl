@@ -1,7 +1,7 @@
 /**
  * Centralized deployment configuration validation. Issue #155.
  *
- * Why this exists: a deploy missing STRIPE_STARTER_AMOUNT_CENTS booted
+ * Why this exists: a deploy missing STRIPE_PRICE_STARTER booted
  * cleanly, passed /healthz, and failed only when a customer clicked Buy Now
  * (issue #213) - and the provider layer is worse: in production a missing
  * PostGrid key silently dispatches real sends to the dummy provider. A healthy
@@ -19,6 +19,8 @@
  * environment before promotion, so the validator and the preflight can never
  * disagree about what production requires.
  */
+
+import { JIT_PRICE_ENV_VARS, PACK_PRICE_ENV_VARS } from './products.js';
 
 export type DeploymentMode = 'production' | 'development' | 'test';
 
@@ -70,16 +72,13 @@ export const APPROVED_LIVE_PROVIDERS = ['postgrid'] as const;
 /**
  * Price ids only. The amounts used to live alongside them as
  * STRIPE_*_AMOUNT_CENTS - a second copy of a figure Stripe already owns, which
- * could drift from it silently (#275). They are now resolved from the Price
- * itself at startup, so there is one number and nothing to keep in step.
+ * could drift from it silently (#275). They now resolve from the Price itself,
+ * so there is one number and nothing to keep in step. The env-name lists come
+ * from the same product table the resolver reads (src/config/products.ts), so
+ * "must be set" and "must resolve" cannot name different variables.
  */
-const PACK_PRICE_VARS = [
-  'STRIPE_PRICE_STARTER',
-  'STRIPE_PRICE_REGULAR',
-  'STRIPE_PRICE_POWER'
-] as const;
-
-const JIT_VARS = ['STRIPE_JIT_LETTER_PRICE_ID', 'STRIPE_JIT_POSTCARD_PRICE_ID'] as const;
+const PACK_PRICE_VARS = PACK_PRICE_ENV_VARS;
+const JIT_VARS = JIT_PRICE_ENV_VARS;
 
 /**
  * Every PostGrid credential the provider layer can read. SEND-capable keys
@@ -370,7 +369,6 @@ export function isProductionEnv(env: NodeJS.ProcessEnv = process.env): boolean {
 function isPlaceholder(value: string): boolean {
   return value.includes('...') || /^(your[_-]|changeme|placeholder|xxx)/i.test(value);
 }
-
 
 function validateProvider(
   env: NodeJS.ProcessEnv,

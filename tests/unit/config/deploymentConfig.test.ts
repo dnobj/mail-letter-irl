@@ -23,11 +23,8 @@ const VALID_PROD: NodeJS.ProcessEnv = {
   STRIPE_SECRET_KEY: 'sk_live_unit_fixture',
   STRIPE_WEBHOOK_SECRET: 'whsec_unit_fixture',
   STRIPE_PRICE_STARTER: 'price_starter_unit_fixture',
-  STRIPE_STARTER_AMOUNT_CENTS: '500',
   STRIPE_PRICE_REGULAR: 'price_regular_unit_fixture',
-  STRIPE_REGULAR_AMOUNT_CENTS: '1000',
   STRIPE_PRICE_POWER: 'price_power_unit_fixture',
-  STRIPE_POWER_AMOUNT_CENTS: '9000',
   LETTER_PROVIDER: 'postgrid',
   LETTER_PROVIDER_API_KEY: 'live_sk_unit_fixture',
   LETTER_PROVIDER_CONFIG: '{"mode":"live"}',
@@ -385,11 +382,6 @@ describe('ENV_VAR_MANIFEST', () => {
     // absent so the deletion cannot be quietly undone by a future edit that
     // "restores" them for symmetry with the price ids.
     for (const removed of [
-      'STRIPE_STARTER_AMOUNT_CENTS',
-      'STRIPE_REGULAR_AMOUNT_CENTS',
-      'STRIPE_POWER_AMOUNT_CENTS',
-      'JIT_LETTER_AMOUNT_CENTS',
-      'JIT_POSTCARD_AMOUNT_CENTS'
     ]) {
       expect(names).not.toContain(removed);
     }

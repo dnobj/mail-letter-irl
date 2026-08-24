@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Last updated: July 19, 2026
+Last updated: August 24, 2026
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
 
@@ -80,7 +80,7 @@ order they catch problems:
    In production it refuses: a missing/unapproved `LETTER_PROVIDER` (the
    implicit dummy default included), test-mode PostGrid or Stripe keys,
    `LETTER_PROVIDER_CONFIG` without `"mode": "live"`, missing pack
-   prices/amounts, incomplete JIT config while `JIT_PURCHASE_ENABLED=true`,
+   price ids (amounts resolve from the Prices themselves, #275), incomplete JIT config while `JIT_PURCHASE_ENABLED=true`,
    memory image storage or incomplete bucket credentials, and
    placeholder-shaped credentials. Outside production it refuses live-mode
    keys. A failed validation exits non-zero, so Railway keeps the previous
@@ -88,9 +88,9 @@ order they catch problems:
 
 3. **After deploying — `/readyz`.** Returns `200` with
    `{"ready":true,"mode":...,"provider":...}` when configuration is valid, the
-   database answers, and every enabled `provider_routing` row names a
-   registered (in production: non-dummy) provider; `503` with check names
-   otherwise. Detail is in the server log under `readiness.failed`.
+   database answers, every enabled product's Stripe price has resolved, and
+   every enabled `provider_routing` row names a registered (in production:
+   non-dummy) provider; `503` with check names otherwise. Detail is in the server log under `readiness.failed`.
 
 **Rollout ordering warning:** set an environment's variables *before* deploying
 code that validates them. New variables are inert to a running image, but a
@@ -137,7 +137,7 @@ As of July 16, 2026, development has the transactional-outbox release and hourly
    expect: a successful HTTP response proves the service is up, not that your deployment replaced
    the previous image. A failed pre-deploy leaves the old build serving and every other check green.
    `/readyz` must return `200` with `"mode":"development"` — a `503` names the failing check
-   (config, database, routing) and the detail is in the deploy log under `readiness.failed`.
+   (config, database, routing, prices) and the detail is in the deploy log under `readiness.failed`.
 5. Run the automated suites in both repositories.
 6. Run the manual checks in [manual-tests.md](manual-tests.md), including zero balance, simulated purchase, confirmed send, status retrieval, image generation, and restart persistence.
 7. Confirm Serverless is enabled, leave development idle for more than ten minutes, and confirm both API and website sleep.
@@ -389,9 +389,9 @@ Configure development and production independently:
   `IMAGE_RESERVATION_PROVIDER_TIMEOUT_MINUTES` (default 30)
 - `LETTER_IRL_PACKS_URL`
 
-The configured cent amounts must exactly match their Stripe Prices. A paid
-amount or currency mismatch is quarantined as `refund_pending`; it is never
-fulfilled. Keep Stripe test/live keys, Price IDs, webhook secrets, Railway URLs,
+Amounts are read from the Stripe Prices themselves - there are no configured
+cent amounts to keep in step (#275). A paid amount or currency mismatch against
+the order row is quarantined as `refund_pending`; it is never fulfilled. Keep Stripe test/live keys, Price IDs, webhook secrets, Railway URLs,
 Neon databases, and PostGrid environments separated as described in
 `docs/infrastructure.md`.
 
@@ -539,8 +539,9 @@ refund as the discovery event. Set the price in Stripe and point
 `STRIPE_PRICE_*` at it; there is nothing to mirror.
 
 An unresolved price disables checkout and reconciliation for that product and
-makes `/readyz` report `prices` failing. There are no runtime price fallbacks. Historical migration-021 rows whose one-cent value cannot be
-distinguished from its placeholder are marked `amount_known=false` by migration
+makes `/readyz` report `prices` failing. There are no runtime price fallbacks.
+
+Historical migration-021 rows whose one-cent value cannot be distinguished from its placeholder are marked `amount_known=false` by migration
 023 and excluded from revenue totals while retaining their audit value.
 
 After the migration and disabled deployment are healthy, validate both mail

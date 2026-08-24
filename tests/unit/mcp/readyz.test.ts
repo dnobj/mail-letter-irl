@@ -1,12 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Prices resolve from Stripe at boot (#275 stage A) and /readyz reports whether
-// they did. That is a separate concern from the checks this suite exercises, so
-// it is stubbed here and covered directly in priceCatalog.test.ts.
-const priceCatalog = vi.hoisted(() => ({ loaded: true }));
+// Prices resolve lazily from Stripe (#275 stage A); /readyz reports whether
+// any ENABLED product is currently unpriceable, and kicks a re-attempt when
+// one is. Resolution itself is covered in priceCatalog.test.ts; this suite
+// stubs the accessors to exercise the readiness wiring in BOTH directions -
+// the failing branch had zero coverage in the first revision (#278 review).
+const priceCatalog = vi.hoisted(() => ({
+  unpriced: [] as Array<{ productCode: string; rule: string; diagnosticClass: string }>,
+  ensureCalls: 0
+}));
 vi.mock('../../../src/services/priceCatalog.js', () => ({
-  isPriceCatalogLoaded: () => priceCatalog.loaded,
-  getPriceCatalogFailures: () => (priceCatalog.loaded ? [] : ['price.lookup_failed'])
+  getUnpricedProducts: () => priceCatalog.unpriced,
+  ensurePriceCatalog: async () => {
+    priceCatalog.ensureCalls += 1;
+  }
 }));
 import { readFile } from 'node:fs/promises';
 
@@ -21,6 +28,11 @@ const { query } = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock('../../../src/db/index.js', () => ({ query }));
 
 import { getReadiness, resetReadinessCache } from '../../../src/mcp/readiness.js';
+
+beforeEach(() => {
+  priceCatalog.unpriced = [];
+  priceCatalog.ensureCalls = 0;
+});
 
 const READY_DEV: NodeJS.ProcessEnv = {
   NODE_ENV: 'production', // deployed development runs NODE_ENV=production
@@ -37,11 +49,8 @@ const READY_PROD: NodeJS.ProcessEnv = {
   STRIPE_SECRET_KEY: 'sk_live_readyz_fixture',
   STRIPE_WEBHOOK_SECRET: 'whsec_readyz_fixture',
   STRIPE_PRICE_STARTER: 'price_starter_readyz',
-  STRIPE_STARTER_AMOUNT_CENTS: '500',
   STRIPE_PRICE_REGULAR: 'price_regular_readyz',
-  STRIPE_REGULAR_AMOUNT_CENTS: '1000',
   STRIPE_PRICE_POWER: 'price_power_readyz',
-  STRIPE_POWER_AMOUNT_CENTS: '9000',
   LETTER_PROVIDER: 'postgrid',
   LETTER_PROVIDER_API_KEY: 'live_sk_readyz_fixture',
   LETTER_PROVIDER_CONFIG: '{"mode":"live"}',
@@ -203,5 +212,56 @@ describe('/readyz readiness report', () => {
     const source = await readFile('src/mcp/httpServer.ts', 'utf8');
     const healthz = source.slice(source.indexOf('url.pathname === "/healthz"'));
     expect(healthz.slice(0, healthz.indexOf('return;'))).toContain('res.end("ok")');
+  });
+});
+
+describe('/readyz prices check (#275 stage A)', () => {
+  beforeEach(() => {
+    resetReadinessCache();
+    routableDb([{ mail_type: 'letter', provider: 'postgrid' }]);
+  });
+
+  it('fails closed, naming only the check, when an enabled product is unpriced', async () => {
+    // The failing branch had no coverage in the first revision - a refactor
+    // dropping the prices entry from `failing` would have passed the suite.
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-100', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
+    ];
+
+    const report = await getReadiness(READY_PROD);
+
+    expect(report.statusCode).toBe(503);
+    const body = JSON.parse(report.body);
+    expect(body.failing).toContain('prices');
+    // Privacy contract: the unauthenticated body never carries a rule id or a
+    // product code - those go to the server log.
+    expect(report.body).not.toContain('price.inactive');
+    expect(report.body).not.toContain('credit-pack-100');
+  });
+
+  it('kicks a re-attempt when failing, so a transient boot failure self-heals', async () => {
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-4', rule: 'price.not_resolved', diagnosticClass: 'provider_error' }
+    ];
+
+    await getReadiness(READY_PROD);
+
+    expect(priceCatalog.ensureCalls).toBeGreaterThan(0);
+  });
+
+  it('does not touch the catalog resolver when healthy', async () => {
+    const report = await getReadiness(READY_PROD);
+
+    expect(report.statusCode).toBe(200);
+    expect(JSON.parse(report.body).checks.prices).toBe('ok');
+    expect(priceCatalog.ensureCalls).toBe(0);
+  });
+
+  it('keeps the ready-body checks object in step with the possible failing names', async () => {
+    // The checks literal is hand-written; this guard stops a fifth check being
+    // added to `failing` without appearing in the healthy body, or vice versa.
+    const report = await getReadiness(READY_PROD);
+    const checkNames = Object.keys(JSON.parse(report.body).checks).sort();
+    expect(checkNames).toEqual(['config', 'database', 'prices', 'routing']);
   });
 });

@@ -1130,6 +1130,79 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
     expect(quiet.rows[0].count).toBe('0');
   });
 
+  it('adopts a paid legacy pack session, pricing it lazily from the catalog seam (#275)', async () => {
+    // The regression this pins: the maintenance process never loaded the price
+    // catalog, so getPackProductConfig returned amountCents 0 and every legacy
+    // adoption was refused - a paid customer booked as unmatched money with no
+    // credits (#278 review). The catalog is deliberately NOT pre-loaded here:
+    // processCheckoutSessionEvent must ensure it itself, outside its
+    // transaction, exactly as the cron path does. The Stripe boundary is
+    // substituted through the retriever seam, never a module mock - the same
+    // pattern as RefundOperations.
+    const priceCatalog = await import('../../src/services/priceCatalog.js');
+    const previousStarter = process.env.STRIPE_PRICE_STARTER;
+    process.env.STRIPE_PRICE_STARTER = 'price_starter_adoption';
+    priceCatalog.resetPriceCatalog();
+    priceCatalog.setPriceRetriever(async priceId => ({
+      id: priceId,
+      active: true,
+      unit_amount: 500,
+      currency: 'usd',
+      product: 'prod_starter'
+    }) as never);
+
+    try {
+      await acidPool.query(
+        `INSERT INTO users (user_id, email) VALUES ('legacy-adopt-user', 'legacy-adopt@example.test')`
+      );
+
+      await expect(commerceService.processStripeWebhookEvent({
+        id: 'evt-legacy-adopt', type: 'checkout.session.completed', data: { object: {
+          id: 'cs-legacy-adopt', client_reference_id: null,
+          metadata: { userId: 'legacy-adopt-user', productId: 'credit-pack-4' },
+          payment_intent: 'pi-legacy-adopt', payment_status: 'paid',
+          amount_total: 500, currency: 'usd',
+          expires_at: Math.floor(Date.now() / 1000) + 3600
+        } }
+      } as any)).resolves.toEqual({ duplicate: false });
+
+      const order = await acidPool.query<{
+        order_id: string; credits: number; amount_cents: number;
+        currency: string; status: string;
+      }>(
+        `SELECT order_id, credits, amount_cents, currency, status
+         FROM orders WHERE stripe_checkout_session_id = 'cs-legacy-adopt'`
+      );
+      // The amount on the authoritative row IS the resolved Stripe figure.
+      expect(order.rows[0]).toMatchObject({
+        order_id: 'stripe-cs-legacy-adopt',
+        credits: 4,
+        amount_cents: 500,
+        currency: 'usd',
+        status: 'fulfilled'
+      });
+
+      const event = await acidPool.query<{ processing_status: string; order_id: string }>(
+        `SELECT processing_status, order_id FROM stripe_webhook_events
+         WHERE event_id = 'evt-legacy-adopt'`
+      );
+      expect(event.rows[0]).toEqual({
+        processing_status: 'processed',
+        order_id: 'stripe-cs-legacy-adopt'
+      });
+
+      // The customer got what they paid for - the whole point of adoption.
+      const credits = await acidPool.query<{ credits: number }>(
+        `SELECT credits FROM users WHERE user_id = 'legacy-adopt-user'`
+      );
+      expect(credits.rows[0].credits).toBe(4);
+    } finally {
+      priceCatalog.resetPriceCatalog();
+      if (previousStarter === undefined) delete process.env.STRIPE_PRICE_STARTER;
+      else process.env.STRIPE_PRICE_STARTER = previousStarter;
+    }
+  });
+
   it('refuses to re-dispatch mail whose provider outcome is still ambiguous', async () => {
     const jobId = '00000000-0000-4000-8000-000000000210';
     await acidPool.query(

@@ -22,7 +22,7 @@ import {
 } from '../config/deploymentConfig.js';
 import { listProviders } from '../services/providers/index.js';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
-import { getPriceCatalogFailures, isPriceCatalogLoaded } from '../services/priceCatalog.js';
+import { ensurePriceCatalog, getUnpricedProducts } from '../services/priceCatalog.js';
 
 export interface ReadinessReport {
   ready: boolean;
@@ -95,10 +95,17 @@ export async function getReadiness(
     ? await checkRouting(env)
     : { ok: false, offenders: ['database_unreachable'] };
 
-  // Prices resolve from Stripe at boot (#275 stage A). An instance that could
-  // not resolve them refuses every purchase, so it is not ready even though it
-  // is otherwise healthy - and without this check that state is invisible.
-  const pricesOk = isPriceCatalogLoaded();
+  // Prices resolve lazily from Stripe (#275 stage A). The check means exactly
+  // "some ENABLED product cannot be priced" - such an instance refuses those
+  // purchases, so unready and refuses line up. Disabled Pay & Send cannot fail
+  // it (its products are not configured), a legitimately shared Pay & Send
+  // price cannot fail it, and an empty or never-attempted catalog FAILS it
+  // rather than reporting a false green. On failure, kick a re-attempt: a
+  // transiently failed warmup self-heals within the readiness TTL instead of
+  // needing a redeploy. Fire-and-forget - a health probe must stay fast.
+  const priceFailures = getUnpricedProducts();
+  const pricesOk = priceFailures.length === 0;
+  if (!pricesOk) void ensurePriceCatalog();
 
   const failing: string[] = [];
   if (!configOk) failing.push('config');
@@ -132,8 +139,10 @@ export async function getReadiness(
     // which variable to attack.
     writeDiagnostic('error', 'readiness.failed', {
       failing: failing.join(','),
-      // Rule ids only; the loader never puts an amount in a failure.
-      priceFailures: getPriceCatalogFailures().join(',') || 'none',
+      // Product codes and rule ids only; the loader never puts an amount in
+      // a failure.
+      priceFailures:
+        priceFailures.map(f => `${f.productCode}:${f.rule}`).join(',') || 'none',
       rules: validation.findings
         .filter(f => f.severity === 'error')
         .map(f => f.rule)

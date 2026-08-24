@@ -14,21 +14,12 @@ import Stripe from 'stripe';
 import { query } from '../db/index.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
-let stripeClient: Stripe | null = null;
-
-function getStripeClient(): Stripe {
-  const apiKey = process.env.STRIPE_SECRET_KEY;
-  if (!apiKey) throw new Error('STRIPE_SECRET_KEY is not configured');
-  stripeClient ??= new Stripe(apiKey, { apiVersion: '2025-11-17.clover' });
-  return stripeClient;
-}
-
-// Credit amounts by product ID (must match stripeService.ts)
-const PRODUCT_CREDITS: Record<string, number> = {
-  'credit-pack-4': 4,
-  'credit-pack-10': 10,
-  'credit-pack-100': 100,
-};
+// The shared client (with its timeout/retry bounds) and the shared product
+// table. Both used to be private hand-kept duplicates here - the credits map's
+// own comment said "must match stripeService.ts", which is the drift shape
+// behind #160/#270/#275. Now there is one of each.
+import { getStripeClient } from './stripeClient.js';
+import { PACK_CREDITS_BY_PRODUCT as PRODUCT_CREDITS } from '../config/products.js';
 
 interface ReconciliationResult {
   period: {
