@@ -120,11 +120,16 @@ export interface CheckoutSessionResult {
   expiresAt?: Date;
   error?: string;
   /** Stable, non-PII classification for configuration failures. */
-  errorCode?: 'PRICE_ID_NOT_CONFIGURED' | 'PACK_AMOUNT_NOT_CONFIGURED' | 'PROVIDER_ERROR';
+  errorCode?:
+    | 'PRICE_ID_NOT_CONFIGURED'
+    | 'PACK_AMOUNT_NOT_CONFIGURED'
+    | 'PACK_AMOUNT_MISMATCH'
+    | 'PROVIDER_ERROR';
   /**
-   * The resolved diagnostic class for a provider failure - the Stripe error's
-   * own code or type (e.g. `resource_missing`), already sanitized through
-   * classifyDiagnosticError. Carried so the caller's own catch can log the real
+   * The resolved diagnostic class for the failure - for a provider error, the
+   * Stripe error's own code or type (e.g. `resource_missing`), already
+   * sanitized through classifyDiagnosticError; for a configuration fault,
+   * `configuration_error`. Carried so the caller's own catch can log the real
    * cause rather than relabelling it. Issue #213.
    */
   diagnosticClass?: string;
@@ -157,6 +162,53 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
       success: false,
       errorCode: 'PACK_AMOUNT_NOT_CONFIGURED',
       error: `Amount not configured for product: ${params.product.productCode}`
+    };
+  }
+
+  // The amount above is what WE record, reconcile, and refund against. Stripe
+  // charges whatever the Price object says - the session below is built from
+  // the price id alone. Nothing compared the two, so a drifted pair billed one
+  // figure and booked another, silently, with a refund as the discovery event
+  // (issue #275). Verify before money moves, and refuse rather than transact.
+  //
+  // Deliberately uncached. A cache would let a changed Price go unnoticed for
+  // its TTL, which is the exact failure this guards; one extra call on a flow
+  // that already calls Stripe is a fair price for always-fresh verification.
+  let price: Stripe.Price;
+  try {
+    price = await getStripeClient().prices.retrieve(params.product.priceId);
+  } catch (error) {
+    // Unverifiable is not the same as mismatched: report it as what it is.
+    const diagnosticClass = classifyDiagnosticError(error, 'provider_error');
+    writeDiagnostic('error', 'stripe.price_lookup_failed', { errorClass: diagnosticClass });
+    return {
+      success: false,
+      errorCode: 'PROVIDER_ERROR',
+      diagnosticClass,
+      error: 'Failed to verify the configured price'
+    };
+  }
+
+  const configuredCurrency = params.product.currency.toLowerCase();
+  const priceCurrency = (price.currency || '').toLowerCase();
+  // unit_amount is null for tiered and metered prices. That is unverifiable
+  // rather than equal, and the strict comparison already refuses it.
+  if (price.unit_amount !== params.product.amountCents || priceCurrency !== configuredCurrency) {
+    // Both sides, or the log cannot be acted on. Amounts and currencies are
+    // configuration, not customer data.
+    writeDiagnostic('error', 'stripe.pack_amount_mismatch', {
+      productCode: params.product.productCode,
+      configuredAmountCents: params.product.amountCents,
+      // null for tiered/metered prices; render it rather than drop the field.
+      priceAmountCents: price.unit_amount ?? 'unset',
+      configuredCurrency,
+      priceCurrency
+    });
+    return {
+      success: false,
+      errorCode: 'PACK_AMOUNT_MISMATCH',
+      diagnosticClass: 'configuration_error',
+      error: `Configured amount does not match the Stripe price for product: ${params.product.productCode}`
     };
   }
 

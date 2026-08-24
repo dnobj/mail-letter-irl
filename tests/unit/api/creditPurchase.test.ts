@@ -15,11 +15,32 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Hoist mock functions so they're available when vi.mock is hoisted
-const { mockSessionCreate, mockSessionList, mockConstructEvent } = vi.hoisted(() => ({
+const { mockSessionCreate, mockSessionList, mockConstructEvent, mockPriceRetrieve } = vi.hoisted(() => ({
   mockSessionCreate: vi.fn(),
   mockSessionList: vi.fn(),
   mockConstructEvent: vi.fn(),
+  mockPriceRetrieve: vi.fn(),
 }));
+
+/**
+ * Checkout now verifies the configured amount against the Stripe Price before
+ * charging (issue #275), so these tests need a Price to verify against. The
+ * stub derives the amount from the same env var the code reads, which is what
+ * a correctly-configured Stripe would return - keeping the verification
+ * transparent to tests that are about something else. Drift itself is covered
+ * in tests/unit/services/stripePriceVerification.test.ts.
+ */
+function stubMatchingPrices(): void {
+  const amountEnvByPriceId: Record<string, string> = {
+    price_starter_mock: 'STRIPE_STARTER_AMOUNT_CENTS',
+    price_regular_mock: 'STRIPE_REGULAR_AMOUNT_CENTS',
+    price_power_mock: 'STRIPE_POWER_AMOUNT_CENTS',
+  };
+  mockPriceRetrieve.mockImplementation(async (priceId: string) => ({
+    unit_amount: Number.parseInt(process.env[amountEnvByPriceId[priceId] ?? ''] || '0', 10),
+    currency: (process.env.STRIPE_CURRENCY || 'usd').toLowerCase(),
+  }));
+}
 
 // Mock Stripe as a class constructor
 vi.mock('stripe', () => {
@@ -30,6 +51,9 @@ vi.mock('stripe', () => {
           create: mockSessionCreate,
           list: mockSessionList,
         },
+      };
+      prices = {
+        retrieve: mockPriceRetrieve,
       };
       webhooks = {
         constructEvent: mockConstructEvent,
@@ -55,6 +79,7 @@ import {
 describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    stubMatchingPrices();
     // Set required environment variables
     vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
     vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_mock');
@@ -228,6 +253,7 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
 describe('Checkout Session Error Handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    stubMatchingPrices();
   });
 
   afterEach(() => {
