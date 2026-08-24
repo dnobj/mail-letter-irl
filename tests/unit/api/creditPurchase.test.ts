@@ -86,6 +86,14 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
     vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
     vi.stubEnv('STRIPE_PRICE_REGULAR', 'price_regular_mock');
     vi.stubEnv('STRIPE_PRICE_POWER', 'price_power_mock');
+    // Without these the amounts resolve to 0 and every checkout here exits at
+    // PACK_AMOUNT_NOT_CONFIGURED two guards early - so these tests never
+    // reached the price verification at all, and passed while proving nothing
+    // about it. Nothing supplies them ambiently: .env.test does not exist, so
+    // tests/setup.ts's dotenv.config is a silent no-op.
+    vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '500');
+    vi.stubEnv('STRIPE_REGULAR_AMOUNT_CENTS', '1000');
+    vi.stubEnv('STRIPE_POWER_AMOUNT_CENTS', '9000');
   });
 
   afterEach(() => {

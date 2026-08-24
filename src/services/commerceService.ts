@@ -280,13 +280,50 @@ async function recordOrderEvent(
   );
 }
 
-async function markCheckoutCreationFailure(orderId: string, error: string): Promise<void> {
-  await query(
-    `UPDATE orders
-     SET last_error_code = 'CHECKOUT_CREATION_FAILED', last_error = $2, updated_at = NOW()
-     WHERE order_id = $1`,
-    [orderId, error]
-  );
+/**
+ * A transient Stripe failure leaves the order pending so a retry can pick it
+ * up. A CONFIGURATION fault must not: retrying cannot succeed until a human
+ * changes config, and a pending row is not inert. It strands a pack order
+ * forever (the pack INSERT omits checkout_expires_at, and the only sweeper for
+ * session-less rows compares `checkout_expires_at <= NOW()`, which is never
+ * true for NULL), and it blocks a JIT draft from prepaid sending for the whole
+ * ~30 minute window behind a "checkout in progress" that does not exist.
+ *
+ * So a terminal fault cancels the order and records the transition. Introduced
+ * with the price-drift guard (#275): making that guard fire deterministically
+ * turned both leaks from rare-under-transient-errors into certain-under-drift.
+ */
+async function markCheckoutCreationFailure(
+  orderId: string,
+  error: string,
+  options: { errorCode?: string; terminal?: boolean } = {}
+): Promise<void> {
+  const errorCode = options.errorCode ?? 'CHECKOUT_CREATION_FAILED';
+  if (!options.terminal) {
+    await query(
+      `UPDATE orders
+       SET last_error_code = $3, last_error = $2, updated_at = NOW()
+       WHERE order_id = $1`,
+      [orderId, error, errorCode]
+    );
+    return;
+  }
+
+  await transaction(async client => {
+    const { rows } = await client.query(
+      `UPDATE orders
+       SET status = 'cancelled', last_error_code = $3, last_error = $2, updated_at = NOW()
+       WHERE order_id = $1 AND status = 'checkout_pending'
+       RETURNING order_id`,
+      [orderId, error, errorCode]
+    );
+    // Only record the transition we actually made. A concurrent path may have
+    // moved the order on already.
+    if (rows.length === 0) return;
+    await recordOrderEvent(client, orderId, 'checkout_creation_cancelled', 'checkout_pending', 'cancelled', {
+      errorCode
+    });
+  });
 }
 
 async function attachCheckout(
@@ -406,7 +443,10 @@ export async function createPackCheckout(
     idempotencyKey
   });
   if (!checkout.success || !checkout.sessionId) {
-    await markCheckoutCreationFailure(orderId, checkout.error || 'Unknown Stripe error');
+    await markCheckoutCreationFailure(orderId, checkout.error || 'Unknown Stripe error', {
+      errorCode: checkout.errorCode,
+      terminal: checkout.diagnosticClass === 'configuration_error'
+    });
     // Carry the resolved provider class up to the handler's catch, so the log
     // there names the real cause (e.g. resource_missing) instead of defaulting
     // to database_error and pointing at the wrong subsystem. Issue #213.
@@ -581,9 +621,19 @@ export async function createJitCheckout(
   if (!checkout.success || !checkout.sessionId) {
     await markCheckoutCreationFailure(
       prepared.order.order_id,
-      checkout.error || 'Unknown Stripe error'
+      checkout.error || 'Unknown Stripe error',
+      {
+        errorCode: checkout.errorCode,
+        terminal: checkout.diagnosticClass === 'configuration_error'
+      }
     );
-    throw new Error(checkout.error || 'Failed to create Pay & Send checkout');
+    // Carry the class, as the pack sibling does. A bare Error drops it, the
+    // server logs `unknown_error`, and the tool tells the customer to retry a
+    // fault that can never succeed.
+    throw Object.assign(new Error(checkout.error || 'Failed to create Pay & Send checkout'), {
+      code: checkout.errorCode,
+      diagnosticClass: checkout.diagnosticClass ?? 'provider_error'
+    });
   }
 
   const order = await attachCheckout(

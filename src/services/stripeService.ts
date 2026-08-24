@@ -123,7 +123,7 @@ export interface CheckoutSessionResult {
   errorCode?:
     | 'PRICE_ID_NOT_CONFIGURED'
     | 'PACK_AMOUNT_NOT_CONFIGURED'
-    | 'PACK_AMOUNT_MISMATCH'
+    | 'PRICE_CONFIG_MISMATCH'
     | 'PROVIDER_ERROR';
   /**
    * The resolved diagnostic class for the failure - for a provider error, the
@@ -144,6 +144,39 @@ interface HostedCheckoutParams {
   cancelUrl: string;
   expiresAt?: Date;
   idempotencyKey: string;
+}
+
+/** Only the two fields the guard compares, both immutable on an existing Price. */
+interface PriceFacts {
+  unitAmount: number | null;
+  currency: string;
+}
+
+const priceFactsByPriceId = new Map<string, PriceFacts>();
+
+/**
+ * Reads a Price once per process. Everything inside the try, so a non-object
+ * resolution cannot throw a raw TypeError out of a function whose contract is
+ * to RETURN a CheckoutSessionResult - that escape would strand the order and
+ * land as `database_error` downstream, the #213 mislabel these guards exist to
+ * prevent. Exported only so tests can clear it between cases.
+ */
+export function __clearPriceFactsCache(): void {
+  priceFactsByPriceId.clear();
+}
+
+async function getVerifiedPriceFacts(priceId: string): Promise<PriceFacts> {
+  const memo = priceFactsByPriceId.get(priceId);
+  if (memo) return memo;
+  const price = await getStripeClient().prices.retrieve(priceId);
+  const facts: PriceFacts = {
+    unitAmount: price?.unit_amount ?? null,
+    currency: (price?.currency || '').trim().toLowerCase()
+  };
+  // A price we could not read as an object is not cached - it must not become
+  // a sticky refusal for the life of the process.
+  if (price && typeof price === 'object') priceFactsByPriceId.set(priceId, facts);
+  return facts;
 }
 
 async function createHostedCheckout(params: HostedCheckoutParams): Promise<CheckoutSessionResult> {
@@ -171,14 +204,19 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
   // figure and booked another, silently, with a refund as the discovery event
   // (issue #275). Verify before money moves, and refuse rather than transact.
   //
-  // Deliberately uncached. A cache would let a changed Price go unnoticed for
-  // its TTL, which is the exact failure this guards; one extra call on a flow
-  // that already calls Stripe is a fair price for always-fresh verification.
-  let price: Stripe.Price;
+  // Memoized for the process lifetime, which costs nothing in freshness: on an
+  // existing Price, unit_amount and currency are IMMUTABLE - PriceUpdateParams
+  // exposes neither, so Stripe offers no way to change them. Drift can only
+  // come from repointing STRIPE_*_PRICE_ID, and nothing in src/ writes
+  // process.env, so that is a deploy. An earlier revision of this code argued
+  // against caching on the grounds that a Price could change underneath us;
+  // that was simply wrong about the API.
+  let price: PriceFacts;
   try {
-    price = await getStripeClient().prices.retrieve(params.product.priceId);
+    price = await getVerifiedPriceFacts(params.product.priceId);
   } catch (error) {
-    // Unverifiable is not the same as mismatched: report it as what it is.
+    // Unverifiable is not the same as mismatched: one is transient and retries,
+    // the other needs a human. Reporting them alike sends the wrong person.
     const diagnosticClass = classifyDiagnosticError(error, 'provider_error');
     writeDiagnostic('error', 'stripe.price_lookup_failed', { errorClass: diagnosticClass });
     return {
@@ -189,26 +227,36 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
     };
   }
 
-  const configuredCurrency = params.product.currency.toLowerCase();
-  const priceCurrency = (price.currency || '').toLowerCase();
-  // unit_amount is null for tiered and metered prices. That is unverifiable
-  // rather than equal, and the strict comparison already refuses it.
-  if (price.unit_amount !== params.product.amountCents || priceCurrency !== configuredCurrency) {
-    // Both sides, or the log cannot be acted on. Amounts and currencies are
-    // configuration, not customer data.
-    writeDiagnostic('error', 'stripe.pack_amount_mismatch', {
+  // Trimmed on both sides. A trailing space in STRIPE_CURRENCY would otherwise
+  // refuse every purchase while reporting an amount fault - and unlike the
+  // amount vars, currency is neither trimmed by its producer nor validated at
+  // boot (see the follow-up issue).
+  const configuredCurrency = params.product.currency.trim().toLowerCase();
+  const amountMatches = price.unitAmount === params.product.amountCents;
+  const currencyMatches = price.currency === configuredCurrency;
+  if (!amountMatches || !currencyMatches) {
+    // Name the field that actually drifted. One predicate, three distinct
+    // faults: amount drift, currency-only drift where the numbers are
+    // identical, and a null unit_amount on a tiered or metered price.
+    const mismatched = [
+      ...(amountMatches ? [] : ['amount']),
+      ...(currencyMatches ? [] : ['currency'])
+    ].join(' and ');
+    writeDiagnostic('error', 'stripe.price_config_mismatch', {
+      orderType: params.orderType,
       productCode: params.product.productCode,
+      mismatched,
       configuredAmountCents: params.product.amountCents,
       // null for tiered/metered prices; render it rather than drop the field.
-      priceAmountCents: price.unit_amount ?? 'unset',
+      priceAmountCents: price.unitAmount ?? 'unset',
       configuredCurrency,
-      priceCurrency
+      priceCurrency: price.currency
     });
     return {
       success: false,
-      errorCode: 'PACK_AMOUNT_MISMATCH',
+      errorCode: 'PRICE_CONFIG_MISMATCH',
       diagnosticClass: 'configuration_error',
-      error: `Configured amount does not match the Stripe price for product: ${params.product.productCode}`
+      error: `Configured ${mismatched} does not match the Stripe price for product: ${params.product.productCode}`
     };
   }
 
