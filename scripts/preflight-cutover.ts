@@ -20,6 +20,11 @@
  *   JIT_PURCHASE_ENABLED name exists in the environment - reading its value
  *   would break the names-only contract, and a set-but-false flag is itself
  *   worth flagging before a cutover.
+ * - Static-DCR variables ('when-static-dcr') follow the same rule against
+ *   LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY (issue #270).
+ * - 'development' entries are the mirror of 'production' ones: demanded only in
+ *   the development environment, never in production. The environment-isolation
+ *   issuer allowlists are one per environment and must not be swapped.
  * - 'unless-admin' conditions are ignored: deployed Railway services are
  *   never local admin mode, so their Stripe variables are always required.
  * - LETTER_IRL_DEPLOYMENT_ENVIRONMENT is required in BOTH deployed
@@ -63,6 +68,7 @@ export function diffManifest(
   const present = new Set(presentNames);
   const production = options.environment === 'production';
   const jitFlagSet = present.has('JIT_PURCHASE_ENABLED');
+  const staticDcrFlagSet = present.has('LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY');
   const missing: EnvVarRequirement[] = [];
   const notes: string[] = [];
 
@@ -73,7 +79,9 @@ export function diffManifest(
       // environment, because deployed development runs NODE_ENV=production.
       if (entry.name !== 'LETTER_IRL_DEPLOYMENT_ENVIRONMENT') continue;
     }
+    if (entry.requiredIn === 'development' && production) continue;
     if (entry.condition === 'when-jit-enabled' && !jitFlagSet) continue;
+    if (entry.condition === 'when-static-dcr' && !staticDcrFlagSet) continue;
     // 'unless-admin' is ignored: deployed services are never local admin mode.
 
     const satisfied = [entry.name, ...(entry.aliases ?? [])].some(name => present.has(name));
@@ -85,7 +93,9 @@ export function diffManifest(
       const conditionNote =
         entry.condition === 'when-jit-enabled'
           ? ' [required because JIT_PURCHASE_ENABLED is set]'
-          : '';
+          : entry.condition === 'when-static-dcr'
+            ? ' [required because LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY is set]'
+            : '';
       notes.push(`${entry.name}${aliasNote}${conditionNote}`);
     }
   }

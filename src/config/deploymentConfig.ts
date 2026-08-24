@@ -43,8 +43,8 @@ export interface EnvVarRequirement {
   name: string;
   /** Alternative names that satisfy the requirement (bucket alias chains). */
   aliases?: readonly string[];
-  requiredIn: 'always' | 'production';
-  condition?: 'unless-admin' | 'when-jit-enabled';
+  requiredIn: 'always' | 'production' | 'development';
+  condition?: 'unless-admin' | 'when-jit-enabled' | 'when-static-dcr';
   /** True when the value is a credential; drives placeholder detection. */
   secret: boolean;
   services: ReadonlyArray<'api' | 'maintenance'>;
@@ -172,6 +172,100 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
       checkedBy: 'stripe.jit_config_incomplete'
     }
   ]),
+  /**
+   * OAuth configuration (issue #270).
+   *
+   * These are owned by validateOAuthConfig (src/auth/oauthConfig.ts), hence
+   * checkedBy - so the generic presence pass stays silent and boot behaviour is
+   * unchanged by their arrival here. The point of listing them is the OTHER
+   * consumer: scripts/preflight-cutover.ts reads the manifest to diff a
+   * Railway environment before promotion, and could not see a single OAuth
+   * variable. Production diverges more here than anywhere else, and neither
+   * check could report it - the preflight because the names were absent from
+   * this list, the validator because assertValidOAuthConfig only runs when
+   * LETTER_IRL_OAUTH_CIMD_ENFORCEMENT is enabled, which production does not set
+   * (#158).
+   *
+   * Presence is all the preflight can judge: it reads names, never values, by a
+   * deliberate privacy contract. So this catches an absent issuer, not a wrong
+   * one. A wrong-but-present value is the validator's job, which is why
+   * LETTER_IRL_OAUTH_CIMD_ENFORCEMENT is itself required in production below.
+   *
+   * None are secrets: issuer URLs, audiences, scope lists, and public client
+   * ids are all published in metadata, so they stay out of the placeholder scan.
+   */
+  ...(
+    [
+      'LETTER_IRL_OAUTH_ISSUER',
+      'LETTER_IRL_OAUTH_AUTH_ENDPOINT',
+      'LETTER_IRL_OAUTH_TOKEN_ENDPOINT',
+      'LETTER_IRL_OAUTH_JWKS_URI',
+      'LETTER_IRL_OAUTH_AUDIENCE'
+    ] as const
+  ).map((name): EnvVarRequirement => ({
+    name,
+    requiredIn: 'always',
+    secret: false,
+    services: ['api'],
+    checkedBy: 'oauth.config_required'
+  })),
+  {
+    // Falls back to LETTER_IRL_PUBLIC_BASE_URL + LETTER_IRL_MCP_PATH when
+    // unset (getOAuthConfig), so either name satisfies the requirement - the
+    // same alias-chain shape the bucket entries use. Production relies on the
+    // fallback today and is correct to.
+    name: 'LETTER_IRL_MCP_RESOURCE',
+    aliases: ['LETTER_IRL_PUBLIC_BASE_URL'],
+    requiredIn: 'always',
+    secret: false,
+    services: ['api'],
+    checkedBy: 'oauth.config_required'
+  },
+  {
+    // Environment isolation: validateOAuthConfig pins the issuer against the
+    // matching allowlist and errors without it. Production has never had it set.
+    name: 'LETTER_IRL_OAUTH_PROD_ISSUER',
+    requiredIn: 'production',
+    secret: false,
+    services: ['api'],
+    checkedBy: 'oauth.config_required'
+  },
+  {
+    name: 'LETTER_IRL_OAUTH_DEV_ISSUER',
+    requiredIn: 'development',
+    secret: false,
+    services: ['api'],
+    checkedBy: 'oauth.config_required'
+  },
+  {
+    // Not configuration but the switch that makes the configuration checked:
+    // without it assertValidOAuthConfig never runs and a misconfigured
+    // production boots clean and serves a broken OAuth surface (#158). Required
+    // in production so the preflight reports its absence as the cutover gap it
+    // is. It gates nothing at boot by design - a server that refused to start
+    // over its own strictness flag would be a worse failure than the one it
+    // guards against.
+    name: 'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT',
+    requiredIn: 'production',
+    secret: false,
+    services: ['api'],
+    checkedBy: 'oauth.config_required'
+  },
+  ...(
+    ['CHATGPT_STATIC_CLIENT_ID', 'CHATGPT_STATIC_REDIRECT_URIS'] as const
+  ).map((name): EnvVarRequirement => ({
+    // Only meaningful in the static-DCR rollback shape, and required outright
+    // there - validateOAuthConfig errors on either being absent when the
+    // compatibility flag is on. Keyed off the flag NAME being present, matching
+    // how when-jit-enabled is interpreted: the preflight cannot read values, and
+    // a set-but-false flag is worth surfacing before a cutover anyway.
+    name,
+    requiredIn: 'always',
+    condition: 'when-static-dcr',
+    secret: false,
+    services: ['api'],
+    checkedBy: 'oauth.config_required'
+  })),
   {
     name: 'TEMP_IMAGE_BUCKET_NAME',
     aliases: ['AWS_S3_BUCKET_NAME', 'BUCKET'],
@@ -550,8 +644,17 @@ export function validateDeploymentConfig(
     if (entry.checkedBy) continue;
     if (!entry.services.includes(service)) continue;
     if (entry.requiredIn === 'production' && !production) continue;
+    // Symmetric to the line above. Without it a development-only entry would
+    // be demanded in production, which is the opposite of what it means.
+    if (entry.requiredIn === 'development' && production) continue;
     if (entry.condition === 'unless-admin' && adminMode) continue;
     if (entry.condition === 'when-jit-enabled' && env.JIT_PURCHASE_ENABLED !== 'true') continue;
+    if (
+      entry.condition === 'when-static-dcr' &&
+      env.LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY !== 'true'
+    ) {
+      continue;
+    }
     if (!resolveAliased(entry, env)) {
       findings.push({
         severity: 'error',

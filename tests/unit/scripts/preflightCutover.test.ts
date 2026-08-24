@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { diffManifest } from '../../../scripts/preflight-cutover.js';
 import {
@@ -32,7 +33,18 @@ const FULL_PRODUCTION_NAMES = [
   'TEMP_IMAGE_BUCKET_NAME',
   'TEMP_IMAGE_BUCKET_ENDPOINT',
   'TEMP_IMAGE_BUCKET_ACCESS_KEY_ID',
-  'TEMP_IMAGE_BUCKET_SECRET_ACCESS_KEY'
+  'TEMP_IMAGE_BUCKET_SECRET_ACCESS_KEY',
+  // OAuth (#270). Absent from this list until production was found diverging
+  // here more than anywhere else, with neither the preflight nor the boot
+  // validator able to report it.
+  'LETTER_IRL_OAUTH_ISSUER',
+  'LETTER_IRL_OAUTH_AUTH_ENDPOINT',
+  'LETTER_IRL_OAUTH_TOKEN_ENDPOINT',
+  'LETTER_IRL_OAUTH_JWKS_URI',
+  'LETTER_IRL_OAUTH_AUDIENCE',
+  'LETTER_IRL_MCP_RESOURCE',
+  'LETTER_IRL_OAUTH_PROD_ISSUER',
+  'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT'
 ];
 
 describe('diffManifest', () => {
@@ -73,6 +85,14 @@ describe('diffManifest', () => {
       // Deployed development runs NODE_ENV=production; without the identity
       // label the validator resolves it to production mode and boot fails.
       'LETTER_IRL_DEPLOYMENT_ENVIRONMENT',
+      'LETTER_IRL_MCP_RESOURCE',
+      'LETTER_IRL_OAUTH_AUDIENCE',
+      'LETTER_IRL_OAUTH_AUTH_ENDPOINT',
+      // The development half of the issuer allowlist - see the isolation test.
+      'LETTER_IRL_OAUTH_DEV_ISSUER',
+      'LETTER_IRL_OAUTH_ISSUER',
+      'LETTER_IRL_OAUTH_JWKS_URI',
+      'LETTER_IRL_OAUTH_TOKEN_ENDPOINT',
       'STRIPE_SECRET_KEY',
       'STRIPE_WEBHOOK_SECRET'
     ]);
@@ -221,5 +241,137 @@ describe('parity with the boot validator', () => {
     env.STRIPE_SECRET_KEY = 'sk_test_parity_fixture'; // dev holds a test key
 
     expect(validateDeploymentConfig(env, 'maintenance').errors).toEqual([]);
+  });
+});
+
+/**
+ * Issue #270. The preflight could not see a single OAuth variable, which is
+ * exactly the category where production diverged most: it advertised no product
+ * scopes at all, and nothing reported it. The preflight was blind because the
+ * names were absent from ENV_VAR_MANIFEST; the boot validator was silent
+ * because assertValidOAuthConfig only runs under LETTER_IRL_OAUTH_CIMD_ENFORCEMENT,
+ * which production does not set.
+ *
+ * The root cause is drift between two lists that must agree and had nothing
+ * comparing them - the same shape as the grant_types_supported vs /oauth/register
+ * contradiction in #160. The last test here is the one that stops it recurring.
+ */
+describe('OAuth coverage (issue #270)', () => {
+  it('reports missing OAuth variables in production instead of passing them', () => {
+    const withoutOAuth = FULL_PRODUCTION_NAMES.filter(name => !/OAUTH|MCP_RESOURCE/.test(name));
+    const diff = diffManifest(withoutOAuth, { environment: 'production', service: 'api' });
+    const missing = diff.missing.map(entry => entry.name);
+
+    for (const name of [
+      'LETTER_IRL_OAUTH_ISSUER',
+      'LETTER_IRL_OAUTH_AUTH_ENDPOINT',
+      'LETTER_IRL_OAUTH_TOKEN_ENDPOINT',
+      'LETTER_IRL_OAUTH_JWKS_URI',
+      'LETTER_IRL_OAUTH_AUDIENCE',
+      'LETTER_IRL_MCP_RESOURCE',
+      'LETTER_IRL_OAUTH_PROD_ISSUER',
+      'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT'
+    ]) {
+      expect(missing, `preflight cannot see ${name}`).toContain(name);
+    }
+  });
+
+  it('accepts the public base URL in place of an explicit MCP resource', () => {
+    // getOAuthConfig falls back to baseUrl + mcpPath, and production relies on
+    // that fallback. Demanding the explicit name would report a false gap.
+    const aliased = FULL_PRODUCTION_NAMES.filter(name => name !== 'LETTER_IRL_MCP_RESOURCE');
+    aliased.push('LETTER_IRL_PUBLIC_BASE_URL');
+    const diff = diffManifest(aliased, { environment: 'production', service: 'api' });
+    expect(diff.missing).toEqual([]);
+  });
+
+  it('never swaps the two environment-isolation issuers', () => {
+    // One allowlist per environment. Demanding the wrong one would push an
+    // operator toward pointing production at the development tenant.
+    const prod = diffManifest([], { environment: 'production', service: 'api' })
+      .missing.map(entry => entry.name);
+    expect(prod).toContain('LETTER_IRL_OAUTH_PROD_ISSUER');
+    expect(prod).not.toContain('LETTER_IRL_OAUTH_DEV_ISSUER');
+
+    const dev = diffManifest([], { environment: 'development', service: 'api' })
+      .missing.map(entry => entry.name);
+    expect(dev).toContain('LETTER_IRL_OAUTH_DEV_ISSUER');
+    expect(dev).not.toContain('LETTER_IRL_OAUTH_PROD_ISSUER');
+  });
+
+  it('demands the static-DCR client variables only when that mode is in play', () => {
+    const off = diffManifest(FULL_PRODUCTION_NAMES, {
+      environment: 'production',
+      service: 'api'
+    }).missing.map(entry => entry.name);
+    expect(off).not.toContain('CHATGPT_STATIC_CLIENT_ID');
+    expect(off).not.toContain('CHATGPT_STATIC_REDIRECT_URIS');
+
+    const on = diffManifest(
+      [...FULL_PRODUCTION_NAMES, 'LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY'],
+      { environment: 'production', service: 'api' }
+    );
+    expect(on.missing.map(entry => entry.name)).toEqual([
+      'CHATGPT_STATIC_CLIENT_ID',
+      'CHATGPT_STATIC_REDIRECT_URIS'
+    ]);
+    // The note has to say WHY, or the gap reads as an unexplained new demand.
+    expect(on.notes.join(' ')).toContain('LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY is set');
+  });
+
+  it('adding OAuth entries did not change what fails at boot', () => {
+    // Every new entry carries checkedBy, so the generic presence pass skips it
+    // and validateOAuthConfig stays the sole owner of these errors. If one ever
+    // loses its owner, a production deploy starts failing boot on a variable
+    // that used to be validated elsewhere - a surprise worth catching here.
+    const owned = ENV_VAR_MANIFEST.filter(entry =>
+      /OAUTH|MCP_RESOURCE|CHATGPT_STATIC/.test(entry.name)
+    );
+    expect(owned.length).toBeGreaterThan(0);
+    for (const entry of owned) {
+      expect(entry.checkedBy, `${entry.name} would now fail boot generically`).toBe(
+        'oauth.config_required'
+      );
+      // None of these are credentials, so none belong in the placeholder scan.
+      expect(entry.secret, `${entry.name} is not a credential`).toBe(false);
+    }
+  });
+
+  it('covers every OAuth input getOAuthConfig actually reads', () => {
+    // The drift guard. ENV_VAR_MANIFEST and getOAuthConfig are two lists that
+    // must agree, and nothing compared them - which is why the gap existed at
+    // all. Read the real source rather than restating a list here, so adding an
+    // env lookup to getOAuthConfig without a manifest entry fails.
+    const source = readFileSync(
+      new URL('../../../src/auth/oauthConfig.ts', import.meta.url),
+      'utf8'
+    );
+    const read = new Set(
+      [...source.matchAll(/env\.([A-Z0-9_]+)/g)].map(match => match[1])
+    );
+    const covered = new Set(
+      ENV_VAR_MANIFEST.flatMap(entry => [entry.name, ...(entry.aliases ?? [])])
+    );
+
+    // Deliberate exclusions, each for a reason rather than convenience.
+    const exempt = new Set([
+      // Optional with a safe default; absence is correct, so presence cannot be
+      // required. A wrong VALUE here is what broke production, and only the
+      // validator can catch that - names-only checking never will.
+      'LETTER_IRL_OAUTH_SCOPES',
+      'LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS',
+      'LETTER_IRL_MCP_PATH',
+      'LETTER_IRL_OAUTH_LEGACY_AUDIENCES',
+      // Mode switches, not configuration: they select which rules apply.
+      'LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY',
+      'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT',
+      'LETTER_IRL_DEPLOYMENT_ENVIRONMENT'
+    ]);
+
+    const uncovered = [...read].filter(name => !covered.has(name) && !exempt.has(name));
+    expect(
+      uncovered,
+      `getOAuthConfig reads these, and the preflight cannot see them: ${uncovered.join(', ')}`
+    ).toEqual([]);
   });
 });
