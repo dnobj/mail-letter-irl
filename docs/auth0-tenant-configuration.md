@@ -364,11 +364,30 @@ canonical `/mcp` resource.
      `client.json`.
    - Refresh-token rotation and the 30-day/15-day lifetimes in 2a have nothing to
      apply to yet, being client settings.
-   - **Dynamic Client Registration is enabled** in production. Per the contract
-     above that is rollback inventory only; leaving it on widens the surface for
-     no current consumer. Worth an explicit decision rather than drift.
-   - `Letter IRL API (Test Application)`, a Machine-to-Machine client, exists in
-     the production tenant and holds real credentials against it.
+   - **Dynamic Client Registration: disabled 2026-08-24.** Per the contract above
+     it is rollback inventory only, and CIMD now supersedes it. Verified off by
+     reading the tenant Advanced setting back after a reload. Note the tenant
+     still publishes `registration_endpoint` in its metadata either way - the DEV
+     tenant does too - so the published document is NOT a way to check this. Read
+     the setting.
+   - `Letter IRL API (Test Application)` is **retained deliberately, despite the
+     name.** It holds **Auth0 Management API access (4 of 273 permissions)** and
+     is the client `scripts/dev-sync.ts` authenticates as, via
+     `AUTH0_PROD_CLIENT_ID` / `AUTH0_PROD_CLIENT_SECRET`, to read production
+     users for the prod-to-dev sync. Deleting it would break that script.
+
+     It holds **no** `mail:*` grants (0 of 3 on the MCP API), so it cannot mint
+     tokens carrying product scopes. The name is the problem, not the client:
+     Auth0 auto-creates a `(Test Application)` M2M client whenever an API is
+     created, and this one was later given Management API permissions without
+     being renamed. Renaming it to describe what it actually does is worth doing
+     - `AUTH0_PROD_CLIENT_ID` refers to it by id, so a rename is safe - but that
+     is an owner decision about a production identity, not a cleanup.
+
+     **Creating an API creates one of these every time.** The `Letter IRL MCP`
+     API created earlier the same day produced `Letter IRL MCP (Test Application)`
+     as a side effect; it had zero grants anywhere and was deleted. Check for it
+     after any future API creation.
 
 2a. **Refresh token settings on the CIMD client** (owner decision, 2026-08-23)
 
