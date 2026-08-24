@@ -68,13 +68,18 @@ Use this table to verify each application has the correct settings:
 
 | Setting | Value | Status (Dev) | Status (Prod) |
 |---------|-------|--------------|---------------|
-| Friendly Name | `Letter IRL` | ✅ Applied | ⏳ Pending |
-| Logo URL | `https://letterirl.com/logo.jpg` | ✅ Applied | ⏳ Pending |
-| Favicon URL | `https://letterirl.com/favicon.ico` | ✅ Applied | ⏳ Pending |
-| Primary Color | `#1a8ccc` | ✅ Applied | ⏳ Pending |
-| Page Background | `#ffffff` | ✅ Applied | ⏳ Pending |
-| ChatGPT MCP App Name | `Letter IRL` | ✅ Applied | ⏳ Pending |
-| ChatGPT MCP App Logo | `https://letterirl.com/logo.jpg` | ✅ Applied | ⏳ Pending |
+| Friendly Name | `Letter IRL` | ✅ Applied | ✅ Applied |
+| Logo URL | `https://letterirl.com/logo.jpg` | ✅ Applied | ✅ Applied |
+| Favicon URL | `https://letterirl.com/favicon.ico` | ✅ Applied | ❓ Unverified |
+| Primary Color | `#1a8ccc` | ✅ Applied | ❓ Unverified |
+| Page Background | `#ffffff` | ✅ Applied | ❓ Unverified |
+| ChatGPT MCP App Name | `Letter IRL` | ✅ Applied | ❓ Unverified |
+| ChatGPT MCP App Logo | `https://letterirl.com/logo.jpg` | ✅ Applied | ❓ Unverified |
+
+Production rows corrected 2026-08-24: friendly name and logo were audited
+directly and are applied, having been listed as Pending since July. The
+remaining rows were not inspected and are marked unverified rather than assumed
+either way - a checklist that guesses is worse than one that admits a gap.
 
 ---
 
@@ -333,6 +338,37 @@ canonical `/mcp` resource.
    - **Allow Offline Access: enabled.** Without it Auth0 issues no refresh token
      however the client asks, and the connection dies at access-token expiry with
      a human re-consent as the only recovery (issue #160).
+
+2b. **Production tenant status** (built 2026-08-24, issue #158)
+
+   The production tenant had **no MCP API at all** until this date - only the
+   legacy `https://letter-irl/api` resource server. That is why production
+   advertised `scopes_supported: ["openid","email","profile"]` with no product
+   scopes: there were none in the tenant to advertise.
+
+   | Item | State | Verified by |
+   |---|---|---|
+   | API `Letter IRL MCP`, identifier `https://api.letterirl.com/mcp` | Created | Dashboard, id `6a8bafc38557d1cb6fa22153` |
+   | Signing `RS256`, token profile `access_token` | Set | Matches DEV; `validateOAuthConfig` requires RS256 |
+   | Access token lifetime 86400 / web 7200 | Set | Read back after reload |
+   | **Allow Offline Access** | **Enabled** | Read back after reload |
+   | `mail:read` / `mail:draft` / `mail:send` with descriptions | Added | Read back after reload |
+   | CIMD registration (tenant Advanced) | **Enabled** | `client_id_metadata_document_supported: true` in published metadata |
+
+   Still outstanding in this tenant:
+
+   - **No CIMD client is imported.** The ChatGPT applications present are static
+     clients, two of them in *permissive* third-party mode where the contract at
+     the top of this document specifies strict. The CIMD client cannot be
+     imported until a production ChatGPT connector exists to publish its
+     `client.json`.
+   - Refresh-token rotation and the 30-day/15-day lifetimes in 2a have nothing to
+     apply to yet, being client settings.
+   - **Dynamic Client Registration is enabled** in production. Per the contract
+     above that is rollback inventory only; leaving it on widens the surface for
+     no current consumer. Worth an explicit decision rather than drift.
+   - `Letter IRL API (Test Application)`, a Machine-to-Machine client, exists in
+     the production tenant and holds real credentials against it.
 
 2a. **Refresh token settings on the CIMD client** (owner decision, 2026-08-23)
 
