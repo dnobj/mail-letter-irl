@@ -1268,3 +1268,89 @@ describe('commerceService', () => {
     }
   );
 });
+
+/**
+ * Issue #275. The price-drift guard refuses a checkout on a configuration
+ * fault. That refusal happens AFTER the order row is committed, and a
+ * configuration fault cannot be retried away, so leaving the row pending is not
+ * inert:
+ *
+ *  - a pack order strands forever, because the pack INSERT omits
+ *    checkout_expires_at and the only sweeper for session-less rows compares
+ *    `checkout_expires_at <= NOW()`, which is never true for NULL;
+ *  - a JIT order blocks its draft from prepaid sending for the whole ~30 minute
+ *    window, behind a "checkout in progress" that does not exist.
+ *
+ * Both leaks predate the guard but were rare, needing a transient Stripe throw.
+ * Making the guard fire deterministically turned them into certainties under
+ * drift. These tests exist because a mutation setting `terminal: false` at both
+ * call sites passed the entire suite.
+ */
+describe('checkout refusal cleanup (#275)', () => {
+  const PACK_PARAMS = {
+    userId: 'user-1',
+    userEmail: 'person@example.com',
+    productId: 'credit-pack-4' as const,
+    successUrl: 'https://letterirl.com/success',
+    cancelUrl: 'https://letterirl.com/cancel'
+  };
+
+  function statementsRun(): string[] {
+    return mocks.query.mock.calls.map(call => String(call[0]));
+  }
+
+  beforeEach(() => {
+    mocks.query.mockReset();
+    mocks.query.mockResolvedValue({ rows: [{ ...baseOrder, order_id: 'pack-order' }] });
+  });
+
+  it('cancels the order when the price configuration is refused', async () => {
+    mocks.createPackSession.mockResolvedValueOnce({
+      success: false,
+      errorCode: 'PRICE_CONFIG_MISMATCH',
+      diagnosticClass: 'configuration_error',
+      error: 'Configured amount does not match the Stripe price'
+    });
+
+    await expect(createPackCheckout(PACK_PARAMS)).rejects.toThrow();
+
+    const cancelled = statementsRun().filter(sql => /SET status = 'cancelled'/.test(sql));
+    expect(cancelled).toHaveLength(1);
+    // Guarded on the status it expects, so a concurrent path cannot be stomped.
+    expect(cancelled[0]).toMatch(/status = 'checkout_pending'/);
+    // The transition is recorded, not silently applied.
+    expect(statementsRun().some(sql => /INSERT INTO commerce_order_events/.test(sql))).toBe(true);
+  });
+
+  it('carries the real error code onto the order rather than a generic one', async () => {
+    mocks.createPackSession.mockResolvedValueOnce({
+      success: false,
+      errorCode: 'PRICE_CONFIG_MISMATCH',
+      diagnosticClass: 'configuration_error',
+      error: 'Configured amount does not match the Stripe price'
+    });
+
+    await expect(createPackCheckout(PACK_PARAMS)).rejects.toThrow();
+
+    const update = mocks.query.mock.calls.find(call =>
+      /SET status = 'cancelled'/.test(String(call[0]))
+    );
+    expect(update?.[1]).toContain('PRICE_CONFIG_MISMATCH');
+  });
+
+  it('leaves a transient provider failure pending, so a retry can still succeed', async () => {
+    // The counterpart, and the reason this is not simply "cancel on any
+    // failure": a Stripe blip must not burn the customer's order.
+    mocks.createPackSession.mockResolvedValueOnce({
+      success: false,
+      errorCode: 'PROVIDER_ERROR',
+      diagnosticClass: 'api_connection_error',
+      error: 'Failed to create checkout session'
+    });
+
+    await expect(createPackCheckout(PACK_PARAMS)).rejects.toThrow();
+
+    expect(statementsRun().some(sql => /SET status = 'cancelled'/.test(sql))).toBe(false);
+    expect(statementsRun().some(sql => /last_error_code/.test(sql))).toBe(true);
+  });
+});
