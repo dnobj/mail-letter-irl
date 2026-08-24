@@ -363,7 +363,7 @@ async function attachCheckout(
 
 export class PackAmountNotConfiguredError extends Error {
   readonly code = 'PACK_AMOUNT_NOT_CONFIGURED';
-  // A missing STRIPE_*_AMOUNT_CENTS is a configuration fault, not a database
+  // An unresolvable Stripe price is a configuration fault, not a database
   // one. This guard throws before any query runs, so the checkout handler's
   // catch has no query to blame and defaults an uncarried error to
   // database_error - which is exactly what sent issue #213 on a schema hunt for
@@ -409,7 +409,7 @@ export async function createPackCheckout(
       diagnosticClass: 'configuration_error'
     });
   }
-  // A missing STRIPE_*_AMOUNT_CENTS must fail before any authoritative order
+  // An unresolved price must fail before any authoritative order
   // exists. Persisting a zero amount would make the order unreconcilable
   // against Stripe and would leave any later refund without a trusted amount.
   assertConfiguredAmount(product, params.productId);

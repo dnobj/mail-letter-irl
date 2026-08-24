@@ -23,23 +23,28 @@ const { mockSessionCreate, mockSessionList, mockConstructEvent, mockPriceRetriev
 }));
 
 /**
- * Checkout now verifies the configured amount against the Stripe Price before
- * charging (issue #275), so these tests need a Price to verify against. The
- * stub derives the amount from the same env var the code reads, which is what
- * a correctly-configured Stripe would return - keeping the verification
- * transparent to tests that are about something else. Drift itself is covered
- * in tests/unit/services/stripePriceVerification.test.ts.
+ * Amounts come from Stripe's Price, resolved once at startup (#275 stage A),
+ * so these tests must load a catalog before any checkout can price anything.
+ * The stub returns the figures this suite has always asserted.
  */
-function stubMatchingPrices(): void {
-  const amountEnvByPriceId: Record<string, string> = {
-    price_starter_mock: 'STRIPE_STARTER_AMOUNT_CENTS',
-    price_regular_mock: 'STRIPE_REGULAR_AMOUNT_CENTS',
-    price_power_mock: 'STRIPE_POWER_AMOUNT_CENTS',
-  };
+const PRICE_FIXTURES: Record<string, number> = {
+  price_starter_mock: 500,
+  price_regular_mock: 1000,
+  price_power_mock: 9000,
+};
+
+async function loadStubbedPrices(): Promise<void> {
+  const { loadPriceCatalog, resetPriceCatalog } = await import(
+    '../../../src/services/priceCatalog.js'
+  );
+  resetPriceCatalog();
   mockPriceRetrieve.mockImplementation(async (priceId: string) => ({
-    unit_amount: Number.parseInt(process.env[amountEnvByPriceId[priceId] ?? ''] || '0', 10),
-    currency: (process.env.STRIPE_CURRENCY || 'usd').toLowerCase(),
+    active: true,
+    unit_amount: PRICE_FIXTURES[priceId] ?? 0,
+    currency: 'usd',
+    product: `prod_${priceId}`,
   }));
+  await loadPriceCatalog(Object.keys(PRICE_FIXTURES));
 }
 
 // Mock Stripe as a class constructor
@@ -77,9 +82,9 @@ import {
 } from '../../../src/services/stripeService.js';
 
 describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    stubMatchingPrices();
+    await loadStubbedPrices();
     // Set required environment variables
     vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
     vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_mock');
@@ -91,9 +96,6 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
     // reached the price verification at all, and passed while proving nothing
     // about it. Nothing supplies them ambiently: .env.test does not exist, so
     // tests/setup.ts's dotenv.config is a silent no-op.
-    vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '500');
-    vi.stubEnv('STRIPE_REGULAR_AMOUNT_CENTS', '1000');
-    vi.stubEnv('STRIPE_POWER_AMOUNT_CENTS', '9000');
   });
 
   afterEach(() => {
@@ -171,13 +173,27 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
       expect(mockSessionCreate).not.toHaveBeenCalled();
     });
 
-    it('should read the amount only from configuration, with no built-in default', () => {
-      vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '777');
+    it('reads the amount from the resolved Stripe price, never a built-in default', async () => {
+      // Same intent as before #275 stage A - no hard-coded fallback amount can
+      // reach a customer - at its new source. The amount used to come from
+      // STRIPE_STARTER_AMOUNT_CENTS; it now comes from the Price itself.
+      const { loadPriceCatalog, resetPriceCatalog } = await import(
+        '../../../src/services/priceCatalog.js'
+      );
+
+      resetPriceCatalog();
+      mockPriceRetrieve.mockResolvedValue({
+        active: true,
+        unit_amount: 777,
+        currency: 'usd',
+        product: 'prod_starter'
+      });
+      await loadPriceCatalog(['price_starter_mock']);
       expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 777 });
 
-      // Removing the variable must yield an unusable amount rather than the
-      // historical hard-coded 500.
-      vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '');
+      // An unresolved price must yield an unusable amount rather than the
+      // historical hard-coded 500, so the caller's guard refuses the purchase.
+      resetPriceCatalog();
       expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 0 });
     });
 
@@ -259,9 +275,14 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
 });
 
 describe('Checkout Session Error Handling', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    stubMatchingPrices();
+    // Before the catalog load: resolving a price needs a client, and a client
+    // needs the key. Without it every price fails to resolve and the checkout
+    // refuses two guards earlier than this suite is aiming at.
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
+    await loadStubbedPrices();
   });
 
   afterEach(() => {

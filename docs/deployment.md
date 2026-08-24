@@ -381,7 +381,7 @@ real migrations fail to converge.
 Configure development and production independently:
 
 - `STRIPE_JIT_LETTER_PRICE_ID` and `STRIPE_JIT_POSTCARD_PRICE_ID`
-- `JIT_LETTER_AMOUNT_CENTS`, `JIT_POSTCARD_AMOUNT_CENTS`, and `JIT_CURRENCY`
+- `JIT_CURRENCY` (amounts come from the Stripe Prices above, not from variables)
 - `JIT_CHECKOUT_EXPIRY_MINUTES`, `JIT_REFUND_RETRY_LIMIT`, and
   `JIT_REFUND_RETRY_DELAY_SECONDS` (minimum 30; default 300)
 - `IMAGE_ENTITLEMENTS_PER_PACK_LETTER` and `IMAGE_ENTITLEMENTS_PER_JIT_ORDER`
@@ -532,9 +532,14 @@ Events without enough provider references remain open for operator
 reconciliation and must never be dismissed merely because replay is
 deduplicated.
 
-Pack amount variables (`STRIPE_*_AMOUNT_CENTS`) are required alongside price
-IDs. Missing amounts disable checkout/reconciliation; there are no runtime
-price fallbacks. Historical migration-021 rows whose one-cent value cannot be
+Pack amounts are **not** environment variables. They are resolved from the
+Stripe Price itself at startup (#275): a second copy in the environment could
+drift from the figure Stripe actually charges, and did so silently, with a
+refund as the discovery event. Set the price in Stripe and point
+`STRIPE_PRICE_*` at it; there is nothing to mirror.
+
+An unresolved price disables checkout and reconciliation for that product and
+makes `/readyz` report `prices` failing. There are no runtime price fallbacks. Historical migration-021 rows whose one-cent value cannot be
 distinguished from its placeholder are marked `amount_known=false` by migration
 023 and excluded from revenue totals while retaining their audit value.
 

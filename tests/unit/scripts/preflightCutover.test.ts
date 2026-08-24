@@ -25,11 +25,8 @@ const FULL_PRODUCTION_NAMES = [
   'LETTER_PROVIDER_API_KEY',
   'LETTER_PROVIDER_CONFIG',
   'STRIPE_PRICE_STARTER',
-  'STRIPE_STARTER_AMOUNT_CENTS',
   'STRIPE_PRICE_REGULAR',
-  'STRIPE_REGULAR_AMOUNT_CENTS',
   'STRIPE_PRICE_POWER',
-  'STRIPE_POWER_AMOUNT_CENTS',
   'TEMP_IMAGE_BUCKET_NAME',
   'TEMP_IMAGE_BUCKET_ENDPOINT',
   'TEMP_IMAGE_BUCKET_ACCESS_KEY_ID',
@@ -56,18 +53,23 @@ describe('diffManifest', () => {
     expect(diff.missing).toEqual([]);
   });
 
-  it('reports the #213 gap: pack amount variables missing in production', () => {
-    const withoutAmounts = FULL_PRODUCTION_NAMES.filter(
-      name => !name.endsWith('_AMOUNT_CENTS')
+  it('reports the #213 gap in its current form: pack price ids missing in production', () => {
+    // The amount variables this originally guarded were deleted in #275 stage
+    // A - amounts come from the Stripe Price itself now, so there is nothing to
+    // omit. The price IDS are still required, and forgetting one is the same
+    // #213 shape: a deploy that boots clean and fails when a customer clicks
+    // Buy Now.
+    const withoutPrices = FULL_PRODUCTION_NAMES.filter(
+      name => !name.startsWith('STRIPE_PRICE_')
     );
-    const diff = diffManifest(withoutAmounts, {
+    const diff = diffManifest(withoutPrices, {
       environment: 'production',
       service: 'api'
     });
     expect(diff.missing.map(entry => entry.name)).toEqual([
-      'STRIPE_STARTER_AMOUNT_CENTS',
-      'STRIPE_REGULAR_AMOUNT_CENTS',
-      'STRIPE_POWER_AMOUNT_CENTS'
+      'STRIPE_PRICE_STARTER',
+      'STRIPE_PRICE_REGULAR',
+      'STRIPE_PRICE_POWER'
     ]);
   });
 
@@ -120,9 +122,7 @@ describe('diffManifest', () => {
     const missingNames = withFlag.missing.map(entry => entry.name);
     for (const name of [
       'STRIPE_JIT_LETTER_PRICE_ID',
-      'JIT_LETTER_AMOUNT_CENTS',
       'STRIPE_JIT_POSTCARD_PRICE_ID',
-      'JIT_POSTCARD_AMOUNT_CENTS'
     ]) {
       expect(missingNames).toContain(name);
     }
@@ -150,7 +150,11 @@ describe('diffManifest', () => {
   it('consumes the real manifest by default so the two can never drift', () => {
     // A canary: if someone re-points the default manifest, this fails.
     const names = ENV_VAR_MANIFEST.map(entry => entry.name);
-    expect(names).toContain('STRIPE_STARTER_AMOUNT_CENTS');
+    expect(names).toContain('STRIPE_PRICE_STARTER');
+    // The amounts were deliberately removed in #275 stage A; they come from
+    // the Stripe Price now. Asserting their ABSENCE keeps the deletion from
+    // being quietly undone.
+    expect(names).not.toContain('STRIPE_STARTER_AMOUNT_CENTS');
     const diff = diffManifest(names, { environment: 'production', service: 'api' });
     expect(diff.missing).toEqual([]);
   });

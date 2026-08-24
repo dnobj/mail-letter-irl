@@ -113,9 +113,6 @@ describe('validateDeploymentConfig in production', () => {
     ['malformed webhook secret', { STRIPE_WEBHOOK_SECRET: 'not_a_webhook_secret' }, 'stripe.webhook_secret_malformed'],
     ['missing pack price', { STRIPE_PRICE_STARTER: undefined }, 'stripe.pack_price_incomplete'],
     ['pack price without price_ prefix', { STRIPE_PRICE_REGULAR: 'prod_something' }, 'stripe.pack_price_incomplete'],
-    ['missing pack amount', { STRIPE_POWER_AMOUNT_CENTS: undefined }, 'stripe.pack_price_incomplete'],
-    ['zero pack amount', { STRIPE_STARTER_AMOUNT_CENTS: '0' }, 'stripe.pack_price_incomplete'],
-    ['non-integer pack amount', { STRIPE_STARTER_AMOUNT_CENTS: 'five hundred' }, 'stripe.pack_price_incomplete'],
     ['unset provider (implicit dummy)', { LETTER_PROVIDER: undefined }, 'provider.live_provider_required'],
     ['dummy provider', { LETTER_PROVIDER: 'dummy' }, 'provider.live_provider_required'],
     ['diy provider', { LETTER_PROVIDER: 'diy' }, 'provider.live_provider_required'],
@@ -376,14 +373,25 @@ describe('ENV_VAR_MANIFEST', () => {
       'LETTER_PROVIDER',
       'LETTER_PROVIDER_API_KEY',
       'STRIPE_PRICE_STARTER',
-      'STRIPE_STARTER_AMOUNT_CENTS',
       'STRIPE_PRICE_REGULAR',
-      'STRIPE_REGULAR_AMOUNT_CENTS',
       'STRIPE_PRICE_POWER',
-      'STRIPE_POWER_AMOUNT_CENTS',
       'TEMP_IMAGE_BUCKET_NAME'
     ]) {
       expect(names).toContain(required);
+    }
+
+    // Deleted in #275 stage A: amounts come from the Stripe Price itself, so a
+    // second copy in the environment can no longer drift from it. Asserted
+    // absent so the deletion cannot be quietly undone by a future edit that
+    // "restores" them for symmetry with the price ids.
+    for (const removed of [
+      'STRIPE_STARTER_AMOUNT_CENTS',
+      'STRIPE_REGULAR_AMOUNT_CENTS',
+      'STRIPE_POWER_AMOUNT_CENTS',
+      'JIT_LETTER_AMOUNT_CENTS',
+      'JIT_POSTCARD_AMOUNT_CENTS'
+    ]) {
+      expect(names).not.toContain(removed);
     }
   });
 

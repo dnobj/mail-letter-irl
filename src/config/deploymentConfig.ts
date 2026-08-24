@@ -67,16 +67,19 @@ export interface EnvVarRequirement {
  */
 export const APPROVED_LIVE_PROVIDERS = ['postgrid'] as const;
 
+/**
+ * Price ids only. The amounts used to live alongside them as
+ * STRIPE_*_AMOUNT_CENTS - a second copy of a figure Stripe already owns, which
+ * could drift from it silently (#275). They are now resolved from the Price
+ * itself at startup, so there is one number and nothing to keep in step.
+ */
 const PACK_PRICE_VARS = [
-  { price: 'STRIPE_PRICE_STARTER', amount: 'STRIPE_STARTER_AMOUNT_CENTS' },
-  { price: 'STRIPE_PRICE_REGULAR', amount: 'STRIPE_REGULAR_AMOUNT_CENTS' },
-  { price: 'STRIPE_PRICE_POWER', amount: 'STRIPE_POWER_AMOUNT_CENTS' }
+  'STRIPE_PRICE_STARTER',
+  'STRIPE_PRICE_REGULAR',
+  'STRIPE_PRICE_POWER'
 ] as const;
 
-const JIT_VARS = [
-  { price: 'STRIPE_JIT_LETTER_PRICE_ID', amount: 'JIT_LETTER_AMOUNT_CENTS' },
-  { price: 'STRIPE_JIT_POSTCARD_PRICE_ID', amount: 'JIT_POSTCARD_AMOUNT_CENTS' }
-] as const;
+const JIT_VARS = ['STRIPE_JIT_LETTER_PRICE_ID', 'STRIPE_JIT_POSTCARD_PRICE_ID'] as const;
 
 /**
  * Every PostGrid credential the provider layer can read. SEND-capable keys
@@ -138,40 +141,21 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api', 'maintenance'],
     checkedBy: 'provider.live_mode_required'
   },
-  ...PACK_PRICE_VARS.flatMap(({ price, amount }): EnvVarRequirement[] => [
-    {
-      name: price,
-      requiredIn: 'production',
-      secret: false,
-      services: ['api', 'maintenance'],
-      checkedBy: 'stripe.pack_price_incomplete'
-    },
-    {
-      name: amount,
-      requiredIn: 'production',
-      secret: false,
-      services: ['api', 'maintenance'],
-      checkedBy: 'stripe.pack_price_incomplete'
-    }
-  ]),
-  ...JIT_VARS.flatMap(({ price, amount }): EnvVarRequirement[] => [
-    {
-      name: price,
-      requiredIn: 'production',
-      condition: 'when-jit-enabled',
-      secret: false,
-      services: ['api', 'maintenance'],
-      checkedBy: 'stripe.jit_config_incomplete'
-    },
-    {
-      name: amount,
-      requiredIn: 'production',
-      condition: 'when-jit-enabled',
-      secret: false,
-      services: ['api', 'maintenance'],
-      checkedBy: 'stripe.jit_config_incomplete'
-    }
-  ]),
+  ...PACK_PRICE_VARS.map((price): EnvVarRequirement => ({
+    name: price,
+    requiredIn: 'production',
+    secret: false,
+    services: ['api', 'maintenance'],
+    checkedBy: 'stripe.pack_price_incomplete'
+  })),
+  ...JIT_VARS.map((price): EnvVarRequirement => ({
+    name: price,
+    requiredIn: 'production',
+    condition: 'when-jit-enabled',
+    secret: false,
+    services: ['api', 'maintenance'],
+    checkedBy: 'stripe.jit_config_incomplete'
+  })),
   /**
    * OAuth configuration (issue #270).
    *
@@ -387,9 +371,6 @@ function isPlaceholder(value: string): boolean {
   return value.includes('...') || /^(your[_-]|changeme|placeholder|xxx)/i.test(value);
 }
 
-function isPositiveInteger(value: string | undefined): boolean {
-  return value !== undefined && /^[1-9]\d*$/.test(value.trim());
-}
 
 function validateProvider(
   env: NodeJS.ProcessEnv,
@@ -519,14 +500,11 @@ function validateStripe(
   // deployed environment. Test mode skips it: unit fixtures configure only
   // what they exercise.
   if (mode !== 'test' && !adminMode) {
-    for (const { price, amount } of PACK_PRICE_VARS) {
+    for (const price of PACK_PRICE_VARS) {
       const problems: string[] = [];
       const priceValue = env[price];
       if (!priceValue) problems.push(`${price} is required`);
       else if (!priceValue.startsWith('price_')) problems.push(`${price} must be a Stripe price id (price_...)`);
-      if (!isPositiveInteger(env[amount])) {
-        problems.push(`${amount} must be a positive integer of cents`);
-      }
       for (const message of problems) {
         findings.push({
           severity: production ? 'error' : 'warning',
@@ -537,14 +515,11 @@ function validateStripe(
     }
 
     if (env.JIT_PURCHASE_ENABLED === 'true') {
-      for (const { price, amount } of JIT_VARS) {
+      for (const price of JIT_VARS) {
         const problems: string[] = [];
         const priceValue = env[price];
         if (!priceValue) problems.push(`${price} is required when JIT_PURCHASE_ENABLED=true`);
         else if (!priceValue.startsWith('price_')) problems.push(`${price} must be a Stripe price id (price_...)`);
-        if (!isPositiveInteger(env[amount])) {
-          problems.push(`${amount} must be a positive integer of cents when JIT_PURCHASE_ENABLED=true`);
-        }
         for (const message of problems) {
           findings.push({
             severity: production ? 'error' : 'warning',

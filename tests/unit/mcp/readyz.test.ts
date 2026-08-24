@@ -1,4 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Prices resolve from Stripe at boot (#275 stage A) and /readyz reports whether
+// they did. That is a separate concern from the checks this suite exercises, so
+// it is stubbed here and covered directly in priceCatalog.test.ts.
+const priceCatalog = vi.hoisted(() => ({ loaded: true }));
+vi.mock('../../../src/services/priceCatalog.js', () => ({
+  isPriceCatalogLoaded: () => priceCatalog.loaded,
+  getPriceCatalogFailures: () => (priceCatalog.loaded ? [] : ['price.lookup_failed'])
+}));
 import { readFile } from 'node:fs/promises';
 
 /**
@@ -67,7 +76,7 @@ describe('/readyz readiness report', () => {
       ready: true,
       mode: 'development',
       provider: 'dummy', // LETTER_PROVIDER unset: the implicit default, made visible
-      checks: { config: 'ok', database: 'ok', routing: 'ok' }
+      checks: { config: 'ok', database: 'ok', routing: 'ok', prices: 'ok' }
     });
   });
 

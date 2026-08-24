@@ -57,27 +57,29 @@ LETTER_PROVIDER_CONFIG={"mode":"live"}
 STRIPE_SECRET_KEY=<sk_live_ in production; sk_test_ in development - never crossed>
 STRIPE_WEBHOOK_SECRET=<whsec_ for that environment's webhook endpoint>
 STRIPE_PRICE_STARTER=<price_ id>
-STRIPE_STARTER_AMOUNT_CENTS=<that Price's unit amount in cents>
 STRIPE_PRICE_REGULAR=<price_ id>
-STRIPE_REGULAR_AMOUNT_CENTS=<that Price's unit amount in cents>
 STRIPE_PRICE_POWER=<price_ id>
-STRIPE_POWER_AMOUNT_CENTS=<that Price's unit amount in cents>
+# Amounts are read from these Prices at startup - do not mirror them here (#275).
 ```
 
 In development set `LETTER_PROVIDER_CONFIG={"mode":"test"}`. When
-`JIT_PURCHASE_ENABLED=true`, also set `STRIPE_JIT_LETTER_PRICE_ID` with
-`JIT_LETTER_AMOUNT_CENTS` and `STRIPE_JIT_POSTCARD_PRICE_ID` with
-`JIT_POSTCARD_AMOUNT_CENTS`.
+`JIT_PURCHASE_ENABLED=true`, also set `STRIPE_JIT_LETTER_PRICE_ID` and
+`STRIPE_JIT_POSTCARD_PRICE_ID`.
 
-Every `*_AMOUNT_CENTS` must equal the Stripe Price's unit amount for that
-environment's mode: the webhook refuses fulfillment (and moves the order to
-`refund_pending`) on an amount mismatch. **No automated check verifies that
-equality before payment time.** The preflight
-(`npm run preflight:cutover -- --env <environment>`) verifies both variables of
-each pair are *set* — it reads names, never values — and the boot validator
-checks only that the amount is a positive integer. Read the amount off the
-Stripe Price itself when setting it. Committed variables require an explicit
-service **Redeploy** to reach the running instance (issue #213).
+**Amounts are not configured here.** They are read from each Stripe Price at
+startup (#275). Until that change there was a second copy in the environment
+that had to equal the Price's unit amount, with no automated check that it did —
+so a drifted pair charged one figure and booked another, and the webhook only
+caught it after the customer had paid, moving the order to `refund_pending`.
+
+Set the price in Stripe; there is nothing to mirror. A price that cannot be
+resolved — archived, mistyped, or in another account — disables that product's
+checkout and makes `/readyz` report `prices` failing, before any customer is
+charged rather than after.
+
+The preflight (`npm run preflight:cutover -- --env <environment>`) verifies the
+price ids are *set* — it reads names, never values. Committed variables require
+an explicit service **Redeploy** to reach the running instance (issue #213).
 
 Use Railway variable references to the bucket service. Do not copy bucket credentials into Git, screenshots, logs, or documentation. The application also accepts Railway's standard `BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` names.
 

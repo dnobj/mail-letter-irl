@@ -51,6 +51,8 @@ import {
 } from "../admin/config.js";
 import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
 import { getReadiness } from "./readiness.js";
+import { loadPriceCatalog } from "../services/priceCatalog.js";
+import { getConfiguredPriceIds } from "../services/stripeService.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -257,6 +259,14 @@ async function createMcpServer(letterServer: LetterIrlServer, authInfo: Authenti
 export async function startHttpServer() {
   // Validate environment variables before starting server
   validateEnvironment();
+
+  // Resolve prices from Stripe once, before serving (#275 stage A). Never
+  // throws: an instance that cannot reach Stripe must still start and answer
+  // /healthz and /readyz, reporting itself unready, rather than crash-loop
+  // where nobody can ask it what is wrong. Purchases refuse in the meantime,
+  // because an unresolved price yields no amount and every caller's existing
+  // "not configured" guard fires.
+  await loadPriceCatalog(getConfiguredPriceIds());
 
   const letterServer = new LetterIrlServer();
   let cachedToolNames: Set<string> | null = null;

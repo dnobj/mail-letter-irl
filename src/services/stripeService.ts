@@ -3,6 +3,7 @@
 import Stripe from 'stripe';
 import type { MailType } from './types.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import { getResolvedPrice } from './priceCatalog.js';
 
 let stripeClient: Stripe | null = null;
 
@@ -29,7 +30,6 @@ export interface CommerceProductConfig {
 interface PackProductDefinition {
   credits: number;
   priceEnv: string;
-  amountEnv: string;
   name: string;
   description: string;
 }
@@ -38,44 +38,52 @@ const PACK_PRODUCTS: Record<PackProductId, PackProductDefinition> = {
   'credit-pack-4': {
     credits: 4,
     priceEnv: 'STRIPE_PRICE_STARTER',
-    amountEnv: 'STRIPE_STARTER_AMOUNT_CENTS',
     name: 'Starter Pack - 2 Letters',
     description: 'Two prepaid physical letters or postcards'
   },
   'credit-pack-10': {
     credits: 10,
     priceEnv: 'STRIPE_PRICE_REGULAR',
-    amountEnv: 'STRIPE_REGULAR_AMOUNT_CENTS',
     name: 'Regular Pack - 5 Letters',
     description: 'Five prepaid physical letters or postcards'
   },
   'credit-pack-100': {
     credits: 100,
     priceEnv: 'STRIPE_PRICE_POWER',
-    amountEnv: 'STRIPE_POWER_AMOUNT_CENTS',
     name: 'Power Pack - 50 Letters',
     description: 'Fifty prepaid physical letters or postcards'
   }
 };
 
-function positiveInteger(value: string | undefined, fallback?: number): number {
-  const parsed = Number.parseInt(value || '', 10);
-  if (Number.isInteger(parsed) && parsed > 0) return parsed;
-  return fallback || 0;
+/**
+ * Every price id this deployment is configured with. The startup loader reads
+ * this rather than a hand-kept list, so adding a product cannot leave its price
+ * unresolved - the drift shape that produced #160, #270 and #275 alike.
+ */
+export function getConfiguredPriceIds(): string[] {
+  const ids = [
+    ...Object.values(PACK_PRODUCTS).map(definition => process.env[definition.priceEnv]),
+    process.env.STRIPE_JIT_LETTER_PRICE_ID,
+    process.env.STRIPE_JIT_POSTCARD_PRICE_ID
+  ];
+  return ids.filter((id): id is string => Boolean(id));
 }
 
 export function getPackProductConfig(productId: PackProductId): CommerceProductConfig | null {
   const definition = PACK_PRODUCTS[productId];
   if (!definition) return null;
+  const priceId = process.env[definition.priceEnv] || '';
+  // The amount comes from Stripe's Price, resolved once at startup - there is
+  // no second copy to disagree with it (#275 stage A). An unresolved price
+  // yields 0, which every caller's "not configured" guard already refuses, so
+  // the purchase is disabled rather than transacted against a guess.
+  const resolved = getResolvedPrice(priceId);
   return {
     productCode: productId,
     credits: definition.credits,
-    priceId: process.env[definition.priceEnv] || '',
-    // Never guess a financial amount from a price identifier. Missing config
-    // disables checkout and reconciliation instead of refunding a legitimate
-    // purchase against a stale hard-coded price.
-    amountCents: positiveInteger(process.env[definition.amountEnv]),
-    currency: (process.env.STRIPE_CURRENCY || 'usd').toLowerCase(),
+    priceId,
+    amountCents: resolved?.unitAmount ?? 0,
+    currency: resolved?.currency ?? (process.env.STRIPE_CURRENCY || 'usd').trim().toLowerCase(),
     name: definition.name,
     description: definition.description
   };
@@ -83,15 +91,17 @@ export function getPackProductConfig(productId: PackProductId): CommerceProductC
 
 export function getJitProductConfig(mailType: MailType): CommerceProductConfig {
   const isPostcard = mailType === 'postcard';
+  const priceId =
+    process.env[isPostcard ? 'STRIPE_JIT_POSTCARD_PRICE_ID' : 'STRIPE_JIT_LETTER_PRICE_ID'] || '';
+  const resolved = getResolvedPrice(priceId);
   return {
     productCode: isPostcard ? 'jit-postcard' : 'jit-letter',
     mailType,
-    priceId:
-      process.env[isPostcard ? 'STRIPE_JIT_POSTCARD_PRICE_ID' : 'STRIPE_JIT_LETTER_PRICE_ID'] || '',
-    amountCents: positiveInteger(
-      process.env[isPostcard ? 'JIT_POSTCARD_AMOUNT_CENTS' : 'JIT_LETTER_AMOUNT_CENTS']
-    ),
-    currency: (process.env.JIT_CURRENCY || process.env.STRIPE_CURRENCY || 'usd').toLowerCase(),
+    priceId,
+    amountCents: resolved?.unitAmount ?? 0,
+    currency:
+      resolved?.currency ??
+      (process.env.JIT_CURRENCY || process.env.STRIPE_CURRENCY || 'usd').trim().toLowerCase(),
     name: isPostcard ? 'Pay & Send One Physical Postcard' : 'Pay & Send One Physical Letter',
     description: isPostcard
       ? 'Payment authorizes Letter IRL to print and mail this exact postcard.'

@@ -22,6 +22,7 @@ import {
 } from '../config/deploymentConfig.js';
 import { listProviders } from '../services/providers/index.js';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
+import { getPriceCatalogFailures, isPriceCatalogLoaded } from '../services/priceCatalog.js';
 
 export interface ReadinessReport {
   ready: boolean;
@@ -94,10 +95,16 @@ export async function getReadiness(
     ? await checkRouting(env)
     : { ok: false, offenders: ['database_unreachable'] };
 
+  // Prices resolve from Stripe at boot (#275 stage A). An instance that could
+  // not resolve them refuses every purchase, so it is not ready even though it
+  // is otherwise healthy - and without this check that state is invisible.
+  const pricesOk = isPriceCatalogLoaded();
+
   const failing: string[] = [];
   if (!configOk) failing.push('config');
   if (!databaseOk) failing.push('database');
   if (!routing.ok) failing.push('routing');
+  if (!pricesOk) failing.push('prices');
 
   let report: ReadinessReport;
   if (failing.length === 0) {
@@ -116,7 +123,7 @@ export async function getReadiness(
         ready: true,
         mode: validation.mode,
         provider,
-        checks: { config: 'ok', database: 'ok', routing: 'ok' }
+        checks: { config: 'ok', database: 'ok', routing: 'ok', prices: 'ok' }
       })
     };
   } else {
@@ -125,6 +132,8 @@ export async function getReadiness(
     // which variable to attack.
     writeDiagnostic('error', 'readiness.failed', {
       failing: failing.join(','),
+      // Rule ids only; the loader never puts an amount in a failure.
+      priceFailures: getPriceCatalogFailures().join(',') || 'none',
       rules: validation.findings
         .filter(f => f.severity === 'error')
         .map(f => f.rule)
