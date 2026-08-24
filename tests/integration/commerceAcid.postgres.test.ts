@@ -1164,7 +1164,9 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
           amount_total: 500, currency: 'usd',
           expires_at: Math.floor(Date.now() / 1000) + 3600
         } }
-      } as any)).resolves.toEqual({ duplicate: false });
+      // The success path carries more than the bare duplicate flag; pin only
+      // what this test is about.
+      } as any)).resolves.toMatchObject({ duplicate: false });
 
       const order = await acidPool.query<{
         order_id: string; credits: number; amount_cents: number;
