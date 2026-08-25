@@ -129,9 +129,21 @@ export function diffManifest(
           : entry.condition === 'when-static-dcr'
             ? 'LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY'
             : null;
+      // The note describes the ACTUAL state, not the entry's declaration.
+      // Advisory entries now bypass the condition gate, so they reach this
+      // builder with the flag absent - and the note went on asserting the
+      // flag was set, in exactly the case the bypass was added for. That is
+      // the same false-note defect round 9 fixed on the required branch
+      // (#278 round 11).
+      const conditionSatisfied =
+        entry.condition === 'when-jit-enabled'
+          ? jitFlagSet
+          : entry.condition === 'when-static-dcr'
+            ? staticDcrFlagSet
+            : false;
       const conditionNote = conditionSubject
         ? entry.advisory
-          ? ` [parity check because ${conditionSubject} is set]`
+          ? ` [parity check; ${conditionSubject} is ${conditionSatisfied ? 'set' : 'not set here'}]`
           : ` [required because ${conditionSubject} is set]`
         : '';
       const gap = { entry, note: `${entry.name}${aliasNote}${conditionNote}` };

@@ -152,7 +152,7 @@ const sendEligibilitySchema: JsonSchema = {
         // it, and fell back to amountCents/100 - 100x wrong for a
         // zero-decimal currency, the exact bug the server-side formatting was
         // added to fix, still live on the second surface. Four round-10
-        // angles found it; outputSchemaParity.test.ts now compares the layers.
+        // angles found it; schemaConsistency.test.ts now compares the layers.
         displayAmount: { type: "string" },
         productDescription: { type: "string" },
         unavailableReason: { type: "string" }

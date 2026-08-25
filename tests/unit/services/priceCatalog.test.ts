@@ -18,6 +18,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   describeUnpriced,
   ensurePriceCatalog,
+  formatPriceFailureSummary,
+  invalidateResolvedPrice,
   getResolvedPriceForProduct,
   getUnpricedProducts,
   resetPriceCatalog,
@@ -1044,6 +1046,66 @@ describe('price catalog (#275 stage A)', () => {
     expect(getUnpricedProducts()).toEqual([]);
   });
 
+  it('lets an invalidation raised MID-FLIGHT discard the result it disproves', async () => {
+    // The archived-Price remedy rests on invalidation being authoritative.
+    // stale() checked only generation and signature, neither of which an
+    // invalidation touches, so a lookup already in the air - read BEFORE the
+    // archival - re-installed the very memo the invalidation had dropped,
+    // putting the process straight back into readiness-green-while-every-
+    // purchase-fails (#278 round 11).
+    let release: (value: unknown) => void = () => undefined;
+    const inFlight = new Promise(resolve => {
+      release = resolve;
+    });
+    setPriceRetriever(
+      vi.fn(async (priceId: string) => {
+        if (priceId === 'price_starter') {
+          await inFlight;
+          return priceFixture({ id: priceId, unit_amount: 500 });
+        }
+        return priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] });
+      })
+    );
+
+    const flight = ensurePriceCatalog('credit-pack-4');
+    // The archival happens while the read is in the air.
+    invalidateResolvedPrice('credit-pack-4', 'StripeInvalidRequestError');
+    release(undefined);
+    await flight;
+
+    expect(getResolvedPriceForProduct('credit-pack-4')).toBeNull();
+  });
+
+  it('folds the resolution epoch into the signature, so a RECURRING fault re-logs', async () => {
+    // A change-only slot keyed on rule:class alone stayed silent when the
+    // same fault recurred after a recovery no reader observed - quiet hours,
+    // then re-broken. The epoch is what makes the two outages hash
+    // differently, and it moves only on a real successful resolution, so it
+    // is pinned here against the real counter (#278 rounds 8, 11).
+    vi.useFakeTimers();
+    setPriceRetriever(healthyRetriever({ price_power: { unit_amount: 500 } })); // pin is 9000
+    await ensurePriceCatalog();
+    const firstOutage = formatPriceFailureSummary(getUnpricedProducts());
+    expect(firstOutage).toContain('credit-pack-100');
+
+    // Recovery nothing observed, then the identical fault again. The wrong
+    // amount is a CONFIGURATION fault, so its ladder is the terminal one -
+    // the fix only takes effect once that cooldown expires.
+    setPriceRetriever(healthyRetriever());
+    vi.advanceTimersByTime(31_000);
+    await ensurePriceCatalog();
+    expect(getUnpricedProducts()).toEqual([]);
+    // Break it again through the same door production uses - Stripe rejecting
+    // the price at checkout - rather than a test-only reset.
+    invalidateResolvedPrice('credit-pack-100', 'test');
+    setPriceRetriever(healthyRetriever({ price_power: { unit_amount: 500 } }));
+    await ensurePriceCatalog();
+
+    const secondOutage = formatPriceFailureSummary(getUnpricedProducts());
+    expect(secondOutage).toContain('credit-pack-100');
+    expect(secondOutage).not.toBe(firstOutage);
+  });
+
   it('names the figures that disagreed, so diagnosis needs no Stripe dashboard', async () => {
     // The deleted price_config_mismatch event carried the configured and live
     // amounts; nothing in the replacement did, so every operator-reachable
@@ -1058,7 +1120,7 @@ describe('price catalog (#275 stage A)', () => {
 
     expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
       rule: 'price.amount_mismatch',
-      detail: 'expected 9000, stripe 8500'
+      detail: 'expected 9000 / stripe 8500'
     });
   });
 
@@ -1173,6 +1235,24 @@ describe('price catalog (#275 stage A)', () => {
 
     // No residual cooldown: the fixed Price resolves immediately.
     expect(getResolvedPriceForProduct('jit-postcard')?.unitAmount).toBe(499);
+  });
+
+  it('reads the CREDENTIAL from the caller environment too, not ambient', async () => {
+    // Every other signature term came from the caller's row while the
+    // credential was read from ambient process.env, so a threaded-env verdict
+    // took its price ids from one environment and its credential from
+    // another - the stitch the threading exists to make unrepresentable, and
+    // the one axis a caller cannot see being ignored (#278 round 11).
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_ambient');
+    setPriceRetriever(healthyRetriever());
+    await ensurePriceCatalog();
+    expect(getUnpricedProducts()).toEqual([]);
+
+    // A caller whose env names a DIFFERENT Stripe account: the memo resolved
+    // under the ambient key cannot vouch for it.
+    const otherAccount = { ...process.env, STRIPE_SECRET_KEY: 'sk_test_other_account' };
+
+    expect(getUnpricedProducts(otherAccount).map(f => f.productCode)).toContain('credit-pack-4');
   });
 
   it('validates a stored failure against the CALLER environment, not process.env', async () => {

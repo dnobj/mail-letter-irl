@@ -51,6 +51,21 @@ describe('background Stripe budget (#278)', () => {
   // a paginated loop with no per-page recovery on a checkout-tuned budget: one
   // slow page aborts the whole run, and creditExpirationWorker's catch
   // swallows it unlogged (#278 review round 3).
+  it('stops walking SESSIONS on an empty page too', async () => {
+    // The refunds walk was created as a copy of the sessions one; round 10
+    // fixed only the copy, leaving the original able to hang the whole
+    // maintenance sweep on the same has_more-with-no-data page (#278 r11).
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_reconciliation');
+    mockSessionsList.mockResolvedValueOnce({ data: [], has_more: true });
+    mockRefundsList.mockResolvedValue({ data: [], has_more: false });
+    mockQuery.mockResolvedValue({ rows: [] });
+    mockSessionsList.mockClear();
+
+    await reconcileStripePayments(7);
+
+    expect(mockSessionsList).toHaveBeenCalledTimes(1);
+  });
+
   it('stops walking refunds on an empty page, whatever has_more says', async () => {
     // The cursor advances only from the last item, so a has_more page with no
     // data left it unmoved and re-issued the identical request forever - each
@@ -68,6 +83,50 @@ describe('background Stripe budget (#278)', () => {
     await reconcileStripePayments(7);
 
     expect(mockRefundsList).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not raise a false amount_mismatch for a padded legacy currency', async () => {
+    // The fulfilment gate trims and this audit did not, over the SAME
+    // orders.currency column - so a row credited correctly was reported here
+    // as a high-severity mismatch telling the operator not to fulfil it, a
+    // false alarm inside the audit that finds real ones (#278 round 11).
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_reconciliation');
+    mockSessionsList.mockResolvedValueOnce({
+      data: [{
+        id: 'cs_padded',
+        metadata: { userId: 'user-1', productCode: 'credit-pack-4' },
+        client_reference_id: 'order-padded',
+        payment_status: 'paid',
+        amount_total: 500,
+        currency: 'USD ',
+        created: Math.floor(Date.now() / 1000)
+      }],
+      has_more: false
+    });
+    mockRefundsList.mockResolvedValue({ data: [], has_more: false });
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM orders')) {
+        return {
+          rows: [{
+            order_id: 'order-padded',
+            order_type: 'letter_pack',
+            // The map keys on this, so it must be present or the row is
+            // never matched and the amount comparison is never reached.
+            stripe_checkout_session_id: 'cs_padded',
+            status: 'fulfilled',
+            user_id: 'user-1',
+            credits: 4,
+            amount_cents: 500,
+            currency: 'usd '
+          }]
+        };
+      }
+      return { rows: [] };
+    });
+
+    const result = await reconcileStripePayments(7);
+
+    expect(result.discrepancies.filter(d => d.type === 'amount_mismatch')).toEqual([]);
   });
 
   it('audits EVERY page of refunds, not just the newest hundred', async () => {

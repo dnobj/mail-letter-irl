@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * The product table: every sellable product, its identity, where its Stripe
  * price id comes from, and THE AMOUNT IT IS EXPECTED TO COST. A leaf module
@@ -139,6 +140,17 @@ export function jitCurrency(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export interface ConfiguredProduct {
+  /**
+   * Non-reversible digest of the Stripe credential this row is read under -
+   * never the credential. The key decides which Stripe ACCOUNT a price id
+   * resolves against, so it is part of the configuration; carrying it on the
+   * row is what keeps the catalog's signature a pure function of ONE
+   * environment. Reading it from ambient process.env inside the signature
+   * meant a caller-threaded env got its price ids from one environment and
+   * its credential from another - the stitched verdict the threading exists
+   * to make unrepresentable, reproduced by two round-11 angles (#278 r11).
+   */
+  readonly credential: string;
   readonly productCode: string;
   readonly group: ProductGroup;
   /** Empty string when the env var is unset - the catalog records that as a failure. */
@@ -165,6 +177,16 @@ export interface ConfiguredProduct {
  * memos are then validated by one and pruned by the other - the asymmetry
  * that produced the round-6 bug (#278 round 9).
  */
+export function credentialFingerprint(env: NodeJS.ProcessEnv = process.env): string {
+  const key = (env.STRIPE_SECRET_KEY ?? '').trim();
+  if (!key) return 'unset';
+  // sha256, this repo's convention for digesting a credential: the value is
+  // load-bearing for CORRECTNESS, not just redaction - a collision between
+  // the old and new key would leave the signature unchanged and resurrect
+  // the cooldown-outlives-the-fix bug it exists to prevent (#278 round 11).
+  return createHash('sha256').update(key).digest('hex').slice(0, 16);
+}
+
 function configuredRow(
   definition: { productCode: string; priceEnv: string; expectedAmountCents: number },
   group: ConfiguredProduct['group'],
@@ -172,6 +194,7 @@ function configuredRow(
   env: NodeJS.ProcessEnv
 ): ConfiguredProduct {
   return {
+    credential: credentialFingerprint(env),
     productCode: definition.productCode,
     group,
     priceId: (env[definition.priceEnv] ?? '').trim(),

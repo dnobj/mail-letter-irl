@@ -189,17 +189,27 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
     // forever, log blaming Stripe for a missing credential (#278 round 7).
     const diagnosticClass =
       carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error');
-    // Stripe rejected the REQUEST, and the price id is the parameter in it
-    // most likely to be wrong - an archived Price is the case the catalog
-    // cannot see on its own, because `active` is mutable and deliberately not
-    // a signature input. Drop the memo so the next ensure re-reads it: either
-    // it rebuilds (the fault was elsewhere and nothing is lost but one
-    // lookup) or it records price.inactive, which turns readiness red and
-    // refuses further purchases BEFORE an order row exists instead of
-    // stranding one per attempt forever (#278 round 10).
+    // Drop the memo ONLY when Stripe names the price as the offending
+    // parameter. An archived Price is the case the catalog cannot see on its
+    // own (`active` is mutable and deliberately not a signature input), but
+    // the class that reports it - StripeInvalidRequestError - is stripe-node's
+    // catch-all for ANY invalid_request without an allowlisted code, and this
+    // request carries user-supplied success_url, cancel_url and customer_email.
+    // Keying on the class alone therefore let any authenticated caller delete
+    // a verified memo on demand: /readyz went 503 and every OTHER customer's
+    // purchase was refused until the next resolve. Three round-11 angles found
+    // it, one with a live probe. Stripe's `param` is not caller-controlled, so
+    // it is the discriminator; if Stripe ever stops naming it, this falls back
+    // to the pre-round-10 behaviour (an archived Price persists until restart)
+    // rather than to a remotely triggerable one (#278 round 11).
+    const offendingParam =
+      typeof (error as { param?: unknown })?.param === 'string'
+        ? (error as { param: string }).param
+        : '';
     if (
-      diagnosticClass === 'StripeInvalidRequestError' ||
-      diagnosticClass === 'resource_missing'
+      offendingParam.includes('price') &&
+      (diagnosticClass === 'StripeInvalidRequestError' ||
+        diagnosticClass === 'resource_missing')
     ) {
       invalidateResolvedPrice(params.product.productCode, diagnosticClass);
     }

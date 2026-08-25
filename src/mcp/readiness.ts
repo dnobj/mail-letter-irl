@@ -170,7 +170,9 @@ export async function getReadiness(
   // Logged whichever branch we take: outside production this is the ONLY
   // place an unpriced product is reported at all, and the 200 branch below
   // does not write a diagnostic. Product codes and rule ids only - the loader
-  // never puts an amount in a failure.
+  // carries the classes and, since round 10, the figures that disagreed -
+  // Stripe's own public amounts plus a source constant. Log only: the body
+  // still carries check names and nothing else (#278 round 11).
   // ONE encoding, owned by the catalog beside the record it describes. The
   // hand-kept copy that stood here was class-blind until round 8 - the same
   // omission round 7 had already fixed in the catalog's own copy, which is
@@ -248,8 +250,10 @@ export async function getReadiness(
     ].join('|');
     writeDiagnosticOnChange('readiness.failed', failingSignature, 'error', 'readiness.failed', {
       failing: failing.join(','),
-      // Product codes and rule ids only; the loader never puts an amount in
-      // a failure.
+      // Product codes, rule ids, classes and - since round 10 - the figures
+      // that disagreed, which are Stripe's own public amounts plus a constant
+      // from source control. Log only: the /readyz body still carries check
+      // names and nothing else (#278 round 11).
       priceFailures: priceFailureSummary || 'none',
       rules: validation.findings
         .filter(f => f.severity === 'error')

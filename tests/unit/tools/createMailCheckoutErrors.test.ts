@@ -9,6 +9,21 @@ import { describe, expect, it } from 'vitest';
 import { friendlyCheckoutError } from '../../../src/tools/createMailCheckout.js';
 
 describe('friendlyCheckoutError terminality (#278)', () => {
+  it('never tells a permanently blocked account to try again', () => {
+    // ACCOUNT_SENDS_BLOCKED fell to the default branch, which replaced a
+    // terminal block (carrying its own "contact support") with retry advice
+    // no retry can honour - the precise mistake this function exists to
+    // prevent (#278 round 11).
+    const friendly = friendlyCheckoutError(
+      Object.assign(new Error('Sending is disabled on this account (fraud_review). Contact support.'), {
+        code: 'ACCOUNT_SENDS_BLOCKED'
+      })
+    );
+
+    expect(friendly.message).not.toMatch(/try again/i);
+    expect(friendly.message).toMatch(/support/i);
+  });
+
   it('drops a non-string carried class instead of passing it on', () => {
     // The hand-rolled cast this replaced asserted the property was a string
     // without checking, so a non-string class flowed into the terminality

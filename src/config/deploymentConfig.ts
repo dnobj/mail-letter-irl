@@ -20,7 +20,12 @@
  * disagree about what production requires.
  */
 
-import { JIT_PRICE_ENV_VARS, PACK_PRICE_ENV_VARS, normalizedCurrency } from './products.js';
+import {
+  JIT_PRICE_ENV_VARS,
+  PACK_PRICE_ENV_VARS,
+  normalizedCurrency,
+  packCurrency
+} from './products.js';
 
 export type DeploymentMode = 'production' | 'development' | 'test';
 
@@ -575,11 +580,19 @@ function validateStripe(
     // Via the SAME normalizer the runtime uses, so the validator's notion of
     // "unset" cannot drift from products.ts's (#278 round 6).
     if (normalizedCurrency(env.STRIPE_CURRENCY, '') === '') {
+      // Names every product family that inherits it. Round 10 deduped the
+      // two currency findings by DELETING the JIT one, so with Pay & Send
+      // enabled and both vars unset the operator read a pack-only warning,
+      // fixed packs, and still had Pay & Send failing on a terminal
+      // currency_mismatch nothing had mentioned (#278 round 11).
+      const alsoJit = env.JIT_PURCHASE_ENABLED === 'true' &&
+        normalizedCurrency(env.JIT_CURRENCY, '') === '';
       findings.push({
         severity: 'warning',
         rule: 'stripe.currency_unset',
         message:
-          'STRIPE_CURRENCY is not set; pack Prices must be denominated in the default (usd) or they will not resolve'
+          `STRIPE_CURRENCY is not set; ${alsoJit ? 'pack and Pay & Send' : 'pack'} ` +
+          'Prices must be denominated in the default (usd) or they will not resolve'
       });
     }
 
@@ -606,11 +619,18 @@ function validateStripe(
         normalizedCurrency(env.JIT_CURRENCY, '') === '' &&
         normalizedCurrency(env.STRIPE_CURRENCY, '') !== ''
       ) {
+        // The message is rendered FROM the predicate. Round 10 narrowed this
+        // branch to "JIT_CURRENCY alone is unset" but left text asserting
+        // that STRIPE_CURRENCY was unset too and that Prices must be in usd -
+        // both false on the only branch that can now reach it, and a non-USD
+        // operator following it would point Pay & Send at USD Prices and get
+        // a terminal currency_mismatch (#278 round 11).
         findings.push({
           severity: 'warning',
           rule: 'stripe.currency_unset',
           message:
-            'JIT_CURRENCY is not set and neither is STRIPE_CURRENCY; Pay & Send Prices must be denominated in the default (usd)'
+            `JIT_CURRENCY is not set; Pay & Send Prices must be denominated in ` +
+            `${packCurrency(env)}, inherited from STRIPE_CURRENCY`
         });
       }
     }

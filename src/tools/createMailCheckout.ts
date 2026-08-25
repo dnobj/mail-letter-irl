@@ -70,6 +70,21 @@ export function friendlyCheckoutError(error: unknown): Error {
           ? 'Pay & Send pricing is not configured. Please use a letter pack instead.'
           : 'Pay & Send is temporarily unavailable. Please try again shortly, or use a letter pack.'
       );
+    case 'ACCOUNT_SENDS_BLOCKED':
+      // Terminal by nature and already carrying its own instruction: the
+      // default branch replaced it with retry advice no retry can honour,
+      // and dropped the "contact support" the customer actually needs
+      // (#278 round 11).
+      return friendly(
+        error instanceof Error && error.message
+          ? error.message
+          : 'Sending is disabled on this account. Please contact support.'
+      );
+    case 'DRAFT_INVALID_STATE':
+      return friendly(
+        'That draft can no longer be paid for - it has already been sent or cancelled. ' +
+          'Create a new preview to send another.'
+      );
     case 'PROVIDER_ERROR':
       return friendly(
         terminal

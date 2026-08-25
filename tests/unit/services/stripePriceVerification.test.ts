@@ -123,7 +123,13 @@ function checkout(product: Record<string, unknown>) {
 
 describe('checkout pricing guards (#275)', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // resetAllMocks, not clearAllMocks: clearAllMocks wipes CALLS but keeps
+    // whatever implementation a previous case installed, so the loud unwired
+    // priceRetrieve default was dead from the second test onward - a case
+    // that forgot its wiring silently inherited a sibling's healthy prices,
+    // the exact fake-green the sentinel exists to prevent (#278 round 11,
+    // probed). resetAllMocks restores each vi.fn(impl) to its own impl.
+    vi.resetAllMocks();
     resetPriceCatalog();
     // This is the ONE suite that drives the real retriever, against a mocked
     // stripe module, so its per-request bounds are observable at all. Reset
@@ -366,7 +372,9 @@ describe('checkout pricing guards (#275)', () => {
 
     stripeMocks.sessionCreate.mockRejectedValue(
       Object.assign(new Error('This price is not active'), {
-        type: 'StripeInvalidRequestError'
+        type: 'StripeInvalidRequestError',
+        // Stripe names the offending parameter; that is the discriminator.
+        param: 'line_items[0][price]'
       })
     );
 
@@ -382,6 +390,37 @@ describe('checkout pricing guards (#275)', () => {
     // The memo is gone, so the next ensure re-reads it from Stripe - where it
     // will record price.inactive and take readiness red.
     expect(getResolvedPriceForProduct('credit-pack-10')).toBeNull();
+  });
+
+  it('keeps the memo when Stripe blames a CALLER-supplied parameter', () => {
+    // success_url, cancel_url and customer_email reach this call straight
+    // from a request body, and they all fail as the same catch-all class an
+    // archived price does. Keying the invalidation on the class alone let any
+    // authenticated caller delete a verified memo on demand - /readyz 503 and
+    // every OTHER customer's purchase refused until the next resolve. Three
+    // round-11 angles found it, one with a live probe (#278 round 11).
+    serveHealthyPrices();
+    return ensurePriceCatalog().then(async () => {
+      expect(getResolvedPriceForProduct('credit-pack-10')).not.toBeNull();
+
+      stripeMocks.sessionCreate.mockRejectedValue(
+        Object.assign(new Error('Not a valid URL'), {
+          type: 'StripeInvalidRequestError',
+          param: 'success_url'
+        })
+      );
+
+      await checkout({
+        productCode: 'credit-pack-10',
+        priceId: 'price_regular',
+        amountCents: 1000,
+        currency: 'usd',
+        name: 'Regular Pack',
+        description: 'Five prepaid letters'
+      });
+
+      expect(getResolvedPriceForProduct('credit-pack-10')).not.toBeNull();
+    });
   });
 
   it('classifies a missing key at the WEBHOOK catch as configuration, not a blip', () => {

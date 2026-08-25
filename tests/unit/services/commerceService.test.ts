@@ -16,8 +16,7 @@ const mocks = vi.hoisted(() => ({
   getJitProduct: vi.fn(),
   getPackProduct: vi.fn(),
   ensurePriceCatalog: vi.fn(),
-  describeUnpriced: vi.fn(() => null),
-  resolutionEpoch: vi.fn(() => 0)
+  describeUnpriced: vi.fn(() => null)
 }));
 
 /**
@@ -31,7 +30,9 @@ const mocks = vi.hoisted(() => ({
  * api.stripe.com, under a 10s client timeout against vitest's 10s testTimeout
  * (#278 review round 2).
  */
-vi.mock('../../../src/services/priceCatalog.js', () => ({
+vi.mock('../../../src/services/priceCatalog.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../../src/services/priceCatalog.js')>();
+  return {
   ensurePriceCatalog: mocks.ensurePriceCatalog,
   // The guards read describeUnpriced (non-null by contract); the fixtures
   // still drive it through getPriceResolutionFailure so each test states its
@@ -46,17 +47,14 @@ vi.mock('../../../src/services/priceCatalog.js', () => ({
     mocks.describeUnpriced(productCode) ?? {
       productCode,
       rule: 'price.not_resolved',
-      diagnosticClass: 'provider_error',
-      terminal: false
+      diagnosticClass: 'provider_error'
     },
-  // The real formatter, so the slot signature these tests pin is the one
-  // production writes; the epoch knob feeds it through the catalog's own
-  // getResolutionEpoch, which this factory also stubs.
-  formatPriceFailureSummary: (failures: Array<{ productCode: string; rule: string; diagnosticClass: string; detail?: string }>) =>
-    failures
-      .map(f => `${f.productCode}:${f.rule}:${f.diagnosticClass}:e${mocks.resolutionEpoch(f.productCode)}` + (f.detail ? `(${f.detail})` : ''))
-      .sort()
-      .join(','),
+  // The REAL formatter, not a retype of it: this string is the slot
+  // SIGNATURE that decides whether a fault logs at all, and it has changed
+  // in four consecutive rounds - a copy here could not fail when the real
+  // one drifts, which is the whole defect these tests exist to catch
+  // (#278 round 11; the readyz suite already does this).
+  formatPriceFailureSummary: actual.formatPriceFailureSummary,
   // Swallows like production kick: aliasing straight to the ensure mock let a
   // mockRejectedValue fixture leak an unhandled rejection from fire-and-forget
   // call sites - a failure mode the real kick structurally cannot produce.
@@ -67,7 +65,8 @@ vi.mock('../../../src/services/priceCatalog.js', () => ({
       /* swallowed, as in production */
     }
   }
-}));
+  };
+});
 
 vi.mock('../../../src/db/index.js', () => ({
   query: mocks.query,
@@ -466,8 +465,7 @@ describe('commerceService', () => {
     mocks.describeUnpriced.mockReturnValue({
       productCode: 'credit-pack-4',
       rule: 'price.inactive',
-      diagnosticClass: 'configuration_error',
-      terminal: true
+      diagnosticClass: 'configuration_error'
     } as never);
     mocks.getPackProduct.mockReturnValue({
       productCode: 'credit-pack-4',
@@ -738,11 +736,13 @@ describe('commerceService', () => {
     expect(recovery).toContain("CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH'");
   });
 
-  it('re-logs a recurring quote fault after a recovery no quote observed', () => {
-    // Slot cleared only by a quote seeing the product configured: recovery
-    // during quiet hours followed by an identical re-break hashed the same
-    // and the second outage logged NOTHING. The resolution epoch re-arms the
-    // signature (#278 round 8).
+  it('dedupes an identical quote fault and re-logs a CHANGED one', () => {
+    // The quote surface reports on change only, through the catalog's own
+    // canonical signature. The recovery axis of that signature - the
+    // resolution epoch, which re-arms the slot after a recovery no quote
+    // observed - is pinned against the REAL counter in priceCatalog.test.ts
+    // ('folds the resolution epoch into the signature'), because this suite
+    // stubs the catalog's state and cannot move a real epoch (#278 r8, r11).
     clearDiagnosticChangeSlot('commerce.pay_and_send_unpriced:jit-letter');
     const diag = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
@@ -755,25 +755,28 @@ describe('commerceService', () => {
       mocks.describeUnpriced.mockReturnValue({
         productCode: 'jit-letter',
         rule: 'price.inactive',
-        diagnosticClass: 'configuration_error',
-        terminal: true
+        diagnosticClass: 'configuration_error'
       });
 
       getSendEligibility(0, 2, 'letter'); // outage 1: logs
-      getSendEligibility(0, 2, 'letter'); // steady: suppressed
-      mocks.resolutionEpoch.mockReturnValue(1); // resolved during quiet hours
-      getSendEligibility(0, 2, 'letter'); // outage 2, identical shape: logs
+      getSendEligibility(0, 2, 'letter'); // steady, identical: suppressed
+      mocks.describeUnpriced.mockReturnValue({
+        productCode: 'jit-letter',
+        rule: 'price.amount_mismatch',
+        diagnosticClass: 'configuration_error',
+        detail: 'expected 499, stripe 599'
+      });
+      getSendEligibility(0, 2, 'letter'); // a DIFFERENT fault: logs
 
       const lines = diag.mock.calls
         .flat()
         .map(String)
         .filter(line => line.includes('"event":"commerce.pay_and_send_unpriced"'));
       expect(lines).toHaveLength(2);
+      // and the figures reach the operator on the quote surface too
+      expect(lines[1]).toContain('expected 499, stripe 599');
     } finally {
       diag.mockRestore();
-      // clearAllMocks clears CALLS, not implementations: put both the knob
-      // and the module-global slot back the way this test found them.
-      mocks.resolutionEpoch.mockReturnValue(0);
       clearDiagnosticChangeSlot('commerce.pay_and_send_unpriced:jit-letter');
     }
   });
@@ -949,8 +952,7 @@ describe('commerceService', () => {
     mocks.describeUnpriced.mockReturnValue({
       productCode: 'credit-pack-4',
       rule: 'price.lookup_failed',
-      diagnosticClass: 'StripeConnectionError',
-      terminal: false
+      diagnosticClass: 'StripeConnectionError'
     } as never);
     mocks.getPackProduct.mockReturnValue({
       productCode: 'credit-pack-4',
@@ -985,8 +987,7 @@ describe('commerceService', () => {
       mocks.describeUnpriced.mockImplementation(((productCode: string) => ({
         productCode,
         rule: 'price.inactive',
-        diagnosticClass: 'configuration_error',
-        terminal: true
+        diagnosticClass: 'configuration_error'
       })) as never);
       mocks.getJitProduct.mockImplementation(((mailType: string) => ({
         productCode: mailType === 'letter' ? 'jit-letter' : 'jit-postcard',
@@ -1031,8 +1032,7 @@ describe('commerceService', () => {
       mocks.describeUnpriced.mockReturnValue({
         productCode: 'jit-letter',
         rule: 'price.inactive',
-        diagnosticClass: 'configuration_error',
-        terminal: true
+        diagnosticClass: 'configuration_error'
       } as never);
       mocks.getJitProduct.mockReturnValue({
         productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,

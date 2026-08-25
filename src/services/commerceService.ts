@@ -297,23 +297,55 @@ function enabledPayAndSend(
 
 /**
  * Stripe's own floor for a Checkout Session's expires_at: it refuses a session
- * whose expiry is nearer than this. EXACTLY the floor, with no added margin -
- * checkoutExpiry below stamps rows at the floor plus five seconds, so a margin
- * here would cancel a freshly inserted row on its own first retry and break
- * the idempotency-key replay that recovers a crashed attachment (#278 r10).
+ * whose expiry is nearer than this.
+ *
+ * A sessionless row must forward its stored expiry verbatim - the idempotency
+ * key that recovers a crashed attachment only replays for IDENTICAL
+ * parameters - so a row inside this floor cannot open a session at all and is
+ * retired in favour of a fresh one. With the shipped 30-minute window that
+ * makes the reuse window five seconds wide, which is honest rather than
+ * ideal: a sessionless row is nearly always one whose creation FAILED, where
+ * Stripe has nothing to replay and a fresh row is the only thing that can
+ * produce a working checkout. The rare crashed-attachment case (Stripe holds
+ * a session we never recorded) is still recovered on a prompt retry, and
+ * beyond that it costs an orphaned Stripe session that expires on its own -
+ * a working checkout either way, which forwarding a stale expiry was not
+ * (#278 rounds 10-11; round 10's comment here claimed the zero margin
+ * preserved the replay, which the arithmetic does not support).
  */
-const STRIPE_MIN_CHECKOUT_WINDOW_MS = 30 * 60_000;
+const STRIPE_MIN_CHECKOUT_WINDOW_MINUTES = 30;
+const STRIPE_MIN_CHECKOUT_WINDOW_MS = STRIPE_MIN_CHECKOUT_WINDOW_MS_OF(
+  STRIPE_MIN_CHECKOUT_WINDOW_MINUTES
+);
+function STRIPE_MIN_CHECKOUT_WINDOW_MS_OF(minutes: number): number {
+  return minutes * 60_000;
+}
+/** Clock/network margin on a stamped expiry, so it is still valid on arrival. */
+const CHECKOUT_STAMP_MARGIN_MS = 5_000;
+/**
+ * Headroom above Stripe's floor, so a sessionless row stays REUSABLE for a
+ * while. A window stamped at exactly the floor leaves none: round 10's reuse
+ * guard then cancelled every sessionless row more than five seconds old,
+ * which made the round-7 reprice branch dead code, churned a cancelled order
+ * per retry, and orphaned the Stripe session behind a crashed attachment
+ * instead of replaying its idempotency key (three round-11 angles).
+ */
+const CHECKOUT_REUSE_BUDGET_MINUTES = 10;
 
 function checkoutExpiry(draftExpiresAt: Date): Date {
   const configuredMinutes = Math.min(
     24 * 60,
-    Math.max(30, integerSetting('JIT_CHECKOUT_EXPIRY_MINUTES', 30))
+    Math.max(
+      STRIPE_MIN_CHECKOUT_WINDOW_MINUTES + CHECKOUT_REUSE_BUDGET_MINUTES,
+      integerSetting('JIT_CHECKOUT_EXPIRY_MINUTES', 30)
+    )
   );
-  // Stripe requires expires_at to remain at least 30 minutes in the future
-  // when the API request arrives, so retain a small network/clock margin.
-  const configured = new Date(Date.now() + configuredMinutes * 60_000 + 5_000);
+  const configured = new Date(
+    Date.now() + configuredMinutes * 60_000 + CHECKOUT_STAMP_MARGIN_MS
+  );
   const draftExpiry = new Date(draftExpiresAt);
-  if (draftExpiry.getTime() - Date.now() < 30 * 60_000 + 5_000) {
+  // A draft with less than Stripe's own floor left cannot open ANY session.
+  if (draftExpiry.getTime() - Date.now() < STRIPE_MIN_CHECKOUT_WINDOW_MS + CHECKOUT_STAMP_MARGIN_MS) {
     throw Object.assign(
       new Error('Draft expires too soon to open a safe checkout. Please create a new preview.'),
       { code: 'DRAFT_TOO_CLOSE_TO_EXPIRY' }
@@ -674,15 +706,21 @@ async function prepareJitOrder(
           Date.now() + STRIPE_MIN_CHECKOUT_WINDOW_MS &&
         !existing.stripe_checkout_session_id
       ) {
+        // The audit trail distinguishes the two: a row still inside its own
+        // window was NOT "expired locally" - saying so in order history is a
+        // statement an operator would act on, and the round-10 gate started
+        // producing it for rows with most of their window left (#278 r11).
+        const past = new Date(existing.checkout_expires_at).getTime() <= Date.now();
         await client.query(
-          `UPDATE orders SET status = 'cancelled', updated_at = NOW()
+          `UPDATE orders SET status = 'cancelled',
+             last_error_code = $2, updated_at = NOW()
            WHERE order_id = $1`,
-          [existing.order_id]
+          [existing.order_id, past ? 'CHECKOUT_EXPIRED' : 'CHECKOUT_WINDOW_TOO_SHORT']
         );
         await recordOrderEvent(
           client,
           existing.order_id,
-          'checkout.expired_locally',
+          past ? 'checkout.expired_locally' : 'checkout.window_too_short',
           existing.status,
           'cancelled'
         );
@@ -839,7 +877,19 @@ export async function createJitCheckout(
   }
 
   const mailType = String(prepared.order.product_snapshot.mailType || 'letter') as MailType;
-  const product = getJitProductConfig(mailType);
+  // The row's OWN snapshot, not a fresh catalog read across the transaction
+  // boundary: re-deriving here meant a memo dropped by a parallel checkout in
+  // that window turned a healthy purchase into PACK_AMOUNT_NOT_CONFIGURED
+  // with a transient class, leaving the just-inserted row stranded in
+  // checkout_pending. createPackCheckout has always snapshotted (#278 r11).
+  const snapshot = prepared.order.product_snapshot;
+  const product = {
+    ...getJitProductConfig(mailType),
+    amountCents: prepared.order.amount_cents,
+    currency: prepared.order.currency,
+    ...(snapshot.name ? { name: String(snapshot.name) } : {}),
+    ...(snapshot.description ? { description: String(snapshot.description) } : {})
+  };
   const urls = jitReturnUrls(prepared.order.order_id);
   const checkout = await createJitCheckoutSession({
     orderId: prepared.order.order_id,

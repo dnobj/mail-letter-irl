@@ -213,6 +213,8 @@ export function resetPriceCatalog(): void {
   attempts.clear();
   inFlight.clear();
   resolutionEpochs.clear();
+  lastInvalidatedAt.clear();
+  invalidations.clear();
   clearDiagnosticChangeSlot('stripe.price_catalog_resolved');
   generation += 1;
   jitter = () => 0;
@@ -270,31 +272,15 @@ export function formatPriceFailureSummary(
     .join(',');
 }
 
-/**
- * A NON-REVERSIBLE digest of the Stripe credential - never the credential
- * itself. The key decides which Stripe ACCOUNT a price id resolves against,
- * so a rotation can change every answer while every other signature input is
- * byte-identical. Without it, a TERMINAL cooldown earned from a missing or
- * revoked key outlived the operator's fix: pruneStale could not see the
- * change, so /readyz held 503 and every purchase was refused for up to the
- * 15-minute ceiling AFTER the configuration was already correct - the round-6
- * STRIPE_CURRENCY bug reproduced on the one axis the signature omitted
- * (#278 round 10, reproduced empirically by two angles).
- */
-function credentialFingerprint(env: NodeJS.ProcessEnv = process.env): string {
-  const key = (env.STRIPE_SECRET_KEY ?? '').trim();
-  if (!key) return 'unset';
-  let hash = 5381;
-  for (let index = 0; index < key.length; index += 1) {
-    hash = ((hash * 33) ^ key.charCodeAt(index)) >>> 0;
-  }
-  return hash.toString(36);
-}
 
 function configSignature(product: ConfiguredProduct): string {
+  // Every term comes from the ROW, so the signature describes exactly one
+  // environment - including the credential, which used to be read from
+  // ambient process.env and stitched a caller-threaded verdict out of two
+  // (#278 round 11).
   return (
     `${product.priceId}|${product.expectedAmountCents}|${product.expectedCurrency}` +
-    `|${credentialFingerprint()}`
+    `|${product.credential}`
   );
 }
 
@@ -372,8 +358,41 @@ function storedFailureIfCurrent(
  * price.inactive - at which point readiness goes red, quotes stop offering it,
  * and further purchases are refused BEFORE an order row exists (#278 r10).
  */
+const INVALIDATION_FLOOR_MS = 60_000;
+const lastInvalidatedAt = new Map<string, number>();
+/**
+ * Per-product invalidation counter, checked by resolveOne's staleness guard.
+ * Without it an invalidation raised while a lookup was already in the air was
+ * a silent no-op: the flight had read Stripe BEFORE the archival and its
+ * commit re-installed the very memo the invalidation existed to drop, putting
+ * the process straight back into readiness-green-while-every-purchase-fails
+ * (#278 round 11).
+ */
+const invalidations = new Map<string, number>();
+
+function invalidationCount(productCode: string): number {
+  return invalidations.get(productCode) ?? 0;
+}
+
 export function invalidateResolvedPrice(productCode: string, reason: string): void {
-  if (!resolved.delete(productCode)) return;
+  // Rate-limited, because the trigger is necessarily coarse: the class that
+  // reports an archived Price is stripe-node's catch-all for any
+  // invalid_request without an allowlisted code, so a rejection caused by
+  // some OTHER parameter (an expires_at drift, a malformed url, an email
+  // Stripe dislikes) also lands here. There the re-read SUCCEEDS, no failure
+  // is recorded, nothing throttles, and the next attempt invalidates again -
+  // measured at one extra Stripe read per failing checkout, unbounded, plus
+  // a warn line each time. One invalidation is all the archived-Price case
+  // ever needs: its re-read records price.inactive and the terminal ladder
+  // takes over from there (#278 round 11).
+  const now = Date.now();
+  const last = lastInvalidatedAt.get(productCode);
+  if (last !== undefined && now - last < INVALIDATION_FLOOR_MS) return;
+  lastInvalidatedAt.set(productCode, now);
+  // Counted whether or not a memo is present RIGHT NOW: the point is to
+  // invalidate the answer, including one still being computed.
+  invalidations.set(productCode, invalidationCount(productCode) + 1);
+  resolved.delete(productCode);
   // Clear the ladder too: this is new evidence, not a repeat failure, so the
   // re-read happens on the next call rather than after a cooldown.
   failures.delete(productCode);
@@ -459,14 +478,14 @@ function validate(
     return {
       rule: 'price.amount_mismatch',
       diagnosticClass: 'configuration_error',
-      detail: `expected ${product.expectedAmountCents}, stripe ${unitAmount}`
+      detail: `expected ${product.expectedAmountCents} / stripe ${unitAmount}`
     };
   }
   if (currency !== product.expectedCurrency) {
     return {
       rule: 'price.currency_mismatch',
       diagnosticClass: 'configuration_error',
-      detail: `expected ${product.expectedCurrency}, stripe ${currency}`
+      detail: `expected ${product.expectedCurrency} / stripe ${currency}`
     };
   }
 
@@ -476,7 +495,7 @@ function validate(
     priceId: product.priceId,
     unitAmount,
     currency,
-    credential: credentialFingerprint()
+    credential: product.credential
   });
 }
 
@@ -540,6 +559,7 @@ function recordFailure(
 
 /** Resolve ONE product's price and commit the outcome, staleness-guarded. */
 async function resolveOne(product: ConfiguredProduct, startedGen: number): Promise<void> {
+  const startedInvalidations = invalidationCount(product.productCode);
   const signature = configSignature(product);
   // A commit is valid only if nothing moved underneath the lookup: not the
   // catalog generation (a reset), and not ANY part of the configuration - a
@@ -549,6 +569,9 @@ async function resolveOne(product: ConfiguredProduct, startedGen: number): Promi
   // the dead snapshot).
   const stale = (): boolean => {
     if (generation !== startedGen) return true;
+    // An invalidation raised mid-flight discards this result: it was read
+    // before the event that disproved it (#278 round 11).
+    if (invalidationCount(product.productCode) !== startedInvalidations) return true;
     const current = getConfiguredProduct(product.productCode);
     return !current || configSignature(current) !== signature;
   };

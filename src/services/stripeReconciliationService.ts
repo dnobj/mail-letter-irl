@@ -19,7 +19,10 @@ import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog
 // own comment said "must match stripeService.ts", which is the drift shape
 // behind #160/#270/#275. Now there is one of each.
 import { BACKGROUND_REQUEST_OPTIONS, getStripeClient } from './stripeClient.js';
-import { PACK_CREDITS_BY_PRODUCT as PRODUCT_CREDITS } from '../config/products.js';
+import {
+  PACK_CREDITS_BY_PRODUCT as PRODUCT_CREDITS,
+  normalizedCurrency
+} from '../config/products.js';
 
 
 interface ReconciliationResult {
@@ -124,7 +127,7 @@ export async function reconcileStripePayments(
           sessionId: session.id,
           userId,
           amount: session.amount_total || 0,
-          currency: (session.currency || '').toLowerCase(),
+          currency: normalizedCurrency(session.currency ?? undefined, ''),
           credits,
           productId,
           created: new Date(session.created * 1000),
@@ -135,10 +138,14 @@ export async function reconcileStripePayments(
       }
     }
 
+    // Same guard as the refunds walk below, for the same reason: the cursor
+    // advances only from the last item, so a has_more page carrying no data
+    // left it unmoved and re-issued the identical request forever, hanging
+    // the whole maintenance sweep. Round 10 fixed that shape in one of the
+    // two copies of this loop; this is the other (#278 round 11).
+    if (sessions.data.length === 0) break;
+    startingAfter = sessions.data[sessions.data.length - 1].id;
     hasMore = sessions.has_more;
-    if (sessions.data.length > 0) {
-      startingAfter = sessions.data[sessions.data.length - 1].id;
-    }
   }
 
   console.log(`   Found ${stripePayments.size} paid Stripe sessions`);
@@ -240,8 +247,16 @@ export async function reconcileStripePayments(
 
     const paidOrderState = !['checkout_pending', 'payment_failed', 'cancelled', 'paid']
       .includes(order.status);
-    if (stripePayment.amount !== order.amount_cents ||
-        stripePayment.currency !== order.currency.toLowerCase()) {
+    if (
+      stripePayment.amount !== order.amount_cents ||
+      // The shared normalizer on BOTH sides. The fulfilment gate trims and
+      // this audit did not, over the SAME orders.currency column - so a
+      // legacy row with a padded currency was credited correctly and then
+      // reported here as a high-severity amount_mismatch telling the operator
+      // not to fulfil it: a false money alarm inside the audit that exists to
+      // find real ones (#278 round 11).
+      stripePayment.currency !== normalizedCurrency(order.currency, '')
+    ) {
       amountMismatches++;
       discrepancies.push({
         type: 'amount_mismatch',
