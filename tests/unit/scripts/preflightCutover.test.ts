@@ -152,6 +152,27 @@ describe('diffManifest', () => {
     }
   });
 
+  it('reports an unset advisory variable without failing the gate', () => {
+    // STRIPE_CURRENCY and the price band change what production will sell, so
+    // they must be VISIBLE to a parity diff - but each has a working default,
+    // and listing them as required turned the cutover gate red for a correctly
+    // configured USD environment. `checkedBy` alone could not express that: it
+    // only exempts an entry from the boot presence loop, and this script reads
+    // requiredIn/condition and nothing else (#278 review round 3).
+    const withoutCurrency = FULL_PRODUCTION_NAMES.filter(name => name !== 'STRIPE_CURRENCY');
+    const diff = diffManifest(withoutCurrency, { environment: 'production', service: 'api' });
+
+    expect(diff.missing.map(entry => entry.name)).not.toContain('STRIPE_CURRENCY');
+    expect(diff.advisory.map(entry => entry.name)).toContain('STRIPE_CURRENCY');
+    // The band bounds are advisory too, and are absent from the fixture.
+    expect(diff.advisory.map(entry => entry.name)).toEqual(
+      expect.arrayContaining(['STRIPE_PRICE_MIN_UNIT_AMOUNT', 'STRIPE_PRICE_MAX_UNIT_AMOUNT'])
+    );
+    expect(diff.advisoryNotes).toHaveLength(diff.advisory.length);
+    // The gate itself stays green.
+    expect(diff.missing).toEqual([]);
+  });
+
   it('consumes the real manifest by default so the two can never drift', () => {
     // A canary: if someone re-points the default manifest, this fails.
     const names = ENV_VAR_MANIFEST.map(entry => entry.name);
@@ -188,7 +209,6 @@ describe('parity with the boot validator', () => {
     if (name === 'LETTER_PROVIDER_API_KEY') return production ? 'live_sk_parity_fixture' : 'test_sk_parity_fixture';
     if (name === 'LETTER_PROVIDER_CONFIG') return production ? '{"mode":"live"}' : '{"mode":"test"}';
     if (name.startsWith('STRIPE_PRICE_') || name.endsWith('_PRICE_ID')) return `price_${name.toLowerCase()}`;
-    if (name.endsWith('_AMOUNT_CENTS')) return '500';
     return `parity-fixture-${name.toLowerCase()}`;
   }
 

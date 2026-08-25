@@ -30,7 +30,11 @@ describe('example env files (#275)', () => {
     expect(exampleFiles.length).toBeGreaterThanOrEqual(3);
   });
 
-  for (const file of ['.env.example', '.env.dev.example', '.env.test.example']) {
+  // Driven from what is ON DISK, not a hand-kept literal: the repo already had
+  // a fourth example file the literal did not name, so a restored variable
+  // there would have passed a test whose docblock promises the deletion is
+  // pinned "everywhere an operator copies from" (#278 review round 3).
+  for (const file of exampleFiles) {
     it(`${file} sets no deleted amount variable`, () => {
       const content = readFileSync(file, 'utf8');
       for (const name of DELETED_VARS) {

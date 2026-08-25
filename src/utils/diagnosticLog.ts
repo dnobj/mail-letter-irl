@@ -62,6 +62,39 @@ export type DiagnosticErrorCategory =
   | "validation_error"
   | "unknown_error";
 
+/**
+ * Classes a human must act on: retrying cannot clear them, however long you
+ * wait. This is the vocabulary's own question, so it is answered once here
+ * rather than by string comparisons scattered through the commerce layer -
+ * where `=== 'configuration_error'` was inlined at five sites, each of which
+ * decides something expensive (whether to cancel a customer's order, whether a
+ * paid webhook retries or books unmatched money, how hard to retry Stripe).
+ * Adding a class there meant finding all five; missing one cancelled a live
+ * order or retried a hopeless fault forever (#278 review round 3).
+ *
+ * Everything absent from this set is treated as transient, which is the safe
+ * default: a transient verdict retries and leaves orders pending, a terminal
+ * one cancels.
+ */
+const TERMINAL_ERROR_CLASSES = new Set([
+  "configuration_error",
+  // The id points at nothing in this account or mode.
+  "resource_missing",
+  // Credentials: a revoked, expired, restricted or wrong-mode key. No amount
+  // of retrying fixes any of them.
+  "api_key_expired",
+  "testmode_charges_only",
+  "StripeAuthenticationError",
+  "StripePermissionError",
+  // A malformed request is our bug or our config; the same call will keep
+  // failing identically.
+  "StripeInvalidRequestError"
+]);
+
+export function isTerminalDiagnosticClass(diagnosticClass: string | undefined): boolean {
+  return diagnosticClass !== undefined && TERMINAL_ERROR_CLASSES.has(diagnosticClass);
+}
+
 export function classifyDiagnosticError(
   error: unknown,
   fallback: DiagnosticErrorCategory = "unknown_error"

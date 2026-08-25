@@ -22,8 +22,13 @@ import {
   type CommerceProductConfig,
   type PackProductId
 } from './stripeService.js';
+import { jitProductCode } from '../config/products.js';
 import type { LetterDraft, MailType, Order, OrderStatus } from './types.js';
-import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import {
+  classifyDiagnosticError,
+  isTerminalDiagnosticClass,
+  writeDiagnostic
+} from '../utils/diagnosticLog.js';
 
 // Must mirror idx_orders_active_jit_draft_unique in migration 023.
 export const ACTIVE_JIT_STATUSES: OrderStatus[] = [
@@ -147,6 +152,12 @@ function refundRetryDelaySeconds(): number {
   );
 }
 
+/**
+ * Last reported Pay & Send pricing fault, so a steady fault is logged once
+ * rather than once per quote. Cleared when pricing recovers.
+ */
+let lastPayAndSendFault: string | null = null;
+
 export function getSendEligibility(
   availableCredits: number,
   requiredCredits: number,
@@ -155,6 +166,7 @@ export function getSendEligibility(
   const prepaidEligible = availableCredits >= requiredCredits;
   const product = getJitProductConfig(mailType);
   const configured = Boolean(product.priceId && product.amountCents > 0);
+  if (configured) lastPayAndSendFault = null;
   const allowedWithBalance = process.env.JIT_ALLOW_WITH_PREPAID_BALANCE === 'true';
   const available =
     isJitPurchaseEnabled() && configured && (!prepaidEligible || allowedWithBalance);
@@ -169,15 +181,24 @@ export function getSendEligibility(
     // directions.
     const failure = getPriceResolutionFailure(product.productCode);
     const errorClass = failure?.diagnosticClass ?? 'provider_error';
-    writeDiagnostic('error', 'commerce.pay_and_send_unpriced', {
-      productCode: product.productCode,
-      rule: failure?.rule ?? 'price.not_resolved',
-      errorClass
-    });
-    unavailableReason =
-      errorClass === 'configuration_error'
-        ? 'Pay & Send pricing is not configured.'
-        : 'Pay & Send is temporarily unavailable. Please try again shortly.';
+    const rule = failure?.rule ?? 'price.not_resolved';
+    // Reported on CHANGE only. This is a synchronous accessor on the quote
+    // path, and the module header notes quotes vastly outnumber purchases - so
+    // an unconditional error line here turned one persistent config fault into
+    // a continuous error stream and a permanently firing alert, scaling with
+    // traffic rather than with the number of faults (#278 review round 3).
+    const signature = `${product.productCode}:${rule}:${errorClass}`;
+    if (signature !== lastPayAndSendFault) {
+      lastPayAndSendFault = signature;
+      writeDiagnostic('error', 'commerce.pay_and_send_unpriced', {
+        productCode: product.productCode,
+        rule,
+        errorClass
+      });
+    }
+    unavailableReason = (failure?.terminal ?? false)
+      ? 'Pay & Send pricing is not configured.'
+      : 'Pay & Send is temporarily unavailable. Please try again shortly.';
   } else if (prepaidEligible && !allowedWithBalance) {
     unavailableReason = 'Use your existing prepaid letter balance.';
   }
@@ -395,10 +416,17 @@ export class PackAmountNotConfiguredError extends Error {
   // 30-second Stripe outage was logged as an operator-must-act config fault
   // (#278 review round 2) - the #213 mislabel reintroduced one layer up.
   readonly diagnosticClass: string;
-  constructor(readonly productCode: string, diagnosticClass = 'configuration_error') {
+  /** Whether a human must act; false means a retry can still succeed. */
+  readonly terminal: boolean;
+  constructor(
+    readonly productCode: string,
+    diagnosticClass = 'configuration_error',
+    terminal = true
+  ) {
     super(`Pack amount is not configured for ${productCode}`);
     this.name = 'PackAmountNotConfiguredError';
     this.diagnosticClass = diagnosticClass;
+    this.terminal = terminal;
   }
 }
 
@@ -419,7 +447,11 @@ export function assertConfiguredAmount(
     // No recorded failure means never-attempted or in-flight, which the
     // catalog classes transient.
     const failure = getPriceResolutionFailure(productCode);
-    throw new PackAmountNotConfiguredError(productCode, failure?.diagnosticClass ?? 'provider_error');
+    throw new PackAmountNotConfiguredError(
+      productCode,
+      failure?.diagnosticClass ?? 'provider_error',
+      failure?.terminal ?? false
+    );
   }
 }
 
@@ -480,7 +512,7 @@ export async function createPackCheckout(
   if (!checkout.success || !checkout.sessionId) {
     await markCheckoutCreationFailure(orderId, checkout.error || 'Unknown Stripe error', {
       errorCode: checkout.errorCode,
-      terminal: checkout.diagnosticClass === 'configuration_error'
+      terminal: checkout.terminal ?? isTerminalDiagnosticClass(checkout.diagnosticClass)
     });
     // Carry the resolved provider class up to the handler's catch, so the log
     // there names the real cause (e.g. resource_missing) instead of defaulting
@@ -565,8 +597,20 @@ async function prepareJitOrder(
     const actualMailType = (draft.mail_type || 'letter') as MailType;
     const product = getJitProductConfig(actualMailType);
     if (!product.priceId || product.amountCents <= 0) {
+      // The one Pay & Send path left reading nothing. Without the carried class
+      // the handler's catch defaults to database_error, and the customer was
+      // told "not configured" (permanent) for the very blip the quote had just
+      // called temporary - the two contradicting each other (#278 review r3).
+      const failure = getPriceResolutionFailure(product.productCode);
+      writeDiagnostic('error', 'commerce.jit_not_priced', {
+        productCode: product.productCode,
+        rule: failure?.rule ?? 'price.not_resolved',
+        errorClass: failure?.diagnosticClass ?? 'provider_error'
+      });
       throw Object.assign(new Error('Pay & Send pricing is not configured'), {
-        code: 'JIT_NOT_CONFIGURED'
+        code: 'JIT_NOT_CONFIGURED',
+        diagnosticClass: failure?.diagnosticClass ?? 'provider_error',
+        terminal: failure?.terminal ?? false
       });
     }
     if (process.env.JIT_ALLOW_WITH_PREPAID_BALANCE !== 'true') {
@@ -610,12 +654,19 @@ async function prepareJitOrder(
 export async function createJitCheckout(
   params: CreateJitCheckoutParams
 ): Promise<CommerceCheckoutResult> {
-  await ensurePriceCatalog();
+  // After the cheap synchronous guard, not before it: with Pay & Send disabled
+  // (the shipped default) the catalog work is for products this deployment
+  // does not sell, on a request that is about to throw anyway. Both JIT codes
+  // are named so neither call can join an unrelated batch (#278 review r3).
   if (!isJitPurchaseEnabled()) {
     throw Object.assign(new Error('Pay & Send is not currently enabled'), {
       code: 'JIT_DISABLED'
     });
   }
+  await Promise.all([
+    ensurePriceCatalog(jitProductCode('letter')),
+    ensurePriceCatalog(jitProductCode('postcard'))
+  ]);
 
   // Issue #150: refuse a restricted account BEFORE taking payment.
   //
@@ -660,7 +711,7 @@ export async function createJitCheckout(
       checkout.error || 'Unknown Stripe error',
       {
         errorCode: checkout.errorCode,
-        terminal: checkout.diagnosticClass === 'configuration_error'
+        terminal: checkout.terminal ?? isTerminalDiagnosticClass(checkout.diagnosticClass)
       }
     );
     // Carry the class, as the pack sibling does. A bare Error drops it, the
@@ -735,12 +786,19 @@ async function createLegacyPackOrder(
   if (!Number.isInteger(product.amountCents) || product.amountCents <= 0) {
     const failure = getPriceResolutionFailure(product.productCode);
     const errorClass = failure?.diagnosticClass ?? 'provider_error';
+    const terminal = failure?.terminal ?? false;
     writeDiagnostic('error', 'commerce.legacy_pack_amount_not_configured', {
       productCode: product.productCode,
       rule: failure?.rule ?? 'price.not_resolved',
-      errorClass
+      errorClass,
+      terminal: String(terminal)
     });
-    if (errorClass !== 'configuration_error') {
+    // Retrying is only worth a rolled-back transaction and a 500 when there is
+    // MONEY at stake. This function is also reached for checkout.session.expired
+    // and async_payment_failed, which carry none - throwing for those made
+    // Stripe redeliver an event where "retry adoption" is meaningless, on the
+    // schedule that eventually disables a webhook endpoint (#278 review r3).
+    if (!terminal && session.payment_status === 'paid') {
       throw Object.assign(
         new Error(`Pack price unresolved for ${product.productCode}; retry adoption`),
         { diagnosticClass: errorClass }
@@ -1041,7 +1099,10 @@ async function processCheckoutSessionEvent(
   // maintenance cron, which adopts paid-but-unmatched sessions and priced
   // everything at zero when resolution lived only in the HTTP entrypoint
   // (#278 review).
-  await ensurePriceCatalog();
+  // The code is already in hand - createLegacyPackOrder reads exactly this
+  // metadata - so name it rather than taking the uncoded path, which forfeits
+  // the memoized fast path and joins any unrelated batch (#278 review r3).
+  await ensurePriceCatalog(session.metadata?.productId || session.metadata?.product_id);
   return transaction(async client => {
     if (!(await claimStripeEvent(client, eventId, eventType, session.id))) {
       return { duplicate: true };

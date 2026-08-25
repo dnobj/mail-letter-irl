@@ -47,6 +47,16 @@ export interface EnvVarRequirement {
   aliases?: readonly string[];
   requiredIn: 'always' | 'production' | 'development';
   condition?: 'unless-admin' | 'when-jit-enabled' | 'when-static-dcr';
+  /**
+   * Listed so the cutover preflight can DIFF it, but absence is not a failure:
+   * the code has a working default. `checkedBy` alone was not enough - it only
+   * exempts an entry from the boot-time presence loop, and the preflight reads
+   * `requiredIn`/`condition` and nothing else, so adding STRIPE_CURRENCY turned
+   * `preflight:cutover` red for a correctly configured USD production
+   * environment - "a fresh way for production to refuse", which the entry's own
+   * comment claimed to be avoiding (#278 review round 3).
+   */
+  advisory?: boolean;
   /** True when the value is a credential; drives placeholder detection. */
   secret: boolean;
   services: ReadonlyArray<'api' | 'maintenance'>;
@@ -174,6 +184,7 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     name: 'STRIPE_CURRENCY',
     requiredIn: 'production',
     condition: 'unless-admin',
+    advisory: true,
     secret: false,
     services: ['api', 'maintenance'],
     checkedBy: 'stripe.currency_unset'
@@ -182,9 +193,35 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     name: 'JIT_CURRENCY',
     requiredIn: 'production',
     condition: 'when-jit-enabled',
+    advisory: true,
     secret: false,
     services: ['api', 'maintenance'],
     checkedBy: 'stripe.currency_unset'
+  },
+  /**
+   * The price sanity band. Introduced in the same change that added the
+   * currencies above - and, in the first attempt, with exactly the blind spot
+   * that entry exists to fix: two new variables that change what production
+   * will sell, in no manifest, no example and no preflight (#278 review r3).
+   * A deployment in a zero- or three-decimal currency must set both, and a
+   * value present in one environment and absent in the other refuses every
+   * price after promotion.
+   */
+  {
+    name: 'STRIPE_PRICE_MIN_UNIT_AMOUNT',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api', 'maintenance'],
+    checkedBy: 'stripe.price_band'
+  },
+  {
+    name: 'STRIPE_PRICE_MAX_UNIT_AMOUNT',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api', 'maintenance'],
+    checkedBy: 'stripe.price_band'
   },
   /**
    * OAuth configuration (issue #270).
@@ -556,6 +593,31 @@ function validateStripe(
         rule: 'stripe.currency_unset',
         message:
           'STRIPE_CURRENCY is not set; pack Prices must be denominated in the default (usd) or they will not resolve'
+      });
+    }
+
+    // The band is in MINOR units and has no currency-independent meaning, so a
+    // deployment that sets one bound almost certainly meant to set both.
+    const bandMin = env.STRIPE_PRICE_MIN_UNIT_AMOUNT;
+    const bandMax = env.STRIPE_PRICE_MAX_UNIT_AMOUNT;
+    for (const [name, value] of [
+      ['STRIPE_PRICE_MIN_UNIT_AMOUNT', bandMin],
+      ['STRIPE_PRICE_MAX_UNIT_AMOUNT', bandMax]
+    ] as const) {
+      if (value !== undefined && !/^[0-9]+$/.test(value.trim())) {
+        findings.push({
+          severity: production ? 'error' : 'warning',
+          rule: 'stripe.price_band',
+          message: `${name} must be a whole number of minor units (no separators, no decimal point)`
+        });
+      }
+    }
+    if (Boolean(bandMin) !== Boolean(bandMax)) {
+      findings.push({
+        severity: 'warning',
+        rule: 'stripe.price_band',
+        message:
+          'Set STRIPE_PRICE_MIN_UNIT_AMOUNT and STRIPE_PRICE_MAX_UNIT_AMOUNT together; the other bound keeps its two-decimal default'
       });
     }
 

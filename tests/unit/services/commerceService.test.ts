@@ -153,6 +153,11 @@ describe('commerceService', () => {
     mocks.createMail.mockResolvedValue({});
     mocks.grantEntitlement.mockResolvedValue({ entitlement_id: 'ent-1' });
     mocks.findRefund.mockResolvedValue(null);
+    // vi.clearAllMocks() resets call history but NOT mockReturnValue, and this
+    // one decides throw-vs-refuse for a paid webhook - so a leftover from an
+    // earlier test silently changed a later test's outcome, and adding or
+    // reordering a test could flip an assertion nobody edited (#278 r3).
+    mocks.getPriceResolutionFailure.mockReturnValue(null as never);
   });
 
   it('claims concurrent Stripe event replays so only one can send or grant', async () => {
@@ -387,7 +392,8 @@ describe('commerceService', () => {
     mocks.getPriceResolutionFailure.mockReturnValue({
       productCode: 'credit-pack-4',
       rule: 'price.inactive',
-      diagnosticClass: 'configuration_error'
+      diagnosticClass: 'configuration_error',
+      terminal: true
     } as never);
     mocks.getPackProduct.mockReturnValue({
       productCode: 'credit-pack-4',
@@ -442,7 +448,8 @@ describe('commerceService', () => {
     mocks.getPriceResolutionFailure.mockReturnValue({
       productCode: 'credit-pack-4',
       rule: 'price.lookup_failed',
-      diagnosticClass: 'StripeConnectionError'
+      diagnosticClass: 'StripeConnectionError',
+      terminal: false
     } as never);
     mocks.getPackProduct.mockReturnValue({
       productCode: 'credit-pack-4',
@@ -475,6 +482,71 @@ describe('commerceService', () => {
       expect.stringContaining('INSERT INTO orders'),
       expect.anything()
     );
+  });
+
+  it('does not retry an UNPAID event just because a price is cooling down', async () => {
+    // The throw exists to stop a PAYING customer being booked as unmatched
+    // money. This function is also reached for checkout.session.expired and
+    // async_payment_failed, which carry none - throwing for those made Stripe
+    // redeliver an event where "retry adoption" is meaningless, on the schedule
+    // that eventually disables a webhook endpoint (#278 review round 3).
+    mocks.getPriceResolutionFailure.mockReturnValue({
+      productCode: 'credit-pack-4',
+      rule: 'price.lookup_failed',
+      diagnosticClass: 'StripeConnectionError',
+      terminal: false
+    } as never);
+    mocks.getPackProduct.mockReturnValue({
+      productCode: 'credit-pack-4',
+      priceId: 'price-pack',
+      amountCents: 0,
+      currency: 'usd',
+      credits: 4,
+      name: 'Starter Pack',
+      description: 'Two prepaid letters'
+    });
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-expired' }] };
+      return { rows: [] };
+    });
+
+    await expect(processStripeWebhookEvent(checkoutEvent({
+      id: 'cs-expired',
+      client_reference_id: null,
+      metadata: { userId: 'user-1', productId: 'credit-pack-4' },
+      payment_status: 'unpaid',
+      amount_total: 0
+    }) as never)).resolves.toMatchObject({ duplicate: false });
+  });
+
+  it('reports a steady Pay & Send pricing fault once, not once per quote', async () => {
+    // getSendEligibility is a synchronous accessor on the quote path, and the
+    // catalog's own header notes quotes vastly outnumber purchases - so an
+    // unconditional error line turned one persistent config fault into a
+    // continuous error stream scaling with traffic (#278 review round 3).
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      mocks.getPriceResolutionFailure.mockReturnValue({
+        productCode: 'jit-letter',
+        rule: 'price.inactive',
+        diagnosticClass: 'configuration_error',
+        terminal: true
+      } as never);
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,
+        currency: 'usd', name: 'Pay & Send', description: 'One letter'
+      });
+
+      for (let i = 0; i < 5; i += 1) getSendEligibility(0, 2, 'letter');
+
+      const emitted = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('commerce.pay_and_send_unpriced'));
+      expect(emitted).toHaveLength(1);
+    } finally {
+      diagnostic.mockRestore();
+    }
   });
 
   // The gate is "did money move", not "which event carried the news". A
@@ -1014,11 +1086,11 @@ describe('commerceService', () => {
   });
 
   it.each([
-    ['a permanently archived price', 'configuration_error', 'Pay & Send pricing is not configured.'],
-    ['a Stripe blip', 'StripeConnectionError', 'Pay & Send is temporarily unavailable. Please try again shortly.']
+    ['a permanently archived price', 'configuration_error', true, 'Pay & Send pricing is not configured.'],
+    ['a Stripe blip', 'StripeConnectionError', false, 'Pay & Send is temporarily unavailable. Please try again shortly.']
   ])(
     'tells the customer which kind of unavailable %s is',
-    (_label, diagnosticClass, expectedReason) => {
+    (_label, diagnosticClass, terminal, expectedReason) => {
       // Both used to produce the identical permanent-sounding "not configured"
       // message, and getSendEligibility logged nothing at all - so a 30-second
       // outage switched Pay & Send off across every quote and the operator
@@ -1026,7 +1098,8 @@ describe('commerceService', () => {
       mocks.getPriceResolutionFailure.mockReturnValue({
         productCode: 'jit-letter',
         rule: 'price.lookup_failed',
-        diagnosticClass
+        diagnosticClass,
+        terminal
       } as never);
       mocks.getJitProduct.mockReturnValue({
         productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,

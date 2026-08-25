@@ -130,7 +130,6 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
 
     it('should fail closed with a stable code when the price ID is not configured', async () => {
       vi.stubEnv('STRIPE_PRICE_STARTER', '');
-      vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '500');
 
       const result = await createCheckoutSession({
         userId: 'user-123',
@@ -336,7 +335,6 @@ describe('Checkout Session Error Handling', () => {
     const sensitive = 'private Stripe failure cs_private pi_private auth0|private-user';
     vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
     vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
-    vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '500');
     mockSessionCreate.mockRejectedValueOnce(new Error(sensitive));
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
@@ -357,6 +355,9 @@ describe('Checkout Session Error Handling', () => {
       success: false,
       errorCode: 'PROVIDER_ERROR',
       diagnosticClass: 'provider_error',
+      // A bare Error is not one of the classes a human must act on, so cleanup
+      // leaves the order pending rather than cancelling it.
+      terminal: false,
       error: 'Failed to create checkout session'
     });
     expect(output).not.toContain(sensitive);

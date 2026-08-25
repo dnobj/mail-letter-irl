@@ -140,3 +140,22 @@ export function jitProductCode(mailType: MailType): string {
   const definition = JIT_PRODUCTS.find(product => product.mailType === mailType);
   return (definition ?? JIT_PRODUCTS[0]).productCode;
 }
+
+/**
+ * The price id currently configured for one product, without building the
+ * whole table. Lets the catalog validate a memo cheaply: `unit_amount` and
+ * `currency` are immutable on a Price, so memoizing forever is sound - but
+ * only for the id that produced it. If the env var is repointed, the memo
+ * describes a Price we are no longer selling, and serving it charges the old
+ * amount with readiness green (#278 review round 3).
+ */
+export function configuredPriceIdFor(
+  productCode: string,
+  env: NodeJS.ProcessEnv = process.env
+): string | null {
+  const definition =
+    PACK_PRODUCTS.find(product => product.productCode === productCode) ??
+    JIT_PRODUCTS.find(product => product.productCode === productCode);
+  if (!definition) return null;
+  return (env[definition.priceEnv] ?? '').trim();
+}

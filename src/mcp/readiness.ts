@@ -22,11 +22,7 @@ import {
 } from '../config/deploymentConfig.js';
 import { listProviders } from '../services/providers/index.js';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
-import {
-  ensurePriceCatalog,
-  getUnpricedProducts,
-  isPriceCatalogCold
-} from '../services/priceCatalog.js';
+import { ensurePriceCatalog, getUnpricedProducts } from '../services/priceCatalog.js';
 
 export interface ReadinessReport {
   ready: boolean;
@@ -36,14 +32,28 @@ export interface ReadinessReport {
 }
 
 const CACHE_TTL_MS = 5_000;
-/** Shorter hold while the catalog has simply not warmed up yet. */
-const COLD_CACHE_TTL_MS = 1_000;
+/**
+ * An UNREADY verdict is held for less time than a ready one. An instance that
+ * has just bound its port must not pin a 503 across the whole window the
+ * documented post-deploy check runs in, and the body carries only a check name
+ * so a warmup is indistinguishable from a real fault. Stated generally on
+ * purpose: the price catalog is not the only check with a warmup phase - the
+ * pg pool opening its first connection and provider_routing settling after a
+ * migration have exactly the same shape, and an earlier attempt that special-
+ * cased prices covered none of them (and was dead code besides, #278 r3).
+ * Still bounded, so an anonymous prober cannot drive the database checks
+ * harder than once a second.
+ */
+const UNREADY_CACHE_TTL_MS = 1_000;
 
 let cached: { report: ReadinessReport; expiresAt: number } | null = null;
+/** Last reported price-failure set, so a steady fault is logged once. */
+let lastReportedPriceFailures: string | null = null;
 
 /** Test hook: drop the memoized report. */
 export function resetReadinessCache(): void {
   cached = null;
+  lastReportedPriceFailures = null;
 }
 
 async function checkDatabase(): Promise<boolean> {
@@ -125,7 +135,12 @@ export async function getReadiness(
   const pricesEnforced = validation.mode === 'production';
   const priceFailures = getUnpricedProducts();
   const pricesOk = priceFailures.length === 0;
-  if (!pricesOk) void ensurePriceCatalog();
+
+  // Nothing can change until a human edits config and redeploys, so neither
+  // the re-attempt nor the log line below is worth doing every probe.
+  const priceFaultsAreStatic =
+    !pricesOk && priceFailures.every(failure => failure.rule === 'price.id_not_configured');
+  if (!pricesOk && !priceFaultsAreStatic) void ensurePriceCatalog();
 
   const failing: string[] = [];
   if (!configOk) failing.push('config');
@@ -137,12 +152,18 @@ export async function getReadiness(
   // place an unpriced product is reported at all, and the 200 branch below
   // does not write a diagnostic. Product codes and rule ids only - the loader
   // never puts an amount in a failure.
-  if (!pricesOk) {
+  const priceFailureSummary = priceFailures.map(f => `${f.productCode}:${f.rule}`).join(',');
+  // On CHANGE only. A non-production deploy legitimately has no prices, so
+  // pricesOk is false forever there; an unconditional line meant ~17,000
+  // identical entries a day per instance for a steady, already-reported state
+  // (#278 review round 3).
+  if (!pricesOk && priceFailureSummary !== lastReportedPriceFailures) {
     writeDiagnostic(pricesEnforced ? 'error' : 'warn', 'readiness.prices_unresolved', {
       enforced: String(pricesEnforced),
-      priceFailures: priceFailures.map(f => `${f.productCode}:${f.rule}`).join(',')
+      priceFailures: priceFailureSummary
     });
   }
+  lastReportedPriceFailures = pricesOk ? null : priceFailureSummary;
 
   let report: ReadinessReport;
   if (failing.length === 0) {
@@ -180,8 +201,7 @@ export async function getReadiness(
       failing: failing.join(','),
       // Product codes and rule ids only; the loader never puts an amount in
       // a failure.
-      priceFailures:
-        priceFailures.map(f => `${f.productCode}:${f.rule}`).join(',') || 'none',
+      priceFailures: priceFailureSummary || 'none',
       rules: validation.findings
         .filter(f => f.severity === 'error')
         .map(f => f.rule)
@@ -195,15 +215,9 @@ export async function getReadiness(
     };
   }
 
-  // A cold catalog is not news yet - it is the few hundred milliseconds
-  // between the port binding and the warmup landing. Caching that verdict for
-  // the full TTL pinned a perfectly healthy instance at 503 for five seconds
-  // after boot, which is exactly the window the documented post-deploy check
-  // runs in, and the body carries only a check name so it is indistinguishable
-  // from a real fault (#278 review round 2). Hold it briefly instead: still
-  // bounded (an anonymous prober cannot drive the database checks harder than
-  // once a second), but the instance stops lying about itself almost at once.
-  const coldStart = !report.ready && !pricesOk && isPriceCatalogCold();
-  cached = { report, expiresAt: now + (coldStart ? COLD_CACHE_TTL_MS : CACHE_TTL_MS) };
+  cached = {
+    report,
+    expiresAt: now + (report.ready ? CACHE_TTL_MS : UNREADY_CACHE_TTL_MS)
+  };
   return report;
 }

@@ -565,14 +565,24 @@ would sell one of them at the other's price. A deployment in a zero- or
 three-decimal currency, or one selling a tier above the ceiling, must set
 `STRIPE_PRICE_MIN_UNIT_AMOUNT` and `STRIPE_PRICE_MAX_UNIT_AMOUNT`: the band is
 in minor units and cannot be converted across currencies without an exchange
-rate.
+rate. Both take whole numbers only — `100_000` parses as `100`, which would
+refuse every real price, so the validator rejects separators and a discarded
+bound is logged under `stripe.price_band_ignored`. Both appear in the manifest
+as **advisory**: `npm run preflight:cutover` lists them when unset so a parity
+gap is visible before promotion, without failing the gate on a deployment that
+correctly relies on the defaults — which is also how `STRIPE_CURRENCY` and
+`JIT_CURRENCY` are listed.
 
-Resolution failures are classified. A configuration fault (archived price,
-wrong currency, typo'd id, a shared Price) needs a human, so it backs off
-toward a 15-minute retry ceiling and cancels the affected order; a transient
-Stripe failure keeps the short 30-second retry, leaves the order pending, and
-makes a legacy webhook adoption retry rather than book the payment as unmatched
-money.
+Resolution failures carry two things: the **class** (the Stripe error's own
+code, e.g. `resource_missing` for a typo'd id, or `configuration_error` for a
+rule this code enforces) and whether it is **terminal** — whether a human must
+act. Terminal faults (an archived or recurring Price, the wrong currency, an id
+pointing at nothing, a revoked or restricted key, a shared Price) back off
+toward a 15-minute retry ceiling and cancel the affected order. Transient ones
+back off only to a 5-minute ceiling, leave the order pending, and make a *paid*
+legacy webhook retry rather than book the payment as unmatched money. An
+unpaid event — an expired session — is never retried on a pricing fault,
+because there is no money at stake.
 
 Historical migration-021 rows whose one-cent value cannot be distinguished from its placeholder are marked `amount_known=false` by migration
 023 and excluded from revenue totals while retaining their audit value.

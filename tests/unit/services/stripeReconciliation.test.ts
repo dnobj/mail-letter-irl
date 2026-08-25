@@ -45,6 +45,32 @@ import {
   reconcileStripePayments
 } from '../../../src/services/stripeReconciliationService.js';
 
+describe('background Stripe budget (#278)', () => {
+  // Consolidating onto the shared client cut this job from stripe-node's 80s/2
+  // default to the interactive 10s/1. Unpinned, deleting the restoration left
+  // a paginated loop with no per-page recovery on a checkout-tuned budget: one
+  // slow page aborts the whole run, and creditExpirationWorker's catch
+  // swallows it unlogged (#278 review round 3).
+  it('gives every outbound list call the background budget, not the checkout one', async () => {
+    // The default `stripe` parameter builds the shared client, so the key must
+    // be present; the module itself is mocked, so nothing leaves the process.
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_reconciliation');
+    mockSessionsList.mockResolvedValue({ data: [], has_more: false });
+    mockRefundsList.mockResolvedValue({ data: [] });
+    mockQuery.mockResolvedValue({ rows: [] });
+
+    await reconcileStripePayments(7);
+
+    for (const spy of [mockSessionsList, mockRefundsList]) {
+      expect(spy).toHaveBeenCalled();
+      expect(spy.mock.calls[0][1]).toMatchObject({
+        timeout: 60_000,
+        maxNetworkRetries: 2
+      });
+    }
+  });
+});
+
 describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
   beforeEach(() => {
     vi.clearAllMocks();

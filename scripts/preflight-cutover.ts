@@ -54,6 +54,14 @@ export interface ManifestDiff {
   missing: EnvVarRequirement[];
   /** Names-only note per missing entry, safe to print. */
   notes: string[];
+  /**
+   * Absent entries marked `advisory`: reported so a parity gap is VISIBLE, but
+   * not counted as a failure, because the code has a working default. Listing
+   * them as required turned the cutover gate red for a correctly configured
+   * environment (#278 review round 3).
+   */
+  advisory: EnvVarRequirement[];
+  advisoryNotes: string[];
 }
 
 /**
@@ -71,6 +79,8 @@ export function diffManifest(
   const staticDcrFlagSet = present.has('LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY');
   const missing: EnvVarRequirement[] = [];
   const notes: string[] = [];
+  const advisory: EnvVarRequirement[] = [];
+  const advisoryNotes: string[] = [];
 
   for (const entry of manifest) {
     if (!entry.services.includes(options.service)) continue;
@@ -86,7 +96,6 @@ export function diffManifest(
 
     const satisfied = [entry.name, ...(entry.aliases ?? [])].some(name => present.has(name));
     if (!satisfied) {
-      missing.push(entry);
       const aliasNote = entry.aliases?.length
         ? ` (or one of: ${entry.aliases.join(', ')})`
         : '';
@@ -96,11 +105,18 @@ export function diffManifest(
           : entry.condition === 'when-static-dcr'
             ? ' [required because LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY is set]'
             : '';
-      notes.push(`${entry.name}${aliasNote}${conditionNote}`);
+      const note = `${entry.name}${aliasNote}${conditionNote}`;
+      if (entry.advisory) {
+        advisory.push(entry);
+        advisoryNotes.push(note);
+      } else {
+        missing.push(entry);
+        notes.push(note);
+      }
     }
   }
 
-  return { missing, notes };
+  return { missing, notes, advisory, advisoryNotes };
 }
 
 interface RailwayIds {
@@ -276,6 +292,15 @@ async function main(): Promise<void> {
       failures += diff.missing.length;
       console.error(`❌ ${environment}/${service}: ${diff.missing.length} required variable(s) missing:`);
       for (const note of diff.notes) console.error(`   - ${note}`);
+    }
+    // Not a gate: these have working defaults. Printed because the whole point
+    // of listing them is that an operator can SEE the two environments
+    // disagree before promotion, which is what nothing could do before.
+    if (diff.advisory.length > 0) {
+      console.log(
+        `ℹ️  ${environment}/${service}: ${diff.advisory.length} optional variable(s) unset (defaults apply):`
+      );
+      for (const note of diff.advisoryNotes) console.log(`   - ${note}`);
     }
   }
 

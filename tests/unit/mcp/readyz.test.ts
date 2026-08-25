@@ -7,15 +7,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // the failing branch had zero coverage in the first revision (#278 review).
 const priceCatalog = vi.hoisted(() => ({
   unpriced: [] as Array<{ productCode: string; rule: string; diagnosticClass: string }>,
-  ensureCalls: 0,
-  cold: false
+  ensureCalls: 0
 }));
+// The mock supplies DATA and never a verdict. An earlier version exported an
+// isPriceCatalogCold() the suite could hand-set, which let a cold-start test
+// pass against production code where that function could never return true
+// (#278 review round 3). Coldness is now derived from the failure rules, which
+// this mock reproduces faithfully because they are the catalog's own output.
 vi.mock('../../../src/services/priceCatalog.js', () => ({
   getUnpricedProducts: () => priceCatalog.unpriced,
   ensurePriceCatalog: async () => {
     priceCatalog.ensureCalls += 1;
-  },
-  isPriceCatalogCold: () => priceCatalog.cold
+  }
 }));
 import { readFile } from 'node:fs/promises';
 
@@ -34,7 +37,6 @@ import { getReadiness, resetReadinessCache } from '../../../src/mcp/readiness.js
 beforeEach(() => {
   priceCatalog.unpriced = [];
   priceCatalog.ensureCalls = 0;
-  priceCatalog.cold = false;
 });
 
 const READY_DEV: NodeJS.ProcessEnv = {
@@ -268,6 +270,46 @@ describe('/readyz prices check (#275 stage A)', () => {
     expect(checkNames).toEqual(['config', 'database', 'prices', 'routing']);
   });
 
+  it('names every failing-list entry in the healthy body too', async () => {
+    // The reverse direction, which reading only the 200 body cannot see: a
+    // `failing.push('newcheck')` with no matching key in the hand-written
+    // `checks` literal passed the guard above untouched, and an operator got a
+    // 503 naming a check that appears in no ready body and no documentation
+    // (#278 review round 3). Read from source, like the route-registration
+    // guard in this suite.
+    const source = await readFile('src/mcp/readiness.ts', 'utf8');
+    const pushed = [...source.matchAll(/failing\.push\('([a-z_]+)'\)/g)].map(m => m[1]).sort();
+    const report = await getReadiness(READY_PROD);
+    const checkNames = Object.keys(JSON.parse(report.body).checks).sort();
+
+    expect(pushed.length).toBeGreaterThan(0);
+    expect(pushed).toEqual(checkNames);
+  });
+
+  it('does not re-attempt resolution for prices that are simply unset', async () => {
+    // Nothing can change until a human edits config and redeploys, so kicking
+    // the resolver on every probe is pure noise - and on a non-production
+    // deploy, where prices are legitimately unset, that state is permanent
+    // (#278 review round 3).
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-4', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' }
+    ];
+
+    await getReadiness(READY_DEV);
+
+    expect(priceCatalog.ensureCalls).toBe(0);
+  });
+
+  it('still re-attempts a fault that could clear on its own', async () => {
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-4', rule: 'price.lookup_failed', diagnosticClass: 'StripeConnectionError' }
+    ];
+
+    await getReadiness(READY_PROD);
+
+    expect(priceCatalog.ensureCalls).toBeGreaterThan(0);
+  });
+
   /**
    * The gate mirrors validateStripe: STRIPE_PRICE_* are requiredIn
    * 'production', downgraded to a warning outside it and skipped entirely in
@@ -310,25 +352,22 @@ describe('/readyz prices check (#275 stage A)', () => {
     expect(JSON.parse(report.body).failing).toContain('config');
   });
 
-  it('holds a cold-catalog 503 only briefly, so a healthy boot stops lying fast', async () => {
-    // A cold catalog is the few hundred ms between the port binding and the
-    // warmup landing. Caching that verdict for the full 5s TTL pinned a
-    // healthy instance at 503 across exactly the window the documented
-    // post-deploy check runs in (#278 review round 2).
+  it('holds an UNREADY verdict briefly, so a warming instance stops lying fast', async () => {
+    // The few hundred ms between the port binding and a subsystem warming up.
+    // Caching that verdict for the full 5s pinned a healthy instance at 503
+    // across exactly the window the documented post-deploy check runs in, and
+    // the body carries only a check name so it is indistinguishable from a real
+    // fault (#278 review rounds 2 and 3).
     vi.useFakeTimers();
     try {
-      priceCatalog.cold = true;
       priceCatalog.unpriced = [
         { productCode: 'credit-pack-4', rule: 'price.not_resolved', diagnosticClass: 'provider_error' }
       ];
       expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
 
       // The warmup lands.
-      priceCatalog.cold = false;
       priceCatalog.unpriced = [];
-
-      // Still inside the ordinary 5s TTL, past the cold one.
-      vi.advanceTimersByTime(1_500);
+      vi.advanceTimersByTime(1_100);
       const recovered = await getReadiness(READY_PROD);
 
       expect(recovered.statusCode).toBe(200);
@@ -338,21 +377,57 @@ describe('/readyz prices check (#275 stage A)', () => {
     }
   });
 
-  it('caches a genuine price fault for the full TTL', async () => {
-    // The counterpart: only COLDNESS gets the short hold. A real fault must
-    // not turn /readyz into an uncached database probe for anonymous callers.
+  it('applies the same short hold to a database fault, not just a price one', async () => {
+    // Stated generally on purpose: the pg pool opening its first connection
+    // has the same warmup shape as the catalog, and an earlier attempt that
+    // special-cased prices covered neither it nor routing.
     vi.useFakeTimers();
     try {
-      priceCatalog.cold = false;
+      query.mockRejectedValue(new Error('still connecting'));
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+
+      routableDb([{ mail_type: 'letter', provider: 'postgrid' }]);
+      vi.advanceTimersByTime(1_100);
+
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still caches the unready verdict, so /readyz is never an open database probe', async () => {
+    // Shorter is not uncached: the route is unauthenticated, and each miss
+    // costs two database round-trips.
+    vi.useFakeTimers();
+    try {
       priceCatalog.unpriced = [
         { productCode: 'credit-pack-4', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
       ];
       expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+      const callsAfterFirst = query.mock.calls.length;
 
       priceCatalog.unpriced = [];
-      vi.advanceTimersByTime(1_500);
+      vi.advanceTimersByTime(500);
 
       expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+      expect(query.mock.calls.length).toBe(callsAfterFirst);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('caches a READY verdict for the full TTL', async () => {
+    vi.useFakeTimers();
+    try {
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(200);
+
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
+      ];
+      vi.advanceTimersByTime(1_500);
+
+      // Still the memoized 200: only unready verdicts get the short hold.
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(200);
     } finally {
       vi.useRealTimers();
     }

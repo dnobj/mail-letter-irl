@@ -11,6 +11,7 @@ import http from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { verifyWebhookSignature } from '../services/stripeService.js';
 import { createPackCheckout, processStripeWebhookEvent } from '../services/commerceService.js';
+import { PACK_PRODUCTS } from '../config/products.js';
 import { authenticateHttpRequest } from './middleware/auth.js';
 import { parseCookies, serializeCookie } from '../utils/cookies.js';
 import { query } from '../db/index.js';
@@ -91,7 +92,11 @@ export async function handleCreateCheckoutSession(
     }
 
     // Validate product ID
-    const validProducts = ['credit-pack-4', 'credit-pack-10', 'credit-pack-100'];
+    // The fourth copy of the pack table until #275 gave it one home. Adding a
+    // tier in products.ts prices it, validates its env var, resolves it and
+    // reports it in /readyz - while a hand-kept list here answered 400 and left
+    // the Buy button dead for a product every other layer believed was live.
+    const validProducts = PACK_PRODUCTS.map(product => product.productCode);
     if (!validProducts.includes(productId)) {
       res.statusCode = 400;
       res.json({

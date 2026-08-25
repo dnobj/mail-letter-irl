@@ -32,7 +32,7 @@ vi.mock('stripe', () => stripeMockModule(stripeMocks));
 const { createPackCheckoutSession, createCheckoutSession } = await import(
   '../../../src/services/stripeService.js'
 );
-const { resetPriceCatalog, ensurePriceCatalog } = await import(
+const { resetPriceCatalog, ensurePriceCatalog, useDefaultPriceRetriever } = await import(
   '../../../src/services/priceCatalog.js'
 );
 const { resetStripeClient } = await import('../../../src/services/stripeClient.js');
@@ -74,6 +74,10 @@ describe('checkout pricing guards (#275)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetPriceCatalog();
+    // This is the ONE suite that drives the real retriever, against a mocked
+    // stripe module, so its per-request bounds are observable at all. Reset
+    // deliberately installs a throwing retriever otherwise (#278 review r3).
+    useDefaultPriceRetriever();
     resetStripeClient();
     packEnv();
     stripeMocks.sessionCreate.mockResolvedValue({
@@ -195,6 +199,39 @@ describe('checkout pricing guards (#275)', () => {
     expect(result.errorCode).toBe('PRICE_ID_NOT_CONFIGURED');
     expect(result.diagnosticClass).toBe('configuration_error');
     expect(stripeMocks.sessionCreate).not.toHaveBeenCalled();
+  });
+
+  it('bounds each price lookup more tightly than the shared client', async () => {
+    // A checkout or quote may be waiting on this, and stripe-node's retry math
+    // compounds; the batch settles only with its slowest member. Unpinned,
+    // deleting the third argument reverted every lookup to the client's 10s/1
+    // (~20.5s with the retry) with nothing red (#278 review round 3).
+    stripeMocks.priceRetrieve.mockResolvedValue(priceFixture({ unit_amount: 500 }));
+    await ensurePriceCatalog();
+
+    expect(stripeMocks.priceRetrieve.mock.calls[0]?.[2]).toMatchObject({
+      timeout: 5_000,
+      maxNetworkRetries: 1
+    });
+  });
+
+  it('rebuilds the client when the secret key CHANGES, not just when it appears', async () => {
+    // Memoizing on presence meant removing the key threw while replacing it was
+    // a silent no-op, so a rotated credential kept signing with the revoked one
+    // - and in the test lane every suite stubbing a different key transacted
+    // against a client built from the first (#278 review round 3).
+    serveHealthyPrices();
+    await ensurePriceCatalog();
+    const first = StripeCtor.lastConstructorArgs?.[0];
+
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_rotated');
+    resetPriceCatalog();
+    useDefaultPriceRetriever();
+    serveHealthyPrices();
+    await ensurePriceCatalog();
+
+    expect(first).toBe('sk_test_dummy');
+    expect(StripeCtor.lastConstructorArgs?.[0]).toBe('sk_test_rotated');
   });
 
   it('constructs the client with explicit timeout and retry bounds', async () => {

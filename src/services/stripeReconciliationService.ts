@@ -21,6 +21,20 @@ import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog
 import { getStripeClient } from './stripeClient.js';
 import { PACK_CREDITS_BY_PRODUCT as PRODUCT_CREDITS } from '../config/products.js';
 
+/**
+ * The budget for THIS JOB, not for one call. The shared client is tuned for
+ * the interactive paths (10s, 1 retry) and consolidating onto it silently cut
+ * this file from stripe-node's 80s/2 default. Restoring it per call meant the
+ * next Stripe call added here inherits the checkout bounds by accident - which
+ * is exactly what happened to refunds.list, left tight while its sibling was
+ * patched (#278 review round 3). Nothing here has a customer waiting, and no
+ * call has per-page recovery: one timeout discards the whole run.
+ */
+export const BACKGROUND_REQUEST_OPTIONS = {
+  timeout: 60_000,
+  maxNetworkRetries: 2
+} as const;
+
 interface ReconciliationResult {
   period: {
     start: Date;
@@ -96,17 +110,8 @@ export async function reconcileStripePayments(
   let startingAfter: string | undefined;
 
   while (hasMore) {
-    // This is background reconciliation over a paginated range, not a customer
-    // waiting on a checkout, and the loop has no per-page recovery: one page
-    // over budget throws and aborts the whole run mid-pagination, which
-    // creditExpirationWorker's catch swallows without logging the error. The
-    // shared client is tuned for the interactive paths (10s, 1 retry), and
-    // consolidating onto it silently cut this job's budget from stripe-node's
-    // 80s/2 default. Per-request options restore it here rather than loosening
-    // the bound that protects checkout (#278 review round 2).
-    //
-    // `expand: ['data.line_items']` used to be requested and then never read -
-    // maximum server-side latency for data that was discarded on every page.
+    // `expand: ['data.line_items']` used to be requested here and then never
+    // read - maximum server-side latency for data discarded on every page.
     const sessions = await stripe.checkout.sessions.list(
       {
         created: {
@@ -116,7 +121,7 @@ export async function reconcileStripePayments(
         limit: 100,
         starting_after: startingAfter,
       },
-      { timeout: 60_000, maxNetworkRetries: 2 }
+      BACKGROUND_REQUEST_OPTIONS
     );
 
     for (const session of sessions.data) {
@@ -363,13 +368,16 @@ export async function reconcileStripePayments(
   }
 
   // 5. Check for refunds in Stripe that weren't processed
-  const refunds = await stripe.refunds.list({
-    created: {
-      gte: Math.floor(startDate.getTime() / 1000),
-      lte: Math.floor(endDate.getTime() / 1000),
+  const refunds = await stripe.refunds.list(
+    {
+      created: {
+        gte: Math.floor(startDate.getTime() / 1000),
+        lte: Math.floor(endDate.getTime() / 1000),
+      },
+      limit: 100,
     },
-    limit: 100,
-  });
+    BACKGROUND_REQUEST_OPTIONS
+  );
 
   for (const refund of refunds.data) {
     if (refund.status === 'succeeded' && refund.payment_intent) {

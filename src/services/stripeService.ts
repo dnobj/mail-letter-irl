@@ -2,7 +2,11 @@
 
 import type Stripe from 'stripe';
 import type { MailType } from './types.js';
-import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import {
+  classifyDiagnosticError,
+  isTerminalDiagnosticClass,
+  writeDiagnostic
+} from '../utils/diagnosticLog.js';
 import {
   ensurePriceCatalog,
   getPriceResolutionFailure,
@@ -17,10 +21,12 @@ import {
   type PackProductId
 } from '../config/products.js';
 
-// Re-exported so existing importers (commerceService, tests) keep working; the
-// definitions themselves live in the leaf module src/config/products.ts so the
-// manifest, the catalog, and the reconciliation service read one table.
-export { getStripeClient } from './stripeClient.js';
+// Re-exported because commerceService and the tool layer import them from
+// here; the definitions themselves live in the leaf module
+// src/config/products.ts so the manifest, the catalog, and the reconciliation
+// service read one table. (getStripeClient is NOT re-exported: its two real
+// consumers import it straight from ./stripeClient.js, and the comment that
+// used to claim otherwise named importers that do not exist - #278 review r3.)
 export { isJitPurchaseEnabled, type PackProductId } from '../config/products.js';
 
 export interface CommerceProductConfig {
@@ -94,6 +100,12 @@ export interface CheckoutSessionResult {
    * cause rather than relabelling it. Issue #213.
    */
   diagnosticClass?: string;
+  /**
+   * Whether a human must act. Order cleanup keys off this to decide between
+   * cancelling the order and leaving it pending; carried explicitly so five
+   * call sites stop re-deriving it from a magic string (#278 review round 3).
+   */
+  terminal?: boolean;
 }
 
 interface HostedCheckoutParams {
@@ -113,6 +125,7 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
       success: false,
       errorCode: 'PRICE_ID_NOT_CONFIGURED',
       diagnosticClass: 'configuration_error',
+      terminal: true,
       error: `Price ID not configured for product: ${params.product.productCode}`
     };
   }
@@ -148,6 +161,7 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
       success: false,
       errorCode: 'PACK_AMOUNT_NOT_CONFIGURED',
       diagnosticClass,
+      terminal: failure?.terminal ?? false,
       error: `Amount not configured for product: ${params.product.productCode}`
     };
   }
@@ -187,6 +201,7 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
       success: false,
       errorCode: 'PROVIDER_ERROR',
       diagnosticClass,
+      terminal: isTerminalDiagnosticClass(diagnosticClass),
       error: 'Failed to create checkout session'
     };
   }

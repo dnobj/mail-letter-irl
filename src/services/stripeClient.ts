@@ -16,19 +16,30 @@
 import Stripe from 'stripe';
 
 let stripeClient: Stripe | null = null;
+/** The key the memoized client was built from. */
+let stripeClientKey: string | null = null;
 
 export function getStripeClient(): Stripe {
   const apiKey = process.env.STRIPE_SECRET_KEY;
   if (!apiKey) throw new Error('STRIPE_SECRET_KEY is not configured');
-  stripeClient ??= new Stripe(apiKey, {
-    apiVersion: '2025-11-17.clover',
-    timeout: 10_000,
-    maxNetworkRetries: 1
-  });
+  // Keyed on the VALUE, not merely its presence. Memoizing on presence meant
+  // removing the key threw while REPLACING it was a silent no-op, so a rotated
+  // credential kept signing with the revoked one - and in the test lane every
+  // suite that stubs a different key transacted against a client built from
+  // the first (#278 review round 3).
+  if (!stripeClient || stripeClientKey !== apiKey) {
+    stripeClient = new Stripe(apiKey, {
+      apiVersion: '2025-11-17.clover',
+      timeout: 10_000,
+      maxNetworkRetries: 1
+    });
+    stripeClientKey = apiKey;
+  }
   return stripeClient;
 }
 
 /** Test hook: force the next call to construct a fresh client. */
 export function resetStripeClient(): void {
   stripeClient = null;
+  stripeClientKey = null;
 }

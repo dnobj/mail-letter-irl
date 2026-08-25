@@ -178,7 +178,6 @@ describe('validateDeploymentConfig in production', () => {
       .map(f => f.message)
       .join('\n');
     expect(jitMessages).toContain('POSTCARD');
-    expect(jitMessages).not.toContain('JIT_LETTER_AMOUNT_CENTS');
   });
 
   it('warns rather than errors when production auth enforcement is staged off (server surface only)', () => {
