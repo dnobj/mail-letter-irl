@@ -1,3 +1,4 @@
+import { formatAmountForCurrency } from '../config/products.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { createMailCheckoutInputSchema, createMailCheckoutOutputSchema } from '../schemas.js';
 import { createJitCheckout } from '../services/commerceService.js';
@@ -48,14 +49,22 @@ function friendlyCheckoutError(error: unknown): Error {
         'You already have enough prepaid balance to send this draft. Use the Send action.'
       );
     case 'JIT_NOT_CONFIGURED':
+    case 'PACK_AMOUNT_NOT_CONFIGURED':
+    case 'PRICE_ID_NOT_CONFIGURED':
       // Match the quote surface: a terminal fault must not carry retry advice
       // no retry can honor, and a blip must not read as permanent - the two
       // surfaces used to contradict each other in whichever direction (#278
-      // review round 4).
+      // review rounds 4-5).
       return friendly(
         source.terminal
           ? 'Pay & Send pricing is not configured. Please use a letter pack instead.'
           : 'Pay & Send is temporarily unavailable. Please try again shortly, or use a letter pack.'
+      );
+    case 'PROVIDER_ERROR':
+      return friendly(
+        source.terminal
+          ? 'Pay & Send cannot complete this purchase right now. Please use a letter pack instead.'
+          : 'Unable to create Pay & Send checkout. Please try again.'
       );
     default:
       return friendly('Unable to create Pay & Send checkout. Please try again.');
@@ -83,7 +92,7 @@ async function handler(
       status: result.status,
       reused: result.reused,
       message: pending
-        ? `Pay ${result.currency.toUpperCase()} ${(result.amountCents / 100).toFixed(2)} to authorize printing and mailing this exact physical item.`
+        ? `Pay ${result.currency.toUpperCase()} ${formatAmountForCurrency(result.amountCents, result.currency)} to authorize printing and mailing this exact physical item.`
         : 'This purchase is already paid or being fulfilled. Check its purchase status instead of opening another checkout.'
     };
   } catch (error) {

@@ -915,7 +915,14 @@ export async function startHttpServer() {
       // closed port cannot report "unready", so the comment promising /healthz
       // would answer was false (#278 review). Resolution is lazy at every
       // consuming path anyway; this only saves the first request the latency.
-      void ensurePriceCatalog();
+      void ensurePriceCatalog().catch(error => {
+        // Only the test-lane sentinel can reject; everything real is recorded
+        // in the catalog. Logged rather than crashing the process on an
+        // unhandled rejection (#278 review round 5).
+        writeDiagnostic("warn", "stripe.price_warmup_rejected", {
+          errorClass: classifyDiagnosticError(error, "unknown_error")
+        });
+      });
       console.log(`  MCP endpoint: http://${DEFAULT_HOST}:${DEFAULT_PORT}${MCP_PATH}`);
       console.log(`  SSE stream: http://${DEFAULT_HOST}:${DEFAULT_PORT}${SSE_PATH}`);
       console.log(

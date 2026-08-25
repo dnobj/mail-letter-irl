@@ -85,9 +85,14 @@ export function diffManifest(
   for (const entry of manifest) {
     if (!entry.services.includes(options.service)) continue;
     if (entry.requiredIn === 'production' && !production) {
-      // One exception: the identity label is required in every DEPLOYED
+      // Two exceptions. The identity label is required in every DEPLOYED
       // environment, because deployed development runs NODE_ENV=production.
-      if (entry.name !== 'LETTER_IRL_DEPLOYMENT_ENVIRONMENT') continue;
+      // And ADVISORY entries are diffed everywhere: their entire purpose is
+      // cross-environment parity VISIBILITY, and skipping them outside
+      // production made that visibility one-directional - a value set in
+      // production but absent in development was reported by neither run
+      // (#278 review round 5).
+      if (entry.name !== 'LETTER_IRL_DEPLOYMENT_ENVIRONMENT' && !entry.advisory) continue;
     }
     if (entry.requiredIn === 'development' && production) continue;
     if (entry.condition === 'when-jit-enabled' && !jitFlagSet) continue;

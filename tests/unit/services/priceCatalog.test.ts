@@ -121,8 +121,8 @@ describe('price catalog (#275 stage A)', () => {
     const cases: Array<[string, Record<string, unknown>, string]> = [
       ['archived', { active: false }, 'price.inactive'],
       ['no unit amount (tiered/metered)', { unit_amount: null }, 'price.no_unit_amount'],
-      ['implausibly small', { unit_amount: 1 }, 'price.amount_out_of_range'],
-      ['implausibly large', { unit_amount: 500_000 }, 'price.amount_out_of_range'],
+      ['a cent off the pinned amount', { unit_amount: 999 }, 'price.amount_mismatch'],
+      ['an order of magnitude off', { unit_amount: 100_000 }, 'price.amount_mismatch'],
       ['wrong currency', { currency: 'gbp' }, 'price.currency_mismatch']
     ];
 
@@ -144,21 +144,26 @@ describe('price catalog (#275 stage A)', () => {
     }
   });
 
-  it('refuses BOTH pack tiers when they share one price id', async () => {
-    // The Power-at-Starter's-price missell: each lookup succeeds on its own,
-    // only the set is wrong, and before #275 the amount cross-check caught it.
+  it('refuses the missold side of a shared price id and keeps selling the right one', async () => {
+    // The Power-at-Starter's-price missell: each lookup succeeds on its own.
+    // The pin decides per PRODUCT: the tier whose amount agrees keeps selling,
+    // the tier the shared id misprices is refused - which is strictly better
+    // than the old shared-id heuristic that refused both, and unlike it needs
+    // no notion of which pairings are "legitimate" (#278 round 5).
     vi.stubEnv('STRIPE_PRICE_POWER', 'price_starter');
     setPriceRetriever(healthyRetriever());
 
     await ensurePriceCatalog();
 
-    expect(getResolvedPriceForProduct('credit-pack-4')).toBeNull();
+    // The Starter, whose id this genuinely is, sells at its pinned 500.
+    expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
+    // The Power tier resolved 500 against a 9000 pin: refused.
     expect(getResolvedPriceForProduct('credit-pack-100')).toBeNull();
     expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
-      rule: 'price.shared_between_products',
-      diagnosticClass: 'configuration_error'
+      rule: 'price.amount_mismatch',
+      diagnosticClass: 'configuration_error',
+      terminal: true
     });
-    // The uninvolved tier still prices.
     expect(getResolvedPriceForProduct('credit-pack-10')?.unitAmount).toBe(1000);
   });
 
@@ -292,12 +297,12 @@ describe('price catalog (#275 stage A)', () => {
     });
   });
 
-  it('refuses a pack AND a Pay & Send product that share one price id', async () => {
-    // The missell the round-2 review found: the first rework counted only
-    // pack-to-pack sharing, so pointing STRIPE_JIT_LETTER_PRICE_ID at the
-    // Power pack's price passed every check - both products resolved, one
-    // letter was charged $90.00, the webhook's paid-amount comparison agreed
-    // because Stripe really had charged that, and /readyz stayed green.
+  it('refuses Pay & Send pointed at a pack price - the $90.00 letter (#278 r2)', async () => {
+    // STRIPE_JIT_LETTER_PRICE_ID pasted with the Power pack's price id: the
+    // lookup succeeds and the Price is perfectly healthy, but 9000 does not
+    // equal the letter's 499 pin. Round 2's shared-id heuristic caught this
+    // only for byte-identical configured ids; the pin catches ANY id that
+    // resolves to the wrong figure.
     vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
     vi.stubEnv('STRIPE_JIT_LETTER_PRICE_ID', 'price_power');
     vi.stubEnv('STRIPE_JIT_POSTCARD_PRICE_ID', 'price_jit_postcard');
@@ -306,15 +311,13 @@ describe('price catalog (#275 stage A)', () => {
     await ensurePriceCatalog();
 
     expect(getResolvedPriceForProduct('jit-letter')).toBeNull();
-    expect(getResolvedPriceForProduct('credit-pack-100')).toBeNull();
-    for (const productCode of ['jit-letter', 'credit-pack-100']) {
-      expect(getPriceResolutionFailure(productCode), productCode).toMatchObject({
-        rule: 'price.shared_between_products',
-        diagnosticClass: 'configuration_error'
-      });
-    }
+    expect(getPriceResolutionFailure('jit-letter')).toMatchObject({
+      rule: 'price.amount_mismatch',
+      terminal: true
+    });
     // Uninvolved products still price - one bad pairing must not close the store.
     expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
+    expect(getResolvedPriceForProduct('credit-pack-100')?.unitAmount).toBe(9000);
     expect(getResolvedPriceForProduct('jit-postcard')?.unitAmount).toBe(499);
   });
 
@@ -336,70 +339,6 @@ describe('price catalog (#275 stage A)', () => {
       diagnosticClass: 'configuration_error'
     });
     expect(getResolvedPriceForProduct('credit-pack-100')).toBeNull();
-  });
-
-  it('refuses a zero-decimal-currency price under the two-decimal default band', async () => {
-    // ~₩126,000 is an ordinary Power-pack price and unit_amount is whole won,
-    // so the number sails past a ceiling calibrated in cents. The band cannot
-    // be made currency-universal by arithmetic - that needs an exchange rate -
-    // so the honest behaviour is to refuse loudly and be configurable, not to
-    // pretend (#278 review round 2).
-    vi.stubEnv('STRIPE_CURRENCY', 'krw');
-    setPriceRetriever(healthyRetriever({ price_power: { unit_amount: 126_000, currency: 'krw' } }));
-
-    await ensurePriceCatalog();
-
-    expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
-      rule: 'price.amount_out_of_range',
-      diagnosticClass: 'configuration_error'
-    });
-  });
-
-  it('accepts it once the deployment configures the band for its currency', async () => {
-    vi.stubEnv('STRIPE_CURRENCY', 'krw');
-    vi.stubEnv('STRIPE_PRICE_MIN_UNIT_AMOUNT', '100');
-    vi.stubEnv('STRIPE_PRICE_MAX_UNIT_AMOUNT', '10000000');
-    setPriceRetriever(
-      healthyRetriever({
-        price_starter: { unit_amount: 7_000, currency: 'krw' },
-        price_regular: { unit_amount: 14_000, currency: 'krw' },
-        price_power: { unit_amount: 126_000, currency: 'krw' }
-      })
-    );
-
-    await ensurePriceCatalog();
-
-    expect(getResolvedPriceForProduct('credit-pack-100')).toMatchObject({
-      unitAmount: 126_000,
-      currency: 'krw'
-    });
-    expect(getUnpricedProducts()).toEqual([]);
-  });
-
-  it('refuses a band value with a numeric separator instead of silently truncating it', async () => {
-    // `Number.parseInt('100_000')` is 100. That is the exact form this file's
-    // own comment prints, so an operator copying it would have collapsed the
-    // ceiling to $1.00 and failed every real price as a terminal configuration
-    // fault, with nothing naming the discarded value (#278 review round 3).
-    vi.stubEnv('STRIPE_PRICE_MAX_UNIT_AMOUNT', '100_000');
-    setPriceRetriever(healthyRetriever());
-
-    await ensurePriceCatalog();
-
-    // Falls back to the default ceiling, so the healthy fixture still prices.
-    expect(getResolvedPriceForProduct('credit-pack-100')?.unitAmount).toBe(9000);
-    expect(getUnpricedProducts()).toEqual([]);
-  });
-
-  it('ignores an inverted band rather than making every price unsellable', async () => {
-    vi.stubEnv('STRIPE_PRICE_MIN_UNIT_AMOUNT', '90000');
-    vi.stubEnv('STRIPE_PRICE_MAX_UNIT_AMOUNT', '100');
-    setPriceRetriever(healthyRetriever());
-
-    await ensurePriceCatalog();
-
-    // Falls back to the defaults, which the healthy fixture satisfies.
-    expect(getUnpricedProducts()).toEqual([]);
   });
 
   it('normalizes the CONFIGURED currency, not just the one Stripe returns', async () => {
@@ -559,36 +498,28 @@ describe('price catalog (#275 stage A)', () => {
     expect(powerReads()).toBe(6);
   });
 
-  it('revokes an already-priced product that turns out to share its price id', async () => {
-    // The missell surviving through a different door: the offender set is
-    // computed over every configured product, but was consulted only for
-    // members of the current batch, and the due filter excludes anything
-    // resolved. So when the two sharers landed in different batches, the first
-    // kept its memo and went on selling at the other's price for the life of
-    // the process (#278 review round 3).
+  it('a late repoint onto an already-sold price id cannot missell either side', async () => {
+    // Sequencing variant of the shared-id case: credit-pack-4 resolves
+    // healthily FIRST, then the Power tier is mistyped onto the same id. The
+    // pin's verdict is per-product and order-free: the Starter's memo still
+    // matches its own pin and keeps selling; the Power tier resolves 500
+    // against 9000 and is refused. No revocation machinery required - round
+    // 4's revocation was order-dependent, and its sticky variant deadlocked a
+    // partially-fixed config (#278 rounds 4-5).
     setPriceRetriever(healthyRetriever());
 
-    // Batch one: a healthy configuration. Both tiers resolve to their own
-    // Price, and credit-pack-4 is memoized at $5.00.
     await ensurePriceCatalog();
     expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
 
-    // An operator now mistypes the Power tier onto the Starter's price id. The
-    // sharing did not exist when credit-pack-4 resolved, so its memo predates
-    // the fault entirely.
     vi.stubEnv('STRIPE_PRICE_POWER', 'price_starter');
     await ensurePriceCatalog();
 
-    // BOTH must be refused. Before this, only the tier that happened to be in
-    // the batch was, and credit-pack-4 went on selling 4 credits at whatever
-    // the shared Price says for the life of the process.
-    for (const productCode of ['credit-pack-4', 'credit-pack-100']) {
-      expect(getResolvedPriceForProduct(productCode), productCode).toBeNull();
-      expect(getPriceResolutionFailure(productCode), productCode).toMatchObject({
-        rule: 'price.shared_between_products',
-        terminal: true
-      });
-    }
+    expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
+    expect(getResolvedPriceForProduct('credit-pack-100')).toBeNull();
+    expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
+      rule: 'price.amount_mismatch',
+      terminal: true
+    });
   });
 
   it('drops a memo whose price id has been repointed', async () => {
@@ -601,12 +532,12 @@ describe('price catalog (#275 stage A)', () => {
     expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
 
     vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_v2');
-    setPriceRetriever(healthyRetriever({ price_starter_v2: { unit_amount: 700 } }));
+    setPriceRetriever(healthyRetriever({ price_starter_v2: { unit_amount: 500 } }));
     await ensurePriceCatalog('credit-pack-4');
 
     expect(getResolvedPriceForProduct('credit-pack-4')).toMatchObject({
       priceId: 'price_starter_v2',
-      unitAmount: 700
+      unitAmount: 500
     });
   });
 
@@ -646,14 +577,14 @@ describe('price catalog (#275 stage A)', () => {
     expect(await settlesPromptly(ensurePriceCatalog('jit-letter'))).toBe(false);
   });
 
-  it('refuses every pack tier when the price env vars are transposed', async () => {
-    // The round-4 headline. Deleting STRIPE_*_AMOUNT_CENTS removed the only
-    // two-source check on price-id CORRECTNESS: transposed ids are each
-    // distinct, active, one-time and in band, so every per-price rule passes,
-    // and order.amount_cents is now written FROM the resolved price - the
-    // paid-amount comparison compares Stripe against itself. 100 credits sold
-    // for $5.00 with /readyz green. Credits are the second source: more
-    // credits must cost strictly more, and never more per credit.
+  it('refuses BOTH transposed tiers, independently of resolution order', async () => {
+    // The round-4/5 headline. Transposed STRIPE_PRICE_* env vars are each a
+    // healthy, active, one-time, plausible Price, so no per-price heuristic
+    // can refuse them - and the round-4 tier-ordering replacement leaked
+    // whenever the partner tiers were unresolved, because it could only
+    // compare tiers that had already resolved. The pin needs no partner:
+    // each tier checks its OWN resolved amount against its OWN table entry,
+    // so the verdict cannot depend on what else has resolved (#278 round 5).
     setPriceRetriever(
       healthyRetriever({
         price_starter: { unit_amount: 9000 }, // the Power price
@@ -663,47 +594,91 @@ describe('price catalog (#275 stage A)', () => {
 
     await ensurePriceCatalog();
 
-    for (const productCode of ['credit-pack-4', 'credit-pack-10', 'credit-pack-100']) {
+    for (const productCode of ['credit-pack-4', 'credit-pack-100']) {
       expect(getResolvedPriceForProduct(productCode), productCode).toBeNull();
       expect(getPriceResolutionFailure(productCode), productCode).toMatchObject({
-        rule: 'price.pack_tier_ordering',
+        rule: 'price.amount_mismatch',
         diagnosticClass: 'configuration_error',
         terminal: true
       });
     }
-    // And readiness must see it: an inconsistent tier table is not sellable,
-    // so a memoized-but-refused tier cannot read as priced on /readyz.
+    // The untransposed middle tier is genuinely fine and keeps selling.
+    expect(getResolvedPriceForProduct('credit-pack-10')?.unitAmount).toBe(1000);
+    // And readiness sees exactly the two.
     expect(
       getUnpricedProducts().map(f => `${f.productCode}:${f.rule}`).sort()
     ).toEqual([
-      'credit-pack-100:price.pack_tier_ordering',
-      'credit-pack-10:price.pack_tier_ordering',
-      'credit-pack-4:price.pack_tier_ordering'
+      'credit-pack-100:price.amount_mismatch',
+      'credit-pack-4:price.amount_mismatch'
     ]);
   });
 
-  it('refuses a tier pair whose per-credit price INCREASES with size', async () => {
-    // A subtler repoint than a transposition: totals still ascend, but the
-    // bigger pack costs more per credit - bulk got worse, which no sane tier
-    // pricing does. Only the violating pair is refused.
+  it('refuses a transposed tier even when its partners are unresolved', async () => {
+    // The exact leak that killed the ordering heuristic: partners blip during
+    // warmup, the transposed tier resolves ALONE - and used to sell at the
+    // wrong price because there was no pair to compare. The pin refuses it
+    // with zero knowledge of the other tiers (#278 round 5, reproduced).
     setPriceRetriever(
-      healthyRetriever({
-        price_starter: { unit_amount: 500 }, // 125.0 cents/credit
-        price_regular: { unit_amount: 1300 } // 130.0 cents/credit - worse
+      vi.fn(async (priceId: string) => {
+        if (priceId !== 'price_power') {
+          throw Object.assign(new Error('blip'), { type: 'StripeConnectionError' });
+        }
+        // Transposed: the Power id points at the real $5.00 starter Price.
+        return priceFixture({ id: priceId, unit_amount: 500 });
       })
     );
 
     await ensurePriceCatalog();
 
-    expect(getResolvedPriceForProduct('credit-pack-4')).toBeNull();
+    expect(getResolvedPriceForProduct('credit-pack-100')).toBeNull();
+    expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
+      rule: 'price.amount_mismatch',
+      terminal: true
+    });
+  });
+
+  it('refuses an in-band repoint that every heuristic accepted', async () => {
+    // Round 5's quantified hole: STRIPE_PRICE_REGULAR repointed to an
+    // unrelated $12.00 Price - active, one-time, inside any sane band, and
+    // ordering correctly between the $5 and $90 tiers. The ordering check
+    // bounded the middle tier to roughly [900..1250] and this sailed through;
+    // the pin refuses anything but exactly 1000.
+    setPriceRetriever(healthyRetriever({ price_regular: { unit_amount: 1200 } }));
+
+    await ensurePriceCatalog();
+
     expect(getResolvedPriceForProduct('credit-pack-10')).toBeNull();
     expect(getPriceResolutionFailure('credit-pack-10')).toMatchObject({
-      rule: 'price.pack_tier_ordering'
+      rule: 'price.amount_mismatch',
+      terminal: true
     });
-    // The uninvolved tier still prices: the verdict is derived pairwise at
-    // read time, so a tier that orders correctly against every resolved
-    // neighbour is not punished for someone else's bad pair.
-    expect(getResolvedPriceForProduct('credit-pack-100')?.unitAmount).toBe(9000);
+    expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
+  });
+
+  it('refuses swapped Pay & Send ids the moment their pins differ', async () => {
+    // The JIT gap round 5 opened with: letter and postcard swapped. Today
+    // both pin at 499 so a swap is harmless BY THE PIN'S OWN LOGIC - the
+    // amounts agree, nothing is missold, and that is also exactly why the
+    // two may share one Price. This case pins the mechanism with divergent
+    // amounts served by the retriever instead.
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    vi.stubEnv('STRIPE_JIT_LETTER_PRICE_ID', 'price_jit_letter');
+    vi.stubEnv('STRIPE_JIT_POSTCARD_PRICE_ID', 'price_jit_postcard');
+    setPriceRetriever(
+      healthyRetriever({
+        price_jit_letter: { unit_amount: 299 }, // not the letter's 499 pin
+        price_jit_postcard: { unit_amount: 499 }
+      })
+    );
+
+    await ensurePriceCatalog();
+
+    expect(getResolvedPriceForProduct('jit-letter')).toBeNull();
+    expect(getPriceResolutionFailure('jit-letter')).toMatchObject({
+      rule: 'price.amount_mismatch',
+      terminal: true
+    });
+    expect(getResolvedPriceForProduct('jit-postcard')?.unitAmount).toBe(499);
   });
 
   it('reports a repointed price id as unpriced WITHOUT waiting for a resolver pass', async () => {
@@ -806,32 +781,61 @@ describe('price catalog (#275 stage A)', () => {
     resetPriceCatalog();
 
     await expect(ensurePriceCatalog()).rejects.toThrow(/no retriever injected/);
-    // And crucially: nothing was recorded as if Stripe had failed.
-    expect(getPriceResolutionFailure('credit-pack-4')).toBeNull();
+    // And crucially: nothing was RECORDED as if Stripe had failed - the
+    // accessor synthesizes the transient never-attempted record for any
+    // configured-but-unpriced product, so assert the rule, not null.
+    expect(getPriceResolutionFailure('credit-pack-4')).toMatchObject({
+      rule: 'price.not_resolved'
+    });
   });
 
-  it('honors a lone configured ceiling below the default floor', async () => {
-    // The knobs exist for currencies where the two-decimal defaults are
-    // wrong. Reverting BOTH bounds when a configured ceiling undercut the
-    // DEFAULT floor discarded the only value the operator set and enforced
-    // nothing they asked for (#278 review round 4).
-    // A ceiling BELOW the default floor of 50 - the shape only the inversion
-    // branch handles. unit_amount is whole yen here, so these are tiny
-    // numbers on purpose.
-    vi.stubEnv('STRIPE_CURRENCY', 'jpy');
-    vi.stubEnv('STRIPE_PRICE_MAX_UNIT_AMOUNT', '40');
+  it('stops serving a memo when STRIPE_CURRENCY changes out from under it', async () => {
+    // Memo staleness used to be keyed on the price id alone, so an in-process
+    // currency change kept serving a memo the current configuration would
+    // refuse (#278 review round 5). Validity is now the full triple: id,
+    // pinned amount, expected currency.
+    setPriceRetriever(healthyRetriever());
+    await ensurePriceCatalog();
+    expect(getResolvedPriceForProduct('credit-pack-4')?.currency).toBe('usd');
+
+    vi.stubEnv('STRIPE_CURRENCY', 'gbp');
+
+    expect(getResolvedPriceForProduct('credit-pack-4')).toBeNull();
+    expect(getUnpricedProducts().map(f => f.productCode)).toContain('credit-pack-4');
+  });
+
+  it('discards an in-flight lookup outrun by a repoint instead of committing it', async () => {
+    // The fourth staleness surface: a lookup started for price_OLD, the env
+    // repointed mid-flight, and the commit re-installed a memo for the old id
+    // that the awaiting checkout then transacted against (#278 round 5,
+    // reproduced). The commit now re-checks the configured id.
+    let releaseOld: (value: never) => void = () => undefined;
+    const oldLookup = new Promise<never>(resolve => {
+      releaseOld = resolve as never;
+    });
     setPriceRetriever(
-      healthyRetriever({
-        price_starter: { unit_amount: 5, currency: 'jpy' },
-        price_regular: { unit_amount: 10, currency: 'jpy' },
-        price_power: { unit_amount: 38, currency: 'jpy' }
+      vi.fn((priceId: string) => {
+        if (priceId === 'price_starter') return oldLookup;
+        return Promise.resolve(
+          priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] ?? 500 }) as never
+        );
       })
     );
 
-    await ensurePriceCatalog();
+    const flight = ensurePriceCatalog('credit-pack-4');
+    void flight.catch(() => undefined);
 
-    expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(5);
-    expect(getUnpricedProducts()).toEqual([]);
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_v2');
+    releaseOld(priceFixture({ id: 'price_starter', unit_amount: 500 }) as never);
+    await flight;
+
+    // The stale flight committed nothing; the next ensure resolves the NEW id.
+    expect(getResolvedPriceForProduct('credit-pack-4')).toBeNull();
+    await ensurePriceCatalog('credit-pack-4');
+    expect(getResolvedPriceForProduct('credit-pack-4')).toMatchObject({
+      priceId: 'price_starter_v2',
+      unitAmount: 500
+    });
   });
 
   it('drops a stale failure when its product stops being configured', async () => {

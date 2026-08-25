@@ -21,7 +21,7 @@ import {
   validateDeploymentConfig
 } from '../config/deploymentConfig.js';
 import { listProviders } from '../services/providers/index.js';
-import { writeDiagnostic } from '../utils/diagnosticLog.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { ensurePriceCatalog, getUnpricedProducts } from '../services/priceCatalog.js';
 
 export interface ReadinessReport {
@@ -44,16 +44,19 @@ const CACHE_TTL_MS = 5_000;
  * Still bounded, so an anonymous prober cannot drive the database checks
  * harder than once a second.
  */
-const UNREADY_CACHE_TTL_MS = 1_000;
+const UNREADY_CACHE_TTL_MS = 2_000;
 
 let cached: { report: ReadinessReport; expiresAt: number } | null = null;
 /** Last reported price-failure set, so a steady fault is logged once. */
 let lastReportedPriceFailures: string | null = null;
+/** Last reported failing-signature, so a steady 503 is logged once, not 1/2s. */
+let lastReportedFailing: string | null = null;
 
 /** Test hook: drop the memoized report. */
 export function resetReadinessCache(): void {
   cached = null;
   lastReportedPriceFailures = null;
+  lastReportedFailing = null;
 }
 
 async function checkDatabase(): Promise<boolean> {
@@ -133,14 +136,23 @@ export async function getReadiness(
   // production is itself a config ERROR (admin.enabled_in_production), so such
   // a deploy is already 503 on `config` and a second gate would be dead code.
   const pricesEnforced = validation.mode === 'production';
-  const priceFailures = getUnpricedProducts();
+  // Threaded env: every other check in this report reads the caller's env,
+  // and a verdict stitched from two environments describes neither (#278 r5).
+  const priceFailures = getUnpricedProducts(env);
   const pricesOk = priceFailures.length === 0;
 
-  // Nothing can change until a human edits config and redeploys, so neither
-  // the re-attempt nor the log line below is worth doing every probe.
-  const priceFaultsAreStatic =
-    !pricesOk && priceFailures.every(failure => failure.rule === 'price.id_not_configured');
-  if (!pricesOk && !priceFaultsAreStatic) void ensurePriceCatalog();
+  // Unconditional: the catalog's own cooldown ladder rate-limits real
+  // lookups, so the kick is a cheap synchronous no-op between attempts - and
+  // suppressing it for "static" faults gated the self-heal off exactly the
+  // staleness it would have fixed (an id_not_configured recorded before the
+  // var was set kept suppressing the kick after it was, #278 review round 5).
+  if (!pricesOk) {
+    void ensurePriceCatalog().catch(error => {
+      writeDiagnostic('warn', 'stripe.price_kick_rejected', {
+        errorClass: classifyDiagnosticError(error, 'unknown_error')
+      });
+    });
+  }
 
   const failing: string[] = [];
   if (!configOk) failing.push('config');
@@ -173,6 +185,7 @@ export async function getReadiness(
     // name - this route is unauthenticated, and echoing an arbitrary env
     // value would serve anything accidentally pasted into LETTER_PROVIDER
     // to anonymous callers (review round 1).
+    lastReportedFailing = null;
     const configured = (env.LETTER_PROVIDER || 'dummy').toLowerCase();
     const provider = new Set(listProviders()).has(configured) ? configured : 'unrecognized';
     report = {
@@ -197,7 +210,19 @@ export async function getReadiness(
     // Detail goes to the log, not the wire: rule ids and routing offenders
     // are for the operator, and the body must not teach an anonymous caller
     // which variable to attack.
-    writeDiagnostic('error', 'readiness.failed', {
+    // On CHANGE only: at the short unready TTL an unconditional line here was
+    // up to ~43,000 identical entries a day on a steadily-unready probed
+    // instance - the flood shape every other diagnostic in this file already
+    // dedupes (#278 review round 5).
+    const failingSignature = [
+      failing.join(','),
+      priceFailureSummary,
+      routing.offenders.join(','),
+      validation.findings.filter(f => f.severity === 'error').map(f => f.rule).join(',')
+    ].join('|');
+    if (failingSignature !== lastReportedFailing) {
+      lastReportedFailing = failingSignature;
+      writeDiagnostic('error', 'readiness.failed', {
       failing: failing.join(','),
       // Product codes and rule ids only; the loader never puts an amount in
       // a failure.
@@ -207,7 +232,8 @@ export async function getReadiness(
         .map(f => f.rule)
         .join(',') || 'none',
       routingOffenders: routing.offenders.join(',') || 'none'
-    });
+      });
+    }
     report = {
       ready: false,
       statusCode: 503,

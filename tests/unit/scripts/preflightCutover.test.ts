@@ -164,13 +164,20 @@ describe('diffManifest', () => {
 
     expect(diff.missing.map(entry => entry.name)).not.toContain('STRIPE_CURRENCY');
     expect(diff.advisory.map(entry => entry.name)).toContain('STRIPE_CURRENCY');
-    // The band bounds are advisory too, and are absent from the fixture.
-    expect(diff.advisory.map(entry => entry.name)).toEqual(
-      expect.arrayContaining(['STRIPE_PRICE_MIN_UNIT_AMOUNT', 'STRIPE_PRICE_MAX_UNIT_AMOUNT'])
-    );
     expect(diff.advisoryNotes).toHaveLength(diff.advisory.length);
     // The gate itself stays green.
     expect(diff.missing).toEqual([]);
+  });
+
+  it('lists advisory variables when diffing DEVELOPMENT too', () => {
+    // Their entire purpose is cross-environment parity visibility. Skipping
+    // production-only entries in the development run made that visibility
+    // one-directional: a value set in production but absent in development
+    // was reported by neither run (#278 review round 5).
+    const diff = diffManifest([], { environment: 'development', service: 'api' });
+
+    expect(diff.advisory.map(entry => entry.name)).toContain('STRIPE_CURRENCY');
+    expect(diff.missing.map(entry => entry.name)).not.toContain('STRIPE_CURRENCY');
   });
 
   it('consumes the real manifest by default so the two can never drift', () => {
@@ -208,11 +215,6 @@ describe('parity with the boot validator', () => {
     if (name === 'LETTER_PROVIDER') return 'postgrid';
     if (name === 'LETTER_PROVIDER_API_KEY') return production ? 'live_sk_parity_fixture' : 'test_sk_parity_fixture';
     if (name === 'LETTER_PROVIDER_CONFIG') return production ? '{"mode":"live"}' : '{"mode":"test"}';
-    // The band bounds share the STRIPE_PRICE_ prefix but are integers, not
-    // price ids - the prefix rule below would hand them a value the validator
-    // rejects (#278 review round 4).
-    if (name === 'STRIPE_PRICE_MIN_UNIT_AMOUNT') return '50';
-    if (name === 'STRIPE_PRICE_MAX_UNIT_AMOUNT') return '100000';
     if (name.startsWith('STRIPE_PRICE_') || name.endsWith('_PRICE_ID')) return `price_${name.toLowerCase()}`;
     return `parity-fixture-${name.toLowerCase()}`;
   }

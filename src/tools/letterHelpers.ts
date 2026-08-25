@@ -495,7 +495,12 @@ export async function createLetterDraftAndBuildOutput(
 ): Promise<LetterQuoteOutput> {
   // Quotes read the resolved price (#275 stage A); resolve lazily so the
   // stdio server and flow harness work without a bootstrap call.
-  await ensurePriceCatalog(jitProductCode('letter'));
+  // Fire-and-forget, never awaited: a quote must not block on Stripe. The
+  // eligibility block degrades cleanly ("temporarily unavailable") from the
+  // recorded state, and when the catalog is warm the kick is a synchronous
+  // no-op anyway - awaiting here turned Stripe latency into tool latency on
+  // the highest-traffic path during any brownout (#278 review round 5).
+  void ensurePriceCatalog(jitProductCode('letter')).catch(() => undefined);
 
   const {
     sender,

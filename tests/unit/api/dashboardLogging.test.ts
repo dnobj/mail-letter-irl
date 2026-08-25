@@ -146,6 +146,30 @@ describe("dashboard runtime logging privacy", () => {
     }
   });
 
+  it("maps a carried-only terminal class to 503, like the config fault it is", async () => {
+    // The session-create rethrow carries diagnosticClass but not always a
+    // code. Matching only the literal 'configuration_error' sent
+    // amount_too_small / resource_missing / StripeAuthenticationError - the
+    // same fault family, already cancelled as terminal - to a bare 500 while
+    // the sibling guard one layer earlier answered 503 (#278 review round 5).
+    createPackCheckout.mockRejectedValue(
+      Object.assign(new Error("amount below Stripe's currency minimum"), {
+        diagnosticClass: "amount_too_small"
+      })
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const req = {
+      headers: {},
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+    };
+    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+    await handleCreateCheckoutSession(req as never, res as never);
+
+    expect(res.statusCode).toBe(503);
+    error.mockRestore();
+  });
+
   it("answers 400 for an unknown product id, off the carried validation class", async () => {
     createPackCheckout.mockRejectedValue(
       Object.assign(new Error("Invalid product ID: credit-pack-999"), {

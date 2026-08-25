@@ -27,8 +27,6 @@ describe('boot configuration logging', () => {
   // Read by the stripe.currency_unset and stripe.price_band rules (#275/#278).
   'STRIPE_CURRENCY',
   'JIT_CURRENCY',
-  'STRIPE_PRICE_MIN_UNIT_AMOUNT',
-  'STRIPE_PRICE_MAX_UNIT_AMOUNT',
     'STRIPE_PRICE_STARTER',
     'STRIPE_PRICE_REGULAR',
     'STRIPE_PRICE_POWER',

@@ -36,7 +36,7 @@ import {
   Logger
 } from "./contracts/types.js";
 import { createLogger } from "./logging/index.js";
-import { classifyDiagnosticError } from "./utils/diagnosticLog.js";
+import { carriedDiagnosticClass, classifyDiagnosticError } from "./utils/diagnosticLog.js";
 
 const tools: McpToolDefinition<any, any>[] = [
   // ChatGPT currently appears to expose only the first 12 registered actions
@@ -184,11 +184,7 @@ export class LetterIrlServer {
       // errors, and a rebuilt Error has neither .code nor .type, so without
       // this the log recorded literally unknown_error for a fault the
       // commerce layer had classified precisely (#278 review round 4).
-      const carried =
-        error && typeof error === "object" && "diagnosticClass" in error &&
-        typeof (error as { diagnosticClass?: unknown }).diagnosticClass === "string"
-          ? (error as { diagnosticClass: string }).diagnosticClass
-          : undefined;
+      const carried = carriedDiagnosticClass(error);
       requestLogger.error(
         {
           correlationId,

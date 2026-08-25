@@ -95,27 +95,13 @@ describe('resolveDeploymentMode', () => {
 });
 
 describe('validateDeploymentConfig in production', () => {
-  it.each([
-    ['a numeric separator', '100_000'],
-    ['zero', '0'],
-    ['a decimal', '50.5']
-  ])('flags a malformed price band value (%s) as a WARNING, never a boot error', (_label, value) => {
-    // An error here throws at boot, ~650 lines before server.listen - a total
-    // production outage over a band formatting slip, triggerable by the exact
-    // `100_000` form the catalog docs print. The catalog logs the discarded
-    // bound and falls back; the validator's job is to name it, not to refuse
-    // to start (#278 review round 4). Zero is included because the old regex
-    // passed it while the catalog rejected it - validator green, bound
-    // silently discarded.
-    const validation = validateDeploymentConfig(
-      env({ STRIPE_PRICE_MAX_UNIT_AMOUNT: value }),
-      'server'
-    );
+  it('flags a whitespace-only STRIPE_CURRENCY, which the catalog treats as unset', () => {
+    // A paste artifact in a Railway field: "set" to a falsy check but unset
+    // to the catalog's trimming normalizer, which then validated every Price
+    // against the usd default with zero findings anywhere (#278 review r5).
+    const validation = validateDeploymentConfig(env({ STRIPE_CURRENCY: '   ' }), 'server');
 
-    const bandFindings = validation.findings.filter(f => f.rule === 'stripe.price_band');
-    expect(bandFindings.length).toBeGreaterThan(0);
-    expect(bandFindings.every(f => f.severity === 'warning')).toBe(true);
-    expect(validation.errors).toEqual([]);
+    expect(validation.findings.map(f => f.rule)).toContain('stripe.currency_unset');
   });
 
   it('accepts a completely configured production environment with no findings', () => {

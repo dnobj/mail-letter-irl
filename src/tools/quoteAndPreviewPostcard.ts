@@ -388,7 +388,8 @@ async function handler(
   const requiredCredits = POSTCARD_CREDITS_COST;
   const available = context.user.creditsRemaining;
   const canSendNow = available >= requiredCredits;
-  await ensurePriceCatalog(jitProductCode('postcard'));
+  // Fire-and-forget - see letterHelpers: a quote must never block on Stripe.
+  void ensurePriceCatalog(jitProductCode('postcard')).catch(() => undefined);
   const sendEligibility = getSendEligibility(available, requiredCredits, "postcard");
   const lettersRequired = 1; // User-facing: 1 letter = 1 postcard
 

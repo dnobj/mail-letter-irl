@@ -75,6 +75,10 @@ In development set `LETTER_PROVIDER_CONFIG={"mode":"test"}`. When
 `STRIPE_JIT_POSTCARD_PRICE_ID`, and — if Pay & Send sells in a different
 currency from the packs — `JIT_CURRENCY`.
 
+**Do not delete the old `*_AMOUNT_CENTS` variables until this build is the one
+serving** — the previous image's validator requires them in production, and
+removing them early bricks that image on its next restart.
+
 **Amounts are not configured here.** They are read from each Stripe Price at
 startup (#275). Until that change there was a second copy in the environment
 that had to equal the Price's unit amount, with no automated check that it did —

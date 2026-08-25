@@ -178,12 +178,11 @@ describe('commerceService', () => {
     expect(orphanSweep).toContain('checkout_expires_at IS NULL');
   });
 
-  it('primes the catalog with the metadata key this codebase actually writes', async () => {
-    // stripeService writes { orderId, orderType, productCode } on every
-    // session. The webhook's ensure used to read only the legacy
-    // productId/product_id keys, so its argument was undefined for every
-    // session the current app creates - the uncoded slow path, in front of
-    // the money transaction, on every webhook (#278 review round 4).
+  it('never touches the price catalog from the webhook path', async () => {
+    // The money already moved. Adoption prices from the static product table
+    // and the paid-amount comparison verifies the charge, so a live Stripe
+    // read here can only add failure modes - webhook 500 loops on transient
+    // faults, paid money stranded during a key rotation (#278 review r5).
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
       if (sql.includes('SELECT * FROM orders')) return { rows: [baseOrder] };
@@ -194,7 +193,7 @@ describe('commerceService', () => {
       metadata: { orderId: 'order-1', orderType: 'jit_mail', productCode: 'jit-letter' }
     }));
 
-    expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-letter');
+    expect(mocks.ensurePriceCatalog).not.toHaveBeenCalled();
   });
 
   it('claims concurrent Stripe event replays so only one can send or grant', async () => {
@@ -421,11 +420,14 @@ describe('commerceService', () => {
     expect([String(ordered[0]?.[0]), ordered[0]?.[1]]).toEqual([ACCOUNT_LOCK_SQL, ['user-1']]);
   });
 
-  it('refuses to adopt a legacy pack session when its price is TERMINALLY unconfigured', async () => {
-    // Only a human can fix an archived or typo'd price, so retrying the
-    // adoption forever is pointless: refuse, book the money as unmatched, and
-    // answer Stripe 200 so it stops. The transient case is the next test, and
-    // it must NOT behave like this one (#278 review round 2).
+  it('adopts a paid legacy session from the product table, whatever the catalog says', async () => {
+    // Adoption of already-paid money must not depend on the current state of
+    // a Stripe lookup: terminal-classed blips stranded paying customers as
+    // permanently unmatched, transient-classed ones 500-looped the webhook on
+    // the schedule Stripe uses to disable endpoints. The pinned amount is the
+    // business agreement; the paid-amount comparison downstream verifies the
+    // actual charge against it (#278 review round 5). The catalog mocks here
+    // scream "unpriced" precisely to prove they are not consulted.
     mocks.getPriceResolutionFailure.mockReturnValue({
       productCode: 'credit-pack-4',
       rule: 'price.inactive',
@@ -443,6 +445,17 @@ describe('commerceService', () => {
     });
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-legacy' }] };
+      if (sql.includes('INSERT INTO orders')) {
+        return { rows: [{
+          ...baseOrder,
+          order_id: 'stripe-cs-legacy',
+          order_type: 'letter_pack',
+          product_code: 'credit-pack-4',
+          credits: 4,
+          amount_cents: 500,
+          status: 'paid'
+        }] };
+      }
       return { rows: [] };
     });
 
@@ -453,31 +466,27 @@ describe('commerceService', () => {
       amount_total: 500
     }) as any)).resolves.toMatchObject({ duplicate: false });
 
-    // Inserting a zero amount would violate the amount_cents CHECK and roll
-    // back the webhook claim, leaving Stripe to retry forever with no signal.
+    // The order is INSERTed at the TABLE's pinned amount (500 for the
+    // starter), not at anything the mocked-out catalog could have said.
+    const insert = mocks.query.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO orders')
+    );
+    expect(insert).toBeDefined();
+    expect(insert?.[1]).toEqual(expect.arrayContaining([500, 4, 'credit-pack-4']));
+    // And nothing was BOOKED as unmatched: the money found its order. (The
+    // adoption flow legitimately SELECTs previously-unmatched events to
+    // reconcile them, so match the write, not the phrase.)
     expect(mocks.query).not.toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO orders'),
+      expect.stringContaining("SET processing_status = 'unmatched'"),
       expect.anything()
     );
-    expect(mocks.addCredits).not.toHaveBeenCalled();
-    // But refusing must not silently consume paid money either: the event stays
-    // unmatched and raises a durable alert, so a recovery path can find it once
-    // the amount is configured.
-    expect(mocks.query).toHaveBeenCalledWith(
-      expect.stringContaining("processing_status = 'unmatched'"),
-      ['evt-1', 'pi-1']
-    );
-    expect(mocks.query).toHaveBeenCalledWith(
-      expect.stringContaining("'stripe_money_event_unmatched'"),
-      expect.arrayContaining(['evt-1'])
-    );
+    expect(mocks.getPackProduct).not.toHaveBeenCalled();
   });
 
   it('adopts a legacy session keyed by productCode, the key this codebase writes', async () => {
-    // createLegacyPackOrder existed for OLD sessions with productId metadata,
-    // but reconciliation replays events for sessions the CURRENT app created,
-    // whose metadata carries productCode only - and reading just the legacy
-    // keys made those unadoptable (#278 review round 4).
+    // Reconciliation replays events for sessions the CURRENT app created,
+    // whose metadata carries productCode only - reading just the legacy
+    // productId keys made those unadoptable (#278 review round 4).
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-pc' }] };
       if (sql.includes('INSERT INTO orders')) {
@@ -493,55 +502,10 @@ describe('commerceService', () => {
       amount_total: 500
     }) as never).catch(() => undefined);
 
-    expect(mocks.getPackProduct).toHaveBeenCalledWith('credit-pack-4');
-  });
-
-  it('retries a legacy adoption whose price is only TRANSIENTLY unresolved', async () => {
-    // The regression this whole rework exists to prevent, in its subtler form.
-    // The amount used to come from an env var and could never be transiently
-    // absent; it now comes from a live Stripe read, so a blip during the
-    // warmup would have booked a PAYING customer as permanently unmatched -
-    // and unmatched does not auto-recover (docs/manual-tests.md), because a
-    // refused adoption leaves no order row for the maintenance sweep to find.
-    // Throwing rolls the transaction back including the event claim, so Stripe
-    // (or the next cron pass) retries once the cooldown has cleared.
-    mocks.getPriceResolutionFailure.mockReturnValue({
-      productCode: 'credit-pack-4',
-      rule: 'price.lookup_failed',
-      diagnosticClass: 'StripeConnectionError',
-      terminal: false
-    } as never);
-    mocks.getPackProduct.mockReturnValue({
-      productCode: 'credit-pack-4',
-      priceId: 'price-pack',
-      amountCents: 0,
-      currency: 'usd',
-      credits: 4,
-      name: 'Starter Pack',
-      description: 'Two prepaid letters'
-    });
-    mocks.query.mockImplementation(async (sql: string) => {
-      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-legacy' }] };
-      return { rows: [] };
-    });
-
-    await expect(processStripeWebhookEvent(checkoutEvent({
-      id: 'cs-legacy',
-      client_reference_id: null,
-      metadata: { userId: 'user-1', productId: 'credit-pack-4' },
-      amount_total: 500
-    }) as never)).rejects.toMatchObject({ diagnosticClass: 'StripeConnectionError' });
-
-    // Crucially NOT booked as unmatched: that is the terminal outcome, and
-    // applying it to a blip is what strands the money.
-    expect(mocks.query).not.toHaveBeenCalledWith(
-      expect.stringContaining("processing_status = 'unmatched'"),
-      expect.anything()
+    const insert = mocks.query.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO orders')
     );
-    expect(mocks.query).not.toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO orders'),
-      expect.anything()
-    );
+    expect(insert?.[1]).toEqual(expect.arrayContaining(['credit-pack-4']));
   });
 
   it('does not retry an UNPAID event just because a price is cooling down', async () => {
@@ -1050,6 +1014,9 @@ describe('commerceService', () => {
   it('rejects cross-user draft checkout before calling Stripe', async () => {
     // Issue #150 added a send-block lookup ahead of the draft read. This account
     // is not blocked, so the original assertion below is unchanged.
+    // createJitCheckout peeks the draft's mail type (unlocked, advisory)
+    // before the money transaction, to ensure exactly one product's price.
+    mocks.query.mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] });
     mocks.query.mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] });
     mocks.query.mockResolvedValueOnce({
       rows: [
@@ -1076,7 +1043,9 @@ describe('commerceService', () => {
       checkout_expires_at: new Date(Date.now() + 20 * 60_000)
     };
     mocks.query
-      // Issue #150 added a send-block lookup ahead of the draft read.
+      // The draft-type peek runs first (unlocked, advisory), then the #150
+      // send-block lookup, then the FOR UPDATE draft read.
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
       .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
       .mockResolvedValueOnce({
         rows: [

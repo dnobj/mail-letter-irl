@@ -199,31 +199,6 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     checkedBy: 'stripe.currency_unset'
   },
   /**
-   * The price sanity band. Introduced in the same change that added the
-   * currencies above - and, in the first attempt, with exactly the blind spot
-   * that entry exists to fix: two new variables that change what production
-   * will sell, in no manifest, no example and no preflight (#278 review r3).
-   * A deployment in a zero- or three-decimal currency must set both, and a
-   * value present in one environment and absent in the other refuses every
-   * price after promotion.
-   */
-  {
-    name: 'STRIPE_PRICE_MIN_UNIT_AMOUNT',
-    requiredIn: 'production',
-    advisory: true,
-    secret: false,
-    services: ['api', 'maintenance'],
-    checkedBy: 'stripe.price_band'
-  },
-  {
-    name: 'STRIPE_PRICE_MAX_UNIT_AMOUNT',
-    requiredIn: 'production',
-    advisory: true,
-    secret: false,
-    services: ['api', 'maintenance'],
-    checkedBy: 'stripe.price_band'
-  },
-  /**
    * OAuth configuration (issue #270).
    *
    * These are owned by validateOAuthConfig (src/auth/oauthConfig.ts), hence
@@ -587,7 +562,10 @@ function validateStripe(
     // not an error - the default is right for this deployment and production
     // must not gain a new way to refuse to boot - but it is now something an
     // operator can read (#278 review round 2).
-    if (!env.STRIPE_CURRENCY) {
+    // Trimmed: a whitespace-only value (a paste artifact in a Railway field)
+    // is "set" to the falsy check but unset to the catalog, which silently
+    // validated every Price against usd with zero findings (#278 review r5).
+    if (!env.STRIPE_CURRENCY?.trim()) {
       findings.push({
         severity: 'warning',
         rule: 'stripe.currency_unset',
@@ -600,39 +578,6 @@ function validateStripe(
     // deployment that sets one bound almost certainly meant to set both.
     const bandMin = env.STRIPE_PRICE_MIN_UNIT_AMOUNT;
     const bandMax = env.STRIPE_PRICE_MAX_UNIT_AMOUNT;
-    // WARNING severity always, never error: an error here throws at boot,
-    // ~650 lines before server.listen, taking /healthz and /readyz down with
-    // it - a total production outage over a band formatting slip, while the
-    // catalog itself logs the discarded bound and falls back gracefully. The
-    // first version of this rule was production-severity and could be
-    // triggered by the exact `100_000` form the catalog's own docs print
-    // (#278 review round 4).
-    for (const [name, value] of [
-      ['STRIPE_PRICE_MIN_UNIT_AMOUNT', bandMin],
-      ['STRIPE_PRICE_MAX_UNIT_AMOUNT', bandMax]
-    ] as const) {
-      if (value === undefined) continue;
-      const trimmed = value.trim();
-      // Match the catalog's parser exactly: digits only AND positive. '0'
-      // passed the old regex while the catalog rejected it as not_positive -
-      // validator green, bound silently discarded (#278 review round 4).
-      if (!/^[0-9]+$/.test(trimmed) || Number.parseInt(trimmed, 10) <= 0) {
-        findings.push({
-          severity: 'warning',
-          rule: 'stripe.price_band',
-          message: `${name} must be a positive whole number of minor units (no separators, no decimal point, not zero)`
-        });
-      }
-    }
-    if (Boolean(bandMin) !== Boolean(bandMax)) {
-      findings.push({
-        severity: 'warning',
-        rule: 'stripe.price_band',
-        message:
-          'STRIPE_PRICE_MIN_UNIT_AMOUNT and STRIPE_PRICE_MAX_UNIT_AMOUNT are meant to be set together; if the pair would invert, the configured bound wins and the default falls away'
-      });
-    }
-
     if (env.JIT_PURCHASE_ENABLED === 'true') {
       for (const price of JIT_VARS) {
         const problems: string[] = [];
@@ -647,7 +592,7 @@ function validateStripe(
           });
         }
       }
-      if (!env.JIT_CURRENCY && !env.STRIPE_CURRENCY) {
+      if (!env.JIT_CURRENCY?.trim() && !env.STRIPE_CURRENCY?.trim()) {
         findings.push({
           severity: 'warning',
           rule: 'stripe.currency_unset',

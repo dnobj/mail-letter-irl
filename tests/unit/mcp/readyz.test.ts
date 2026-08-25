@@ -7,7 +7,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // the failing branch had zero coverage in the first revision (#278 review).
 const priceCatalog = vi.hoisted(() => ({
   unpriced: [] as Array<{ productCode: string; rule: string; diagnosticClass: string }>,
-  ensureCalls: 0
+  ensureCalls: 0,
+  lastEnv: undefined as NodeJS.ProcessEnv | undefined
 }));
 // The mock supplies DATA and never a verdict. An earlier version exported an
 // isPriceCatalogCold() the suite could hand-set, which let a cold-start test
@@ -15,7 +16,10 @@ const priceCatalog = vi.hoisted(() => ({
 // (#278 review round 3). Coldness is now derived from the failure rules, which
 // this mock reproduces faithfully because they are the catalog's own output.
 vi.mock('../../../src/services/priceCatalog.js', () => ({
-  getUnpricedProducts: () => priceCatalog.unpriced,
+  getUnpricedProducts: (env?: NodeJS.ProcessEnv) => {
+    priceCatalog.lastEnv = env;
+    return priceCatalog.unpriced;
+  },
   ensurePriceCatalog: async () => {
     priceCatalog.ensureCalls += 1;
   }
@@ -37,6 +41,7 @@ import { getReadiness, resetReadinessCache } from '../../../src/mcp/readiness.js
 beforeEach(() => {
   priceCatalog.unpriced = [];
   priceCatalog.ensureCalls = 0;
+  priceCatalog.lastEnv = undefined;
 });
 
 const READY_DEV: NodeJS.ProcessEnv = {
@@ -286,18 +291,19 @@ describe('/readyz prices check (#275 stage A)', () => {
     expect(pushed).toEqual(checkNames);
   });
 
-  it('does not re-attempt resolution for prices that are simply unset', async () => {
-    // Nothing can change until a human edits config and redeploys, so kicking
-    // the resolver on every probe is pure noise - and on a non-production
-    // deploy, where prices are legitimately unset, that state is permanent
-    // (#278 review round 3).
+  it('kicks the resolver even for statically-unset prices', async () => {
+    // The suppression this replaces gated the self-heal off exactly the
+    // staleness it would have fixed: an id_not_configured recorded before the
+    // env var was set kept suppressing the kick after it was. The catalog's
+    // own cooldown ladder makes the kick a cheap synchronous no-op between
+    // attempts, so unconditional is safe (#278 review round 5).
     priceCatalog.unpriced = [
       { productCode: 'credit-pack-4', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' }
     ];
 
     await getReadiness(READY_DEV);
 
-    expect(priceCatalog.ensureCalls).toBe(0);
+    expect(priceCatalog.ensureCalls).toBeGreaterThan(0);
   });
 
   it('still re-attempts a fault that could clear on its own', async () => {
@@ -367,7 +373,7 @@ describe('/readyz prices check (#275 stage A)', () => {
 
       // The warmup lands.
       priceCatalog.unpriced = [];
-      vi.advanceTimersByTime(1_100);
+      vi.advanceTimersByTime(2_100);
       const recovered = await getReadiness(READY_PROD);
 
       expect(recovered.statusCode).toBe(200);
@@ -387,7 +393,7 @@ describe('/readyz prices check (#275 stage A)', () => {
       expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
 
       routableDb([{ mail_type: 'letter', provider: 'postgrid' }]);
-      vi.advanceTimersByTime(1_100);
+      vi.advanceTimersByTime(2_100);
 
       expect((await getReadiness(READY_PROD)).statusCode).toBe(200);
     } finally {
@@ -445,6 +451,44 @@ describe('/readyz prices check (#275 stage A)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('logs a steady failing verdict once, not once per recompute', async () => {
+    // At the short unready TTL an unconditional readiness.failed line was up
+    // to ~43,000 identical entries a day on a probed instance - the flood
+    // shape every other diagnostic in this file already dedupes (#278 r5).
+    vi.useFakeTimers();
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
+      ];
+
+      await getReadiness(READY_PROD);
+      vi.advanceTimersByTime(2_100);
+      await getReadiness(READY_PROD);
+      vi.advanceTimersByTime(2_100);
+      await getReadiness(READY_PROD);
+
+      const emitted = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('"event":"readiness.failed"'));
+      expect(emitted).toHaveLength(1);
+    } finally {
+      diagnostic.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("asks the catalog about the CALLER'S env, not ambient process.env", async () => {
+    // Every other check in the report reads the env parameter; a prices
+    // verdict computed from process.env stitched a report from two different
+    // environments - a 503 naming prices that no variable in the supplied env
+    // explained (#278 review round 5).
+    await getReadiness(READY_PROD);
+
+    expect(priceCatalog.lastEnv).toBe(READY_PROD);
   });
 
   it('caches a READY verdict for the full TTL', async () => {

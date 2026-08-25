@@ -103,7 +103,13 @@ order they catch problems:
    unready almost at once.
 
 **Rollout ordering warning:** set an environment's variables *before* deploying
-code that validates them. New variables are inert to a running image, but a
+code that validates them — and **delete** variables only *after* the build
+that stopped requiring them is serving. The five `STRIPE_*_AMOUNT_CENTS` /
+`JIT_*_AMOUNT_CENTS` variables this release removes are still boot-**errors**
+to the previous image's validator: deleting them from Railway while the old
+image can still crash-restart or redeploy bricks that image
+(`stripe.pack_price_incomplete`) — an outage caused by tidying too early
+(#278 review round 5). New variables are inert to a running image, but a
 crash-restart of an already-running service whose config has become invalid
 will boot-loop. In particular, `LETTER_IRL_DEPLOYMENT_ENVIRONMENT` must be set
 on every deployed service (`development` on dev API and maintenance,
@@ -556,29 +562,32 @@ An unresolved price disables checkout for that product and makes `/readyz`
 report `prices` failing in production (`degraded` elsewhere). There are no
 runtime price fallbacks.
 
-A price must be **active**, **one-time** (a recurring Price cannot be used with
-a `payment`-mode Checkout Session), denominated in its product's expected
-currency, and within a sanity band — by default 50 to 100,000 minor units, i.e.
-$0.50 to $1,000.00. Pack tiers must also **order sanely against each other**:
-more credits must cost strictly more in total and never more per credit. This
-is the two-source check that replaces the deleted `STRIPE_*_AMOUNT_CENTS`
-comparison — a transposed pair of `STRIPE_PRICE_*` values passes every
-per-price rule, and the amount comparisons downstream now compare the resolved
-price against itself, so tier ordering against the static credits table is the
-only thing that can catch it. Both members of a violating pair are refused. Two products may share a Price only when both are Pay &
+A price must be **active**, **one-time** (a recurring Price cannot be used
+with a `payment`-mode Checkout Session), and must resolve to **exactly the
+amount and currency pinned for its product** in `src/config/products.ts`
+(`expectedAmountCents`). The pin is the two-source check: a transposed pair of
+`STRIPE_PRICE_*` values, an id pasted from the wrong product, or a repoint to
+any unrelated Price each resolves to a perfectly healthy Price — active,
+one-time, plausible — that no per-price rule can refuse; five review rounds
+proved every heuristic replacement (sanity bands, tier ordering, shared-id
+detection) leaked a silent-wrong-price case. Equality against the reviewed
+code table is deterministic, and it subsumes those heuristics: two products
+may share one Price exactly when their pinned amounts agree (the Pay & Send
+letter and postcard do), and there is no "sane range" question left when the
+exact figure is known.
+
+**Changing a price**: create the new Price in Stripe (amounts are immutable on
+an existing Price), then in one commit update `expectedAmountCents` in
+`src/config/products.ts` and repoint the price-id env var. A redeploy was
+already required — the id is an env var — so this adds a review, not a step. Two products may share a Price only when both are Pay &
 Send; any other sharing is refused for **every** product involved, because it
 would sell one of them at the other's price. A deployment in a zero- or
 three-decimal currency, or one selling a tier above the ceiling, must set
 `STRIPE_PRICE_MIN_UNIT_AMOUNT` and `STRIPE_PRICE_MAX_UNIT_AMOUNT`: the band is
 in minor units and cannot be converted across currencies without an exchange
-rate. Both take positive whole numbers only — `100_000` parses as `100`, which would
-refuse every real price, so the validator warns on separators and on zero, and
-a discarded bound is logged under `stripe.price_band_ignored`. The validator
-finding is always a **warning**, never a boot error: the catalog falls back
-gracefully, and a formatting slip must not take `/healthz` down with it. If
-exactly one bound is set and it contradicts the other side's default, the
-configured bound wins and the default falls away; only a contradictory
-configured *pair* is reverted. Both appear in the manifest
+rate. (The former `STRIPE_PRICE_MIN_UNIT_AMOUNT`/`STRIPE_PRICE_MAX_UNIT_AMOUNT`
+sanity band is gone: with the exact amount pinned per product there is no
+range question left to configure, in any currency.) Both appear in the manifest
 as **advisory**: `npm run preflight:cutover` lists them when unset so a parity
 gap is visible before promotion, without failing the gate on a deployment that
 correctly relies on the defaults — which is also how `STRIPE_CURRENCY` and
@@ -587,14 +596,24 @@ correctly relies on the defaults — which is also how `STRIPE_CURRENCY` and
 Resolution failures carry two things: the **class** (the Stripe error's own
 code, e.g. `resource_missing` for a typo'd id, or `configuration_error` for a
 rule this code enforces) and whether it is **terminal** — whether a human must
-act. Terminal faults (an archived or recurring Price, the wrong currency, an id
-pointing at nothing, a revoked or restricted key, a shared Price, a Price
-below Stripe's own per-currency minimum) start their retry ladder at 30
-seconds and back off toward a 15-minute ceiling; they cancel the affected
-order. Transient ones start at **2 seconds** — so a warmup blip self-heals on
-the first purchase moments later — and back off toward a 5-minute ceiling,
-leave the order pending, and make a *paid* legacy webhook retry rather than
-book the payment as unmatched money. An
+act, derived from the class in exactly one place
+(`isTerminalDiagnosticClass`). Terminal faults (an archived or recurring
+Price, an amount or currency disagreeing with the product table, an id
+pointing at nothing, a revoked or restricted key, a Price below Stripe's own
+per-currency minimum) start their retry ladder at 30 seconds and back off
+toward a 15-minute ceiling; they cancel the affected order. Transient ones
+start at **2 seconds** — a warmup blip self-heals on the first purchase
+moments later — and cap at 2 minutes, which also bounds how long a purchase
+can be refused after Stripe recovers.
+
+**The webhook path does not read Stripe at all.** A paid legacy session is
+adopted at the product table's pinned amount, and the paid-amount comparison
+verifies the actual charge against that independent figure — a disagreement
+quarantines the order (`PAYMENT_AMOUNT_MISMATCH`, a durable, recoverable
+state) instead of stranding the payment. Earlier revisions put a live price
+read in front of the webhook transaction; review rounds 4–5 showed every
+outcome that design permits is wrong (500 loops on the schedule Stripe uses
+to disable endpoints, or paid money booked unmatched during a key rotation). An
 unpaid event — an expired session — is never retried on a pricing fault,
 because there is no money at stake.
 

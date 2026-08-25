@@ -15,7 +15,12 @@ import { PACK_PRODUCTS } from '../config/products.js';
 import { authenticateHttpRequest } from './middleware/auth.js';
 import { parseCookies, serializeCookie } from '../utils/cookies.js';
 import { query } from '../db/index.js';
-import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import {
+  carriedDiagnosticClass,
+  classifyDiagnosticError,
+  isTerminalDiagnosticClass,
+  writeDiagnostic
+} from '../utils/diagnosticLog.js';
 
 // Extended request/response types with cookie support
 type Request = http.IncomingMessage & {
@@ -146,11 +151,7 @@ export async function handleCreateCheckoutSession(
     // investigation on a schema hunt. The default stays database_error because
     // the *uncarried* errors that reach here are genuine database operations -
     // the user-email lookup above and the order INSERT inside createPackCheckout.
-    const carried =
-      error && typeof error === 'object' && 'diagnosticClass' in error &&
-      typeof (error as { diagnosticClass?: unknown }).diagnosticClass === 'string'
-        ? (error as { diagnosticClass: string }).diagnosticClass
-        : undefined;
+    const carried = carriedDiagnosticClass(error);
     writeDiagnostic('error', 'credits.checkout_creation_failed', {
       errorClass: carried ?? classifyDiagnosticError(error, 'database_error')
     });
@@ -164,7 +165,16 @@ export async function handleCreateCheckoutSession(
       // Unknown product id: the caller's mistake, not ours.
       res.statusCode = 400;
       res.json({ error: 'Invalid product' });
-    } else if (code === 'PACK_AMOUNT_NOT_CONFIGURED' || carried === 'configuration_error') {
+    } else if (
+      code === 'PACK_AMOUNT_NOT_CONFIGURED' ||
+      code === 'PRICE_ID_NOT_CONFIGURED' ||
+      carried === 'configuration_error' ||
+      // The vocabulary's own terminality answer, so a terminal class carried
+      // verbatim (amount_too_small, resource_missing, StripeAuthenticationError)
+      // maps like the configuration fault it is instead of falling to a bare
+      // 500 while the sibling guard one layer earlier answered 503 (#278 r5).
+      isTerminalDiagnosticClass(carried)
+    ) {
       // An unpriced or misconfigured product - transient (a Stripe blip mid
       // resolution) or terminal (a human must fix config), the customer-facing
       // answer is the same: unavailable right now, try again later.
@@ -224,7 +234,7 @@ export async function handleStripeWebhook(
     return;
   } catch (error: unknown) {
     writeDiagnostic('error', 'credits.webhook_failed', {
-      errorClass: classifyDiagnosticError(error, 'provider_error')
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error')
     });
     res.statusCode = 500;
     res.json({ error: 'Webhook processing failed' });

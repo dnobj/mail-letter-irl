@@ -5,6 +5,12 @@ import type pg from 'pg';
 import type Stripe from 'stripe';
 import { query, transaction } from '../db/index.js';
 import { ensurePriceCatalog, getPriceResolutionFailure } from './priceCatalog.js';
+import {
+  PACK_PRODUCTS,
+  configuredPriceIdFor,
+  jitProductCode,
+  packCurrency
+} from '../config/products.js';
 import { lockAccountForBalanceChange } from './accountLock.js';
 import { addCreditsToLedgerWithClient } from './creditLedgerService.js';
 import { grantImageEntitlementWithClient } from './imageGenerationLimitService.js';
@@ -22,9 +28,9 @@ import {
   type CommerceProductConfig,
   type PackProductId
 } from './stripeService.js';
-import { jitProductCode } from '../config/products.js';
 import type { LetterDraft, MailType, Order, OrderStatus } from './types.js';
 import {
+  carriedDiagnosticClass,
   classifyDiagnosticError,
   isTerminalDiagnosticClass,
   writeDiagnostic
@@ -183,6 +189,9 @@ export function getSendEligibility(
     // it from a customer (#278 review round 2). Say which it is, in both
     // directions.
     const failure = getPriceResolutionFailure(product.productCode);
+    // Synthesized for the unpriced state, so no ?? re-derivation here; null
+    // only when the product is not configured at all, and this branch is
+    // gated on isJitPurchaseEnabled so that cannot happen.
     const errorClass = failure?.diagnosticClass ?? 'provider_error';
     const rule = failure?.rule ?? 'price.not_resolved';
     // Reported on CHANGE only. This is a synchronous accessor on the quote
@@ -419,17 +428,17 @@ export class PackAmountNotConfiguredError extends Error {
   // 30-second Stripe outage was logged as an operator-must-act config fault
   // (#278 review round 2) - the #213 mislabel reintroduced one layer up.
   readonly diagnosticClass: string;
-  /** Whether a human must act; false means a retry can still succeed. */
+  /**
+   * Whether a human must act - DERIVED from the class, never independently
+   * settable: two parameters answering one question let a caller mint a
+   * transient class with terminal=true and cancel a live order (#278 r5).
+   */
   readonly terminal: boolean;
-  constructor(
-    readonly productCode: string,
-    diagnosticClass = 'configuration_error',
-    terminal = true
-  ) {
+  constructor(readonly productCode: string, diagnosticClass = 'configuration_error') {
     super(`Pack amount is not configured for ${productCode}`);
     this.name = 'PackAmountNotConfiguredError';
     this.diagnosticClass = diagnosticClass;
-    this.terminal = terminal;
+    this.terminal = isTerminalDiagnosticClass(diagnosticClass);
   }
 }
 
@@ -447,14 +456,11 @@ export function assertConfiguredAmount(
   productCode: string
 ): void {
   if (!Number.isInteger(product.amountCents) || product.amountCents <= 0) {
-    // No recorded failure means never-attempted or in-flight, which the
-    // catalog classes transient.
+    // getPriceResolutionFailure synthesizes the transient not-resolved record
+    // for a configured-but-unpriced product, so the policy for that state
+    // lives in ONE place instead of a ?? chain per guard (#278 review r5).
     const failure = getPriceResolutionFailure(productCode);
-    throw new PackAmountNotConfiguredError(
-      productCode,
-      failure?.diagnosticClass ?? 'provider_error',
-      failure?.terminal ?? false
-    );
+    throw new PackAmountNotConfiguredError(productCode, failure?.diagnosticClass ?? 'provider_error');
   }
 }
 
@@ -519,10 +525,16 @@ export async function createPackCheckout(
     });
     // Carry the resolved provider class up to the handler's catch, so the log
     // there names the real cause (e.g. resource_missing) instead of defaulting
-    // to database_error and pointing at the wrong subsystem. Issue #213.
+    // to database_error and pointing at the wrong subsystem (issue #213) -
+    // plus code and terminality, so the handler's status mapping and the
+    // customer message do not diverge from the cleanup decision (#278 r5).
     throw Object.assign(
       new Error(checkout.error || 'Failed to create checkout session'),
-      { diagnosticClass: checkout.diagnosticClass ?? 'provider_error' }
+      {
+        code: checkout.errorCode,
+        diagnosticClass: checkout.diagnosticClass ?? 'provider_error',
+        terminal: checkout.terminal ?? isTerminalDiagnosticClass(checkout.diagnosticClass)
+      }
     );
   }
   const order = await attachCheckout(
@@ -600,10 +612,6 @@ async function prepareJitOrder(
     const actualMailType = (draft.mail_type || 'letter') as MailType;
     const product = getJitProductConfig(actualMailType);
     if (!product.priceId || product.amountCents <= 0) {
-      // The one Pay & Send path left reading nothing. Without the carried class
-      // the handler's catch defaults to database_error, and the customer was
-      // told "not configured" (permanent) for the very blip the quote had just
-      // called temporary - the two contradicting each other (#278 review r3).
       const failure = getPriceResolutionFailure(product.productCode);
       writeDiagnostic('error', 'commerce.jit_not_priced', {
         productCode: product.productCode,
@@ -659,17 +667,25 @@ export async function createJitCheckout(
 ): Promise<CommerceCheckoutResult> {
   // After the cheap synchronous guard, not before it: with Pay & Send disabled
   // (the shipped default) the catalog work is for products this deployment
-  // does not sell, on a request that is about to throw anyway. Both JIT codes
-  // are named so neither call can join an unrelated batch (#278 review r3).
+  // does not sell, on a request that is about to throw anyway (#278 r3).
   if (!isJitPurchaseEnabled()) {
     throw Object.assign(new Error('Pay & Send is not currently enabled'), {
       code: 'JIT_DISABLED'
     });
   }
-  await Promise.all([
-    ensurePriceCatalog(jitProductCode('letter')),
-    ensurePriceCatalog(jitProductCode('postcard'))
-  ]);
+  // Which product is being bought decides which price must be verified, so
+  // read the draft's mail type BEFORE the money transaction (a network await
+  // must never run inside it) and ensure exactly that product. Ensuring both
+  // JIT products coupled the two on the money path: a letter checkout stalled
+  // behind a hanging postcard lookup, the precise cross-product wait the
+  // catalog's own contract forbids (#278 review round 5). The unlocked
+  // pre-read is advisory only - prepareJitOrder re-reads FOR UPDATE.
+  const draftPeek = await query<{ mail_type: string | null }>(
+    'SELECT mail_type FROM letter_drafts WHERE draft_id = $1',
+    [params.draftId]
+  );
+  const peekedMailType = (draftPeek.rows[0]?.mail_type || 'letter') as MailType;
+  await ensurePriceCatalog(jitProductCode(peekedMailType));
 
   // Issue #150: refuse a restricted account BEFORE taking payment.
   //
@@ -717,12 +733,13 @@ export async function createJitCheckout(
         terminal: checkout.terminal ?? isTerminalDiagnosticClass(checkout.diagnosticClass)
       }
     );
-    // Carry the class, as the pack sibling does. A bare Error drops it, the
-    // server logs `unknown_error`, and the tool tells the customer to retry a
-    // fault that can never succeed.
+    // Carry class AND terminality: friendlyCheckoutError keys the customer
+    // message off `terminal`, and omitting it here told customers to retry a
+    // fault whose order had just been cancelled as unretryable (#278 r5).
     throw Object.assign(new Error(checkout.error || 'Failed to create Pay & Send checkout'), {
       code: checkout.errorCode,
-      diagnosticClass: checkout.diagnosticClass ?? 'provider_error'
+      diagnosticClass: checkout.diagnosticClass ?? 'provider_error',
+      terminal: checkout.terminal ?? isTerminalDiagnosticClass(checkout.diagnosticClass)
     });
   }
 
@@ -767,49 +784,26 @@ async function createLegacyPackOrder(
   const userId = session.metadata?.userId || session.metadata?.user_id;
   const productCode =
     session.metadata?.productCode || session.metadata?.productId || session.metadata?.product_id;
-  const product = productCode ? getPackProductConfig(productCode as PackProductId) : null;
-  if (!userId || !product) {
+  // The STATIC table, not the resolved catalog: this session is already PAID,
+  // so refusing it over the current state of a Stripe lookup can only strand
+  // money (terminal-classed blips booked paying customers as permanently
+  // unmatched; transient-classed ones 500-looped the webhook). The pinned
+  // amount is the business agreement; if the customer actually paid something
+  // else, the paid-amount comparison downstream quarantines the order - which
+  // is a durable, recoverable state, unlike unmatched (#278 review round 5).
+  const definition = PACK_PRODUCTS.find(candidate => candidate.productCode === productCode);
+  if (!userId || !definition) {
     return null;
   }
-  // The amount now comes from a live Stripe read, so "unpriced" has two very
-  // different causes and they must not share an outcome (#278 review round 2).
-  //
-  // TERMINAL (archived price, typo'd id, wrong currency): retrying cannot help
-  // until a human acts. Refuse the adoption; the caller records the paid
-  // session as unmatched money, which is the durable operator signal, and
-  // answers Stripe 200 so it stops retrying something that will never succeed.
-  //
-  // TRANSIENT (a Stripe blip while resolving): refusing would book a paying
-  // customer as permanently unmatched - docs/manual-tests.md is explicit that
-  // unmatched does not auto-recover, and the maintenance sweep only scans
-  // orders in checkout_pending, so a refused adoption leaves no row to find.
-  // Before this change the amount came from an env var and could never be
-  // transiently absent; a live read can be. So THROW: the transaction rolls
-  // back including the event claim, the handler answers 500, and Stripe (or
-  // the next cron pass) retries after the cooldown has cleared.
-  if (!Number.isInteger(product.amountCents) || product.amountCents <= 0) {
-    const failure = getPriceResolutionFailure(product.productCode);
-    const errorClass = failure?.diagnosticClass ?? 'provider_error';
-    const terminal = failure?.terminal ?? false;
-    writeDiagnostic('error', 'commerce.legacy_pack_amount_not_configured', {
-      productCode: product.productCode,
-      rule: failure?.rule ?? 'price.not_resolved',
-      errorClass,
-      terminal: String(terminal)
-    });
-    // Retrying is only worth a rolled-back transaction and a 500 when there is
-    // MONEY at stake. This function is also reached for checkout.session.expired
-    // and async_payment_failed, which carry none - throwing for those made
-    // Stripe redeliver an event where "retry adoption" is meaningless, on the
-    // schedule that eventually disables a webhook endpoint (#278 review r3).
-    if (!terminal && session.payment_status === 'paid') {
-      throw Object.assign(
-        new Error(`Pack price unresolved for ${product.productCode}; retry adoption`),
-        { diagnosticClass: errorClass }
-      );
-    }
-    return null;
-  }
+  const product = {
+    productCode: definition.productCode,
+    credits: definition.credits,
+    amountCents: definition.expectedAmountCents,
+    currency: packCurrency(),
+    priceId: configuredPriceIdFor(definition.productCode) ?? '',
+    name: definition.name,
+    description: definition.description
+  };
   const orderId = `stripe-${session.id}`;
   const inserted = await client.query<Order>(
     `INSERT INTO orders (
@@ -1097,23 +1091,15 @@ async function processCheckoutSessionEvent(
   eventType: string,
   session: Stripe.Checkout.Session
 ): Promise<StripeEventProcessingResult> {
-  // BEFORE the transaction opens: createLegacyPackOrder inside it needs a
-  // priced product, and a network await must never run while holding a
-  // database connection (ACID standard). This is also what un-broke the
-  // maintenance cron, which adopts paid-but-unmatched sessions and priced
-  // everything at zero when resolution lived only in the HTTP entrypoint
-  // (#278 review).
-  // The code is already in hand - createLegacyPackOrder reads exactly this
-  // metadata - so name it rather than taking the uncoded path, which forfeits
-  // the memoized fast path and joins any unrelated batch (#278 review r3).
-  // productCode FIRST: it is the only key this codebase writes on a session
-  // (stripeService's metadata block); productId/product_id are legacy shapes.
-  // Reading only the legacy keys made the argument undefined for every session
-  // the current app creates - the uncoded slow path on every webhook, in front
-  // of the money transaction (#278 review round 4).
-  await ensurePriceCatalog(
-    session.metadata?.productCode || session.metadata?.productId || session.metadata?.product_id
-  );
+  // NO price-catalog call here, deliberately. The money already moved:
+  // adoption prices from the static product table (createLegacyPackOrder),
+  // and the paid-amount comparison downstream verifies the charge against
+  // that independent figure. Putting a live Stripe read in front of this
+  // transaction spent five review rounds producing exactly the failure modes
+  // you would expect - webhook 500 loops on transient faults (the schedule on
+  // which Stripe disables an endpoint), paid money stranded as unmatched
+  // during a key rotation, Stripe latency inside the webhook budget - all for
+  // a lookup whose answer the table already knows (#278 review round 5).
   return transaction(async client => {
     if (!(await claimStripeEvent(client, eventId, eventType, session.id))) {
       return { duplicate: true };
@@ -2357,7 +2343,7 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
       }
     } catch (error) {
       writeDiagnostic('error', 'commerce.checkout_reconciliation_failed', {
-        errorClass: classifyDiagnosticError(error, 'provider_error')
+        errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error')
       });
     }
   }

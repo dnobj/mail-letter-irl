@@ -192,13 +192,13 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
       );
 
       resetPriceCatalog();
-      // Distinct, ascending amounts: the pack-ordering invariant (#278 round
-      // 4) revokes tiers that do not cost strictly more for more credits, so
-      // a flat one-amount fixture would be refused as a transposition.
+      // The Stripe Price must say exactly what the product table pins
+      // (500/1000/9000): a resolved-and-verified amount is served, anything
+      // else refuses. This is the two-source check in miniature (#278 r5).
       const amounts: Record<string, number> = {
-        price_starter_mock: 777,
-        price_regular_mock: 1554,
-        price_power_mock: 7770
+        price_starter_mock: 500,
+        price_regular_mock: 1000,
+        price_power_mock: 9000
       };
       setPriceRetriever(async priceId => ({
         id: priceId,
@@ -208,7 +208,20 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
         product: 'prod_starter'
       }) as never);
       await ensurePriceCatalog();
-      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 777 });
+      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 500 });
+
+      // A healthy, active, plausible Price at the WRONG amount - a transposed
+      // or repointed env var - is refused, never served.
+      resetPriceCatalog();
+      setPriceRetriever(async priceId => ({
+        id: priceId,
+        active: true,
+        unit_amount: 777,
+        currency: 'usd',
+        product: 'prod_starter'
+      }) as never);
+      await ensurePriceCatalog();
+      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 0 });
 
       // An unresolved price must yield an unusable amount rather than the
       // historical hard-coded 500, so the caller's guard refuses the purchase.

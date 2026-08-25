@@ -1130,27 +1130,14 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
     expect(quiet.rows[0].count).toBe('0');
   });
 
-  it('adopts a paid legacy pack session, pricing it lazily from the catalog seam (#275)', async () => {
-    // The regression this pins: the maintenance process never loaded the price
-    // catalog, so getPackProductConfig returned amountCents 0 and every legacy
-    // adoption was refused - a paid customer booked as unmatched money with no
-    // credits (#278 review). The catalog is deliberately NOT pre-loaded here:
-    // processCheckoutSessionEvent must ensure it itself, outside its
-    // transaction, exactly as the cron path does. The Stripe boundary is
-    // substituted through the retriever seam, never a module mock - the same
-    // pattern as RefundOperations.
-    const priceCatalog = await import('../../src/services/priceCatalog.js');
-    const previousStarter = process.env.STRIPE_PRICE_STARTER;
-    process.env.STRIPE_PRICE_STARTER = 'price_starter_adoption';
-    priceCatalog.resetPriceCatalog();
-    priceCatalog.setPriceRetriever(async priceId => ({
-      id: priceId,
-      active: true,
-      unit_amount: 500,
-      currency: 'usd',
-      product: 'prod_starter'
-    }) as never);
-
+  it('adopts a paid legacy pack session at the product table\'s pinned amount (#275)', async () => {
+    // The original regression: the maintenance process never loaded the price
+    // catalog, priced every adoption at zero, and booked paying customers as
+    // unmatched money. The redesign removes the failure mode at the root -
+    // adoption never consults Stripe or the catalog at all. It prices from
+    // src/config/products.ts (expectedAmountCents), so no retriever, no seam,
+    // no warmup, and no process-specific bootstrap can affect it: this test
+    // deliberately arranges NOTHING about the catalog.
     try {
       await acidPool.query(
         `INSERT INTO users (user_id, email) VALUES ('legacy-adopt-user', 'legacy-adopt@example.test')`
@@ -1175,7 +1162,7 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
         `SELECT order_id, credits, amount_cents, currency, status
          FROM orders WHERE stripe_checkout_session_id = 'cs-legacy-adopt'`
       );
-      // The amount on the authoritative row IS the resolved Stripe figure.
+      // The amount on the authoritative row IS the table's pinned figure.
       expect(order.rows[0]).toMatchObject({
         order_id: 'stripe-cs-legacy-adopt',
         credits: 4,
@@ -1199,85 +1186,51 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
       );
       expect(credits.rows[0].credits).toBe(4);
     } finally {
-      priceCatalog.resetPriceCatalog();
-      if (previousStarter === undefined) delete process.env.STRIPE_PRICE_STARTER;
-      else process.env.STRIPE_PRICE_STARTER = previousStarter;
+      // Nothing to restore: the adoption path holds no catalog state.
     }
   });
 
-  it('rolls a transiently-unpriced adoption back so a later retry can still adopt (#278)', async () => {
-    // The subtler half of the same regression. The amount used to come from an
-    // env var and could never be TRANSIENTLY absent; it now comes from a live
-    // Stripe read, so a blip during resolution must not book a paying customer
-    // as unmatched money - unmatched does not auto-recover, and a refused
-    // adoption leaves no order row for the maintenance sweep to find. The
-    // handler throws instead, and this proves the property only a real
-    // database can show: the rollback releases the event claim, so the retry
-    // Stripe sends is free to adopt.
-    const priceCatalog = await import('../../src/services/priceCatalog.js');
-    const previousStarter = process.env.STRIPE_PRICE_STARTER;
-    process.env.STRIPE_PRICE_STARTER = 'price_starter_transient';
-    priceCatalog.resetPriceCatalog();
-    priceCatalog.setPriceRetriever(async () => {
-      throw new Error('Stripe unreachable');
-    });
-
-    const event = {
-      id: 'evt-legacy-transient', type: 'checkout.session.completed', data: { object: {
-        id: 'cs-legacy-transient', client_reference_id: null,
-        metadata: { userId: 'legacy-transient-user', productId: 'credit-pack-4' },
-        payment_intent: 'pi-legacy-transient', payment_status: 'paid',
-        amount_total: 500, currency: 'usd',
-        expires_at: Math.floor(Date.now() / 1000) + 3600
-      } }
-    };
-
+  it('quarantines an adopted session whose PAID amount disagrees with the table (#278)', async () => {
+    // The pin's verification half, provable only against a real database. The
+    // customer actually paid 999 for a product the table pins at 500 - a
+    // stale table after a Stripe-side price change, or a tampered session.
+    // The order is adopted AT THE PIN and then the paid-amount comparison
+    // quarantines it (PAYMENT_AMOUNT_MISMATCH -> refund_pending) instead of
+    // fulfilling: a durable, operator-recoverable state, with no credits
+    // granted against a figure nobody agreed to.
     try {
       await acidPool.query(
-        `INSERT INTO users (user_id, email) VALUES ('legacy-transient-user', 'legacy-transient@example.test')`
+        `INSERT INTO users (user_id, email) VALUES ('legacy-mismatch-user', 'legacy-mismatch@example.test')`
       );
 
-      await expect(
-        commerceService.processStripeWebhookEvent(event as never)
-      ).rejects.toThrow(/retry adoption/);
+      await expect(commerceService.processStripeWebhookEvent({
+        id: 'evt-legacy-mismatch', type: 'checkout.session.completed', data: { object: {
+          id: 'cs-legacy-mismatch', client_reference_id: null,
+          metadata: { userId: 'legacy-mismatch-user', productId: 'credit-pack-4' },
+          payment_intent: 'pi-legacy-mismatch', payment_status: 'paid',
+          amount_total: 999, currency: 'usd',
+          expires_at: Math.floor(Date.now() / 1000) + 3600
+        } }
+      } as any)).resolves.toMatchObject({ duplicate: false });
 
-      // Nothing durable survived the rollback: no order, and crucially no
-      // claimed event row. A consumed claim would make the retry a no-op
-      // duplicate and strand the money permanently.
-      const afterFailure = await acidPool.query(
-        `SELECT event_id FROM stripe_webhook_events WHERE event_id = 'evt-legacy-transient'`
+      const order = await acidPool.query<{
+        status: string; amount_cents: number; last_error_code: string | null;
+      }>(
+        `SELECT status, amount_cents, last_error_code
+         FROM orders WHERE stripe_checkout_session_id = 'cs-legacy-mismatch'`
       );
-      expect(afterFailure.rows).toEqual([]);
-      const noOrder = await acidPool.query(
-        `SELECT order_id FROM orders WHERE stripe_checkout_session_id = 'cs-legacy-transient'`
-      );
-      expect(noOrder.rows).toEqual([]);
+      expect(order.rows[0]).toMatchObject({
+        status: 'refund_pending',
+        amount_cents: 500,
+        last_error_code: 'PAYMENT_AMOUNT_MISMATCH'
+      });
 
-      // Stripe retries once the blip has cleared. (Resetting stands in for the
-      // resolution cooldown expiring; what matters is that the retry is not
-      // blocked by leftover state.)
-      priceCatalog.resetPriceCatalog();
-      priceCatalog.setPriceRetriever(async priceId => ({
-        id: priceId, active: true, unit_amount: 500, currency: 'usd', product: 'prod_starter'
-      }) as never);
-
-      await expect(
-        commerceService.processStripeWebhookEvent(event as never)
-      ).resolves.toMatchObject({ duplicate: false });
-
-      const order = await acidPool.query<{ amount_cents: number; status: string }>(
-        `SELECT amount_cents, status FROM orders
-         WHERE stripe_checkout_session_id = 'cs-legacy-transient'`
-      );
-      expect(order.rows[0]).toMatchObject({ amount_cents: 500, status: 'fulfilled' });
       const credits = await acidPool.query<{ credits: number }>(
-        `SELECT credits FROM users WHERE user_id = 'legacy-transient-user'`
+        `SELECT credits FROM users WHERE user_id = 'legacy-mismatch-user'`
       );
-      expect(credits.rows[0].credits).toBe(4);
+      expect(credits.rows[0].credits).toBe(0);
     } finally {
-      priceCatalog.resetPriceCatalog();
-      if (previousStarter === undefined) delete process.env.STRIPE_PRICE_STARTER;
-      else process.env.STRIPE_PRICE_STARTER = previousStarter;
+      // No catalog state involved.
     }
   });
 

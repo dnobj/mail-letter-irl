@@ -108,6 +108,26 @@ export function isTerminalDiagnosticClass(diagnosticClass: string | undefined): 
   return diagnosticClass !== undefined && TERMINAL_ERROR_CLASSES.has(diagnosticClass);
 }
 
+/**
+ * The class a lower layer already resolved and attached to the error it
+ * threw, if any. Prefer this over re-classifying: tool-layer wrappers rebuild
+ * errors, and a rebuilt Error has neither .code nor .type, so re-classifying
+ * records unknown_error/database_error for a fault the commerce layer had
+ * named precisely - the #213 mislabel. This narrowing used to be copy-pasted
+ * at four catch sites, drifting cosmetically (#278 review round 5).
+ */
+export function carriedDiagnosticClass(error: unknown): string | undefined {
+  if (
+    error &&
+    typeof error === "object" &&
+    "diagnosticClass" in error &&
+    typeof (error as { diagnosticClass?: unknown }).diagnosticClass === "string"
+  ) {
+    return (error as { diagnosticClass: string }).diagnosticClass;
+  }
+  return undefined;
+}
+
 export function classifyDiagnosticError(
   error: unknown,
   fallback: DiagnosticErrorCategory = "unknown_error"
