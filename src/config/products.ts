@@ -206,6 +206,37 @@ export function configuredPriceIdFor(
 }
 
 /**
+ * ONE product's configured row, without building the full table. The warm
+ * read path (every quote validates a memo) paid ~9 env reads and a 5-object
+ * table build per call to answer a one-product question (#278 review r6).
+ */
+export function getConfiguredProduct(
+  productCode: string,
+  env: NodeJS.ProcessEnv = process.env
+): ConfiguredProduct | null {
+  const pack = PACK_PRODUCTS.find(product => product.productCode === productCode);
+  if (pack) {
+    return {
+      productCode: pack.productCode,
+      group: 'pack',
+      priceId: (env[pack.priceEnv] ?? '').trim(),
+      expectedAmountCents: pack.expectedAmountCents,
+      expectedCurrency: packCurrency(env)
+    };
+  }
+  if (env.JIT_PURCHASE_ENABLED !== 'true') return null;
+  const jit = JIT_PRODUCTS.find(product => product.productCode === productCode);
+  if (!jit) return null;
+  return {
+    productCode: jit.productCode,
+    group: 'jit',
+    priceId: (env[jit.priceEnv] ?? '').trim(),
+    expectedAmountCents: jit.expectedAmountCents,
+    expectedCurrency: jitCurrency(env)
+  };
+}
+
+/**
  * Whether this deployment sells the product, without building the full
  * configured-product table - the answer both quote paths need on every call
  * when Pay & Send is disabled, the shipped default (#278 review round 5).

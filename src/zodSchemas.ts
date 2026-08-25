@@ -231,6 +231,7 @@ const sendEligibilityZ = z.object({
     available: z.boolean(),
     amountCents: z.number().int().optional(),
     currency: z.string().optional(),
+    displayAmount: z.string().optional(),
     productDescription: z.string().optional(),
     unavailableReason: z.string().optional()
   }),

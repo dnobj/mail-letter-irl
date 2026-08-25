@@ -20,7 +20,7 @@
  * disagree about what production requires.
  */
 
-import { JIT_PRICE_ENV_VARS, PACK_PRICE_ENV_VARS } from './products.js';
+import { JIT_PRICE_ENV_VARS, PACK_PRICE_ENV_VARS, normalizedCurrency } from './products.js';
 
 export type DeploymentMode = 'production' | 'development' | 'test';
 
@@ -87,8 +87,6 @@ export const APPROVED_LIVE_PROVIDERS = ['postgrid'] as const;
  * from the same product table the resolver reads (src/config/products.ts), so
  * "must be set" and "must resolve" cannot name different variables.
  */
-const PACK_PRICE_VARS = PACK_PRICE_ENV_VARS;
-const JIT_VARS = JIT_PRICE_ENV_VARS;
 
 /**
  * Every PostGrid credential the provider layer can read. SEND-capable keys
@@ -150,14 +148,14 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api', 'maintenance'],
     checkedBy: 'provider.live_mode_required'
   },
-  ...PACK_PRICE_VARS.map((price): EnvVarRequirement => ({
+  ...PACK_PRICE_ENV_VARS.map((price): EnvVarRequirement => ({
     name: price,
     requiredIn: 'production',
     secret: false,
     services: ['api', 'maintenance'],
     checkedBy: 'stripe.pack_price_incomplete'
   })),
-  ...JIT_VARS.map((price): EnvVarRequirement => ({
+  ...JIT_PRICE_ENV_VARS.map((price): EnvVarRequirement => ({
     name: price,
     requiredIn: 'production',
     condition: 'when-jit-enabled',
@@ -541,7 +539,7 @@ function validateStripe(
   // deployed environment. Test mode skips it: unit fixtures configure only
   // what they exercise.
   if (mode !== 'test' && !adminMode) {
-    for (const price of PACK_PRICE_VARS) {
+    for (const price of PACK_PRICE_ENV_VARS) {
       const problems: string[] = [];
       const priceValue = env[price];
       if (!priceValue) problems.push(`${price} is required`);
@@ -565,7 +563,9 @@ function validateStripe(
     // Trimmed: a whitespace-only value (a paste artifact in a Railway field)
     // is "set" to the falsy check but unset to the catalog, which silently
     // validated every Price against usd with zero findings (#278 review r5).
-    if (!env.STRIPE_CURRENCY?.trim()) {
+    // Via the SAME normalizer the runtime uses, so the validator's notion of
+    // "unset" cannot drift from products.ts's (#278 round 6).
+    if (normalizedCurrency(env.STRIPE_CURRENCY, '') === '') {
       findings.push({
         severity: 'warning',
         rule: 'stripe.currency_unset',
@@ -574,12 +574,8 @@ function validateStripe(
       });
     }
 
-    // The band is in MINOR units and has no currency-independent meaning, so a
-    // deployment that sets one bound almost certainly meant to set both.
-    const bandMin = env.STRIPE_PRICE_MIN_UNIT_AMOUNT;
-    const bandMax = env.STRIPE_PRICE_MAX_UNIT_AMOUNT;
     if (env.JIT_PURCHASE_ENABLED === 'true') {
-      for (const price of JIT_VARS) {
+      for (const price of JIT_PRICE_ENV_VARS) {
         const problems: string[] = [];
         const priceValue = env[price];
         if (!priceValue) problems.push(`${price} is required when JIT_PURCHASE_ENABLED=true`);
@@ -592,7 +588,7 @@ function validateStripe(
           });
         }
       }
-      if (!env.JIT_CURRENCY?.trim() && !env.STRIPE_CURRENCY?.trim()) {
+      if (normalizedCurrency(env.JIT_CURRENCY, '') === '' && normalizedCurrency(env.STRIPE_CURRENCY, '') === '') {
         findings.push({
           severity: 'warning',
           rule: 'stripe.currency_unset',

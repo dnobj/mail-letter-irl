@@ -151,6 +151,33 @@ export function classifyDiagnosticError(
   return fallback;
 }
 
+const changeOnlySlots = new Map<string, string>();
+
+/**
+ * Emit a diagnostic only when its signature CHANGED for the given slot - the
+ * steady-fault throttle this PR's review rounds re-invented three times, each
+ * copy with its own keying and reset semantics, one of which shipped a
+ * shared-slot eviction bug mid-review (#278 round 6). Clear a slot when the
+ * fault recovers so a recurrence is reported again.
+ */
+export function writeDiagnosticOnChange(
+  slot: string,
+  signature: string,
+  level: DiagnosticLevel,
+  event: string,
+  fields: Record<string, DiagnosticValue> = {}
+): void {
+  if (changeOnlySlots.get(slot) === signature) return;
+  changeOnlySlots.set(slot, signature);
+  writeDiagnostic(level, event, fields);
+}
+
+export function clearDiagnosticChangeSlot(slotPrefix: string): void {
+  for (const key of [...changeOnlySlots.keys()]) {
+    if (key === slotPrefix || key.startsWith(slotPrefix + ':')) changeOnlySlots.delete(key);
+  }
+}
+
 export function writeDiagnostic(
   level: DiagnosticLevel,
   event: string,

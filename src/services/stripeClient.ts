@@ -21,7 +21,14 @@ let stripeClientKey: string | null = null;
 
 export function getStripeClient(): Stripe {
   const apiKey = process.env.STRIPE_SECRET_KEY;
-  if (!apiKey) throw new Error('STRIPE_SECRET_KEY is not configured');
+  if (!apiKey) {
+    // Carries its class: a bare Error here classified as provider_error, so a
+    // missing credential - a fault only a human can fix - was retried on the
+    // transient ladder forever with the log pointing at Stripe (#278 r6).
+    throw Object.assign(new Error('STRIPE_SECRET_KEY is not configured'), {
+      diagnosticClass: 'configuration_error'
+    });
+  }
   // Keyed on the VALUE, not merely its presence. Memoizing on presence meant
   // removing the key threw while REPLACING it was a silent no-op, so a rotated
   // credential kept signing with the revoked one - and in the test lane every

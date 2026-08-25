@@ -21,7 +21,8 @@ import {
   getResolvedPriceForProduct,
   getUnpricedProducts,
   resetPriceCatalog,
-  setPriceRetriever
+  setPriceRetriever,
+  useDefaultPriceRetriever
 } from '../../../src/services/priceCatalog.js';
 import { priceFixture } from '../../mocks/stripe.js';
 
@@ -835,6 +836,123 @@ describe('price catalog (#275 stage A)', () => {
     expect(getResolvedPriceForProduct('credit-pack-4')).toMatchObject({
       priceId: 'price_starter_v2',
       unitAmount: 500
+    });
+  });
+
+  it('clears a terminal cooldown the moment STRIPE_CURRENCY is fixed', async () => {
+    // Round 6's reproduced asymmetry: memos keyed staleness on the full
+    // configuration triple but cooldowns keyed on the price id alone, so
+    // fixing the currency cleared the memo side and left the terminal ladder
+    // standing - /readyz at 503 for up to 15 minutes AFTER the config was
+    // correct, with zero Stripe calls. Staleness is one signature now.
+    vi.stubEnv('STRIPE_CURRENCY', 'gbp'); // wrong: the Prices are USD
+    setPriceRetriever(healthyRetriever());
+    await ensurePriceCatalog();
+    expect(getPriceResolutionFailure('credit-pack-4')).toMatchObject({
+      rule: 'price.currency_mismatch',
+      terminal: true
+    });
+
+    // Operator fixes the currency. No timers advance: the stale cooldown must
+    // not gate the corrected configuration.
+    vi.stubEnv('STRIPE_CURRENCY', 'usd');
+    await ensurePriceCatalog('credit-pack-4');
+
+    expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
+  });
+
+  it('starts a fresh lookup instead of handing back a flight the repoint doomed', async () => {
+    // Round 6, reproduced: a coded ensure returned the in-flight lookup
+    // started for the OLD id; its commit was staleness-suppressed, so the
+    // awaiting checkout resumed with neither memo nor failure - the first
+    // purchase after a repoint spuriously refused. A flight is only worth
+    // awaiting if it was started for the CURRENT configuration.
+    let releaseOld: (value: never) => void = () => undefined;
+    const oldLookup = new Promise<never>(resolve => {
+      releaseOld = resolve as never;
+    });
+    const served: string[] = [];
+    setPriceRetriever(
+      vi.fn((priceId: string) => {
+        served.push(priceId);
+        if (priceId === 'price_starter') return oldLookup;
+        return Promise.resolve(
+          priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] ?? 500 }) as never
+        );
+      })
+    );
+
+    const doomed = ensurePriceCatalog('credit-pack-4');
+    void doomed.catch(() => undefined);
+
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_v2');
+    // A purchase arrives AFTER the repoint, while the old flight still hangs.
+    const purchase = ensurePriceCatalog('credit-pack-4');
+    releaseOld(priceFixture({ id: 'price_starter', unit_amount: 500 }) as never);
+    await purchase;
+
+    // The NEW id was looked up end-to-end within the purchase's own await.
+    expect(served).toContain('price_starter_v2');
+    expect(getResolvedPriceForProduct('credit-pack-4')).toMatchObject({
+      priceId: 'price_starter_v2',
+      unitAmount: 500
+    });
+  });
+
+  it('clears leftover state for a product the deployment stops selling', async () => {
+    // Round 6: cooldowns recorded before Pay & Send was toggled off survived
+    // un-prunable (the hot paths never prune while packs are green) and
+    // resurfaced verbatim on re-enable - refusing quotes for the residual
+    // terminal ladder even though Stripe would now validate cleanly. The
+    // unsold-product gate clears that state on the first quote after the
+    // toggle.
+    vi.useFakeTimers();
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    vi.stubEnv('STRIPE_JIT_LETTER_PRICE_ID', 'price_jit_letter');
+    vi.stubEnv('STRIPE_JIT_POSTCARD_PRICE_ID', 'price_jit_letter');
+    setPriceRetriever(
+      vi.fn(async (priceId: string) => {
+        if (priceId === 'price_jit_letter') {
+          return priceFixture({ id: priceId, unit_amount: 499, active: false });
+        }
+        return priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] });
+      })
+    );
+    await ensurePriceCatalog();
+    expect(getPriceResolutionFailure('jit-letter')).toMatchObject({ rule: 'price.inactive' });
+
+    // Toggle off; the next quote's ensure hits the unsold gate and clears.
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'false');
+    await ensurePriceCatalog('jit-letter');
+
+    // Operator un-archives the Price in Stripe (active IS mutable - no env
+    // change) and re-enables. The first quote must look Stripe up NOW, not
+    // after the residual terminal cooldown.
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    setPriceRetriever(
+      vi.fn(async (priceId: string) =>
+        priceFixture({ id: priceId, unit_amount: priceId === 'price_jit_letter' ? 499 : PACK_AMOUNTS[priceId] })
+      )
+    );
+    await ensurePriceCatalog('jit-letter');
+
+    expect(getResolvedPriceForProduct('jit-letter')?.unitAmount).toBe(499);
+  });
+
+  it('classifies a missing STRIPE_SECRET_KEY as configuration, not a Stripe outage', async () => {
+    // Round 6: getStripeClient's bare throw classified provider_error, so a
+    // human-only credential fault retried on the transient ladder forever
+    // with the log pointing at Stripe. The throw now carries its class and
+    // the lookup catch prefers a carried class.
+    vi.stubEnv('STRIPE_SECRET_KEY', '');
+    useDefaultPriceRetriever();
+
+    await ensurePriceCatalog();
+
+    expect(getPriceResolutionFailure('credit-pack-4')).toMatchObject({
+      rule: 'price.lookup_failed',
+      diagnosticClass: 'configuration_error',
+      terminal: true
     });
   });
 

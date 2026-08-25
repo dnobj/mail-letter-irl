@@ -71,7 +71,7 @@ describe('diffManifest', () => {
       environment: 'production',
       service: 'api'
     });
-    expect(diff.missing.map(entry => entry.name)).toEqual([
+    expect(diff.missing.map(gap => gap.entry.name)).toEqual([
       'STRIPE_PRICE_STARTER',
       'STRIPE_PRICE_REGULAR',
       'STRIPE_PRICE_POWER'
@@ -87,7 +87,7 @@ describe('diffManifest', () => {
 
   it('requires only the always-required set plus the identity label in development', () => {
     const diff = diffManifest([], { environment: 'development', service: 'api' });
-    expect(diff.missing.map(entry => entry.name).sort()).toEqual([
+    expect(diff.missing.map(gap => gap.entry.name).sort()).toEqual([
       'DATABASE_URL',
       // Deployed development runs NODE_ENV=production; without the identity
       // label the validator resolves it to production mode and boot fails.
@@ -107,8 +107,8 @@ describe('diffManifest', () => {
 
   it('excludes the webhook secret from the maintenance service subset', () => {
     const diff = diffManifest([], { environment: 'development', service: 'maintenance' });
-    expect(diff.missing.map(entry => entry.name)).not.toContain('STRIPE_WEBHOOK_SECRET');
-    expect(diff.missing.map(entry => entry.name)).toContain('STRIPE_SECRET_KEY');
+    expect(diff.missing.map(gap => gap.entry.name)).not.toContain('STRIPE_WEBHOOK_SECRET');
+    expect(diff.missing.map(gap => gap.entry.name)).toContain('STRIPE_SECRET_KEY');
   });
 
   it('requires the JIT variables in production only when the flag name is present', () => {
@@ -116,7 +116,7 @@ describe('diffManifest', () => {
       environment: 'production',
       service: 'api'
     });
-    expect(withoutFlag.missing.map(entry => entry.name)).not.toContain(
+    expect(withoutFlag.missing.map(gap => gap.entry.name)).not.toContain(
       'STRIPE_JIT_LETTER_PRICE_ID'
     );
 
@@ -124,7 +124,7 @@ describe('diffManifest', () => {
       environment: 'production',
       service: 'api'
     });
-    const missingNames = withFlag.missing.map(entry => entry.name);
+    const missingNames = withFlag.missing.map(gap => gap.entry.name);
     for (const name of [
       'STRIPE_JIT_LETTER_PRICE_ID',
       'STRIPE_JIT_POSTCARD_PRICE_ID',
@@ -132,7 +132,7 @@ describe('diffManifest', () => {
       expect(missingNames).toContain(name);
     }
     // The note must explain WHY a conditional variable is demanded.
-    expect(withFlag.notes.join('\n')).toContain('JIT_PURCHASE_ENABLED is set');
+    expect(withFlag.missing.map(gap => gap.note).join('\n')).toContain('JIT_PURCHASE_ENABLED is set');
   });
 
   it('never requires unless-admin exemptions on deployed services', () => {
@@ -141,14 +141,15 @@ describe('diffManifest', () => {
       environment: 'development',
       service: 'api'
     });
-    expect(diff.missing.map(entry => entry.name)).toContain('STRIPE_SECRET_KEY');
+    expect(diff.missing.map(gap => gap.entry.name)).toContain('STRIPE_SECRET_KEY');
   });
 
   it('emits names-only notes, aligned one-to-one with the missing entries', () => {
     const diff = diffManifest([], { environment: 'production', service: 'api' });
-    expect(diff.notes).toHaveLength(diff.missing.length);
-    for (const [index, entry] of diff.missing.entries()) {
-      expect(diff.notes[index]).toContain(entry.name);
+    // Entry and note travel as one record now; alignment is structural.
+    expect(diff.missing.length).toBeGreaterThan(0);
+    for (const gap of diff.missing) {
+      expect(gap.note).toContain(gap.entry.name);
     }
   });
 
@@ -162,9 +163,9 @@ describe('diffManifest', () => {
     const withoutCurrency = FULL_PRODUCTION_NAMES.filter(name => name !== 'STRIPE_CURRENCY');
     const diff = diffManifest(withoutCurrency, { environment: 'production', service: 'api' });
 
-    expect(diff.missing.map(entry => entry.name)).not.toContain('STRIPE_CURRENCY');
-    expect(diff.advisory.map(entry => entry.name)).toContain('STRIPE_CURRENCY');
-    expect(diff.advisoryNotes).toHaveLength(diff.advisory.length);
+    expect(diff.missing.map(gap => gap.entry.name)).not.toContain('STRIPE_CURRENCY');
+    expect(diff.advisory.map(gap => gap.entry.name)).toContain('STRIPE_CURRENCY');
+    for (const gap of diff.advisory) expect(gap.note).toContain(gap.entry.name);
     // The gate itself stays green.
     expect(diff.missing).toEqual([]);
   });
@@ -176,8 +177,8 @@ describe('diffManifest', () => {
     // was reported by neither run (#278 review round 5).
     const diff = diffManifest([], { environment: 'development', service: 'api' });
 
-    expect(diff.advisory.map(entry => entry.name)).toContain('STRIPE_CURRENCY');
-    expect(diff.missing.map(entry => entry.name)).not.toContain('STRIPE_CURRENCY');
+    expect(diff.advisory.map(gap => gap.entry.name)).toContain('STRIPE_CURRENCY');
+    expect(diff.missing.map(gap => gap.entry.name)).not.toContain('STRIPE_CURRENCY');
   });
 
   it('consumes the real manifest by default so the two can never drift', () => {
@@ -227,7 +228,7 @@ describe('parity with the boot validator', () => {
   ] as const)('a preflight-complete %s/%s environment boots with no presence errors', (environment, service) => {
     // Build exactly the environment the preflight considers complete...
     const complete = ENV_VAR_MANIFEST.filter(
-      entry => diffManifest([], { environment, service }).missing.some(m => m.name === entry.name)
+      entry => diffManifest([], { environment, service }).missing.some(m => m.entry.name === entry.name)
     );
     const env: NodeJS.ProcessEnv = {
       NODE_ENV: 'production', // both Railway environments run this
@@ -264,7 +265,7 @@ describe('parity with the boot validator', () => {
     const maintenanceNames = diffManifest([], {
       environment: 'development',
       service: 'maintenance'
-    }).missing.map(entry => entry.name);
+    }).missing.map(gap => gap.entry.name);
     expect(maintenanceNames).not.toContain('STRIPE_WEBHOOK_SECRET');
 
     const env: NodeJS.ProcessEnv = {
@@ -296,7 +297,7 @@ describe('OAuth coverage (issue #270)', () => {
   it('reports missing OAuth variables in production instead of passing them', () => {
     const withoutOAuth = FULL_PRODUCTION_NAMES.filter(name => !/OAUTH|MCP_RESOURCE/.test(name));
     const diff = diffManifest(withoutOAuth, { environment: 'production', service: 'api' });
-    const missing = diff.missing.map(entry => entry.name);
+    const missing = diff.missing.map(gap => gap.entry.name);
 
     for (const name of [
       'LETTER_IRL_OAUTH_ISSUER',
@@ -325,12 +326,12 @@ describe('OAuth coverage (issue #270)', () => {
     // One allowlist per environment. Demanding the wrong one would push an
     // operator toward pointing production at the development tenant.
     const prod = diffManifest([], { environment: 'production', service: 'api' })
-      .missing.map(entry => entry.name);
+      .missing.map(gap => gap.entry.name);
     expect(prod).toContain('LETTER_IRL_OAUTH_PROD_ISSUER');
     expect(prod).not.toContain('LETTER_IRL_OAUTH_DEV_ISSUER');
 
     const dev = diffManifest([], { environment: 'development', service: 'api' })
-      .missing.map(entry => entry.name);
+      .missing.map(gap => gap.entry.name);
     expect(dev).toContain('LETTER_IRL_OAUTH_DEV_ISSUER');
     expect(dev).not.toContain('LETTER_IRL_OAUTH_PROD_ISSUER');
   });
@@ -339,7 +340,7 @@ describe('OAuth coverage (issue #270)', () => {
     const off = diffManifest(FULL_PRODUCTION_NAMES, {
       environment: 'production',
       service: 'api'
-    }).missing.map(entry => entry.name);
+    }).missing.map(gap => gap.entry.name);
     expect(off).not.toContain('CHATGPT_STATIC_CLIENT_ID');
     expect(off).not.toContain('CHATGPT_STATIC_REDIRECT_URIS');
 
@@ -347,12 +348,12 @@ describe('OAuth coverage (issue #270)', () => {
       [...FULL_PRODUCTION_NAMES, 'LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY'],
       { environment: 'production', service: 'api' }
     );
-    expect(on.missing.map(entry => entry.name)).toEqual([
+    expect(on.missing.map(gap => gap.entry.name)).toEqual([
       'CHATGPT_STATIC_CLIENT_ID',
       'CHATGPT_STATIC_REDIRECT_URIS'
     ]);
     // The note has to say WHY, or the gap reads as an unexplained new demand.
-    expect(on.notes.join(' ')).toContain('LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY is set');
+    expect(on.missing.map(gap => gap.note).join(' ')).toContain('LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY is set');
   });
 
   it('adding OAuth entries did not change what fails at boot', () => {

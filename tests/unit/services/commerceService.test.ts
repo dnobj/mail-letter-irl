@@ -32,7 +32,19 @@ const mocks = vi.hoisted(() => ({
  */
 vi.mock('../../../src/services/priceCatalog.js', () => ({
   ensurePriceCatalog: mocks.ensurePriceCatalog,
-  getPriceResolutionFailure: mocks.getPriceResolutionFailure
+  // The guards read describeUnpriced (non-null by contract); the fixtures
+  // still drive it through getPriceResolutionFailure so each test states its
+  // catalog verdict the same way it always did, with the synthesized
+  // transient record as the null-case default - mirroring production.
+  describeUnpriced: (productCode: string) =>
+    mocks.getPriceResolutionFailure(productCode) ?? {
+      productCode,
+      rule: 'price.not_resolved',
+      diagnosticClass: 'provider_error',
+      terminal: false
+    },
+  getPriceResolutionFailure: mocks.getPriceResolutionFailure,
+  kickPriceCatalog: mocks.ensurePriceCatalog
 }));
 
 vi.mock('../../../src/db/index.js', () => ({
@@ -481,6 +493,33 @@ describe('commerceService', () => {
       expect.anything()
     );
     expect(mocks.getPackProduct).not.toHaveBeenCalled();
+  });
+
+  it('refuses to adopt a paid session whose amount disagrees with the pin', async () => {
+    // The unit half of the round-6 gate: paid 999 against a 500 pin must NOT
+    // insert an order (an inserted mismatch reaches the order-type-agnostic
+    // refund sweep and auto-refunds a legitimate historical purchase); it
+    // books the money as unmatched for an operator instead.
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-mm' }] };
+      return { rows: [] };
+    });
+
+    await expect(processStripeWebhookEvent(checkoutEvent({
+      id: 'cs-mm',
+      client_reference_id: null,
+      metadata: { userId: 'user-1', productId: 'credit-pack-4' },
+      amount_total: 999
+    }) as never)).resolves.toMatchObject({ duplicate: false });
+
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO orders'),
+      expect.anything()
+    );
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("SET processing_status = 'unmatched'"),
+      expect.anything()
+    );
   });
 
   it('adopts a legacy session keyed by productCode, the key this codebase writes', async () => {
@@ -1158,6 +1197,47 @@ describe('commerceService', () => {
       available: false,
       unavailableReason: 'Pay & Send is not enabled.'
     });
+  });
+
+  it('kicks its own catalog warmup and serves a formatted display amount', async () => {
+    // The accessor owns its warmup (a caller-by-convention kick left future
+    // surfaces and the stdio lane silently unavailable), and it serves the
+    // display string so widgets stop dividing minor units by 100 - which is
+    // 100x wrong for zero-decimal currencies (#278 round 6).
+    const eligibility = getSendEligibility(0, 2, 'letter');
+
+    expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-letter', 'send_eligibility');
+    expect(eligibility.payAndSend.displayAmount).toBe('4.99');
+  });
+
+  it('logs the boot race at WARN, and a recorded fault at ERROR', async () => {
+    // price.not_resolved is the quote-raced-the-warmup state - routine on
+    // every deploy and guaranteed on the first stdio quote. Five review
+    // angles corroborated that an error-level line there is a per-deploy
+    // false alarm; a RECORDED failure is news and stays at error (#278 r6).
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      // Recovery first: the dedupe map survives between tests.
+      getSendEligibility(0, 2, 'letter');
+
+      // Boot race: unpriced with NO recorded failure -> synthesized
+      // not_resolved -> warn.
+      mocks.getPriceResolutionFailure.mockReturnValue(null as never);
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,
+        currency: 'usd', name: 'Pay & Send', description: 'One letter'
+      });
+      getSendEligibility(0, 2, 'letter');
+
+      const warned = warnSpy.mock.calls.flat().map(String).join('\n');
+      const errored = errorSpy.mock.calls.flat().map(String).join('\n');
+      expect(warned).toContain('commerce.pay_and_send_unpriced');
+      expect(errored).not.toContain('commerce.pay_and_send_unpriced');
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
   });
 
   it.each([

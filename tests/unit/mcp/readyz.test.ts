@@ -20,7 +20,7 @@ vi.mock('../../../src/services/priceCatalog.js', () => ({
     priceCatalog.lastEnv = env;
     return priceCatalog.unpriced;
   },
-  ensurePriceCatalog: async () => {
+  kickPriceCatalog: () => {
     priceCatalog.ensureCalls += 1;
   }
 }));
@@ -254,7 +254,7 @@ describe('/readyz prices check (#275 stage A)', () => {
       { productCode: 'credit-pack-4', rule: 'price.not_resolved', diagnosticClass: 'provider_error' }
     ];
 
-    await getReadiness(READY_PROD);
+    await getReadiness();
 
     expect(priceCatalog.ensureCalls).toBeGreaterThan(0);
   });
@@ -301,9 +301,22 @@ describe('/readyz prices check (#275 stage A)', () => {
       { productCode: 'credit-pack-4', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' }
     ];
 
-    await getReadiness(READY_DEV);
+    // No env argument: the kick is gated on the AMBIENT env, because it can
+    // only heal process.env's catalog - kicking for a custom-env caller would
+    // heal a different environment than the report described (#278 round 6).
+    await getReadiness();
 
     expect(priceCatalog.ensureCalls).toBeGreaterThan(0);
+  });
+
+  it('suppresses the kick for a caller-supplied env it cannot heal', async () => {
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-4', rule: 'price.lookup_failed', diagnosticClass: 'StripeConnectionError' }
+    ];
+
+    await getReadiness(READY_PROD);
+
+    expect(priceCatalog.ensureCalls).toBe(0);
   });
 
   it('still re-attempts a fault that could clear on its own', async () => {
@@ -311,7 +324,7 @@ describe('/readyz prices check (#275 stage A)', () => {
       { productCode: 'credit-pack-4', rule: 'price.lookup_failed', diagnosticClass: 'StripeConnectionError' }
     ];
 
-    await getReadiness(READY_PROD);
+    await getReadiness();
 
     expect(priceCatalog.ensureCalls).toBeGreaterThan(0);
   });
@@ -489,6 +502,41 @@ describe('/readyz prices check (#275 stage A)', () => {
     await getReadiness(READY_PROD);
 
     expect(priceCatalog.lastEnv).toBe(READY_PROD);
+  });
+
+  it('does not re-log when only the ORDER of routing offenders changes', async () => {
+    // The offenders come from an ORDER BY-less query, so a heap-order flip
+    // between probes changed the dedupe signature with no state change and
+    // re-emitted the line the dedupe exists to suppress (#278 round 6).
+    vi.useFakeTimers();
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      let flip = false;
+      query.mockImplementation(async (sql: string) => {
+        if (sql.includes('provider_routing')) {
+          const rows = [
+            { mail_type: 'letter', provider: 'ghost-a' },
+            { mail_type: 'postcard', provider: 'ghost-b' }
+          ];
+          return { rows: flip ? [...rows].reverse() : rows };
+        }
+        return { rows: [{ '?column?': 1 }] };
+      });
+
+      await getReadiness(READY_PROD);
+      flip = true;
+      vi.advanceTimersByTime(2_100);
+      await getReadiness(READY_PROD);
+
+      const emitted = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('"event":"readiness.failed"'));
+      expect(emitted).toHaveLength(1);
+    } finally {
+      diagnostic.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it('caches a READY verdict for the full TTL', async () => {

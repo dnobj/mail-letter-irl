@@ -22,7 +22,7 @@ import {
 } from '../config/deploymentConfig.js';
 import { listProviders } from '../services/providers/index.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
-import { ensurePriceCatalog, getUnpricedProducts } from '../services/priceCatalog.js';
+import { getUnpricedProducts, kickPriceCatalog } from '../services/priceCatalog.js';
 
 export interface ReadinessReport {
   ready: boolean;
@@ -146,12 +146,12 @@ export async function getReadiness(
   // suppressing it for "static" faults gated the self-heal off exactly the
   // staleness it would have fixed (an id_not_configured recorded before the
   // var was set kept suppressing the kick after it was, #278 review round 5).
-  if (!pricesOk) {
-    void ensurePriceCatalog().catch(error => {
-      writeDiagnostic('warn', 'stripe.price_kick_rejected', {
-        errorClass: classifyDiagnosticError(error, 'unknown_error')
-      });
-    });
+  // Gated on the ambient env: the verdict above describes the CALLER's env,
+  // but ensurePriceCatalog can only heal process.env's catalog - kicking for
+  // a custom-env caller would "heal" a different environment than the one the
+  // report described (#278 round 6; production always passes the default).
+  if (!pricesOk && env === process.env) {
+    kickPriceCatalog(undefined, 'readiness');
   }
 
   const failing: string[] = [];
@@ -214,11 +214,14 @@ export async function getReadiness(
     // up to ~43,000 identical entries a day on a steadily-unready probed
     // instance - the flood shape every other diagnostic in this file already
     // dedupes (#278 review round 5).
+    // Every input sorted: routing offenders come from an ORDER BY-less query,
+    // so a heap-order flip re-emitted the very line this dedupe suppresses
+    // (#278 round 6).
     const failingSignature = [
       failing.join(','),
       priceFailureSummary,
-      routing.offenders.join(','),
-      validation.findings.filter(f => f.severity === 'error').map(f => f.rule).join(',')
+      [...routing.offenders].sort().join(','),
+      validation.findings.filter(f => f.severity === 'error').map(f => f.rule).sort().join(',')
     ].join('|');
     if (failingSignature !== lastReportedFailing) {
       lastReportedFailing = failingSignature;

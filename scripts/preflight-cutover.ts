@@ -49,19 +49,23 @@ export interface DiffOptions {
   service: 'api' | 'maintenance';
 }
 
+export interface ManifestGap {
+  entry: EnvVarRequirement;
+  /** Names-only, safe to print. */
+  note: string;
+}
+
 export interface ManifestDiff {
   /** Requirements not satisfied by any present name (own name or alias). */
-  missing: EnvVarRequirement[];
-  /** Names-only note per missing entry, safe to print. */
-  notes: string[];
+  missing: ManifestGap[];
   /**
    * Absent entries marked `advisory`: reported so a parity gap is VISIBLE, but
-   * not counted as a failure, because the code has a working default. Listing
-   * them as required turned the cutover gate red for a correctly configured
-   * environment (#278 review round 3).
+   * not counted as a failure, because the code has a working default (#278
+   * round 3). Entry and note travel as ONE record - the previous four
+   * index-coupled parallel arrays let a count disagree with the lines printed
+   * under it (#278 round 6).
    */
-  advisory: EnvVarRequirement[];
-  advisoryNotes: string[];
+  advisory: ManifestGap[];
 }
 
 /**
@@ -77,10 +81,8 @@ export function diffManifest(
   const production = options.environment === 'production';
   const jitFlagSet = present.has('JIT_PURCHASE_ENABLED');
   const staticDcrFlagSet = present.has('LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY');
-  const missing: EnvVarRequirement[] = [];
-  const notes: string[] = [];
-  const advisory: EnvVarRequirement[] = [];
-  const advisoryNotes: string[] = [];
+  const missing: ManifestGap[] = [];
+  const advisory: ManifestGap[] = [];
 
   for (const entry of manifest) {
     if (!entry.services.includes(options.service)) continue;
@@ -110,18 +112,13 @@ export function diffManifest(
           : entry.condition === 'when-static-dcr'
             ? ' [required because LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY is set]'
             : '';
-      const note = `${entry.name}${aliasNote}${conditionNote}`;
-      if (entry.advisory) {
-        advisory.push(entry);
-        advisoryNotes.push(note);
-      } else {
-        missing.push(entry);
-        notes.push(note);
-      }
+      const gap = { entry, note: `${entry.name}${aliasNote}${conditionNote}` };
+      if (entry.advisory) advisory.push(gap);
+      else missing.push(gap);
     }
   }
 
-  return { missing, notes, advisory, advisoryNotes };
+  return { missing, advisory };
 }
 
 interface RailwayIds {
@@ -296,7 +293,7 @@ async function main(): Promise<void> {
     } else {
       failures += diff.missing.length;
       console.error(`❌ ${environment}/${service}: ${diff.missing.length} required variable(s) missing:`);
-      for (const note of diff.notes) console.error(`   - ${note}`);
+      for (const gap of diff.missing) console.error(`   - ${gap.note}`);
     }
     // Not a gate: these have working defaults. Printed because the whole point
     // of listing them is that an operator can SEE the two environments
@@ -305,7 +302,7 @@ async function main(): Promise<void> {
       console.log(
         `ℹ️  ${environment}/${service}: ${diff.advisory.length} optional variable(s) unset (defaults apply):`
       );
-      for (const note of diff.advisoryNotes) console.log(`   - ${note}`);
+      for (const gap of diff.advisory) console.log(`   - ${gap.note}`);
     }
   }
 

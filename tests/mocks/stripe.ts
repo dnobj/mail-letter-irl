@@ -22,6 +22,7 @@ import { vi } from 'vitest';
 export interface StripeMockFns {
   sessionCreate: ReturnType<typeof vi.fn>;
   sessionList: ReturnType<typeof vi.fn>;
+  sessionRetrieve: ReturnType<typeof vi.fn>;
   priceRetrieve: ReturnType<typeof vi.fn>;
   refundList: ReturnType<typeof vi.fn>;
   refundCreate: ReturnType<typeof vi.fn>;
@@ -33,6 +34,7 @@ export function stripeMockModule(fns: Partial<StripeMockFns>): { default: unknow
   const stub = (): ReturnType<typeof vi.fn> => vi.fn();
   const sessionCreate = fns.sessionCreate ?? stub();
   const sessionList = fns.sessionList ?? stub();
+  const sessionRetrieve = fns.sessionRetrieve ?? stub();
   const priceRetrieve = fns.priceRetrieve ?? stub();
   const refundList = fns.refundList ?? stub();
   const refundCreate = fns.refundCreate ?? stub();
@@ -40,7 +42,7 @@ export function stripeMockModule(fns: Partial<StripeMockFns>): { default: unknow
   const constructEvent = fns.constructEvent ?? stub();
   return {
     default: class MockStripe {
-      checkout = { sessions: { create: sessionCreate, list: sessionList } };
+      checkout = { sessions: { create: sessionCreate, list: sessionList, retrieve: sessionRetrieve } };
       prices = { retrieve: priceRetrieve };
       refunds = { list: refundList, create: refundCreate, retrieve: refundRetrieve };
       webhooks = { constructEvent };
@@ -66,6 +68,8 @@ export function priceFixture(
     unit_amount: number | null;
     currency: string;
     product: string;
+    type: string;
+    recurring: Record<string, unknown> | null;
   }> = {}
 ): Record<string, unknown> {
   return {
@@ -74,6 +78,11 @@ export function priceFixture(
     unit_amount: 1000,
     currency: 'usd',
     product: 'prod_fixture',
+    // A real Stripe Price ALWAYS carries these; omitting them made every
+    // healthy-path test resolve through validate()'s absent-type leniency
+    // branch instead of the shape production sees (#278 round 6).
+    type: 'one_time',
+    recurring: null,
     ...overrides
   };
 }

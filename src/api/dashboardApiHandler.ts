@@ -161,11 +161,13 @@ export async function handleCreateCheckoutSession(
       typeof (error as { code?: unknown }).code === 'string'
         ? (error as { code: string }).code
         : undefined;
-    if (carried === 'validation_error') {
-      // Unknown product id: the caller's mistake, not ours.
-      res.statusCode = 400;
-      res.json({ error: 'Invalid product' });
-    } else if (
+    // No validation_error branch: this handler pre-validates productId
+    // against PACK_PRODUCTS before calling createPackCheckout, so the
+    // commerce layer's invalid-product throw is unreachable from here - the
+    // branch that used to sit in this chain had zero real coverage and its
+    // test asserted a 400 that actually came from the pre-validation (#278
+    // round 6).
+    if (
       code === 'PACK_AMOUNT_NOT_CONFIGURED' ||
       code === 'PRICE_ID_NOT_CONFIGURED' ||
       carried === 'configuration_error' ||

@@ -41,16 +41,21 @@ import type Stripe from 'stripe';
 import { getStripeClient } from './stripeClient.js';
 import {
   configuredPriceIdFor,
+  getConfiguredProduct,
   getConfiguredProducts,
   isConfiguredProductCode,
   normalizedCurrency,
   type ConfiguredProduct
 } from '../config/products.js';
 import {
+  carriedDiagnosticClass,
   classifyDiagnosticError,
+  clearDiagnosticChangeSlot,
   isTerminalDiagnosticClass,
-  writeDiagnostic
+  writeDiagnostic,
+  writeDiagnosticOnChange
 } from '../utils/diagnosticLog.js';
+import { boundedExponentialDelayMs } from '../utils/backoff.js';
 
 export interface ResolvedPrice {
   readonly productCode: string;
@@ -150,11 +155,12 @@ interface AttemptState {
   /** Which ladder those failures were counted on. */
   readonly terminal: boolean;
   /**
-   * The price id the failure was recorded against, so a cooldown cannot
-   * outlive the configuration that earned it: an operator who FIXES the env
-   * var must not wait out the old id's terminal ladder at 503 (#278 round 4).
+   * The FULL configuration signature the failure was recorded against, so a
+   * cooldown cannot outlive the configuration that earned it - whichever part
+   * of it changes. Round 4 keyed this on the price id alone; round 6 proved a
+   * currency fix then left the cooldown standing (#278).
    */
-  readonly priceId: string;
+  readonly signature: string;
 }
 
 const resolved = new Map<string, ResolvedPrice>();
@@ -166,7 +172,7 @@ const attempts = new Map<string, AttemptState>();
  * that never touched its price id or returned silently unresolved (#278
  * round 4). A caller awaits the flight resolving ITS product or starts one.
  */
-const inFlight = new Map<string, Promise<void>>();
+const inFlight = new Map<string, { promise: Promise<void>; signature: string }>();
 /**
  * Bumped by resetPriceCatalog. A lookup already in flight when the catalog is
  * reset must not write its outcome into the freshly cleared maps, nor delete
@@ -196,6 +202,7 @@ export function resetPriceCatalog(): void {
   failures.clear();
   attempts.clear();
   inFlight.clear();
+  clearDiagnosticChangeSlot('stripe.price_catalog_resolved');
   generation += 1;
   jitter = () => 0;
   retrievePrice = () => {
@@ -210,6 +217,19 @@ export function resetPriceCatalog(): void {
  * or an edited table pin serving a memo the current configuration would
  * refuse (#278 review round 5).
  */
+/**
+ * The configuration a piece of catalog state was derived from, as one
+ * comparable value. EVERY staleness decision keys on this - memos, failures,
+ * cooldowns, and in-flight lookups alike. Round 6 found the asymmetry that
+ * motivates it: memos validated the full triple while cooldowns validated
+ * only the price id, so fixing STRIPE_CURRENCY cleared the memo side but
+ * left the terminal cooldown standing - /readyz held 503 for up to 15
+ * minutes after the configuration was already correct (reproduced).
+ */
+function configSignature(product: ConfiguredProduct): string {
+  return `${product.priceId}|${product.expectedAmountCents}|${product.expectedCurrency}`;
+}
+
 function memoMatchesConfiguration(memo: ResolvedPrice, product: ConfiguredProduct): boolean {
   return (
     memo.priceId === product.priceId &&
@@ -247,6 +267,16 @@ export function getResolvedPriceForProduct(productCode: string): ResolvedPrice |
  * with its own ?? chain (#278 review round 5). Null means: not configured
  * here, or priced and sellable.
  */
+/**
+ * The non-null form for checkout guards standing at a configured-but-unpriced
+ * product: stored failure, else the synthesized transient record. Exists so
+ * the "unattempted means transient" policy is written ONCE instead of as a
+ * ?? triad at every guard (#278 rounds 5-6).
+ */
+export function describeUnpriced(productCode: string): PriceResolutionFailure {
+  return failures.get(productCode) ?? notResolvedFailure(productCode);
+}
+
 export function getPriceResolutionFailure(productCode: string): PriceResolutionFailure | null {
   const stored = failures.get(productCode);
   if (stored) return stored;
@@ -334,7 +364,8 @@ function validate(
 function pruneStale(products: readonly ConfiguredProduct[]): void {
   const byCode = new Map(products.map(product => [product.productCode, product]));
   for (const [code, state] of [...attempts.entries()]) {
-    if (byCode.get(code)?.priceId !== state.priceId) {
+    const product = byCode.get(code);
+    if (!product || configSignature(product) !== state.signature) {
       attempts.delete(code);
       failures.delete(code);
     }
@@ -350,7 +381,7 @@ function pruneStale(products: readonly ConfiguredProduct[]): void {
 
 function recordFailure(
   productCode: string,
-  priceId: string,
+  signature: string,
   rule: string,
   diagnosticClass: string,
   now: number
@@ -364,24 +395,28 @@ function recordFailure(
   const consecutive = prior && prior.terminal === terminal ? prior.failures + 1 : 1;
   const base = terminal ? TERMINAL_COOLDOWN_BASE_MS : TRANSIENT_COOLDOWN_BASE_MS;
   const ceiling = terminal ? TERMINAL_COOLDOWN_MAX_MS : TRANSIENT_COOLDOWN_MAX_MS;
-  const cooldown =
-    Math.min(base * 2 ** (consecutive - 1), ceiling) + Math.floor(jitter() * COOLDOWN_JITTER_MS);
-  attempts.set(productCode, { failures: consecutive, nextAttemptAt: now + cooldown, terminal, priceId });
+  const cooldown = boundedExponentialDelayMs(base, ceiling, consecutive, jitter, COOLDOWN_JITTER_MS);
+  attempts.set(productCode, { failures: consecutive, nextAttemptAt: now + cooldown, terminal, signature });
 }
 
 /** Resolve ONE product's price and commit the outcome, staleness-guarded. */
 async function resolveOne(product: ConfiguredProduct, startedGen: number): Promise<void> {
+  const signature = configSignature(product);
   // A commit is valid only if nothing moved underneath the lookup: not the
-  // catalog generation (a reset), and not the configuration (a repoint while
-  // the request was in the air - the one staleness surface round 4's guards
-  // missed, #278 round 5).
-  const stale = (): boolean =>
-    generation !== startedGen ||
-    configuredPriceIdFor(product.productCode) !== product.priceId;
+  // catalog generation (a reset), and not ANY part of the configuration - a
+  // repoint, a currency change, or an edited pin while the request was in
+  // the air (#278 rounds 5-6; round 5's guard checked the id only, so a
+  // mid-flight currency fix could be poisoned by a verdict computed against
+  // the dead snapshot).
+  const stale = (): boolean => {
+    if (generation !== startedGen) return true;
+    const current = getConfiguredProduct(product.productCode);
+    return !current || configSignature(current) !== signature;
+  };
 
   const commitFailure = (rule: string, diagnosticClass: string): void => {
     if (stale()) return;
-    recordFailure(product.productCode, product.priceId, rule, diagnosticClass, Date.now());
+    recordFailure(product.productCode, signature, rule, diagnosticClass, Date.now());
   };
 
   if (!product.priceId) {
@@ -394,8 +429,14 @@ async function resolveOne(product: ConfiguredProduct, startedGen: number): Promi
     outcome = validate(product, price);
   } catch (error) {
     if (error instanceof PriceRetrieverMissingError) throw error;
-    // Carry the class VERBATIM; terminality is derived from it separately.
-    return commitFailure('price.lookup_failed', classifyDiagnosticError(error, 'provider_error'));
+    // Prefer a class the failing layer attached (getStripeClient's missing-key
+    // throw carries configuration_error - a bare classify read it as a
+    // transient provider fault and retried a human-only problem forever,
+    // #278 round 6), else classify the Stripe error verbatim.
+    return commitFailure(
+      'price.lookup_failed',
+      carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error')
+    );
   }
 
   if ('rule' in outcome) {
@@ -420,30 +461,48 @@ async function resolveOne(product: ConfiguredProduct, startedGen: number): Promi
  * for every flight.
  */
 export async function ensurePriceCatalog(productCode?: string): Promise<void> {
-  // Nothing to do for a product this deployment does not sell - the answer
-  // both quote paths need on every call when Pay & Send is disabled, without
-  // building the product table (#278 round 5).
-  if (productCode && !isConfiguredProductCode(productCode)) return;
+  // Nothing to do for a product this deployment does not sell - and any state
+  // it left behind is cleared HERE, because the hot paths never prune while
+  // the packs are green: without this, cooldowns recorded before Pay & Send
+  // was toggled off survived un-prunable and resurfaced verbatim on
+  // re-enable, refusing quotes for up to the residual terminal ladder even
+  // though Stripe would validate cleanly (#278 round 6).
+  if (productCode && !isConfiguredProductCode(productCode)) {
+    attempts.delete(productCode);
+    failures.delete(productCode);
+    return;
+  }
 
-  const products = getConfiguredProducts();
-
+  // Warm fast path from the single-product accessor: the full table build
+  // here cost ~9 env reads per quote to validate one memo (#278 round 6).
   if (productCode) {
+    const product = getConfiguredProduct(productCode);
     const memo = resolved.get(productCode);
-    const product = products.find(candidate => candidate.productCode === productCode);
     if (memo && product && memoMatchesConfiguration(memo, product)) return;
   }
 
+  const products = getConfiguredProducts();
   pruneStale(products);
 
   if (productCode) {
     const flight = inFlight.get(productCode);
-    if (flight) return flight;
+    const product = products.find(candidate => candidate.productCode === productCode);
+    // Only a flight started for the CURRENT configuration is worth awaiting.
+    // Handing back a flight begun before a repoint left the caller with
+    // neither memo nor failure - its commit is staleness-suppressed - so the
+    // first purchase after a repoint was spuriously refused (#278 round 6,
+    // reproduced). A stale flight is simply ignored; its finally only deletes
+    // its own entry, so overwriting below is safe.
+    if (flight && product && flight.signature === configSignature(product)) {
+      return flight.promise;
+    }
   }
 
   const now = Date.now();
   const due = products.filter(product => {
     if (resolved.has(product.productCode)) return false;
-    if (inFlight.has(product.productCode)) return false;
+    const flight = inFlight.get(product.productCode);
+    if (flight && flight.signature === configSignature(product)) return false;
     const state = attempts.get(product.productCode);
     return !state || state.nextAttemptAt <= now;
   });
@@ -452,8 +511,9 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
   const started: Promise<void>[] = [];
   let mine: Promise<void> | undefined;
   for (const product of due) {
+    const signature = configSignature(product);
     const promise: Promise<void> = resolveOne(product, startedGen).finally(() => {
-      if (inFlight.get(product.productCode) === promise) {
+      if (inFlight.get(product.productCode)?.promise === promise) {
         inFlight.delete(product.productCode);
       }
     });
@@ -461,7 +521,7 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
     // branch so a test-lane sentinel rejection is loud where it is awaited
     // and not an unhandled-rejection crash everywhere else.
     void promise.catch(() => undefined);
-    inFlight.set(product.productCode, promise);
+    inFlight.set(product.productCode, { promise, signature });
     started.push(promise);
     if (product.productCode === productCode) mine = promise;
   }
@@ -469,15 +529,25 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
   if (started.length > 0) {
     void Promise.allSettled(started).then(() => {
       if (generation !== startedGen) return;
-      writeDiagnostic(failures.size ? 'error' : 'info', 'stripe.price_catalog_resolved', {
-        resolved: resolved.size,
-        requested: products.length,
-        failures:
-          [...failures.values()].map(f => `${f.productCode}:${f.rule}`).join(' ') || 'none',
-        prices: [...resolved.values()]
-          .map(p => `${p.productCode}=${p.unitAmount}${p.currency}`)
-          .join(' ')
-      });
+      const failureSummary =
+        [...failures.values()].map(f => `${f.productCode}:${f.rule}`).join(' ') || 'none';
+      // On CHANGE only: a dev deploy with prices legitimately unset re-logged
+      // an identical error-level line every terminal-ladder expiry, ~720/day,
+      // for an already-reported steady state (#278 round 6).
+      writeDiagnosticOnChange(
+        'stripe.price_catalog_resolved',
+        `${resolved.size}|${failureSummary}`,
+        failures.size ? 'error' : 'info',
+        'stripe.price_catalog_resolved',
+        {
+          resolved: resolved.size,
+          requested: products.length,
+          failures: failureSummary,
+          prices: [...resolved.values()]
+            .map(p => `${p.productCode}=${p.unitAmount}${p.currency}`)
+            .join(' ')
+        }
+      );
     });
   }
 
@@ -488,6 +558,21 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
   }
 
   // Uncoded: wait for everything currently running, ours or not.
-  const all = new Set<Promise<void>>([...inFlight.values(), ...started]);
+  const all = new Set<Promise<void>>([...[...inFlight.values()].map(f => f.promise), ...started]);
   if (all.size > 0) await Promise.all(all);
+}
+
+/**
+ * Fire-and-forget warmup. Owns the swallow-and-log policy in ONE place: four
+ * call sites used to hand-roll `void ensure().catch(...)` and had already
+ * drifted into two behaviors, two logging a rejection and two silently
+ * swallowing it (#278 round 6). Only the test-lane sentinel can reject.
+ */
+export function kickPriceCatalog(productCode?: string, context = 'warmup'): void {
+  void ensurePriceCatalog(productCode).catch(error => {
+    writeDiagnostic('warn', 'stripe.price_kick_rejected', {
+      context,
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  });
 }

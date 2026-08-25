@@ -376,9 +376,6 @@ describe('Checkout Session Error Handling', () => {
       success: false,
       errorCode: 'PROVIDER_ERROR',
       diagnosticClass: 'provider_error',
-      // A bare Error is not one of the classes a human must act on, so cleanup
-      // leaves the order pending rather than cancelling it.
-      terminal: false,
       error: 'Failed to create checkout session'
     });
     expect(output).not.toContain(sensitive);

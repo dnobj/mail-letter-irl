@@ -1190,14 +1190,15 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
     }
   });
 
-  it('quarantines an adopted session whose PAID amount disagrees with the table (#278)', async () => {
-    // The pin's verification half, provable only against a real database. The
-    // customer actually paid 999 for a product the table pins at 500 - a
-    // stale table after a Stripe-side price change, or a tampered session.
-    // The order is adopted AT THE PIN and then the paid-amount comparison
-    // quarantines it (PAYMENT_AMOUNT_MISMATCH -> refund_pending) instead of
-    // fulfilling: a durable, operator-recoverable state, with no credits
-    // granted against a figure nobody agreed to.
+  it('routes a paid legacy session whose amount disagrees with the pin to the OPERATOR (#278)', async () => {
+    // Round 6's money-path finding. Adopting a mismatched payment at the pin
+    // would flag PAYMENT_AMOUNT_MISMATCH -> refund_pending, and the
+    // maintenance refund sweep is order-type-agnostic - a legitimate
+    // months-old purchase at a historical price would be AUTO-REFUNDED with
+    // no credits and no human decision. So a mismatch is NOT adopted: the
+    // paid session takes the unmatched-money lane - durable record, critical
+    // alert, operator review - and crucially leaves NO order row for any
+    // automatic sweep to act on.
     try {
       await acidPool.query(
         `INSERT INTO users (user_id, email) VALUES ('legacy-mismatch-user', 'legacy-mismatch@example.test')`
@@ -1213,17 +1214,23 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
         } }
       } as any)).resolves.toMatchObject({ duplicate: false });
 
-      const order = await acidPool.query<{
-        status: string; amount_cents: number; last_error_code: string | null;
-      }>(
-        `SELECT status, amount_cents, last_error_code
-         FROM orders WHERE stripe_checkout_session_id = 'cs-legacy-mismatch'`
+      // No order row exists - nothing for the refund sweep to find.
+      const order = await acidPool.query(
+        `SELECT order_id FROM orders WHERE stripe_checkout_session_id = 'cs-legacy-mismatch'`
       );
-      expect(order.rows[0]).toMatchObject({
-        status: 'refund_pending',
-        amount_cents: 500,
-        last_error_code: 'PAYMENT_AMOUNT_MISMATCH'
-      });
+      expect(order.rows).toEqual([]);
+
+      // The money is durably recorded as unmatched, with the critical alert.
+      const event = await acidPool.query<{ processing_status: string }>(
+        `SELECT processing_status FROM stripe_webhook_events WHERE event_id = 'evt-legacy-mismatch'`
+      );
+      expect(event.rows[0]).toEqual({ processing_status: 'unmatched' });
+      const alert = await acidPool.query<{ severity: string }>(
+        `SELECT severity FROM commerce_operational_alerts
+         WHERE source_event_id = 'evt-legacy-mismatch'
+           AND alert_type = 'stripe_money_event_unmatched'`
+      );
+      expect(alert.rows[0]).toEqual({ severity: 'critical' });
 
       const credits = await acidPool.query<{ credits: number }>(
         `SELECT credits FROM users WHERE user_id = 'legacy-mismatch-user'`

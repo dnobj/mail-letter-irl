@@ -16,6 +16,8 @@ import { BACKGROUND_REQUEST_OPTIONS, getStripeClient } from './stripeClient.js';
 import {
   JIT_PRODUCTS,
   PACK_PRODUCTS,
+  configuredPriceIdFor,
+  formatAmountForCurrency,
   jitCurrency,
   packCurrency,
   type PackProductId
@@ -52,9 +54,14 @@ export function getPackProductConfig(productId: PackProductId): CommerceProductC
   return {
     productCode: productId,
     credits: definition.credits,
-    priceId: resolved?.priceId ?? (process.env[definition.priceEnv] ?? '').trim(),
+    // Not memo ?? env: getResolvedPriceForProduct only returns a memo that
+    // ALREADY equals the configured id and expected currency, so the two
+    // sources were identical by construction and the ?? read as if the memo
+    // could win - a trap armed the day the memo validity rule loosens (#278
+    // round 6). Only the amount genuinely depends on resolution.
+    priceId: configuredPriceIdFor(productId) ?? '',
     amountCents: resolved?.unitAmount ?? 0,
-    currency: resolved?.currency ?? packCurrency(),
+    currency: packCurrency(),
     name: definition.name,
     description: definition.description
   };
@@ -66,9 +73,9 @@ export function getJitProductConfig(mailType: MailType): CommerceProductConfig {
   return {
     productCode: definition.productCode,
     mailType,
-    priceId: resolved?.priceId ?? (process.env[definition.priceEnv] ?? '').trim(),
+    priceId: configuredPriceIdFor(definition.productCode) ?? '',
     amountCents: resolved?.unitAmount ?? 0,
-    currency: resolved?.currency ?? jitCurrency(),
+    currency: jitCurrency(),
     name: definition.name,
     description: definition.description
   };
@@ -100,12 +107,6 @@ export interface CheckoutSessionResult {
    * cause rather than relabelling it. Issue #213.
    */
   diagnosticClass?: string;
-  /**
-   * Whether a human must act. Order cleanup keys off this to decide between
-   * cancelling the order and leaving it pending; carried explicitly so five
-   * call sites stop re-deriving it from a magic string (#278 review round 3).
-   */
-  terminal?: boolean;
 }
 
 interface HostedCheckoutParams {
@@ -125,7 +126,6 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
       success: false,
       errorCode: 'PRICE_ID_NOT_CONFIGURED',
       diagnosticClass: 'configuration_error',
-      terminal: true,
       error: `Price ID not configured for product: ${params.product.productCode}`
     };
   }
@@ -161,7 +161,6 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
       success: false,
       errorCode: 'PACK_AMOUNT_NOT_CONFIGURED',
       diagnosticClass,
-      terminal: failure?.terminal ?? false,
       error: `Amount not configured for product: ${params.product.productCode}`
     };
   }
@@ -201,7 +200,6 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
       success: false,
       errorCode: 'PROVIDER_ERROR',
       diagnosticClass,
-      terminal: isTerminalDiagnosticClass(diagnosticClass),
       error: 'Failed to create checkout session'
     };
   }
@@ -276,7 +274,10 @@ export async function extractCheckoutData(
     credits,
     productId,
     sessionId: session.id,
-    amountPaid: (session.amount_total || 0) / 100,
+    // Currency-aware: the raw /100 this replaced is 100x wrong for
+    // zero-decimal currencies (#278 round 6). Number() keeps the field's
+    // numeric type for the existing consumers.
+    amountPaid: Number(formatAmountForCurrency(session.amount_total || 0, session.currency || 'usd')),
     customerEmail: session.customer_email || session.customer_details?.email || ''
   };
 }

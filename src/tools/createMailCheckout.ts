@@ -1,3 +1,4 @@
+import { isTerminalDiagnosticClass } from '../utils/diagnosticLog.js';
 import { formatAmountForCurrency } from '../config/products.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { createMailCheckoutInputSchema, createMailCheckoutOutputSchema } from '../schemas.js';
@@ -19,17 +20,19 @@ interface CreateMailCheckoutOutput {
   message: string;
 }
 
-function friendlyCheckoutError(error: unknown): Error {
-  const source = (error ?? {}) as { code?: string; diagnosticClass?: string; terminal?: boolean };
+export function friendlyCheckoutError(error: unknown): Error {
+  const source = (error ?? {}) as { code?: string; diagnosticClass?: string };
   // Rebuild the message, keep the classification. Returning a bare Error here
-  // discarded the diagnosticClass and terminal the commerce layer attached,
-  // so the server log recorded unknown_error for precisely classified faults
-  // (#278 review round 4).
+  // discarded the diagnosticClass the commerce layer attached, so the server
+  // log recorded unknown_error for precisely classified faults (#278 r4).
+  // Terminality is DERIVED from the class, never carried: a carried pair can
+  // be minted mismatched, and three review angles independently converged on
+  // class-only carriage (#278 round 6).
+  const terminal = isTerminalDiagnosticClass(source.diagnosticClass);
   const friendly = (message: string): Error =>
     Object.assign(new Error(message), {
       ...(source.code !== undefined ? { code: source.code } : {}),
-      ...(source.diagnosticClass !== undefined ? { diagnosticClass: source.diagnosticClass } : {}),
-      ...(source.terminal !== undefined ? { terminal: source.terminal } : {})
+      ...(source.diagnosticClass !== undefined ? { diagnosticClass: source.diagnosticClass } : {})
     });
   switch (source.code) {
     case 'JIT_DISABLED':
@@ -56,13 +59,13 @@ function friendlyCheckoutError(error: unknown): Error {
       // surfaces used to contradict each other in whichever direction (#278
       // review rounds 4-5).
       return friendly(
-        source.terminal
+        terminal
           ? 'Pay & Send pricing is not configured. Please use a letter pack instead.'
           : 'Pay & Send is temporarily unavailable. Please try again shortly, or use a letter pack.'
       );
     case 'PROVIDER_ERROR':
       return friendly(
-        source.terminal
+        terminal
           ? 'Pay & Send cannot complete this purchase right now. Please use a letter pack instead.'
           : 'Unable to create Pay & Send checkout. Please try again.'
       );

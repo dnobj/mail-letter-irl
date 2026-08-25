@@ -4,11 +4,13 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type Stripe from 'stripe';
 import { query, transaction } from '../db/index.js';
-import { ensurePriceCatalog, getPriceResolutionFailure } from './priceCatalog.js';
+import { describeUnpriced, ensurePriceCatalog, kickPriceCatalog } from './priceCatalog.js';
 import {
   PACK_PRODUCTS,
   configuredPriceIdFor,
+  formatAmountForCurrency,
   jitProductCode,
+  normalizedCurrency,
   packCurrency
 } from '../config/products.js';
 import { lockAccountForBalanceChange } from './accountLock.js';
@@ -25,6 +27,7 @@ import {
   isJitPurchaseEnabled,
   retrieveCheckoutSession,
   retrieveRefund,
+  type CheckoutSessionResult,
   type CommerceProductConfig,
   type PackProductId
 } from './stripeService.js';
@@ -135,6 +138,8 @@ export interface SendEligibility {
     available: boolean;
     amountCents?: number;
     currency?: string;
+    /** Pre-formatted per-currency amount for display surfaces. */
+    displayAmount?: string;
     productDescription?: string;
     unavailableReason?: string;
   };
@@ -174,6 +179,11 @@ export function getSendEligibility(
 ): SendEligibility {
   const prepaidEligible = availableCredits >= requiredCredits;
   const product = getJitProductConfig(mailType);
+  // The eligibility accessor owns its own warmup kick: leaving it to callers
+  // by convention meant a future quote surface (or the stdio lane) could go
+  // permanently "temporarily unavailable" in silence (#278 round 6). Warm
+  // case: synchronous no-op.
+  if (isJitPurchaseEnabled()) kickPriceCatalog(product.productCode, 'send_eligibility');
   const configured = Boolean(product.priceId && product.amountCents > 0);
   if (configured) lastPayAndSendFault.delete(product.productCode);
   const allowedWithBalance = process.env.JIT_ALLOW_WITH_PREPAID_BALANCE === 'true';
@@ -188,12 +198,11 @@ export function getSendEligibility(
     // anywhere - the feature vanished silently and the operator learned about
     // it from a customer (#278 review round 2). Say which it is, in both
     // directions.
-    const failure = getPriceResolutionFailure(product.productCode);
-    // Synthesized for the unpriced state, so no ?? re-derivation here; null
-    // only when the product is not configured at all, and this branch is
-    // gated on isJitPurchaseEnabled so that cannot happen.
-    const errorClass = failure?.diagnosticClass ?? 'provider_error';
-    const rule = failure?.rule ?? 'price.not_resolved';
+    // Non-null by contract: the "unattempted means transient" policy lives in
+    // describeUnpriced, not in per-guard ?? chains (#278 rounds 5-6).
+    const failure = describeUnpriced(product.productCode);
+    const errorClass = failure.diagnosticClass;
+    const rule = failure.rule;
     // Reported on CHANGE only. This is a synchronous accessor on the quote
     // path, and the module header notes quotes vastly outnumber purchases - so
     // an unconditional error line here turned one persistent config fault into
@@ -202,13 +211,18 @@ export function getSendEligibility(
     const signature = `${rule}:${errorClass}`;
     if (lastPayAndSendFault.get(product.productCode) !== signature) {
       lastPayAndSendFault.set(product.productCode, signature);
-      writeDiagnostic('error', 'commerce.pay_and_send_unpriced', {
+      // price.not_resolved is the boot race - the quote arrived before the
+      // warmup landed. That is routine on every deploy (and guaranteed on the
+      // first stdio quote), so it must not read as an alertable error; a
+      // recorded FAILURE is news and stays at error level (#278 round 6,
+      // corroborated five ways).
+      writeDiagnostic(rule === 'price.not_resolved' ? 'warn' : 'error', 'commerce.pay_and_send_unpriced', {
         productCode: product.productCode,
         rule,
         errorClass
       });
     }
-    unavailableReason = (failure?.terminal ?? false)
+    unavailableReason = isTerminalDiagnosticClass(errorClass)
       ? 'Pay & Send pricing is not configured.'
       : 'Pay & Send is temporarily unavailable. Please try again shortly.';
   } else if (prepaidEligible && !allowedWithBalance) {
@@ -225,6 +239,13 @@ export function getSendEligibility(
       available,
       amountCents: configured ? product.amountCents : undefined,
       currency: configured ? product.currency : undefined,
+      // Server-formatted for display: the widgets rendered amountCents/100
+      // themselves, which is 100x wrong for zero-decimal currencies this
+      // codebase declares supported (#278 round 6). Widgets prefer this and
+      // fall back to /100 for older servers.
+      displayAmount: configured
+        ? formatAmountForCurrency(product.amountCents, product.currency)
+        : undefined,
       productDescription: configured ? product.name : undefined,
       unavailableReason
     },
@@ -412,6 +433,32 @@ async function attachCheckout(
   });
 }
 
+/**
+ * Mark the order's cleanup outcome and throw the carried-classification error
+ * in ONE place: the pack and JIT paths each duplicated a ~15-line mark+throw
+ * block whose four copies of `terminal ?? isTerminal(...)` could drift, and a
+ * drifted pair cancels the order as terminal while telling the customer to
+ * retry (#278 round 6). Terminality is derived from the class exactly once.
+ */
+async function failCheckoutCreation(
+  orderId: string,
+  checkout: CheckoutSessionResult,
+  fallbackMessage: string
+): Promise<Error> {
+  const diagnosticClass = checkout.diagnosticClass ?? 'provider_error';
+  await markCheckoutCreationFailure(orderId, checkout.error || fallbackMessage, {
+    errorCode: checkout.errorCode,
+    terminal: isTerminalDiagnosticClass(diagnosticClass)
+  });
+  // Returned, not thrown: `throw await` at the call site keeps TypeScript's
+  // control-flow narrowing of checkout.sessionId, which an awaited
+  // Promise<never> would not.
+  return Object.assign(new Error(checkout.error || fallbackMessage), {
+    code: checkout.errorCode,
+    diagnosticClass
+  });
+}
+
 export class PackAmountNotConfiguredError extends Error {
   readonly code = 'PACK_AMOUNT_NOT_CONFIGURED';
   // An unresolvable Stripe price is not a database fault. This guard throws
@@ -428,17 +475,14 @@ export class PackAmountNotConfiguredError extends Error {
   // 30-second Stripe outage was logged as an operator-must-act config fault
   // (#278 review round 2) - the #213 mislabel reintroduced one layer up.
   readonly diagnosticClass: string;
-  /**
-   * Whether a human must act - DERIVED from the class, never independently
-   * settable: two parameters answering one question let a caller mint a
-   * transient class with terminal=true and cancel a live order (#278 r5).
-   */
-  readonly terminal: boolean;
   constructor(readonly productCode: string, diagnosticClass = 'configuration_error') {
     super(`Pack amount is not configured for ${productCode}`);
     this.name = 'PackAmountNotConfiguredError';
+    // No separate `terminal` property: three review angles independently
+    // converged on carrying ONLY the class and deriving terminality at the
+    // decision points - a carried pair can be minted mismatched, and consumers
+    // were hedging with their own ?? re-derivations anyway (#278 round 6).
     this.diagnosticClass = diagnosticClass;
-    this.terminal = isTerminalDiagnosticClass(diagnosticClass);
   }
 }
 
@@ -456,11 +500,7 @@ export function assertConfiguredAmount(
   productCode: string
 ): void {
   if (!Number.isInteger(product.amountCents) || product.amountCents <= 0) {
-    // getPriceResolutionFailure synthesizes the transient not-resolved record
-    // for a configured-but-unpriced product, so the policy for that state
-    // lives in ONE place instead of a ?? chain per guard (#278 review r5).
-    const failure = getPriceResolutionFailure(productCode);
-    throw new PackAmountNotConfiguredError(productCode, failure?.diagnosticClass ?? 'provider_error');
+    throw new PackAmountNotConfiguredError(productCode, describeUnpriced(productCode).diagnosticClass);
   }
 }
 
@@ -519,23 +559,7 @@ export async function createPackCheckout(
     idempotencyKey
   });
   if (!checkout.success || !checkout.sessionId) {
-    await markCheckoutCreationFailure(orderId, checkout.error || 'Unknown Stripe error', {
-      errorCode: checkout.errorCode,
-      terminal: checkout.terminal ?? isTerminalDiagnosticClass(checkout.diagnosticClass)
-    });
-    // Carry the resolved provider class up to the handler's catch, so the log
-    // there names the real cause (e.g. resource_missing) instead of defaulting
-    // to database_error and pointing at the wrong subsystem (issue #213) -
-    // plus code and terminality, so the handler's status mapping and the
-    // customer message do not diverge from the cleanup decision (#278 r5).
-    throw Object.assign(
-      new Error(checkout.error || 'Failed to create checkout session'),
-      {
-        code: checkout.errorCode,
-        diagnosticClass: checkout.diagnosticClass ?? 'provider_error',
-        terminal: checkout.terminal ?? isTerminalDiagnosticClass(checkout.diagnosticClass)
-      }
-    );
+    throw await failCheckoutCreation(orderId, checkout, 'Failed to create checkout session');
   }
   const order = await attachCheckout(
     orderId,
@@ -612,16 +636,15 @@ async function prepareJitOrder(
     const actualMailType = (draft.mail_type || 'letter') as MailType;
     const product = getJitProductConfig(actualMailType);
     if (!product.priceId || product.amountCents <= 0) {
-      const failure = getPriceResolutionFailure(product.productCode);
+      const failure = describeUnpriced(product.productCode);
       writeDiagnostic('error', 'commerce.jit_not_priced', {
         productCode: product.productCode,
-        rule: failure?.rule ?? 'price.not_resolved',
-        errorClass: failure?.diagnosticClass ?? 'provider_error'
+        rule: failure.rule,
+        errorClass: failure.diagnosticClass
       });
       throw Object.assign(new Error('Pay & Send pricing is not configured'), {
         code: 'JIT_NOT_CONFIGURED',
-        diagnosticClass: failure?.diagnosticClass ?? 'provider_error',
-        terminal: failure?.terminal ?? false
+        diagnosticClass: failure.diagnosticClass
       });
     }
     if (process.env.JIT_ALLOW_WITH_PREPAID_BALANCE !== 'true') {
@@ -725,22 +748,11 @@ export async function createJitCheckout(
     idempotencyKey: prepared.order.idempotency_key
   });
   if (!checkout.success || !checkout.sessionId) {
-    await markCheckoutCreationFailure(
+    throw await failCheckoutCreation(
       prepared.order.order_id,
-      checkout.error || 'Unknown Stripe error',
-      {
-        errorCode: checkout.errorCode,
-        terminal: checkout.terminal ?? isTerminalDiagnosticClass(checkout.diagnosticClass)
-      }
+      checkout,
+      'Failed to create Pay & Send checkout'
     );
-    // Carry class AND terminality: friendlyCheckoutError keys the customer
-    // message off `terminal`, and omitting it here told customers to retry a
-    // fault whose order had just been cancelled as unretryable (#278 r5).
-    throw Object.assign(new Error(checkout.error || 'Failed to create Pay & Send checkout'), {
-      code: checkout.errorCode,
-      diagnosticClass: checkout.diagnosticClass ?? 'provider_error',
-      terminal: checkout.terminal ?? isTerminalDiagnosticClass(checkout.diagnosticClass)
-    });
   }
 
   const order = await attachCheckout(
@@ -793,6 +805,28 @@ async function createLegacyPackOrder(
   // is a durable, recoverable state, unlike unmatched (#278 review round 5).
   const definition = PACK_PRODUCTS.find(candidate => candidate.productCode === productCode);
   if (!userId || !definition) {
+    return null;
+  }
+  // THE GATE (#278 round 6). If what the customer actually paid does not
+  // equal the pin, do NOT adopt: adopting would write the pinned amount onto
+  // the order, the paid-amount comparison would flag PAYMENT_AMOUNT_MISMATCH
+  // -> refund_pending, and the maintenance refund sweep is order-type
+  // agnostic - so a legitimate months-old purchase at a historical price
+  // would be AUTO-REFUNDED with no credits and no human decision. A paid
+  // session we decline to adopt takes the unmatched-money path instead:
+  // durable record, critical alert, operator review - origin/dev's exact
+  // semantics for money we cannot vouch for.
+  const paidAmount = session.amount_total ?? null;
+  const paidCurrency = normalizedCurrency(session.currency ?? undefined, '');
+  if (paidAmount !== definition.expectedAmountCents || paidCurrency !== packCurrency()) {
+    writeDiagnostic('error', 'commerce.legacy_adoption_amount_mismatch', {
+      productCode: definition.productCode,
+      // Amounts here are Stripe's own public figures for this session plus a
+      // constant from source control - nothing secret.
+      paidAmount: paidAmount ?? 'none',
+      expectedAmount: definition.expectedAmountCents,
+      paidCurrency: paidCurrency || 'none'
+    });
     return null;
   }
   const product = {

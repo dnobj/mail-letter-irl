@@ -579,19 +579,15 @@ exact figure is known.
 **Changing a price**: create the new Price in Stripe (amounts are immutable on
 an existing Price), then in one commit update `expectedAmountCents` in
 `src/config/products.ts` and repoint the price-id env var. A redeploy was
-already required — the id is an env var — so this adds a review, not a step. Two products may share a Price only when both are Pay &
-Send; any other sharing is refused for **every** product involved, because it
-would sell one of them at the other's price. A deployment in a zero- or
-three-decimal currency, or one selling a tier above the ceiling, must set
-`STRIPE_PRICE_MIN_UNIT_AMOUNT` and `STRIPE_PRICE_MAX_UNIT_AMOUNT`: the band is
-in minor units and cannot be converted across currencies without an exchange
-rate. (The former `STRIPE_PRICE_MIN_UNIT_AMOUNT`/`STRIPE_PRICE_MAX_UNIT_AMOUNT`
-sanity band is gone: with the exact amount pinned per product there is no
-range question left to configure, in any currency.) Both appear in the manifest
-as **advisory**: `npm run preflight:cutover` lists them when unset so a parity
-gap is visible before promotion, without failing the gate on a deployment that
-correctly relies on the defaults — which is also how `STRIPE_CURRENCY` and
-`JIT_CURRENCY` are listed.
+already required — the id is an env var — so this adds a review, not a step.
+
+`STRIPE_CURRENCY` and `JIT_CURRENCY` appear in the manifest as **advisory**:
+`npm run preflight:cutover` lists them when unset in EITHER environment so a
+parity gap is visible before promotion, without failing the gate on a
+deployment that correctly relies on the defaults. (There is no configurable
+sanity band, and no separate sharing rule: the pin subsumes both — a shared
+Price is legitimate exactly when the pinned amounts agree, and the missold
+side of any other sharing is refused per product.)
 
 Resolution failures carry two things: the **class** (the Stripe error's own
 code, e.g. `resource_missing` for a typo'd id, or `configuration_error` for a
@@ -608,9 +604,12 @@ can be refused after Stripe recovers.
 
 **The webhook path does not read Stripe at all.** A paid legacy session is
 adopted at the product table's pinned amount, and the paid-amount comparison
-verifies the actual charge against that independent figure — a disagreement
-quarantines the order (`PAYMENT_AMOUNT_MISMATCH`, a durable, recoverable
-state) instead of stranding the payment. Earlier revisions put a live price
+verifies the actual charge against that independent figure — a paid session that does NOT
+match the pin is deliberately **not adopted** — it takes the unmatched-money
+path (durable record, critical alert, operator review), because an adopted
+mismatch would reach the `PAYMENT_AMOUNT_MISMATCH` quarantine and the
+order-type-agnostic refund sweep, auto-refunding a legitimate historical
+purchase with no human decision (#278 round 6). Earlier revisions put a live price
 read in front of the webhook transaction; review rounds 4–5 showed every
 outcome that design permits is wrong (500 loops on the schedule Stripe uses
 to disable endpoints, or paid money booked unmatched during a key rotation). An

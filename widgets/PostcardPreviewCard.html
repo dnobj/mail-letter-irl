@@ -442,7 +442,9 @@
           paySendButton.style.display = payAndSend?.available ? "flex" : "none";
           paySendButton.disabled = !payAndSend?.available;
           if (payAndSend?.available && payAndSend.amountCents) {
-            const amount = (payAndSend.amountCents / 100).toFixed(2);
+            // Server-formatted per currency; /100 is a legacy-server fallback
+            // and is 100x wrong for zero-decimal currencies (#278 round 6).
+            const amount = payAndSend.displayAmount || (payAndSend.amountCents / 100).toFixed(2);
             paySendButtonText.textContent = `Pay & Send (${String(payAndSend.currency || "usd").toUpperCase()} ${amount})`;
           }
           buyPackButton.style.display =
