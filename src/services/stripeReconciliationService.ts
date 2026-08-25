@@ -249,12 +249,13 @@ export async function reconcileStripePayments(
       .includes(order.status);
     if (
       stripePayment.amount !== order.amount_cents ||
-      // The shared normalizer on BOTH sides. The fulfilment gate trims and
-      // this audit did not, over the SAME orders.currency column - so a
-      // legacy row with a padded currency was credited correctly and then
-      // reported here as a high-severity amount_mismatch telling the operator
-      // not to fulfil it: a false money alarm inside the audit that exists to
-      // find real ones (#278 round 11).
+      // The shared normalizer on BOTH sides, for consistency with the
+      // fulfilment gate rather than to fix a live alarm: orders.currency is
+      // VARCHAR(3), so a padded value cannot be stored, and round 11's claim
+      // that this fixed a false money alarm was wrong (its test padded both
+      // sides and passed with the change reverted). What it does buy is that
+      // one policy judges this column everywhere, so the two gates cannot
+      // drift if the column ever widens (#278 round 12).
       stripePayment.currency !== normalizedCurrency(order.currency, '')
     ) {
       amountMismatches++;

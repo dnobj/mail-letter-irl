@@ -172,7 +172,7 @@ export async function getReadiness(
   // does not write a diagnostic. Product codes and rule ids only - the loader
   // carries the classes and, since round 10, the figures that disagreed -
   // Stripe's own public amounts plus a source constant. Log only: the body
-  // still carries check names and nothing else (#278 round 11).
+  // carries check names, the mode and the provider - never a figure (#278 round 11).
   // ONE encoding, owned by the catalog beside the record it describes. The
   // hand-kept copy that stood here was class-blind until round 8 - the same
   // omission round 7 had already fixed in the catalog's own copy, which is

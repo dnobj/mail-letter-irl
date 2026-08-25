@@ -214,7 +214,14 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
       invalidateResolvedPrice(params.product.productCode, diagnosticClass);
     }
     writeDiagnostic('error', 'stripe.checkout_creation_failed', {
-      errorClass: diagnosticClass
+      errorClass: diagnosticClass,
+      // The parameter Stripe blamed. It gates the whole memo-invalidation
+      // remedy, so if the guess about Stripe's wire shape is ever wrong the
+      // symptom is the round-10 bug with nothing in the log to distinguish
+      // it from correct behaviour. `param` is a fixed public StripeError
+      // field and not caller-controlled - the same reason it was chosen as
+      // the discriminator makes it safe to record (#278 round 12).
+      offendingParam: offendingParam || 'none'
     });
     return {
       success: false,

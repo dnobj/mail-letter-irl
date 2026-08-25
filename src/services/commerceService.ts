@@ -302,16 +302,9 @@ function enabledPayAndSend(
  * A sessionless row must forward its stored expiry verbatim - the idempotency
  * key that recovers a crashed attachment only replays for IDENTICAL
  * parameters - so a row inside this floor cannot open a session at all and is
- * retired in favour of a fresh one. With the shipped 30-minute window that
- * makes the reuse window five seconds wide, which is honest rather than
- * ideal: a sessionless row is nearly always one whose creation FAILED, where
- * Stripe has nothing to replay and a fresh row is the only thing that can
- * produce a working checkout. The rare crashed-attachment case (Stripe holds
- * a session we never recorded) is still recovered on a prompt retry, and
- * beyond that it costs an orphaned Stripe session that expires on its own -
- * a working checkout either way, which forwarding a stale expiry was not
- * (#278 rounds 10-11; round 10's comment here claimed the zero margin
- * preserved the replay, which the arithmetic does not support).
+ * retired in favour of a fresh one. How long a row stays reusable is
+ * therefore set by how far ABOVE this floor it was stamped, which is what
+ * CHECKOUT_REUSE_BUDGET_MINUTES below exists to guarantee (#278 r10-12).
  */
 const STRIPE_MIN_CHECKOUT_WINDOW_MINUTES = 30;
 const STRIPE_MIN_CHECKOUT_WINDOW_MS = STRIPE_MIN_CHECKOUT_WINDOW_MS_OF(
@@ -337,15 +330,26 @@ function checkoutExpiry(draftExpiresAt: Date): Date {
     24 * 60,
     Math.max(
       STRIPE_MIN_CHECKOUT_WINDOW_MINUTES + CHECKOUT_REUSE_BUDGET_MINUTES,
-      integerSetting('JIT_CHECKOUT_EXPIRY_MINUTES', 30)
+      // Default matches the floor below, so the declared default is a value
+      // the function can actually return (#278 round 12).
+      integerSetting('JIT_CHECKOUT_EXPIRY_MINUTES', 40)
     )
   );
   const configured = new Date(
     Date.now() + configuredMinutes * 60_000 + CHECKOUT_STAMP_MARGIN_MS
   );
   const draftExpiry = new Date(draftExpiresAt);
-  // A draft with less than Stripe's own floor left cannot open ANY session.
-  if (draftExpiry.getTime() - Date.now() < STRIPE_MIN_CHECKOUT_WINDOW_MS + CHECKOUT_STAMP_MARGIN_MS) {
+  // The floor INCLUDES the reuse budget, because the value actually stamped
+  // is min(configured, draftExpiry): raising only the configured branch left
+  // a draft in its last 40 minutes stamping barely above Stripe's floor, so
+  // the reuse window collapsed to seconds again for exactly those checkouts
+  // - the five-second window round 11 believed it had closed (#278 r12).
+  if (
+    draftExpiry.getTime() - Date.now() <
+    STRIPE_MIN_CHECKOUT_WINDOW_MS +
+      CHECKOUT_REUSE_BUDGET_MINUTES * 60_000 +
+      CHECKOUT_STAMP_MARGIN_MS
+  ) {
     throw Object.assign(
       new Error('Draft expires too soon to open a safe checkout. Please create a new preview.'),
       { code: 'DRAFT_TOO_CLOSE_TO_EXPIRY' }
@@ -391,7 +395,15 @@ function productSnapshot(product: CommerceProductConfig): Record<string, unknown
   return {
     name: product.name,
     description: product.description,
-    mailType: product.mailType
+    mailType: product.mailType,
+    // The price id belongs in the snapshot because it is the field Stripe
+    // charges from: without it, a checkout for a reused row took its AMOUNT
+    // from the row and its PRICE ID from a live catalog read, so a repoint
+    // between insert and session-create opened a session on the new Price
+    // while the row recorded the old figure - the customer pays one number,
+    // the row holds another, and the paid-amount check files a legitimate
+    // purchase as PAYMENT_AMOUNT_MISMATCH (#278 round 12).
+    priceId: product.priceId
   };
 }
 
@@ -436,7 +448,7 @@ async function recordOrderEvent(
  * forever (the pack INSERT omits checkout_expires_at, and the only sweeper for
  * session-less rows compares `checkout_expires_at <= NOW()`, which is never
  * true for NULL), and it blocks a JIT draft from prepaid sending for the whole
- * ~30 minute window behind a "checkout in progress" that does not exist.
+ * checkout window behind a "checkout in progress" that does not exist.
  *
  * So a terminal fault cancels the order and records the transition. Introduced
  * with the price-drift guard (#275): making that guard fire deterministically
@@ -665,6 +677,14 @@ async function prepareJitOrder(
         code: 'DRAFT_NOT_OWNED'
       });
     }
+    if (draft.status === 'expired') {
+      // Distinguished from the generic invalid-state throw: the sweeper flips
+      // aged drafts to 'expired', and reporting those as DRAFT_INVALID_STATE
+      // told the customer the draft had "already been sent or cancelled" -
+      // false, and contradicting the message the SAME draft got one sweep
+      // cycle earlier from the expiry check below (#278 round 12).
+      throw Object.assign(new Error('Draft has expired'), { code: 'DRAFT_EXPIRED' });
+    }
     if (draft.status !== 'pending') {
       throw Object.assign(new Error(`Draft is ${draft.status}`), {
         code: 'DRAFT_INVALID_STATE'
@@ -703,7 +723,7 @@ async function prepareJitOrder(
         // Stripe and left pending - the customer could not open a checkout
         // for that draft until the row finally aged out (#278 round 10).
         new Date(existing.checkout_expires_at).getTime() <=
-          Date.now() + STRIPE_MIN_CHECKOUT_WINDOW_MS &&
+          Date.now() + STRIPE_MIN_CHECKOUT_WINDOW_MS + CHECKOUT_STAMP_MARGIN_MS &&
         !existing.stripe_checkout_session_id
       ) {
         // The audit trail distinguishes the two: a row still inside its own
@@ -713,9 +733,19 @@ async function prepareJitOrder(
         const past = new Date(existing.checkout_expires_at).getTime() <= Date.now();
         await client.query(
           `UPDATE orders SET status = 'cancelled',
-             last_error_code = $2, updated_at = NOW()
+             last_error_code = $2, last_error = $3, updated_at = NOW()
            WHERE order_id = $1`,
-          [existing.order_id, past ? 'CHECKOUT_EXPIRED' : 'CHECKOUT_WINDOW_TOO_SHORT']
+          [
+            existing.order_id,
+            past ? 'CHECKOUT_EXPIRED' : 'CHECKOUT_WINDOW_TOO_SHORT',
+            // The PAIR, like every other code-setting path here. Writing only
+            // the code left the previous failure's message beside it, so the
+            // two columns described different events - in the branch added to
+            // make order history honest (#278 round 12).
+            past
+              ? 'Checkout window expired before a session was opened'
+              : 'Checkout window too short for Stripe to open a session'
+          ]
         );
         await recordOrderEvent(
           client,
@@ -883,12 +913,17 @@ export async function createJitCheckout(
   // with a transient class, leaving the just-inserted row stranded in
   // checkout_pending. createPackCheckout has always snapshotted (#278 r11).
   const snapshot = prepared.order.product_snapshot;
+  const base = getJitProductConfig(mailType);
   const product = {
-    ...getJitProductConfig(mailType),
+    ...base,
     amountCents: prepared.order.amount_cents,
     currency: prepared.order.currency,
-    ...(snapshot.name ? { name: String(snapshot.name) } : {}),
-    ...(snapshot.description ? { description: String(snapshot.description) } : {})
+    // The price id from the SAME row as the amount. Rows written before this
+    // field was snapshotted fall back to the live value, which is the old
+    // behaviour rather than a new failure mode.
+    priceId: snapshot.priceId ? String(snapshot.priceId) : base.priceId,
+    name: snapshot.name ? String(snapshot.name) : base.name,
+    description: snapshot.description ? String(snapshot.description) : base.description
   };
   const urls = jitReturnUrls(prepared.order.order_id);
   const checkout = await createJitCheckoutSession({

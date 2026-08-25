@@ -167,16 +167,6 @@ export interface ConfiguredProduct {
  * stale or placeholder price id must not be resolved, and must never be able to
  * fail readiness (#278 review).
  */
-/**
- * THE ConfiguredProduct construction. Four hand-rolled copies of this literal
- * stood here (two in the table builder, two in the single-product accessor),
- * and priceCatalog keys every staleness decision on those two functions
- * agreeing: configSignature and memoMatchesConfiguration read one, pruneStale
- * reads the other. A field added to one copy and missed in the other makes
- * the single-product and full-table encodings of the same row disagree, and
- * memos are then validated by one and pruned by the other - the asymmetry
- * that produced the round-6 bug (#278 round 9).
- */
 export function credentialFingerprint(env: NodeJS.ProcessEnv = process.env): string {
   const key = (env.STRIPE_SECRET_KEY ?? '').trim();
   if (!key) return 'unset';
@@ -187,6 +177,16 @@ export function credentialFingerprint(env: NodeJS.ProcessEnv = process.env): str
   return createHash('sha256').update(key).digest('hex').slice(0, 16);
 }
 
+/**
+ * THE ConfiguredProduct construction. Four hand-rolled copies of this literal
+ * stood here (two in the table builder, two in the single-product accessor),
+ * and priceCatalog keys every staleness decision on those two functions
+ * agreeing: configSignature and memoMatchesConfiguration read one, pruneStale
+ * reads the other. A field added to one copy and missed in the other makes
+ * the single-product and full-table encodings of the same row disagree, and
+ * memos are then validated by one and pruned by the other - the asymmetry
+ * that produced the round-6 bug (#278 round 9).
+ */
 function configuredRow(
   definition: { productCode: string; priceEnv: string; expectedAmountCents: number },
   group: ConfiguredProduct['group'],

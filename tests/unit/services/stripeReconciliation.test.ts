@@ -85,11 +85,13 @@ describe('background Stripe budget (#278)', () => {
     expect(mockRefundsList).toHaveBeenCalledTimes(1);
   });
 
-  it('does not raise a false amount_mismatch for a padded legacy currency', async () => {
-    // The fulfilment gate trims and this audit did not, over the SAME
-    // orders.currency column - so a row credited correctly was reported here
-    // as a high-severity mismatch telling the operator not to fulfil it, a
-    // false alarm inside the audit that finds real ones (#278 round 11).
+  it('judges currency by one policy, whatever case Stripe returns', async () => {
+    // NOT the padded-legacy-row story round 11 told: orders.currency is
+    // VARCHAR(3), so a padded value cannot be stored, and that test padded
+    // both sides and passed with the fix reverted. What is real and worth
+    // pinning is that the audit and the fulfilment gate judge this column by
+    // the same normalizer, so an upper-case Stripe currency against a
+    // lower-case row is not a discrepancy (#278 round 12).
     vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_reconciliation');
     mockSessionsList.mockResolvedValueOnce({
       data: [{
@@ -98,7 +100,7 @@ describe('background Stripe budget (#278)', () => {
         client_reference_id: 'order-padded',
         payment_status: 'paid',
         amount_total: 500,
-        currency: 'USD ',
+        currency: 'USD',
         created: Math.floor(Date.now() / 1000)
       }],
       has_more: false
@@ -117,7 +119,7 @@ describe('background Stripe budget (#278)', () => {
             user_id: 'user-1',
             credits: 4,
             amount_cents: 500,
-            currency: 'usd '
+            currency: 'usd'
           }]
         };
       }

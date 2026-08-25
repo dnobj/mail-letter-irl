@@ -22,6 +22,11 @@ describe('friendlyCheckoutError terminality (#278)', () => {
 
     expect(friendly.message).not.toMatch(/try again/i);
     expect(friendly.message).toMatch(/support/i);
+    // And the message is SERVER-AUTHORED: forwarding the upstream text
+    // carried the internal block label (users.sends_blocked_reason) to the
+    // customer, the one exemption in a function whose job is producing
+    // customer-safe copy (#278 round 12).
+    expect(friendly.message).not.toMatch(/fraud_review/);
   });
 
   it('drops a non-string carried class instead of passing it on', () => {

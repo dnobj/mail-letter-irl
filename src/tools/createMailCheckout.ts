@@ -75,11 +75,12 @@ export function friendlyCheckoutError(error: unknown): Error {
       // default branch replaced it with retry advice no retry can honour,
       // and dropped the "contact support" the customer actually needs
       // (#278 round 11).
-      return friendly(
-        error instanceof Error && error.message
-          ? error.message
-          : 'Sending is disabled on this account. Please contact support.'
-      );
+      // A FIXED string, like every other branch. Forwarding the upstream
+      // message was the one exemption in the function whose job is producing
+      // customer-safe text, and it carried the internal block label
+      // (users.sends_blocked_reason, e.g. "payment_disputed") to the end user
+      // (#278 round 12).
+      return friendly('Sending is disabled on this account. Please contact support.');
     case 'DRAFT_INVALID_STATE':
       return friendly(
         'That draft can no longer be paid for - it has already been sent or cancelled. ' +

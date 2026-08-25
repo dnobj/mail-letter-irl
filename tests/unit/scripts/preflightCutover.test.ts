@@ -190,6 +190,12 @@ describe('diffManifest', () => {
     const diff = diffManifest(withoutJitFlag, { environment: 'production', service: 'api' });
 
     expect(diff.advisory.map(gap => gap.entry.name)).toContain('JIT_CURRENCY');
+    // ...and the note states the REAL state. Round 11's note asserted
+    // "because JIT_PURCHASE_ENABLED is set" in exactly this case, where the
+    // flag is absent - the false-note class round 9 fixed on the required
+    // branch, reintroduced on the advisory one (#278 round 12).
+    const note = diff.advisory.find(gap => gap.entry.name === 'JIT_CURRENCY')?.note ?? '';
+    expect(note).toContain('not set here');
     // Visibility only - the gate itself stays green.
     expect(diff.missing.map(gap => gap.entry.name)).not.toContain('JIT_CURRENCY');
   });

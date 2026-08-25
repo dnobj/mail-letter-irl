@@ -581,6 +581,149 @@ describe('commerceService', () => {
     }
   });
 
+  it('refuses a draft too close to expiry to carry a reusable window', async () => {
+    // The stamped value is min(configured, draftExpiry), so raising only the
+    // configured branch left a draft in its last 40 minutes stamping barely
+    // above Stripe's floor - the seconds-wide reuse window round 11 believed
+    // it had closed, still open for exactly those checkouts (#278 round 12).
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit', amountCents: 499,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          // Past Stripe's 30-minute floor, inside the floor plus the reuse
+          // budget: a session could be opened, but not a reusable one.
+          expires_at: new Date(Date.now() + 35 * 60_000)
+        }]
+      })
+      .mockResolvedValue({ rows: [] });
+
+    await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+      .rejects.toMatchObject({ code: 'DRAFT_TOO_CLOSE_TO_EXPIRY' });
+  });
+
+  it('reports an EXPIRED draft as expired, not as already sent', async () => {
+    // The sweeper flips aged drafts to 'expired', and the generic
+    // invalid-state throw told the customer it had "already been sent or
+    // cancelled" - false, and contradicting what the same draft got one
+    // sweep cycle earlier (#278 round 12).
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'expired',
+          expires_at: new Date(Date.now() + 6 * 60 * 60_000)
+        }]
+      })
+      .mockResolvedValue({ rows: [] });
+
+    await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+      .rejects.toMatchObject({ code: 'DRAFT_EXPIRED' });
+  });
+
+  it('records WHY a live row was retired, in both audit columns', async () => {
+    // A row inside Stripe's floor has not expired, and saying so in order
+    // history is a statement an operator acts on. Round 11 also wrote only
+    // the code, leaving the previous failure's message beside it, so the two
+    // columns described different events (#278 round 12).
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit', amountCents: 499,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const tooShort = {
+      ...baseOrder,
+      stripe_checkout_session_id: null,
+      checkout_url: null,
+      last_error: 'Failed to create Pay & Send checkout',
+      last_error_code: 'CHECKOUT_CREATION_FAILED',
+      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 6 * 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [tooShort] })
+      .mockResolvedValue({ rows: [baseOrder] });
+    mocks.createJitSession.mockResolvedValue({
+      success: true, sessionId: 'cs-fresh', sessionUrl: 'https://s', expiresAt: new Date()
+    });
+
+    await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+    const cancel = mocks.query.mock.calls.find(([sql]) =>
+      String(sql).includes("SET status = 'cancelled'") && String(sql).includes('last_error')
+    );
+    expect(cancel).toBeDefined();
+    expect(cancel?.[1]).toContain('CHECKOUT_WINDOW_TOO_SHORT');
+    // The statement writes the PAIR: a code without its message leaves the
+    // previous failure's text beside it.
+    expect(String(cancel?.[0])).toContain('last_error = $3');
+    expect(String(cancel?.[1]?.[2])).toMatch(/too short/i);
+  });
+
+  it('charges the price id recorded on the row, not a later catalog read', async () => {
+    // The amount came from the row while the price id came from a live read,
+    // so a repoint between insert and session-create opened a session on the
+    // NEW Price against the OLD recorded amount - the customer pays one
+    // figure, the row holds another, and a legitimate purchase is filed as
+    // PAYMENT_AMOUNT_MISMATCH (#278 round 12).
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit-REPOINTED', amountCents: 599,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const reusable = {
+      ...baseOrder,
+      amount_cents: 499,
+      product_snapshot: { ...baseOrder.product_snapshot, priceId: 'price-jit-AS-SOLD' },
+      stripe_checkout_session_id: 'cs-existing',
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 90 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 6 * 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [reusable] })
+      .mockResolvedValue({ rows: [reusable] });
+    mocks.createJitSession.mockResolvedValue({
+      success: true, sessionId: 'cs-x', sessionUrl: 'https://s', expiresAt: new Date()
+    });
+
+    await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+    expect(mocks.createJitSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        product: expect.objectContaining({
+          priceId: 'price-jit-AS-SOLD',
+          amountCents: 499
+        })
+      })
+    );
+  });
+
   it('refuses to reuse a sessionless order too close to expiry for Stripe', async () => {
     // Stripe rejects a Checkout Session whose expires_at is under 30 minutes
     // away, and a reused sessionless row forwards its stored expiry verbatim.
@@ -764,7 +907,7 @@ describe('commerceService', () => {
         productCode: 'jit-letter',
         rule: 'price.amount_mismatch',
         diagnosticClass: 'configuration_error',
-        detail: 'expected 499, stripe 599'
+        detail: 'expected 499 / stripe 599'
       });
       getSendEligibility(0, 2, 'letter'); // a DIFFERENT fault: logs
 
@@ -774,7 +917,7 @@ describe('commerceService', () => {
         .filter(line => line.includes('"event":"commerce.pay_and_send_unpriced"'));
       expect(lines).toHaveLength(2);
       // and the figures reach the operator on the quote surface too
-      expect(lines[1]).toContain('expected 499, stripe 599');
+      expect(lines[1]).toContain('expected 499 / stripe 599');
     } finally {
       diag.mockRestore();
       clearDiagnosticChangeSlot('commerce.pay_and_send_unpriced:jit-letter');

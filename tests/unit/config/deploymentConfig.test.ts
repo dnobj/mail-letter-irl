@@ -121,9 +121,13 @@ describe('validateDeploymentConfig in production', () => {
 
     const validation = validateDeploymentConfig(bothUnset, 'server');
 
-    expect(
-      validation.findings.filter(f => f.rule === 'stripe.currency_unset')
-    ).toHaveLength(1);
+    const [finding] = validation.findings.filter(f => f.rule === 'stripe.currency_unset');
+    expect(finding).toBeDefined();
+    // ...and it names EVERY family that inherits the unset value. The round-10
+    // dedupe deleted the Pay & Send half of the diagnosis instead of widening
+    // the survivor, so an operator fixed packs and still had Pay & Send
+    // failing on a fault nothing had mentioned (#278 rounds 11-12).
+    expect(finding.message).toMatch(/Pay & Send/);
   });
 
   it('still names JIT_CURRENCY when only IT is unset', () => {
@@ -137,7 +141,14 @@ describe('validateDeploymentConfig in production', () => {
 
     const validation = validateDeploymentConfig(jitOnly, 'server');
 
-    expect(validation.findings.filter(f => f.rule === 'stripe.currency_unset')).toHaveLength(1);
+    const [finding] = validation.findings.filter(f => f.rule === 'stripe.currency_unset');
+    expect(finding).toBeDefined();
+    // The message follows the predicate: this branch requires STRIPE_CURRENCY
+    // to be SET, so text asserting it is unset - and naming usd when the
+    // inherited currency is something else - would send a non-USD operator to
+    // create USD Prices and earn a terminal mismatch (#278 round 12).
+    expect(finding.message).not.toMatch(/neither is STRIPE_CURRENCY/);
+    expect(finding.message).toMatch(/usd/);
   });
 
   it('accepts a completely configured production environment with no findings', () => {

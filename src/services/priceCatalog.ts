@@ -61,7 +61,10 @@ export interface ResolvedPrice {
   readonly priceId: string;
   readonly unitAmount: number;
   readonly currency: string;
-  /** Digest of the credential this was resolved under - see credentialFingerprint. */
+  /**
+   * Digest of the credential this was resolved under, copied from the
+   * ConfiguredProduct row (products.ts owns the digest).
+   */
   readonly credential: string;
 }
 
@@ -385,19 +388,35 @@ export function invalidateResolvedPrice(productCode: string, reason: string): vo
   // a warn line each time. One invalidation is all the archived-Price case
   // ever needs: its re-read records price.inactive and the terminal ladder
   // takes over from there (#278 round 11).
-  const now = Date.now();
-  const last = lastInvalidatedAt.get(productCode);
-  if (last !== undefined && now - last < INVALIDATION_FLOOR_MS) return;
-  lastInvalidatedAt.set(productCode, now);
-  // Counted whether or not a memo is present RIGHT NOW: the point is to
-  // invalidate the answer, including one still being computed.
+  // ALWAYS authoritative, and in this order. Round 11 put a rate-limit early
+  // return ABOVE these lines, so a throttled call dropped no memo AND never
+  // moved the counter that resolveOne's stale() reads - the two mechanisms
+  // added in that same commit to make invalidation authoritative cancelled
+  // each other out, and retries cluster inside the floor, so the throttled
+  // call was the common path. Four round-12 angles reproduced it (#278 r12).
   invalidations.set(productCode, invalidationCount(productCode) + 1);
   resolved.delete(productCode);
+  // The in-flight lookup goes too. Both flight guards key on configSignature,
+  // which an invalidation deliberately does not change, so the next ensure
+  // would otherwise JOIN a flight whose commit stale() is about to discard -
+  // re-reading nothing and leaving the caller with neither memo nor failure
+  // (#278 round 12).
+  inFlight.delete(productCode);
   // Clear the ladder too: this is new evidence, not a repeat failure, so the
   // re-read happens on the next call rather than after a cooldown.
   failures.delete(productCode);
   attempts.delete(productCode);
-  writeDiagnostic('warn', 'stripe.price_memo_invalidated', { productCode, reason });
+  // Only the LOG is throttled. Throttling the invalidation itself was the
+  // defect above; the read it triggers is bounded by the trigger instead -
+  // Stripe must name the price as the offending parameter, and a genuinely
+  // bad price records a failure on the re-read, at which point the terminal
+  // ladder owns the retry rate.
+  const now = Date.now();
+  const last = lastInvalidatedAt.get(productCode);
+  if (last === undefined || now - last >= INVALIDATION_FLOOR_MS) {
+    lastInvalidatedAt.set(productCode, now);
+    writeDiagnostic('warn', 'stripe.price_memo_invalidated', { productCode, reason });
+  }
 }
 
 export function describeUnpriced(
@@ -521,6 +540,12 @@ function pruneStale(products: readonly ConfiguredProduct[]): void {
     const product = byCode.get(code);
     if (!product || !memoMatchesConfiguration(memo, product)) resolved.delete(code);
   }
+  // The log floor is configuration-scoped like everything else here: a
+  // timestamp earned under a dead configuration survived a repoint and
+  // suppressed the first report under the new one (#278 round 12).
+  for (const code of [...lastInvalidatedAt.keys()]) {
+    if (!byCode.has(code)) lastInvalidatedAt.delete(code);
+  }
 }
 
 function recordFailure(
@@ -567,17 +592,26 @@ async function resolveOne(product: ConfiguredProduct, startedGen: number): Promi
   // the air (#278 rounds 5-6; round 5's guard checked the id only, so a
   // mid-flight currency fix could be poisoned by a verdict computed against
   // the dead snapshot).
-  const stale = (): boolean => {
+  const stale = (forSuccess = true): boolean => {
     if (generation !== startedGen) return true;
-    // An invalidation raised mid-flight discards this result: it was read
-    // before the event that disproved it (#278 round 11).
-    if (invalidationCount(product.productCode) !== startedInvalidations) return true;
+    // An invalidation raised mid-flight discards a SUCCESS: it was read
+    // before the event that disproved it. Failures are exempt - see
+    // commitFailure, which passes `false` - because a recorded fault is
+    // evidence in its own right, and discarding it downgraded a correct
+    // terminal price.inactive to the synthesized transient record, telling
+    // the customer to retry a permanently archived Price (#278 rounds 11-12).
+    if (
+      forSuccess &&
+      invalidationCount(product.productCode) !== startedInvalidations
+    ) {
+      return true;
+    }
     const current = getConfiguredProduct(product.productCode);
     return !current || configSignature(current) !== signature;
   };
 
   const commitFailure = (rule: string, diagnosticClass: string, detail?: string): void => {
-    if (stale()) return;
+    if (stale(false)) return;
     recordFailure(product.productCode, signature, rule, diagnosticClass, Date.now(), detail);
   };
 

@@ -402,7 +402,7 @@ Configure development and production independently:
 - `JIT_CURRENCY` (amounts come from the Stripe Prices above, not from variables).
   Pay & Send may use a different currency from the packs; each product's Price
   is validated against its own expected currency.
-- `JIT_CHECKOUT_EXPIRY_MINUTES`, `JIT_REFUND_RETRY_LIMIT`, and
+- `JIT_CHECKOUT_EXPIRY_MINUTES` (minimum 40; default 40), `JIT_REFUND_RETRY_LIMIT`, and
   `JIT_REFUND_RETRY_DELAY_SECONDS` (minimum 30; default 300)
 - `IMAGE_ENTITLEMENTS_PER_PACK_LETTER` and `IMAGE_ENTITLEMENTS_PER_JIT_ORDER`
 - `IMAGE_RESERVATION_PRE_DISPATCH_TIMEOUT_MINUTES` (default 15) and

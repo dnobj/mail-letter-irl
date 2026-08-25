@@ -1046,6 +1046,90 @@ describe('price catalog (#275 stage A)', () => {
     expect(getUnpricedProducts()).toEqual([]);
   });
 
+  it('stays authoritative on the SECOND invalidation inside the log window', async () => {
+    // Round 11 put a rate-limit early return above the counter bump, so a
+    // throttled call dropped no memo and never armed the mid-flight guard -
+    // the two mechanisms it added in one commit cancelled each other, and
+    // retries cluster inside the window, so the throttled call was the
+    // common path. Four round-12 angles reproduced it (#278 round 12).
+    setPriceRetriever(healthyRetriever());
+    await ensurePriceCatalog();
+    expect(getResolvedPriceForProduct('credit-pack-4')).not.toBeNull();
+
+    // First invalidation arms the log floor; the re-read rebuilds the memo.
+    invalidateResolvedPrice('credit-pack-4', 'first');
+    await ensurePriceCatalog('credit-pack-4');
+    expect(getResolvedPriceForProduct('credit-pack-4')).not.toBeNull();
+
+    // The Price is archived and a second checkout is rejected, INSIDE the
+    // floor. The memo must still go.
+    invalidateResolvedPrice('credit-pack-4', 'second');
+
+    expect(getResolvedPriceForProduct('credit-pack-4')).toBeNull();
+  });
+
+  it('re-reads Stripe after an invalidation instead of joining the doomed flight', async () => {
+    // Both flight guards key on configSignature, which an invalidation does
+    // not change, so the next ensure joined a flight whose commit stale() was
+    // about to discard: no re-read, and the caller left with neither memo nor
+    // failure - the round-6 defect the flight signature exists to prevent
+    // (#278 round 12).
+    let release: (value: unknown) => void = () => undefined;
+    const gate = new Promise(resolve => {
+      release = resolve;
+    });
+    const retriever = vi.fn(async (priceId: string) => {
+      if (priceId === 'price_starter') {
+        await gate;
+        return priceFixture({ id: priceId, unit_amount: 500 });
+      }
+      return priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] });
+    });
+    setPriceRetriever(retriever);
+    const starterReads = () => retriever.mock.calls.filter(c => c[0] === 'price_starter').length;
+
+    const flight = ensurePriceCatalog('credit-pack-4');
+    invalidateResolvedPrice('credit-pack-4', 'archived');
+    expect(starterReads()).toBe(1);
+
+    // WHILE the first is still in the air: joining it would re-read nothing,
+    // because its commit is about to be discarded.
+    const second = ensurePriceCatalog('credit-pack-4');
+    expect(starterReads()).toBe(2);
+
+    release(undefined);
+    await Promise.all([flight, second]);
+  });
+
+  it('keeps a terminal verdict read AFTER the archival, instead of discarding it', async () => {
+    // The counter check was applied to failure commits too, so a correct
+    // price.inactive read after the archival was thrown away and the
+    // customer was told to retry a permanently archived Price (#278 r12).
+    let release: (value: unknown) => void = () => undefined;
+    const gate = new Promise(resolve => {
+      release = resolve;
+    });
+    setPriceRetriever(
+      vi.fn(async (priceId: string) => {
+        if (priceId === 'price_starter') {
+          await gate;
+          return priceFixture({ id: priceId, unit_amount: 500, active: false });
+        }
+        return priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] });
+      })
+    );
+
+    const flight = ensurePriceCatalog('credit-pack-4');
+    invalidateResolvedPrice('credit-pack-4', 'archived');
+    release(undefined);
+    await flight;
+
+    expect(describeUnpriced('credit-pack-4')).toMatchObject({
+      rule: 'price.inactive',
+      diagnosticClass: 'configuration_error'
+    });
+  });
+
   it('lets an invalidation raised MID-FLIGHT discard the result it disproves', async () => {
     // The archived-Price remedy rests on invalidation being authoritative.
     // stale() checked only generation and signature, neither of which an
