@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { getConfiguredProduct } from '../../../src/config/products.js';
 import {
   APPROVED_LIVE_PROVIDERS,
   ENV_VAR_MANIFEST,
@@ -111,6 +112,24 @@ describe('validateDeploymentConfig in production', () => {
     expect(validation.warnings).toEqual([]);
   });
 
+  it('accepts a padded price id, because the runtime that resolves it trims', () => {
+    // #275 made products.ts trim every price id; this validator judged the
+    // RAW value, so a pasted leading space - the exact artifact the round-5
+    // STRIPE_CURRENCY trim cites - became a production BOOT error for an id
+    // the catalog resolves and sells. Development booted and sold, promotion
+    // crash-looped the API, and preflight (names only) stayed green
+    // (#278 round 9).
+    const padded = env({ STRIPE_PRICE_STARTER: ' price_starter_padded ' });
+
+    const validation = validateDeploymentConfig(padded, 'server');
+
+    expect(
+      validation.findings.filter(f => f.rule === 'stripe.pack_price_incomplete')
+    ).toEqual([]);
+    // The same value the catalog will resolve against.
+    expect(getConfiguredProduct('credit-pack-4', padded)?.priceId).toBe('price_starter_padded');
+  });
+
   it.each([
     // [description, overrides, expected error rule]
     ['missing DATABASE_URL', { DATABASE_URL: undefined }, 'presence.database_url'],
@@ -120,6 +139,8 @@ describe('validateDeploymentConfig in production', () => {
     ['malformed webhook secret', { STRIPE_WEBHOOK_SECRET: 'not_a_webhook_secret' }, 'stripe.webhook_secret_malformed'],
     ['missing pack price', { STRIPE_PRICE_STARTER: undefined }, 'stripe.pack_price_incomplete'],
     ['pack price without price_ prefix', { STRIPE_PRICE_REGULAR: 'prod_something' }, 'stripe.pack_price_incomplete'],
+    // NOT here: a padded price id. The catalog trims before resolving, so it
+    // is sellable - see the whitespace pin below.
     ['unset provider (implicit dummy)', { LETTER_PROVIDER: undefined }, 'provider.live_provider_required'],
     ['dummy provider', { LETTER_PROVIDER: 'dummy' }, 'provider.live_provider_required'],
     ['diy provider', { LETTER_PROVIDER: 'diy' }, 'provider.live_provider_required'],

@@ -166,8 +166,36 @@ describe('diffManifest', () => {
     expect(diff.missing.map(gap => gap.entry.name)).not.toContain('STRIPE_CURRENCY');
     expect(diff.advisory.map(gap => gap.entry.name)).toContain('STRIPE_CURRENCY');
     for (const gap of diff.advisory) expect(gap.note).toContain(gap.entry.name);
+    // An advisory note NEVER claims the variable is required: these print
+    // under "optional (defaults apply)", and JIT_CURRENCY - advisory AND
+    // carrying the when-jit-enabled condition - told the operator on a
+    // normal production run that one variable was both (#278 round 9).
+    for (const gap of diff.advisory) expect(gap.note).not.toContain('required because');
     // The gate itself stays green.
     expect(diff.missing).toEqual([]);
+  });
+
+  it('never tells the operator an OPTIONAL variable is required', () => {
+    // The reproduction is a normal production cutover: Railway sets
+    // JIT_PURCHASE_ENABLED (the shipped config sets it to 'false', and the
+    // diff keys on the NAME being present) and leaves JIT_CURRENCY unset -
+    // correct, since jitCurrency() falls back to STRIPE_CURRENCY. The gate
+    // exits 0 and prints JIT_CURRENCY under "optional (defaults apply)"
+    // carrying "[required because JIT_PURCHASE_ENABLED is set]": the only
+    // per-variable explanation the gate emits, and it said both at once
+    // (#278 round 9).
+    const withJitFlag = [...FULL_PRODUCTION_NAMES, 'JIT_PURCHASE_ENABLED'].filter(
+      name => name !== 'JIT_CURRENCY'
+    );
+
+    const diff = diffManifest(withJitFlag, { environment: 'production', service: 'api' });
+
+    const jitCurrency = diff.advisory.find(gap => gap.entry.name === 'JIT_CURRENCY');
+    expect(jitCurrency, 'JIT_CURRENCY is advisory and condition-carrying').toBeDefined();
+    expect(jitCurrency?.note).not.toContain('required because');
+    expect(jitCurrency?.note).toContain('JIT_PURCHASE_ENABLED');
+    // And the gate itself is unaffected.
+    expect(diff.missing.map(gap => gap.entry.name)).not.toContain('JIT_CURRENCY');
   });
 
   it('lists advisory variables when diffing DEVELOPMENT too', () => {

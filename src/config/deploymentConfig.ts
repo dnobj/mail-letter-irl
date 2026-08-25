@@ -541,7 +541,16 @@ function validateStripe(
   if (mode !== 'test' && !adminMode) {
     for (const price of PACK_PRICE_ENV_VARS) {
       const problems: string[] = [];
-      const priceValue = env[price];
+      // TRIMMED, exactly like the catalog that will resolve it: #275 made
+      // products.ts trim every price id, and judging the raw value here made
+      // a pasted leading space a production BOOT error for an id the runtime
+      // resolves and sells. Development boots and sells packs normally,
+      // promotion crash-loops the API, and the message tells the operator
+      // that a value plainly beginning with price_ is not a price id -
+      // preflight is names-only, so nothing between them catches it. The
+      // same trim-vs-raw split round 5 fixed for STRIPE_CURRENCY and round 7
+      // for order currencies (#278 round 9).
+      const priceValue = (env[price] ?? '').trim();
       if (!priceValue) problems.push(`${price} is required`);
       else if (!priceValue.startsWith('price_')) problems.push(`${price} must be a Stripe price id (price_...)`);
       for (const message of problems) {
@@ -577,7 +586,8 @@ function validateStripe(
     if (env.JIT_PURCHASE_ENABLED === 'true') {
       for (const price of JIT_PRICE_ENV_VARS) {
         const problems: string[] = [];
-        const priceValue = env[price];
+        // Trimmed, like the catalog - see the pack loop above (#278 round 9).
+        const priceValue = (env[price] ?? '').trim();
         if (!priceValue) problems.push(`${price} is required when JIT_PURCHASE_ENABLED=true`);
         else if (!priceValue.startsWith('price_')) problems.push(`${price} must be a Stripe price id (price_...)`);
         for (const message of problems) {

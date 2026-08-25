@@ -106,12 +106,24 @@ export function diffManifest(
       const aliasNote = entry.aliases?.length
         ? ` (or one of: ${entry.aliases.join(', ')})`
         : '';
-      const conditionNote =
+      // The note follows the LIST this entry lands in. An advisory entry
+      // prints under "optional variable(s) unset (defaults apply)", so a
+      // "[required because ...]" suffix told the operator that one variable
+      // was simultaneously required and optional-with-a-working-default -
+      // and this note is the only per-variable explanation the gate emits.
+      // It fired on a normal production cutover, because JIT_CURRENCY is
+      // advisory AND carries the when-jit-enabled condition (#278 round 9).
+      const conditionSubject =
         entry.condition === 'when-jit-enabled'
-          ? ' [required because JIT_PURCHASE_ENABLED is set]'
+          ? 'JIT_PURCHASE_ENABLED'
           : entry.condition === 'when-static-dcr'
-            ? ' [required because LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY is set]'
-            : '';
+            ? 'LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY'
+            : null;
+      const conditionNote = conditionSubject
+        ? entry.advisory
+          ? ` [parity check because ${conditionSubject} is set]`
+          : ` [required because ${conditionSubject} is set]`
+        : '';
       const gap = { entry, note: `${entry.name}${aliasNote}${conditionNote}` };
       if (entry.advisory) advisory.push(gap);
       else missing.push(gap);
