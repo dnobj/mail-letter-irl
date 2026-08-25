@@ -457,11 +457,13 @@ describe('price catalog (#275 stage A)', () => {
     expect(powerReads()).toBe(2);
   });
 
-  it('retries a TRANSIENT failure sooner than a terminal one, but still backs off', async () => {
-    // A blip must self-heal quickly or /readyz kicking a re-attempt stops
-    // meaning anything - but a FLAT transient cooldown is only safe if every
-    // permanent fault is classed terminal, and a revoked key is not. So
-    // transient backs off too, to a much lower ceiling (#278 review round 3).
+  it('retries a TRANSIENT failure within seconds, backing off as it persists', async () => {
+    // A blip must self-heal fast - readiness holds an unready verdict for one
+    // second, and a 30s first cooldown made its "self-heals within the TTL"
+    // docblock arithmetically false while refusing every purchase of the
+    // affected product for the duration (#278 review round 4). But flat-fast
+    // is only safe if every permanent fault is classed terminal, and a
+    // revoked key is not - so the ladder still doubles toward its ceiling.
     vi.useFakeTimers();
     const retriever = vi.fn(async (priceId: string) => {
       if (priceId === 'price_power') {
@@ -475,20 +477,45 @@ describe('price catalog (#275 stage A)', () => {
     await ensurePriceCatalog();
     expect(powerReads()).toBe(1);
 
-    // First retry is still fast: 30s.
-    vi.advanceTimersByTime(31_000);
+    // First retry after ~2s, not 30.
+    vi.advanceTimersByTime(2_100);
     await ensurePriceCatalog();
     expect(powerReads()).toBe(2);
 
-    // Second waits 60s, so 31s more is not enough...
-    vi.advanceTimersByTime(31_000);
+    // The ladder doubled to 4s, so another 2.1s is not enough...
+    vi.advanceTimersByTime(2_100);
     await ensurePriceCatalog();
     expect(powerReads()).toBe(2);
 
-    // ...but it does come back, unlike a terminal fault at this point.
-    vi.advanceTimersByTime(31_000);
+    // ...but it comes back, unlike a terminal fault at this point.
+    vi.advanceTimersByTime(2_100);
     await ensurePriceCatalog();
     expect(powerReads()).toBe(3);
+  });
+
+  it('lets a one-blip warmup self-heal on the first purchase seconds later', async () => {
+    // The concrete customer story behind the ladder base: Stripe hiccups for
+    // one second during the post-listen warmup, and the first customer
+    // arrives three seconds later. With the old 30s cooldown their purchase
+    // was refused; origin/dev (which never cached a failed lookup) would have
+    // served them, so this pins the regression closed (#278 review round 4).
+    vi.useFakeTimers();
+    let blip = true;
+    setPriceRetriever(
+      vi.fn(async (priceId: string) => {
+        if (blip) throw Object.assign(new Error('down'), { type: 'StripeConnectionError' });
+        return priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] });
+      })
+    );
+
+    await ensurePriceCatalog(); // the warmup, mid blip
+    expect(getResolvedPriceForProduct('credit-pack-4')).toBeNull();
+
+    blip = false;
+    vi.advanceTimersByTime(3_000);
+    await ensurePriceCatalog('credit-pack-4'); // the customer
+
+    expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
   });
 
   it('restarts the ladder when a fault changes kind', async () => {
@@ -509,16 +536,17 @@ describe('price catalog (#275 stage A)', () => {
     setPriceRetriever(retriever);
     const powerReads = () => retriever.mock.calls.filter(call => call[0] === 'price_power').length;
 
-    // Four transient failures: the ladder is well up (30s, 60s, 120s, 240s).
-    for (const wait of [0, 31_000, 61_000, 121_000]) {
+    // Four transient failures: the ladder is well up (2s, 4s, 8s, 16s).
+    for (const wait of [0, 2_100, 4_100, 8_100]) {
       vi.advanceTimersByTime(wait);
       await ensurePriceCatalog();
     }
     expect(powerReads()).toBe(4);
 
     // The outage clears and the real fault appears: a different kind, so the
-    // ladder starts over at 30s rather than inheriting a 4-deep transient one.
-    vi.advanceTimersByTime(241_000);
+    // ladder starts over at the terminal base (30s) rather than inheriting a
+    // 4-deep transient count.
+    vi.advanceTimersByTime(16_100);
     mode = 'archived';
     await ensurePriceCatalog();
     expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
@@ -616,6 +644,194 @@ describe('price catalog (#275 stage A)', () => {
     expect(await settlesPromptly(ensurePriceCatalog('credit-pack-4'))).toBe(true);
     // And a caller that genuinely needs the hanging product still waits for it.
     expect(await settlesPromptly(ensurePriceCatalog('jit-letter'))).toBe(false);
+  });
+
+  it('refuses every pack tier when the price env vars are transposed', async () => {
+    // The round-4 headline. Deleting STRIPE_*_AMOUNT_CENTS removed the only
+    // two-source check on price-id CORRECTNESS: transposed ids are each
+    // distinct, active, one-time and in band, so every per-price rule passes,
+    // and order.amount_cents is now written FROM the resolved price - the
+    // paid-amount comparison compares Stripe against itself. 100 credits sold
+    // for $5.00 with /readyz green. Credits are the second source: more
+    // credits must cost strictly more, and never more per credit.
+    setPriceRetriever(
+      healthyRetriever({
+        price_starter: { unit_amount: 9000 }, // the Power price
+        price_power: { unit_amount: 500 } // the Starter price
+      })
+    );
+
+    await ensurePriceCatalog();
+
+    for (const productCode of ['credit-pack-4', 'credit-pack-10', 'credit-pack-100']) {
+      expect(getResolvedPriceForProduct(productCode), productCode).toBeNull();
+      expect(getPriceResolutionFailure(productCode), productCode).toMatchObject({
+        rule: 'price.pack_tier_ordering',
+        diagnosticClass: 'configuration_error',
+        terminal: true
+      });
+    }
+    // And readiness must see it: an inconsistent tier table is not sellable,
+    // so a memoized-but-refused tier cannot read as priced on /readyz.
+    expect(
+      getUnpricedProducts().map(f => `${f.productCode}:${f.rule}`).sort()
+    ).toEqual([
+      'credit-pack-100:price.pack_tier_ordering',
+      'credit-pack-10:price.pack_tier_ordering',
+      'credit-pack-4:price.pack_tier_ordering'
+    ]);
+  });
+
+  it('refuses a tier pair whose per-credit price INCREASES with size', async () => {
+    // A subtler repoint than a transposition: totals still ascend, but the
+    // bigger pack costs more per credit - bulk got worse, which no sane tier
+    // pricing does. Only the violating pair is refused.
+    setPriceRetriever(
+      healthyRetriever({
+        price_starter: { unit_amount: 500 }, // 125.0 cents/credit
+        price_regular: { unit_amount: 1300 } // 130.0 cents/credit - worse
+      })
+    );
+
+    await ensurePriceCatalog();
+
+    expect(getResolvedPriceForProduct('credit-pack-4')).toBeNull();
+    expect(getResolvedPriceForProduct('credit-pack-10')).toBeNull();
+    expect(getPriceResolutionFailure('credit-pack-10')).toMatchObject({
+      rule: 'price.pack_tier_ordering'
+    });
+    // The uninvolved tier still prices: the verdict is derived pairwise at
+    // read time, so a tier that orders correctly against every resolved
+    // neighbour is not punished for someone else's bad pair.
+    expect(getResolvedPriceForProduct('credit-pack-100')?.unitAmount).toBe(9000);
+  });
+
+  it('reports a repointed price id as unpriced WITHOUT waiting for a resolver pass', async () => {
+    // getUnpricedProducts checked bare memo membership, so after a repoint
+    // /readyz reported ok - and because its re-attempt kick is gated on
+    // !pricesOk, the false green also suppressed the self-heal (#278 r4).
+    setPriceRetriever(healthyRetriever());
+    await ensurePriceCatalog();
+    expect(getUnpricedProducts()).toEqual([]);
+
+    vi.stubEnv('STRIPE_PRICE_POWER', 'price_power_v2');
+
+    expect(getUnpricedProducts().map(f => f.productCode)).toEqual(['credit-pack-100']);
+  });
+
+  it('re-attempts immediately after a repoint, not after the old id cooldown', async () => {
+    // Failures and cooldowns now carry the price id they were recorded
+    // against. Without that, an operator who FIXED the configuration still
+    // waited out up to 15 minutes of 503 on the old id's terminal cooldown
+    // (#278 review round 4).
+    setPriceRetriever(
+      vi.fn(async (priceId: string) => {
+        if (priceId === 'price_power') return priceFixture({ id: priceId, active: false });
+        return priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] });
+      })
+    );
+    await ensurePriceCatalog();
+    expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
+      rule: 'price.inactive',
+      terminal: true
+    });
+
+    // Operator repoints to a healthy Price. No timers advance: the stale
+    // cooldown must not gate the fixed configuration.
+    vi.stubEnv('STRIPE_PRICE_POWER', 'price_power_v2');
+    setPriceRetriever(healthyRetriever({ price_power_v2: { unit_amount: 9000 } }));
+    await ensurePriceCatalog('credit-pack-100');
+
+    expect(getResolvedPriceForProduct('credit-pack-100')).toMatchObject({
+      priceId: 'price_power_v2',
+      unitAmount: 9000
+    });
+  });
+
+  it('looks a due product up immediately even while an unrelated lookup hangs', async () => {
+    // The single-slot batch made a due-but-unresolved product either wait out
+    // a foreign batch or - after bounded waits - return silently unresolved
+    // with no failure recorded, refusing a correctly configured purchase.
+    // Per-product flights: a caller awaits the flight resolving ITS product
+    // or starts one (#278 review round 4).
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    vi.stubEnv('STRIPE_JIT_LETTER_PRICE_ID', 'price_jit_letter');
+    vi.stubEnv('STRIPE_JIT_POSTCARD_PRICE_ID', 'price_jit_letter');
+    let hangJit = false;
+    setPriceRetriever(
+      vi.fn((priceId: string) => {
+        if (priceId === 'price_jit_letter' && hangJit) return new Promise<never>(() => {});
+        if (priceId === 'price_jit_letter') {
+          return Promise.reject(Object.assign(new Error('down'), { type: 'StripeConnectionError' }));
+        }
+        return Promise.resolve(priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] }) as never);
+      })
+    );
+    vi.useFakeTimers();
+
+    // Round one: packs resolve, JIT blips. Then the JIT lookup starts hanging.
+    await ensurePriceCatalog();
+    expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
+    hangJit = true;
+    vi.advanceTimersByTime(2_100);
+    const hungFlight = ensurePriceCatalog('jit-letter');
+    void hungFlight.catch(() => undefined);
+
+    // A repointed pack is due NOW; its lookup must not queue behind the hang.
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_v2');
+    setPriceRetriever(
+      vi.fn((priceId: string) => {
+        if (priceId === 'price_jit_letter') return new Promise<never>(() => {});
+        return Promise.resolve(
+          priceFixture({
+            id: priceId,
+            unit_amount: priceId === 'price_starter_v2' ? 500 : PACK_AMOUNTS[priceId]
+          }) as never
+        );
+      })
+    );
+    await ensurePriceCatalog('credit-pack-4');
+
+    expect(getResolvedPriceForProduct('credit-pack-4')).toMatchObject({
+      priceId: 'price_starter_v2',
+      unitAmount: 500
+    });
+  });
+
+  it('fails LOUDLY when reset left no retriever, instead of faking an outage', async () => {
+    // The previous "fail loudly" retriever threw inside the per-product try,
+    // landed in the same catch as a network error, and was recorded as a
+    // transient provider_error - byte-for-byte indistinguishable from a real
+    // Stripe outage, the safer-looking of the two verdicts (#278 round 4).
+    resetPriceCatalog();
+
+    await expect(ensurePriceCatalog()).rejects.toThrow(/no retriever injected/);
+    // And crucially: nothing was recorded as if Stripe had failed.
+    expect(getPriceResolutionFailure('credit-pack-4')).toBeNull();
+  });
+
+  it('honors a lone configured ceiling below the default floor', async () => {
+    // The knobs exist for currencies where the two-decimal defaults are
+    // wrong. Reverting BOTH bounds when a configured ceiling undercut the
+    // DEFAULT floor discarded the only value the operator set and enforced
+    // nothing they asked for (#278 review round 4).
+    // A ceiling BELOW the default floor of 50 - the shape only the inversion
+    // branch handles. unit_amount is whole yen here, so these are tiny
+    // numbers on purpose.
+    vi.stubEnv('STRIPE_CURRENCY', 'jpy');
+    vi.stubEnv('STRIPE_PRICE_MAX_UNIT_AMOUNT', '40');
+    setPriceRetriever(
+      healthyRetriever({
+        price_starter: { unit_amount: 5, currency: 'jpy' },
+        price_regular: { unit_amount: 10, currency: 'jpy' },
+        price_power: { unit_amount: 38, currency: 'jpy' }
+      })
+    );
+
+    await ensurePriceCatalog();
+
+    expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(5);
+    expect(getUnpricedProducts()).toEqual([]);
   });
 
   it('drops a stale failure when its product stops being configured', async () => {

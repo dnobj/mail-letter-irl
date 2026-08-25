@@ -153,10 +153,13 @@ function refundRetryDelaySeconds(): number {
 }
 
 /**
- * Last reported Pay & Send pricing fault, so a steady fault is logged once
- * rather than once per quote. Cleared when pricing recovers.
+ * Last reported Pay & Send pricing fault PER PRODUCT, so a steady fault is
+ * logged once rather than once per quote. A single shared slot meant letter
+ * and postcard faults evicted each other under interleaved traffic, restoring
+ * exactly the one-error-line-per-quote flood the throttle exists to prevent
+ * (#278 review round 4). Cleared per product when its pricing recovers.
  */
-let lastPayAndSendFault: string | null = null;
+const lastPayAndSendFault = new Map<string, string>();
 
 export function getSendEligibility(
   availableCredits: number,
@@ -166,7 +169,7 @@ export function getSendEligibility(
   const prepaidEligible = availableCredits >= requiredCredits;
   const product = getJitProductConfig(mailType);
   const configured = Boolean(product.priceId && product.amountCents > 0);
-  if (configured) lastPayAndSendFault = null;
+  if (configured) lastPayAndSendFault.delete(product.productCode);
   const allowedWithBalance = process.env.JIT_ALLOW_WITH_PREPAID_BALANCE === 'true';
   const available =
     isJitPurchaseEnabled() && configured && (!prepaidEligible || allowedWithBalance);
@@ -187,9 +190,9 @@ export function getSendEligibility(
     // an unconditional error line here turned one persistent config fault into
     // a continuous error stream and a permanently firing alert, scaling with
     // traffic rather than with the number of faults (#278 review round 3).
-    const signature = `${product.productCode}:${rule}:${errorClass}`;
-    if (signature !== lastPayAndSendFault) {
-      lastPayAndSendFault = signature;
+    const signature = `${rule}:${errorClass}`;
+    if (lastPayAndSendFault.get(product.productCode) !== signature) {
+      lastPayAndSendFault.set(product.productCode, signature);
       writeDiagnostic('error', 'commerce.pay_and_send_unpriced', {
         productCode: product.productCode,
         rule,
@@ -762,7 +765,8 @@ async function createLegacyPackOrder(
   session: Stripe.Checkout.Session
 ): Promise<Order | null> {
   const userId = session.metadata?.userId || session.metadata?.user_id;
-  const productCode = session.metadata?.productId || session.metadata?.product_id;
+  const productCode =
+    session.metadata?.productCode || session.metadata?.productId || session.metadata?.product_id;
   const product = productCode ? getPackProductConfig(productCode as PackProductId) : null;
   if (!userId || !product) {
     return null;
@@ -1102,7 +1106,14 @@ async function processCheckoutSessionEvent(
   // The code is already in hand - createLegacyPackOrder reads exactly this
   // metadata - so name it rather than taking the uncoded path, which forfeits
   // the memoized fast path and joins any unrelated batch (#278 review r3).
-  await ensurePriceCatalog(session.metadata?.productId || session.metadata?.product_id);
+  // productCode FIRST: it is the only key this codebase writes on a session
+  // (stripeService's metadata block); productId/product_id are legacy shapes.
+  // Reading only the legacy keys made the argument undefined for every session
+  // the current app creates - the uncoded slow path on every webhook, in front
+  // of the money transaction (#278 review round 4).
+  await ensurePriceCatalog(
+    session.metadata?.productCode || session.metadata?.productId || session.metadata?.product_id
+  );
   return transaction(async client => {
     if (!(await claimStripeEvent(client, eventId, eventType, session.id))) {
       return { duplicate: true };
@@ -2356,8 +2367,18 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
   // asynchronous payment may remain unpaid beyond its original expires_at.
   const orphaned = await query<{ order_id: string }>(
     `UPDATE orders SET status = 'cancelled', updated_at = NOW()
-     WHERE status = 'checkout_pending' AND checkout_expires_at <= NOW()
+     WHERE status = 'checkout_pending'
        AND stripe_checkout_session_id IS NULL
+       AND (
+         checkout_expires_at <= NOW()
+         -- Pack orders are inserted WITHOUT checkout_expires_at, and NULL <=
+         -- NOW() is UNKNOWN - so a pack whose session creation failed
+         -- non-terminally was a zombie this sweep could never reclaim,
+         -- stranded in checkout_pending forever with no alarm (the stuck-order
+         -- check watches paid statuses only). No session exists, so nothing
+         -- can ever pay it; a day is ample grace (#278 review round 4).
+         OR (checkout_expires_at IS NULL AND updated_at <= NOW() - INTERVAL '24 hours')
+       )
      RETURNING order_id`
   );
   expiredCheckouts += orphaned.rowCount || 0;

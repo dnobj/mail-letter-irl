@@ -115,19 +115,54 @@ describe("dashboard runtime logging privacy", () => {
     expect(logged).not.toContain("database_error");
   });
 
-  it("classifies known checkout configuration failures", async () => {
-    createPackCheckout.mockResolvedValue({ success: false, error: "STRIPE_SECRET_KEY not configured" });
+  it("answers 503 for an unpriced product, whether the fault is terminal or a blip", async () => {
+    // createPackCheckout either succeeds or THROWS - its result's `success` is
+    // the literal `true`. The previous version of this test mocked a
+    // { success: false } return the real function cannot produce, which is how
+    // the handler's dead else-branch stayed green while an unpriced pack
+    // actually fell through to a bare 500 (#278 review round 4).
+    for (const diagnosticClass of ["configuration_error", "StripeConnectionError"]) {
+      createPackCheckout.mockRejectedValue(
+        Object.assign(new Error("Amount not configured for product: credit-pack-4"), {
+          code: "PACK_AMOUNT_NOT_CONFIGURED",
+          diagnosticClass,
+          terminal: diagnosticClass === "configuration_error"
+        })
+      );
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const req = {
+        headers: {},
+        body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      };
+      const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+      await handleCreateCheckoutSession(req as never, res as never);
+
+      expect(error.mock.calls.flat().map(String).join("\n")).toContain(
+        `"errorClass":"${diagnosticClass}"`
+      );
+      expect(res.statusCode, diagnosticClass).toBe(503);
+      error.mockRestore();
+    }
+  });
+
+  it("answers 400 for an unknown product id, off the carried validation class", async () => {
+    createPackCheckout.mockRejectedValue(
+      Object.assign(new Error("Invalid product ID: credit-pack-999"), {
+        diagnosticClass: "validation_error"
+      })
+    );
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-999", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
     await handleCreateCheckoutSession(req as never, res as never);
 
-    expect(error.mock.calls.flat().map(String).join("\n")).toContain('"errorClass":"configuration_error"');
-    expect(res.statusCode).toBe(503);
+    expect(res.statusCode).toBe(400);
+    error.mockRestore();
   });
 
   it("classifies the actual user-email lookup failure as database error", async () => {

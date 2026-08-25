@@ -416,6 +416,37 @@ describe('/readyz prices check (#275 stage A)', () => {
     }
   });
 
+  it('computes the cache expiry from the clock AFTER the checks, not before', async () => {
+    // The database and routing checks can take seconds (5s pool connect
+    // timeout, a Neon wake retry). An expiry computed from the entry
+    // timestamp was already in the past by the time it was written whenever
+    // the checks took longer than the TTL - the memo dead on arrival, and
+    // /readyz re-ran two database round-trips per probe in exactly the
+    // slow-database failure mode the cache exists to bound (#278 round 4).
+    vi.useFakeTimers();
+    try {
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
+      ];
+      query.mockImplementation(async (sql: string) => {
+        // The checks themselves consume 3s - longer than the 1s unready TTL.
+        vi.advanceTimersByTime(3_000);
+        if (sql.includes('provider_routing')) return { rows: [{ mail_type: 'letter', provider: 'postgrid' }] };
+        return { rows: [{ '?column?': 1 }] };
+      });
+
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+      const callsAfterFirst = query.mock.calls.length;
+
+      // 500ms later - inside the post-checks TTL. Must serve the memo.
+      vi.advanceTimersByTime(500);
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+      expect(query.mock.calls.length).toBe(callsAfterFirst);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('caches a READY verdict for the full TTL', async () => {
     vi.useFakeTimers();
     try {

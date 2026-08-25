@@ -23,15 +23,16 @@ const stripeMocks = vi.hoisted(() => {
   // vi.mock factory below runs lazily and can use the shared class.
   return {
     sessionCreate: vi.fn(),
-    priceRetrieve: vi.fn()
+    priceRetrieve: vi.fn(),
+    refundCreate: vi.fn(),
+    refundList: vi.fn()
   };
 });
 
 vi.mock('stripe', () => stripeMockModule(stripeMocks));
 
-const { createPackCheckoutSession, createCheckoutSession } = await import(
-  '../../../src/services/stripeService.js'
-);
+const { createPackCheckoutSession, createCheckoutSession, createPaymentRefund, findPaymentRefund } =
+  await import('../../../src/services/stripeService.js');
 const { resetPriceCatalog, ensurePriceCatalog, useDefaultPriceRetriever } = await import(
   '../../../src/services/priceCatalog.js'
 );
@@ -234,15 +235,43 @@ describe('checkout pricing guards (#275)', () => {
     expect(StripeCtor.lastConstructorArgs?.[0]).toBe('sk_test_rotated');
   });
 
+  it('gives refund calls the background budget - attempts are spent before Stripe is reached', async () => {
+    // requestRefund increments refund_attempts at claim time and never rolls
+    // it back on a throw; with the shared client's interactive 10s/1 bound a
+    // slow Stripe day burned the finite retry budget without refunds.create
+    // ever succeeding, stranding a paid order in refund_pending for manual
+    // action (#278 review round 4).
+    stripeMocks.refundCreate.mockResolvedValue({ id: 're_1' });
+    stripeMocks.refundList.mockResolvedValue({ data: [] });
+
+    await createPaymentRefund('pi_1', 'order-1', 2);
+    await findPaymentRefund('pi_1', 'order-1');
+
+    expect(stripeMocks.refundCreate.mock.calls[0][1]).toMatchObject({
+      timeout: 60_000,
+      maxNetworkRetries: 2,
+      idempotencyKey: 'jit-refund:order-1:attempt:2'
+    });
+    expect(stripeMocks.refundList.mock.calls[0][1]).toMatchObject({
+      timeout: 60_000,
+      maxNetworkRetries: 2
+    });
+  });
+
   it('constructs the client with explicit timeout and retry bounds', async () => {
     // stripe-node defaults to an 80s timeout with 2 retries; on the resolution
     // path that compounded to minutes of hung boot, and on checkout it held a
     // paying customer (#277, #278 review). Deleting these options would keep
-    // every other test green - this is the only pin.
+    // every other test green - this is the only pin. The static is nulled
+    // FIRST: it survives across tests, so without this the assertion could
+    // pass on a construction some earlier test triggered (#278 round 4).
+    StripeCtor.lastConstructorArgs = null;
+    resetStripeClient();
     serveHealthyPrices();
     await ensurePriceCatalog();
 
-    const args = StripeCtor.lastConstructorArgs;
+    const args = StripeCtor.lastConstructorArgs as unknown[] | null;
+    expect(args).not.toBeNull();
     expect(args?.[1]).toMatchObject({ timeout: 10_000, maxNetworkRetries: 1 });
   });
 

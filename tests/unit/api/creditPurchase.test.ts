@@ -192,10 +192,18 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
       );
 
       resetPriceCatalog();
+      // Distinct, ascending amounts: the pack-ordering invariant (#278 round
+      // 4) revokes tiers that do not cost strictly more for more credits, so
+      // a flat one-amount fixture would be refused as a transposition.
+      const amounts: Record<string, number> = {
+        price_starter_mock: 777,
+        price_regular_mock: 1554,
+        price_power_mock: 7770
+      };
       setPriceRetriever(async priceId => ({
         id: priceId,
         active: true,
-        unit_amount: 777,
+        unit_amount: amounts[priceId] ?? 999_999,
         currency: 'usd',
         product: 'prod_starter'
       }) as never);

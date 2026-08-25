@@ -126,45 +126,18 @@ export async function handleCreateCheckoutSession(
       cancelUrl
     });
 
-    if (result.success) {
-      writeDiagnostic('info', 'credits.checkout_created');
-
-      res.json({
-        success: true,
-        orderId: result.orderId,
-        sessionId: result.sessionId,
-        sessionUrl: result.sessionUrl
-      });
-    } else {
-      // Distinguish between configuration errors and other failures
-      const errorMessage = result.error || 'Failed to create checkout session';
-      const configurationFailure =
-        errorMessage.includes('not configured') ||
-        errorMessage.includes('environment variable');
-      writeDiagnostic('error', 'credits.checkout_creation_failed', {
-        errorClass: configurationFailure ? 'configuration_error' : 'provider_error'
-      });
-      if (configurationFailure) {
-        // Configuration error - service temporarily unavailable
-        res.statusCode = 503;
-        res.json({
-          error: 'Service configuration error',
-          message: 'Payment processing is temporarily unavailable. Please try again later.'
-        });
-      } else if (errorMessage.includes('Invalid product')) {
-        // Client error - bad request
-        res.statusCode = 400;
-        res.json({
-          error: 'Invalid product'
-        });
-      } else {
-        // Other errors
-        res.statusCode = 500;
-        res.json({
-          error: 'Unable to create checkout session'
-        });
-      }
-    }
+    // createPackCheckout either succeeds or THROWS - its result type's
+    // `success` is the literal `true`, so the else-branch that used to sit
+    // here was dead code tsc could not flag, and an unpriced pack fell through
+    // to the generic catch as a bare 500 instead of the 503 the branch
+    // promised (#278 review round 4). Failure mapping lives in the catch now.
+    writeDiagnostic('info', 'credits.checkout_created');
+    res.json({
+      success: true,
+      orderId: result.orderId,
+      sessionId: result.sessionId,
+      sessionUrl: result.sessionUrl
+    });
   } catch (error: unknown) {
     // Prefer a class the failing layer already resolved. createPackCheckout
     // carries the Stripe error's own class (e.g. resource_missing) here, which
@@ -182,11 +155,31 @@ export async function handleCreateCheckoutSession(
       errorClass: carried ?? classifyDiagnosticError(error, 'database_error')
     });
 
-    res.statusCode = 500;
-    res.json({
-      error: 'Internal server error',
-      message: 'Unable to create checkout session'
-    });
+    const code =
+      error && typeof error === 'object' && 'code' in error &&
+      typeof (error as { code?: unknown }).code === 'string'
+        ? (error as { code: string }).code
+        : undefined;
+    if (carried === 'validation_error') {
+      // Unknown product id: the caller's mistake, not ours.
+      res.statusCode = 400;
+      res.json({ error: 'Invalid product' });
+    } else if (code === 'PACK_AMOUNT_NOT_CONFIGURED' || carried === 'configuration_error') {
+      // An unpriced or misconfigured product - transient (a Stripe blip mid
+      // resolution) or terminal (a human must fix config), the customer-facing
+      // answer is the same: unavailable right now, try again later.
+      res.statusCode = 503;
+      res.json({
+        error: 'Service configuration error',
+        message: 'Payment processing is temporarily unavailable. Please try again later.'
+      });
+    } else {
+      res.statusCode = 500;
+      res.json({
+        error: 'Internal server error',
+        message: 'Unable to create checkout session'
+      });
+    }
   }
 }
 

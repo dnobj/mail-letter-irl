@@ -19,28 +19,46 @@ interface CreateMailCheckoutOutput {
 }
 
 function friendlyCheckoutError(error: unknown): Error {
-  const code = (error as { code?: string })?.code;
-  switch (code) {
+  const source = (error ?? {}) as { code?: string; diagnosticClass?: string; terminal?: boolean };
+  // Rebuild the message, keep the classification. Returning a bare Error here
+  // discarded the diagnosticClass and terminal the commerce layer attached,
+  // so the server log recorded unknown_error for precisely classified faults
+  // (#278 review round 4).
+  const friendly = (message: string): Error =>
+    Object.assign(new Error(message), {
+      ...(source.code !== undefined ? { code: source.code } : {}),
+      ...(source.diagnosticClass !== undefined ? { diagnosticClass: source.diagnosticClass } : {}),
+      ...(source.terminal !== undefined ? { terminal: source.terminal } : {})
+    });
+  switch (source.code) {
     case 'JIT_DISABLED':
-      return new Error('Pay & Send is not currently available. You can still buy a letter pack.');
+      return friendly('Pay & Send is not currently available. You can still buy a letter pack.');
     case 'DRAFT_NOT_OWNED':
     case 'DRAFT_NOT_FOUND':
-      return new Error(
+      return friendly(
         'Draft not found for your account. Please create a new letter or postcard preview.'
       );
     case 'DRAFT_EXPIRED':
     case 'DRAFT_TOO_CLOSE_TO_EXPIRY':
-      return new Error(
+      return friendly(
         'This draft is expired or too close to expiry. Please create a new preview.'
       );
     case 'PREPAID_BALANCE_AVAILABLE':
-      return new Error(
+      return friendly(
         'You already have enough prepaid balance to send this draft. Use the Send action.'
       );
     case 'JIT_NOT_CONFIGURED':
-      return new Error('Pay & Send is temporarily unavailable. Please use a letter pack instead.');
+      // Match the quote surface: a terminal fault must not carry retry advice
+      // no retry can honor, and a blip must not read as permanent - the two
+      // surfaces used to contradict each other in whichever direction (#278
+      // review round 4).
+      return friendly(
+        source.terminal
+          ? 'Pay & Send pricing is not configured. Please use a letter pack instead.'
+          : 'Pay & Send is temporarily unavailable. Please try again shortly, or use a letter pack.'
+      );
     default:
-      return new Error('Unable to create Pay & Send checkout. Please try again.');
+      return friendly('Unable to create Pay & Send checkout. Please try again.');
   }
 }
 

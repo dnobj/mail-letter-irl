@@ -217,7 +217,14 @@ export async function getReadiness(
 
   cached = {
     report,
-    expiresAt: now + (report.ready ? CACHE_TTL_MS : UNREADY_CACHE_TTL_MS)
+    // From the CURRENT clock, not the pre-await `now`: the database and
+    // routing checks above can take seconds (the pool's connect timeout is 5s
+    // and a Neon wake retries), and an expiry computed from the entry
+    // timestamp was often already in the past by the time it was written -
+    // the memo dead on arrival, /readyz re-running its checks on every probe
+    // in exactly the slow-database failure mode it exists to bound (#278
+    // review round 4).
+    expiresAt: Date.now() + (report.ready ? CACHE_TTL_MS : UNREADY_CACHE_TTL_MS)
   };
   return report;
 }

@@ -160,6 +160,43 @@ describe('commerceService', () => {
     mocks.getPriceResolutionFailure.mockReturnValue(null as never);
   });
 
+  it('sweeps session-less orders whose checkout_expires_at is NULL', async () => {
+    // Pack orders are INSERTed without checkout_expires_at, and NULL <= NOW()
+    // is UNKNOWN - so a pack whose session creation failed non-terminally was
+    // a zombie the orphan sweep could never reclaim, stranded in
+    // checkout_pending forever with no alarm (the stuck-order check watches
+    // paid statuses only) (#278 review round 4).
+    mocks.query.mockResolvedValue({ rows: [], rowCount: 0 });
+    mocks.retrieveSession.mockResolvedValue(null);
+
+    await runCommerceMaintenance();
+
+    const orphanSweep = mocks.query.mock.calls
+      .map(([sql]) => String(sql))
+      .find(sql => sql.includes("status = 'checkout_pending'") && sql.includes('stripe_checkout_session_id IS NULL'));
+    expect(orphanSweep).toBeDefined();
+    expect(orphanSweep).toContain('checkout_expires_at IS NULL');
+  });
+
+  it('primes the catalog with the metadata key this codebase actually writes', async () => {
+    // stripeService writes { orderId, orderType, productCode } on every
+    // session. The webhook's ensure used to read only the legacy
+    // productId/product_id keys, so its argument was undefined for every
+    // session the current app creates - the uncoded slow path, in front of
+    // the money transaction, on every webhook (#278 review round 4).
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+      if (sql.includes('SELECT * FROM orders')) return { rows: [baseOrder] };
+      return { rows: [] };
+    });
+
+    await processStripeWebhookEvent(checkoutEvent({
+      metadata: { orderId: 'order-1', orderType: 'jit_mail', productCode: 'jit-letter' }
+    }));
+
+    expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-letter');
+  });
+
   it('claims concurrent Stripe event replays so only one can send or grant', async () => {
     let claimed = false;
     mocks.query.mockImplementation(async (sql: string) => {
@@ -436,6 +473,29 @@ describe('commerceService', () => {
     );
   });
 
+  it('adopts a legacy session keyed by productCode, the key this codebase writes', async () => {
+    // createLegacyPackOrder existed for OLD sessions with productId metadata,
+    // but reconciliation replays events for sessions the CURRENT app created,
+    // whose metadata carries productCode only - and reading just the legacy
+    // keys made those unadoptable (#278 review round 4).
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-pc' }] };
+      if (sql.includes('INSERT INTO orders')) {
+        return { rows: [{ ...baseOrder, order_id: 'stripe-cs-pc', order_type: 'letter_pack', product_code: 'credit-pack-4', credits: 4, status: 'paid' }] };
+      }
+      return { rows: [] };
+    });
+
+    await processStripeWebhookEvent(checkoutEvent({
+      id: 'cs-pc',
+      client_reference_id: null,
+      metadata: { userId: 'user-1', productCode: 'credit-pack-4' },
+      amount_total: 500
+    }) as never).catch(() => undefined);
+
+    expect(mocks.getPackProduct).toHaveBeenCalledWith('credit-pack-4');
+  });
+
   it('retries a legacy adoption whose price is only TRANSIENTLY unresolved', async () => {
     // The regression this whole rework exists to prevent, in its subtler form.
     // The amount used to come from an env var and could never be transiently
@@ -519,6 +579,43 @@ describe('commerceService', () => {
     }) as never)).resolves.toMatchObject({ duplicate: false });
   });
 
+  it('keeps per-product fault dedupe under interleaved letter/postcard traffic', async () => {
+    // A single shared dedupe slot meant the letter and postcard faults
+    // evicted each other on every alternation, restoring exactly the
+    // one-error-line-per-quote flood the throttle exists to prevent (#278
+    // review round 4).
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      mocks.getPriceResolutionFailure.mockImplementation(((productCode: string) => ({
+        productCode,
+        rule: 'price.inactive',
+        diagnosticClass: 'configuration_error',
+        terminal: true
+      })) as never);
+      mocks.getJitProduct.mockImplementation(((mailType: string) => ({
+        productCode: mailType === 'letter' ? 'jit-letter' : 'jit-postcard',
+        priceId: 'price-jit',
+        amountCents: 0,
+        currency: 'usd',
+        name: 'Pay & Send',
+        description: 'One item'
+      })) as never);
+
+      for (let i = 0; i < 3; i += 1) {
+        getSendEligibility(0, 2, 'letter');
+        getSendEligibility(0, 1, 'postcard');
+      }
+
+      const emitted = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('commerce.pay_and_send_unpriced'));
+      expect(emitted).toHaveLength(2); // one per product, not one per quote
+    } finally {
+      diagnostic.mockRestore();
+    }
+  });
+
   it('reports a steady Pay & Send pricing fault once, not once per quote', async () => {
     // getSendEligibility is a synchronous accessor on the quote path, and the
     // catalog's own header notes quotes vastly outnumber purchases - so an
@@ -526,6 +623,15 @@ describe('commerceService', () => {
     // continuous error stream scaling with traffic (#278 review round 3).
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
+      // The dedupe map is module state that survives between tests, so start
+      // from a RECOVERY: a healthy quote clears this product's entry (also
+      // pinning the clear-on-recovery path), making the count below exact.
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-letter', priceId: 'price-jit', amountCents: 499,
+        currency: 'usd', name: 'Pay & Send', description: 'One letter'
+      });
+      getSendEligibility(0, 2, 'letter');
+
       mocks.getPriceResolutionFailure.mockReturnValue({
         productCode: 'jit-letter',
         rule: 'price.inactive',

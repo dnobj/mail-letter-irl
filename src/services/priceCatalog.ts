@@ -35,6 +35,7 @@
 import type Stripe from 'stripe';
 import { getStripeClient } from './stripeClient.js';
 import {
+  PACK_CREDITS_BY_PRODUCT,
   configuredPriceIdFor,
   getConfiguredProducts,
   normalizedCurrency,
@@ -129,13 +130,37 @@ function boundFromEnv(name: string, fallback: number, env: NodeJS.ProcessEnv): n
 }
 
 export function saneBand(env: NodeJS.ProcessEnv = process.env): { min: number; max: number } {
-  const min = boundFromEnv('STRIPE_PRICE_MIN_UNIT_AMOUNT', DEFAULT_MIN_SANE_UNIT_AMOUNT, env)
-    ?? DEFAULT_MIN_SANE_UNIT_AMOUNT;
-  const max = boundFromEnv('STRIPE_PRICE_MAX_UNIT_AMOUNT', DEFAULT_MAX_SANE_UNIT_AMOUNT, env)
-    ?? DEFAULT_MAX_SANE_UNIT_AMOUNT;
+  const configuredMin = boundFromEnv('STRIPE_PRICE_MIN_UNIT_AMOUNT', DEFAULT_MIN_SANE_UNIT_AMOUNT, env);
+  const configuredMax = boundFromEnv('STRIPE_PRICE_MAX_UNIT_AMOUNT', DEFAULT_MAX_SANE_UNIT_AMOUNT, env);
+  const min = configuredMin ?? DEFAULT_MIN_SANE_UNIT_AMOUNT;
+  const max = configuredMax ?? DEFAULT_MAX_SANE_UNIT_AMOUNT;
   if (min <= max) return { min, max };
-  // Reverting BOTH bounds silently is how a one-character typo in the minimum
-  // throws away a correctly-set maximum and refuses every price.
+
+  // The bounds invert. Which one wins depends on where the contradiction came
+  // from: a CONFIGURED bound colliding with the OTHER SIDE'S DEFAULT is not an
+  // operator error - the defaults are calibrated for a two-decimal currency,
+  // and the entire reason the knobs exist is deployments where that
+  // calibration is wrong. The previous shape reverted BOTH bounds, i.e. it
+  // discarded the operator's only configured value in favour of the default it
+  // conflicted with, and enforced nothing they asked for (#278 review r4).
+  if (configuredMin === null && configuredMax !== null) {
+    // Only the ceiling was configured, below the default floor (a zero-decimal
+    // ceiling like JPY 40). Honor the ceiling; the floor falls away to 1.
+    writeDiagnostic('warn', 'stripe.price_band_ignored', {
+      name: 'STRIPE_PRICE_MIN_UNIT_AMOUNT',
+      reason: 'default_floor_above_configured_ceiling'
+    });
+    return { min: 1, max };
+  }
+  if (configuredMax === null && configuredMin !== null) {
+    writeDiagnostic('warn', 'stripe.price_band_ignored', {
+      name: 'STRIPE_PRICE_MAX_UNIT_AMOUNT',
+      reason: 'default_ceiling_below_configured_floor'
+    });
+    return { min, max: Number.MAX_SAFE_INTEGER };
+  }
+  // BOTH were configured and they contradict each other: no way to know which
+  // is the typo, so revert both - loudly.
   writeDiagnostic('error', 'stripe.price_band_ignored', { name: 'both', reason: 'min_above_max' });
   return { min: DEFAULT_MIN_SANE_UNIT_AMOUNT, max: DEFAULT_MAX_SANE_UNIT_AMOUNT };
 }
@@ -155,7 +180,18 @@ export function saneBand(env: NodeJS.ProcessEnv = process.env): { min: number; m
  * are no transactions earning allocation (#278 review round 2). Backing off to
  * a 15-minute ceiling keeps the eventual self-heal without the bill.
  */
-const COOLDOWN_BASE_MS = 30_000;
+const TERMINAL_COOLDOWN_BASE_MS = 30_000;
+/**
+ * Transient failures start their ladder at TWO seconds, not thirty. Readiness
+ * holds an unready verdict for one second and the docblock there promises a
+ * failed warmup "self-heals within the readiness TTL" - with a 30s first
+ * cooldown that promise was arithmetically false, and a one-second Stripe blip
+ * during warmup refused every purchase of the affected products for ~30s
+ * (origin/dev never cached a failed lookup at all). Two seconds keeps the
+ * fast self-heal; the ladder doubling toward the 5-minute ceiling keeps a
+ * real outage from being hammered (#278 review round 4).
+ */
+const TRANSIENT_COOLDOWN_BASE_MS = 2_000;
 /**
  * Transient failures back off too, just not as far. The previous revision gave
  * them a FLAT 30s forever, which is only safe if every permanent fault is
@@ -220,52 +256,140 @@ interface AttemptState {
   readonly nextAttemptAt: number;
   /** Which ladder those failures were counted on. */
   readonly terminal: boolean;
+  /**
+   * The price id the failure was recorded against. Cooldowns used to survive a
+   * repoint: an operator who fixed the configuration still waited out up to 15
+   * minutes of 503 on a verdict computed from the OLD id, because neither
+   * failures nor attempts carried enough to detect their own staleness (#278
+   * review round 4).
+   */
+  readonly priceId: string;
 }
 
 const resolved = new Map<string, ResolvedPrice>();
 const failures = new Map<string, PriceResolutionFailure>();
 const attempts = new Map<string, AttemptState>();
 /**
- * Bumped by resetPriceCatalog. A batch that was already in flight when the
- * catalog was reset must not write its outcomes into the freshly cleared maps,
- * nor null an `inFlight` that now belongs to a newer batch - which let two
- * batches hit Stripe for the same id and let one test's amounts land in the
- * next test's assertions (#278 review round 3).
+ * The lookup currently in flight for each product. Replaces the single shared
+ * batch slot: with one slot, a due product not covered by the running batch
+ * either waited out a batch that never touched its price id, or - after a
+ * bounded number of waits - returned silently unresolved with no failure
+ * recorded, refusing a correctly configured purchase (#278 review round 4).
+ * Per-product flights mean a caller either awaits the flight that IS resolving
+ * its product or starts one; there is no foreign batch to wait behind.
+ */
+const inFlight = new Map<string, Promise<void>>();
+/**
+ * Bumped by resetPriceCatalog. A lookup already in flight when the catalog is
+ * reset must not write its outcome into the freshly cleared maps, nor delete a
+ * flight entry that now belongs to a newer lookup.
  */
 let generation = 0;
-/** The running batch and which products it covers. */
-let inFlight: { promise: Promise<void>; codes: Set<string> } | null = null;
 
 /**
- * Test hook: back to a cold, never-attempted catalog.
- *
- * Deliberately does NOT re-arm the real retriever. Restoring it meant any
- * suite that reset without immediately re-injecting would dial out to
- * api.stripe.com - tests/setup.ts loads a developer's .env.test, so the key is
- * often present, and ensurePriceCatalog is now reachable from checkout, the
- * webhook, and both quote tools. Failing loudly beats a flaky network-dependent
- * unit suite (#278 review round 3).
+ * Thrown by the retriever resetPriceCatalog installs. Deliberately NOT
+ * swallowed like a provider failure: the lookup catch rethrows it, so a suite
+ * that forgot setPriceRetriever fails loudly instead of recording something
+ * byte-for-byte indistinguishable from a Stripe outage - which is what the
+ * previous "fail loudly" attempt actually produced, because its throw landed
+ * in the same catch as a network error (#278 review round 4).
  */
+export class PriceRetrieverMissingError extends Error {
+  constructor() {
+    super(
+      'priceCatalog: no retriever injected after resetPriceCatalog(). ' +
+        'Call setPriceRetriever() - tests must never reach the real Stripe API.'
+    );
+    this.name = 'PriceRetrieverMissingError';
+  }
+}
+
+/** Test hook: back to a cold, never-attempted catalog with no live retriever. */
 export function resetPriceCatalog(): void {
   resolved.clear();
   failures.clear();
   attempts.clear();
-  inFlight = null;
+  inFlight.clear();
   generation += 1;
   jitter = () => 0;
   retrievePrice = () => {
-    throw new Error(
-      'priceCatalog: no retriever injected after resetPriceCatalog(). ' +
-        'Call setPriceRetriever() - tests must never reach the real Stripe API.'
-    );
+    throw new PriceRetrieverMissingError();
   };
 }
 
+/**
+ * The two-source agreement test the deleted STRIPE_*_AMOUNT_CENTS variables
+ * used to provide, rebuilt from data that never leaves the repo. A transposed
+ * pair of price env vars (STRIPE_PRICE_STARTER <-> STRIPE_PRICE_POWER) passes
+ * every per-price rule - both ids are distinct, active, one-time and in band -
+ * and since order.amount_cents is now WRITTEN from the resolved price, the
+ * paid-amount comparison and reconciliation compare the price against itself
+ * and can never fire for it. Result: 100 credits sold for $5.00 with /readyz
+ * green (#278 review round 4, the headline finding).
+ *
+ * Credits are the second source: they live in the static product table. Two
+ * invariants any sane tier pricing satisfies and any transposition violates:
+ * more credits must cost strictly more in total, and never more PER credit
+ * (bulk never gets worse). Both members of a violating pair are refused - the
+ * data cannot say which side is the wrong one.
+ *
+ * Derived at READ time over the full resolved set, never enforced by revoking
+ * memos at commit time. Commit-time revocation was order-dependent: with
+ * transposed env vars the Power tier could settle LAST - alone, its ordering
+ * partners already revoked - see no pair to violate, and survive at the
+ * Starter's $5.00 for 100 credits; and making the revocation sticky instead
+ * deadlocked a PARTIALLY-fixed configuration, because the untouched tiers'
+ * failure records never pruned. A derived verdict is order-independent and
+ * heals the instant re-resolution replaces the offending memo (#278 round 4).
+ */
+function packOrderingOffenders(): Set<string> {
+  const tiers = [...resolved.values()]
+    .filter(memo => PACK_CREDITS_BY_PRODUCT[memo.productCode] !== undefined)
+    .sort(
+      (a, b) => PACK_CREDITS_BY_PRODUCT[a.productCode] - PACK_CREDITS_BY_PRODUCT[b.productCode]
+    );
+
+  const offenders = new Set<string>();
+  for (let i = 1; i < tiers.length; i += 1) {
+    const small = tiers[i - 1];
+    const large = tiers[i];
+    if (small.currency !== large.currency) continue; // packs share one currency by rule
+    const creditsSmall = PACK_CREDITS_BY_PRODUCT[small.productCode];
+    const creditsLarge = PACK_CREDITS_BY_PRODUCT[large.productCode];
+    const totalOrdered = small.unitAmount < large.unitAmount;
+    // small/creditsSmall >= large/creditsLarge, cross-multiplied to stay integral.
+    const perCreditOrdered = small.unitAmount * creditsLarge >= large.unitAmount * creditsSmall;
+    if (!totalOrdered || !perCreditOrdered) {
+      offenders.add(small.productCode);
+      offenders.add(large.productCode);
+    }
+  }
+  return offenders;
+}
+
+function orderingFailure(productCode: string): PriceResolutionFailure {
+  return Object.freeze({
+    productCode,
+    rule: 'price.pack_tier_ordering',
+    diagnosticClass: 'configuration_error',
+    terminal: true
+  });
+}
+
 export function getResolvedPriceForProduct(productCode: string): ResolvedPrice | null {
-  return resolved.get(productCode) ?? null;
+  const memo = resolved.get(productCode);
+  if (!memo) return null;
+  if (packOrderingOffenders().has(productCode)) return null;
+  return memo;
 }
 
 export function getPriceResolutionFailure(productCode: string): PriceResolutionFailure | null {
+  // A resolved-but-inconsistent tier has no stored failure; synthesize the
+  // ordering verdict so the checkout guards see WHY it is refused (terminal:
+  // a human must repoint an env var; retrying cannot reorder the table).
+  if (resolved.has(productCode) && packOrderingOffenders().has(productCode)) {
+    return orderingFailure(productCode);
+  }
   return failures.get(productCode) ?? null;
 }
 
@@ -278,7 +402,19 @@ export function getPriceResolutionFailure(productCode: string): PriceResolutionF
  */
 export function getUnpricedProducts(): PriceResolutionFailure[] {
   return getConfiguredProducts().flatMap(product => {
-    if (resolved.has(product.productCode)) return [];
+    const memo = resolved.get(product.productCode);
+    // A memo counts only if it describes the price id configured NOW. Bare
+    // membership let a repointed id read as priced: /readyz reported ok AND,
+    // because the kick there is gated on !pricesOk, suppressed the very
+    // re-attempt that would have detected the repoint (#278 review round 4).
+    if (memo && memo.priceId === product.priceId) {
+      // Resolved, current - but a tier in an inconsistent pack table is still
+      // unsellable, and readiness must say so.
+      if (packOrderingOffenders().has(product.productCode)) {
+        return [orderingFailure(product.productCode)];
+      }
+      return [];
+    }
     const failure = failures.get(product.productCode);
     if (failure) return [failure];
     return [
@@ -325,7 +461,8 @@ function sharedPriceOffenders(products: readonly ConfiguredProduct[]): Set<strin
 
 function validate(
   product: ConfiguredProduct,
-  price: Stripe.Price | undefined
+  price: Stripe.Price | undefined,
+  band: { min: number; max: number }
 ): ResolvedPrice | string {
   if (!price || typeof price !== 'object') return 'price.unreadable';
   if (price.active !== true) return 'price.inactive';
@@ -348,7 +485,9 @@ function validate(
   if (unitAmount === null || unitAmount === undefined || !Number.isInteger(unitAmount)) {
     return 'price.no_unit_amount';
   }
-  const band = saneBand();
+  // The band arrives as a parameter, computed once per trigger: calling
+  // saneBand() per price re-read the env three to five times per batch and
+  // re-logged any discarded bound each time (#278 review round 4).
   if (unitAmount < band.min || unitAmount > band.max) {
     return 'price.amount_out_of_range';
   }
@@ -370,25 +509,32 @@ function validate(
 }
 
 /**
- * Drop state for products this deployment no longer sells, and memos whose
- * price id has been repointed. `resolved` was previously exempt, so a stale
- * memo outlived the configuration that produced it.
+ * Drop state for products this deployment no longer sells, and any state
+ * recorded against a price id that is no longer the configured one - memos,
+ * failures and cooldowns alike. `resolved` used to be the only map checked
+ * for staleness, so an operator who FIXED the configuration still waited out
+ * the old id's cooldown, up to the 15-minute terminal ceiling, with /readyz
+ * at 503 the whole time (#278 review round 4).
  */
-function pruneUnconfigured(products: readonly ConfiguredProduct[]): void {
+function pruneStale(products: readonly ConfiguredProduct[]): void {
   const configured = new Map(products.map(product => [product.productCode, product.priceId]));
+  for (const [code, state] of [...attempts.entries()]) {
+    if (configured.get(code) !== state.priceId) {
+      attempts.delete(code);
+      failures.delete(code);
+    }
+  }
   for (const code of [...failures.keys()]) {
     if (!configured.has(code)) failures.delete(code);
   }
-  for (const code of [...attempts.keys()]) {
-    if (!configured.has(code)) attempts.delete(code);
-  }
   for (const [code, memo] of [...resolved.entries()]) {
-    if (!configured.has(code) || configured.get(code) !== memo.priceId) resolved.delete(code);
+    if (configured.get(code) !== memo.priceId) resolved.delete(code);
   }
 }
 
 function recordFailure(
   productCode: string,
+  priceId: string,
   rule: string,
   diagnosticClass: string,
   now: number
@@ -405,143 +551,82 @@ function recordFailure(
   // production refusing every purchase (#278 review round 3).
   const prior = attempts.get(productCode);
   const consecutive = prior && prior.terminal === terminal ? prior.failures + 1 : 1;
+  const base = terminal ? TERMINAL_COOLDOWN_BASE_MS : TRANSIENT_COOLDOWN_BASE_MS;
   const ceiling = terminal ? TERMINAL_COOLDOWN_MAX_MS : TRANSIENT_COOLDOWN_MAX_MS;
   const cooldown =
-    Math.min(COOLDOWN_BASE_MS * 2 ** (consecutive - 1), ceiling) +
+    Math.min(base * 2 ** (consecutive - 1), ceiling) +
     Math.floor(jitter() * COOLDOWN_JITTER_MS);
-  attempts.set(productCode, { failures: consecutive, nextAttemptAt: now + cooldown, terminal });
+  attempts.set(productCode, { failures: consecutive, nextAttemptAt: now + cooldown, terminal, priceId });
 }
 
-async function attemptResolution(due: readonly ConfiguredProduct[]): Promise<void> {
-  const startedAt = generation;
-  const products = getConfiguredProducts();
-  const offenders = sharedPriceOffenders(products);
+/** Resolve ONE product's price and commit the outcome, generation-guarded. */
+async function resolveOne(
+  product: ConfiguredProduct,
+  isOffender: boolean,
+  band: { min: number; max: number },
+  startedGen: number
+): Promise<void> {
+  const commitFailure = (rule: string, diagnosticClass: string): void => {
+    if (generation !== startedGen) return;
+    recordFailure(product.productCode, product.priceId, rule, diagnosticClass, Date.now());
+  };
 
-  // Revoke a product that ALREADY resolved and only later turned out to share
-  // its price id. The offender set is computed over every configured product,
-  // but it used to be consulted only for members of this batch, and the due
-  // filter excludes anything resolved - so if the two sharers landed in
-  // different batches (one blipped and retried), the first kept its memo and
-  // went on selling at the other's price for the life of the process, with
-  // getPriceResolutionFailure returning null for it. "Refused for EVERY product
-  // involved" has to mean already-priced ones too (#278 review round 3).
-  for (const code of offenders) {
-    if (resolved.delete(code)) {
-      recordFailure(code, 'price.shared_between_products', 'configuration_error', Date.now());
-    }
+  if (!product.priceId) {
+    return commitFailure('price.id_not_configured', 'configuration_error');
   }
-  const now = Date.now();
-  // Stamp the attempt BEFORE awaiting, so a concurrent caller arriving mid
-  // batch sees the product as not-due rather than starting a second lookup.
-  for (const product of due) {
-    const prior = attempts.get(product.productCode);
-    attempts.set(product.productCode, {
-      failures: prior?.failures ?? 0,
-      nextAttemptAt: now + COOLDOWN_BASE_MS,
-      terminal: prior?.terminal ?? false
-    });
+  if (isOffender) {
+    return commitFailure('price.shared_between_products', 'configuration_error');
   }
 
-  const outcomes = await Promise.allSettled(
-    due.map(async product => {
-      if (!product.priceId) {
-        return { product, failure: 'price.id_not_configured', diagnosticClass: 'configuration_error' };
-      }
-      if (offenders.has(product.productCode)) {
-        return { product, failure: 'price.shared_between_products', diagnosticClass: 'configuration_error' };
-      }
-      try {
-        const price = await retrievePrice(product.priceId);
-        const outcome = validate(product, price);
-        if (typeof outcome === 'string') {
-          return { product, failure: outcome, diagnosticClass: 'configuration_error' };
-        }
-        return { product, price: outcome };
-      } catch (error) {
-        // Carry the class VERBATIM. Whether a human must act is answered
-        // separately by isTerminalDiagnosticClass, so there is no longer any
-        // reason to overwrite `resource_missing` - the one class that tells an
-        // operator exactly what is wrong with a typo'd price id.
-        return {
-          product,
-          failure: 'price.lookup_failed',
-          diagnosticClass: classifyDiagnosticError(error, 'provider_error')
-        };
-      }
-    })
-  );
-
-  // The catalog was reset while this batch was in flight: its answers describe
-  // a configuration that no longer applies.
-  if (generation !== startedAt) return;
-
-  const settledAt = Date.now();
-  for (const settled of outcomes) {
-    // allSettled never rejects here - the map callback catches - but the type
-    // demands the check.
-    if (settled.status !== 'fulfilled') continue;
-    const outcome = settled.value;
-    if ('price' in outcome && outcome.price) {
-      resolved.set(outcome.product.productCode, outcome.price);
-      failures.delete(outcome.product.productCode);
-      attempts.delete(outcome.product.productCode);
-    } else if ('failure' in outcome && outcome.failure) {
-      recordFailure(
-        outcome.product.productCode,
-        outcome.failure,
-        outcome.diagnosticClass ?? 'provider_error',
-        settledAt
-      );
-    }
+  let price: Stripe.Price;
+  try {
+    price = await retrievePrice(product.priceId);
+  } catch (error) {
+    if (error instanceof PriceRetrieverMissingError) throw error;
+    // Carry the class VERBATIM. Whether a human must act is answered
+    // separately by isTerminalDiagnosticClass, so there is no reason to
+    // overwrite `resource_missing` - the one class that tells an operator
+    // exactly what is wrong with a typo'd price id.
+    return commitFailure('price.lookup_failed', classifyDiagnosticError(error, 'provider_error'));
   }
 
-  writeDiagnostic(failures.size ? 'error' : 'info', 'stripe.price_catalog_resolved', {
-    resolved: resolved.size,
-    requested: products.length,
-    failures:
-      [...failures.values()].map(f => `${f.productCode}:${f.rule}`).join(' ') || 'none',
-    prices: [...resolved.values()]
-      .map(p => `${p.productCode}=${p.unitAmount}${p.currency}`)
-      .join(' ')
-  });
+  if (generation !== startedGen) return;
+  const outcome = validate(product, price, band);
+  if (typeof outcome === 'string') {
+    return commitFailure(outcome, 'configuration_error');
+  }
+  resolved.set(product.productCode, outcome);
+  failures.delete(product.productCode);
+  attempts.delete(product.productCode);
 }
 
 /**
  * Resolve every configured product that is not yet resolved and is due for an
  * attempt. Idempotent and cheap after full success; failed products re-attempt
- * past their cooldown. Never throws - callers read the outcome through the
- * accessors, and an unpriceable product refuses its purchase through the
- * existing guards.
+ * past their cooldown. Callers read the outcome through the accessors, and an
+ * unpriceable product refuses its purchase through the existing guards. The
+ * only rejection this can produce is PriceRetrieverMissingError, which exists
+ * only in the test lane.
  *
- * Pass the productCode you actually need. A caller whose own product is
- * already priced returns immediately instead of joining a batch that is
- * blocked on somebody else's hanging lookup - the first revision checked
- * inFlight before looking at anything, so one hung Pay & Send price stalled
- * every pack checkout and every quote for the length of the batch (#278
- * review round 2).
+ * Pass the productCode you actually need: a priced product answers from
+ * memory, an in-flight one is awaited, a due one is looked up - and none of
+ * them ever waits behind a lookup for a DIFFERENT product. An uncoded call
+ * (warmup, readiness) means "everything": it fires whatever is due and waits
+ * for every flight, including ones other callers started.
  */
 export async function ensurePriceCatalog(productCode?: string): Promise<void> {
-  return ensureResolved(productCode, 0);
-}
-
-/** Bound on how many times one call will wait out somebody else's batch. */
-const MAX_BATCH_WAITS = 3;
-
-async function ensureResolved(productCode: string | undefined, depth: number): Promise<void> {
   // A priced product answers from memory and never waits - the fast path for
-  // the warm case (every quote, every checkout), which also skips rebuilding
-  // the product list.
-  //
-  // The memo is only valid for the id that produced it. `unit_amount` and
-  // `currency` are immutable on a Stripe Price, so remembering them forever is
-  // sound; but if the env var is REPOINTED, the memo describes a Price we no
-  // longer sell, and prune only ever cleaned `failures` and `attempts`. Serving
-  // it charged the old amount, recorded the old amount on the order row, and
-  // left /readyz green (#278 review round 3). One env read keeps the fast path
-  // fast and the memo honest.
+  // the warm case (every quote, every checkout). The memo is only valid for
+  // the id that produced it: unit_amount and currency are immutable on a
+  // Price, but the env var can be REPOINTED, and serving the old memo charged
+  // the old amount with readiness green (#278 review round 3).
   if (productCode) {
     const memo = resolved.get(productCode);
     if (memo) {
+      // Returning here is correct even for a tier the ordering verdict
+      // refuses: amounts are immutable on a Price, so no re-lookup can change
+      // the verdict - only a config change can, and that path invalidates the
+      // memo below.
       if (memo.priceId === configuredPriceIdFor(productCode)) return;
       resolved.delete(productCode);
     }
@@ -551,55 +636,82 @@ async function ensureResolved(productCode: string | undefined, depth: number): P
 
   // Nothing to do for a product this deployment does not sell. Pay & Send is
   // disabled by default, so both quote paths ask for a product that is not in
-  // the table at all - without this they can never reach the fast path above
-  // (an unconfigured product is never in `resolved`) and took the full slow
-  // path on every quote, able to block on a pack lookup they have no use for
-  // (#278 review round 3).
+  // the table at all; without this they took the full slow path on every
+  // quote (#278 review round 3).
   if (productCode && !products.some(product => product.productCode === productCode)) return;
 
-  pruneUnconfigured(products);
+  pruneStale(products);
 
-  // A running batch already covers what this caller needs, so wait for it.
-  // This must be checked BEFORE the due-list: attemptResolution stamps its
-  // members' next-attempt time up front to keep a concurrent caller from
-  // starting a duplicate lookup, which also makes them look not-due - so
-  // testing dueness first would hand the very first customer after boot an
-  // instant refusal while the warmup that would have priced their product was
-  // still in flight.
-  if (inFlight && (!productCode || inFlight.codes.has(productCode))) {
-    return inFlight.promise;
+  if (productCode) {
+    const flight = inFlight.get(productCode);
+    if (flight) return flight;
+  }
+
+  const offenders = sharedPriceOffenders(products);
+  // Revoke a product that ALREADY resolved and only later turned out to share
+  // its price id - the sharers may land in different batches, and "refused for
+  // EVERY product involved" has to include already-priced ones (#278 r3).
+  for (const code of offenders) {
+    const memo = resolved.get(code);
+    if (memo) {
+      resolved.delete(code);
+      recordFailure(code, memo.priceId, 'price.shared_between_products', 'configuration_error', Date.now());
+    }
   }
 
   const now = Date.now();
   const due = products.filter(product => {
     if (resolved.has(product.productCode)) return false;
+    if (inFlight.has(product.productCode)) return false;
     const state = attempts.get(product.productCode);
     return !state || state.nextAttemptAt <= now;
   });
-  if (due.length === 0) return;
 
-  // Work is due that the running batch does not cover. Handing back ITS
-  // promise - the previous shape - resolved this caller's await with work that
-  // never touched their product and recorded no failure for it, so
-  // `await ensurePriceCatalog(code)` could return with `code` still unresolved
-  // and no diagnosis: a correctly configured product refusing a legitimate
-  // purchase (#278 review round 3). Wait for the batch to clear, then take a
-  // turn - bounded, so heavy contention degrades to a refusal rather than a
-  // stack.
-  if (inFlight) {
-    if (depth >= MAX_BATCH_WAITS) return;
-    await inFlight.promise;
-    return ensureResolved(productCode, depth + 1);
+  const startedGen = generation;
+  const band = saneBand();
+  const started = new Map<string, Promise<void>>();
+  for (const product of due) {
+    const promise: Promise<void> = resolveOne(
+      product,
+      offenders.has(product.productCode),
+      band,
+      startedGen
+    ).finally(() => {
+      if (generation === startedGen && inFlight.get(product.productCode) === promise) {
+        inFlight.delete(product.productCode);
+      }
+    });
+    // A coded caller awaits only its own lookup; give the others a handled
+    // branch so a test-lane sentinel rejection is loud where it is awaited
+    // and not an unhandled-rejection crash everywhere else.
+    void promise.catch(() => undefined);
+    inFlight.set(product.productCode, promise);
+    started.set(product.productCode, promise);
   }
 
-  const startedAt = generation;
-  const promise = attemptResolution(due)
-    .catch(() => undefined)
-    .finally(() => {
-      // Only clear the slot if it is still ours; a reset may have handed it to
-      // a newer batch.
-      if (generation === startedAt) inFlight = null;
+  if (started.size > 0) {
+    void Promise.allSettled([...started.values()]).then(() => {
+      if (generation !== startedGen) return;
+      writeDiagnostic(failures.size ? 'error' : 'info', 'stripe.price_catalog_resolved', {
+        resolved: resolved.size,
+        requested: products.length,
+        failures:
+          [...failures.values()].map(f => `${f.productCode}:${f.rule}`).join(' ') || 'none',
+        prices: [...resolved.values()]
+          .map(p => `${p.productCode}=${p.unitAmount}${p.currency}`)
+          .join(' ')
+      });
     });
-  inFlight = { promise, codes: new Set(due.map(product => product.productCode)) };
-  return promise;
+  }
+
+  if (productCode) {
+    // Either we just started this product's lookup, or it is cooling down /
+    // just failed - in which case there is nothing to wait for and the guards
+    // read the recorded failure.
+    return started.get(productCode);
+  }
+
+  // Uncoded: wait for everything currently running, ours or not.
+  const all = new Set<Promise<void>>([...inFlight.values(), ...started.values()]);
+  if (all.size > 0) await Promise.all(all);
 }

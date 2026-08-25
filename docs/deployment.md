@@ -559,15 +559,26 @@ runtime price fallbacks.
 A price must be **active**, **one-time** (a recurring Price cannot be used with
 a `payment`-mode Checkout Session), denominated in its product's expected
 currency, and within a sanity band — by default 50 to 100,000 minor units, i.e.
-$0.50 to $1,000.00. Two products may share a Price only when both are Pay &
+$0.50 to $1,000.00. Pack tiers must also **order sanely against each other**:
+more credits must cost strictly more in total and never more per credit. This
+is the two-source check that replaces the deleted `STRIPE_*_AMOUNT_CENTS`
+comparison — a transposed pair of `STRIPE_PRICE_*` values passes every
+per-price rule, and the amount comparisons downstream now compare the resolved
+price against itself, so tier ordering against the static credits table is the
+only thing that can catch it. Both members of a violating pair are refused. Two products may share a Price only when both are Pay &
 Send; any other sharing is refused for **every** product involved, because it
 would sell one of them at the other's price. A deployment in a zero- or
 three-decimal currency, or one selling a tier above the ceiling, must set
 `STRIPE_PRICE_MIN_UNIT_AMOUNT` and `STRIPE_PRICE_MAX_UNIT_AMOUNT`: the band is
 in minor units and cannot be converted across currencies without an exchange
-rate. Both take whole numbers only — `100_000` parses as `100`, which would
-refuse every real price, so the validator rejects separators and a discarded
-bound is logged under `stripe.price_band_ignored`. Both appear in the manifest
+rate. Both take positive whole numbers only — `100_000` parses as `100`, which would
+refuse every real price, so the validator warns on separators and on zero, and
+a discarded bound is logged under `stripe.price_band_ignored`. The validator
+finding is always a **warning**, never a boot error: the catalog falls back
+gracefully, and a formatting slip must not take `/healthz` down with it. If
+exactly one bound is set and it contradicts the other side's default, the
+configured bound wins and the default falls away; only a contradictory
+configured *pair* is reverted. Both appear in the manifest
 as **advisory**: `npm run preflight:cutover` lists them when unset so a parity
 gap is visible before promotion, without failing the gate on a deployment that
 correctly relies on the defaults — which is also how `STRIPE_CURRENCY` and
@@ -577,10 +588,13 @@ Resolution failures carry two things: the **class** (the Stripe error's own
 code, e.g. `resource_missing` for a typo'd id, or `configuration_error` for a
 rule this code enforces) and whether it is **terminal** — whether a human must
 act. Terminal faults (an archived or recurring Price, the wrong currency, an id
-pointing at nothing, a revoked or restricted key, a shared Price) back off
-toward a 15-minute retry ceiling and cancel the affected order. Transient ones
-back off only to a 5-minute ceiling, leave the order pending, and make a *paid*
-legacy webhook retry rather than book the payment as unmatched money. An
+pointing at nothing, a revoked or restricted key, a shared Price, a Price
+below Stripe's own per-currency minimum) start their retry ladder at 30
+seconds and back off toward a 15-minute ceiling; they cancel the affected
+order. Transient ones start at **2 seconds** — so a warmup blip self-heals on
+the first purchase moments later — and back off toward a 5-minute ceiling,
+leave the order pending, and make a *paid* legacy webhook retry rather than
+book the payment as unmatched money. An
 unpaid event — an expired session — is never retried on a pricing fault,
 because there is no money at stake.
 

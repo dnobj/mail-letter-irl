@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { prepareAuthenticatedUser } from "../../../src/auth/identity.js";
 import {
   classifyDiagnosticError,
+  isTerminalDiagnosticClass,
   writeDiagnostic
 } from "../../../src/utils/diagnosticLog.js";
 import { AuthenticatedUser } from "../../../src/auth/tokenValidator.js";
@@ -189,5 +190,39 @@ describe("privacy-safe authentication diagnostics", () => {
     expect(output).not.toMatch(/\$\{[^}]*\.(?:id|ledger_id|transaction_id|message|stack)\}/);
     expect(output).not.toMatch(/,\s*(?:error|err|exception|responseBody|requestBody)\s*\)/);
     expect(output).not.toMatch(/(?:tokenResponse|providerResponse|response)\.(?:text|json)\(/);
+  });
+});
+
+
+describe('isTerminalDiagnosticClass (#278)', () => {
+  // The single owner of "must a human act?". Five call sites used to inline
+  // `=== 'configuration_error'`, and the set itself was wrong in BOTH
+  // directions in one revision: amount_too_small (permanent - the Price is
+  // below Stripe's own per-currency minimum) read as retryable and stranded
+  // orders, while the coarse StripeInvalidRequestError TYPE read as terminal
+  // and cancelled live orders over an expires_at that drifted under Stripe's
+  // 30-minute floor in transit (#278 review round 4).
+  it.each([
+    ['configuration_error', true],
+    ['resource_missing', true],
+    ['api_key_expired', true],
+    ['StripeAuthenticationError', true],
+    ['StripePermissionError', true],
+    ['amount_too_small', true],
+    ['amount_too_large', true],
+    // The coarse invalid-request TYPE stays transient: it is stripe-node's
+    // constructor-name fallback and covers retryable faults.
+    ['StripeInvalidRequestError', false],
+    ['StripeConnectionError', false],
+    ['StripeRateLimitError', false],
+    ['provider_error', false],
+    ['ECONNRESET', false],
+    ['database_error', false]
+  ])('%s -> terminal: %s', (diagnosticClass, expected) => {
+    expect(isTerminalDiagnosticClass(diagnosticClass)).toBe(expected);
+  });
+
+  it('treats undefined as transient, the safe default', () => {
+    expect(isTerminalDiagnosticClass(undefined)).toBe(false);
   });
 });

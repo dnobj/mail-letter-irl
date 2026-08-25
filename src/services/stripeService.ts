@@ -12,7 +12,7 @@ import {
   getPriceResolutionFailure,
   getResolvedPriceForProduct
 } from './priceCatalog.js';
-import { getStripeClient } from './stripeClient.js';
+import { BACKGROUND_REQUEST_OPTIONS, getStripeClient } from './stripeClient.js';
 import {
   JIT_PRODUCTS,
   PACK_PRODUCTS,
@@ -281,8 +281,13 @@ export async function extractCheckoutData(
   };
 }
 
+// The four calls below run from maintenance sweeps and webhook recovery - no
+// customer is waiting, and the refund path spends a finite refund_attempts
+// budget BEFORE calling Stripe, never rolling it back on a throw. On the
+// shared client's interactive 10s/1 bound, a slow Stripe day burned attempts
+// without refunds.create ever being reached (#278 review round 4).
 export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe.Checkout.Session> {
-  return getStripeClient().checkout.sessions.retrieve(sessionId);
+  return getStripeClient().checkout.sessions.retrieve(sessionId, undefined, BACKGROUND_REQUEST_OPTIONS);
 }
 
 export async function createPaymentRefund(
@@ -295,22 +300,25 @@ export async function createPaymentRefund(
       payment_intent: paymentIntentId,
       metadata: { orderId }
     },
-    { idempotencyKey: `jit-refund:${orderId}:attempt:${attempt}` }
+    { ...BACKGROUND_REQUEST_OPTIONS, idempotencyKey: `jit-refund:${orderId}:attempt:${attempt}` }
   );
 }
 
 export async function retrieveRefund(refundId: string): Promise<Stripe.Refund> {
-  return getStripeClient().refunds.retrieve(refundId);
+  return getStripeClient().refunds.retrieve(refundId, undefined, BACKGROUND_REQUEST_OPTIONS);
 }
 
 export async function findPaymentRefund(
   paymentIntentId: string,
   orderId: string
 ): Promise<Stripe.Refund | null> {
-  const refunds = await getStripeClient().refunds.list({
-    payment_intent: paymentIntentId,
-    limit: 100
-  });
+  const refunds = await getStripeClient().refunds.list(
+    {
+      payment_intent: paymentIntentId,
+      limit: 100
+    },
+    BACKGROUND_REQUEST_OPTIONS
+  );
   return (
     refunds.data.find(
       refund =>

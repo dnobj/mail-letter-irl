@@ -208,6 +208,11 @@ describe('parity with the boot validator', () => {
     if (name === 'LETTER_PROVIDER') return 'postgrid';
     if (name === 'LETTER_PROVIDER_API_KEY') return production ? 'live_sk_parity_fixture' : 'test_sk_parity_fixture';
     if (name === 'LETTER_PROVIDER_CONFIG') return production ? '{"mode":"live"}' : '{"mode":"test"}';
+    // The band bounds share the STRIPE_PRICE_ prefix but are integers, not
+    // price ids - the prefix rule below would hand them a value the validator
+    // rejects (#278 review round 4).
+    if (name === 'STRIPE_PRICE_MIN_UNIT_AMOUNT') return '50';
+    if (name === 'STRIPE_PRICE_MAX_UNIT_AMOUNT') return '100000';
     if (name.startsWith('STRIPE_PRICE_') || name.endsWith('_PRICE_ID')) return `price_${name.toLowerCase()}`;
     return `parity-fixture-${name.toLowerCase()}`;
   }

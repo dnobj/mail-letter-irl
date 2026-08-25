@@ -81,14 +81,27 @@ const TERMINAL_ERROR_CLASSES = new Set([
   // The id points at nothing in this account or mode.
   "resource_missing",
   // Credentials: a revoked, expired, restricted or wrong-mode key. No amount
-  // of retrying fixes any of them.
+  // of retrying fixes any of them. These are TYPES, but unambiguous ones:
+  // stripe-node raises them only for authentication and permission failures.
   "api_key_expired",
   "testmode_charges_only",
   "StripeAuthenticationError",
   "StripePermissionError",
-  // A malformed request is our bug or our config; the same call will keep
-  // failing identically.
-  "StripeInvalidRequestError"
+  // Specific invalid-request CODES whose cause is always configuration: a
+  // Price below/above Stripe's own per-currency limits, or a request our code
+  // built wrong. Each keeps failing identically until a human acts.
+  "amount_too_small",
+  "amount_too_large",
+  "parameter_missing",
+  "parameter_invalid_integer"
+  // The coarse "StripeInvalidRequestError" TYPE is deliberately absent. It is
+  // stripe-node's constructor-name fallback for every invalid_request_error
+  // without an allowlisted code - including retryable ones like expires_at
+  // drifting under Stripe's 30-minute floor while a slow request is in
+  // transit. Listing it here cancelled live customers' orders for faults a
+  // retry would have cleared (#278 review round 4). An unrecognized invalid
+  // request therefore defaults to transient, which strands nothing: pending
+  // orders are swept, cancelled ones are gone.
 ]);
 
 export function isTerminalDiagnosticClass(diagnosticClass: string | undefined): boolean {

@@ -600,15 +600,27 @@ function validateStripe(
     // deployment that sets one bound almost certainly meant to set both.
     const bandMin = env.STRIPE_PRICE_MIN_UNIT_AMOUNT;
     const bandMax = env.STRIPE_PRICE_MAX_UNIT_AMOUNT;
+    // WARNING severity always, never error: an error here throws at boot,
+    // ~650 lines before server.listen, taking /healthz and /readyz down with
+    // it - a total production outage over a band formatting slip, while the
+    // catalog itself logs the discarded bound and falls back gracefully. The
+    // first version of this rule was production-severity and could be
+    // triggered by the exact `100_000` form the catalog's own docs print
+    // (#278 review round 4).
     for (const [name, value] of [
       ['STRIPE_PRICE_MIN_UNIT_AMOUNT', bandMin],
       ['STRIPE_PRICE_MAX_UNIT_AMOUNT', bandMax]
     ] as const) {
-      if (value !== undefined && !/^[0-9]+$/.test(value.trim())) {
+      if (value === undefined) continue;
+      const trimmed = value.trim();
+      // Match the catalog's parser exactly: digits only AND positive. '0'
+      // passed the old regex while the catalog rejected it as not_positive -
+      // validator green, bound silently discarded (#278 review round 4).
+      if (!/^[0-9]+$/.test(trimmed) || Number.parseInt(trimmed, 10) <= 0) {
         findings.push({
-          severity: production ? 'error' : 'warning',
+          severity: 'warning',
           rule: 'stripe.price_band',
-          message: `${name} must be a whole number of minor units (no separators, no decimal point)`
+          message: `${name} must be a positive whole number of minor units (no separators, no decimal point, not zero)`
         });
       }
     }
@@ -617,7 +629,7 @@ function validateStripe(
         severity: 'warning',
         rule: 'stripe.price_band',
         message:
-          'Set STRIPE_PRICE_MIN_UNIT_AMOUNT and STRIPE_PRICE_MAX_UNIT_AMOUNT together; the other bound keeps its two-decimal default'
+          'STRIPE_PRICE_MIN_UNIT_AMOUNT and STRIPE_PRICE_MAX_UNIT_AMOUNT are meant to be set together; if the pair would invert, the configured bound wins and the default falls away'
       });
     }
 

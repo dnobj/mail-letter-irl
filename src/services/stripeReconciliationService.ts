@@ -18,22 +18,9 @@ import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog
 // table. Both used to be private hand-kept duplicates here - the credits map's
 // own comment said "must match stripeService.ts", which is the drift shape
 // behind #160/#270/#275. Now there is one of each.
-import { getStripeClient } from './stripeClient.js';
+import { BACKGROUND_REQUEST_OPTIONS, getStripeClient } from './stripeClient.js';
 import { PACK_CREDITS_BY_PRODUCT as PRODUCT_CREDITS } from '../config/products.js';
 
-/**
- * The budget for THIS JOB, not for one call. The shared client is tuned for
- * the interactive paths (10s, 1 retry) and consolidating onto it silently cut
- * this file from stripe-node's 80s/2 default. Restoring it per call meant the
- * next Stripe call added here inherits the checkout bounds by accident - which
- * is exactly what happened to refunds.list, left tight while its sibling was
- * patched (#278 review round 3). Nothing here has a customer waiting, and no
- * call has per-page recovery: one timeout discards the whole run.
- */
-export const BACKGROUND_REQUEST_OPTIONS = {
-  timeout: 60_000,
-  maxNetworkRetries: 2
-} as const;
 
 interface ReconciliationResult {
   period: {
