@@ -169,7 +169,14 @@ describe("dashboard runtime logging privacy", () => {
     error.mockRestore();
   });
 
-  it("answers 400 for an unknown product id, off the carried validation class", async () => {
+  it("answers 400 for an unknown product id, from the handler's own pre-validation", async () => {
+    // The 400 comes from VALID_PACK_CODES two guards earlier - the commerce
+    // layer is never reached, which is the point: the rejection below is
+    // wired precisely to prove it stays unconsumed. An earlier title claimed
+    // the answer came from a carried validation_error, a mapping that does
+    // not exist (validation_error is not terminal, so reaching the catch
+    // would answer 500) - and trusting it would invite deleting the
+    // pre-validation (#278 round 9).
     createPackCheckout.mockRejectedValue(
       Object.assign(new Error("Invalid product ID: credit-pack-999"), {
         diagnosticClass: "validation_error"

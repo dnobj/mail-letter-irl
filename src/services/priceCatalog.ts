@@ -235,6 +235,28 @@ export function getResolutionEpoch(productCode: string): number {
   return resolutionEpochs.get(productCode) ?? 0;
 }
 
+/**
+ * The ONE encoding of a failure set for a change-only diagnostic signature.
+ * Two hand-kept copies of this format (here and readiness) drifted inside
+ * this PR: round 7 added the diagnosticClass to one, round 8 had to add it
+ * to the other after the class-blind signature suppressed exactly the
+ * transient->terminal transition the class vocabulary exists to surface.
+ * The resolution epoch is folded in on the same principle at the recovery
+ * axis - a fault recurring after a recovery no reader observed otherwise
+ * hashes identically and the second outage logs nothing (#278 rounds 7-9).
+ */
+export function formatPriceFailureSummary(
+  failures: readonly PriceResolutionFailure[]
+): string {
+  return failures
+    .map(
+      failure =>
+        `${failure.productCode}:${failure.rule}:${failure.diagnosticClass}` +
+        `:e${getResolutionEpoch(failure.productCode)}`
+    )
+    .join(',');
+}
+
 function configSignature(product: ConfiguredProduct): string {
   return `${product.priceId}|${product.expectedAmountCents}|${product.expectedCurrency}`;
 }
@@ -284,16 +306,10 @@ export function getResolvedPriceForProduct(productCode: string): ResolvedPrice |
  */
 function storedFailureIfCurrent(
   productCode: string,
-  env: NodeJS.ProcessEnv = process.env
+  product: ConfiguredProduct | null
 ): PriceResolutionFailure | null {
   const stored = failures.get(productCode);
-  if (!stored) return null;
-  // The CALLER'S env, not ambient: a threaded-env read (readiness with a
-  // custom env) that validated the memo against its own env but the stored
-  // failure against process.env stitched one verdict from two environments -
-  // the exact defect this signature check exists to prevent (#278 round 8).
-  const product = getConfiguredProduct(productCode, env);
-  if (!product) return null;
+  if (!stored || !product) return null;
   const state = attempts.get(productCode);
   if (state && state.signature !== configSignature(product)) return null;
   return stored;
@@ -303,7 +319,15 @@ export function describeUnpriced(
   productCode: string,
   env: NodeJS.ProcessEnv = process.env
 ): PriceResolutionFailure {
-  return storedFailureIfCurrent(productCode, env) ?? notResolvedFailure(productCode);
+  // The row is derived ONCE, here, from the caller's env and handed down.
+  // Threading `env` through every helper as an optional trailing parameter
+  // is how the round-8 stitched verdict happened in the first place: a
+  // missed pass-through compiles silently and falls back to ambient
+  // (#278 round 9).
+  return (
+    storedFailureIfCurrent(productCode, getConfiguredProduct(productCode, env)) ??
+    notResolvedFailure(productCode)
+  );
 }
 
 /**
@@ -317,10 +341,14 @@ export function getUnpricedProducts(env: NodeJS.ProcessEnv = process.env): Price
   return getConfiguredProducts(env).flatMap(product => {
     const memo = resolved.get(product.productCode);
     if (memo && memoMatchesConfiguration(memo, product)) return [];
-    // Signature-validated like every other read - see storedFailureIfCurrent.
-    const failure = storedFailureIfCurrent(product.productCode, env);
-    if (failure) return [failure];
-    return [notResolvedFailure(product.productCode)];
+    // The row this loop already built, from the caller's env, handed down:
+    // what makes the two-environment verdict unrepresentable rather than
+    // merely unlikely, and it drops the second derivation per product per
+    // probe (#278 round 9).
+    return [
+      storedFailureIfCurrent(product.productCode, product) ??
+        notResolvedFailure(product.productCode)
+    ];
   });
 }
 
@@ -459,7 +487,18 @@ async function resolveOne(product: ConfiguredProduct, startedGen: number): Promi
     const price = await retrievePrice(product.priceId);
     outcome = validate(product, price);
   } catch (error) {
-    if (error instanceof PriceRetrieverMissingError) throw error;
+    // By name as well as identity: the shared Stripe mock raises this
+    // sentinel for an unwired priceRetrieve, and it cannot import this class
+    // (the suites that use it often replace this very module), while a test
+    // registry can hold two copies of one class - under either, `instanceof`
+    // quietly fails and the loud failure degrades into the fake outage the
+    // sentinel exists to prevent (#278 round 9).
+    if (
+      error instanceof PriceRetrieverMissingError ||
+      (error instanceof Error && error.name === 'PriceRetrieverMissingError')
+    ) {
+      throw error;
+    }
     // Prefer a class the failing layer attached (getStripeClient's missing-key
     // throw carries configuration_error - a bare classify read it as a
     // transient provider fault and retried a human-only problem forever,
@@ -511,7 +550,19 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
     // quoting a price every purchase then failed against, with readiness
     // green. pruneStale drops attempts, failures AND memos for every code
     // the current configuration no longer sells (#278 round 8).
-    pruneStale(getConfiguredProducts());
+    //
+    // Behind a cheap precondition: this branch runs on EVERY quote in the
+    // shipped default (Pay & Send off, so the eligibility kick always passes
+    // an unsold code), and building the full table plus walking three maps to
+    // prune nothing cost more per quote than the enabled warm path two rounds
+    // went to trim. The maps hold at most five keys and the membership check
+    // is a static array scan plus one env read (#278 round 9).
+    const holdsUnsoldState = [
+      ...resolved.keys(),
+      ...failures.keys(),
+      ...attempts.keys()
+    ].some(code => !isConfiguredProductCode(code));
+    if (holdsUnsoldState) pruneStale(getConfiguredProducts());
     return;
   }
 
@@ -589,16 +640,20 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
       // Class included: price.lookup_failed can flip transient<->terminal
       // under the SAME rule, and a class-blind signature suppressed exactly
       // the transition the classes exist to surface (#278 round 7).
-      const failureSummary =
-        [...failures.values()]
-          .map(f => `${f.productCode}:${f.rule}:${f.diagnosticClass}`)
-          .join(' ') || 'none';
+      const failureSummary = formatPriceFailureSummary([...failures.values()]) || 'none';
+      // What we are SELLING, not how many rows we hold: the signature used
+      // resolved.size, so a repoint that changed an amount while leaving the
+      // count and the failure set alone was suppressed - and this line is
+      // the only audit record of live sell prices (#278 round 9).
+      const priceSummary = [...resolved.values()]
+        .map(p => `${p.productCode}=${p.unitAmount}${p.currency}`)
+        .join(' ');
       // On CHANGE only: a dev deploy with prices legitimately unset re-logged
       // an identical error-level line every terminal-ladder expiry, ~720/day,
       // for an already-reported steady state (#278 round 6).
       writeDiagnosticOnChange(
         'stripe.price_catalog_resolved',
-        `${resolved.size}|${failureSummary}`,
+        `${priceSummary}|${failureSummary}`,
         failures.size ? 'error' : 'info',
         'stripe.price_catalog_resolved',
         {
@@ -607,9 +662,7 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
           // dead product list against the live maps (#278 round 7).
           requested: getConfiguredProducts().length,
           failures: failureSummary,
-          prices: [...resolved.values()]
-            .map(p => `${p.productCode}=${p.unitAmount}${p.currency}`)
-            .join(' ')
+          prices: priceSummary
         }
       );
     });

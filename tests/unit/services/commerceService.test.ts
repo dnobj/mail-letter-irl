@@ -511,6 +511,71 @@ describe('commerceService', () => {
     expect(mocks.getPackProduct).not.toHaveBeenCalled();
   });
 
+  it('does not raise a money alarm for an UNPAID legacy session', async () => {
+    // The gate runs for every legacy-metadata session, including expiries and
+    // failed async payments, whose amount_total is a historical price nobody
+    // paid. Logging those at error made an unpaid expiry indistinguishable
+    // from the real paid-mismatch alarm this event name exists for, and the
+    // payload carried nothing to tell them apart (#278 round 9).
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const infoSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-x' }] };
+        return { rows: [] };
+      });
+
+      await processStripeWebhookEvent(
+        checkoutEvent({
+          payment_status: 'unpaid',
+          amount_total: 399,
+          client_reference_id: null,
+          metadata: { userId: 'user-1', productCode: 'credit-pack-4' }
+        })
+      );
+
+      const lines = (spy: typeof errorSpy) =>
+        spy.mock.calls
+          .flat()
+          .map(String)
+          .filter(line => line.includes('commerce.legacy_adoption_amount_mismatch'));
+      expect(lines(errorSpy)).toHaveLength(0);
+      expect(lines(infoSpy)).toHaveLength(1);
+      expect(lines(infoSpy)[0]).toContain('"paymentStatus":"unpaid"');
+    } finally {
+      errorSpy.mockRestore();
+      infoSpy.mockRestore();
+    }
+  });
+
+  it('still raises the money alarm when a PAID legacy session disagrees', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-y' }] };
+        return { rows: [] };
+      });
+
+      await processStripeWebhookEvent(
+        checkoutEvent({
+          payment_status: 'paid',
+          amount_total: 399,
+          client_reference_id: null,
+          metadata: { userId: 'user-1', productCode: 'credit-pack-4' }
+        })
+      );
+
+      const lines = errorSpy.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('commerce.legacy_adoption_amount_mismatch'));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('"paymentStatus":"paid"');
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it('treats an UNRESOLVED catalog as no verdict, never as a price change', async () => {
     // amountCents 0 is the catalog's unresolved sentinel. Three review angles
     // read the reprice branch as cancelling a reusable order during a

@@ -906,13 +906,21 @@ async function createLegacyPackOrder(
   const paidAmount = session.amount_total ?? null;
   const paidCurrency = normalizedCurrency(session.currency ?? undefined, '');
   if (paidAmount !== definition.expectedAmountCents || paidCurrency !== packCurrency()) {
-    writeDiagnostic('error', 'commerce.legacy_adoption_amount_mismatch', {
+    // Level follows whether money actually moved. This gate runs for EVERY
+    // legacy-metadata session, including checkout.session.expired and
+    // async_payment_failed, whose amount_total is a historical price nobody
+    // paid - logging those at error made an unpaid expiry indistinguishable
+    // from the real paid-mismatch alarm this event name exists for, and the
+    // payload carried no marker to tell them apart (#278 round 9).
+    const paid = session.payment_status === 'paid';
+    writeDiagnostic(paid ? 'error' : 'info', 'commerce.legacy_adoption_amount_mismatch', {
       productCode: definition.productCode,
       // Amounts here are Stripe's own public figures for this session plus a
       // constant from source control - nothing secret.
       paidAmount: paidAmount ?? 'none',
       expectedAmount: definition.expectedAmountCents,
-      paidCurrency: paidCurrency || 'none'
+      paidCurrency: paidCurrency || 'none',
+      paymentStatus: session.payment_status ?? 'unknown'
     });
     return null;
   }

@@ -19,6 +19,7 @@ import {
   PACK_PRODUCTS,
   getConfiguredProduct,
   jitCurrency,
+  jitProductDefinition,
   packCurrency,
   type PackProductId
 } from '../config/products.js';
@@ -50,6 +51,7 @@ export function getPackProductConfig(productId: PackProductId): CommerceProductC
   // that can reach this awaits ensurePriceCatalog() first. An unresolved
   // product yields 0, which every caller's "not configured" guard refuses, so
   // the purchase is disabled rather than transacted against a guess.
+  const configured = getConfiguredProduct(productId);
   const resolved = getResolvedPriceForProduct(productId);
   return {
     productCode: productId,
@@ -59,36 +61,34 @@ export function getPackProductConfig(productId: PackProductId): CommerceProductC
     // sources were identical by construction and the ?? read as if the memo
     // could win - a trap armed the day the memo validity rule loosens (#278
     // round 6). Only the amount genuinely depends on resolution.
-    priceId: getConfiguredProduct(productId)?.priceId ?? '',
+    priceId: configured?.priceId ?? '',
     amountCents: resolved?.unitAmount ?? 0,
-    currency: packCurrency(),
+    // The row's OWN expected currency: it is packCurrency(env) by
+    // construction, and re-reading the env for it made this accessor pay
+    // three derivations of one row per warm quote - the per-quote cost
+    // getConfiguredProduct was introduced to remove (#278 round 9).
+    currency: configured?.expectedCurrency ?? packCurrency(),
     name: definition.name,
     description: definition.description
   };
 }
 
 export function getJitProductConfig(mailType: MailType): CommerceProductConfig {
-  const definition = JIT_PRODUCTS.find(product => product.mailType === mailType) ?? JIT_PRODUCTS[0];
+  // The shared lookup, so the unknown-mail-type fallback policy is not
+  // written once here and once in jitProductCode - the quote path kicks and
+  // clears through one and prices through the other (#278 round 9).
+  const definition = jitProductDefinition(mailType);
+  const configured = getConfiguredProduct(definition.productCode);
   const resolved = getResolvedPriceForProduct(definition.productCode);
   return {
     productCode: definition.productCode,
     mailType,
-    priceId: getConfiguredProduct(definition.productCode)?.priceId ?? '',
+    priceId: configured?.priceId ?? '',
     amountCents: resolved?.unitAmount ?? 0,
-    currency: jitCurrency(),
+    currency: configured?.expectedCurrency ?? jitCurrency(),
     name: definition.name,
     description: definition.description
   };
-}
-
-export interface CheckoutSessionParams {
-  userId: string;
-  userEmail: string;
-  productId: PackProductId;
-  successUrl: string;
-  cancelUrl: string;
-  orderId?: string;
-  idempotencyKey?: string;
 }
 
 export interface CheckoutSessionResult {
@@ -204,24 +204,6 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
 }
 
 /** Backward-compatible pack adapter used by older callers and tests. */
-export async function createCheckoutSession(
-  params: CheckoutSessionParams
-): Promise<CheckoutSessionResult> {
-  await ensurePriceCatalog(params.productId);
-  const product = getPackProductConfig(params.productId);
-  if (!product) return { success: false, error: `Invalid product ID: ${params.productId}` };
-  const orderId = params.orderId || `legacy-${params.userId}-${Date.now()}`;
-  return createHostedCheckout({
-    orderId,
-    orderType: 'letter_pack',
-    userEmail: params.userEmail,
-    product,
-    successUrl: params.successUrl,
-    cancelUrl: params.cancelUrl,
-    idempotencyKey: params.idempotencyKey || `legacy-pack:${orderId}`
-  });
-}
-
 export async function createPackCheckoutSession(
   params: Omit<HostedCheckoutParams, 'orderType'>
 ): Promise<CheckoutSessionResult> {
@@ -244,7 +226,14 @@ export function verifyWebhookSignature(
     return getStripeClient().webhooks.constructEvent(payload, signature, webhookSecret);
   } catch (error) {
     writeDiagnostic('warn', 'stripe.webhook_signature_invalid', {
-      errorClass: classifyDiagnosticError(error, 'provider_error')
+      // Carried FIRST. This try wraps getStripeClient(), whose missing-key
+      // throw carries configuration_error: bare classification filed a
+      // credential fault as a provider blip, so the operator chased a Stripe
+      // signing problem while every webhook failed on an unset key - the
+      // #213 mislabel, one function away from where round 7 fixed it
+      // (#278 round 9).
+      errorClass:
+        carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error')
     });
     return null;
   }

@@ -22,12 +22,15 @@ import {
 } from '../config/deploymentConfig.js';
 import { listProviders } from '../services/providers/index.js';
 import {
-  classifyDiagnosticError,
   clearDiagnosticChangeSlot,
   writeDiagnostic,
   writeDiagnosticOnChange
 } from '../utils/diagnosticLog.js';
-import { getUnpricedProducts, kickPriceCatalog } from '../services/priceCatalog.js';
+import {
+  formatPriceFailureSummary,
+  getUnpricedProducts,
+  kickPriceCatalog
+} from '../services/priceCatalog.js';
 
 export interface ReadinessReport {
   ready: boolean;
@@ -47,7 +50,7 @@ const CACHE_TTL_MS = 5_000;
  * migration have exactly the same shape, and an earlier attempt that special-
  * cased prices covered none of them (and was dead code besides, #278 r3).
  * Still bounded, so an anonymous prober cannot drive the database checks
- * harder than once a second.
+ * harder than once every two seconds.
  */
 const UNREADY_CACHE_TTL_MS = 2_000;
 
@@ -169,14 +172,13 @@ export async function getReadiness(
   // place an unpriced product is reported at all, and the 200 branch below
   // does not write a diagnostic. Product codes and rule ids only - the loader
   // never puts an amount in a failure.
-  // Class included: price.lookup_failed flips transient<->terminal under the
-  // SAME rule (a blip hardening into a revoked key), and a class-blind
-  // signature suppressed exactly the transition the class vocabulary exists
-  // to surface (#278 round 8 - the same defect round 7 fixed in the
-  // catalog's own summary).
-  const priceFailureSummary = priceFailures
-    .map(f => `${f.productCode}:${f.rule}:${f.diagnosticClass}`)
-    .join(',');
+  // ONE encoding, owned by the catalog beside the record it describes. The
+  // hand-kept copy that stood here was class-blind until round 8 - the same
+  // omission round 7 had already fixed in the catalog's own copy, which is
+  // exactly how two copies of one format behave. Its epoch component also
+  // gives this surface the recovery-awareness round 8 gave only the quote
+  // slot (#278 round 9).
+  const priceFailureSummary = formatPriceFailureSummary(priceFailures);
   // On CHANGE only, via the ONE shared throttle. A non-production deploy
   // legitimately has no prices, so pricesOk is false forever there; an
   // unconditional line meant ~17,000 identical entries a day per instance

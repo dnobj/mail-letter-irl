@@ -355,18 +355,35 @@ export async function reconcileStripePayments(
   }
 
   // 5. Check for refunds in Stripe that weren't processed
-  const refunds = await stripe.refunds.list(
-    {
-      created: {
-        gte: Math.floor(startDate.getTime() / 1000),
-        lte: Math.floor(endDate.getTime() / 1000),
+  // Paginated like the sessions sweep above. A single 100-item page silently
+  // dropped every older refund in the window - and Stripe returns refunds
+  // newest-first, so what fell off the end was exactly the aged, most likely
+  // unreconciled ones, in precisely the mass-refund incident this audit
+  // exists for. The reconciliation reported clean while completed Stripe
+  // refunds had no durable reversal (#278 round 9).
+  const allRefunds: Stripe.Refund[] = [];
+  let refundsHasMore = true;
+  let refundsStartingAfter: string | undefined;
+  while (refundsHasMore) {
+    const refundPage = await stripe.refunds.list(
+      {
+        created: {
+          gte: Math.floor(startDate.getTime() / 1000),
+          lte: Math.floor(endDate.getTime() / 1000),
+        },
+        limit: 100,
+        starting_after: refundsStartingAfter,
       },
-      limit: 100,
-    },
-    BACKGROUND_REQUEST_OPTIONS
-  );
+      BACKGROUND_REQUEST_OPTIONS
+    );
+    allRefunds.push(...refundPage.data);
+    refundsHasMore = refundPage.has_more;
+    if (refundPage.data.length > 0) {
+      refundsStartingAfter = refundPage.data[refundPage.data.length - 1].id;
+    }
+  }
 
-  for (const refund of refunds.data) {
+  for (const refund of allRefunds) {
     if (refund.status === 'succeeded' && refund.payment_intent) {
       const paymentIntentReference = typeof refund.payment_intent === 'string'
         ? refund.payment_intent

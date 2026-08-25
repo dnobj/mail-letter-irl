@@ -78,10 +78,47 @@ vi.mock('../../../src/db/index.js', () => ({
 
 // Import after mocking
 import {
-  createCheckoutSession,
+  createPackCheckoutSession,
   getPackProductConfig,
   verifyWebhookSignature,
 } from '../../../src/services/stripeService.js';
+
+/**
+ * The legacy pack-checkout call shape, kept HERE rather than in production.
+ * src/services/stripeService.ts exported this adapter with no caller on this
+ * branch or on dev, and #278 round 9 deleted it the way round 8 deleted
+ * extractCheckoutData: a dead export this PR had modified (it gained the
+ * lazy ensure), so every future money-path change would have to be mirrored
+ * into an unreachable function that an entrypoint audit still counts. The
+ * behaviour these cases exercise is createHostedCheckout via
+ * createPackCheckoutSession; the shape below is reproduced exactly, including
+ * the invalid-product refusal and the legacy id fallbacks.
+ */
+async function createCheckoutSession(params: {
+  userId: string;
+  userEmail: string;
+  productId: string;
+  successUrl: string;
+  cancelUrl: string;
+  orderId?: string;
+  idempotencyKey?: string;
+}) {
+  const { ensurePriceCatalog } = await import('../../../src/services/priceCatalog.js');
+  await ensurePriceCatalog(params.productId);
+  const product = getPackProductConfig(params.productId as never);
+  if (!product) {
+    return { success: false as const, error: `Invalid product ID: ${params.productId}` };
+  }
+  const orderId = params.orderId || `legacy-${params.userId}-${Date.now()}`;
+  return createPackCheckoutSession({
+    orderId,
+    userEmail: params.userEmail,
+    product,
+    successUrl: params.successUrl,
+    cancelUrl: params.cancelUrl,
+    idempotencyKey: params.idempotencyKey || `legacy-pack:${orderId}`
+  });
+}
 
 describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
   beforeEach(async () => {
@@ -100,7 +137,7 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
     vi.unstubAllEnvs();
   });
 
-  describe('createCheckoutSession', () => {
+  describe('pack checkout, through the legacy entrypoint shape', () => {
     it('should create checkout session for credit-pack-4', async () => {
       const result = await createCheckoutSession({
         userId: 'user-123',

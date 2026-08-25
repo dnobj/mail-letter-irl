@@ -98,8 +98,8 @@ order they catch problems:
    to a warning elsewhere. Outside production an unresolved price shows as
    `"prices":"degraded"` in an otherwise-`200` body, with the product codes and
    rules in the log under `readiness.prices_unresolved`. Immediately after a
-   restart the catalog may briefly be cold; that verdict is held for about a
-   second, not the usual five, so a healthy instance stops reporting itself
+   restart the catalog may briefly be cold; that verdict is held for about two
+   seconds, not the usual five, so a healthy instance stops reporting itself
    unready almost at once.
 
 **Rollout ordering warning:** set an environment's variables *before* deploying

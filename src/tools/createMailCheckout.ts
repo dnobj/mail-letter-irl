@@ -1,4 +1,4 @@
-import { isTerminalDiagnosticClass } from '../utils/diagnosticLog.js';
+import { carriedDiagnosticClass, isTerminalDiagnosticClass } from '../utils/diagnosticLog.js';
 import { formatAmountForCurrency } from '../config/products.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { createMailCheckoutInputSchema, createMailCheckoutOutputSchema } from '../schemas.js';
@@ -21,18 +21,25 @@ interface CreateMailCheckoutOutput {
 }
 
 export function friendlyCheckoutError(error: unknown): Error {
-  const source = (error ?? {}) as { code?: string; diagnosticClass?: string };
+  const source = (error ?? {}) as { code?: string };
+  // The helper, not a fifth hand-rolled cast: an unchecked cast asserts the
+  // property is a string without verifying it, so a non-string class
+  // attached anywhere upstream flowed into the terminality test and back
+  // out on the friendly error, where the server's own carried read then
+  // rejected it and logged unknown_error - the mislabel this helper was
+  // built to end (#278 round 9).
+  const diagnosticClass = carriedDiagnosticClass(error);
   // Rebuild the message, keep the classification. Returning a bare Error here
   // discarded the diagnosticClass the commerce layer attached, so the server
   // log recorded unknown_error for precisely classified faults (#278 r4).
   // Terminality is DERIVED from the class, never carried: a carried pair can
   // be minted mismatched, and three review angles independently converged on
   // class-only carriage (#278 round 6).
-  const terminal = isTerminalDiagnosticClass(source.diagnosticClass);
+  const terminal = isTerminalDiagnosticClass(diagnosticClass);
   const friendly = (message: string): Error =>
     Object.assign(new Error(message), {
       ...(source.code !== undefined ? { code: source.code } : {}),
-      ...(source.diagnosticClass !== undefined ? { diagnosticClass: source.diagnosticClass } : {})
+      ...(diagnosticClass !== undefined ? { diagnosticClass } : {})
     });
   switch (source.code) {
     case 'JIT_DISABLED':

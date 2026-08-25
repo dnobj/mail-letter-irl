@@ -491,8 +491,6 @@ export interface CreateLetterDraftParams {
 export async function createLetterDraftAndBuildOutput(
   params: CreateLetterDraftParams
 ): Promise<LetterQuoteOutput> {
-  // Quotes read the resolved price (#275 stage A); resolve lazily so the
-  // stdio server and flow harness work without a bootstrap call.
 
   const {
     sender,

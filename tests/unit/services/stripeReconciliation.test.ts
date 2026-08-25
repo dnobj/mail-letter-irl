@@ -51,6 +51,32 @@ describe('background Stripe budget (#278)', () => {
   // a paginated loop with no per-page recovery on a checkout-tuned budget: one
   // slow page aborts the whole run, and creditExpirationWorker's catch
   // swallows it unlogged (#278 review round 3).
+  it('audits EVERY page of refunds, not just the newest hundred', async () => {
+    // Stripe returns refunds newest-first, so a single 100-item page drops
+    // the OLDEST refunds in the window - the aged, most likely unreconciled
+    // ones, in exactly the mass-refund incident this audit exists for. The
+    // sessions sweep beside it has always paginated (#278 round 9).
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_reconciliation');
+    mockSessionsList.mockResolvedValue({ data: [], has_more: false });
+    const firstPage = Array.from({ length: 100 }, (_unused, index) => ({
+      id: `re_${index}`,
+      status: 'failed',
+      payment_intent: null
+    }));
+    mockRefundsList
+      .mockResolvedValueOnce({ data: firstPage, has_more: true })
+      .mockResolvedValueOnce({
+        data: [{ id: 're_oldest', status: 'failed', payment_intent: null }],
+        has_more: false
+      });
+    mockQuery.mockResolvedValue({ rows: [] });
+
+    await reconcileStripePayments(7);
+
+    expect(mockRefundsList).toHaveBeenCalledTimes(2);
+    expect(mockRefundsList.mock.calls[1][0]).toMatchObject({ starting_after: 're_99' });
+  });
+
   it('gives every outbound list call the background budget, not the checkout one', async () => {
     // The default `stripe` parameter builds the shared client, so the key must
     // be present; the module itself is mocked, so nothing leaves the process.

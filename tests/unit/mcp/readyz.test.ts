@@ -15,15 +15,23 @@ const priceCatalog = vi.hoisted(() => ({
 // pass against production code where that function could never return true
 // (#278 review round 3). Coldness is now derived from the failure rules, which
 // this mock reproduces faithfully because they are the catalog's own output.
-vi.mock('../../../src/services/priceCatalog.js', () => ({
-  getUnpricedProducts: (env?: NodeJS.ProcessEnv) => {
-    priceCatalog.lastEnv = env;
-    return priceCatalog.unpriced;
-  },
-  kickPriceCatalog: () => {
-    priceCatalog.ensureCalls += 1;
-  }
-}));
+vi.mock('../../../src/services/priceCatalog.js', async importOriginal => {
+  // The state reads are stubbed; the SUMMARY FORMATTER is the real one.
+  // Re-typing that format here would rebuild the second copy whose drift
+  // these very tests exist to catch - round 7 fixed the class omission in the
+  // catalog's copy, round 8 in readiness's (#278 round 9).
+  const actual = await importOriginal<typeof import('../../../src/services/priceCatalog.js')>();
+  return {
+    formatPriceFailureSummary: actual.formatPriceFailureSummary,
+    getUnpricedProducts: (env?: NodeJS.ProcessEnv) => {
+      priceCatalog.lastEnv = env;
+      return priceCatalog.unpriced;
+    },
+    kickPriceCatalog: () => {
+      priceCatalog.ensureCalls += 1;
+    }
+  };
+});
 import { readFile } from 'node:fs/promises';
 
 /**

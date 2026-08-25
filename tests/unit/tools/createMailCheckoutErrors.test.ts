@@ -9,6 +9,21 @@ import { describe, expect, it } from 'vitest';
 import { friendlyCheckoutError } from '../../../src/tools/createMailCheckout.js';
 
 describe('friendlyCheckoutError terminality (#278)', () => {
+  it('drops a non-string carried class instead of passing it on', () => {
+    // The hand-rolled cast this replaced asserted the property was a string
+    // without checking, so a non-string class flowed into the terminality
+    // test and back out on the friendly error, where the server's own
+    // carried read then rejected it and logged unknown_error (#278 round 9).
+    const friendly = friendlyCheckoutError(
+      Object.assign(new Error('internal detail'), {
+        code: 'PROVIDER_ERROR',
+        diagnosticClass: { nested: 'configuration_error' }
+      })
+    );
+
+    expect((friendly as { diagnosticClass?: unknown }).diagnosticClass).toBeUndefined();
+  });
+
   it.each([
     // [code, diagnosticClass, mustMatch, mustNotMatch]
     ['JIT_NOT_CONFIGURED', 'configuration_error', /not configured/, /try again/i],

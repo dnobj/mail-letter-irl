@@ -155,35 +155,52 @@ export interface ConfiguredProduct {
  * stale or placeholder price id must not be resolved, and must never be able to
  * fail readiness (#278 review).
  */
+/**
+ * THE ConfiguredProduct construction. Four hand-rolled copies of this literal
+ * stood here (two in the table builder, two in the single-product accessor),
+ * and priceCatalog keys every staleness decision on those two functions
+ * agreeing: configSignature and memoMatchesConfiguration read one, pruneStale
+ * reads the other. A field added to one copy and missed in the other makes
+ * the single-product and full-table encodings of the same row disagree, and
+ * memos are then validated by one and pruned by the other - the asymmetry
+ * that produced the round-6 bug (#278 round 9).
+ */
+function configuredRow(
+  definition: { productCode: string; priceEnv: string; expectedAmountCents: number },
+  group: ConfiguredProduct['group'],
+  currency: string,
+  env: NodeJS.ProcessEnv
+): ConfiguredProduct {
+  return {
+    productCode: definition.productCode,
+    group,
+    priceId: (env[definition.priceEnv] ?? '').trim(),
+    expectedAmountCents: definition.expectedAmountCents,
+    expectedCurrency: currency
+  };
+}
+
+/** The Pay & Send product definition for a mail type, with its fallback. */
+export function jitProductDefinition(mailType: MailType): (typeof JIT_PRODUCTS)[number] {
+  return JIT_PRODUCTS.find(product => product.mailType === mailType) ?? JIT_PRODUCTS[0];
+}
+
 export function getConfiguredProducts(env: NodeJS.ProcessEnv = process.env): ConfiguredProduct[] {
   // Hoisted: computing these inside the maps re-read and re-normalized the
   // same env vars up to seven times per call (#278 review round 5).
   const packCcy = packCurrency(env);
-  const packs: ConfiguredProduct[] = PACK_PRODUCTS.map(product => ({
-    productCode: product.productCode,
-    group: 'pack',
-    priceId: (env[product.priceEnv] ?? '').trim(),
-    expectedAmountCents: product.expectedAmountCents,
-    expectedCurrency: packCcy
-  }));
+  const packs = PACK_PRODUCTS.map(product => configuredRow(product, 'pack', packCcy, env));
 
   if (env.JIT_PURCHASE_ENABLED !== 'true') return packs;
 
   const jitCcy = jitCurrency(env);
-  const jit: ConfiguredProduct[] = JIT_PRODUCTS.map(product => ({
-    productCode: product.productCode,
-    group: 'jit',
-    priceId: (env[product.priceEnv] ?? '').trim(),
-    expectedAmountCents: product.expectedAmountCents,
-    expectedCurrency: jitCcy
-  }));
+  const jit = JIT_PRODUCTS.map(product => configuredRow(product, 'jit', jitCcy, env));
   return [...packs, ...jit];
 }
 
 /** The Pay & Send product code for a mail type. */
 export function jitProductCode(mailType: MailType): string {
-  const definition = JIT_PRODUCTS.find(product => product.mailType === mailType);
-  return (definition ?? JIT_PRODUCTS[0]).productCode;
+  return jitProductDefinition(mailType).productCode;
 }
 
 /**
@@ -196,25 +213,11 @@ export function getConfiguredProduct(
   env: NodeJS.ProcessEnv = process.env
 ): ConfiguredProduct | null {
   const pack = PACK_PRODUCTS.find(product => product.productCode === productCode);
-  if (pack) {
-    return {
-      productCode: pack.productCode,
-      group: 'pack',
-      priceId: (env[pack.priceEnv] ?? '').trim(),
-      expectedAmountCents: pack.expectedAmountCents,
-      expectedCurrency: packCurrency(env)
-    };
-  }
+  if (pack) return configuredRow(pack, 'pack', packCurrency(env), env);
   if (env.JIT_PURCHASE_ENABLED !== 'true') return null;
   const jit = JIT_PRODUCTS.find(product => product.productCode === productCode);
   if (!jit) return null;
-  return {
-    productCode: jit.productCode,
-    group: 'jit',
-    priceId: (env[jit.priceEnv] ?? '').trim(),
-    expectedAmountCents: jit.expectedAmountCents,
-    expectedCurrency: jitCurrency(env)
-  };
+  return configuredRow(jit, 'jit', jitCurrency(env), env);
 }
 
 /**

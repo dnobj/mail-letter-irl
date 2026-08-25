@@ -1024,6 +1024,55 @@ describe('price catalog (#275 stage A)', () => {
     ).toMatchObject({ rule: 'price.not_resolved' });
   });
 
+  it('re-logs the catalog summary when the CURRENCY moves under a steady count', async () => {
+    // The signature used resolved.size, so a change that left the count and
+    // the failure set alone was suppressed - and this line is the only audit
+    // record of what is being sold at what price. A currency repoint is
+    // exactly that shape: same three products, same pins, different money
+    // (#278 round 9).
+    const diagnostic = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      setPriceRetriever(healthyRetriever());
+      await ensurePriceCatalog();
+
+      vi.stubEnv('STRIPE_CURRENCY', 'eur');
+      setPriceRetriever(
+        vi.fn(async (priceId: string) =>
+          priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId], currency: 'eur' })
+        )
+      );
+      await ensurePriceCatalog();
+
+      const summaries = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('"event":"stripe.price_catalog_resolved"'));
+      expect(summaries).toHaveLength(2);
+      expect(summaries[1]).toContain('eur');
+    } finally {
+      diagnostic.mockRestore();
+    }
+  });
+
+  it('rethrows the unwired-retriever sentinel by NAME, not only by identity', async () => {
+    // The shared Stripe mock raises this sentinel for an unwired
+    // priceRetrieve and cannot import the class (the suites using it often
+    // replace this module); a registry can also hold two copies of one class.
+    // Under either, identity fails and the loud failure degrades into the
+    // fake outage the sentinel exists to prevent (#278 round 9).
+    setPriceRetriever(
+      vi.fn(() =>
+        Promise.reject(
+          Object.assign(new Error('stripeMockModule: priceRetrieve not wired'), {
+            name: 'PriceRetrieverMissingError'
+          })
+        ) as never
+      )
+    );
+
+    await expect(ensurePriceCatalog()).rejects.toThrow(/not wired/);
+  });
+
   it('drops the MEMO too when Pay & Send is toggled off', async () => {
     // The unsold gate cleared cooldowns but spared memos, and in the steady
     // state nothing else prunes: warm pack quotes take the fast path and

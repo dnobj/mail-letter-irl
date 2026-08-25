@@ -24,7 +24,10 @@ describe('boot configuration logging', () => {
     'ADMIN_ENABLED',
     'STRIPE_SECRET_KEY',
     'STRIPE_WEBHOOK_SECRET',
-  // Read by the stripe.currency_unset and stripe.price_band rules (#275/#278).
+  // Read by the stripe.currency_unset rule, and by the catalog's per-product
+  // currency check (#275/#278). There is no price-band rule: the sanity-band
+  // heuristic was abandoned in review for the pinned amounts, and a comment
+  // naming it sends the next reader hunting a rule that does not exist.
   'STRIPE_CURRENCY',
   'JIT_CURRENCY',
     'STRIPE_PRICE_STARTER',

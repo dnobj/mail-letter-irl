@@ -31,8 +31,42 @@ const stripeMocks = vi.hoisted(() => {
 
 vi.mock('stripe', () => stripeMockModule(stripeMocks));
 
-const { createPackCheckoutSession, createCheckoutSession, createPaymentRefund, findPaymentRefund } =
-  await import('../../../src/services/stripeService.js');
+const {
+  createPackCheckoutSession,
+  createPaymentRefund,
+  findPaymentRefund,
+  getPackProductConfig,
+  verifyWebhookSignature
+} = await import('../../../src/services/stripeService.js');
+
+/**
+ * The legacy pack-checkout call shape (deleted from production in #278 round
+ * 9 as a dead export - see the note in creditPurchase.test.ts). Reproduced
+ * exactly so this case keeps exercising the productId-based entry it was
+ * written for.
+ */
+async function createCheckoutSession(params: {
+  userId: string;
+  userEmail: string;
+  productId: string;
+  successUrl: string;
+  cancelUrl: string;
+}) {
+  await ensurePriceCatalog(params.productId);
+  const product = getPackProductConfig(params.productId as never);
+  if (!product) {
+    return { success: false as const, error: `Invalid product ID: ${params.productId}` };
+  }
+  const orderId = `legacy-${params.userId}-1`;
+  return createPackCheckoutSession({
+    orderId,
+    userEmail: params.userEmail,
+    product,
+    successUrl: params.successUrl,
+    cancelUrl: params.cancelUrl,
+    idempotencyKey: `legacy-pack:${orderId}`
+  });
+}
 const { resetPriceCatalog, ensurePriceCatalog, useDefaultPriceRetriever } = await import(
   '../../../src/services/priceCatalog.js'
 );
@@ -299,6 +333,30 @@ describe('checkout pricing guards (#275)', () => {
       error: 'Failed to create checkout session'
     });
     expect(JSON.stringify(result)).not.toContain(sensitive);
+  });
+
+  it('classifies a missing key at the WEBHOOK catch as configuration, not a blip', () => {
+    // This try wraps getStripeClient(), whose missing-key throw carries
+    // configuration_error. Bare classification filed a credential fault as a
+    // provider blip, so an operator chased a Stripe signing problem while
+    // every webhook failed on an unset key - the #213 mislabel, one function
+    // away from where round 7 fixed it (#278 round 9).
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_test');
+    vi.stubEnv('STRIPE_SECRET_KEY', '');
+    resetStripeClient();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(verifyWebhookSignature('body', 'sig')).toBeNull();
+
+      const lines = warn.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('"event":"stripe.webhook_signature_invalid"'));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('"errorClass":"configuration_error"');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('prefers a diagnosticClass carried on the thrown error over reclassification', async () => {
