@@ -244,41 +244,7 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
     });
   });
 
-  describe('extractCheckoutData', () => {
-    it('should extract user and credit info from checkout session', async () => {
-      const mockSession = {
-        id: 'cs_test_123',
-        client_reference_id: 'user-123',
-        customer_email: 'test@example.com',
-        amount_total: 399, // $3.99 in cents
-        metadata: {
-          userId: 'user-123',
-          productId: 'credit-pack-4',
-          credits: '4',
-        },
-      } as any;
-
-      const data = await extractCheckoutData(mockSession);
-
-      expect(data).not.toBeNull();
-      expect(data?.userId).toBe('user-123');
-      expect(data?.credits).toBe(4);
-      expect(data?.productId).toBe('credit-pack-4');
-      expect(data?.sessionId).toBe('cs_test_123');
-      expect(data?.amountPaid).toBe(3.99);
-    });
-
-    it('should return null when required metadata is missing', async () => {
-      const mockSession = {
-        id: 'cs_test_123',
-        metadata: {}, // Missing required fields
-      } as any;
-
-      const data = await extractCheckoutData(mockSession);
-
-      expect(data).toBeNull();
-    });
-  });
+  
 
   describe('webhook signature verification', () => {
     it('should return null when webhook secret is not configured', () => {

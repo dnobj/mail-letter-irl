@@ -3,21 +3,21 @@
 import type Stripe from 'stripe';
 import type { MailType } from './types.js';
 import {
+  carriedDiagnosticClass,
   classifyDiagnosticError,
   isTerminalDiagnosticClass,
   writeDiagnostic
 } from '../utils/diagnosticLog.js';
 import {
+  describeUnpriced,
   ensurePriceCatalog,
-  getPriceResolutionFailure,
   getResolvedPriceForProduct
 } from './priceCatalog.js';
 import { BACKGROUND_REQUEST_OPTIONS, getStripeClient } from './stripeClient.js';
 import {
   JIT_PRODUCTS,
   PACK_PRODUCTS,
-  configuredPriceIdFor,
-  formatAmountForCurrency,
+  getConfiguredProduct,
   jitCurrency,
   packCurrency,
   type PackProductId
@@ -59,7 +59,7 @@ export function getPackProductConfig(productId: PackProductId): CommerceProductC
     // sources were identical by construction and the ?? read as if the memo
     // could win - a trap armed the day the memo validity rule loosens (#278
     // round 6). Only the amount genuinely depends on resolution.
-    priceId: configuredPriceIdFor(productId) ?? '',
+    priceId: getConfiguredProduct(productId)?.priceId ?? '',
     amountCents: resolved?.unitAmount ?? 0,
     currency: packCurrency(),
     name: definition.name,
@@ -73,7 +73,7 @@ export function getJitProductConfig(mailType: MailType): CommerceProductConfig {
   return {
     productCode: definition.productCode,
     mailType,
-    priceId: configuredPriceIdFor(definition.productCode) ?? '',
+    priceId: getConfiguredProduct(definition.productCode)?.priceId ?? '',
     amountCents: resolved?.unitAmount ?? 0,
     currency: jitCurrency(),
     name: definition.name,
@@ -139,22 +139,15 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
   // A Stripe blip must never cancel a customer's order (#276 review, #278
   // review).
   if (!Number.isInteger(params.product.amountCents) || params.product.amountCents <= 0) {
-    const failure = getPriceResolutionFailure(params.product.productCode);
-    // No recorded failure means the catalog has not attempted this product yet
-    // or an attempt is in flight - which priceCatalog itself classes
-    // provider_error, "transient by definition". Defaulting the other way made
-    // the terminal class the fallback for an unknown state, and terminal is
-    // what drives markCheckoutCreationFailure's UPDATE orders SET
-    // status='cancelled': the wrong default sitting directly under a header
-    // promising a Stripe blip never cancels an order (#278 review round 2). A
-    // genuinely unconfigured id is not affected - the catalog records that as
-    // price.id_not_configured with configuration_error, so this ?? never fires
-    // for it.
-    const diagnosticClass = failure?.diagnosticClass ?? 'provider_error';
+    // describeUnpriced owns the unattempted-means-transient policy; the ??
+    // triad this replaces was the last copy of it outside the catalog (#278
+    // round 7).
+    const failure = describeUnpriced(params.product.productCode);
+    const diagnosticClass = failure.diagnosticClass;
     writeDiagnostic('error', 'stripe.product_not_priced', {
       orderType: params.orderType,
       productCode: params.product.productCode,
-      rule: failure?.rule ?? 'price.not_resolved',
+      rule: failure.rule,
       errorClass: diagnosticClass
     });
     return {
@@ -192,7 +185,12 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
       expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : params.expiresAt
     };
   } catch (error) {
-    const diagnosticClass = classifyDiagnosticError(error, 'provider_error');
+    // Carried-first, like every sibling catch this PR installed: without it,
+    // getStripeClient's missing-key configuration_error (a bare Error with no
+    // .code/.type) degraded to transient provider_error - order pending
+    // forever, log blaming Stripe for a missing credential (#278 round 7).
+    const diagnosticClass =
+      carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error');
     writeDiagnostic('error', 'stripe.checkout_creation_failed', {
       errorClass: diagnosticClass
     });
@@ -250,36 +248,6 @@ export function verifyWebhookSignature(
     });
     return null;
   }
-}
-
-export interface CheckoutCompletedData {
-  userId: string;
-  credits: number;
-  productId: string;
-  sessionId: string;
-  amountPaid: number;
-  customerEmail: string;
-}
-
-/** Legacy session metadata extraction retained for rollout compatibility. */
-export async function extractCheckoutData(
-  session: Stripe.Checkout.Session
-): Promise<CheckoutCompletedData | null> {
-  const userId = session.metadata?.userId || session.metadata?.user_id;
-  const credits = Number.parseInt(session.metadata?.credits || '0', 10);
-  const productId = session.metadata?.productId || session.metadata?.product_id || '';
-  if (!userId || !credits || !productId) return null;
-  return {
-    userId,
-    credits,
-    productId,
-    sessionId: session.id,
-    // Currency-aware: the raw /100 this replaced is 100x wrong for
-    // zero-decimal currencies (#278 round 6). Number() keeps the field's
-    // numeric type for the existing consumers.
-    amountPaid: Number(formatAmountForCurrency(session.amount_total || 0, session.currency || 'usd')),
-    customerEmail: session.customer_email || session.customer_details?.email || ''
-  };
 }
 
 // The four calls below run from maintenance sweeps and webhook recovery - no

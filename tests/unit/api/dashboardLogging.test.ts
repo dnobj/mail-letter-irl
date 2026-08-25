@@ -125,8 +125,7 @@ describe("dashboard runtime logging privacy", () => {
       createPackCheckout.mockRejectedValue(
         Object.assign(new Error("Amount not configured for product: credit-pack-4"), {
           code: "PACK_AMOUNT_NOT_CONFIGURED",
-          diagnosticClass,
-          terminal: diagnosticClass === "configuration_error"
+          diagnosticClass
         })
       );
       const error = vi.spyOn(console, "error").mockImplementation(() => undefined);

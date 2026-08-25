@@ -300,4 +300,35 @@ describe('checkout pricing guards (#275)', () => {
     });
     expect(JSON.stringify(result)).not.toContain(sensitive);
   });
+
+  it('prefers a diagnosticClass carried on the thrown error over reclassification', async () => {
+    // getStripeClient's missing-key throw is a plain Error carrying
+    // diagnosticClass 'configuration_error'. classifyDiagnosticError sees no
+    // Stripe type on it and would file it as 'provider_error' - transient, so
+    // the order stays pending and the customer is told to retry a checkout
+    // that can never succeed. The catch must read the carried class first
+    // (#278 round 7).
+    serveHealthyPrices();
+    await ensurePriceCatalog();
+    stripeMocks.sessionCreate.mockRejectedValue(
+      Object.assign(new Error('STRIPE_SECRET_KEY is not configured'), {
+        diagnosticClass: 'configuration_error'
+      })
+    );
+
+    const result = await checkout({
+      productCode: 'credit-pack-10',
+      priceId: 'price_regular',
+      amountCents: 1000,
+      currency: 'usd',
+      name: 'Regular Pack',
+      description: 'Five prepaid letters'
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      errorCode: 'PROVIDER_ERROR',
+      diagnosticClass: 'configuration_error'
+    });
+  });
 });

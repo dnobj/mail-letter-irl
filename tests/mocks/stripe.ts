@@ -35,7 +35,12 @@ export function stripeMockModule(fns: Partial<StripeMockFns>): { default: unknow
   const sessionCreate = fns.sessionCreate ?? stub();
   const sessionList = fns.sessionList ?? stub();
   const sessionRetrieve = fns.sessionRetrieve ?? stub();
-  const priceRetrieve = fns.priceRetrieve ?? stub();
+  // An inert default RESOLVED undefined - a shape real stripe-node can never
+  // produce - so a suite that forgot to wire priceRetrieve silently recorded
+  // a fake transient outage instead of failing (#278 round 7).
+  const priceRetrieve =
+    fns.priceRetrieve ??
+    vi.fn(() => Promise.reject(new Error('stripeMockModule: priceRetrieve not wired')));
   const refundList = fns.refundList ?? stub();
   const refundCreate = fns.refundCreate ?? stub();
   const refundRetrieve = fns.refundRetrieve ?? stub();

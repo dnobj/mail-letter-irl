@@ -40,7 +40,6 @@
 import type Stripe from 'stripe';
 import { getStripeClient } from './stripeClient.js';
 import {
-  configuredPriceIdFor,
   getConfiguredProduct,
   getConfiguredProducts,
   isConfiguredProductCode,
@@ -149,11 +148,16 @@ export function useDefaultPriceRetriever(): void {
 let jitter: () => number = Math.random;
 
 interface AttemptState {
-  /** Consecutive failures OF THE SAME KIND, for the backoff ladder. */
-  readonly failures: number;
+  /**
+   * Per-KIND consecutive counters. One shared counter that reset on a kind
+   * flip meant sustained alternation (typo'd id + intermittent network) held
+   * BOTH ladders at their base forever - ~2,700 reads/day/product instead of
+   * the ceiling's ~96, defeating the read-allocation bound the ladders exist
+   * for (#278 round 7).
+   */
+  readonly transientFailures: number;
+  readonly terminalFailures: number;
   readonly nextAttemptAt: number;
-  /** Which ladder those failures were counted on. */
-  readonly terminal: boolean;
   /**
    * The FULL configuration signature the failure was recorded against, so a
    * cooldown cannot outlive the configuration that earned it - whichever part
@@ -211,13 +215,6 @@ export function resetPriceCatalog(): void {
 }
 
 /**
- * A memo is valid only while it describes the configuration as it stands NOW:
- * the configured price id produced it, and its figures still equal the
- * product table's pin. Checking the id alone left a changed STRIPE_CURRENCY
- * or an edited table pin serving a memo the current configuration would
- * refuse (#278 review round 5).
- */
-/**
  * The configuration a piece of catalog state was derived from, as one
  * comparable value. EVERY staleness decision keys on this - memos, failures,
  * cooldowns, and in-flight lookups alike. Round 6 found the asymmetry that
@@ -231,11 +228,10 @@ function configSignature(product: ConfiguredProduct): string {
 }
 
 function memoMatchesConfiguration(memo: ResolvedPrice, product: ConfiguredProduct): boolean {
-  return (
-    memo.priceId === product.priceId &&
-    memo.unitAmount === product.expectedAmountCents &&
-    memo.currency === product.expectedCurrency
-  );
+  // THE signature, not a parallel field-wise enumeration: two encodings of
+  // the config triple four lines apart is exactly how the next added field
+  // recreates the round-6 asymmetry, on whichever side gets missed (#278 r7).
+  return `${memo.priceId}|${memo.unitAmount}|${memo.currency}` === configSignature(product);
 }
 
 const NOT_RESOLVED_RULE = 'price.not_resolved';
@@ -253,8 +249,10 @@ function notResolvedFailure(productCode: string): PriceResolutionFailure {
 export function getResolvedPriceForProduct(productCode: string): ResolvedPrice | null {
   const memo = resolved.get(productCode);
   if (!memo) return null;
-  const products = getConfiguredProducts();
-  const product = products.find(candidate => candidate.productCode === productCode);
+  // Single-product accessor: the full-table build here cost ~9 env reads per
+  // warm quote - the exact cost getConfiguredProduct was added to remove,
+  // wired into ensure but not into this hotter read (#278 round 7).
+  const product = getConfiguredProduct(productCode);
   if (!product || !memoMatchesConfiguration(memo, product)) return null;
   return memo;
 }
@@ -272,17 +270,32 @@ export function getResolvedPriceForProduct(productCode: string): ResolvedPrice |
  * product: stored failure, else the synthesized transient record. Exists so
  * the "unattempted means transient" policy is written ONCE instead of as a
  * ?? triad at every guard (#278 rounds 5-6).
+ *
+ * A stored failure counts only if it was recorded against the CURRENT
+ * configuration - the failures map was the one catalog state read without
+ * signature validation, so a reader racing ahead of the next prune (readiness
+ * computes its verdict BEFORE it kicks) served a verdict from dead
+ * configuration (#278 round 7). The lockstep attempts entry carries the
+ * signature; a mismatch reads as never-attempted, and the next ensure prunes.
  */
+function storedFailureIfCurrent(productCode: string): PriceResolutionFailure | null {
+  const stored = failures.get(productCode);
+  if (!stored) return null;
+  const product = getConfiguredProduct(productCode);
+  if (!product) return null;
+  const state = attempts.get(productCode);
+  if (state && state.signature !== configSignature(product)) return null;
+  return stored;
+}
+
 export function describeUnpriced(productCode: string): PriceResolutionFailure {
-  return failures.get(productCode) ?? notResolvedFailure(productCode);
+  return storedFailureIfCurrent(productCode) ?? notResolvedFailure(productCode);
 }
 
 export function getPriceResolutionFailure(productCode: string): PriceResolutionFailure | null {
-  const stored = failures.get(productCode);
-  if (stored) return stored;
   if (!isConfiguredProductCode(productCode)) return null;
   if (getResolvedPriceForProduct(productCode)) return null;
-  return notResolvedFailure(productCode);
+  return describeUnpriced(productCode);
 }
 
 /**
@@ -296,7 +309,8 @@ export function getUnpricedProducts(env: NodeJS.ProcessEnv = process.env): Price
   return getConfiguredProducts(env).flatMap(product => {
     const memo = resolved.get(product.productCode);
     if (memo && memoMatchesConfiguration(memo, product)) return [];
-    const failure = failures.get(product.productCode);
+    // Signature-validated like every other read - see storedFailureIfCurrent.
+    const failure = storedFailureIfCurrent(product.productCode);
     if (failure) return [failure];
     return [notResolvedFailure(product.productCode)];
   });
@@ -388,15 +402,19 @@ function recordFailure(
 ): void {
   const terminal = isTerminalDiagnosticClass(diagnosticClass);
   failures.set(productCode, Object.freeze({ productCode, rule, diagnosticClass, terminal }));
-  // Consecutive failures OF THE SAME KIND: sharing one counter let a long
-  // outage push the first real configuration fault straight to the 15-minute
-  // ceiling (#278 round 3).
   const prior = attempts.get(productCode);
-  const consecutive = prior && prior.terminal === terminal ? prior.failures + 1 : 1;
+  const transientFailures = (prior?.transientFailures ?? 0) + (terminal ? 0 : 1);
+  const terminalFailures = (prior?.terminalFailures ?? 0) + (terminal ? 1 : 0);
+  const consecutive = terminal ? terminalFailures : transientFailures;
   const base = terminal ? TERMINAL_COOLDOWN_BASE_MS : TRANSIENT_COOLDOWN_BASE_MS;
   const ceiling = terminal ? TERMINAL_COOLDOWN_MAX_MS : TRANSIENT_COOLDOWN_MAX_MS;
   const cooldown = boundedExponentialDelayMs(base, ceiling, consecutive, jitter, COOLDOWN_JITTER_MS);
-  attempts.set(productCode, { failures: consecutive, nextAttemptAt: now + cooldown, terminal, signature });
+  attempts.set(productCode, {
+    transientFailures,
+    terminalFailures,
+    nextAttemptAt: now + cooldown,
+    signature
+  });
 }
 
 /** Resolve ONE product's price and commit the outcome, staleness-guarded. */
@@ -473,12 +491,27 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
     return;
   }
 
-  // Warm fast path from the single-product accessor: the full table build
-  // here cost ~9 env reads per quote to validate one memo (#278 round 6).
-  if (productCode) {
-    const product = getConfiguredProduct(productCode);
+  // Warm fast paths from ONE single-product fetch: the memo check, the
+  // cooling-down early exit, and the flight check all reuse it. Building the
+  // full table (and running pruneStale) per steady-fault quote cost ~3x the
+  // early-exit path, on the module's own quotes-vastly-outnumber-purchases
+  // premise (#278 rounds 6-7). Cross-product pruning still happens on every
+  // slow-path and uncoded call.
+  const codedProduct = productCode ? getConfiguredProduct(productCode) : null;
+  if (productCode && codedProduct) {
     const memo = resolved.get(productCode);
-    if (memo && product && memoMatchesConfiguration(memo, product)) return;
+    if (memo && memoMatchesConfiguration(memo, codedProduct)) return;
+    const state = attempts.get(productCode);
+    if (
+      state &&
+      state.signature === configSignature(codedProduct) &&
+      state.nextAttemptAt > Date.now() &&
+      !inFlight.has(productCode)
+    ) {
+      // Cooling down under the current configuration: nothing to do, and the
+      // guards read the recorded failure.
+      return;
+    }
   }
 
   const products = getConfiguredProducts();
@@ -486,7 +519,7 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
 
   if (productCode) {
     const flight = inFlight.get(productCode);
-    const product = products.find(candidate => candidate.productCode === productCode);
+    const product = codedProduct;
     // Only a flight started for the CURRENT configuration is worth awaiting.
     // Handing back a flight begun before a repoint left the caller with
     // neither memo nor failure - its commit is staleness-suppressed - so the
@@ -529,8 +562,13 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
   if (started.length > 0) {
     void Promise.allSettled(started).then(() => {
       if (generation !== startedGen) return;
+      // Class included: price.lookup_failed can flip transient<->terminal
+      // under the SAME rule, and a class-blind signature suppressed exactly
+      // the transition the classes exist to surface (#278 round 7).
       const failureSummary =
-        [...failures.values()].map(f => `${f.productCode}:${f.rule}`).join(' ') || 'none';
+        [...failures.values()]
+          .map(f => `${f.productCode}:${f.rule}:${f.diagnosticClass}`)
+          .join(' ') || 'none';
       // On CHANGE only: a dev deploy with prices legitimately unset re-logged
       // an identical error-level line every terminal-ladder expiry, ~720/day,
       // for an already-reported steady state (#278 round 6).
@@ -541,7 +579,9 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
         'stripe.price_catalog_resolved',
         {
           resolved: resolved.size,
-          requested: products.length,
+          // Computed FRESH: a batch begun before a repoint otherwise logs its
+          // dead product list against the live maps (#278 round 7).
+          requested: getConfiguredProducts().length,
           failures: failureSummary,
           prices: [...resolved.values()]
             .map(p => `${p.productCode}=${p.unitAmount}${p.currency}`)
@@ -572,6 +612,9 @@ export function kickPriceCatalog(productCode?: string, context = 'warmup'): void
   void ensurePriceCatalog(productCode).catch(error => {
     writeDiagnostic('warn', 'stripe.price_kick_rejected', {
       context,
+      // The error NAME, so the test-lane sentinel does not collapse into an
+      // anonymous unknown_error with no setPriceRetriever hint (#278 r7).
+      errorName: error instanceof Error ? error.name : 'unknown',
       errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
     });
   });

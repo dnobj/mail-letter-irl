@@ -956,6 +956,61 @@ describe('price catalog (#275 stage A)', () => {
     });
   });
 
+  it('keeps BOTH ladders climbing under alternating fault kinds', async () => {
+    // One shared counter reset on every kind flip, so a typo'd id plus
+    // intermittent network faults held both ladders at base forever - ~2,700
+    // reads/day/product instead of the ceiling's ~96 (#278 round 7).
+    vi.useFakeTimers();
+    let flip = false;
+    const retriever = vi.fn(async (priceId: string) => {
+      if (priceId !== 'price_power') {
+        return priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] });
+      }
+      flip = !flip;
+      if (flip) throw Object.assign(new Error('down'), { type: 'StripeConnectionError' });
+      throw Object.assign(new Error('gone'), { code: 'resource_missing' });
+    });
+    setPriceRetriever(retriever);
+    const powerReads = () => retriever.mock.calls.filter(call => call[0] === 'price_power').length;
+
+    // t1 transient (cooldown 2s) -> t2 terminal (30s) -> transient again.
+    await ensurePriceCatalog(); // transient #1
+    vi.advanceTimersByTime(2_100);
+    await ensurePriceCatalog(); // terminal #1 -> 30s
+    vi.advanceTimersByTime(30_100);
+    await ensurePriceCatalog(); // transient #2 -> ladder says 4s, NOT re-based 2s
+    expect(powerReads()).toBe(3);
+
+    vi.advanceTimersByTime(2_100); // < 4s: a re-based ladder would fire here
+    await ensurePriceCatalog();
+    expect(powerReads()).toBe(3);
+
+    vi.advanceTimersByTime(2_100); // 4.2s total: the climbed ladder fires
+    await ensurePriceCatalog();
+    expect(powerReads()).toBe(4);
+  });
+
+  it('never serves a stored failure recorded under a dead configuration', async () => {
+    // The failures map was the one catalog state read WITHOUT signature
+    // validation, so readiness - which computes its verdict BEFORE it kicks -
+    // reported the already-fixed fault for one more probe cycle (#278 r7).
+    setPriceRetriever(healthyRetriever({ price_power: { unit_amount: 500 } })); // wrong: pin is 9000
+    await ensurePriceCatalog();
+    expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
+      rule: 'price.amount_mismatch'
+    });
+
+    // Operator repoints. NO ensure runs - the read itself must notice.
+    vi.stubEnv('STRIPE_PRICE_POWER', 'price_power_v2');
+
+    expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
+      rule: 'price.not_resolved'
+    });
+    expect(
+      getUnpricedProducts().find(f => f.productCode === 'credit-pack-100')
+    ).toMatchObject({ rule: 'price.not_resolved' });
+  });
+
   it('drops a stale failure when its product stops being configured', async () => {
     vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
     vi.stubEnv('STRIPE_JIT_LETTER_PRICE_ID', 'price_gone');

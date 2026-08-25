@@ -44,7 +44,16 @@ vi.mock('../../../src/services/priceCatalog.js', () => ({
       terminal: false
     },
   getPriceResolutionFailure: mocks.getPriceResolutionFailure,
-  kickPriceCatalog: mocks.ensurePriceCatalog
+  // Swallows like production kick: aliasing straight to the ensure mock let a
+  // mockRejectedValue fixture leak an unhandled rejection from fire-and-forget
+  // call sites - a failure mode the real kick structurally cannot produce.
+  kickPriceCatalog: (...args: unknown[]) => {
+    try {
+      void Promise.resolve(mocks.ensurePriceCatalog(...args)).catch(() => undefined);
+    } catch {
+      /* swallowed, as in production */
+    }
+  }
 }));
 
 vi.mock('../../../src/db/index.js', () => ({
@@ -493,6 +502,116 @@ describe('commerceService', () => {
       expect.anything()
     );
     expect(mocks.getPackProduct).not.toHaveBeenCalled();
+  });
+
+  it('cancels a sessionless pending JIT order priced under an OLD pin and starts fresh', async () => {
+    // Round 7's money-path find: session creation failed, the price was
+    // repointed+repinned, the customer retried inside the checkout window.
+    // Reusing the old row would build the NEW session against the OLD
+    // amount - customer pays 599 vs a 499 row, PAYMENT_AMOUNT_MISMATCH, and
+    // (before the sweep exclusion) an auto-refund of a legitimate purchase.
+    // Nothing was ever paid on a sessionless row, so it cancels free.
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit-v2', amountCents: 599,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const stale = {
+      ...baseOrder,
+      amount_cents: 499,
+      stripe_checkout_session_id: null,
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] }) // peek
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [stale] }) // active-order lookup
+      .mockResolvedValueOnce({ rows: [] }) // cancel UPDATE
+      .mockResolvedValueOnce({ rows: [] }) // order event
+      .mockResolvedValueOnce({ rows: [{ ...baseOrder, amount_cents: 599 }] }); // fresh INSERT
+    mocks.createJitSession.mockResolvedValue({
+      success: true, sessionId: 'cs-fresh', sessionUrl: 'https://s', expiresAt: new Date()
+    });
+
+    await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+    const cancel = mocks.query.mock.calls.find(([sql]) =>
+      String(sql).includes("'PRICE_CHANGED_BEFORE_SESSION'")
+    );
+    expect(cancel).toBeDefined();
+    expect(cancel?.[1]).toEqual(['order-1']);
+  });
+
+  it('reuses a pending JIT order untouched when its Stripe session already exists', async () => {
+    // The session fixes what the customer pays; it matches the row. Reuse.
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit-v2', amountCents: 599,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const withSession = {
+      ...baseOrder,
+      amount_cents: 499,
+      stripe_checkout_session_id: 'cs-old',
+      checkout_url: 'https://checkout.stripe.com/old',
+      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [withSession] });
+
+    const result = await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+
+    expect(result).toMatchObject({ orderId: 'order-1', reused: true });
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("'PRICE_CHANGED_BEFORE_SESSION'"),
+      expect.anything()
+    );
+  });
+
+  it('never auto-refunds a PAYMENT_AMOUNT_MISMATCH quarantine from the sweep', async () => {
+    // Round 6 gated the adoption PRODUCER of the quarantine; the sweep - the
+    // CONSUMER - would still have auto-refunded any normally-created order a
+    // Stripe-side amount change pushed into it. The exclusion lives in the
+    // sweep's own WHERE (#278 round 7).
+    mocks.query.mockResolvedValue({ rows: [], rowCount: 0 });
+    mocks.retrieveSession.mockResolvedValue(null);
+
+    await runCommerceMaintenance();
+
+    const sweep = mocks.query.mock.calls
+      .map(([sql]) => String(sql))
+      .find(sql => sql.includes("status = 'refund_pending'") && sql.includes('refund_attempts <'));
+    expect(sweep).toBeDefined();
+    expect(sweep).toContain("last_error_code <> 'PAYMENT_AMOUNT_MISMATCH'");
+  });
+
+  it('kicks the catalog with the JIT code even while Pay & Send is disabled', async () => {
+    // The disabled short-circuit must not starve the catalog's unsold-state
+    // clearing - that starvation is how toggle-off cooldowns survived to
+    // resurface on re-enable (#278 round 7).
+    mocks.jitEnabled.mockReturnValue(false);
+
+    const eligibility = getSendEligibility(0, 2, 'letter');
+
+    expect(eligibility.payAndSend.unavailableReason).toBe('Pay & Send is not enabled.');
+    expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-letter', 'send_eligibility_disabled');
   });
 
   it('refuses to adopt a paid session whose amount disagrees with the pin', async () => {
@@ -1654,7 +1773,7 @@ describe('checkout refusal cleanup (#275)', () => {
   it('cancels the order when the price configuration is refused', async () => {
     mocks.createPackSession.mockResolvedValueOnce({
       success: false,
-      errorCode: 'PRICE_CONFIG_MISMATCH',
+      errorCode: 'PACK_AMOUNT_NOT_CONFIGURED',
       diagnosticClass: 'configuration_error',
       error: 'Configured amount does not match the Stripe price'
     });
@@ -1672,7 +1791,7 @@ describe('checkout refusal cleanup (#275)', () => {
   it('carries the real error code onto the order rather than a generic one', async () => {
     mocks.createPackSession.mockResolvedValueOnce({
       success: false,
-      errorCode: 'PRICE_CONFIG_MISMATCH',
+      errorCode: 'PACK_AMOUNT_NOT_CONFIGURED',
       diagnosticClass: 'configuration_error',
       error: 'Configured amount does not match the Stripe price'
     });
@@ -1682,7 +1801,7 @@ describe('checkout refusal cleanup (#275)', () => {
     const update = mocks.query.mock.calls.find(call =>
       /SET status = 'cancelled'/.test(String(call[0]))
     );
-    expect(update?.[1]).toContain('PRICE_CONFIG_MISMATCH');
+    expect(update?.[1]).toContain('PACK_AMOUNT_NOT_CONFIGURED');
   });
 
   it('leaves a transient provider failure pending, so a retry can still succeed', async () => {

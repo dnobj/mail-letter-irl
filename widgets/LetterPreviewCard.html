@@ -448,9 +448,16 @@
           paySendButton.style.display = payAndSend?.available ? "flex" : "none";
           paySendButton.disabled = !payAndSend?.available;
           if (payAndSend?.available && payAndSend.amountCents) {
-            // Server-formatted per currency; /100 is a legacy-server fallback
-            // and is 100x wrong for zero-decimal currencies (#278 round 6).
-            const amount = payAndSend.displayAmount || (payAndSend.amountCents / 100).toFixed(2);
+            // Server-formatted per currency. The fallback matters more than it
+            // looks: a connector that has not re-ingested the tool schema
+            // strips unknown fields, so displayAmount is absent on stale
+            // connections and the fallback IS the display - make it
+            // currency-aware too (#278 round 7).
+            const zeroDecimal = ['bif','clp','djf','gnf','jpy','kmf','krw','mga','pyg','rwf','ugx','vnd','vuv','xaf','xof','xpf'];
+            const threeDecimal = ['bhd','jod','kwd','omr','tnd'];
+            const ccy = String(payAndSend.currency || 'usd').toLowerCase();
+            const decimals = zeroDecimal.includes(ccy) ? 0 : threeDecimal.includes(ccy) ? 3 : 2;
+            const amount = payAndSend.displayAmount || (payAndSend.amountCents / Math.pow(10, decimals)).toFixed(decimals);
             paySendButtonText.textContent = `Pay & Send (${String(payAndSend.currency || "usd").toUpperCase()} ${amount})`;
           }
           buyPackButton.style.display =

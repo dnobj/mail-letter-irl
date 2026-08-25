@@ -176,7 +176,6 @@ describe('validateDeploymentConfig in production', () => {
     const jitOn = env({
       JIT_PURCHASE_ENABLED: 'true',
       STRIPE_JIT_LETTER_PRICE_ID: 'price_jit_letter_unit_fixture',
-      JIT_LETTER_AMOUNT_CENTS: '499'
       // postcard pair deliberately missing
     });
     const errors = ruleIds(jitOn, 'error');
