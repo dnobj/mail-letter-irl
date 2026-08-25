@@ -170,8 +170,12 @@ export async function handleCreateCheckoutSession(
     // test asserted a 400 that actually came from the pre-validation (#278
     // round 6).
     if (
+      // PACK_AMOUNT_NOT_CONFIGURED stays: its carried class is legitimately
+      // transient (a Stripe blip mid-resolution), so the terminal test below
+      // does not cover it. PRICE_ID_NOT_CONFIGURED does not - its one producer
+      // always carries configuration_error, which IS in the terminal set, so
+      // the disjunct never changed the outcome (#278 round 10).
       code === 'PACK_AMOUNT_NOT_CONFIGURED' ||
-      code === 'PRICE_ID_NOT_CONFIGURED' ||
       // The vocabulary's own terminality answer, so a terminal class carried
       // verbatim (configuration_error, amount_too_small, resource_missing,
       // StripeAuthenticationError) maps like the configuration fault it is

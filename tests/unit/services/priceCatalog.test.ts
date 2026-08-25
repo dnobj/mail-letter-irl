@@ -175,8 +175,7 @@ describe('price catalog (#275 stage A)', () => {
     expect(getResolvedPriceForProduct('credit-pack-100')).toBeNull();
     expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
       rule: 'price.amount_mismatch',
-      diagnosticClass: 'configuration_error',
-      terminal: true
+      diagnosticClass: 'configuration_error'
     });
     expect(getResolvedPriceForProduct('credit-pack-10')?.unitAmount).toBe(1000);
   });
@@ -255,13 +254,11 @@ describe('price catalog (#275 stage A)', () => {
     // is carried alongside it instead (#278 review round 3).
     expect(getPriceResolutionFailure('credit-pack-4')).toMatchObject({
       rule: 'price.lookup_failed',
-      diagnosticClass: 'resource_missing',
-      terminal: true
+      diagnosticClass: 'resource_missing'
     });
     expect(getPriceResolutionFailure('credit-pack-10')).toMatchObject({
       rule: 'price.lookup_failed',
-      diagnosticClass: 'StripeConnectionError',
-      terminal: false
+      diagnosticClass: 'StripeConnectionError'
     });
   });
 
@@ -326,8 +323,7 @@ describe('price catalog (#275 stage A)', () => {
 
     expect(getResolvedPriceForProduct('jit-letter')).toBeNull();
     expect(getPriceResolutionFailure('jit-letter')).toMatchObject({
-      rule: 'price.amount_mismatch',
-      terminal: true
+      rule: 'price.amount_mismatch'
     });
     // Uninvolved products still price - one bad pairing must not close the store.
     expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
@@ -503,8 +499,7 @@ describe('price catalog (#275 stage A)', () => {
     mode = 'archived';
     await ensurePriceCatalog();
     expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
-      rule: 'price.inactive',
-      terminal: true
+      rule: 'price.inactive'
     });
 
     vi.advanceTimersByTime(31_000);
@@ -531,8 +526,7 @@ describe('price catalog (#275 stage A)', () => {
     expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
     expect(getResolvedPriceForProduct('credit-pack-100')).toBeNull();
     expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
-      rule: 'price.amount_mismatch',
-      terminal: true
+      rule: 'price.amount_mismatch'
     });
   });
 
@@ -612,8 +606,7 @@ describe('price catalog (#275 stage A)', () => {
       expect(getResolvedPriceForProduct(productCode), productCode).toBeNull();
       expect(getPriceResolutionFailure(productCode), productCode).toMatchObject({
         rule: 'price.amount_mismatch',
-        diagnosticClass: 'configuration_error',
-        terminal: true
+        diagnosticClass: 'configuration_error'
       });
     }
     // The untransposed middle tier is genuinely fine and keeps selling.
@@ -646,8 +639,7 @@ describe('price catalog (#275 stage A)', () => {
 
     expect(getResolvedPriceForProduct('credit-pack-100')).toBeNull();
     expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
-      rule: 'price.amount_mismatch',
-      terminal: true
+      rule: 'price.amount_mismatch'
     });
   });
 
@@ -663,8 +655,7 @@ describe('price catalog (#275 stage A)', () => {
 
     expect(getResolvedPriceForProduct('credit-pack-10')).toBeNull();
     expect(getPriceResolutionFailure('credit-pack-10')).toMatchObject({
-      rule: 'price.amount_mismatch',
-      terminal: true
+      rule: 'price.amount_mismatch'
     });
     expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
   });
@@ -689,8 +680,7 @@ describe('price catalog (#275 stage A)', () => {
 
     expect(getResolvedPriceForProduct('jit-letter')).toBeNull();
     expect(getPriceResolutionFailure('jit-letter')).toMatchObject({
-      rule: 'price.amount_mismatch',
-      terminal: true
+      rule: 'price.amount_mismatch'
     });
     expect(getResolvedPriceForProduct('jit-postcard')?.unitAmount).toBe(499);
   });
@@ -721,8 +711,7 @@ describe('price catalog (#275 stage A)', () => {
     );
     await ensurePriceCatalog();
     expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
-      rule: 'price.inactive',
-      terminal: true
+      rule: 'price.inactive'
     });
 
     // Operator repoints to a healthy Price. No timers advance: the stale
@@ -862,8 +851,7 @@ describe('price catalog (#275 stage A)', () => {
     setPriceRetriever(healthyRetriever());
     await ensurePriceCatalog();
     expect(getPriceResolutionFailure('credit-pack-4')).toMatchObject({
-      rule: 'price.currency_mismatch',
-      terminal: true
+      rule: 'price.currency_mismatch'
     });
 
     // Operator fixes the currency. No timers advance: the stale cooldown must
@@ -964,8 +952,7 @@ describe('price catalog (#275 stage A)', () => {
 
     expect(getPriceResolutionFailure('credit-pack-4')).toMatchObject({
       rule: 'price.lookup_failed',
-      diagnosticClass: 'configuration_error',
-      terminal: true
+      diagnosticClass: 'configuration_error'
     });
   });
 
@@ -1022,6 +1009,57 @@ describe('price catalog (#275 stage A)', () => {
     expect(
       getUnpricedProducts().find(f => f.productCode === 'credit-pack-100')
     ).toMatchObject({ rule: 'price.not_resolved' });
+  });
+
+  it('re-attempts the moment the CREDENTIAL is fixed, not after the terminal ladder', async () => {
+    // The key decides which Stripe ACCOUNT a price id resolves against, but
+    // it was invisible to configSignature - so a terminal cooldown earned
+    // from a missing or revoked key outlived the operator's fix and /readyz
+    // held 503, refusing every purchase, for up to the 15-minute ceiling
+    // AFTER the configuration was already correct. That is the round-6
+    // STRIPE_CURRENCY bug on the one axis the signature omitted (#278 r10).
+    vi.stubEnv('STRIPE_SECRET_KEY', '');
+    const retriever = vi.fn(() =>
+      Promise.reject(
+        Object.assign(new Error('STRIPE_SECRET_KEY is not configured'), {
+          diagnosticClass: 'configuration_error'
+        })
+      ) as never
+    );
+    setPriceRetriever(retriever);
+    await ensurePriceCatalog();
+    const afterFailure = retriever.mock.calls.length;
+    expect(afterFailure).toBeGreaterThan(0);
+    expect(getPriceResolutionFailure('credit-pack-4')).toMatchObject({
+      diagnosticClass: 'configuration_error'
+    });
+
+    // The operator fixes ONLY the key - no price id, amount or currency moves.
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_restored');
+    setPriceRetriever(healthyRetriever());
+
+    await ensurePriceCatalog();
+
+    expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
+    expect(getUnpricedProducts()).toEqual([]);
+  });
+
+  it('names the figures that disagreed, so diagnosis needs no Stripe dashboard', async () => {
+    // The deleted price_config_mismatch event carried the configured and live
+    // amounts; nothing in the replacement did, so every operator-reachable
+    // line for a repointed price read `credit-pack-100:price.amount_mismatch:
+    // configuration_error` and diagnosing it meant opening the Stripe
+    // dashboard - in the PR whose whole purpose is catching that drift
+    // (#278 round 10). Amounts are Stripe's own public figures plus a
+    // constant from source control; nothing secret.
+    setPriceRetriever(healthyRetriever({ price_power: { unit_amount: 8500 } }));
+
+    await ensurePriceCatalog();
+
+    expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
+      rule: 'price.amount_mismatch',
+      detail: 'expected 9000, stripe 8500'
+    });
   });
 
   it('re-logs the catalog summary when the CURRENCY moves under a steady count', async () => {

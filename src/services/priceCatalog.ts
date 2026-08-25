@@ -61,6 +61,8 @@ export interface ResolvedPrice {
   readonly priceId: string;
   readonly unitAmount: number;
   readonly currency: string;
+  /** Digest of the credential this was resolved under - see credentialFingerprint. */
+  readonly credential: string;
 }
 
 export interface PriceResolutionFailure {
@@ -76,11 +78,15 @@ export interface PriceResolutionFailure {
    */
   readonly diagnosticClass: string;
   /**
-   * Whether a human must act (isTerminalDiagnosticClass of the class above).
-   * It decides whether an order is cancelled or left pending and how hard the
-   * catalog retries.
+   * What disagreed, in Stripe's own public figures plus a constant from
+   * source control - never a secret. The deleted price_config_mismatch event
+   * carried the configured and live amounts; nothing in the replacement did,
+   * so every operator-reachable line for a repointed price read
+   * `credit-pack-10:price.amount_mismatch:configuration_error` and diagnosing
+   * it meant opening the Stripe dashboard - in the PR whose whole purpose is
+   * catching that drift (#278 round 10).
    */
-  readonly terminal: boolean;
+  readonly detail?: string;
 }
 
 /**
@@ -248,24 +254,58 @@ export function getResolutionEpoch(productCode: string): number {
 export function formatPriceFailureSummary(
   failures: readonly PriceResolutionFailure[]
 ): string {
-  return failures
+  // SORTED: these maps iterate in insertion order, which is network
+  // completion order, so a recovery-then-refail reordered the string with no
+  // change in the failure set and re-emitted an error line for an
+  // already-reported steady state - the heap-order flip readiness sorts away
+  // for its own inputs (#278 rounds 6, 10).
+  return [...failures]
     .map(
       failure =>
         `${failure.productCode}:${failure.rule}:${failure.diagnosticClass}` +
-        `:e${getResolutionEpoch(failure.productCode)}`
+        `:e${getResolutionEpoch(failure.productCode)}` +
+        (failure.detail ? `(${failure.detail})` : '')
     )
+    .sort()
     .join(',');
 }
 
+/**
+ * A NON-REVERSIBLE digest of the Stripe credential - never the credential
+ * itself. The key decides which Stripe ACCOUNT a price id resolves against,
+ * so a rotation can change every answer while every other signature input is
+ * byte-identical. Without it, a TERMINAL cooldown earned from a missing or
+ * revoked key outlived the operator's fix: pruneStale could not see the
+ * change, so /readyz held 503 and every purchase was refused for up to the
+ * 15-minute ceiling AFTER the configuration was already correct - the round-6
+ * STRIPE_CURRENCY bug reproduced on the one axis the signature omitted
+ * (#278 round 10, reproduced empirically by two angles).
+ */
+function credentialFingerprint(env: NodeJS.ProcessEnv = process.env): string {
+  const key = (env.STRIPE_SECRET_KEY ?? '').trim();
+  if (!key) return 'unset';
+  let hash = 5381;
+  for (let index = 0; index < key.length; index += 1) {
+    hash = ((hash * 33) ^ key.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
 function configSignature(product: ConfiguredProduct): string {
-  return `${product.priceId}|${product.expectedAmountCents}|${product.expectedCurrency}`;
+  return (
+    `${product.priceId}|${product.expectedAmountCents}|${product.expectedCurrency}` +
+    `|${credentialFingerprint()}`
+  );
 }
 
 function memoMatchesConfiguration(memo: ResolvedPrice, product: ConfiguredProduct): boolean {
   // THE signature, not a parallel field-wise enumeration: two encodings of
   // the config triple four lines apart is exactly how the next added field
   // recreates the round-6 asymmetry, on whichever side gets missed (#278 r7).
-  return `${memo.priceId}|${memo.unitAmount}|${memo.currency}` === configSignature(product);
+  return (
+    `${memo.priceId}|${memo.unitAmount}|${memo.currency}|${memo.credential}` ===
+    configSignature(product)
+  );
 }
 
 const NOT_RESOLVED_RULE = 'price.not_resolved';
@@ -275,8 +315,7 @@ function notResolvedFailure(productCode: string): PriceResolutionFailure {
     productCode,
     rule: NOT_RESOLVED_RULE,
     // Not yet attempted, or an attempt is in flight - transient by definition.
-    diagnosticClass: 'provider_error',
-    terminal: false
+    diagnosticClass: 'provider_error'
   });
 }
 
@@ -313,6 +352,33 @@ function storedFailureIfCurrent(
   const state = attempts.get(productCode);
   if (state && state.signature !== configSignature(product)) return null;
   return stored;
+}
+
+/**
+ * Drop a product's memo so the next ensure re-reads it from Stripe.
+ *
+ * `active` is the ONE field validate() enforces that Stripe lets change under
+ * us, and it is deliberately not in the signature (it is not a configuration
+ * input). So an archived Price stayed memoized for the process lifetime:
+ * /readyz answered 200 with prices ok, quotes kept advertising the price, and
+ * every purchase inserted an authoritative order row and then failed at
+ * session creation with a non-terminal class - stranding a checkout_pending
+ * row per attempt, forever, with nothing in the log to say why. Three round-10
+ * angles found it and one reproduced it end to end.
+ *
+ * The checkout path calls this when Stripe rejects the request itself, which
+ * is the only moment anything in this process learns the memo is a lie. The
+ * re-read then either rebuilds the memo (the fault was elsewhere) or records
+ * price.inactive - at which point readiness goes red, quotes stop offering it,
+ * and further purchases are refused BEFORE an order row exists (#278 r10).
+ */
+export function invalidateResolvedPrice(productCode: string, reason: string): void {
+  if (!resolved.delete(productCode)) return;
+  // Clear the ladder too: this is new evidence, not a repeat failure, so the
+  // re-read happens on the next call rather than after a cooldown.
+  failures.delete(productCode);
+  attempts.delete(productCode);
+  writeDiagnostic('warn', 'stripe.price_memo_invalidated', { productCode, reason });
 }
 
 export function describeUnpriced(
@@ -355,7 +421,7 @@ export function getUnpricedProducts(env: NodeJS.ProcessEnv = process.env): Price
 function validate(
   product: ConfiguredProduct,
   price: Stripe.Price | undefined
-): ResolvedPrice | { rule: string; diagnosticClass: string } {
+): ResolvedPrice | { rule: string; diagnosticClass: string; detail?: string } {
   // Not an object at all: a middlebox or SDK anomaly, not a statement about
   // the configuration - transient, so one bad response is not a sticky
   // refusal (origin/dev made the same call; #278 round 5 caught this being
@@ -390,10 +456,18 @@ function validate(
   // healthy Price for the wrong product, which no per-price heuristic can
   // refuse deterministically.
   if (unitAmount !== product.expectedAmountCents) {
-    return { rule: 'price.amount_mismatch', diagnosticClass: 'configuration_error' };
+    return {
+      rule: 'price.amount_mismatch',
+      diagnosticClass: 'configuration_error',
+      detail: `expected ${product.expectedAmountCents}, stripe ${unitAmount}`
+    };
   }
   if (currency !== product.expectedCurrency) {
-    return { rule: 'price.currency_mismatch', diagnosticClass: 'configuration_error' };
+    return {
+      rule: 'price.currency_mismatch',
+      diagnosticClass: 'configuration_error',
+      detail: `expected ${product.expectedCurrency}, stripe ${currency}`
+    };
   }
 
   // Frozen so nothing downstream can mutate a shared figure.
@@ -401,7 +475,8 @@ function validate(
     productCode: product.productCode,
     priceId: product.priceId,
     unitAmount,
-    currency
+    currency,
+    credential: credentialFingerprint()
   });
 }
 
@@ -434,10 +509,15 @@ function recordFailure(
   signature: string,
   rule: string,
   diagnosticClass: string,
-  now: number
+  now: number,
+  detail?: string
 ): void {
   const terminal = isTerminalDiagnosticClass(diagnosticClass);
-  failures.set(productCode, Object.freeze({ productCode, rule, diagnosticClass, terminal }));
+  // Only the class is stored. Terminality is DERIVED at each decision point
+  // (isTerminalDiagnosticClass), because a carried pair can be minted
+  // mismatched - the same reason it was removed from the carried error shapes
+  // in round 6, applied to this later-added record (#278 round 10).
+  failures.set(productCode, Object.freeze({ productCode, rule, diagnosticClass, detail }));
   // Counters carry over only within ONE configuration: a flight that started
   // under config A landing after a B->A flip must not inherit rungs earned
   // under B, or A's first failure starts mid-ladder and refuses purchases
@@ -473,9 +553,9 @@ async function resolveOne(product: ConfiguredProduct, startedGen: number): Promi
     return !current || configSignature(current) !== signature;
   };
 
-  const commitFailure = (rule: string, diagnosticClass: string): void => {
+  const commitFailure = (rule: string, diagnosticClass: string, detail?: string): void => {
     if (stale()) return;
-    recordFailure(product.productCode, signature, rule, diagnosticClass, Date.now());
+    recordFailure(product.productCode, signature, rule, diagnosticClass, Date.now(), detail);
   };
 
   if (!product.priceId) {
@@ -510,7 +590,7 @@ async function resolveOne(product: ConfiguredProduct, startedGen: number): Promi
   }
 
   if ('rule' in outcome) {
-    return commitFailure(outcome.rule, outcome.diagnosticClass);
+    return commitFailure(outcome.rule, outcome.diagnosticClass, outcome.detail);
   }
   if (stale()) return;
   resolved.set(product.productCode, outcome);
@@ -647,6 +727,7 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
       // the only audit record of live sell prices (#278 round 9).
       const priceSummary = [...resolved.values()]
         .map(p => `${p.productCode}=${p.unitAmount}${p.currency}`)
+        .sort()
         .join(' ');
       // On CHANGE only: a dev deploy with prices legitimately unset re-logged
       // an identical error-level line every terminal-ladder expiry, ~720/day,

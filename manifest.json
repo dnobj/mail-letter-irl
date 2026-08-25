@@ -163,6 +163,9 @@
                   "currency": {
                     "type": "string"
                   },
+                  "displayAmount": {
+                    "type": "string"
+                  },
                   "productDescription": {
                     "type": "string"
                   },
@@ -455,6 +458,9 @@
                   "currency": {
                     "type": "string"
                   },
+                  "displayAmount": {
+                    "type": "string"
+                  },
                   "productDescription": {
                     "type": "string"
                   },
@@ -745,6 +751,9 @@
                     "type": "integer"
                   },
                   "currency": {
+                    "type": "string"
+                  },
+                  "displayAmount": {
                     "type": "string"
                   },
                   "productDescription": {
@@ -1493,6 +1502,9 @@
                     "type": "integer"
                   },
                   "currency": {
+                    "type": "string"
+                  },
+                  "displayAmount": {
                     "type": "string"
                   },
                   "productDescription": {

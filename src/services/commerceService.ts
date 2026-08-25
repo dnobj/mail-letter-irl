@@ -7,7 +7,7 @@ import { query, transaction } from '../db/index.js';
 import {
   describeUnpriced,
   ensurePriceCatalog,
-  getResolutionEpoch,
+  formatPriceFailureSummary,
   kickPriceCatalog
 } from './priceCatalog.js';
 import {
@@ -260,13 +260,16 @@ function enabledPayAndSend(
     // NOTHING for its whole duration (#278 round 8).
     writeDiagnosticOnChange(
       `commerce.pay_and_send_unpriced:${product.productCode}`,
-      `${rule}:${errorClass}:e${getResolutionEpoch(product.productCode)}`,
+      formatPriceFailureSummary([failure]),
       rule === 'price.not_resolved' ? 'warn' : 'error',
       'commerce.pay_and_send_unpriced',
       {
         productCode: product.productCode,
         rule,
-        errorClass
+        errorClass,
+        // The figures, when the fault has them: an operator reading this line
+        // should not need the Stripe dashboard to see what disagreed.
+        ...(failure.detail ? { detail: failure.detail } : {})
       }
     );
     unavailableReason = isTerminalDiagnosticClass(errorClass)
@@ -291,6 +294,15 @@ function enabledPayAndSend(
     unavailableReason
   };
 }
+
+/**
+ * Stripe's own floor for a Checkout Session's expires_at: it refuses a session
+ * whose expiry is nearer than this. EXACTLY the floor, with no added margin -
+ * checkoutExpiry below stamps rows at the floor plus five seconds, so a margin
+ * here would cancel a freshly inserted row on its own first retry and break
+ * the idempotency-key replay that recovers a crashed attachment (#278 r10).
+ */
+const STRIPE_MIN_CHECKOUT_WINDOW_MS = 30 * 60_000;
 
 function checkoutExpiry(draftExpiresAt: Date): Date {
   const configuredMinutes = Math.min(
@@ -652,7 +664,14 @@ async function prepareJitOrder(
       if (
         existing.status === 'checkout_pending' &&
         existing.checkout_expires_at &&
-        new Date(existing.checkout_expires_at).getTime() <= Date.now() &&
+        // Not just PAST: Stripe refuses a Checkout Session whose expires_at
+        // is under 30 minutes away, and a reused sessionless row forwards its
+        // stored expiry verbatim. A row created 10 minutes ago on the default
+        // 30-minute window has ~20 left, so every retry was rejected by
+        // Stripe and left pending - the customer could not open a checkout
+        // for that draft until the row finally aged out (#278 round 10).
+        new Date(existing.checkout_expires_at).getTime() <=
+          Date.now() + STRIPE_MIN_CHECKOUT_WINDOW_MS &&
         !existing.stripe_checkout_session_id
       ) {
         await client.query(
@@ -1030,7 +1049,11 @@ export async function repairFulfilledPackGrant(
       order.stripe_checkout_session_id !== params.stripeSessionId ||
       order.credits !== params.expectedCredits ||
       order.amount_cents !== params.paidAmountCents ||
-      order.currency.toLowerCase() !== params.paidCurrency.toLowerCase()
+      // The shared normalizer, like every sibling gate: a legacy row with a
+      // padded currency passed the paid-amount check and then failed HERE, so
+      // the repair tool refused a grant every other gate had accepted
+      // (#278 round 10 - the last copy of the two-policies split).
+      normalizedCurrency(order.currency, '') !== normalizedCurrency(params.paidCurrency, '')
     ) {
       throw new Error('Pack reconciliation does not match a fulfilled authoritative order');
     }

@@ -51,6 +51,25 @@ describe('background Stripe budget (#278)', () => {
   // a paginated loop with no per-page recovery on a checkout-tuned budget: one
   // slow page aborts the whole run, and creditExpirationWorker's catch
   // swallows it unlogged (#278 review round 3).
+  it('stops walking refunds on an empty page, whatever has_more says', async () => {
+    // The cursor advances only from the last item, so a has_more page with no
+    // data left it unmoved and re-issued the identical request forever - each
+    // a 60s call, no cap, no diagnostic - hanging the entire maintenance
+    // sweep for the life of the process. Five round-10 angles found it
+    // independently; the single-call code it replaced could not loop.
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_reconciliation');
+    mockSessionsList.mockResolvedValue({ data: [], has_more: false });
+    mockRefundsList.mockResolvedValueOnce({ data: [], has_more: true });
+    mockQuery.mockResolvedValue({ rows: [] });
+    // Calls only - the queued page above survives, and this suite has no
+    // per-test clear, so without this the count includes sibling tests.
+    mockRefundsList.mockClear();
+
+    await reconcileStripePayments(7);
+
+    expect(mockRefundsList).toHaveBeenCalledTimes(1);
+  });
+
   it('audits EVERY page of refunds, not just the newest hundred', async () => {
     // Stripe returns refunds newest-first, so a single 100-item page drops
     // the OLDEST refunds in the window - the aged, most likely unreconciled
@@ -70,6 +89,7 @@ describe('background Stripe budget (#278)', () => {
         has_more: false
       });
     mockQuery.mockResolvedValue({ rows: [] });
+    mockRefundsList.mockClear();
 
     await reconcileStripePayments(7);
 

@@ -49,7 +49,14 @@ vi.mock('../../../src/services/priceCatalog.js', () => ({
       diagnosticClass: 'provider_error',
       terminal: false
     },
-  getResolutionEpoch: (productCode: string) => mocks.resolutionEpoch(productCode),
+  // The real formatter, so the slot signature these tests pin is the one
+  // production writes; the epoch knob feeds it through the catalog's own
+  // getResolutionEpoch, which this factory also stubs.
+  formatPriceFailureSummary: (failures: Array<{ productCode: string; rule: string; diagnosticClass: string; detail?: string }>) =>
+    failures
+      .map(f => `${f.productCode}:${f.rule}:${f.diagnosticClass}:e${mocks.resolutionEpoch(f.productCode)}` + (f.detail ? `(${f.detail})` : ''))
+      .sort()
+      .join(','),
   // Swallows like production kick: aliasing straight to the ensure mock let a
   // mockRejectedValue fixture leak an unhandled rejection from fire-and-forget
   // call sites - a failure mode the real kick structurally cannot produce.
@@ -576,6 +583,47 @@ describe('commerceService', () => {
     }
   });
 
+  it('refuses to reuse a sessionless order too close to expiry for Stripe', async () => {
+    // Stripe rejects a Checkout Session whose expires_at is under 30 minutes
+    // away, and a reused sessionless row forwards its stored expiry verbatim.
+    // A row created 10 minutes ago on the default 30-minute window has ~20
+    // left, so every retry was rejected and left pending - the customer could
+    // not open a checkout for that draft until the row aged out (#278 r10).
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit', amountCents: 499,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const tooClose = {
+      ...baseOrder,
+      stripe_checkout_session_id: null,
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 6 * 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [tooClose] })
+      .mockResolvedValue({ rows: [baseOrder] });
+    mocks.createJitSession.mockResolvedValue({
+      success: true, sessionId: 'cs-fresh', sessionUrl: 'https://s', expiresAt: new Date()
+    });
+
+    await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+    const cancelled = mocks.query.mock.calls
+      .map(([sql]) => String(sql))
+      .some(sql => sql.includes("SET status = 'cancelled'"));
+    expect(cancelled).toBe(true);
+  });
+
   it('treats an UNRESOLVED catalog as no verdict, never as a price change', async () => {
     // amountCents 0 is the catalog's unresolved sentinel. Three review angles
     // read the reprice branch as cancelling a reusable order during a
@@ -591,7 +639,7 @@ describe('commerceService', () => {
       amount_cents: 499,
       stripe_checkout_session_id: null,
       checkout_url: null,
-      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+      checkout_expires_at: new Date(Date.now() + 45 * 60_000)
     };
     mocks.query
       .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
@@ -628,7 +676,7 @@ describe('commerceService', () => {
       amount_cents: 499,
       stripe_checkout_session_id: null,
       checkout_url: null,
-      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+      checkout_expires_at: new Date(Date.now() + 45 * 60_000)
     };
     mocks.query
       .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
@@ -747,7 +795,7 @@ describe('commerceService', () => {
       amount_cents: 499,
       stripe_checkout_session_id: null,
       checkout_url: null,
-      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+      checkout_expires_at: new Date(Date.now() + 45 * 60_000)
     };
     mocks.query
       .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] }) // peek
@@ -788,7 +836,7 @@ describe('commerceService', () => {
       amount_cents: 499,
       stripe_checkout_session_id: 'cs-old',
       checkout_url: 'https://checkout.stripe.com/old',
-      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+      checkout_expires_at: new Date(Date.now() + 45 * 60_000)
     };
     mocks.query
       .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
@@ -1424,7 +1472,7 @@ describe('commerceService', () => {
       ...baseOrder,
       stripe_checkout_session_id: 'cs-1',
       checkout_url: 'https://checkout.stripe.com/c/pay/test',
-      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+      checkout_expires_at: new Date(Date.now() + 45 * 60_000)
     };
     mocks.query
       // The draft-type peek runs first (unlocked, advisory), then the #150

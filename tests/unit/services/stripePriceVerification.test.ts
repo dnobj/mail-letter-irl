@@ -23,7 +23,20 @@ const stripeMocks = vi.hoisted(() => {
   // vi.mock factory below runs lazily and can use the shared class.
   return {
     sessionCreate: vi.fn(),
-    priceRetrieve: vi.fn(),
+    // Wired with the LOUD default rather than a bare vi.fn(): the shared mock
+    // installs its unwired-retriever sentinel only when the key is absent, so
+    // passing an implementation-less fn defeated it - in the one suite that
+    // drives the real retriever and could ever fire it. A vi.fn(impl) returns
+    // to this implementation after the global restoreAllMocks in
+    // tests/setup.ts, so a case that forgets serveHealthyPrices() fails
+    // loudly instead of resolving undefined into a fake outage (#278 r10).
+    priceRetrieve: vi.fn(() =>
+      Promise.reject(
+        Object.assign(new Error('stripePriceVerification: priceRetrieve not wired'), {
+          name: 'PriceRetrieverMissingError'
+        })
+      )
+    ),
     refundCreate: vi.fn(),
     refundList: vi.fn()
   };
@@ -67,9 +80,12 @@ async function createCheckoutSession(params: {
     idempotencyKey: `legacy-pack:${orderId}`
   });
 }
-const { resetPriceCatalog, ensurePriceCatalog, useDefaultPriceRetriever } = await import(
-  '../../../src/services/priceCatalog.js'
-);
+const {
+  resetPriceCatalog,
+  ensurePriceCatalog,
+  getResolvedPriceForProduct,
+  useDefaultPriceRetriever
+} = await import('../../../src/services/priceCatalog.js');
 const { resetStripeClient } = await import('../../../src/services/stripeClient.js');
 const StripeCtor = (await import('stripe')).default as unknown as {
   lastConstructorArgs: unknown[] | null;
@@ -333,6 +349,39 @@ describe('checkout pricing guards (#275)', () => {
       error: 'Failed to create checkout session'
     });
     expect(JSON.stringify(result)).not.toContain(sensitive);
+  });
+
+  it('drops the memo when Stripe rejects the request, so an archived price stops being sold', async () => {
+    // `active` is the one field validate() enforces that Stripe can change
+    // under us, and it is deliberately not a signature input - so an archived
+    // Price stayed memoized for the process lifetime: /readyz green, quotes
+    // still advertising it, and every purchase inserting an order row and
+    // then failing at session creation with a non-terminal class, stranding
+    // a checkout_pending row per attempt forever (#278 round 10, reproduced
+    // by three angles). The checkout rejection is the only moment this
+    // process can learn the memo is a lie.
+    serveHealthyPrices();
+    await ensurePriceCatalog();
+    expect(getResolvedPriceForProduct('credit-pack-10')).not.toBeNull();
+
+    stripeMocks.sessionCreate.mockRejectedValue(
+      Object.assign(new Error('This price is not active'), {
+        type: 'StripeInvalidRequestError'
+      })
+    );
+
+    await checkout({
+      productCode: 'credit-pack-10',
+      priceId: 'price_regular',
+      amountCents: 1000,
+      currency: 'usd',
+      name: 'Regular Pack',
+      description: 'Five prepaid letters'
+    });
+
+    // The memo is gone, so the next ensure re-reads it from Stripe - where it
+    // will record price.inactive and take readiness red.
+    expect(getResolvedPriceForProduct('credit-pack-10')).toBeNull();
   });
 
   it('classifies a missing key at the WEBHOOK catch as configuration, not a blip', () => {

@@ -5,17 +5,15 @@ import type { MailType } from './types.js';
 import {
   carriedDiagnosticClass,
   classifyDiagnosticError,
-  isTerminalDiagnosticClass,
   writeDiagnostic
 } from '../utils/diagnosticLog.js';
 import {
   describeUnpriced,
-  ensurePriceCatalog,
+  invalidateResolvedPrice,
   getResolvedPriceForProduct
 } from './priceCatalog.js';
 import { BACKGROUND_REQUEST_OPTIONS, getStripeClient } from './stripeClient.js';
 import {
-  JIT_PRODUCTS,
   PACK_PRODUCTS,
   getConfiguredProduct,
   jitCurrency,
@@ -191,6 +189,20 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
     // forever, log blaming Stripe for a missing credential (#278 round 7).
     const diagnosticClass =
       carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error');
+    // Stripe rejected the REQUEST, and the price id is the parameter in it
+    // most likely to be wrong - an archived Price is the case the catalog
+    // cannot see on its own, because `active` is mutable and deliberately not
+    // a signature input. Drop the memo so the next ensure re-reads it: either
+    // it rebuilds (the fault was elsewhere and nothing is lost but one
+    // lookup) or it records price.inactive, which turns readiness red and
+    // refuses further purchases BEFORE an order row exists instead of
+    // stranding one per attempt forever (#278 round 10).
+    if (
+      diagnosticClass === 'StripeInvalidRequestError' ||
+      diagnosticClass === 'resource_missing'
+    ) {
+      invalidateResolvedPrice(params.product.productCode, diagnosticClass);
+    }
     writeDiagnostic('error', 'stripe.checkout_creation_failed', {
       errorClass: diagnosticClass
     });

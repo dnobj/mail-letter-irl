@@ -175,6 +175,25 @@ describe('diffManifest', () => {
     expect(diff.missing).toEqual([]);
   });
 
+  it('diffs an advisory variable even when its CONDITION flag is absent', () => {
+    // Round 5 freed advisory entries from the requiredIn gate for parity
+    // visibility; the condition gate still dropped them entirely. With Pay &
+    // Send unrolled in production (flag name absent) and enabled in
+    // development, JIT_CURRENCY landed in neither list in either run, so
+    // nothing reported that the two environments disagree about the Pay &
+    // Send currency - the one-directional blindness the mechanism exists to
+    // end, and which the docs already claim is solved (#278 round 10).
+    const withoutJitFlag = FULL_PRODUCTION_NAMES.filter(
+      name => name !== 'JIT_PURCHASE_ENABLED' && name !== 'JIT_CURRENCY'
+    );
+
+    const diff = diffManifest(withoutJitFlag, { environment: 'production', service: 'api' });
+
+    expect(diff.advisory.map(gap => gap.entry.name)).toContain('JIT_CURRENCY');
+    // Visibility only - the gate itself stays green.
+    expect(diff.missing.map(gap => gap.entry.name)).not.toContain('JIT_CURRENCY');
+  });
+
   it('never tells the operator an OPTIONAL variable is required', () => {
     // The reproduction is a normal production cutover: Railway sets
     // JIT_PURCHASE_ENABLED (the shipped config sets it to 'false', and the

@@ -105,6 +105,41 @@ describe('validateDeploymentConfig in production', () => {
     expect(validation.findings.map(f => f.rule)).toContain('stripe.currency_unset');
   });
 
+  it('reports ONE currency finding for one root cause, not two', () => {
+    // With Pay & Send enabled and both currency vars unset, the JIT check
+    // re-tested the pack check's own predicate, so a single root cause
+    // produced two findings under the identical rule id with conflicting
+    // text - and any surface that groups or counts by rule showed the rule
+    // twice (#278 round 10).
+    const bothUnset = env({
+      JIT_PURCHASE_ENABLED: 'true',
+      STRIPE_JIT_LETTER_PRICE_ID: 'price_jit_letter',
+      STRIPE_JIT_POSTCARD_PRICE_ID: 'price_jit_postcard',
+      STRIPE_CURRENCY: undefined,
+      JIT_CURRENCY: undefined
+    });
+
+    const validation = validateDeploymentConfig(bothUnset, 'server');
+
+    expect(
+      validation.findings.filter(f => f.rule === 'stripe.currency_unset')
+    ).toHaveLength(1);
+  });
+
+  it('still names JIT_CURRENCY when only IT is unset', () => {
+    const jitOnly = env({
+      JIT_PURCHASE_ENABLED: 'true',
+      STRIPE_JIT_LETTER_PRICE_ID: 'price_jit_letter',
+      STRIPE_JIT_POSTCARD_PRICE_ID: 'price_jit_postcard',
+      STRIPE_CURRENCY: 'usd',
+      JIT_CURRENCY: undefined
+    });
+
+    const validation = validateDeploymentConfig(jitOnly, 'server');
+
+    expect(validation.findings.filter(f => f.rule === 'stripe.currency_unset')).toHaveLength(1);
+  });
+
   it('accepts a completely configured production environment with no findings', () => {
     const validation = validateDeploymentConfig(VALID_PROD, 'server');
     expect(validation.mode).toBe('production');

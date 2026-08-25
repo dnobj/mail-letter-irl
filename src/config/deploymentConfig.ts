@@ -598,7 +598,14 @@ function validateStripe(
           });
         }
       }
-      if (normalizedCurrency(env.JIT_CURRENCY, '') === '' && normalizedCurrency(env.STRIPE_CURRENCY, '') === '') {
+      // Only when JIT_CURRENCY alone is missing: the both-unset case is
+      // already reported by the pack check above, under this same rule id, so
+      // firing here too gave one root cause two findings with conflicting
+      // text under one rule (#278 round 10).
+      if (
+        normalizedCurrency(env.JIT_CURRENCY, '') === '' &&
+        normalizedCurrency(env.STRIPE_CURRENCY, '') !== ''
+      ) {
         findings.push({
           severity: 'warning',
           rule: 'stripe.currency_unset',

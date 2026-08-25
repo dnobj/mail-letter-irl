@@ -21,9 +21,14 @@ describe('dashboard pack product list (#275)', () => {
     const source = await readFile('src/api/dashboardApiHandler.ts', 'utf8');
 
     expect(source).toContain('PACK_PRODUCTS.map(product => product.productCode)');
-    // No hand-written pack code may reappear as a literal in this file.
+    // No hand-written pack code may reappear as a literal in this file, in
+    // EITHER quote style: matching only single quotes let the fourth copy
+    // return as a double-quoted array - the prevailing style in the sibling
+    // src/api suites - while this guard stayed green (#278 round 10).
     for (const product of PACK_PRODUCTS) {
-      expect(source, product.productCode).not.toContain('\'' + product.productCode + '\'');
+      for (const quote of ["'", '"', '`']) {
+        expect(source, product.productCode).not.toContain(quote + product.productCode + quote);
+      }
     }
   });
 });

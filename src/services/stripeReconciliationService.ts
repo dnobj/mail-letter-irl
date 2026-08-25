@@ -377,10 +377,16 @@ export async function reconcileStripePayments(
       BACKGROUND_REQUEST_OPTIONS
     );
     allRefunds.push(...refundPage.data);
+    // An EMPTY page ends the walk whatever has_more says. The cursor advances
+    // only from the last item, so a has_more page carrying no data left it
+    // unmoved and re-issued the identical request forever - each a 60s call,
+    // no cap, no diagnostic - hanging the whole maintenance sweep (orphan
+    // cancellation, refund retries, the stuck-order alarm) for the life of
+    // the process. Five round-10 angles found this independently; the
+    // single-call code it replaced could not loop (#278 round 10).
+    if (refundPage.data.length === 0) break;
+    refundsStartingAfter = refundPage.data[refundPage.data.length - 1].id;
     refundsHasMore = refundPage.has_more;
-    if (refundPage.data.length > 0) {
-      refundsStartingAfter = refundPage.data[refundPage.data.length - 1].id;
-    }
   }
 
   for (const refund of allRefunds) {

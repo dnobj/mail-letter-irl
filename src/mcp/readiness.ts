@@ -23,7 +23,6 @@ import {
 import { listProviders } from '../services/providers/index.js';
 import {
   clearDiagnosticChangeSlot,
-  writeDiagnostic,
   writeDiagnosticOnChange
 } from '../utils/diagnosticLog.js';
 import {

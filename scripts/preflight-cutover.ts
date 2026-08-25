@@ -97,8 +97,18 @@ export function diffManifest(
       if (entry.name !== 'LETTER_IRL_DEPLOYMENT_ENVIRONMENT' && !entry.advisory) continue;
     }
     if (entry.requiredIn === 'development' && production) continue;
-    if (entry.condition === 'when-jit-enabled' && !jitFlagSet) continue;
-    if (entry.condition === 'when-static-dcr' && !staticDcrFlagSet) continue;
+    // ADVISORY entries skip the condition gates too. Round 5 freed them from
+    // the requiredIn gate for parity visibility, but the condition gate below
+    // still dropped them entirely: with Pay & Send unrolled in production
+    // (flag name absent) and enabled in development, JIT_CURRENCY landed in
+    // neither list in either run, so nothing reported that the two
+    // environments disagree about the Pay & Send currency - the exact
+    // one-directional blindness the mechanism exists to end, and which the
+    // docs already claim is solved (#278 round 10).
+    if (!entry.advisory) {
+      if (entry.condition === 'when-jit-enabled' && !jitFlagSet) continue;
+      if (entry.condition === 'when-static-dcr' && !staticDcrFlagSet) continue;
+    }
     // 'unless-admin' is ignored: deployed services are never local admin mode.
 
     const satisfied = [entry.name, ...(entry.aliases ?? [])].some(name => present.has(name));
