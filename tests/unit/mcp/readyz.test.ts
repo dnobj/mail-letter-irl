@@ -7,13 +7,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // the failing branch had zero coverage in the first revision (#278 review).
 const priceCatalog = vi.hoisted(() => ({
   unpriced: [] as Array<{ productCode: string; rule: string; diagnosticClass: string }>,
-  ensureCalls: 0
+  ensureCalls: 0,
+  cold: false
 }));
 vi.mock('../../../src/services/priceCatalog.js', () => ({
   getUnpricedProducts: () => priceCatalog.unpriced,
   ensurePriceCatalog: async () => {
     priceCatalog.ensureCalls += 1;
-  }
+  },
+  isPriceCatalogCold: () => priceCatalog.cold
 }));
 import { readFile } from 'node:fs/promises';
 
@@ -32,6 +34,7 @@ import { getReadiness, resetReadinessCache } from '../../../src/mcp/readiness.js
 beforeEach(() => {
   priceCatalog.unpriced = [];
   priceCatalog.ensureCalls = 0;
+  priceCatalog.cold = false;
 });
 
 const READY_DEV: NodeJS.ProcessEnv = {
@@ -263,5 +266,95 @@ describe('/readyz prices check (#275 stage A)', () => {
     const report = await getReadiness(READY_PROD);
     const checkNames = Object.keys(JSON.parse(report.body).checks).sort();
     expect(checkNames).toEqual(['config', 'database', 'prices', 'routing']);
+  });
+
+  /**
+   * The gate mirrors validateStripe: STRIPE_PRICE_* are requiredIn
+   * 'production', downgraded to a warning outside it and skipped entirely in
+   * test/admin. Without this gate a development deploy - where those variables
+   * are legitimately unset, so every product is unpriced - answered 503
+   * forever and could never pass the documented post-deploy check. The
+   * READY_DEV fixture asserted prices:'ok' and passed anyway, because the
+   * suite mocks this very module: the divergence was structurally invisible
+   * (#278 review round 2).
+   */
+  it('does not fail a development deploy whose prices are legitimately unset', async () => {
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-4', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' },
+      { productCode: 'credit-pack-10', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' },
+      { productCode: 'credit-pack-100', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' }
+    ];
+
+    const report = await getReadiness(READY_DEV);
+
+    expect(report.statusCode).toBe(200);
+    // Ready, but honest about it: 'ok' here would be a lie the operator reads
+    // on the deploy check.
+    expect(JSON.parse(report.body).checks.prices).toBe('degraded');
+    expect(report.body).not.toContain('credit-pack-4');
+  });
+
+  it('leaves admin-mode production to the config check, not the prices one', async () => {
+    // validateStripe skips its price rules under ADMIN_ENABLED, so the gate
+    // here looked like it needed an admin term too. It does not:
+    // admin.enabled_in_production is itself a config ERROR, so such a deploy
+    // is already unready on `config` and an admin term in the prices gate
+    // would be unreachable. Pinned so nobody re-adds the dead condition.
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-4', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' }
+    ];
+
+    const report = await getReadiness({ ...READY_PROD, ADMIN_ENABLED: 'true' });
+
+    expect(report.statusCode).toBe(503);
+    expect(JSON.parse(report.body).failing).toContain('config');
+  });
+
+  it('holds a cold-catalog 503 only briefly, so a healthy boot stops lying fast', async () => {
+    // A cold catalog is the few hundred ms between the port binding and the
+    // warmup landing. Caching that verdict for the full 5s TTL pinned a
+    // healthy instance at 503 across exactly the window the documented
+    // post-deploy check runs in (#278 review round 2).
+    vi.useFakeTimers();
+    try {
+      priceCatalog.cold = true;
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.not_resolved', diagnosticClass: 'provider_error' }
+      ];
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+
+      // The warmup lands.
+      priceCatalog.cold = false;
+      priceCatalog.unpriced = [];
+
+      // Still inside the ordinary 5s TTL, past the cold one.
+      vi.advanceTimersByTime(1_500);
+      const recovered = await getReadiness(READY_PROD);
+
+      expect(recovered.statusCode).toBe(200);
+      expect(JSON.parse(recovered.body).checks.prices).toBe('ok');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('caches a genuine price fault for the full TTL', async () => {
+    // The counterpart: only COLDNESS gets the short hold. A real fault must
+    // not turn /readyz into an uncached database probe for anonymous callers.
+    vi.useFakeTimers();
+    try {
+      priceCatalog.cold = false;
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
+      ];
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+
+      priceCatalog.unpriced = [];
+      vi.advanceTimersByTime(1_500);
+
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

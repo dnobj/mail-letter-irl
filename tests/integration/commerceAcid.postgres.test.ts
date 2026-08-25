@@ -1205,6 +1205,82 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
     }
   });
 
+  it('rolls a transiently-unpriced adoption back so a later retry can still adopt (#278)', async () => {
+    // The subtler half of the same regression. The amount used to come from an
+    // env var and could never be TRANSIENTLY absent; it now comes from a live
+    // Stripe read, so a blip during resolution must not book a paying customer
+    // as unmatched money - unmatched does not auto-recover, and a refused
+    // adoption leaves no order row for the maintenance sweep to find. The
+    // handler throws instead, and this proves the property only a real
+    // database can show: the rollback releases the event claim, so the retry
+    // Stripe sends is free to adopt.
+    const priceCatalog = await import('../../src/services/priceCatalog.js');
+    const previousStarter = process.env.STRIPE_PRICE_STARTER;
+    process.env.STRIPE_PRICE_STARTER = 'price_starter_transient';
+    priceCatalog.resetPriceCatalog();
+    priceCatalog.setPriceRetriever(async () => {
+      throw new Error('Stripe unreachable');
+    });
+
+    const event = {
+      id: 'evt-legacy-transient', type: 'checkout.session.completed', data: { object: {
+        id: 'cs-legacy-transient', client_reference_id: null,
+        metadata: { userId: 'legacy-transient-user', productId: 'credit-pack-4' },
+        payment_intent: 'pi-legacy-transient', payment_status: 'paid',
+        amount_total: 500, currency: 'usd',
+        expires_at: Math.floor(Date.now() / 1000) + 3600
+      } }
+    };
+
+    try {
+      await acidPool.query(
+        `INSERT INTO users (user_id, email) VALUES ('legacy-transient-user', 'legacy-transient@example.test')`
+      );
+
+      await expect(
+        commerceService.processStripeWebhookEvent(event as never)
+      ).rejects.toThrow(/retry adoption/);
+
+      // Nothing durable survived the rollback: no order, and crucially no
+      // claimed event row. A consumed claim would make the retry a no-op
+      // duplicate and strand the money permanently.
+      const afterFailure = await acidPool.query(
+        `SELECT event_id FROM stripe_webhook_events WHERE event_id = 'evt-legacy-transient'`
+      );
+      expect(afterFailure.rows).toEqual([]);
+      const noOrder = await acidPool.query(
+        `SELECT order_id FROM orders WHERE stripe_checkout_session_id = 'cs-legacy-transient'`
+      );
+      expect(noOrder.rows).toEqual([]);
+
+      // Stripe retries once the blip has cleared. (Resetting stands in for the
+      // resolution cooldown expiring; what matters is that the retry is not
+      // blocked by leftover state.)
+      priceCatalog.resetPriceCatalog();
+      priceCatalog.setPriceRetriever(async priceId => ({
+        id: priceId, active: true, unit_amount: 500, currency: 'usd', product: 'prod_starter'
+      }) as never);
+
+      await expect(
+        commerceService.processStripeWebhookEvent(event as never)
+      ).resolves.toMatchObject({ duplicate: false });
+
+      const order = await acidPool.query<{ amount_cents: number; status: string }>(
+        `SELECT amount_cents, status FROM orders
+         WHERE stripe_checkout_session_id = 'cs-legacy-transient'`
+      );
+      expect(order.rows[0]).toMatchObject({ amount_cents: 500, status: 'fulfilled' });
+      const credits = await acidPool.query<{ credits: number }>(
+        `SELECT credits FROM users WHERE user_id = 'legacy-transient-user'`
+      );
+      expect(credits.rows[0].credits).toBe(4);
+    } finally {
+      priceCatalog.resetPriceCatalog();
+      if (previousStarter === undefined) delete process.env.STRIPE_PRICE_STARTER;
+      else process.env.STRIPE_PRICE_STARTER = previousStarter;
+    }
+  });
+
   it('refuses to re-dispatch mail whose provider outcome is still ambiguous', async () => {
     const jobId = '00000000-0000-4000-8000-000000000210';
     await acidPool.query(

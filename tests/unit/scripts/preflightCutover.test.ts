@@ -27,6 +27,11 @@ const FULL_PRODUCTION_NAMES = [
   'STRIPE_PRICE_STARTER',
   'STRIPE_PRICE_REGULAR',
   'STRIPE_PRICE_POWER',
+  // Load-bearing since #275: every Price must be denominated in it or the
+  // catalog refuses to price that product. It was in no manifest entry, so the
+  // preflight reported full parity while the two environments disagreed about
+  // the store currency (#278 review round 2).
+  'STRIPE_CURRENCY',
   'TEMP_IMAGE_BUCKET_NAME',
   'TEMP_IMAGE_BUCKET_ENDPOINT',
   'TEMP_IMAGE_BUCKET_ACCESS_KEY_ID',

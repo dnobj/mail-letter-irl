@@ -14,7 +14,25 @@ const mocks = vi.hoisted(() => ({
   retrieveSession: vi.fn(),
   jitEnabled: vi.fn(),
   getJitProduct: vi.fn(),
-  getPackProduct: vi.fn()
+  getPackProduct: vi.fn(),
+  ensurePriceCatalog: vi.fn(),
+  getPriceResolutionFailure: vi.fn(() => null)
+}));
+
+/**
+ * commerceService awaits ensurePriceCatalog() at three chokepoints (#275
+ * stage A). This suite mocked stripeService but not the catalog, so the REAL
+ * resolver ran from a unit suite: its default retriever is
+ * getStripeClient().prices.retrieve, which with STRIPE_SECRET_KEY absent threw
+ * into a swallowed catch - the ensure calls were exercised as silent no-ops and
+ * nothing here would have noticed if all three were deleted - and with a key
+ * present in a developer's shell became real outbound requests to
+ * api.stripe.com, under a 10s client timeout against vitest's 10s testTimeout
+ * (#278 review round 2).
+ */
+vi.mock('../../../src/services/priceCatalog.js', () => ({
+  ensurePriceCatalog: mocks.ensurePriceCatalog,
+  getPriceResolutionFailure: mocks.getPriceResolutionFailure
 }));
 
 vi.mock('../../../src/db/index.js', () => ({
@@ -361,7 +379,16 @@ describe('commerceService', () => {
     expect([String(ordered[0]?.[0]), ordered[0]?.[1]]).toEqual([ACCOUNT_LOCK_SQL, ['user-1']]);
   });
 
-  it('refuses to adopt a legacy pack session when its amount is not configured', async () => {
+  it('refuses to adopt a legacy pack session when its price is TERMINALLY unconfigured', async () => {
+    // Only a human can fix an archived or typo'd price, so retrying the
+    // adoption forever is pointless: refuse, book the money as unmatched, and
+    // answer Stripe 200 so it stops. The transient case is the next test, and
+    // it must NOT behave like this one (#278 review round 2).
+    mocks.getPriceResolutionFailure.mockReturnValue({
+      productCode: 'credit-pack-4',
+      rule: 'price.inactive',
+      diagnosticClass: 'configuration_error'
+    } as never);
     mocks.getPackProduct.mockReturnValue({
       productCode: 'credit-pack-4',
       priceId: 'price-pack',
@@ -400,6 +427,53 @@ describe('commerceService', () => {
     expect(mocks.query).toHaveBeenCalledWith(
       expect.stringContaining("'stripe_money_event_unmatched'"),
       expect.arrayContaining(['evt-1'])
+    );
+  });
+
+  it('retries a legacy adoption whose price is only TRANSIENTLY unresolved', async () => {
+    // The regression this whole rework exists to prevent, in its subtler form.
+    // The amount used to come from an env var and could never be transiently
+    // absent; it now comes from a live Stripe read, so a blip during the
+    // warmup would have booked a PAYING customer as permanently unmatched -
+    // and unmatched does not auto-recover (docs/manual-tests.md), because a
+    // refused adoption leaves no order row for the maintenance sweep to find.
+    // Throwing rolls the transaction back including the event claim, so Stripe
+    // (or the next cron pass) retries once the cooldown has cleared.
+    mocks.getPriceResolutionFailure.mockReturnValue({
+      productCode: 'credit-pack-4',
+      rule: 'price.lookup_failed',
+      diagnosticClass: 'StripeConnectionError'
+    } as never);
+    mocks.getPackProduct.mockReturnValue({
+      productCode: 'credit-pack-4',
+      priceId: 'price-pack',
+      amountCents: 0,
+      currency: 'usd',
+      credits: 4,
+      name: 'Starter Pack',
+      description: 'Two prepaid letters'
+    });
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-legacy' }] };
+      return { rows: [] };
+    });
+
+    await expect(processStripeWebhookEvent(checkoutEvent({
+      id: 'cs-legacy',
+      client_reference_id: null,
+      metadata: { userId: 'user-1', productId: 'credit-pack-4' },
+      amount_total: 500
+    }) as never)).rejects.toMatchObject({ diagnosticClass: 'StripeConnectionError' });
+
+    // Crucially NOT booked as unmatched: that is the terminal outcome, and
+    // applying it to a blip is what strands the money.
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("processing_status = 'unmatched'"),
+      expect.anything()
+    );
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO orders'),
+      expect.anything()
     );
   });
 
@@ -471,24 +545,42 @@ describe('commerceService', () => {
     expect(mocks.createPackSession).not.toHaveBeenCalled();
   });
 
-  it('labels an unconfigured pack amount configuration_error, not a database fault', async () => {
-    // Issue #213: this guard throws before any query runs, so the handler's
-    // catch has no statement to blame and defaults an uncarried error to
-    // database_error - the mislabel that turned a missing
-    // STRIPE_STARTER_AMOUNT_CENTS into a schema hunt for a config problem.
-    mocks.getPackProduct.mockReturnValue({
-      productCode: 'credit-pack-4', priceId: 'price-pack', amountCents: 0,
-      currency: 'usd', name: 'Starter Pack', description: 'Two prepaid letters', credits: 4
-    });
+  it.each([
+    ['a real configuration fault', 'price.inactive', 'configuration_error', 'configuration_error'],
+    // The class the CATALOG recorded must survive, not be flattened. This
+    // guard throws 22 lines before createPackCheckoutSession, so the branch in
+    // stripeService that forwards the real class is unreachable on this path -
+    // hard-coding configuration_error here made the pack path structurally
+    // incapable of reporting a transient fault, and sent the operator hunting
+    // a config problem during a 30-second outage (#278 review round 2).
+    ['a Stripe outage', 'price.lookup_failed', 'StripeConnectionError', 'StripeConnectionError'],
+    // Never attempted or in flight: the catalog calls that transient by
+    // definition, and terminal is what cancels a customer's order.
+    ['a catalog that has not attempted yet', null, null, 'provider_error']
+  ])(
+    'carries the catalog class for %s, so #213 is not reintroduced one layer up',
+    async (_label, rule, catalogClass, expectedClass) => {
+      // Issue #213: this guard throws before any query runs, so the handler's
+      // catch has no statement to blame and defaults an uncarried error to
+      // database_error - the mislabel that turned a missing amount into a
+      // schema hunt for a config problem.
+      mocks.getPriceResolutionFailure.mockReturnValue(
+        rule ? ({ productCode: 'credit-pack-4', rule, diagnosticClass: catalogClass } as never) : null
+      );
+      mocks.getPackProduct.mockReturnValue({
+        productCode: 'credit-pack-4', priceId: 'price-pack', amountCents: 0,
+        currency: 'usd', name: 'Starter Pack', description: 'Two prepaid letters', credits: 4
+      });
 
-    const error = await createPackCheckout({
-      userId: 'user-1', userEmail: 'user@example.test', productId: 'credit-pack-4',
-      successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no'
-    } as never).catch(e => e);
+      const error = await createPackCheckout({
+        userId: 'user-1', userEmail: 'user@example.test', productId: 'credit-pack-4',
+        successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no'
+      } as never).catch(e => e);
 
-    expect(error).toBeInstanceOf(PackAmountNotConfiguredError);
-    expect(error).toMatchObject({ diagnosticClass: 'configuration_error' });
-  });
+      expect(error).toBeInstanceOf(PackAmountNotConfiguredError);
+      expect(error).toMatchObject({ diagnosticClass: expectedClass });
+    }
+  );
 
   it('labels an unconfigured pack price id configuration_error before any order write', async () => {
     // The sibling guard, same #213 trap: a missing STRIPE_PRICE_* threw a bare
@@ -920,6 +1012,33 @@ describe('commerceService', () => {
       unavailableReason: 'Pay & Send is not enabled.'
     });
   });
+
+  it.each([
+    ['a permanently archived price', 'configuration_error', 'Pay & Send pricing is not configured.'],
+    ['a Stripe blip', 'StripeConnectionError', 'Pay & Send is temporarily unavailable. Please try again shortly.']
+  ])(
+    'tells the customer which kind of unavailable %s is',
+    (_label, diagnosticClass, expectedReason) => {
+      // Both used to produce the identical permanent-sounding "not configured"
+      // message, and getSendEligibility logged nothing at all - so a 30-second
+      // outage switched Pay & Send off across every quote and the operator
+      // heard about it from a customer (#278 review round 2).
+      mocks.getPriceResolutionFailure.mockReturnValue({
+        productCode: 'jit-letter',
+        rule: 'price.lookup_failed',
+        diagnosticClass
+      } as never);
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,
+        currency: 'usd', name: 'Pay & Send', description: 'One letter'
+      });
+
+      expect(getSendEligibility(0, 2, 'letter').payAndSend).toMatchObject({
+        available: false,
+        unavailableReason: expectedReason
+      });
+    }
+  );
 
   it('reconciles a missed paid session before expiring pending checkouts', async () => {
     mocks.query.mockImplementation(async (sql: string) => {

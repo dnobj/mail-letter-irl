@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { stripeMockModule } from '../../mocks/stripe.js';
 
 // Mock Stripe
 const { mockSessionsList, mockRefundsList, mockQuery, mockRepairPackGrant } = vi.hoisted(() => ({
@@ -25,20 +26,11 @@ const { mockSessionsList, mockRefundsList, mockQuery, mockRepairPackGrant } = vi
   mockRepairPackGrant: vi.fn()
 }));
 
-vi.mock('stripe', () => {
-  return {
-    default: class MockStripe {
-      checkout = {
-        sessions: {
-          list: mockSessionsList,
-        },
-      };
-      refunds = {
-        list: mockRefundsList,
-      };
-    },
-  };
-});
+// The one shared MockStripe (tests/mocks/stripe.ts). Unlisted surfaces are
+// inert stubs, so this suite carries no methods it never asserts on.
+vi.mock('stripe', () =>
+  stripeMockModule({ sessionList: mockSessionsList, refundList: mockRefundsList })
+);
 
 // Mock database
 vi.mock('../../../src/db/index.js', () => ({

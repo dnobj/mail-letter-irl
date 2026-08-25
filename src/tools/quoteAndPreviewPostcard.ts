@@ -22,6 +22,7 @@ import { getReturnAddress } from "../services/returnAddressService.js";
 import { downloadAndProcessPostcardImageWithPreview, ImageProcessingError, type ImageInput } from "../services/imageService.js";
 import type { PostcardSize, ImageFileParam } from "../services/types.js";
 import { ensurePriceCatalog } from '../services/priceCatalog.js';
+import { jitProductCode } from '../config/products.js';
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
 import { getRecentUploadedImage } from "../services/recentUploadStore.js";
@@ -387,7 +388,7 @@ async function handler(
   const requiredCredits = POSTCARD_CREDITS_COST;
   const available = context.user.creditsRemaining;
   const canSendNow = available >= requiredCredits;
-  await ensurePriceCatalog();
+  await ensurePriceCatalog(jitProductCode('postcard'));
   const sendEligibility = getSendEligibility(available, requiredCredits, "postcard");
   const lettersRequired = 1; // User-facing: 1 letter = 1 postcard
 

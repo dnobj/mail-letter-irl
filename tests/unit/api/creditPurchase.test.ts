@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { stripeMockModule } from '../../mocks/stripe.js';
 
 // Hoist mock functions so they're available when vi.mock is hoisted
 const { mockSessionCreate, mockSessionList, mockConstructEvent, mockPriceRetrieve } = vi.hoisted(() => ({
@@ -56,25 +57,18 @@ async function configureStubbedPrices(): Promise<void> {
   });
 }
 
-// Mock Stripe as a class constructor
-vi.mock('stripe', () => {
-  return {
-    default: class MockStripe {
-      checkout = {
-        sessions: {
-          create: mockSessionCreate,
-          list: mockSessionList,
-        },
-      };
-      prices = {
-        retrieve: mockPriceRetrieve,
-      };
-      webhooks = {
-        constructEvent: mockConstructEvent,
-      };
-    },
-  };
-});
+// One shared MockStripe (tests/mocks/stripe.ts): the inline copies here and in
+// the price/reconciliation suites disagreed about the Stripe surface, and two
+// of them disagreed about whether a Price carries `active` - so they exercised
+// different validation paths for the same object (#278 review).
+vi.mock('stripe', () =>
+  stripeMockModule({
+    sessionCreate: mockSessionCreate,
+    sessionList: mockSessionList,
+    priceRetrieve: mockPriceRetrieve,
+    constructEvent: mockConstructEvent,
+  })
+);
 
 // Mock database
 vi.mock('../../../src/db/index.js', () => ({

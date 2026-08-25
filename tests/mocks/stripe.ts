@@ -1,15 +1,20 @@
 /**
- * The one Stripe mock. Four suites used to declare their own near-identical
+ * The one Stripe mock. Several suites used to declare their own near-identical
  * MockStripe classes with subtly different surfaces - two of them disagreed on
  * whether a Price carries `active`, so they exercised different validation
  * paths for what was meant to be the same object (#278 review). Adding a
  * Stripe surface now means editing one file.
  *
- * Usage (the vi.mock factory must be self-contained, so callers pass the
- * hoisted fns in):
+ * Usage. `vi.hoisted` runs before imports, so the FNS must be created there
+ * inline; the vi.mock FACTORY runs lazily, so it may call in here:
  *
- *   const stripeMocks = vi.hoisted(() => createStripeMockFns());
+ *   const stripeMocks = vi.hoisted(() => ({ sessionCreate: vi.fn(), ... }));
  *   vi.mock('stripe', () => stripeMockModule(stripeMocks));
+ *
+ * Every surface is optional - a suite passes only the fns it asserts on, and
+ * the rest are inert stubs. That is what lets one class serve the checkout,
+ * price, reconciliation and webhook suites without any of them carrying
+ * methods they never touch.
  */
 
 import { vi } from 'vitest';
@@ -24,25 +29,21 @@ export interface StripeMockFns {
   constructEvent: ReturnType<typeof vi.fn>;
 }
 
-export function createStripeMockFns(): StripeMockFns {
-  return {
-    sessionCreate: vi.fn(),
-    sessionList: vi.fn(),
-    priceRetrieve: vi.fn(),
-    refundList: vi.fn(),
-    refundCreate: vi.fn(),
-    refundRetrieve: vi.fn(),
-    constructEvent: vi.fn()
-  };
-}
-
-export function stripeMockModule(fns: StripeMockFns): { default: unknown } {
+export function stripeMockModule(fns: Partial<StripeMockFns>): { default: unknown } {
+  const stub = (): ReturnType<typeof vi.fn> => vi.fn();
+  const sessionCreate = fns.sessionCreate ?? stub();
+  const sessionList = fns.sessionList ?? stub();
+  const priceRetrieve = fns.priceRetrieve ?? stub();
+  const refundList = fns.refundList ?? stub();
+  const refundCreate = fns.refundCreate ?? stub();
+  const refundRetrieve = fns.refundRetrieve ?? stub();
+  const constructEvent = fns.constructEvent ?? stub();
   return {
     default: class MockStripe {
-      checkout = { sessions: { create: fns.sessionCreate, list: fns.sessionList } };
-      prices = { retrieve: fns.priceRetrieve };
-      refunds = { list: fns.refundList, create: fns.refundCreate, retrieve: fns.refundRetrieve };
-      webhooks = { constructEvent: fns.constructEvent };
+      checkout = { sessions: { create: sessionCreate, list: sessionList } };
+      prices = { retrieve: priceRetrieve };
+      refunds = { list: refundList, create: refundCreate, retrieve: refundRetrieve };
+      webhooks = { constructEvent };
       /** Captured so tests can pin timeout/maxNetworkRetries (#277, #278). */
       static lastConstructorArgs: unknown[] | null = null;
       constructor(...args: unknown[]) {

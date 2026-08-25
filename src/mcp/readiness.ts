@@ -22,7 +22,11 @@ import {
 } from '../config/deploymentConfig.js';
 import { listProviders } from '../services/providers/index.js';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
-import { ensurePriceCatalog, getUnpricedProducts } from '../services/priceCatalog.js';
+import {
+  ensurePriceCatalog,
+  getUnpricedProducts,
+  isPriceCatalogCold
+} from '../services/priceCatalog.js';
 
 export interface ReadinessReport {
   ready: boolean;
@@ -32,6 +36,8 @@ export interface ReadinessReport {
 }
 
 const CACHE_TTL_MS = 5_000;
+/** Shorter hold while the catalog has simply not warmed up yet. */
+const COLD_CACHE_TTL_MS = 1_000;
 
 let cached: { report: ReadinessReport; expiresAt: number } | null = null;
 
@@ -99,10 +105,24 @@ export async function getReadiness(
   // "some ENABLED product cannot be priced" - such an instance refuses those
   // purchases, so unready and refuses line up. Disabled Pay & Send cannot fail
   // it (its products are not configured), a legitimately shared Pay & Send
-  // price cannot fail it, and an empty or never-attempted catalog FAILS it
-  // rather than reporting a false green. On failure, kick a re-attempt: a
-  // transiently failed warmup self-heals within the readiness TTL instead of
-  // needing a redeploy. Fire-and-forget - a health probe must stay fast.
+  // price cannot fail it, and an empty or never-attempted catalog is NOT a
+  // false green. On a problem, kick a re-attempt: a transiently failed warmup
+  // self-heals within the readiness TTL instead of needing a redeploy.
+  // Fire-and-forget - a health probe must stay fast.
+  //
+  // Only PRODUCTION turns that into a 503, mirroring the gate the config
+  // validator already applies to the very same variables: STRIPE_PRICE_* are
+  // requiredIn 'production', and validateStripe downgrades them to a warning
+  // outside it and skips test/admin entirely. The first revision gated on
+  // nothing, so a development or admin deploy - where those variables are
+  // legitimately unset - answered 503 forever and could never complete the
+  // documented post-deploy check (#278 review round 2). Outside production the
+  // truth still reaches the body as `degraded` and the detail still reaches
+  // the log; it just is not a failure.
+  // No adminMode term here, unlike validateStripe: ADMIN_ENABLED=true in
+  // production is itself a config ERROR (admin.enabled_in_production), so such
+  // a deploy is already 503 on `config` and a second gate would be dead code.
+  const pricesEnforced = validation.mode === 'production';
   const priceFailures = getUnpricedProducts();
   const pricesOk = priceFailures.length === 0;
   if (!pricesOk) void ensurePriceCatalog();
@@ -111,7 +131,18 @@ export async function getReadiness(
   if (!configOk) failing.push('config');
   if (!databaseOk) failing.push('database');
   if (!routing.ok) failing.push('routing');
-  if (!pricesOk) failing.push('prices');
+  if (!pricesOk && pricesEnforced) failing.push('prices');
+
+  // Logged whichever branch we take: outside production this is the ONLY
+  // place an unpriced product is reported at all, and the 200 branch below
+  // does not write a diagnostic. Product codes and rule ids only - the loader
+  // never puts an amount in a failure.
+  if (!pricesOk) {
+    writeDiagnostic(pricesEnforced ? 'error' : 'warn', 'readiness.prices_unresolved', {
+      enforced: String(pricesEnforced),
+      priceFailures: priceFailures.map(f => `${f.productCode}:${f.rule}`).join(',')
+    });
+  }
 
   let report: ReadinessReport;
   if (failing.length === 0) {
@@ -130,7 +161,15 @@ export async function getReadiness(
         ready: true,
         mode: validation.mode,
         provider,
-        checks: { config: 'ok', database: 'ok', routing: 'ok', prices: 'ok' }
+        checks: {
+          config: 'ok',
+          database: 'ok',
+          routing: 'ok',
+          // Ready but not everything is sellable: outside production an
+          // unpriced product is not a failure, and saying 'ok' would be a
+          // lie an operator reads on the deploy check.
+          prices: pricesOk ? 'ok' : 'degraded'
+        }
       })
     };
   } else {
@@ -156,6 +195,15 @@ export async function getReadiness(
     };
   }
 
-  cached = { report, expiresAt: now + CACHE_TTL_MS };
+  // A cold catalog is not news yet - it is the few hundred milliseconds
+  // between the port binding and the warmup landing. Caching that verdict for
+  // the full TTL pinned a perfectly healthy instance at 503 for five seconds
+  // after boot, which is exactly the window the documented post-deploy check
+  // runs in, and the body carries only a check name so it is indistinguishable
+  // from a real fault (#278 review round 2). Hold it briefly instead: still
+  // bounded (an anonymous prober cannot drive the database checks harder than
+  // once a second), but the instance stops lying about itself almost at once.
+  const coldStart = !report.ready && !pricesOk && isPriceCatalogCold();
+  cached = { report, expiresAt: now + (coldStart ? COLD_CACHE_TTL_MS : CACHE_TTL_MS) };
   return report;
 }

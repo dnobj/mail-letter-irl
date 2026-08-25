@@ -86,7 +86,7 @@ export function isJitPurchaseEnabled(): boolean {
   return process.env.JIT_PURCHASE_ENABLED === 'true';
 }
 
-function normalizedCurrency(value: string | undefined, fallback: string): string {
+export function normalizedCurrency(value: string | undefined, fallback: string): string {
   const trimmed = (value ?? '').trim().toLowerCase();
   return trimmed || fallback;
 }
@@ -133,4 +133,10 @@ export function getConfiguredProducts(env: NodeJS.ProcessEnv = process.env): Con
     expectedCurrency: jitCurrency(env)
   }));
   return [...packs, ...jit];
+}
+
+/** The Pay & Send product code for a mail type. */
+export function jitProductCode(mailType: MailType): string {
+  const definition = JIT_PRODUCTS.find(product => product.mailType === mailType);
+  return (definition ?? JIT_PRODUCTS[0]).productCode;
 }

@@ -127,16 +127,27 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
   // review).
   if (!Number.isInteger(params.product.amountCents) || params.product.amountCents <= 0) {
     const failure = getPriceResolutionFailure(params.product.productCode);
+    // No recorded failure means the catalog has not attempted this product yet
+    // or an attempt is in flight - which priceCatalog itself classes
+    // provider_error, "transient by definition". Defaulting the other way made
+    // the terminal class the fallback for an unknown state, and terminal is
+    // what drives markCheckoutCreationFailure's UPDATE orders SET
+    // status='cancelled': the wrong default sitting directly under a header
+    // promising a Stripe blip never cancels an order (#278 review round 2). A
+    // genuinely unconfigured id is not affected - the catalog records that as
+    // price.id_not_configured with configuration_error, so this ?? never fires
+    // for it.
+    const diagnosticClass = failure?.diagnosticClass ?? 'provider_error';
     writeDiagnostic('error', 'stripe.product_not_priced', {
       orderType: params.orderType,
       productCode: params.product.productCode,
       rule: failure?.rule ?? 'price.not_resolved',
-      errorClass: failure?.diagnosticClass ?? 'configuration_error'
+      errorClass: diagnosticClass
     });
     return {
       success: false,
       errorCode: 'PACK_AMOUNT_NOT_CONFIGURED',
-      diagnosticClass: failure?.diagnosticClass ?? 'configuration_error',
+      diagnosticClass,
       error: `Amount not configured for product: ${params.product.productCode}`
     };
   }
@@ -185,7 +196,7 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
 export async function createCheckoutSession(
   params: CheckoutSessionParams
 ): Promise<CheckoutSessionResult> {
-  await ensurePriceCatalog();
+  await ensurePriceCatalog(params.productId);
   const product = getPackProductConfig(params.productId);
   if (!product) return { success: false, error: `Invalid product ID: ${params.productId}` };
   const orderId = params.orderId || `legacy-${params.userId}-${Date.now()}`;

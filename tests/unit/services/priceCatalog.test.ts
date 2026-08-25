@@ -54,6 +54,20 @@ function healthyRetriever(overrides: Record<string, Record<string, unknown>> = {
   );
 }
 
+/**
+ * True when `promise` settles within a handful of microtasks - i.e. it took a
+ * synchronous decision rather than joining an outstanding network batch. Ten
+ * ticks against one keeps the race unambiguous.
+ */
+async function settlesPromptly(promise: Promise<void>): Promise<boolean> {
+  const pending = (async () => {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    return 'pending' as const;
+  })();
+  const winner = await Promise.race([promise.then(() => 'settled' as const), pending]);
+  return winner === 'settled';
+}
+
 describe('price catalog (#275 stage A)', () => {
   beforeEach(() => {
     resetPriceCatalog();
@@ -142,7 +156,7 @@ describe('price catalog (#275 stage A)', () => {
     expect(getResolvedPriceForProduct('credit-pack-4')).toBeNull();
     expect(getResolvedPriceForProduct('credit-pack-100')).toBeNull();
     expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
-      rule: 'price.shared_between_pack_tiers',
+      rule: 'price.shared_between_products',
       diagnosticClass: 'configuration_error'
     });
     // The uninvolved tier still prices.
@@ -273,6 +287,185 @@ describe('price catalog (#275 stage A)', () => {
       rule: 'price.id_not_configured',
       diagnosticClass: 'configuration_error'
     });
+  });
+
+  it('refuses a pack AND a Pay & Send product that share one price id', async () => {
+    // The missell the round-2 review found: the first rework counted only
+    // pack-to-pack sharing, so pointing STRIPE_JIT_LETTER_PRICE_ID at the
+    // Power pack's price passed every check - both products resolved, one
+    // letter was charged $90.00, the webhook's paid-amount comparison agreed
+    // because Stripe really had charged that, and /readyz stayed green.
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    vi.stubEnv('STRIPE_JIT_LETTER_PRICE_ID', 'price_power');
+    vi.stubEnv('STRIPE_JIT_POSTCARD_PRICE_ID', 'price_jit_postcard');
+    setPriceRetriever(healthyRetriever({ price_jit_postcard: { unit_amount: 499 } }));
+
+    await ensurePriceCatalog();
+
+    expect(getResolvedPriceForProduct('jit-letter')).toBeNull();
+    expect(getResolvedPriceForProduct('credit-pack-100')).toBeNull();
+    for (const productCode of ['jit-letter', 'credit-pack-100']) {
+      expect(getPriceResolutionFailure(productCode), productCode).toMatchObject({
+        rule: 'price.shared_between_products',
+        diagnosticClass: 'configuration_error'
+      });
+    }
+    // Uninvolved products still price - one bad pairing must not close the store.
+    expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
+    expect(getResolvedPriceForProduct('jit-postcard')?.unitAmount).toBe(499);
+  });
+
+  it('refuses a recurring price, which checkout would only reject after the order exists', async () => {
+    // mode:'payment' cannot use a subscription Price. Stripe says so at
+    // sessions.create - AFTER the authoritative order row is written - so
+    // without this rule the product reports priced, readiness reports green,
+    // and every order strands in checkout_creation_failed (#278 review r2).
+    setPriceRetriever(
+      healthyRetriever({
+        price_power: { recurring: { interval: 'month' }, type: 'recurring' }
+      })
+    );
+
+    await ensurePriceCatalog();
+
+    expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
+      rule: 'price.not_one_time',
+      diagnosticClass: 'configuration_error'
+    });
+    expect(getResolvedPriceForProduct('credit-pack-100')).toBeNull();
+  });
+
+  it('refuses a zero-decimal-currency price under the two-decimal default band', async () => {
+    // ~₩126,000 is an ordinary Power-pack price and unit_amount is whole won,
+    // so the number sails past a ceiling calibrated in cents. The band cannot
+    // be made currency-universal by arithmetic - that needs an exchange rate -
+    // so the honest behaviour is to refuse loudly and be configurable, not to
+    // pretend (#278 review round 2).
+    vi.stubEnv('STRIPE_CURRENCY', 'krw');
+    setPriceRetriever(healthyRetriever({ price_power: { unit_amount: 126_000, currency: 'krw' } }));
+
+    await ensurePriceCatalog();
+
+    expect(getPriceResolutionFailure('credit-pack-100')).toMatchObject({
+      rule: 'price.amount_out_of_range',
+      diagnosticClass: 'configuration_error'
+    });
+  });
+
+  it('accepts it once the deployment configures the band for its currency', async () => {
+    vi.stubEnv('STRIPE_CURRENCY', 'krw');
+    vi.stubEnv('STRIPE_PRICE_MIN_UNIT_AMOUNT', '100');
+    vi.stubEnv('STRIPE_PRICE_MAX_UNIT_AMOUNT', '10000000');
+    setPriceRetriever(
+      healthyRetriever({
+        price_starter: { unit_amount: 7_000, currency: 'krw' },
+        price_regular: { unit_amount: 14_000, currency: 'krw' },
+        price_power: { unit_amount: 126_000, currency: 'krw' }
+      })
+    );
+
+    await ensurePriceCatalog();
+
+    expect(getResolvedPriceForProduct('credit-pack-100')).toMatchObject({
+      unitAmount: 126_000,
+      currency: 'krw'
+    });
+    expect(getUnpricedProducts()).toEqual([]);
+  });
+
+  it('ignores an inverted band rather than making every price unsellable', async () => {
+    vi.stubEnv('STRIPE_PRICE_MIN_UNIT_AMOUNT', '90000');
+    vi.stubEnv('STRIPE_PRICE_MAX_UNIT_AMOUNT', '100');
+    setPriceRetriever(healthyRetriever());
+
+    await ensurePriceCatalog();
+
+    // Falls back to the defaults, which the healthy fixture satisfies.
+    expect(getUnpricedProducts()).toEqual([]);
+  });
+
+  it('normalizes a padded, upper-cased currency before comparing it', async () => {
+    // The trim/lowercase gates every purchase, and the deleted stage-B suite
+    // was the only thing pinning it (#278 review round 2).
+    setPriceRetriever(healthyRetriever({ price_power: { currency: '  USD  ' } }));
+
+    await ensurePriceCatalog();
+
+    expect(getResolvedPriceForProduct('credit-pack-100')).toMatchObject({
+      unitAmount: 9000,
+      currency: 'usd'
+    });
+  });
+
+  it('backs a terminal failure off instead of re-reading a broken price forever', async () => {
+    vi.useFakeTimers();
+    const retriever = vi.fn(async (priceId: string) => {
+      if (priceId === 'price_power') {
+        throw Object.assign(new Error('No such price'), { code: 'resource_missing' });
+      }
+      return priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] });
+    });
+    setPriceRetriever(retriever);
+    const powerReads = () => retriever.mock.calls.filter(call => call[0] === 'price_power').length;
+
+    await ensurePriceCatalog();
+    expect(powerReads()).toBe(1);
+
+    vi.advanceTimersByTime(31_000);
+    await ensurePriceCatalog();
+    expect(powerReads()).toBe(2);
+
+    // A flat 30s cooldown would read a third time here. Only a human can fix a
+    // typo'd id, and 2 reads/minute forever is ~86,400 a month against a
+    // 10,000/month floor - spent when there are no transactions earning it.
+    vi.advanceTimersByTime(31_000);
+    await ensurePriceCatalog();
+    expect(powerReads()).toBe(2);
+  });
+
+  it('keeps retrying a TRANSIENT failure on the short cooldown', async () => {
+    // The counterpart to the backoff: a blip must still self-heal quickly, or
+    // /readyz kicking a re-attempt stops meaning anything.
+    vi.useFakeTimers();
+    const retriever = vi.fn(async (priceId: string) => {
+      if (priceId === 'price_power') {
+        throw Object.assign(new Error('down'), { type: 'StripeConnectionError' });
+      }
+      return priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] });
+    });
+    setPriceRetriever(retriever);
+    const powerReads = () => retriever.mock.calls.filter(call => call[0] === 'price_power').length;
+
+    await ensurePriceCatalog();
+    vi.advanceTimersByTime(31_000);
+    await ensurePriceCatalog();
+    vi.advanceTimersByTime(31_000);
+    await ensurePriceCatalog();
+
+    expect(powerReads()).toBe(3);
+  });
+
+  it('does not make an already-priced product wait on another product hanging', async () => {
+    // ensurePriceCatalog checked inFlight before looking at anything, so one
+    // hung Pay & Send lookup stalled every pack checkout and every quote for
+    // the length of the batch - which the readiness probe can start, from an
+    // unauthenticated route (#278 review round 2).
+    setPriceRetriever(healthyRetriever());
+    await ensurePriceCatalog();
+    expect(getResolvedPriceForProduct('credit-pack-4')?.unitAmount).toBe(500);
+
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    vi.stubEnv('STRIPE_JIT_LETTER_PRICE_ID', 'price_jit_letter');
+    vi.stubEnv('STRIPE_JIT_POSTCARD_PRICE_ID', 'price_jit_postcard');
+    // Never settles.
+    setPriceRetriever(vi.fn(() => new Promise<never>(() => {})));
+
+    const stalled = ensurePriceCatalog();
+    void stalled.catch(() => undefined);
+
+    expect(await settlesPromptly(ensurePriceCatalog('credit-pack-4'))).toBe(true);
+    // And a caller that genuinely needs the hanging product still waits for it.
+    expect(await settlesPromptly(ensurePriceCatalog('jit-letter'))).toBe(false);
   });
 
   it('drops a stale failure when its product stops being configured', async () => {

@@ -59,12 +59,21 @@ STRIPE_WEBHOOK_SECRET=<whsec_ for that environment's webhook endpoint>
 STRIPE_PRICE_STARTER=<price_ id>
 STRIPE_PRICE_REGULAR=<price_ id>
 STRIPE_PRICE_POWER=<price_ id>
+STRIPE_CURRENCY=usd
 # Amounts are read from these Prices at startup - do not mirror them here (#275).
 ```
 
+`STRIPE_CURRENCY` is load-bearing, not decorative: every Price must be
+denominated in it or the catalog refuses to price that product, which in
+production is a `/readyz` 503 and a refused purchase. It defaults to `usd`, so
+set it explicitly and keep the two environments in agreement — it was in no
+manifest entry until #278, which meant `npm run preflight:cutover` reported
+full parity while development and production disagreed about it.
+
 In development set `LETTER_PROVIDER_CONFIG={"mode":"test"}`. When
-`JIT_PURCHASE_ENABLED=true`, also set `STRIPE_JIT_LETTER_PRICE_ID` and
-`STRIPE_JIT_POSTCARD_PRICE_ID`.
+`JIT_PURCHASE_ENABLED=true`, also set `STRIPE_JIT_LETTER_PRICE_ID`,
+`STRIPE_JIT_POSTCARD_PRICE_ID`, and — if Pay & Send sells in a different
+currency from the packs — `JIT_CURRENCY`.
 
 **Amounts are not configured here.** They are read from each Stripe Price at
 startup (#275). Until that change there was a second copy in the environment

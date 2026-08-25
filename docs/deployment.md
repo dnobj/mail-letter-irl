@@ -88,9 +88,19 @@ order they catch problems:
 
 3. **After deploying — `/readyz`.** Returns `200` with
    `{"ready":true,"mode":...,"provider":...}` when configuration is valid, the
-   database answers, every enabled product's Stripe price has resolved, and
-   every enabled `provider_routing` row names a registered (in production:
-   non-dummy) provider; `503` with check names otherwise. Detail is in the server log under `readiness.failed`.
+   database answers, and every enabled `provider_routing` row names a
+   registered (in production: non-dummy) provider; `503` with check names
+   otherwise. Detail is in the server log under `readiness.failed`.
+
+   The `prices` check reports whether every enabled product's Stripe price has
+   resolved, and it is a **failure only in production** — mirroring the
+   validator, which requires `STRIPE_PRICE_*` in production and downgrades them
+   to a warning elsewhere. Outside production an unresolved price shows as
+   `"prices":"degraded"` in an otherwise-`200` body, with the product codes and
+   rules in the log under `readiness.prices_unresolved`. Immediately after a
+   restart the catalog may briefly be cold; that verdict is held for about a
+   second, not the usual five, so a healthy instance stops reporting itself
+   unready almost at once.
 
 **Rollout ordering warning:** set an environment's variables *before* deploying
 code that validates them. New variables are inert to a running image, but a
@@ -138,6 +148,8 @@ As of July 16, 2026, development has the transactional-outbox release and hourly
    the previous image. A failed pre-deploy leaves the old build serving and every other check green.
    `/readyz` must return `200` with `"mode":"development"` — a `503` names the failing check
    (config, database, routing, prices) and the detail is in the deploy log under `readiness.failed`.
+   Outside production `prices` never fails the probe; check the body for
+   `"prices":"degraded"` instead.
 5. Run the automated suites in both repositories.
 6. Run the manual checks in [manual-tests.md](manual-tests.md), including zero balance, simulated purchase, confirmed send, status retrieval, image generation, and restart persistence.
 7. Confirm Serverless is enabled, leave development idle for more than ten minutes, and confirm both API and website sleep.
@@ -381,7 +393,9 @@ real migrations fail to converge.
 Configure development and production independently:
 
 - `STRIPE_JIT_LETTER_PRICE_ID` and `STRIPE_JIT_POSTCARD_PRICE_ID`
-- `JIT_CURRENCY` (amounts come from the Stripe Prices above, not from variables)
+- `JIT_CURRENCY` (amounts come from the Stripe Prices above, not from variables).
+  Pay & Send may use a different currency from the packs; each product's Price
+  is validated against its own expected currency.
 - `JIT_CHECKOUT_EXPIRY_MINUTES`, `JIT_REFUND_RETRY_LIMIT`, and
   `JIT_REFUND_RETRY_DELAY_SECONDS` (minimum 30; default 300)
 - `IMAGE_ENTITLEMENTS_PER_PACK_LETTER` and `IMAGE_ENTITLEMENTS_PER_JIT_ORDER`
@@ -538,8 +552,27 @@ drift from the figure Stripe actually charges, and did so silently, with a
 refund as the discovery event. Set the price in Stripe and point
 `STRIPE_PRICE_*` at it; there is nothing to mirror.
 
-An unresolved price disables checkout and reconciliation for that product and
-makes `/readyz` report `prices` failing. There are no runtime price fallbacks.
+An unresolved price disables checkout for that product and makes `/readyz`
+report `prices` failing in production (`degraded` elsewhere). There are no
+runtime price fallbacks.
+
+A price must be **active**, **one-time** (a recurring Price cannot be used with
+a `payment`-mode Checkout Session), denominated in its product's expected
+currency, and within a sanity band — by default 50 to 100,000 minor units, i.e.
+$0.50 to $1,000.00. Two products may share a Price only when both are Pay &
+Send; any other sharing is refused for **every** product involved, because it
+would sell one of them at the other's price. A deployment in a zero- or
+three-decimal currency, or one selling a tier above the ceiling, must set
+`STRIPE_PRICE_MIN_UNIT_AMOUNT` and `STRIPE_PRICE_MAX_UNIT_AMOUNT`: the band is
+in minor units and cannot be converted across currencies without an exchange
+rate.
+
+Resolution failures are classified. A configuration fault (archived price,
+wrong currency, typo'd id, a shared Price) needs a human, so it backs off
+toward a 15-minute retry ceiling and cancels the affected order; a transient
+Stripe failure keeps the short 30-second retry, leaves the order pending, and
+makes a legacy webhook adoption retry rather than book the payment as unmatched
+money.
 
 Historical migration-021 rows whose one-cent value cannot be distinguished from its placeholder are marked `amount_known=false` by migration
 023 and excluded from revenue totals while retaining their audit value.

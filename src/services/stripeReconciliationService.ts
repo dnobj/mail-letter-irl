@@ -96,15 +96,28 @@ export async function reconcileStripePayments(
   let startingAfter: string | undefined;
 
   while (hasMore) {
-    const sessions = await stripe.checkout.sessions.list({
-      created: {
-        gte: Math.floor(startDate.getTime() / 1000),
-        lte: Math.floor(endDate.getTime() / 1000),
+    // This is background reconciliation over a paginated range, not a customer
+    // waiting on a checkout, and the loop has no per-page recovery: one page
+    // over budget throws and aborts the whole run mid-pagination, which
+    // creditExpirationWorker's catch swallows without logging the error. The
+    // shared client is tuned for the interactive paths (10s, 1 retry), and
+    // consolidating onto it silently cut this job's budget from stripe-node's
+    // 80s/2 default. Per-request options restore it here rather than loosening
+    // the bound that protects checkout (#278 review round 2).
+    //
+    // `expand: ['data.line_items']` used to be requested and then never read -
+    // maximum server-side latency for data that was discarded on every page.
+    const sessions = await stripe.checkout.sessions.list(
+      {
+        created: {
+          gte: Math.floor(startDate.getTime() / 1000),
+          lte: Math.floor(endDate.getTime() / 1000),
+        },
+        limit: 100,
+        starting_after: startingAfter,
       },
-      limit: 100,
-      starting_after: startingAfter,
-      expand: ['data.line_items'],
-    });
+      { timeout: 60_000, maxNetworkRetries: 2 }
+    );
 
     for (const session of sessions.data) {
       // Support both camelCase (userId) and snake_case (user_id) for backwards compatibility

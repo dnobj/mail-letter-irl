@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type Stripe from 'stripe';
 import { query, transaction } from '../db/index.js';
-import { ensurePriceCatalog } from './priceCatalog.js';
+import { ensurePriceCatalog, getPriceResolutionFailure } from './priceCatalog.js';
 import { lockAccountForBalanceChange } from './accountLock.js';
 import { addCreditsToLedgerWithClient } from './creditLedgerService.js';
 import { grantImageEntitlementWithClient } from './imageGenerationLimitService.js';
@@ -160,8 +160,25 @@ export function getSendEligibility(
     isJitPurchaseEnabled() && configured && (!prepaidEligible || allowedWithBalance);
   let unavailableReason: string | undefined;
   if (!isJitPurchaseEnabled()) unavailableReason = 'Pay & Send is not enabled.';
-  else if (!configured) unavailableReason = 'Pay & Send pricing is not configured.';
-  else if (prepaidEligible && !allowedWithBalance) {
+  else if (!configured) {
+    // Pay & Send just switched itself off for every quote. Before this, a
+    // 30-second Stripe blip and a permanently archived price produced the
+    // identical customer-facing "not configured" message and NO log line
+    // anywhere - the feature vanished silently and the operator learned about
+    // it from a customer (#278 review round 2). Say which it is, in both
+    // directions.
+    const failure = getPriceResolutionFailure(product.productCode);
+    const errorClass = failure?.diagnosticClass ?? 'provider_error';
+    writeDiagnostic('error', 'commerce.pay_and_send_unpriced', {
+      productCode: product.productCode,
+      rule: failure?.rule ?? 'price.not_resolved',
+      errorClass
+    });
+    unavailableReason =
+      errorClass === 'configuration_error'
+        ? 'Pay & Send pricing is not configured.'
+        : 'Pay & Send is temporarily unavailable. Please try again shortly.';
+  } else if (prepaidEligible && !allowedWithBalance) {
     unavailableReason = 'Use your existing prepaid letter balance.';
   }
 
@@ -364,16 +381,24 @@ async function attachCheckout(
 
 export class PackAmountNotConfiguredError extends Error {
   readonly code = 'PACK_AMOUNT_NOT_CONFIGURED';
-  // An unresolvable Stripe price is a configuration fault, not a database
-  // one. This guard throws before any query runs, so the checkout handler's
-  // catch has no query to blame and defaults an uncarried error to
-  // database_error - which is exactly what sent issue #213 on a schema hunt for
-  // a config problem. Carrying the real class makes the log name the right
-  // subsystem, the same mechanism #214 gave the Stripe-call path.
-  readonly diagnosticClass = 'configuration_error';
-  constructor(readonly productCode: string) {
+  // An unresolvable Stripe price is not a database fault. This guard throws
+  // before any query runs, so the checkout handler's catch has no query to
+  // blame and defaults an uncarried error to database_error - which is exactly
+  // what sent issue #213 on a schema hunt for a config problem. Carrying the
+  // real class makes the log name the right subsystem, the same mechanism #214
+  // gave the Stripe-call path.
+  //
+  // The class is supplied, not assumed. Hard-coding configuration_error here
+  // made the pack path structurally unable to report a transient fault: this
+  // throws 22 lines before createPackCheckoutSession, so the branch in
+  // stripeService that forwards the catalog's real class was dead, and a
+  // 30-second Stripe outage was logged as an operator-must-act config fault
+  // (#278 review round 2) - the #213 mislabel reintroduced one layer up.
+  readonly diagnosticClass: string;
+  constructor(readonly productCode: string, diagnosticClass = 'configuration_error') {
     super(`Pack amount is not configured for ${productCode}`);
     this.name = 'PackAmountNotConfiguredError';
+    this.diagnosticClass = diagnosticClass;
   }
 }
 
@@ -382,13 +407,19 @@ export class PackAmountNotConfiguredError extends Error {
  * Amounts are never inferred from a Stripe Price ID: an unknown amount must
  * disable the purchase rather than create an order that cannot be reconciled or
  * refunded against a trusted figure.
+ *
+ * The catalog's recorded failure says WHY it is unpriceable, and the class
+ * travels with the error so the operator log names the right subsystem.
  */
 export function assertConfiguredAmount(
   product: Pick<CommerceProductConfig, 'amountCents'>,
   productCode: string
 ): void {
   if (!Number.isInteger(product.amountCents) || product.amountCents <= 0) {
-    throw new PackAmountNotConfiguredError(productCode);
+    // No recorded failure means never-attempted or in-flight, which the
+    // catalog classes transient.
+    const failure = getPriceResolutionFailure(productCode);
+    throw new PackAmountNotConfiguredError(productCode, failure?.diagnosticClass ?? 'provider_error');
   }
 }
 
@@ -397,7 +428,7 @@ export async function createPackCheckout(
 ): Promise<CommerceCheckoutResult> {
   // Prices resolve lazily (#275 stage A); every entrypoint that can reach a
   // product config awaits this first, so no process needs a bootstrap call.
-  await ensurePriceCatalog();
+  await ensurePriceCatalog(params.productId);
   const product = getPackProductConfig(params.productId);
   // Both guards throw before any query, so an uncarried error would take the
   // handler catch's database_error default and mislabel a non-database fault -
@@ -685,14 +716,36 @@ async function createLegacyPackOrder(
   if (!userId || !product) {
     return null;
   }
-  // Without a configured amount this INSERT would violate the amount_cents
-  // CHECK and roll back the whole webhook transaction, including the event
-  // claim, leaving Stripe to retry forever with no operator signal. Refuse the
-  // adoption instead; the caller records a paid refusal as unmatched money.
+  // The amount now comes from a live Stripe read, so "unpriced" has two very
+  // different causes and they must not share an outcome (#278 review round 2).
+  //
+  // TERMINAL (archived price, typo'd id, wrong currency): retrying cannot help
+  // until a human acts. Refuse the adoption; the caller records the paid
+  // session as unmatched money, which is the durable operator signal, and
+  // answers Stripe 200 so it stops retrying something that will never succeed.
+  //
+  // TRANSIENT (a Stripe blip while resolving): refusing would book a paying
+  // customer as permanently unmatched - docs/manual-tests.md is explicit that
+  // unmatched does not auto-recover, and the maintenance sweep only scans
+  // orders in checkout_pending, so a refused adoption leaves no row to find.
+  // Before this change the amount came from an env var and could never be
+  // transiently absent; a live read can be. So THROW: the transaction rolls
+  // back including the event claim, the handler answers 500, and Stripe (or
+  // the next cron pass) retries after the cooldown has cleared.
   if (!Number.isInteger(product.amountCents) || product.amountCents <= 0) {
+    const failure = getPriceResolutionFailure(product.productCode);
+    const errorClass = failure?.diagnosticClass ?? 'provider_error';
     writeDiagnostic('error', 'commerce.legacy_pack_amount_not_configured', {
-      productCode: product.productCode
+      productCode: product.productCode,
+      rule: failure?.rule ?? 'price.not_resolved',
+      errorClass
     });
+    if (errorClass !== 'configuration_error') {
+      throw Object.assign(
+        new Error(`Pack price unresolved for ${product.productCode}; retry adoption`),
+        { diagnosticClass: errorClass }
+      );
+    }
     return null;
   }
   const orderId = `stripe-${session.id}`;

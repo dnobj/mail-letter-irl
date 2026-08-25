@@ -156,6 +156,37 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     checkedBy: 'stripe.jit_config_incomplete'
   })),
   /**
+   * The currencies are here because #275 made them load-bearing. Every Price
+   * must be denominated in its product's expected currency or the catalog
+   * refuses to price it, which in production is a 503 and a refused purchase -
+   * so an unset STRIPE_CURRENCY silently defaulting to 'usd' can brick a GBP
+   * deployment. They appeared in no manifest entry, no validator rule, and no
+   * doc, so `preflight:cutover` reported full parity while the two
+   * environments disagreed and nothing an operator could read named the
+   * variable at fault (#278 review round 2).
+   *
+   * checkedBy keeps this a WARNING rather than a new hard boot requirement:
+   * the default is correct for this deployment, and the point is visibility to
+   * the preflight's name diff, not a fresh way for production to refuse to
+   * start on the eve of a cutover.
+   */
+  {
+    name: 'STRIPE_CURRENCY',
+    requiredIn: 'production',
+    condition: 'unless-admin',
+    secret: false,
+    services: ['api', 'maintenance'],
+    checkedBy: 'stripe.currency_unset'
+  },
+  {
+    name: 'JIT_CURRENCY',
+    requiredIn: 'production',
+    condition: 'when-jit-enabled',
+    secret: false,
+    services: ['api', 'maintenance'],
+    checkedBy: 'stripe.currency_unset'
+  },
+  /**
    * OAuth configuration (issue #270).
    *
    * These are owned by validateOAuthConfig (src/auth/oauthConfig.ts), hence
@@ -512,6 +543,22 @@ function validateStripe(
       }
     }
 
+    // The store currency stopped being decorative in #275: every Price must be
+    // denominated in it or the catalog refuses to price that product, so an
+    // unset value defaulting to 'usd' can make an otherwise correct
+    // non-USD deployment unsellable with nothing naming the cause. A warning,
+    // not an error - the default is right for this deployment and production
+    // must not gain a new way to refuse to boot - but it is now something an
+    // operator can read (#278 review round 2).
+    if (!env.STRIPE_CURRENCY) {
+      findings.push({
+        severity: 'warning',
+        rule: 'stripe.currency_unset',
+        message:
+          'STRIPE_CURRENCY is not set; pack Prices must be denominated in the default (usd) or they will not resolve'
+      });
+    }
+
     if (env.JIT_PURCHASE_ENABLED === 'true') {
       for (const price of JIT_VARS) {
         const problems: string[] = [];
@@ -525,6 +572,14 @@ function validateStripe(
             message
           });
         }
+      }
+      if (!env.JIT_CURRENCY && !env.STRIPE_CURRENCY) {
+        findings.push({
+          severity: 'warning',
+          rule: 'stripe.currency_unset',
+          message:
+            'JIT_CURRENCY is not set and neither is STRIPE_CURRENCY; Pay & Send Prices must be denominated in the default (usd)'
+        });
       }
     }
   }

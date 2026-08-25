@@ -16,37 +16,18 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { priceFixture } from '../../mocks/stripe.js';
+import { priceFixture, stripeMockModule } from '../../mocks/stripe.js';
 
 const stripeMocks = vi.hoisted(() => {
-  // vi.hoisted runs before imports; inline the factory shape.
+  // vi.hoisted runs before imports, so the fns are built inline here; the
+  // vi.mock factory below runs lazily and can use the shared class.
   return {
     sessionCreate: vi.fn(),
-    sessionList: vi.fn(),
-    priceRetrieve: vi.fn(),
-    refundList: vi.fn(),
-    refundCreate: vi.fn(),
-    refundRetrieve: vi.fn(),
-    constructEvent: vi.fn()
+    priceRetrieve: vi.fn()
   };
 });
 
-vi.mock('stripe', () => ({
-  default: class MockStripe {
-    checkout = { sessions: { create: stripeMocks.sessionCreate, list: stripeMocks.sessionList } };
-    prices = { retrieve: stripeMocks.priceRetrieve };
-    refunds = {
-      list: stripeMocks.refundList,
-      create: stripeMocks.refundCreate,
-      retrieve: stripeMocks.refundRetrieve
-    };
-    webhooks = { constructEvent: stripeMocks.constructEvent };
-    static lastConstructorArgs: unknown[] | null = null;
-    constructor(...args: unknown[]) {
-      MockStripe.lastConstructorArgs = args;
-    }
-  }
-}));
+vi.mock('stripe', () => stripeMockModule(stripeMocks));
 
 const { createPackCheckoutSession, createCheckoutSession } = await import(
   '../../../src/services/stripeService.js'
@@ -172,6 +153,32 @@ describe('checkout pricing guards (#275)', () => {
     // A Stripe blip must never cancel a customer's order (#276 cleanup
     // semantics): the class is the signal order cleanup keys off.
     expect(result.diagnosticClass).toBe('StripeConnectionError');
+    expect(stripeMocks.sessionCreate).not.toHaveBeenCalled();
+  });
+
+  it('treats an unattempted product as transient, not as a reason to cancel', async () => {
+    // No recorded failure at all - the catalog has not attempted this product,
+    // or an attempt is in flight. priceCatalog documents that state as
+    // "transient by definition", but this branch defaulted it to
+    // configuration_error, which is precisely what drives
+    // markCheckoutCreationFailure's UPDATE orders SET status='cancelled'. The
+    // wrong default sat directly under a header promising a Stripe blip never
+    // cancels a customer's order (#278 review round 2).
+    //
+    // The pack path cannot reach here today - assertConfiguredAmount throws 22
+    // lines earlier - so this is the only place the branch is exercised, and
+    // without this test the default was free to be wrong.
+    const result = await checkout({
+      productCode: 'credit-pack-10',
+      priceId: 'price_regular',
+      amountCents: 0,
+      currency: 'usd',
+      name: 'Regular Pack',
+      description: 'Five prepaid letters'
+    });
+
+    expect(result.errorCode).toBe('PACK_AMOUNT_NOT_CONFIGURED');
+    expect(result.diagnosticClass).toBe('provider_error');
     expect(stripeMocks.sessionCreate).not.toHaveBeenCalled();
   });
 
