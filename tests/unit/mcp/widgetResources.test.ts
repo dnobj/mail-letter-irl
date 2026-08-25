@@ -13,6 +13,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import {
+  THREE_DECIMAL_CURRENCIES,
+  ZERO_DECIMAL_CURRENCIES
+} from '../../../src/config/products.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
@@ -29,6 +33,33 @@ import { widgetTemplateUri, WIDGET_TEMPLATE_VERSION } from '../../../src/mcp/wid
 import { LetterIrlServer } from '../../../src/server.js';
 
 describe('Widget Resource Registration (US-MCP-07)', () => {
+  describe('widget currency fallback tables', () => {
+    // The widgets' offline fallback hand-copies products.ts's zero/three
+    // decimal sets (no import mechanism exists into standalone widget HTML).
+    // Nothing compared the copies - the exact drift shape the products.ts
+    // header condemns - and a divergence renders a 100x-wrong price for
+    // stale connectors, invisible to the digest test (#278 round 8).
+    for (const widget of ['LetterPreviewCard.html', 'PostcardPreviewCard.html']) {
+      it(`${widget} fallback tables match the products.ts sets`, async () => {
+        const html = await fs.readFile(new URL(`../../../widgets/${widget}`, import.meta.url), 'utf8');
+        const parse = (name: string): string[] => {
+          const opener = `const ${name} = [`;
+          const from = html.indexOf(opener);
+          expect(from, `${name} array present in ${widget}`).toBeGreaterThan(-1);
+          const close = html.indexOf(']', from);
+          return html
+            .slice(from + opener.length, close)
+            .split(',')
+            .map(item => item.trim().replace(/^'|'$/g, ''))
+            .filter(Boolean)
+            .sort();
+        };
+        expect(parse('zeroDecimal')).toEqual([...ZERO_DECIMAL_CURRENCIES].sort());
+        expect(parse('threeDecimal')).toEqual([...THREE_DECIMAL_CURRENCIES].sort());
+      });
+    }
+  });
+
   describe('widget URI format', () => {
     // The previous version built `ui://widgets/${name}.html` itself and then
     // asserted the string it had just built matched a ui:// pattern. It held

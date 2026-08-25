@@ -16,7 +16,8 @@ const mocks = vi.hoisted(() => ({
   getJitProduct: vi.fn(),
   getPackProduct: vi.fn(),
   ensurePriceCatalog: vi.fn(),
-  getPriceResolutionFailure: vi.fn(() => null)
+  describeUnpriced: vi.fn(() => null),
+  resolutionEpoch: vi.fn(() => 0)
 }));
 
 /**
@@ -36,14 +37,19 @@ vi.mock('../../../src/services/priceCatalog.js', () => ({
   // still drive it through getPriceResolutionFailure so each test states its
   // catalog verdict the same way it always did, with the synthesized
   // transient record as the null-case default - mirroring production.
+  // Null from a fixture means "no recorded failure": the synthesized
+  // transient record is the null-case default, mirroring production's
+  // non-null contract. The knob carries the REAL seam's name - the earlier
+  // getPriceResolutionFailure knob cemented a describeUnpriced wiring that
+  // never existed in src (#278 round 8).
   describeUnpriced: (productCode: string) =>
-    mocks.getPriceResolutionFailure(productCode) ?? {
+    mocks.describeUnpriced(productCode) ?? {
       productCode,
       rule: 'price.not_resolved',
       diagnosticClass: 'provider_error',
       terminal: false
     },
-  getPriceResolutionFailure: mocks.getPriceResolutionFailure,
+  getResolutionEpoch: (productCode: string) => mocks.resolutionEpoch(productCode),
   // Swallows like production kick: aliasing straight to the ensure mock let a
   // mockRejectedValue fixture leak an unhandled rejection from fire-and-forget
   // call sites - a failure mode the real kick structurally cannot produce.
@@ -93,6 +99,7 @@ import {
   requestRefund,
   runCommerceMaintenance
 } from '../../../src/services/commerceService.js';
+import { clearDiagnosticChangeSlot } from '../../../src/utils/diagnosticLog.js';
 
 const baseOrder = {
   order_id: 'order-1',
@@ -178,7 +185,7 @@ describe('commerceService', () => {
     // one decides throw-vs-refuse for a paid webhook - so a leftover from an
     // earlier test silently changed a later test's outcome, and adding or
     // reordering a test could flip an assertion nobody edited (#278 r3).
-    mocks.getPriceResolutionFailure.mockReturnValue(null as never);
+    mocks.describeUnpriced.mockReturnValue(null as never);
   });
 
   it('sweeps session-less orders whose checkout_expires_at is NULL', async () => {
@@ -449,7 +456,7 @@ describe('commerceService', () => {
     // business agreement; the paid-amount comparison downstream verifies the
     // actual charge against it (#278 review round 5). The catalog mocks here
     // scream "unpriced" precisely to prove they are not consulted.
-    mocks.getPriceResolutionFailure.mockReturnValue({
+    mocks.describeUnpriced.mockReturnValue({
       productCode: 'credit-pack-4',
       rule: 'price.inactive',
       diagnosticClass: 'configuration_error',
@@ -502,6 +509,160 @@ describe('commerceService', () => {
       expect.anything()
     );
     expect(mocks.getPackProduct).not.toHaveBeenCalled();
+  });
+
+  it('treats an UNRESOLVED catalog as no verdict, never as a price change', async () => {
+    // amountCents 0 is the catalog's unresolved sentinel. Three review angles
+    // read the reprice branch as cancelling a reusable order during a
+    // transient Stripe blip; the enclosing transaction happened to roll the
+    // cancel back, but the branch must not fire at all (#278 round 8).
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const stale = {
+      ...baseOrder,
+      amount_cents: 499,
+      stripe_checkout_session_id: null,
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [stale] });
+
+    await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+      .rejects.toMatchObject({ code: 'JIT_NOT_CONFIGURED' });
+
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("'PRICE_CHANGED_BEFORE_SESSION'"),
+      expect.anything()
+    );
+  });
+
+  it('never lets the reprice branch touch a sessionless order in a hold state', async () => {
+    // Reachable only via operator surgery, but the reprice-cancel must never
+    // be the thing that clears a financial hold (#278 round 8).
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit-v2', amountCents: 599,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const held = {
+      ...baseOrder,
+      status: 'disputed',
+      amount_cents: 499,
+      stripe_checkout_session_id: null,
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [held] });
+    mocks.createJitSession.mockResolvedValue({
+      success: true, sessionId: 'cs-h', sessionUrl: 'https://s', expiresAt: new Date()
+    });
+
+    await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'cancelled'"),
+      expect.anything()
+    );
+  });
+
+  it('the refund claim itself refuses a PAYMENT_AMOUNT_MISMATCH quarantine', async () => {
+    // Round 7 put the gate in the sweep's candidate SELECT - ONE consumer.
+    // The exported money-mover must carry the same wall so a future caller
+    // (admin bulk-retry, second sweep) cannot bypass it (#278 round 8).
+    mocks.query.mockResolvedValue({ rows: [] });
+
+    await requestRefund('order-q', 'sweep retry');
+
+    const claim = mocks.query.mock.calls
+      .map(([sql]) => String(sql))
+      .find(sql => sql.includes("status = 'refund_pending'") && sql.includes('FOR UPDATE'));
+    expect(claim).toBeDefined();
+    expect(claim).toContain("last_error_code <> 'PAYMENT_AMOUNT_MISMATCH'");
+  });
+
+  it('unmatched-money recovery never erases the quarantine marker', async () => {
+    // The recovery UPDATE overwrote last_error_code unconditionally; on a
+    // quarantined row that erased the exact marker the refund gates key on
+    // (#278 round 8).
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-r' }] };
+      if (sql.includes('SELECT * FROM orders')) return { rows: [baseOrder] };
+      if (sql.includes("processing_status = 'unmatched'") && sql.includes('FOR UPDATE')) {
+        return { rows: [{ event_id: 'evt-m', event_type: 'refund.created' }] };
+      }
+      return { rows: [] };
+    });
+
+    await processStripeWebhookEvent(checkoutEvent());
+
+    const recovery = mocks.query.mock.calls
+      .map(([sql]) => String(sql))
+      .find(sql => sql.includes('UNMATCHED_MONEY_EVENT_RECOVERED'));
+    expect(recovery).toBeDefined();
+    expect(recovery).toContain("CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH'");
+  });
+
+  it('re-logs a recurring quote fault after a recovery no quote observed', () => {
+    // Slot cleared only by a quote seeing the product configured: recovery
+    // during quiet hours followed by an identical re-break hashed the same
+    // and the second outage logged NOTHING. The resolution epoch re-arms the
+    // signature (#278 round 8).
+    clearDiagnosticChangeSlot('commerce.pay_and_send_unpriced:jit-letter');
+    const diag = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      mocks.jitEnabled.mockReturnValue(true);
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,
+        currency: 'usd', name: 'Pay & Send One Physical Letter',
+        description: 'x', mailType: 'letter'
+      });
+      mocks.describeUnpriced.mockReturnValue({
+        productCode: 'jit-letter',
+        rule: 'price.inactive',
+        diagnosticClass: 'configuration_error',
+        terminal: true
+      });
+
+      getSendEligibility(0, 2, 'letter'); // outage 1: logs
+      getSendEligibility(0, 2, 'letter'); // steady: suppressed
+      mocks.resolutionEpoch.mockReturnValue(1); // resolved during quiet hours
+      getSendEligibility(0, 2, 'letter'); // outage 2, identical shape: logs
+
+      const lines = diag.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('"event":"commerce.pay_and_send_unpriced"'));
+      expect(lines).toHaveLength(2);
+    } finally {
+      diag.mockRestore();
+      // clearAllMocks clears CALLS, not implementations: put both the knob
+      // and the module-global slot back the way this test found them.
+      mocks.resolutionEpoch.mockReturnValue(0);
+      clearDiagnosticChangeSlot('commerce.pay_and_send_unpriced:jit-letter');
+    }
   });
 
   it('cancels a sessionless pending JIT order priced under an OLD pin and starts fresh', async () => {
@@ -672,7 +833,7 @@ describe('commerceService', () => {
     // async_payment_failed, which carry none - throwing for those made Stripe
     // redeliver an event where "retry adoption" is meaningless, on the schedule
     // that eventually disables a webhook endpoint (#278 review round 3).
-    mocks.getPriceResolutionFailure.mockReturnValue({
+    mocks.describeUnpriced.mockReturnValue({
       productCode: 'credit-pack-4',
       rule: 'price.lookup_failed',
       diagnosticClass: 'StripeConnectionError',
@@ -708,7 +869,7 @@ describe('commerceService', () => {
     // review round 4).
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      mocks.getPriceResolutionFailure.mockImplementation(((productCode: string) => ({
+      mocks.describeUnpriced.mockImplementation(((productCode: string) => ({
         productCode,
         rule: 'price.inactive',
         diagnosticClass: 'configuration_error',
@@ -754,7 +915,7 @@ describe('commerceService', () => {
       });
       getSendEligibility(0, 2, 'letter');
 
-      mocks.getPriceResolutionFailure.mockReturnValue({
+      mocks.describeUnpriced.mockReturnValue({
         productCode: 'jit-letter',
         rule: 'price.inactive',
         diagnosticClass: 'configuration_error',
@@ -864,7 +1025,7 @@ describe('commerceService', () => {
       // catch has no statement to blame and defaults an uncarried error to
       // database_error - the mislabel that turned a missing amount into a
       // schema hunt for a config problem.
-      mocks.getPriceResolutionFailure.mockReturnValue(
+      mocks.describeUnpriced.mockReturnValue(
         rule ? ({ productCode: 'credit-pack-4', rule, diagnosticClass: catalogClass } as never) : null
       );
       mocks.getPackProduct.mockReturnValue({
@@ -1342,7 +1503,7 @@ describe('commerceService', () => {
 
       // Boot race: unpriced with NO recorded failure -> synthesized
       // not_resolved -> warn.
-      mocks.getPriceResolutionFailure.mockReturnValue(null as never);
+      mocks.describeUnpriced.mockReturnValue(null as never);
       mocks.getJitProduct.mockReturnValue({
         productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,
         currency: 'usd', name: 'Pay & Send', description: 'One letter'
@@ -1369,7 +1530,7 @@ describe('commerceService', () => {
       // message, and getSendEligibility logged nothing at all - so a 30-second
       // outage switched Pay & Send off across every quote and the operator
       // heard about it from a customer (#278 review round 2).
-      mocks.getPriceResolutionFailure.mockReturnValue({
+      mocks.describeUnpriced.mockReturnValue({
         productCode: 'jit-letter',
         rule: 'price.lookup_failed',
         diagnosticClass,

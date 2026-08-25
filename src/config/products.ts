@@ -187,25 +187,6 @@ export function jitProductCode(mailType: MailType): string {
 }
 
 /**
- * The price id currently configured for one product, without building the
- * whole table. Lets the catalog validate a memo cheaply: `unit_amount` and
- * `currency` are immutable on a Price, so memoizing forever is sound - but
- * only for the id that produced it. If the env var is repointed, the memo
- * describes a Price we are no longer selling, and serving it charges the old
- * amount with readiness green (#278 review round 3).
- */
-export function configuredPriceIdFor(
-  productCode: string,
-  env: NodeJS.ProcessEnv = process.env
-): string | null {
-  const definition =
-    PACK_PRODUCTS.find(product => product.productCode === productCode) ??
-    JIT_PRODUCTS.find(product => product.productCode === productCode);
-  if (!definition) return null;
-  return (env[definition.priceEnv] ?? '').trim();
-}
-
-/**
  * ONE product's configured row, without building the full table. The warm
  * read path (every quote validates a memo) paid ~9 env reads and a 5-object
  * table build per call to answer a one-product question (#278 review r6).
@@ -256,11 +237,11 @@ export function isConfiguredProductCode(
  * wrong by 100x for these, and this codebase declares multi-currency
  * deployments supported (https://docs.stripe.com/currencies#zero-decimal).
  */
-const ZERO_DECIMAL_CURRENCIES = new Set([
+export const ZERO_DECIMAL_CURRENCIES = new Set([
   'bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga',
   'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf'
 ]);
-const THREE_DECIMAL_CURRENCIES = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
+export const THREE_DECIMAL_CURRENCIES = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
 
 /** "4.99", "500", or "1.250" - minor units rendered for the given currency. */
 export function formatAmountForCurrency(amountMinorUnits: number, currency: string): string {

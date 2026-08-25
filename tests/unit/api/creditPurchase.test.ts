@@ -81,7 +81,6 @@ import {
   createCheckoutSession,
   getPackProductConfig,
   verifyWebhookSignature,
-  extractCheckoutData,
 } from '../../../src/services/stripeService.js';
 
 describe('Credit Purchase Flow (US-PURCHASE-01)', () => {

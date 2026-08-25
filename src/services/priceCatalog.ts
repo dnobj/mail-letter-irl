@@ -206,6 +206,7 @@ export function resetPriceCatalog(): void {
   failures.clear();
   attempts.clear();
   inFlight.clear();
+  resolutionEpochs.clear();
   clearDiagnosticChangeSlot('stripe.price_catalog_resolved');
   generation += 1;
   jitter = () => 0;
@@ -223,6 +224,17 @@ export function resetPriceCatalog(): void {
  * left the terminal cooldown standing - /readyz held 503 for up to 15
  * minutes after the configuration was already correct (reproduced).
  */
+/**
+ * Count of successful resolutions per product, monotonic per process. Quote
+ * surfaces fold this into their change-only diagnostic signatures so a fault
+ * recurring after an UNOBSERVED recovery still logs (#278 round 8).
+ */
+const resolutionEpochs = new Map<string, number>();
+
+export function getResolutionEpoch(productCode: string): number {
+  return resolutionEpochs.get(productCode) ?? 0;
+}
+
 function configSignature(product: ConfiguredProduct): string {
   return `${product.priceId}|${product.expectedAmountCents}|${product.expectedCurrency}`;
 }
@@ -258,14 +270,6 @@ export function getResolvedPriceForProduct(productCode: string): ResolvedPrice |
 }
 
 /**
- * Why a product cannot currently be priced. For an unpriced-but-configured
- * product with no recorded failure (never attempted, or attempt in flight)
- * this returns the synthesized transient record rather than null, so the five
- * checkout guards read ONE policy instead of each re-deriving the default
- * with its own ?? chain (#278 review round 5). Null means: not configured
- * here, or priced and sellable.
- */
-/**
  * The non-null form for checkout guards standing at a configured-but-unpriced
  * product: stored failure, else the synthesized transient record. Exists so
  * the "unattempted means transient" policy is written ONCE instead of as a
@@ -278,24 +282,28 @@ export function getResolvedPriceForProduct(productCode: string): ResolvedPrice |
  * configuration (#278 round 7). The lockstep attempts entry carries the
  * signature; a mismatch reads as never-attempted, and the next ensure prunes.
  */
-function storedFailureIfCurrent(productCode: string): PriceResolutionFailure | null {
+function storedFailureIfCurrent(
+  productCode: string,
+  env: NodeJS.ProcessEnv = process.env
+): PriceResolutionFailure | null {
   const stored = failures.get(productCode);
   if (!stored) return null;
-  const product = getConfiguredProduct(productCode);
+  // The CALLER'S env, not ambient: a threaded-env read (readiness with a
+  // custom env) that validated the memo against its own env but the stored
+  // failure against process.env stitched one verdict from two environments -
+  // the exact defect this signature check exists to prevent (#278 round 8).
+  const product = getConfiguredProduct(productCode, env);
   if (!product) return null;
   const state = attempts.get(productCode);
   if (state && state.signature !== configSignature(product)) return null;
   return stored;
 }
 
-export function describeUnpriced(productCode: string): PriceResolutionFailure {
-  return storedFailureIfCurrent(productCode) ?? notResolvedFailure(productCode);
-}
-
-export function getPriceResolutionFailure(productCode: string): PriceResolutionFailure | null {
-  if (!isConfiguredProductCode(productCode)) return null;
-  if (getResolvedPriceForProduct(productCode)) return null;
-  return describeUnpriced(productCode);
+export function describeUnpriced(
+  productCode: string,
+  env: NodeJS.ProcessEnv = process.env
+): PriceResolutionFailure {
+  return storedFailureIfCurrent(productCode, env) ?? notResolvedFailure(productCode);
 }
 
 /**
@@ -310,7 +318,7 @@ export function getUnpricedProducts(env: NodeJS.ProcessEnv = process.env): Price
     const memo = resolved.get(product.productCode);
     if (memo && memoMatchesConfiguration(memo, product)) return [];
     // Signature-validated like every other read - see storedFailureIfCurrent.
-    const failure = storedFailureIfCurrent(product.productCode);
+    const failure = storedFailureIfCurrent(product.productCode, env);
     if (failure) return [failure];
     return [notResolvedFailure(product.productCode)];
   });
@@ -402,7 +410,12 @@ function recordFailure(
 ): void {
   const terminal = isTerminalDiagnosticClass(diagnosticClass);
   failures.set(productCode, Object.freeze({ productCode, rule, diagnosticClass, terminal }));
-  const prior = attempts.get(productCode);
+  // Counters carry over only within ONE configuration: a flight that started
+  // under config A landing after a B->A flip must not inherit rungs earned
+  // under B, or A's first failure starts mid-ladder and refuses purchases
+  // longer than A's own history warrants (#278 round 8).
+  const priorEntry = attempts.get(productCode);
+  const prior = priorEntry?.signature === signature ? priorEntry : undefined;
   const transientFailures = (prior?.transientFailures ?? 0) + (terminal ? 0 : 1);
   const terminalFailures = (prior?.terminalFailures ?? 0) + (terminal ? 1 : 0);
   const consecutive = terminal ? terminalFailures : transientFailures;
@@ -464,6 +477,10 @@ async function resolveOne(product: ConfiguredProduct, startedGen: number): Promi
   resolved.set(product.productCode, outcome);
   failures.delete(product.productCode);
   attempts.delete(product.productCode);
+  // Each successful resolution opens a new logging epoch: change-only slots
+  // keyed on rule:class alone stayed silent when the SAME fault recurred
+  // after a recovery no quote happened to observe (#278 round 8).
+  resolutionEpochs.set(product.productCode, (resolutionEpochs.get(product.productCode) ?? 0) + 1);
 }
 
 /**
@@ -486,8 +503,15 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
   // re-enable, refusing quotes for up to the residual terminal ladder even
   // though Stripe would validate cleanly (#278 round 6).
   if (productCode && !isConfiguredProductCode(productCode)) {
-    attempts.delete(productCode);
-    failures.delete(productCode);
+    // The FULL prune, not a two-map delete for this one code. Two leaks hid
+    // in the narrow version: the sibling product's cooldown survived if only
+    // one mail type was quoted while disabled, and memos were never touched -
+    // so a Price archived during the disabled window kept serving its stale
+    // memo on re-enable (signature-valid: `active` is not in the signature),
+    // quoting a price every purchase then failed against, with readiness
+    // green. pruneStale drops attempts, failures AND memos for every code
+    // the current configuration no longer sells (#278 round 8).
+    pruneStale(getConfiguredProducts());
     return;
   }
 

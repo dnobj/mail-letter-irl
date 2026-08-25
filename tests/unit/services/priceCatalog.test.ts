@@ -16,15 +16,28 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+  describeUnpriced,
   ensurePriceCatalog,
-  getPriceResolutionFailure,
   getResolvedPriceForProduct,
   getUnpricedProducts,
   resetPriceCatalog,
   setPriceRetriever,
   useDefaultPriceRetriever
 } from '../../../src/services/priceCatalog.js';
+import { isConfiguredProductCode } from '../../../src/config/products.js';
 import { priceFixture } from '../../mocks/stripe.js';
+
+/**
+ * Test-local composition of the surfaces production actually reads
+ * (describeUnpriced + getResolvedPriceForProduct). The exported helper of
+ * this name was dead production surface and was deleted in #278 round 8;
+ * the fixtures keep stating verdicts through the same shape.
+ */
+function getPriceResolutionFailure(productCode: string) {
+  if (!isConfiguredProductCode(productCode)) return null;
+  if (getResolvedPriceForProduct(productCode)) return null;
+  return describeUnpriced(productCode);
+}
 
 const PACK_ENVS: Record<string, string> = {
   STRIPE_PRICE_STARTER: 'price_starter',
@@ -1009,6 +1022,141 @@ describe('price catalog (#275 stage A)', () => {
     expect(
       getUnpricedProducts().find(f => f.productCode === 'credit-pack-100')
     ).toMatchObject({ rule: 'price.not_resolved' });
+  });
+
+  it('drops the MEMO too when Pay & Send is toggled off', async () => {
+    // The unsold gate cleared cooldowns but spared memos, and in the steady
+    // state nothing else prunes: warm pack quotes take the fast path and
+    // readiness only kicks while failing. A Price archived during the
+    // disabled window kept its stale memo through re-enable - quotes served
+    // it, every purchase failed at session create, readiness green (#278 r8).
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    vi.stubEnv('STRIPE_JIT_LETTER_PRICE_ID', 'price_jit_letter');
+    vi.stubEnv('STRIPE_JIT_POSTCARD_PRICE_ID', 'price_jit_letter');
+    setPriceRetriever(healthyRetriever({ price_jit_letter: { unit_amount: 499 } }));
+    await ensurePriceCatalog();
+    expect(getResolvedPriceForProduct('jit-letter')?.unitAmount).toBe(499);
+
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'false');
+    await ensurePriceCatalog('jit-letter'); // the unsold gate
+
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    // Same env, same signature - but the Price was archived meanwhile.
+    setPriceRetriever(
+      healthyRetriever({ price_jit_letter: { unit_amount: 499, active: false } })
+    );
+    await ensurePriceCatalog();
+
+    expect(getResolvedPriceForProduct('jit-letter')).toBeNull();
+    expect(getUnpricedProducts().find(f => f.productCode === 'jit-letter')).toMatchObject({
+      rule: 'price.inactive'
+    });
+  });
+
+  it('clears the SIBLING mail type from the unsold gate, not only the quoted one', async () => {
+    // Toggle-off residue was cleared per quoted code, so a postcard cooldown
+    // survived a disabled window in which only letters were quoted (#278 r8).
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    vi.stubEnv('STRIPE_JIT_LETTER_PRICE_ID', 'price_jit_letter');
+    vi.stubEnv('STRIPE_JIT_POSTCARD_PRICE_ID', 'price_jit_postcard');
+    setPriceRetriever(
+      vi.fn(async (priceId: string) => {
+        if (priceId === 'price_jit_postcard') {
+          throw Object.assign(new Error('gone'), { code: 'resource_missing' });
+        }
+        return priceFixture({
+          id: priceId,
+          unit_amount: priceId === 'price_jit_letter' ? 499 : PACK_AMOUNTS[priceId]
+        });
+      })
+    );
+    await ensurePriceCatalog(); // postcard now under a 30s terminal cooldown
+
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'false');
+    await ensurePriceCatalog('jit-letter'); // gate hit with the OTHER code
+
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    setPriceRetriever(
+      healthyRetriever({
+        price_jit_letter: { unit_amount: 499 },
+        price_jit_postcard: { unit_amount: 499 }
+      })
+    );
+    await ensurePriceCatalog('jit-postcard');
+
+    // No residual cooldown: the fixed Price resolves immediately.
+    expect(getResolvedPriceForProduct('jit-postcard')?.unitAmount).toBe(499);
+  });
+
+  it('validates a stored failure against the CALLER environment, not process.env', async () => {
+    // getUnpricedProducts(env) checked memos under the threaded env but
+    // stored failures under ambient - one verdict stitched from two
+    // environments (#278 round 8, four angles).
+    setPriceRetriever(healthyRetriever({ price_power: { unit_amount: 500 } })); // pin is 9000
+    await ensurePriceCatalog();
+
+    // Threaded env repoints: under THAT env the fault was never attempted.
+    const repointed = { ...process.env, STRIPE_PRICE_POWER: 'price_power_v2' };
+    expect(
+      getUnpricedProducts(repointed).find(f => f.productCode === 'credit-pack-100')
+    ).toMatchObject({ rule: 'price.not_resolved' });
+
+    // Inverse: ambient repoints, the threaded env still matches the failure.
+    const original = { ...process.env };
+    vi.stubEnv('STRIPE_PRICE_POWER', 'price_power_v3');
+    expect(
+      getUnpricedProducts(original).find(f => f.productCode === 'credit-pack-100')
+    ).toMatchObject({ rule: 'price.amount_mismatch' });
+  });
+
+  it('starts a fresh ladder when a flight lands across an A-B-A config flip', async () => {
+    // recordFailure inherited counters from whatever attempts entry stood,
+    // even one recorded under a DIFFERENT configuration - so a flight
+    // landing after a flip-back started the new ladder mid-rung and refused
+    // purchases longer than its own history warranted (#278 round 8).
+    vi.useFakeTimers();
+    let rejectOld: (error: unknown) => void = () => undefined;
+    const oldLookup = new Promise<never>((_resolve, reject) => {
+      rejectOld = reject;
+    });
+    let starterServed = 0;
+    let oldHanded = false;
+    setPriceRetriever(
+      vi.fn((priceId: string): Promise<never> => {
+        if (priceId === 'price_starter') {
+          starterServed += 1;
+          if (!oldHanded) {
+            oldHanded = true;
+            return oldLookup;
+          }
+          return Promise.reject(
+            Object.assign(new Error('down'), { type: 'StripeConnectionError' })
+          );
+        }
+        if (priceId === 'price_starter_v2') {
+          return Promise.reject(
+            Object.assign(new Error('down'), { type: 'StripeConnectionError' })
+          );
+        }
+        return Promise.resolve(
+          priceFixture({ id: priceId, unit_amount: PACK_AMOUNTS[priceId] ?? 500 }) as never
+        );
+      })
+    );
+
+    const doomed = ensurePriceCatalog('credit-pack-4'); // flight under A
+    void doomed.catch(() => undefined);
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_v2'); // B
+    await ensurePriceCatalog('credit-pack-4'); // fails under B: B's rung 1
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter'); // back to A
+    rejectOld(Object.assign(new Error('down'), { type: 'StripeConnectionError' }));
+    await doomed; // lands under current==A, beside B's attempts entry
+
+    // A's rung 1 cools 2s. An inherited rung 2 would still be cooling at 2.1s.
+    vi.advanceTimersByTime(2_100);
+    const before = starterServed;
+    await ensurePriceCatalog('credit-pack-4');
+    expect(starterServed).toBe(before + 1);
   });
 
   it('drops a stale failure when its product stops being configured', async () => {

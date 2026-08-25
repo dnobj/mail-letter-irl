@@ -4,10 +4,14 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type Stripe from 'stripe';
 import { query, transaction } from '../db/index.js';
-import { describeUnpriced, ensurePriceCatalog, kickPriceCatalog } from './priceCatalog.js';
+import {
+  describeUnpriced,
+  ensurePriceCatalog,
+  getResolutionEpoch,
+  kickPriceCatalog
+} from './priceCatalog.js';
 import {
   PACK_PRODUCTS,
-  configuredPriceIdFor,
   formatAmountForCurrency,
   jitProductCode,
   normalizedCurrency,
@@ -176,32 +180,46 @@ export function getSendEligibility(
   // before building a product config whose only fate was to be discarded
   // (#278 round 7).
   const jitEnabled = isJitPurchaseEnabled();
-  if (!jitEnabled) {
-    // Still kick with the code: the catalog's unsold gate clears leftover
-    // cooldowns recorded before the toggle, so an un-archived Price does not
-    // resurface a stale refusal on re-enable. Without this, the disabled
-    // short-circuit reopened exactly the hole the ungated kick closes -
-    // nothing would ever call with a JIT code while disabled (#278 round 7).
-    kickPriceCatalog(jitProductCode(mailType), 'send_eligibility_disabled');
-    return {
-      prepaid: {
-        eligible: prepaidEligible,
-        requiredCredits,
-        availableCredits
-      },
-      payAndSend: {
-        available: false,
-        unavailableReason: 'Pay & Send is not enabled.'
-      },
-      letterPack: {
-        available: true,
-        purchaseUrl:
-          process.env.LETTER_IRL_PACKS_URL ||
-          process.env.LETTER_IRL_PUBLIC_BASE_URL ||
-          'https://letterirl.com'
-      }
-    };
-  }
+  // ONE envelope. The round-7 short-circuit duplicated the whole
+  // prepaid/letterPack literal for the disabled path, so a change to either
+  // block had to be edited in two returns or the enabled and disabled quote
+  // surfaces diverged (#278 round 8). Only payAndSend is branch-dependent.
+  return {
+    prepaid: {
+      eligible: prepaidEligible,
+      requiredCredits,
+      availableCredits
+    },
+    payAndSend: jitEnabled
+      ? enabledPayAndSend(mailType, prepaidEligible)
+      : disabledPayAndSend(mailType),
+    letterPack: {
+      available: true,
+      purchaseUrl:
+        process.env.LETTER_IRL_PACKS_URL ||
+        process.env.LETTER_IRL_PUBLIC_BASE_URL ||
+        'https://letterirl.com'
+    }
+  };
+}
+
+function disabledPayAndSend(mailType: MailType): SendEligibility['payAndSend'] {
+  // Still kick with the code: the catalog's unsold gate clears leftover
+  // state recorded before the toggle - cooldowns AND memos, both mail types -
+  // so neither an un-archived Price nor an archived one resurfaces stale
+  // answers on re-enable. Without this, nothing would ever call with a JIT
+  // code while disabled (#278 rounds 7-8).
+  kickPriceCatalog(jitProductCode(mailType), 'send_eligibility_disabled');
+  return {
+    available: false,
+    unavailableReason: 'Pay & Send is not enabled.'
+  };
+}
+
+function enabledPayAndSend(
+  mailType: MailType,
+  prepaidEligible: boolean
+): SendEligibility['payAndSend'] {
   const product = getJitProductConfig(mailType);
   // The eligibility accessor owns its own warmup kick - UNGATED beyond the
   // enabled check above, which is what makes the catalog's unsold-state
@@ -236,9 +254,13 @@ export function getSendEligibility(
     // the helper built to own this, #278 round 7). price.not_resolved is the
     // boot race - routine on every deploy - and logs at warn; a recorded
     // failure is news and stays at error (#278 round 6, corroborated x5).
+    // The resolution epoch makes recovery part of the signature: without it,
+    // a fault recurring after a recovery no quote happened to observe (quiet
+    // hours, then re-broken) hashed identically and the second outage logged
+    // NOTHING for its whole duration (#278 round 8).
     writeDiagnosticOnChange(
       `commerce.pay_and_send_unpriced:${product.productCode}`,
-      `${rule}:${errorClass}`,
+      `${rule}:${errorClass}:e${getResolutionEpoch(product.productCode)}`,
       rule === 'price.not_resolved' ? 'warn' : 'error',
       'commerce.pay_and_send_unpriced',
       {
@@ -255,32 +277,18 @@ export function getSendEligibility(
   }
 
   return {
-    prepaid: {
-      eligible: prepaidEligible,
-      requiredCredits,
-      availableCredits
-    },
-    payAndSend: {
-      available,
-      amountCents: configured ? product.amountCents : undefined,
-      currency: configured ? product.currency : undefined,
-      // Server-formatted for display: the widgets rendered amountCents/100
-      // themselves, which is 100x wrong for zero-decimal currencies this
-      // codebase declares supported (#278 round 6). Widgets prefer this and
-      // fall back to /100 for older servers.
-      displayAmount: configured
-        ? formatAmountForCurrency(product.amountCents, product.currency)
-        : undefined,
-      productDescription: configured ? product.name : undefined,
-      unavailableReason
-    },
-    letterPack: {
-      available: true,
-      purchaseUrl:
-        process.env.LETTER_IRL_PACKS_URL ||
-        process.env.LETTER_IRL_PUBLIC_BASE_URL ||
-        'https://letterirl.com'
-    }
+    available,
+    amountCents: configured ? product.amountCents : undefined,
+    currency: configured ? product.currency : undefined,
+    // Server-formatted for display: the widgets rendered amountCents/100
+    // themselves, which is 100x wrong for zero-decimal currencies this
+    // codebase declares supported (#278 round 6). Widgets prefer this and
+    // fall back to /100 for older servers.
+    displayAmount: configured
+      ? formatAmountForCurrency(product.amountCents, product.currency)
+      : undefined,
+    productDescription: configured ? product.name : undefined,
+    unavailableReason
   };
 }
 
@@ -624,6 +632,12 @@ async function prepareJitOrder(
       });
     }
 
+    // ONE derivation for the whole transaction: the reprice branch and the
+    // insert below must price against the SAME row or they silently diverge
+    // (#278 round 8).
+    const actualMailType = (draft.mail_type || 'letter') as MailType;
+    const product = getJitProductConfig(actualMailType);
+
     const active = await client.query<Order>(
       `SELECT * FROM orders
        WHERE draft_id = $1 AND order_type = 'jit_mail'
@@ -657,6 +671,19 @@ async function prepareJitOrder(
         // A Stripe session already exists: the customer will pay exactly what
         // that session says, which matches this order row. Reuse is safe.
         return { order: existing, reused: true };
+      } else if (existing.status !== 'checkout_pending') {
+        // A sessionless row in a funded/held state exists only via operator
+        // surgery, but the reprice-cancel below must NEVER be the thing that
+        // clears a financial hold: leave the row exactly as found (#278 r8).
+        return { order: existing, reused: true };
+      } else if (product.amountCents <= 0) {
+        // amountCents 0 is the catalog's UNRESOLVED sentinel, not a price.
+        // Reading it as "price changed" cancelled a reusable order during a
+        // transient Stripe blip (three review angles flagged it; the
+        // enclosing transaction happened to roll the cancel back, but
+        // correctness must not lean on that). No verdict here: FALL THROUGH
+        // to the unpriced guard below, which throws without touching this
+        // reusable row (#278 round 8).
       } else {
         // SESSIONLESS pending order (its session creation previously failed).
         // If the price changed since it was inserted - a repoint plus pin
@@ -667,19 +694,19 @@ async function prepareJitOrder(
         // the refund lane (#278 round 7). Nothing was ever paid on this row,
         // so cancelling it is free; a fresh order is inserted below at the
         // current price.
-        const currentProduct = getJitProductConfig(
-          (draft.mail_type || 'letter') as MailType
-        );
         if (
-          existing.amount_cents === currentProduct.amountCents &&
-          existing.currency.toLowerCase() === normalizedCurrency(currentProduct.currency, '')
+          existing.amount_cents === product.amountCents &&
+          // The same normalizer on BOTH sides: a legacy row's padded currency
+          // must not fail a comparison its paid-amount sibling passes (#278
+          // round 8).
+          normalizedCurrency(existing.currency, '') === normalizedCurrency(product.currency, '')
         ) {
           return { order: existing, reused: true };
         }
         await client.query(
           `UPDATE orders SET status = 'cancelled',
              last_error_code = 'PRICE_CHANGED_BEFORE_SESSION', updated_at = NOW()
-           WHERE order_id = $1`,
+           WHERE order_id = $1 AND status = 'checkout_pending'`,
           [existing.order_id]
         );
         await recordOrderEvent(
@@ -692,8 +719,6 @@ async function prepareJitOrder(
       }
     }
 
-    const actualMailType = (draft.mail_type || 'letter') as MailType;
-    const product = getJitProductConfig(actualMailType);
     if (!product.priceId || product.amountCents <= 0) {
       const failure = describeUnpriced(product.productCode);
       writeDiagnostic('error', 'commerce.jit_not_priced', {
@@ -1257,7 +1282,9 @@ async function processCheckoutSessionEvent(
            stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, $3),
            status = $4::varchar, refund_pending_at = CASE WHEN $4::varchar = 'refund_pending'
              THEN COALESCE(refund_pending_at, NOW()) ELSE refund_pending_at END,
-           last_error_code = 'UNMATCHED_MONEY_EVENT_RECOVERED', updated_at = NOW()
+           last_error_code = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH'
+             THEN last_error_code ELSE 'UNMATCHED_MONEY_EVENT_RECOVERED' END,
+           updated_at = NOW()
          WHERE order_id = $1`,
         [order.order_id, session.id, intentId, blockedStatus]
       );
@@ -2284,6 +2311,12 @@ export async function requestRefund(
        SELECT order_id, refund_attempts
        FROM orders
        WHERE order_id = $1 AND status = 'refund_pending'
+         -- The PAYMENT_AMOUNT_MISMATCH quarantine gate lives in the CLAIM,
+         -- not only in the maintenance sweep's candidate SELECT: any future
+         -- caller of this exported money-mover (an admin bulk-retry, another
+         -- sweep) must hit the same wall. Operator release = clearing the
+         -- marker (#278 round 8).
+         AND (last_error_code IS NULL OR last_error_code <> 'PAYMENT_AMOUNT_MISMATCH')
          AND stripe_payment_intent_id IS NOT NULL
          AND (
            refund_attempts = 0

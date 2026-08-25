@@ -22,6 +22,13 @@ import {
   writeDiagnostic
 } from '../utils/diagnosticLog.js';
 
+// The fourth copy of the pack table until #275 gave it one home. Adding a
+// tier in products.ts prices it, validates its env var, resolves it and
+// reports it in /readyz - while a hand-kept list here answered 400 and left
+// the Buy button dead for a product every other layer believed was live.
+// Static derivation, so it is derived ONCE (#278 round 8).
+const VALID_PACK_CODES = PACK_PRODUCTS.map(product => product.productCode);
+
 // Extended request/response types with cookie support
 type Request = http.IncomingMessage & {
   body?: any;
@@ -97,15 +104,10 @@ export async function handleCreateCheckoutSession(
     }
 
     // Validate product ID
-    // The fourth copy of the pack table until #275 gave it one home. Adding a
-    // tier in products.ts prices it, validates its env var, resolves it and
-    // reports it in /readyz - while a hand-kept list here answered 400 and left
-    // the Buy button dead for a product every other layer believed was live.
-    const validProducts = PACK_PRODUCTS.map(product => product.productCode);
-    if (!validProducts.includes(productId)) {
+    if (!VALID_PACK_CODES.includes(productId)) {
       res.statusCode = 400;
       res.json({
-        error: `Invalid product ID. Must be one of: ${validProducts.join(', ')}`
+        error: `Invalid product ID. Must be one of: ${VALID_PACK_CODES.join(', ')}`
       });
       return;
     }
@@ -170,11 +172,13 @@ export async function handleCreateCheckoutSession(
     if (
       code === 'PACK_AMOUNT_NOT_CONFIGURED' ||
       code === 'PRICE_ID_NOT_CONFIGURED' ||
-      carried === 'configuration_error' ||
       // The vocabulary's own terminality answer, so a terminal class carried
-      // verbatim (amount_too_small, resource_missing, StripeAuthenticationError)
-      // maps like the configuration fault it is instead of falling to a bare
-      // 500 while the sibling guard one layer earlier answered 503 (#278 r5).
+      // verbatim (configuration_error, amount_too_small, resource_missing,
+      // StripeAuthenticationError) maps like the configuration fault it is
+      // instead of falling to a bare 500 while the sibling guard one layer
+      // earlier answered 503 (#278 r5). configuration_error is IN the
+      // terminal set - a separate disjunct for it was the scattered copy the
+      // vocabulary helper exists to end (#278 round 8).
       isTerminalDiagnosticClass(carried)
     ) {
       // An unpriced or misconfigured product - transient (a Stripe blip mid

@@ -21,7 +21,12 @@ import {
   validateDeploymentConfig
 } from '../config/deploymentConfig.js';
 import { listProviders } from '../services/providers/index.js';
-import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import {
+  classifyDiagnosticError,
+  clearDiagnosticChangeSlot,
+  writeDiagnostic,
+  writeDiagnosticOnChange
+} from '../utils/diagnosticLog.js';
 import { getUnpricedProducts, kickPriceCatalog } from '../services/priceCatalog.js';
 
 export interface ReadinessReport {
@@ -47,16 +52,16 @@ const CACHE_TTL_MS = 5_000;
 const UNREADY_CACHE_TTL_MS = 2_000;
 
 let cached: { report: ReadinessReport; expiresAt: number } | null = null;
-/** Last reported price-failure set, so a steady fault is logged once. */
-let lastReportedPriceFailures: string | null = null;
-/** Last reported failing-signature, so a steady 503 is logged once, not 1/2s. */
-let lastReportedFailing: string | null = null;
 
-/** Test hook: drop the memoized report. */
+/** Test hook: drop the memoized report and this file's change-only slots. */
 export function resetReadinessCache(): void {
   cached = null;
-  lastReportedPriceFailures = null;
-  lastReportedFailing = null;
+  // Both readiness slots, named exactly - the helper's prefix form splits on
+  // ':' (per-product slots), not '.' - replacing two bespoke memo variables
+  // whose hand-kept re-arm logic this same PR built the helper to end
+  // (#278 rounds 7-8).
+  clearDiagnosticChangeSlot('readiness.prices_unresolved');
+  clearDiagnosticChangeSlot('readiness.failed');
 }
 
 async function checkDatabase(): Promise<boolean> {
@@ -164,18 +169,33 @@ export async function getReadiness(
   // place an unpriced product is reported at all, and the 200 branch below
   // does not write a diagnostic. Product codes and rule ids only - the loader
   // never puts an amount in a failure.
-  const priceFailureSummary = priceFailures.map(f => `${f.productCode}:${f.rule}`).join(',');
-  // On CHANGE only. A non-production deploy legitimately has no prices, so
-  // pricesOk is false forever there; an unconditional line meant ~17,000
-  // identical entries a day per instance for a steady, already-reported state
-  // (#278 review round 3).
-  if (!pricesOk && priceFailureSummary !== lastReportedPriceFailures) {
-    writeDiagnostic(pricesEnforced ? 'error' : 'warn', 'readiness.prices_unresolved', {
-      enforced: String(pricesEnforced),
-      priceFailures: priceFailureSummary
-    });
+  // Class included: price.lookup_failed flips transient<->terminal under the
+  // SAME rule (a blip hardening into a revoked key), and a class-blind
+  // signature suppressed exactly the transition the class vocabulary exists
+  // to surface (#278 round 8 - the same defect round 7 fixed in the
+  // catalog's own summary).
+  const priceFailureSummary = priceFailures
+    .map(f => `${f.productCode}:${f.rule}:${f.diagnosticClass}`)
+    .join(',');
+  // On CHANGE only, via the ONE shared throttle. A non-production deploy
+  // legitimately has no prices, so pricesOk is false forever there; an
+  // unconditional line meant ~17,000 identical entries a day per instance
+  // for a steady, already-reported state (#278 review round 3).
+  if (pricesOk) {
+    // Recovery re-arms the slot so an identical later fault is news again.
+    clearDiagnosticChangeSlot('readiness.prices_unresolved');
+  } else {
+    writeDiagnosticOnChange(
+      'readiness.prices_unresolved',
+      priceFailureSummary,
+      pricesEnforced ? 'error' : 'warn',
+      'readiness.prices_unresolved',
+      {
+        enforced: String(pricesEnforced),
+        priceFailures: priceFailureSummary
+      }
+    );
   }
-  lastReportedPriceFailures = pricesOk ? null : priceFailureSummary;
 
   let report: ReadinessReport;
   if (failing.length === 0) {
@@ -185,7 +205,9 @@ export async function getReadiness(
     // name - this route is unauthenticated, and echoing an arbitrary env
     // value would serve anything accidentally pasted into LETTER_PROVIDER
     // to anonymous callers (review round 1).
-    lastReportedFailing = null;
+    // Recovery re-arms the slot so the NEXT unready episode logs even if its
+    // signature matches the last one (#278 round 7).
+    clearDiagnosticChangeSlot('readiness.failed');
     const configured = (env.LETTER_PROVIDER || 'dummy').toLowerCase();
     const provider = new Set(listProviders()).has(configured) ? configured : 'unrecognized';
     report = {
@@ -223,9 +245,7 @@ export async function getReadiness(
       [...routing.offenders].sort().join(','),
       validation.findings.filter(f => f.severity === 'error').map(f => f.rule).sort().join(',')
     ].join('|');
-    if (failingSignature !== lastReportedFailing) {
-      lastReportedFailing = failingSignature;
-      writeDiagnostic('error', 'readiness.failed', {
+    writeDiagnosticOnChange('readiness.failed', failingSignature, 'error', 'readiness.failed', {
       failing: failing.join(','),
       // Product codes and rule ids only; the loader never puts an amount in
       // a failure.
@@ -235,8 +255,7 @@ export async function getReadiness(
         .map(f => f.rule)
         .join(',') || 'none',
       routingOffenders: routing.offenders.join(',') || 'none'
-      });
-    }
+    });
     report = {
       ready: false,
       statusCode: 503,

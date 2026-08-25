@@ -466,6 +466,67 @@ describe('/readyz prices check (#275 stage A)', () => {
     }
   });
 
+  it('re-logs an identical unready episode after a recovery', async () => {
+    // Recovery must re-arm the readiness.failed slot: without the clear on
+    // the ready branch, a second outage with a byte-identical signature
+    // logged nothing for its entire duration (#278 round 8).
+    vi.useFakeTimers();
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const fault = [
+        { productCode: 'credit-pack-4', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
+      ];
+      priceCatalog.unpriced = fault;
+      await getReadiness(READY_PROD); // outage 1: logs
+
+      priceCatalog.unpriced = [];
+      vi.advanceTimersByTime(2_100);
+      await getReadiness(READY_PROD); // recovered: ready, re-arms the slot
+
+      priceCatalog.unpriced = fault;
+      vi.advanceTimersByTime(5_100); // past the ready memo TTL
+      await getReadiness(READY_PROD); // outage 2, identical: must log again
+
+      const emitted = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('"event":"readiness.failed"'));
+      expect(emitted).toHaveLength(2);
+    } finally {
+      diagnostic.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-logs when a price fault flips class under the same rule', async () => {
+    // A blip (provider_error) hardening into a terminal fault (the id now
+    // truly gone, or the key revoked) keeps the SAME rule. A class-blind
+    // dedupe signature suppressed exactly the transition the class
+    // vocabulary exists to surface (#278 round 8).
+    vi.useFakeTimers();
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.lookup_failed', diagnosticClass: 'provider_error' }
+      ];
+      await getReadiness(READY_PROD);
+      vi.advanceTimersByTime(2_100);
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.lookup_failed', diagnosticClass: 'resource_missing' }
+      ];
+      await getReadiness(READY_PROD);
+
+      const emitted = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('"event":"readiness.failed"'));
+      expect(emitted).toHaveLength(2);
+    } finally {
+      diagnostic.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('logs a steady failing verdict once, not once per recompute', async () => {
     // At the short unready TTL an unconditional readiness.failed line was up
     // to ~43,000 identical entries a day on a probed instance - the flood
