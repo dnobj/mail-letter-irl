@@ -7,6 +7,7 @@ import { cleanupExpiredImages, closeTempImageStore } from '../services/tempImage
 import { runDailyMaintenance } from '../workers/creditExpirationWorker.js';
 import { runStatusSync } from '../workers/statusSyncWorker.js';
 import { runCommerceMaintenance } from '../services/commerceService.js';
+import { runRetentionSweep } from '../services/retentionService.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
 import {
   carriedDiagnosticClass,
@@ -56,6 +57,21 @@ export async function runMaintenance(): Promise<void> {
     runDailyMaintenance
   );
   console.log(`[Maintenance] Daily cleanup ${daily.ran ? 'completed' : 'not due'}`);
+
+  // Its OWN task rather than a step inside runDailyMaintenance: retention is
+  // the one sweep whose failure is a published-policy breach, so it needs its
+  // own maintenance_tasks status row and must not be masked by - or take
+  // down - credit expiry beside it (#153).
+  const retention = await runMaintenanceTaskIfDue(
+    'content-retention-sweep',
+    ONE_DAY_MS,
+    () => runRetentionSweep()
+  );
+  // Counts only. Never ids, addresses, or any fragment of content (#153).
+  console.log(
+    `[Maintenance] Retention sweep ${retention.ran ? 'completed' : 'not due'}`,
+    retention.result ?? ''
+  );
 }
 
 /**
