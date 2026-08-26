@@ -291,6 +291,71 @@ describePostgres('content retention sweep', () => {
     expect(rows[0].required_credits).toBe(2);
   });
 
+  it('clears a paid POSTCARD image without tripping postcard_requires_image', async () => {
+    // This is the case that would abort the whole sweep. migration 012 has
+    //   CHECK (mail_type != 'postcard' OR front_image_data IS NOT NULL)
+    // with no condition on the row being spent, so NULLing the image throws
+    // and every other due row in the same statement is rolled back with it.
+    const userId = await seedUser();
+    const draftId = randomUUID();
+    await pool.query(
+      `INSERT INTO letter_drafts (
+         draft_id, user_id, sender, recipient, body_text, sign_off,
+         required_credits, status, expires_at, consumed_at, updated_at,
+         mail_type, front_image_data, front_image_url, postcard_size
+       ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, 'Yours, Alex', 2,
+                 'consumed', NOW() - INTERVAL '120 days',
+                 NOW() - INTERVAL '120 days', NOW() - INTERVAL '120 days',
+                 'postcard', $6, 'https://images.example.invalid/secret.png', '6x9')`,
+      [
+        draftId,
+        userId,
+        JSON.stringify({ name: 'Alex' }),
+        JSON.stringify({ name: 'Sam', addressLine1: SECRET_STREET }),
+        SECRET_BODY,
+        `data:image/jpeg;base64,${Buffer.from(SECRET_BODY).toString('base64')}`
+      ]
+    );
+    await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+    await expect(retention.purgePaidDraftContent()).resolves.toBeGreaterThanOrEqual(1);
+
+    const { rows } = await pool.query(
+      `SELECT front_image_data, front_image_url, mail_type
+         FROM letter_drafts WHERE draft_id = $1`,
+      [draftId]
+    );
+    // Emptied, not nulled - the constraint still has to hold afterwards.
+    expect(rows[0].front_image_data).toBe('');
+    expect(rows[0].front_image_url).toBeNull();
+    expect(rows[0].mail_type).toBe('postcard');
+    expect(JSON.stringify(rows[0])).not.toContain('secret.png');
+  });
+
+  it('leaves a letter draft's null image null instead of changing its shape', async () => {
+    const userId = await seedUser();
+    const draftId = randomUUID();
+    await pool.query(
+      `INSERT INTO letter_drafts (
+         draft_id, user_id, sender, recipient, body_text, sign_off,
+         required_credits, status, expires_at, consumed_at, updated_at
+       ) VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb, $3, 'x', 2,
+                 'consumed', NOW() - INTERVAL '150 days',
+                 NOW() - INTERVAL '150 days', NOW() - INTERVAL '150 days')`,
+      [draftId, userId, SECRET_BODY]
+    );
+    await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+    await retention.purgePaidDraftContent();
+
+    const { rows } = await pool.query(
+      `SELECT front_image_data, body_text FROM letter_drafts WHERE draft_id = $1`,
+      [draftId]
+    );
+    expect(rows[0].body_text).toBe('');
+    expect(rows[0].front_image_data).toBeNull();
+  });
+
   it('leaves an UNPAID draft to cleanupOldDrafts rather than redacting it', async () => {
     const userId = await seedUser();
     const draftId = randomUUID();

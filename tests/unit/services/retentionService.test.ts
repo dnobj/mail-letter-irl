@@ -152,10 +152,18 @@ describe('retention sweep guards (#153)', () => {
         "sign_off = ''",
         'preview_html = NULL',
         'sender_validation = NULL',
-        'recipient_validation = NULL'
+        'recipient_validation = NULL',
+        'front_image_url = NULL'
       ]) {
         expect(sql).toContain(column);
       }
+      // The postcard's picture is content too, but postcard_requires_image
+      // (migration 012) is CHECK (mail_type != 'postcard' OR front_image_data
+      // IS NOT NULL) with no liveness condition - NULLing it would throw and
+      // roll back every other due row in the same statement.
+      expect(sql).toContain(
+        "front_image_data = CASE WHEN front_image_data IS NULL THEN NULL ELSE '' END"
+      );
       // CHECK (required_credits > 0), and the refund path still reads it.
       expect(sql).not.toMatch(/required_credits\s*=/);
     });

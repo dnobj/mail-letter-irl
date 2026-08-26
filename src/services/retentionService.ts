@@ -117,6 +117,19 @@ export async function purgeExpiredLetterContent(
  * abandoned after payment, or fulfilment refused) has no letter to date from,
  * and updated_at is the last time anything happened to it.
  *
+ * front_image_data is a base64 data URI of the POSTCARD'S PICTURE and
+ * front_image_url is the original generator URL (migration 012). Both are
+ * content in every sense the policy means, so both go.
+ *
+ * front_image_data is emptied rather than nulled, and that is NOT cosmetic:
+ * postcard_requires_image (migration 012) is
+ *   CHECK (mail_type != 'postcard' OR front_image_data IS NOT NULL)
+ * with NO condition on the row being spent, so NULLing it would violate the
+ * constraint and abort the WHOLE sweep the first time a postcard draft came
+ * due. The empty string satisfies IS NOT NULL while keeping no image. The
+ * CASE preserves NULL on letter drafts, which never had one, so the column
+ * does not silently change shape for a mail type this is not about.
+ *
  * required_credits is left alone: it is non-content, it is CHECK (> 0), and
  * the fulfilment and refund paths still read it.
  */
@@ -155,6 +168,8 @@ export async function purgePaidDraftContent(
             preview_html = NULL,
             sender_validation = NULL,
             recipient_validation = NULL,
+            front_image_data = CASE WHEN front_image_data IS NULL THEN NULL ELSE '' END,
+            front_image_url = NULL,
             updated_at = NOW()
       WHERE draft_id IN (SELECT draft_id FROM due)
      RETURNING draft_id`,
