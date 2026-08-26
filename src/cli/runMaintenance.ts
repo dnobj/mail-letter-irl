@@ -8,6 +8,7 @@ import { runDailyMaintenance } from '../workers/creditExpirationWorker.js';
 import { runStatusSync } from '../workers/statusSyncWorker.js';
 import { runCommerceMaintenance } from '../services/commerceService.js';
 import { runRetentionSweep } from '../services/retentionService.js';
+import { enabledUnlessDisabled, positiveIntegerSetting } from '../utils/envSettings.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
 import {
   carriedDiagnosticClass,
@@ -31,41 +32,63 @@ export function writeMaintenanceFailure(error: unknown): void {
 
 /**
  * The retention sweep, with its published window and batch size reachable from
- * configuration. Every other tunable in this file already is; retention is the
- * one job that destroys customer data irreversibly, so it is the one that most
- * needs a kill switch that does not require a deploy - and stopping the cron
- * instead would also stop outbound mail.
+ * configuration. Retention is the one job that removes customer content, so it
+ * is the one that most needs a kill switch that does not require a deploy -
+ * stopping the cron instead would also stop outbound mail.
+ *
+ * NEVER THROWS. runMaintenanceTaskIfDue issues three queries against
+ * maintenance_tasks OUTSIDE the try that guards the task callback, and rethrows
+ * - so without this wrapper a transient lock or connection error on that
+ * bookkeeping row would propagate out of runMaintenance and skip
+ * processDueLetterJobs, i.e. a retention housekeeping failure would stop paid
+ * mail from being dispatched (#153 review round 2).
  */
 async function runContentRetention(): Promise<void> {
-  if (process.env.CONTENT_RETENTION_ENABLED === 'false') {
-    console.log('[Maintenance] Retention sweep disabled by CONTENT_RETENTION_ENABLED=false');
+  try {
+    await contentRetentionPass();
+  } catch (error) {
+    writeDiagnostic('error', 'retention.task_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
+async function contentRetentionPass(): Promise<void> {
+  if (!enabledUnlessDisabled('CONTENT_RETENTION_ENABLED')) {
+    console.log('[Maintenance] Retention sweep disabled by CONTENT_RETENTION_ENABLED');
     return;
   }
-  const days = Math.max(1, Number.parseInt(process.env.CONTENT_RETENTION_DAYS || '90', 10));
-  const size = Math.max(1, Number.parseInt(process.env.CONTENT_RETENTION_BATCH_SIZE || '500', 10));
+  const days = positiveIntegerSetting('CONTENT_RETENTION_DAYS', 90, 2);
+  const size = positiveIntegerSetting('CONTENT_RETENTION_BATCH_SIZE', 500, 1, 5000);
 
-  const retention = await runMaintenanceTaskIfDue('content-retention-sweep', ONE_DAY_MS, () =>
-    runRetentionSweep(days, size)
-  );
-  // Counts only. Never ids, addresses, or any fragment of content (#153).
+  const retention = await runMaintenanceTaskIfDue('content-retention-sweep', ONE_DAY_MS, async () => {
+    const result = await runRetentionSweep(days, size);
+    // Throw AFTER every sweep has run, so isolation between them is preserved
+    // while maintenance_tasks still records the failure. Returning normally
+    // would stamp last_status='completed' on a pass that redacted nothing, and
+    // the 24h gate would then suppress any retry for a day - the exact state
+    // this task exists to make visible.
+    if (result.errors.length > 0) {
+      throw Object.assign(new Error(`retention sweeps failed: ${result.errors.join(', ')}`), {
+        diagnosticClass: 'database_error'
+      });
+    }
+    return result;
+  });
+
+  // Counts only. Never ids, addresses, or any fragment of content (#153) - the
+  // errors array carries classes rather than driver messages for that reason.
   console.log(
     `[Maintenance] Retention sweep ${retention.ran ? 'completed' : 'not due'}`,
     retention.result ?? ''
   );
   const result = retention.result;
-  if (!result) return;
-  // A partial failure leaves a published obligation unmet, so it gets a
-  // diagnostic rather than only a line on the cron's stdout.
-  if (result.errors.length > 0) {
-    writeDiagnostic('error', 'retention.sweep_partial_failure', {
-      failedSweeps: result.errors.length
-    });
-  }
-  if (result.moreWaiting) {
+  if (result?.moreWaiting) {
     writeDiagnostic('warn', 'retention.backlog_remaining', {
       lettersRedacted: result.lettersRedacted,
       draftsRedacted: result.draftsRedacted,
-      abandonedDraftsRedacted: result.abandonedDraftsRedacted
+      abandonedDraftsRedacted: result.abandonedDraftsRedacted,
+      quarantinePurged: result.quarantinePurged
     });
   }
 }
@@ -77,15 +100,11 @@ export async function runMaintenance(): Promise<void> {
   );
   console.log(`[Maintenance] Starting one-shot run at ${new Date().toISOString()}`);
 
-  // FIRST, deliberately. Retention is its own task (its failure is a
-  // published-policy breach, so it needs its own maintenance_tasks row rather
-  // than being folded into daily cleanup) - but ordering matters too. None of
-  // the tasks below is wrapped, and runMaintenanceTaskIfDue rethrows, so
-  // anything scheduled after them is silently skipped whenever one fails: the
-  // sweep would simply never run while an unrelated task stayed broken, with
-  // its own status row still reading 'completed' from the last good day.
-  // runRetentionSweep never throws (it isolates its three sweeps internally),
-  // so putting it first costs the others nothing (#153).
+  // FIRST, and wrapped. Retention has its own maintenance_tasks row because
+  // its failure is a published-policy breach, but ordering matters too: none
+  // of the tasks below is wrapped and runMaintenanceTaskIfDue rethrows, so
+  // anything scheduled after them is silently skipped whenever one fails.
+  // runContentRetention never throws, so it cannot skip them either (#153).
   await runContentRetention();
 
   const outbox = await processDueLetterJobs(batchLimit);
