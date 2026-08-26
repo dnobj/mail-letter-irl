@@ -29,12 +29,64 @@ export function writeMaintenanceFailure(error: unknown): void {
   });
 }
 
+/**
+ * The retention sweep, with its published window and batch size reachable from
+ * configuration. Every other tunable in this file already is; retention is the
+ * one job that destroys customer data irreversibly, so it is the one that most
+ * needs a kill switch that does not require a deploy - and stopping the cron
+ * instead would also stop outbound mail.
+ */
+async function runContentRetention(): Promise<void> {
+  if (process.env.CONTENT_RETENTION_ENABLED === 'false') {
+    console.log('[Maintenance] Retention sweep disabled by CONTENT_RETENTION_ENABLED=false');
+    return;
+  }
+  const days = Math.max(1, Number.parseInt(process.env.CONTENT_RETENTION_DAYS || '90', 10));
+  const size = Math.max(1, Number.parseInt(process.env.CONTENT_RETENTION_BATCH_SIZE || '500', 10));
+
+  const retention = await runMaintenanceTaskIfDue('content-retention-sweep', ONE_DAY_MS, () =>
+    runRetentionSweep(days, size)
+  );
+  // Counts only. Never ids, addresses, or any fragment of content (#153).
+  console.log(
+    `[Maintenance] Retention sweep ${retention.ran ? 'completed' : 'not due'}`,
+    retention.result ?? ''
+  );
+  const result = retention.result;
+  if (!result) return;
+  // A partial failure leaves a published obligation unmet, so it gets a
+  // diagnostic rather than only a line on the cron's stdout.
+  if (result.errors.length > 0) {
+    writeDiagnostic('error', 'retention.sweep_partial_failure', {
+      failedSweeps: result.errors.length
+    });
+  }
+  if (result.moreWaiting) {
+    writeDiagnostic('warn', 'retention.backlog_remaining', {
+      lettersRedacted: result.lettersRedacted,
+      draftsRedacted: result.draftsRedacted,
+      abandonedDraftsRedacted: result.abandonedDraftsRedacted
+    });
+  }
+}
+
 export async function runMaintenance(): Promise<void> {
   const batchLimit = Math.max(
     1,
     Number.parseInt(process.env.MAINTENANCE_OUTBOX_BATCH_SIZE || '25', 10)
   );
   console.log(`[Maintenance] Starting one-shot run at ${new Date().toISOString()}`);
+
+  // FIRST, deliberately. Retention is its own task (its failure is a
+  // published-policy breach, so it needs its own maintenance_tasks row rather
+  // than being folded into daily cleanup) - but ordering matters too. None of
+  // the tasks below is wrapped, and runMaintenanceTaskIfDue rethrows, so
+  // anything scheduled after them is silently skipped whenever one fails: the
+  // sweep would simply never run while an unrelated task stayed broken, with
+  // its own status row still reading 'completed' from the last good day.
+  // runRetentionSweep never throws (it isolates its three sweeps internally),
+  // so putting it first costs the others nothing (#153).
+  await runContentRetention();
 
   const outbox = await processDueLetterJobs(batchLimit);
   console.log('[Maintenance] Outbox summary:', outbox);
@@ -57,21 +109,6 @@ export async function runMaintenance(): Promise<void> {
     runDailyMaintenance
   );
   console.log(`[Maintenance] Daily cleanup ${daily.ran ? 'completed' : 'not due'}`);
-
-  // Its OWN task rather than a step inside runDailyMaintenance: retention is
-  // the one sweep whose failure is a published-policy breach, so it needs its
-  // own maintenance_tasks status row and must not be masked by - or take
-  // down - credit expiry beside it (#153).
-  const retention = await runMaintenanceTaskIfDue(
-    'content-retention-sweep',
-    ONE_DAY_MS,
-    () => runRetentionSweep()
-  );
-  // Counts only. Never ids, addresses, or any fragment of content (#153).
-  console.log(
-    `[Maintenance] Retention sweep ${retention.ran ? 'completed' : 'not due'}`,
-    retention.result ?? ''
-  );
 }
 
 /**

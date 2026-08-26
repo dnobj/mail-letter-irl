@@ -11,22 +11,29 @@ vi.mock('../../../src/db/index.js', () => ({
 const {
   purgeExpiredLetterContent,
   purgePaidDraftContent,
+  purgeAbandonedDraftContent,
   runRetentionSweep
 } = await import('../../../src/services/retentionService.js');
 
 /**
- * Issue #153 - the retention sweep enforces a PUBLISHED promise, so the guards
- * that keep it from over-deleting are as load-bearing as the delete itself.
+ * Issue #153 - guards on an IRREVERSIBLE sweep.
  *
- * These are statement-shape assertions, deliberately. The behavioural proof
- * lives in tests/integration/contentRetention.postgres.test.ts against real
- * PostgreSQL, because a mocked query() will accept a predicate that matches
- * every row in the table. What this suite buys is that the whole unit lane -
- * which runs without Docker - reddens if any guard is deleted, rather than
- * that failure waiting for the integration job.
+ * WHY THESE ASSERT WHOLE CLAUSES RATHER THAN FRAGMENTS
+ * The first version of this suite matched loose substrings - `FROM orders`,
+ * the status list, `LIMIT $n` - and was proven worthless by mutation: with the
+ * outer `WHERE letter_id IN (...)` replaced by `WHERE TRUE` (redacting EVERY
+ * letter in the table), with `NOT EXISTS` inverted to `EXISTS` (redacting
+ * exactly the rows that must be held), and with the boundary `<` flipped to
+ * `>` (redacting the last 90 days instead of everything older), it still
+ * passed 16/16. None of those mutations removes the fragments it matched.
+ *
+ * Each guard is therefore pinned as a complete normalized clause INCLUDING its
+ * polarity token, and the outer UPDATE is pinned in full. Behaviour is proven
+ * against real PostgreSQL in tests/integration/contentRetention.postgres.test.ts;
+ * this suite exists so the Docker-free lane still reddens on a polarity flip.
  */
 function sqlFrom(call: unknown[]): string {
-  return String(call[0]).replace(/\s+/g, ' ');
+  return String(call[0]).replace(/\s+/g, ' ').trim();
 }
 
 describe('retention sweep guards (#153)', () => {
@@ -36,170 +43,262 @@ describe('retention sweep guards (#153)', () => {
   });
 
   describe('purgeExpiredLetterContent', () => {
-    it('holds letters whose mail is still in flight, including HELD jobs', async () => {
+    it('bounds the UPDATE to the due CTE and to the content columns', async () => {
       await purgeExpiredLetterContent();
 
+      // Pinned WHOLE. `WHERE TRUE` here redacts every letter ever sent.
+      expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
+        "UPDATE letters SET content = '{}'::jsonb, recipient = '{}'::jsonb, " +
+          'preview_html = NULL, redacted_at = NOW() ' +
+          'WHERE letter_id IN (SELECT letter_id FROM due)'
+      );
+    });
+
+    it('redacts strictly OLDER than the window, never newer', async () => {
+      await purgeExpiredLetterContent();
+
+      // Pinned with the operator. `>` inverts the sweep in time.
+      expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
+        'AND COALESCE(l.sent_at, l.created_at) < NOW() - make_interval(days => $1::int)'
+      );
+    });
+
+    it('HOLDS a letter whose mail is still in flight', async () => {
+      await purgeExpiredLetterContent();
+
+      // NOT EXISTS ... AND NOT (settled) - inverting either token turns a hold
+      // into a targeting filter.
+      expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
+        'AND NOT EXISTS ( SELECT 1 FROM letter_jobs j WHERE j.letter_id = l.letter_id ' +
+          'AND NOT (j.status = ANY($3::varchar[])) )'
+      );
+    });
+
+    it('HOLDS a letter whose directly-linked order is unsettled', async () => {
+      await purgeExpiredLetterContent();
+
+      expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
+        'AND NOT EXISTS ( SELECT 1 FROM orders o WHERE o.letter_id = l.letter_id ' +
+          'AND NOT (o.status = ANY($4::varchar[])) )'
+      );
+    });
+
+    it('HOLDS a PREPAID letter through the credit ledger, not just orders.letter_id', async () => {
+      // orders.letter_id is written only for jit_mail, so a hold keyed on it
+      // alone is vacuously true for every prepaid letter - the majority path.
+      // Without this arm, a pack chargeback destroys every letter it funded.
+      await purgeExpiredLetterContent();
       const sql = sqlFrom(mocks.query.mock.calls[0]);
-      expect(sql).toContain('FROM letter_jobs');
-      // 'held' is where migration 023 parks an AMBIGUOUS provider outcome for
-      // operator reconciliation - the case that most needs the content kept.
-      expect(sql).toMatch(/j\.status IN \('pending', 'processing', 'held'\)/);
+
+      expect(sql).toContain(
+        'FROM credit_transactions txn ' +
+          'JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id ' +
+          'JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id ' +
+          'JOIN orders o ON o.order_id = lot.source_order_id'
+      );
+      expect(sql).toContain("WHERE txn.reference_type = 'letter' AND txn.type = 'deduction'");
     });
 
-    it('holds letters whose order is disputed or awaiting refund', async () => {
+    it('only redacts letters in a finished state', async () => {
       await purgeExpiredLetterContent();
 
-      const sql = sqlFrom(mocks.query.mock.calls[0]);
-      expect(sql).toContain('FROM orders');
-      expect(sql).toMatch(/o\.status IN \('disputed', 'refund_pending', 'held'\)/);
+      expect(sqlFrom(mocks.query.mock.calls[0])).toContain('AND l.status = ANY($2::varchar[])');
     });
 
-    it('scopes the dispute hold to the letter, never to the user or the sweep', async () => {
-      // #153: holds must be "explicit, scoped, auditable, and do not silently
-      // disable all cleanup". A hold keyed on user_id would stop retention for
-      // every letter that customer ever sent.
+    it('passes ALLOW-lists, so an unknown future status holds rather than redacts', async () => {
       await purgeExpiredLetterContent();
 
-      const sql = sqlFrom(mocks.query.mock.calls[0]);
-      expect(sql).toContain('o.letter_id = l.letter_id');
-      expect(sql).not.toMatch(/o\.user_id\s*=/);
+      const params = mocks.query.mock.calls[0][1] as unknown[];
+      // Letter states safe to redact: work-pending states are absent.
+      expect(params[1]).toEqual([
+        'sent',
+        'accepted',
+        'in_transit',
+        'delivered',
+        'returned',
+        'failed',
+        'cancelled'
+      ]);
+      for (const pending of ['draft', 'queued', 'processing', 'held']) {
+        expect(params[1]).not.toContain(pending);
+      }
+      // 'failed' is deliberately NOT a settled job: claimJob dispatches on
+      // status IN ('pending','failed') and the operator retry re-enqueues it.
+      expect(params[2]).toEqual(['completed', 'cancelled']);
+      expect(params[2]).not.toContain('failed');
+      // 'paid'/'fulfillment_pending' hold: charged, content still the only copy.
+      expect(params[3]).toEqual(['fulfilled', 'refunded', 'cancelled', 'payment_failed']);
+      for (const contested of ['disputed', 'refund_pending', 'held', 'paid']) {
+        expect(params[3]).not.toContain(contested);
+      }
     });
 
-    it('only ever touches sent letters', async () => {
-      await purgeExpiredLetterContent();
-
-      expect(sqlFrom(mocks.query.mock.calls[0])).toContain('l.sent_at IS NOT NULL');
-    });
-
-    it('skips rows already redacted, so a repeat run is a no-op', async () => {
-      await purgeExpiredLetterContent();
-
-      expect(sqlFrom(mocks.query.mock.calls[0])).toContain('l.content <> $2::jsonb');
-    });
-
-    it('binds the window, the sentinel and the batch limit in that order', async () => {
-      // The recurring defect class in this repo is a parameter bound to the
-      // wrong ordinal, which mocked tests miss because nothing type-checks $n
-      // against the value. Pin the order explicitly.
+    it('skips rows already redacted and bounds the batch', async () => {
       await purgeExpiredLetterContent(30, 7);
 
       const [sql, params] = mocks.query.mock.calls[0] as [string, unknown[]];
-      expect(params).toEqual([30, '{"redacted":true}', 7]);
-      expect(sql).toContain('make_interval(days => $1::int)');
-      expect(sql).toContain('LIMIT $3::int');
-      // The window must never be a literal - a hardcoded 90 would ignore the
-      // approved schedule the moment it changes.
+      expect(sqlFrom([sql])).toContain('WHERE l.redacted_at IS NULL');
+      expect(sqlFrom([sql])).toContain('LIMIT $5::int FOR UPDATE OF l SKIP LOCKED');
+      expect(params[0]).toBe(30);
+      expect(params[4]).toBe(7);
+      // The window must never be a literal.
       expect(sql).not.toMatch(/INTERVAL '90 days'/);
     });
 
-    it('bounds the work and does not block on rows another sweep holds', async () => {
+    it('never deletes a row and never returns identifiers', async () => {
       await purgeExpiredLetterContent();
 
       const sql = sqlFrom(mocks.query.mock.calls[0]);
-      expect(sql).toContain('LIMIT $3::int');
-      expect(sql).toContain('SKIP LOCKED');
-    });
-
-    it('overwrites every content column and nothing else', async () => {
-      await purgeExpiredLetterContent();
-
-      const sql = sqlFrom(mocks.query.mock.calls[0]);
-      expect(sql).toContain('SET content = $2::jsonb');
-      expect(sql).toContain('recipient = $2::jsonb');
-      expect(sql).toContain('preview_html = NULL');
-      // Anonymize, never delete: the order and ledger rows reference this row
-      // and the #158 gate requires the financial trail to survive.
       expect(sql).not.toContain('DELETE FROM letters');
-      expect(sql).not.toContain('sent_at = NULL');
-      expect(sql).not.toMatch(/SET .*status\s*=/);
+      // No RETURNING: the ids cannot reach this process to be logged at all.
+      expect(sql).not.toContain('RETURNING');
     });
   });
 
   describe('purgePaidDraftContent', () => {
-    it('only touches drafts that actually have an order', async () => {
+    it('requires an order in a PAID state, not merely an order row', async () => {
       await purgePaidDraftContent();
 
-      const sql = sqlFrom(mocks.query.mock.calls[0]);
-      // Unpaid drafts belong to cleanupOldDrafts' 7-day DELETE. Redacting one
-      // here would leave an undeletable husk instead of removing the row.
-      expect(sql).toMatch(/EXISTS \( SELECT 1 FROM orders o WHERE o\.draft_id = d\.draft_id \)/);
+      // An abandoned checkout leaves a 'checkout_pending' order behind;
+      // treating that as paid gave a never-paid draft 90-day retention.
+      expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
+        'AND EXISTS ( SELECT 1 FROM orders o WHERE o.draft_id = d.draft_id ' +
+          'AND o.status = ANY($2::varchar[]) )'
+      );
+      const params = mocks.query.mock.calls[0][1] as unknown[];
+      for (const unpaid of ['checkout_pending', 'cancelled', 'payment_failed']) {
+        expect(params[1]).not.toContain(unpaid);
+      }
     });
 
-    it('carries the same two holds as the letter sweep', async () => {
-      await purgePaidDraftContent();
-
-      const sql = sqlFrom(mocks.query.mock.calls[0]);
-      expect(sql).toMatch(/o\.status IN \('disputed', 'refund_pending', 'held'\)/);
-      expect(sql).toMatch(/j\.status IN \('pending', 'processing', 'held'\)/);
-    });
-
-    it('dates a consumed draft from consumption and an unconsumed one from its last change', async () => {
+    it('HOLDS a draft whose order is unsettled', async () => {
       await purgePaidDraftContent();
 
       expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
-        'COALESCE(d.consumed_at, d.updated_at) <'
+        'AND NOT EXISTS ( SELECT 1 FROM orders o WHERE o.draft_id = d.draft_id ' +
+          'AND NOT (o.status = ANY($3::varchar[])) )'
       );
     });
 
-    it('clears every content column but keeps required_credits', async () => {
+    it('clocks from write-once columns, never from trigger-managed updated_at', async () => {
+      await purgePaidDraftContent();
+
+      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      expect(sql).toContain(
+        'AND COALESCE(d.consumed_at, d.created_at) < NOW() - make_interval(days => $1::int)'
+      );
+      // letter_drafts has a BEFORE UPDATE trigger that rewrites updated_at, so
+      // using it as the clock lets any future writer restart the window.
+      expect(sql).not.toContain('d.updated_at');
+    });
+
+    it('clears EVERY content column, including the layout images', async () => {
       await purgePaidDraftContent();
 
       const sql = sqlFrom(mocks.query.mock.calls[0]);
       for (const column of [
-        'sender = $2::jsonb',
-        'recipient = $2::jsonb',
+        "sender = '{}'::jsonb",
+        "recipient = '{}'::jsonb",
         "body_text = ''",
-        "sign_off = ''",
         'preview_html = NULL',
         'sender_validation = NULL',
         'recipient_validation = NULL',
-        'front_image_url = NULL'
+        'front_image_url = NULL',
+        'header_image_url = NULL',
+        'inline_image_url = NULL',
+        'redacted_at = NOW()'
       ]) {
         expect(sql).toContain(column);
       }
-      // The postcard's picture is content too, but postcard_requires_image
-      // (migration 012) is CHECK (mail_type != 'postcard' OR front_image_data
-      // IS NOT NULL) with no liveness condition - NULLing it would throw and
-      // roll back every other due row in the same statement.
-      expect(sql).toContain(
-        "front_image_data = CASE WHEN front_image_data IS NULL THEN NULL ELSE '' END"
-      );
-      // CHECK (required_credits > 0), and the refund path still reads it.
+      // The three image blobs are EMPTIED, not nulled: postcard_requires_image,
+      // header_layout_requires_image and inline_layout_requires_image have no
+      // liveness condition, so a NULL aborts the batch and rolls back every
+      // other due row with it.
+      for (const image of ['front_image_data', 'header_image_data', 'inline_image_data']) {
+        expect(sql).toContain(`${image} = CASE WHEN ${image} IS NULL THEN NULL ELSE '' END`);
+      }
       expect(sql).not.toMatch(/required_credits\s*=/);
     });
   });
 
+  describe('purgeAbandonedDraftContent', () => {
+    it('targets drafts with an order but NO paid order, on the 7-day window', async () => {
+      await purgeAbandonedDraftContent();
+
+      const [sql, params] = mocks.query.mock.calls[0] as [string, unknown[]];
+      const normalized = sqlFrom([sql]);
+      expect(normalized).toContain(
+        'AND EXISTS ( SELECT 1 FROM orders o WHERE o.draft_id = d.draft_id )'
+      );
+      expect(normalized).toContain(
+        'AND NOT EXISTS ( SELECT 1 FROM orders o WHERE o.draft_id = d.draft_id ' +
+          'AND o.status = ANY($2::varchar[]) )'
+      );
+      // The unpaid window, not the letter-content window.
+      expect(params[0]).toBe(7);
+    });
+
+    it('clocks from created_at, since an abandoned draft was never consumed', async () => {
+      await purgeAbandonedDraftContent();
+
+      expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
+        'AND d.created_at < NOW() - make_interval(days => $1::int)'
+      );
+    });
+  });
+
+  describe('parameter validation', () => {
+    it.each([0, -1, 1.5, Number.NaN])('refuses retentionDays %s', async bad => {
+      await expect(purgeExpiredLetterContent(bad as number)).rejects.toThrow(/positive integer/);
+      expect(mocks.query).not.toHaveBeenCalled();
+    });
+
+    it.each([0, -1, 5001])('refuses batchLimit %s', async bad => {
+      await expect(purgeExpiredLetterContent(90, bad as number)).rejects.toThrow(/batchLimit/);
+      expect(mocks.query).not.toHaveBeenCalled();
+    });
+  });
+
   describe('runRetentionSweep', () => {
-    it('reports counts only - never an id, an address, or any content', async () => {
+    it('reports counts only, never an id or any content', async () => {
       mocks.query.mockResolvedValue({ rows: [{ letter_id: 'letter_1' }], rowCount: 1 });
 
       const summary = await runRetentionSweep();
 
-      expect(summary).toEqual({ lettersRedacted: 1, draftsRedacted: 1, moreWaiting: false });
-      // #153 forbids compensating for deleted content by logging it. The
-      // RETURNING ids must not escape into the summary the caller prints.
+      expect(summary).toEqual({
+        lettersRedacted: 1,
+        draftsRedacted: 1,
+        abandonedDraftsRedacted: 1,
+        moreWaiting: false,
+        errors: []
+      });
       expect(JSON.stringify(summary)).not.toContain('letter_1');
     });
 
-    it('flags more work waiting when a batch fills', async () => {
+    it('runs the other sweeps when one fails, and names which failed', async () => {
+      mocks.query
+        .mockRejectedValueOnce(new Error('lock timeout'))
+        .mockResolvedValue({ rows: [], rowCount: 3 });
+
+      const summary = await runRetentionSweep();
+
+      expect(summary.lettersRedacted).toBe(0);
+      expect(summary.draftsRedacted).toBe(3);
+      expect(summary.abandonedDraftsRedacted).toBe(3);
+      expect(summary.errors).toEqual(['letters: lock timeout']);
+    });
+
+    it('flags a remaining backlog when any batch fills', async () => {
       mocks.query.mockResolvedValue({ rows: [], rowCount: 5 });
 
       expect(await runRetentionSweep(90, 5)).toMatchObject({ moreWaiting: true });
     });
 
-    it('does not flag more work when neither batch filled', async () => {
-      mocks.query.mockResolvedValue({ rows: [], rowCount: 4 });
+    it('uses the unpaid window for abandoned drafts regardless of the caller', async () => {
+      await runRetentionSweep(365, 9);
 
-      expect(await runRetentionSweep(90, 5)).toMatchObject({ moreWaiting: false });
-    });
-
-    it('passes the caller window and limit down to BOTH sweeps', async () => {
-      await runRetentionSweep(30, 9);
-
-      expect(mocks.query.mock.calls).toHaveLength(2);
-      for (const call of mocks.query.mock.calls) {
-        expect(call[1]).toEqual([30, '{"redacted":true}', 9]);
-      }
+      const windows = mocks.query.mock.calls.map(call => (call[1] as unknown[])[0]);
+      expect(windows).toEqual([365, 365, 7]);
     });
   });
 });
