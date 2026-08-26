@@ -69,10 +69,14 @@ describe('retention sweep guards (#153)', () => {
       expect(sql).toContain(
         'INSERT INTO redacted_content_quarantine (source_table, source_id, content, purge_after)'
       );
+      expect(sql).toContain("SELECT 'letters', l.letter_id,");
       expect(sql).toContain(
         "jsonb_build_object( 'content', l.content, 'recipient', l.recipient, " +
           "'preview_html', to_jsonb(l.preview_html) )"
       );
+      // The recovery window itself. Collapsing this to NOW() would make the
+      // quarantine purge on its first pass, i.e. destruction with extra steps.
+      expect(sql).toContain('NOW() + make_interval(days => $7::int)');
       // Re-redacting after a restore replaces the row rather than failing.
       expect(sql).toContain('ON CONFLICT (source_table, source_id) DO UPDATE');
     });
@@ -194,6 +198,8 @@ describe('retention sweep guards (#153)', () => {
       expect(sql).toContain(
         'INSERT INTO redacted_content_quarantine (source_table, source_id, content, purge_after)'
       );
+      expect(sql).toContain("SELECT 'letter_drafts', d.draft_id::text,");
+      expect(sql).toMatch(/NOW\(\) \+ make_interval\(days => \$\d::int\)/);
       // Every cleared column is saved, including the layout images an earlier
       // version never cleared at all.
       for (const column of [
@@ -332,7 +338,9 @@ describe('retention sweep guards (#153)', () => {
 
       const sql = sqlFrom(mocks.query.mock.calls[0]);
       expect(sql).toContain('DELETE FROM redacted_content_quarantine');
-      expect(sql).toContain('WHERE purge_after <= NOW()');
+      // Pinned WHOLE, between its ORDER BY and its LIMIT: any extra condition
+      // here silently strands a class of quarantine rows forever.
+      expect(sql).toContain('WHERE purge_after <= NOW() ORDER BY purge_after LIMIT $1::int');
       // This is the statement that finally destroys content. Nothing a future
       // migration can invalidate may appear in it.
       expect(sql).not.toContain('JOIN');

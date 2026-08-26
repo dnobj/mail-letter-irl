@@ -27,8 +27,16 @@ describe('positiveIntegerSetting', () => {
     expect(positiveIntegerSetting('RETENTION', 90, 2, 5000, env('1e3'))).toBe(90);
   });
 
-  it('falls back rather than 1 on a trailing-unit typo', () => {
-    expect(positiveIntegerSetting('RETENTION', 90, 2, 5000, env('90days'))).toBe(90);
+  it('falls back rather than the truncated value on a trailing-unit typo', () => {
+    // The fallback is deliberately NOT 90 here: parseInt('90days') is 90, so a
+    // fallback of 90 would pass whether or not the truncation guard exists.
+    expect(positiveIntegerSetting('RETENTION', 30, 2, 5000, env('90days'))).toBe(30);
+  });
+
+  it('falls back on scientific notation even when the truncation is in range', () => {
+    // parseInt('9e9', 10) is 9, which is a perfectly valid window - so only
+    // the truncation guard catches it, not the minimum.
+    expect(positiveIntegerSetting('RETENTION', 90, 2, 5000, env('9e9'))).toBe(90);
   });
 
   it.each(['0', '-1', '1'])('falls back below the minimum (%s)', raw => {
