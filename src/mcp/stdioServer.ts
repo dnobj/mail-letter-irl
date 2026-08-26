@@ -1,3 +1,4 @@
+import { kickPriceCatalog } from "../services/priceCatalog.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { LetterIrlServer } from "../server.js";
@@ -15,6 +16,12 @@ export async function startStdioServer() {
   });
 
   registerLetterTools(mcpServer, appServer);
+
+  // The stdio lane had NO price warmup, so the first quote's eligibility was
+  // a guaranteed miss - "temporarily unavailable" on a healthy deployment,
+  // every session (#278 round 6). Same fire-and-forget policy as the HTTP
+  // listen callback; connect() is not held up.
+  kickPriceCatalog(undefined, 'stdio_startup');
 
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);

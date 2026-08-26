@@ -1,7 +1,7 @@
 /**
  * Centralized deployment configuration validation. Issue #155.
  *
- * Why this exists: a deploy missing STRIPE_STARTER_AMOUNT_CENTS booted
+ * Why this exists: a deploy missing STRIPE_PRICE_STARTER booted
  * cleanly, passed /healthz, and failed only when a customer clicked Buy Now
  * (issue #213) - and the provider layer is worse: in production a missing
  * PostGrid key silently dispatches real sends to the dummy provider. A healthy
@@ -19,6 +19,13 @@
  * environment before promotion, so the validator and the preflight can never
  * disagree about what production requires.
  */
+
+import {
+  JIT_PRICE_ENV_VARS,
+  PACK_PRICE_ENV_VARS,
+  normalizedCurrency,
+  packCurrency
+} from './products.js';
 
 export type DeploymentMode = 'production' | 'development' | 'test';
 
@@ -45,6 +52,16 @@ export interface EnvVarRequirement {
   aliases?: readonly string[];
   requiredIn: 'always' | 'production' | 'development';
   condition?: 'unless-admin' | 'when-jit-enabled' | 'when-static-dcr';
+  /**
+   * Listed so the cutover preflight can DIFF it, but absence is not a failure:
+   * the code has a working default. `checkedBy` alone was not enough - it only
+   * exempts an entry from the boot-time presence loop, and the preflight reads
+   * `requiredIn`/`condition` and nothing else, so adding STRIPE_CURRENCY turned
+   * `preflight:cutover` red for a correctly configured USD production
+   * environment - "a fresh way for production to refuse", which the entry's own
+   * comment claimed to be avoiding (#278 review round 3).
+   */
+  advisory?: boolean;
   /** True when the value is a credential; drives placeholder detection. */
   secret: boolean;
   services: ReadonlyArray<'api' | 'maintenance'>;
@@ -67,16 +84,14 @@ export interface EnvVarRequirement {
  */
 export const APPROVED_LIVE_PROVIDERS = ['postgrid'] as const;
 
-const PACK_PRICE_VARS = [
-  { price: 'STRIPE_PRICE_STARTER', amount: 'STRIPE_STARTER_AMOUNT_CENTS' },
-  { price: 'STRIPE_PRICE_REGULAR', amount: 'STRIPE_REGULAR_AMOUNT_CENTS' },
-  { price: 'STRIPE_PRICE_POWER', amount: 'STRIPE_POWER_AMOUNT_CENTS' }
-] as const;
-
-const JIT_VARS = [
-  { price: 'STRIPE_JIT_LETTER_PRICE_ID', amount: 'JIT_LETTER_AMOUNT_CENTS' },
-  { price: 'STRIPE_JIT_POSTCARD_PRICE_ID', amount: 'JIT_POSTCARD_AMOUNT_CENTS' }
-] as const;
+/**
+ * Price ids only. The amounts used to live alongside them as
+ * STRIPE_*_AMOUNT_CENTS - a second copy of a figure Stripe already owns, which
+ * could drift from it silently (#275). They now resolve from the Price itself,
+ * so there is one number and nothing to keep in step. The env-name lists come
+ * from the same product table the resolver reads (src/config/products.ts), so
+ * "must be set" and "must resolve" cannot name different variables.
+ */
 
 /**
  * Every PostGrid credential the provider layer can read. SEND-capable keys
@@ -138,40 +153,54 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api', 'maintenance'],
     checkedBy: 'provider.live_mode_required'
   },
-  ...PACK_PRICE_VARS.flatMap(({ price, amount }): EnvVarRequirement[] => [
-    {
-      name: price,
-      requiredIn: 'production',
-      secret: false,
-      services: ['api', 'maintenance'],
-      checkedBy: 'stripe.pack_price_incomplete'
-    },
-    {
-      name: amount,
-      requiredIn: 'production',
-      secret: false,
-      services: ['api', 'maintenance'],
-      checkedBy: 'stripe.pack_price_incomplete'
-    }
-  ]),
-  ...JIT_VARS.flatMap(({ price, amount }): EnvVarRequirement[] => [
-    {
-      name: price,
-      requiredIn: 'production',
-      condition: 'when-jit-enabled',
-      secret: false,
-      services: ['api', 'maintenance'],
-      checkedBy: 'stripe.jit_config_incomplete'
-    },
-    {
-      name: amount,
-      requiredIn: 'production',
-      condition: 'when-jit-enabled',
-      secret: false,
-      services: ['api', 'maintenance'],
-      checkedBy: 'stripe.jit_config_incomplete'
-    }
-  ]),
+  ...PACK_PRICE_ENV_VARS.map((price): EnvVarRequirement => ({
+    name: price,
+    requiredIn: 'production',
+    secret: false,
+    services: ['api', 'maintenance'],
+    checkedBy: 'stripe.pack_price_incomplete'
+  })),
+  ...JIT_PRICE_ENV_VARS.map((price): EnvVarRequirement => ({
+    name: price,
+    requiredIn: 'production',
+    condition: 'when-jit-enabled',
+    secret: false,
+    services: ['api', 'maintenance'],
+    checkedBy: 'stripe.jit_config_incomplete'
+  })),
+  /**
+   * The currencies are here because #275 made them load-bearing. Every Price
+   * must be denominated in its product's expected currency or the catalog
+   * refuses to price it, which in production is a 503 and a refused purchase -
+   * so an unset STRIPE_CURRENCY silently defaulting to 'usd' can brick a GBP
+   * deployment. They appeared in no manifest entry, no validator rule, and no
+   * doc, so `preflight:cutover` reported full parity while the two
+   * environments disagreed and nothing an operator could read named the
+   * variable at fault (#278 review round 2).
+   *
+   * checkedBy keeps this a WARNING rather than a new hard boot requirement:
+   * the default is correct for this deployment, and the point is visibility to
+   * the preflight's name diff, not a fresh way for production to refuse to
+   * start on the eve of a cutover.
+   */
+  {
+    name: 'STRIPE_CURRENCY',
+    requiredIn: 'production',
+    condition: 'unless-admin',
+    advisory: true,
+    secret: false,
+    services: ['api', 'maintenance'],
+    checkedBy: 'stripe.currency_unset'
+  },
+  {
+    name: 'JIT_CURRENCY',
+    requiredIn: 'production',
+    condition: 'when-jit-enabled',
+    advisory: true,
+    secret: false,
+    services: ['api', 'maintenance'],
+    checkedBy: 'stripe.currency_unset'
+  },
   /**
    * OAuth configuration (issue #270).
    *
@@ -387,10 +416,6 @@ function isPlaceholder(value: string): boolean {
   return value.includes('...') || /^(your[_-]|changeme|placeholder|xxx)/i.test(value);
 }
 
-function isPositiveInteger(value: string | undefined): boolean {
-  return value !== undefined && /^[1-9]\d*$/.test(value.trim());
-}
-
 function validateProvider(
   env: NodeJS.ProcessEnv,
   mode: DeploymentMode,
@@ -519,14 +544,20 @@ function validateStripe(
   // deployed environment. Test mode skips it: unit fixtures configure only
   // what they exercise.
   if (mode !== 'test' && !adminMode) {
-    for (const { price, amount } of PACK_PRICE_VARS) {
+    for (const price of PACK_PRICE_ENV_VARS) {
       const problems: string[] = [];
-      const priceValue = env[price];
+      // TRIMMED, exactly like the catalog that will resolve it: #275 made
+      // products.ts trim every price id, and judging the raw value here made
+      // a pasted leading space a production BOOT error for an id the runtime
+      // resolves and sells. Development boots and sells packs normally,
+      // promotion crash-loops the API, and the message tells the operator
+      // that a value plainly beginning with price_ is not a price id -
+      // preflight is names-only, so nothing between them catches it. The
+      // same trim-vs-raw split round 5 fixed for STRIPE_CURRENCY and round 7
+      // for order currencies (#278 round 9).
+      const priceValue = (env[price] ?? '').trim();
       if (!priceValue) problems.push(`${price} is required`);
       else if (!priceValue.startsWith('price_')) problems.push(`${price} must be a Stripe price id (price_...)`);
-      if (!isPositiveInteger(env[amount])) {
-        problems.push(`${amount} must be a positive integer of cents`);
-      }
       for (const message of problems) {
         findings.push({
           severity: production ? 'error' : 'warning',
@@ -536,15 +567,42 @@ function validateStripe(
       }
     }
 
+    // The store currency stopped being decorative in #275: every Price must be
+    // denominated in it or the catalog refuses to price that product, so an
+    // unset value defaulting to 'usd' can make an otherwise correct
+    // non-USD deployment unsellable with nothing naming the cause. A warning,
+    // not an error - the default is right for this deployment and production
+    // must not gain a new way to refuse to boot - but it is now something an
+    // operator can read (#278 review round 2).
+    // Trimmed: a whitespace-only value (a paste artifact in a Railway field)
+    // is "set" to the falsy check but unset to the catalog, which silently
+    // validated every Price against usd with zero findings (#278 review r5).
+    // Via the SAME normalizer the runtime uses, so the validator's notion of
+    // "unset" cannot drift from products.ts's (#278 round 6).
+    if (normalizedCurrency(env.STRIPE_CURRENCY, '') === '') {
+      // Names every product family that inherits it. Round 10 deduped the
+      // two currency findings by DELETING the JIT one, so with Pay & Send
+      // enabled and both vars unset the operator read a pack-only warning,
+      // fixed packs, and still had Pay & Send failing on a terminal
+      // currency_mismatch nothing had mentioned (#278 round 11).
+      const alsoJit = env.JIT_PURCHASE_ENABLED === 'true' &&
+        normalizedCurrency(env.JIT_CURRENCY, '') === '';
+      findings.push({
+        severity: 'warning',
+        rule: 'stripe.currency_unset',
+        message:
+          `STRIPE_CURRENCY is not set; ${alsoJit ? 'pack and Pay & Send' : 'pack'} ` +
+          'Prices must be denominated in the default (usd) or they will not resolve'
+      });
+    }
+
     if (env.JIT_PURCHASE_ENABLED === 'true') {
-      for (const { price, amount } of JIT_VARS) {
+      for (const price of JIT_PRICE_ENV_VARS) {
         const problems: string[] = [];
-        const priceValue = env[price];
+        // Trimmed, like the catalog - see the pack loop above (#278 round 9).
+        const priceValue = (env[price] ?? '').trim();
         if (!priceValue) problems.push(`${price} is required when JIT_PURCHASE_ENABLED=true`);
         else if (!priceValue.startsWith('price_')) problems.push(`${price} must be a Stripe price id (price_...)`);
-        if (!isPositiveInteger(env[amount])) {
-          problems.push(`${amount} must be a positive integer of cents when JIT_PURCHASE_ENABLED=true`);
-        }
         for (const message of problems) {
           findings.push({
             severity: production ? 'error' : 'warning',
@@ -552,6 +610,28 @@ function validateStripe(
             message
           });
         }
+      }
+      // Only when JIT_CURRENCY alone is missing: the both-unset case is
+      // already reported by the pack check above, under this same rule id, so
+      // firing here too gave one root cause two findings with conflicting
+      // text under one rule (#278 round 10).
+      if (
+        normalizedCurrency(env.JIT_CURRENCY, '') === '' &&
+        normalizedCurrency(env.STRIPE_CURRENCY, '') !== ''
+      ) {
+        // The message is rendered FROM the predicate. Round 10 narrowed this
+        // branch to "JIT_CURRENCY alone is unset" but left text asserting
+        // that STRIPE_CURRENCY was unset too and that Prices must be in usd -
+        // both false on the only branch that can now reach it, and a non-USD
+        // operator following it would point Pay & Send at USD Prices and get
+        // a terminal currency_mismatch (#278 round 11).
+        findings.push({
+          severity: 'warning',
+          rule: 'stripe.currency_unset',
+          message:
+            `JIT_CURRENCY is not set; Pay & Send Prices must be denominated in ` +
+            `${packCurrency(env)}, inherited from STRIPE_CURRENCY`
+        });
       }
     }
   }

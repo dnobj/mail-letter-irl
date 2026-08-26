@@ -11,10 +11,23 @@ import http from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { verifyWebhookSignature } from '../services/stripeService.js';
 import { createPackCheckout, processStripeWebhookEvent } from '../services/commerceService.js';
+import { PACK_PRODUCTS } from '../config/products.js';
 import { authenticateHttpRequest } from './middleware/auth.js';
 import { parseCookies, serializeCookie } from '../utils/cookies.js';
 import { query } from '../db/index.js';
-import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import {
+  carriedDiagnosticClass,
+  classifyDiagnosticError,
+  isTerminalDiagnosticClass,
+  writeDiagnostic
+} from '../utils/diagnosticLog.js';
+
+// The fourth copy of the pack table until #275 gave it one home. Adding a
+// tier in products.ts prices it, validates its env var, resolves it and
+// reports it in /readyz - while a hand-kept list here answered 400 and left
+// the Buy button dead for a product every other layer believed was live.
+// Static derivation, so it is derived ONCE (#278 round 8).
+const VALID_PACK_CODES = PACK_PRODUCTS.map(product => product.productCode);
 
 // Extended request/response types with cookie support
 type Request = http.IncomingMessage & {
@@ -91,11 +104,10 @@ export async function handleCreateCheckoutSession(
     }
 
     // Validate product ID
-    const validProducts = ['credit-pack-4', 'credit-pack-10', 'credit-pack-100'];
-    if (!validProducts.includes(productId)) {
+    if (!VALID_PACK_CODES.includes(productId)) {
       res.statusCode = 400;
       res.json({
-        error: `Invalid product ID. Must be one of: ${validProducts.join(', ')}`
+        error: `Invalid product ID. Must be one of: ${VALID_PACK_CODES.join(', ')}`
       });
       return;
     }
@@ -121,45 +133,18 @@ export async function handleCreateCheckoutSession(
       cancelUrl
     });
 
-    if (result.success) {
-      writeDiagnostic('info', 'credits.checkout_created');
-
-      res.json({
-        success: true,
-        orderId: result.orderId,
-        sessionId: result.sessionId,
-        sessionUrl: result.sessionUrl
-      });
-    } else {
-      // Distinguish between configuration errors and other failures
-      const errorMessage = result.error || 'Failed to create checkout session';
-      const configurationFailure =
-        errorMessage.includes('not configured') ||
-        errorMessage.includes('environment variable');
-      writeDiagnostic('error', 'credits.checkout_creation_failed', {
-        errorClass: configurationFailure ? 'configuration_error' : 'provider_error'
-      });
-      if (configurationFailure) {
-        // Configuration error - service temporarily unavailable
-        res.statusCode = 503;
-        res.json({
-          error: 'Service configuration error',
-          message: 'Payment processing is temporarily unavailable. Please try again later.'
-        });
-      } else if (errorMessage.includes('Invalid product')) {
-        // Client error - bad request
-        res.statusCode = 400;
-        res.json({
-          error: 'Invalid product'
-        });
-      } else {
-        // Other errors
-        res.statusCode = 500;
-        res.json({
-          error: 'Unable to create checkout session'
-        });
-      }
-    }
+    // createPackCheckout either succeeds or THROWS - its result type's
+    // `success` is the literal `true`, so the else-branch that used to sit
+    // here was dead code tsc could not flag, and an unpriced pack fell through
+    // to the generic catch as a bare 500 instead of the 503 the branch
+    // promised (#278 review round 4). Failure mapping lives in the catch now.
+    writeDiagnostic('info', 'credits.checkout_created');
+    res.json({
+      success: true,
+      orderId: result.orderId,
+      sessionId: result.sessionId,
+      sessionUrl: result.sessionUrl
+    });
   } catch (error: unknown) {
     // Prefer a class the failing layer already resolved. createPackCheckout
     // carries the Stripe error's own class (e.g. resource_missing) here, which
@@ -168,20 +153,53 @@ export async function handleCreateCheckoutSession(
     // investigation on a schema hunt. The default stays database_error because
     // the *uncarried* errors that reach here are genuine database operations -
     // the user-email lookup above and the order INSERT inside createPackCheckout.
-    const carried =
-      error && typeof error === 'object' && 'diagnosticClass' in error &&
-      typeof (error as { diagnosticClass?: unknown }).diagnosticClass === 'string'
-        ? (error as { diagnosticClass: string }).diagnosticClass
-        : undefined;
+    const carried = carriedDiagnosticClass(error);
     writeDiagnostic('error', 'credits.checkout_creation_failed', {
       errorClass: carried ?? classifyDiagnosticError(error, 'database_error')
     });
 
-    res.statusCode = 500;
-    res.json({
-      error: 'Internal server error',
-      message: 'Unable to create checkout session'
-    });
+    const code =
+      error && typeof error === 'object' && 'code' in error &&
+      typeof (error as { code?: unknown }).code === 'string'
+        ? (error as { code: string }).code
+        : undefined;
+    // No validation_error branch: this handler pre-validates productId
+    // against PACK_PRODUCTS before calling createPackCheckout, so the
+    // commerce layer's invalid-product throw is unreachable from here - the
+    // branch that used to sit in this chain had zero real coverage and its
+    // test asserted a 400 that actually came from the pre-validation (#278
+    // round 6).
+    if (
+      // PACK_AMOUNT_NOT_CONFIGURED stays: its carried class is legitimately
+      // transient (a Stripe blip mid-resolution), so the terminal test below
+      // does not cover it. PRICE_ID_NOT_CONFIGURED does not - its one producer
+      // always carries configuration_error, which IS in the terminal set, so
+      // the disjunct never changed the outcome (#278 round 10).
+      code === 'PACK_AMOUNT_NOT_CONFIGURED' ||
+      // The vocabulary's own terminality answer, so a terminal class carried
+      // verbatim (configuration_error, amount_too_small, resource_missing,
+      // StripeAuthenticationError) maps like the configuration fault it is
+      // instead of falling to a bare 500 while the sibling guard one layer
+      // earlier answered 503 (#278 r5). configuration_error is IN the
+      // terminal set - a separate disjunct for it was the scattered copy the
+      // vocabulary helper exists to end (#278 round 8).
+      isTerminalDiagnosticClass(carried)
+    ) {
+      // An unpriced or misconfigured product - transient (a Stripe blip mid
+      // resolution) or terminal (a human must fix config), the customer-facing
+      // answer is the same: unavailable right now, try again later.
+      res.statusCode = 503;
+      res.json({
+        error: 'Service configuration error',
+        message: 'Payment processing is temporarily unavailable. Please try again later.'
+      });
+    } else {
+      res.statusCode = 500;
+      res.json({
+        error: 'Internal server error',
+        message: 'Unable to create checkout session'
+      });
+    }
   }
 }
 
@@ -226,7 +244,7 @@ export async function handleStripeWebhook(
     return;
   } catch (error: unknown) {
     writeDiagnostic('error', 'credits.webhook_failed', {
-      errorClass: classifyDiagnosticError(error, 'provider_error')
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error')
     });
     res.statusCode = 500;
     res.json({ error: 'Webhook processing failed' });

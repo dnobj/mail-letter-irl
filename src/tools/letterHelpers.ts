@@ -491,6 +491,7 @@ export interface CreateLetterDraftParams {
 export async function createLetterDraftAndBuildOutput(
   params: CreateLetterDraftParams
 ): Promise<LetterQuoteOutput> {
+
   const {
     sender,
     recipient,

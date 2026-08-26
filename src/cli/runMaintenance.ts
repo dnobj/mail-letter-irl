@@ -8,7 +8,11 @@ import { runDailyMaintenance } from '../workers/creditExpirationWorker.js';
 import { runStatusSync } from '../workers/statusSyncWorker.js';
 import { runCommerceMaintenance } from '../services/commerceService.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
-import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import {
+  carriedDiagnosticClass,
+  classifyDiagnosticError,
+  writeDiagnostic
+} from '../utils/diagnosticLog.js';
 import { assertValidDeploymentConfig } from '../config/deploymentConfig.js';
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
@@ -18,11 +22,7 @@ export function writeMaintenanceFailure(error: unknown): void {
   // Prefer a class the failing layer already resolved (the deployment
   // validator carries configuration_error), so a config failure does not
   // masquerade as unknown_error - the mislabel that made #213 expensive.
-  const carried =
-    error && typeof error === 'object' && 'diagnosticClass' in error &&
-    typeof (error as { diagnosticClass?: unknown }).diagnosticClass === 'string'
-      ? (error as { diagnosticClass: string }).diagnosticClass
-      : undefined;
+  const carried = carriedDiagnosticClass(error);
   writeDiagnostic('error', 'maintenance.run_failed', {
     errorClass: carried ?? classifyDiagnosticError(error, 'unknown_error')
   });

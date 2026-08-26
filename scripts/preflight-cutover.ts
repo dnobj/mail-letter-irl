@@ -49,11 +49,23 @@ export interface DiffOptions {
   service: 'api' | 'maintenance';
 }
 
+export interface ManifestGap {
+  entry: EnvVarRequirement;
+  /** Names-only, safe to print. */
+  note: string;
+}
+
 export interface ManifestDiff {
   /** Requirements not satisfied by any present name (own name or alias). */
-  missing: EnvVarRequirement[];
-  /** Names-only note per missing entry, safe to print. */
-  notes: string[];
+  missing: ManifestGap[];
+  /**
+   * Absent entries marked `advisory`: reported so a parity gap is VISIBLE, but
+   * not counted as a failure, because the code has a working default (#278
+   * round 3). Entry and note travel as ONE record - the previous four
+   * index-coupled parallel arrays let a count disagree with the lines printed
+   * under it (#278 round 6).
+   */
+  advisory: ManifestGap[];
 }
 
 /**
@@ -69,38 +81,78 @@ export function diffManifest(
   const production = options.environment === 'production';
   const jitFlagSet = present.has('JIT_PURCHASE_ENABLED');
   const staticDcrFlagSet = present.has('LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY');
-  const missing: EnvVarRequirement[] = [];
-  const notes: string[] = [];
+  const missing: ManifestGap[] = [];
+  const advisory: ManifestGap[] = [];
 
   for (const entry of manifest) {
     if (!entry.services.includes(options.service)) continue;
     if (entry.requiredIn === 'production' && !production) {
-      // One exception: the identity label is required in every DEPLOYED
+      // Two exceptions. The identity label is required in every DEPLOYED
       // environment, because deployed development runs NODE_ENV=production.
-      if (entry.name !== 'LETTER_IRL_DEPLOYMENT_ENVIRONMENT') continue;
+      // And ADVISORY entries are diffed everywhere: their entire purpose is
+      // cross-environment parity VISIBILITY, and skipping them outside
+      // production made that visibility one-directional - a value set in
+      // production but absent in development was reported by neither run
+      // (#278 review round 5).
+      if (entry.name !== 'LETTER_IRL_DEPLOYMENT_ENVIRONMENT' && !entry.advisory) continue;
     }
     if (entry.requiredIn === 'development' && production) continue;
-    if (entry.condition === 'when-jit-enabled' && !jitFlagSet) continue;
-    if (entry.condition === 'when-static-dcr' && !staticDcrFlagSet) continue;
+    // ADVISORY entries skip the condition gates too. Round 5 freed them from
+    // the requiredIn gate for parity visibility, but the condition gate below
+    // still dropped them entirely: with Pay & Send unrolled in production
+    // (flag name absent) and enabled in development, JIT_CURRENCY landed in
+    // neither list in either run, so nothing reported that the two
+    // environments disagree about the Pay & Send currency - the exact
+    // one-directional blindness the mechanism exists to end, and which the
+    // docs already claim is solved (#278 round 10).
+    if (!entry.advisory) {
+      if (entry.condition === 'when-jit-enabled' && !jitFlagSet) continue;
+      if (entry.condition === 'when-static-dcr' && !staticDcrFlagSet) continue;
+    }
     // 'unless-admin' is ignored: deployed services are never local admin mode.
 
     const satisfied = [entry.name, ...(entry.aliases ?? [])].some(name => present.has(name));
     if (!satisfied) {
-      missing.push(entry);
       const aliasNote = entry.aliases?.length
         ? ` (or one of: ${entry.aliases.join(', ')})`
         : '';
-      const conditionNote =
+      // The note follows the LIST this entry lands in. An advisory entry
+      // prints under "optional variable(s) unset (defaults apply)", so a
+      // "[required because ...]" suffix told the operator that one variable
+      // was simultaneously required and optional-with-a-working-default -
+      // and this note is the only per-variable explanation the gate emits.
+      // It fired on a normal production cutover, because JIT_CURRENCY is
+      // advisory AND carries the when-jit-enabled condition (#278 round 9).
+      const conditionSubject =
         entry.condition === 'when-jit-enabled'
-          ? ' [required because JIT_PURCHASE_ENABLED is set]'
+          ? 'JIT_PURCHASE_ENABLED'
           : entry.condition === 'when-static-dcr'
-            ? ' [required because LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY is set]'
-            : '';
-      notes.push(`${entry.name}${aliasNote}${conditionNote}`);
+            ? 'LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY'
+            : null;
+      // The note describes the ACTUAL state, not the entry's declaration.
+      // Advisory entries now bypass the condition gate, so they reach this
+      // builder with the flag absent - and the note went on asserting the
+      // flag was set, in exactly the case the bypass was added for. That is
+      // the same false-note defect round 9 fixed on the required branch
+      // (#278 round 11).
+      const conditionSatisfied =
+        entry.condition === 'when-jit-enabled'
+          ? jitFlagSet
+          : entry.condition === 'when-static-dcr'
+            ? staticDcrFlagSet
+            : false;
+      const conditionNote = conditionSubject
+        ? entry.advisory
+          ? ` [parity check; ${conditionSubject} is ${conditionSatisfied ? 'set' : 'not set here'}]`
+          : ` [required because ${conditionSubject} is set]`
+        : '';
+      const gap = { entry, note: `${entry.name}${aliasNote}${conditionNote}` };
+      if (entry.advisory) advisory.push(gap);
+      else missing.push(gap);
     }
   }
 
-  return { missing, notes };
+  return { missing, advisory };
 }
 
 interface RailwayIds {
@@ -275,7 +327,16 @@ async function main(): Promise<void> {
     } else {
       failures += diff.missing.length;
       console.error(`❌ ${environment}/${service}: ${diff.missing.length} required variable(s) missing:`);
-      for (const note of diff.notes) console.error(`   - ${note}`);
+      for (const gap of diff.missing) console.error(`   - ${gap.note}`);
+    }
+    // Not a gate: these have working defaults. Printed because the whole point
+    // of listing them is that an operator can SEE the two environments
+    // disagree before promotion, which is what nothing could do before.
+    if (diff.advisory.length > 0) {
+      console.log(
+        `ℹ️  ${environment}/${service}: ${diff.advisory.length} optional variable(s) unset (defaults apply):`
+      );
+      for (const gap of diff.advisory) console.log(`   - ${gap.note}`);
     }
   }
 

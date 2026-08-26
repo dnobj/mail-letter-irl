@@ -14,21 +14,16 @@ import Stripe from 'stripe';
 import { query } from '../db/index.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
-let stripeClient: Stripe | null = null;
+// The shared client (with its timeout/retry bounds) and the shared product
+// table. Both used to be private hand-kept duplicates here - the credits map's
+// own comment said "must match stripeService.ts", which is the drift shape
+// behind #160/#270/#275. Now there is one of each.
+import { BACKGROUND_REQUEST_OPTIONS, getStripeClient } from './stripeClient.js';
+import {
+  PACK_CREDITS_BY_PRODUCT as PRODUCT_CREDITS,
+  normalizedCurrency
+} from '../config/products.js';
 
-function getStripeClient(): Stripe {
-  const apiKey = process.env.STRIPE_SECRET_KEY;
-  if (!apiKey) throw new Error('STRIPE_SECRET_KEY is not configured');
-  stripeClient ??= new Stripe(apiKey, { apiVersion: '2025-11-17.clover' });
-  return stripeClient;
-}
-
-// Credit amounts by product ID (must match stripeService.ts)
-const PRODUCT_CREDITS: Record<string, number> = {
-  'credit-pack-4': 4,
-  'credit-pack-10': 10,
-  'credit-pack-100': 100,
-};
 
 interface ReconciliationResult {
   period: {
@@ -105,15 +100,19 @@ export async function reconcileStripePayments(
   let startingAfter: string | undefined;
 
   while (hasMore) {
-    const sessions = await stripe.checkout.sessions.list({
-      created: {
-        gte: Math.floor(startDate.getTime() / 1000),
-        lte: Math.floor(endDate.getTime() / 1000),
+    // `expand: ['data.line_items']` used to be requested here and then never
+    // read - maximum server-side latency for data discarded on every page.
+    const sessions = await stripe.checkout.sessions.list(
+      {
+        created: {
+          gte: Math.floor(startDate.getTime() / 1000),
+          lte: Math.floor(endDate.getTime() / 1000),
+        },
+        limit: 100,
+        starting_after: startingAfter,
       },
-      limit: 100,
-      starting_after: startingAfter,
-      expand: ['data.line_items'],
-    });
+      BACKGROUND_REQUEST_OPTIONS
+    );
 
     for (const session of sessions.data) {
       // Support both camelCase (userId) and snake_case (user_id) for backwards compatibility
@@ -128,7 +127,7 @@ export async function reconcileStripePayments(
           sessionId: session.id,
           userId,
           amount: session.amount_total || 0,
-          currency: (session.currency || '').toLowerCase(),
+          currency: normalizedCurrency(session.currency ?? undefined, ''),
           credits,
           productId,
           created: new Date(session.created * 1000),
@@ -139,10 +138,14 @@ export async function reconcileStripePayments(
       }
     }
 
+    // Same guard as the refunds walk below, for the same reason: the cursor
+    // advances only from the last item, so a has_more page carrying no data
+    // left it unmoved and re-issued the identical request forever, hanging
+    // the whole maintenance sweep. Round 10 fixed that shape in one of the
+    // two copies of this loop; this is the other (#278 round 11).
+    if (sessions.data.length === 0) break;
+    startingAfter = sessions.data[sessions.data.length - 1].id;
     hasMore = sessions.has_more;
-    if (sessions.data.length > 0) {
-      startingAfter = sessions.data[sessions.data.length - 1].id;
-    }
   }
 
   console.log(`   Found ${stripePayments.size} paid Stripe sessions`);
@@ -244,8 +247,17 @@ export async function reconcileStripePayments(
 
     const paidOrderState = !['checkout_pending', 'payment_failed', 'cancelled', 'paid']
       .includes(order.status);
-    if (stripePayment.amount !== order.amount_cents ||
-        stripePayment.currency !== order.currency.toLowerCase()) {
+    if (
+      stripePayment.amount !== order.amount_cents ||
+      // The shared normalizer on BOTH sides, for consistency with the
+      // fulfilment gate rather than to fix a live alarm: orders.currency is
+      // VARCHAR(3), so a padded value cannot be stored, and round 11's claim
+      // that this fixed a false money alarm was wrong (its test padded both
+      // sides and passed with the change reverted). What it does buy is that
+      // one policy judges this column everywhere, so the two gates cannot
+      // drift if the column ever widens (#278 round 12).
+      stripePayment.currency !== normalizedCurrency(order.currency, '')
+    ) {
       amountMismatches++;
       discrepancies.push({
         type: 'amount_mismatch',
@@ -359,15 +371,41 @@ export async function reconcileStripePayments(
   }
 
   // 5. Check for refunds in Stripe that weren't processed
-  const refunds = await stripe.refunds.list({
-    created: {
-      gte: Math.floor(startDate.getTime() / 1000),
-      lte: Math.floor(endDate.getTime() / 1000),
-    },
-    limit: 100,
-  });
+  // Paginated like the sessions sweep above. A single 100-item page silently
+  // dropped every older refund in the window - and Stripe returns refunds
+  // newest-first, so what fell off the end was exactly the aged, most likely
+  // unreconciled ones, in precisely the mass-refund incident this audit
+  // exists for. The reconciliation reported clean while completed Stripe
+  // refunds had no durable reversal (#278 round 9).
+  const allRefunds: Stripe.Refund[] = [];
+  let refundsHasMore = true;
+  let refundsStartingAfter: string | undefined;
+  while (refundsHasMore) {
+    const refundPage = await stripe.refunds.list(
+      {
+        created: {
+          gte: Math.floor(startDate.getTime() / 1000),
+          lte: Math.floor(endDate.getTime() / 1000),
+        },
+        limit: 100,
+        starting_after: refundsStartingAfter,
+      },
+      BACKGROUND_REQUEST_OPTIONS
+    );
+    allRefunds.push(...refundPage.data);
+    // An EMPTY page ends the walk whatever has_more says. The cursor advances
+    // only from the last item, so a has_more page carrying no data left it
+    // unmoved and re-issued the identical request forever - each a 60s call,
+    // no cap, no diagnostic - hanging the whole maintenance sweep (orphan
+    // cancellation, refund retries, the stuck-order alarm) for the life of
+    // the process. Five round-10 angles found this independently; the
+    // single-call code it replaced could not loop (#278 round 10).
+    if (refundPage.data.length === 0) break;
+    refundsStartingAfter = refundPage.data[refundPage.data.length - 1].id;
+    refundsHasMore = refundPage.has_more;
+  }
 
-  for (const refund of refunds.data) {
+  for (const refund of allRefunds) {
     if (refund.status === 'succeeded' && refund.payment_intent) {
       const paymentIntentReference = typeof refund.payment_intent === 'string'
         ? refund.payment_intent

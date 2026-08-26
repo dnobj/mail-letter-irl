@@ -62,6 +62,72 @@ export type DiagnosticErrorCategory =
   | "validation_error"
   | "unknown_error";
 
+/**
+ * Classes a human must act on: retrying cannot clear them, however long you
+ * wait. This is the vocabulary's own question, so it is answered once here
+ * rather than by string comparisons scattered through the commerce layer -
+ * where `=== 'configuration_error'` was inlined at five sites, each of which
+ * decides something expensive (whether to cancel a customer's order, whether a
+ * paid webhook retries or books unmatched money, how hard to retry Stripe).
+ * Adding a class there meant finding all five; missing one cancelled a live
+ * order or retried a hopeless fault forever (#278 review round 3).
+ *
+ * Everything absent from this set is treated as transient, which is the safe
+ * default: a transient verdict retries and leaves orders pending, a terminal
+ * one cancels.
+ */
+const TERMINAL_ERROR_CLASSES = new Set([
+  "configuration_error",
+  // The id points at nothing in this account or mode.
+  "resource_missing",
+  // Credentials: a revoked, expired, restricted or wrong-mode key. No amount
+  // of retrying fixes any of them. These are TYPES, but unambiguous ones:
+  // stripe-node raises them only for authentication and permission failures.
+  "api_key_expired",
+  "testmode_charges_only",
+  "StripeAuthenticationError",
+  "StripePermissionError",
+  // Specific invalid-request CODES whose cause is always configuration: a
+  // Price below/above Stripe's own per-currency limits, or a request our code
+  // built wrong. Each keeps failing identically until a human acts.
+  "amount_too_small",
+  "amount_too_large",
+  "parameter_missing",
+  "parameter_invalid_integer"
+  // The coarse "StripeInvalidRequestError" TYPE is deliberately absent. It is
+  // stripe-node's constructor-name fallback for every invalid_request_error
+  // without an allowlisted code - including retryable ones like expires_at
+  // drifting under Stripe's 30-minute floor while a slow request is in
+  // transit. Listing it here cancelled live customers' orders for faults a
+  // retry would have cleared (#278 review round 4). An unrecognized invalid
+  // request therefore defaults to transient, which strands nothing: pending
+  // orders are swept, cancelled ones are gone.
+]);
+
+export function isTerminalDiagnosticClass(diagnosticClass: string | undefined): boolean {
+  return diagnosticClass !== undefined && TERMINAL_ERROR_CLASSES.has(diagnosticClass);
+}
+
+/**
+ * The class a lower layer already resolved and attached to the error it
+ * threw, if any. Prefer this over re-classifying: tool-layer wrappers rebuild
+ * errors, and a rebuilt Error has neither .code nor .type, so re-classifying
+ * records unknown_error/database_error for a fault the commerce layer had
+ * named precisely - the #213 mislabel. This narrowing used to be copy-pasted
+ * at four catch sites, drifting cosmetically (#278 review round 5).
+ */
+export function carriedDiagnosticClass(error: unknown): string | undefined {
+  if (
+    error &&
+    typeof error === "object" &&
+    "diagnosticClass" in error &&
+    typeof (error as { diagnosticClass?: unknown }).diagnosticClass === "string"
+  ) {
+    return (error as { diagnosticClass: string }).diagnosticClass;
+  }
+  return undefined;
+}
+
 export function classifyDiagnosticError(
   error: unknown,
   fallback: DiagnosticErrorCategory = "unknown_error"
@@ -83,6 +149,33 @@ export function classifyDiagnosticError(
   if (type && SAFE_ERROR_TYPES.has(type)) return type;
 
   return fallback;
+}
+
+const changeOnlySlots = new Map<string, string>();
+
+/**
+ * Emit a diagnostic only when its signature CHANGED for the given slot - the
+ * steady-fault throttle this PR's review rounds re-invented three times, each
+ * copy with its own keying and reset semantics, one of which shipped a
+ * shared-slot eviction bug mid-review (#278 round 6). Clear a slot when the
+ * fault recovers so a recurrence is reported again.
+ */
+export function writeDiagnosticOnChange(
+  slot: string,
+  signature: string,
+  level: DiagnosticLevel,
+  event: string,
+  fields: Record<string, DiagnosticValue> = {}
+): void {
+  if (changeOnlySlots.get(slot) === signature) return;
+  changeOnlySlots.set(slot, signature);
+  writeDiagnostic(level, event, fields);
+}
+
+export function clearDiagnosticChangeSlot(slotPrefix: string): void {
+  for (const key of [...changeOnlySlots.keys()]) {
+    if (key === slotPrefix || key.startsWith(slotPrefix + ':')) changeOnlySlots.delete(key);
+  }
 }
 
 export function writeDiagnostic(

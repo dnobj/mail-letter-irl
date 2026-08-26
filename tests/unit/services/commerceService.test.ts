@@ -14,8 +14,59 @@ const mocks = vi.hoisted(() => ({
   retrieveSession: vi.fn(),
   jitEnabled: vi.fn(),
   getJitProduct: vi.fn(),
-  getPackProduct: vi.fn()
+  getPackProduct: vi.fn(),
+  ensurePriceCatalog: vi.fn(),
+  describeUnpriced: vi.fn(() => null)
 }));
+
+/**
+ * commerceService awaits ensurePriceCatalog() at three chokepoints (#275
+ * stage A). This suite mocked stripeService but not the catalog, so the REAL
+ * resolver ran from a unit suite: its default retriever is
+ * getStripeClient().prices.retrieve, which with STRIPE_SECRET_KEY absent threw
+ * into a swallowed catch - the ensure calls were exercised as silent no-ops and
+ * nothing here would have noticed if all three were deleted - and with a key
+ * present in a developer's shell became real outbound requests to
+ * api.stripe.com, under a 10s client timeout against vitest's 10s testTimeout
+ * (#278 review round 2).
+ */
+vi.mock('../../../src/services/priceCatalog.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../../src/services/priceCatalog.js')>();
+  return {
+  ensurePriceCatalog: mocks.ensurePriceCatalog,
+  // The guards read describeUnpriced (non-null by contract); the fixtures
+  // still drive it through getPriceResolutionFailure so each test states its
+  // catalog verdict the same way it always did, with the synthesized
+  // transient record as the null-case default - mirroring production.
+  // Null from a fixture means "no recorded failure": the synthesized
+  // transient record is the null-case default, mirroring production's
+  // non-null contract. The knob carries the REAL seam's name - the earlier
+  // getPriceResolutionFailure knob cemented a describeUnpriced wiring that
+  // never existed in src (#278 round 8).
+  describeUnpriced: (productCode: string) =>
+    mocks.describeUnpriced(productCode) ?? {
+      productCode,
+      rule: 'price.not_resolved',
+      diagnosticClass: 'provider_error'
+    },
+  // The REAL formatter, not a retype of it: this string is the slot
+  // SIGNATURE that decides whether a fault logs at all, and it has changed
+  // in four consecutive rounds - a copy here could not fail when the real
+  // one drifts, which is the whole defect these tests exist to catch
+  // (#278 round 11; the readyz suite already does this).
+  formatPriceFailureSummary: actual.formatPriceFailureSummary,
+  // Swallows like production kick: aliasing straight to the ensure mock let a
+  // mockRejectedValue fixture leak an unhandled rejection from fire-and-forget
+  // call sites - a failure mode the real kick structurally cannot produce.
+  kickPriceCatalog: (...args: unknown[]) => {
+    try {
+      void Promise.resolve(mocks.ensurePriceCatalog(...args)).catch(() => undefined);
+    } catch {
+      /* swallowed, as in production */
+    }
+  }
+  };
+});
 
 vi.mock('../../../src/db/index.js', () => ({
   query: mocks.query,
@@ -54,6 +105,7 @@ import {
   requestRefund,
   runCommerceMaintenance
 } from '../../../src/services/commerceService.js';
+import { clearDiagnosticChangeSlot } from '../../../src/utils/diagnosticLog.js';
 
 const baseOrder = {
   order_id: 'order-1',
@@ -135,6 +187,47 @@ describe('commerceService', () => {
     mocks.createMail.mockResolvedValue({});
     mocks.grantEntitlement.mockResolvedValue({ entitlement_id: 'ent-1' });
     mocks.findRefund.mockResolvedValue(null);
+    // vi.clearAllMocks() resets call history but NOT mockReturnValue, and this
+    // one decides throw-vs-refuse for a paid webhook - so a leftover from an
+    // earlier test silently changed a later test's outcome, and adding or
+    // reordering a test could flip an assertion nobody edited (#278 r3).
+    mocks.describeUnpriced.mockReturnValue(null as never);
+  });
+
+  it('sweeps session-less orders whose checkout_expires_at is NULL', async () => {
+    // Pack orders are INSERTed without checkout_expires_at, and NULL <= NOW()
+    // is UNKNOWN - so a pack whose session creation failed non-terminally was
+    // a zombie the orphan sweep could never reclaim, stranded in
+    // checkout_pending forever with no alarm (the stuck-order check watches
+    // paid statuses only) (#278 review round 4).
+    mocks.query.mockResolvedValue({ rows: [], rowCount: 0 });
+    mocks.retrieveSession.mockResolvedValue(null);
+
+    await runCommerceMaintenance();
+
+    const orphanSweep = mocks.query.mock.calls
+      .map(([sql]) => String(sql))
+      .find(sql => sql.includes("status = 'checkout_pending'") && sql.includes('stripe_checkout_session_id IS NULL'));
+    expect(orphanSweep).toBeDefined();
+    expect(orphanSweep).toContain('checkout_expires_at IS NULL');
+  });
+
+  it('never touches the price catalog from the webhook path', async () => {
+    // The money already moved. Adoption prices from the static product table
+    // and the paid-amount comparison verifies the charge, so a live Stripe
+    // read here can only add failure modes - webhook 500 loops on transient
+    // faults, paid money stranded during a key rotation (#278 review r5).
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+      if (sql.includes('SELECT * FROM orders')) return { rows: [baseOrder] };
+      return { rows: [] };
+    });
+
+    await processStripeWebhookEvent(checkoutEvent({
+      metadata: { orderId: 'order-1', orderType: 'jit_mail', productCode: 'jit-letter' }
+    }));
+
+    expect(mocks.ensurePriceCatalog).not.toHaveBeenCalled();
   });
 
   it('claims concurrent Stripe event replays so only one can send or grant', async () => {
@@ -361,7 +454,19 @@ describe('commerceService', () => {
     expect([String(ordered[0]?.[0]), ordered[0]?.[1]]).toEqual([ACCOUNT_LOCK_SQL, ['user-1']]);
   });
 
-  it('refuses to adopt a legacy pack session when its amount is not configured', async () => {
+  it('adopts a paid legacy session from the product table, whatever the catalog says', async () => {
+    // Adoption of already-paid money must not depend on the current state of
+    // a Stripe lookup: terminal-classed blips stranded paying customers as
+    // permanently unmatched, transient-classed ones 500-looped the webhook on
+    // the schedule Stripe uses to disable endpoints. The pinned amount is the
+    // business agreement; the paid-amount comparison downstream verifies the
+    // actual charge against it (#278 review round 5). The catalog mocks here
+    // scream "unpriced" precisely to prove they are not consulted.
+    mocks.describeUnpriced.mockReturnValue({
+      productCode: 'credit-pack-4',
+      rule: 'price.inactive',
+      diagnosticClass: 'configuration_error'
+    } as never);
     mocks.getPackProduct.mockReturnValue({
       productCode: 'credit-pack-4',
       priceId: 'price-pack',
@@ -373,6 +478,17 @@ describe('commerceService', () => {
     });
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-legacy' }] };
+      if (sql.includes('INSERT INTO orders')) {
+        return { rows: [{
+          ...baseOrder,
+          order_id: 'stripe-cs-legacy',
+          order_type: 'letter_pack',
+          product_code: 'credit-pack-4',
+          credits: 4,
+          amount_cents: 500,
+          status: 'paid'
+        }] };
+      }
       return { rows: [] };
     });
 
@@ -383,24 +499,701 @@ describe('commerceService', () => {
       amount_total: 500
     }) as any)).resolves.toMatchObject({ duplicate: false });
 
-    // Inserting a zero amount would violate the amount_cents CHECK and roll
-    // back the webhook claim, leaving Stripe to retry forever with no signal.
+    // The order is INSERTed at the TABLE's pinned amount (500 for the
+    // starter), not at anything the mocked-out catalog could have said.
+    const insert = mocks.query.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO orders')
+    );
+    expect(insert).toBeDefined();
+    expect(insert?.[1]).toEqual(expect.arrayContaining([500, 4, 'credit-pack-4']));
+    // And nothing was BOOKED as unmatched: the money found its order. (The
+    // adoption flow legitimately SELECTs previously-unmatched events to
+    // reconcile them, so match the write, not the phrase.)
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("SET processing_status = 'unmatched'"),
+      expect.anything()
+    );
+    expect(mocks.getPackProduct).not.toHaveBeenCalled();
+  });
+
+  it('does not raise a money alarm for an UNPAID legacy session', async () => {
+    // The gate runs for every legacy-metadata session, including expiries and
+    // failed async payments, whose amount_total is a historical price nobody
+    // paid. Logging those at error made an unpaid expiry indistinguishable
+    // from the real paid-mismatch alarm this event name exists for, and the
+    // payload carried nothing to tell them apart (#278 round 9).
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const infoSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-x' }] };
+        return { rows: [] };
+      });
+
+      await processStripeWebhookEvent(
+        checkoutEvent({
+          payment_status: 'unpaid',
+          amount_total: 399,
+          client_reference_id: null,
+          metadata: { userId: 'user-1', productCode: 'credit-pack-4' }
+        })
+      );
+
+      const lines = (spy: typeof errorSpy) =>
+        spy.mock.calls
+          .flat()
+          .map(String)
+          .filter(line => line.includes('commerce.legacy_adoption_amount_mismatch'));
+      expect(lines(errorSpy)).toHaveLength(0);
+      expect(lines(infoSpy)).toHaveLength(1);
+      expect(lines(infoSpy)[0]).toContain('"paymentStatus":"unpaid"');
+    } finally {
+      errorSpy.mockRestore();
+      infoSpy.mockRestore();
+    }
+  });
+
+  it('still raises the money alarm when a PAID legacy session disagrees', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-y' }] };
+        return { rows: [] };
+      });
+
+      await processStripeWebhookEvent(
+        checkoutEvent({
+          payment_status: 'paid',
+          amount_total: 399,
+          client_reference_id: null,
+          metadata: { userId: 'user-1', productCode: 'credit-pack-4' }
+        })
+      );
+
+      const lines = errorSpy.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('commerce.legacy_adoption_amount_mismatch'));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('"paymentStatus":"paid"');
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('refuses a draft too close to expiry to carry a reusable window', async () => {
+    // The stamped value is min(configured, draftExpiry), so raising only the
+    // configured branch left a draft in its last 40 minutes stamping barely
+    // above Stripe's floor - the seconds-wide reuse window round 11 believed
+    // it had closed, still open for exactly those checkouts (#278 round 12).
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit', amountCents: 499,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          // Past Stripe's 30-minute floor, inside the floor plus the reuse
+          // budget: a session could be opened, but not a reusable one.
+          expires_at: new Date(Date.now() + 35 * 60_000)
+        }]
+      })
+      .mockResolvedValue({ rows: [] });
+
+    await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+      .rejects.toMatchObject({ code: 'DRAFT_TOO_CLOSE_TO_EXPIRY' });
+  });
+
+  it('reports an EXPIRED draft as expired, not as already sent', async () => {
+    // The sweeper flips aged drafts to 'expired', and the generic
+    // invalid-state throw told the customer it had "already been sent or
+    // cancelled" - false, and contradicting what the same draft got one
+    // sweep cycle earlier (#278 round 12).
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'expired',
+          expires_at: new Date(Date.now() + 6 * 60 * 60_000)
+        }]
+      })
+      .mockResolvedValue({ rows: [] });
+
+    await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+      .rejects.toMatchObject({ code: 'DRAFT_EXPIRED' });
+  });
+
+  it('records WHY a live row was retired, in both audit columns', async () => {
+    // A row inside Stripe's floor has not expired, and saying so in order
+    // history is a statement an operator acts on. Round 11 also wrote only
+    // the code, leaving the previous failure's message beside it, so the two
+    // columns described different events (#278 round 12).
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit', amountCents: 499,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const tooShort = {
+      ...baseOrder,
+      stripe_checkout_session_id: null,
+      checkout_url: null,
+      last_error: 'Failed to create Pay & Send checkout',
+      last_error_code: 'CHECKOUT_CREATION_FAILED',
+      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 6 * 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [tooShort] })
+      .mockResolvedValue({ rows: [baseOrder] });
+    mocks.createJitSession.mockResolvedValue({
+      success: true, sessionId: 'cs-fresh', sessionUrl: 'https://s', expiresAt: new Date()
+    });
+
+    await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+    const cancel = mocks.query.mock.calls.find(([sql]) =>
+      String(sql).includes("SET status = 'cancelled'") && String(sql).includes('last_error')
+    );
+    expect(cancel).toBeDefined();
+    expect(cancel?.[1]).toContain('CHECKOUT_WINDOW_TOO_SHORT');
+    // The statement writes the PAIR: a code without its message leaves the
+    // previous failure's text beside it.
+    expect(String(cancel?.[0])).toContain('last_error = $3');
+    expect(String(cancel?.[1]?.[2])).toMatch(/too short/i);
+  });
+
+  it('prices a reused order from the LIVE catalog, so a repoint takes effect', async () => {
+    // Rounds 11-12 spliced the row's figures into this product, ending with
+    // the price id pinned to the row - which stranded a checkout on an
+    // archived Price that the pre-round-11 code completed successfully. The
+    // splice existed to survive a concurrent memo invalidation, and that
+    // machinery is gone, so this is one fresh derivation again (#278 r13).
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit-LIVE', amountCents: 499,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const reusable = {
+      ...baseOrder,
+      amount_cents: 499,
+      product_snapshot: { ...baseOrder.product_snapshot },
+      stripe_checkout_session_id: 'cs-existing',
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 90 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 6 * 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [reusable] })
+      .mockResolvedValue({ rows: [reusable] });
+    mocks.createJitSession.mockResolvedValue({
+      success: true, sessionId: 'cs-x', sessionUrl: 'https://s', expiresAt: new Date()
+    });
+
+    await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+    expect(mocks.createJitSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        product: expect.objectContaining({ priceId: 'price-jit-LIVE' })
+      })
+    );
+  });
+
+  it('refuses to reuse a sessionless order too close to expiry for Stripe', async () => {
+    // Stripe rejects a Checkout Session whose expires_at is under 30 minutes
+    // away, and a reused sessionless row forwards its stored expiry verbatim.
+    // A row created 10 minutes ago on the default 30-minute window has ~20
+    // left, so every retry was rejected and left pending - the customer could
+    // not open a checkout for that draft until the row aged out (#278 r10).
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit', amountCents: 499,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const tooClose = {
+      ...baseOrder,
+      stripe_checkout_session_id: null,
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 6 * 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [tooClose] })
+      .mockResolvedValue({ rows: [baseOrder] });
+    mocks.createJitSession.mockResolvedValue({
+      success: true, sessionId: 'cs-fresh', sessionUrl: 'https://s', expiresAt: new Date()
+    });
+
+    await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+    const cancelled = mocks.query.mock.calls
+      .map(([sql]) => String(sql))
+      .some(sql => sql.includes("SET status = 'cancelled'"));
+    expect(cancelled).toBe(true);
+  });
+
+  it('treats an UNRESOLVED catalog as no verdict, never as a price change', async () => {
+    // amountCents 0 is the catalog's unresolved sentinel. Three review angles
+    // read the reprice branch as cancelling a reusable order during a
+    // transient Stripe blip; the enclosing transaction happened to roll the
+    // cancel back, but the branch must not fire at all (#278 round 8).
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const stale = {
+      ...baseOrder,
+      amount_cents: 499,
+      stripe_checkout_session_id: null,
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 45 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [stale] });
+
+    await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+      .rejects.toMatchObject({ code: 'JIT_NOT_CONFIGURED' });
+
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("'PRICE_CHANGED_BEFORE_SESSION'"),
+      expect.anything()
+    );
+  });
+
+  it('never lets the reprice branch touch a sessionless order in a hold state', async () => {
+    // Reachable only via operator surgery, but the reprice-cancel must never
+    // be the thing that clears a financial hold (#278 round 8).
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit-v2', amountCents: 599,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const held = {
+      ...baseOrder,
+      status: 'disputed',
+      amount_cents: 499,
+      stripe_checkout_session_id: null,
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 45 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [held] });
+    mocks.createJitSession.mockResolvedValue({
+      success: true, sessionId: 'cs-h', sessionUrl: 'https://s', expiresAt: new Date()
+    });
+
+    await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'cancelled'"),
+      expect.anything()
+    );
+  });
+
+  it('the refund claim itself refuses a PAYMENT_AMOUNT_MISMATCH quarantine', async () => {
+    // Round 7 put the gate in the sweep's candidate SELECT - ONE consumer.
+    // The exported money-mover must carry the same wall so a future caller
+    // (admin bulk-retry, second sweep) cannot bypass it (#278 round 8).
+    mocks.query.mockResolvedValue({ rows: [] });
+
+    await requestRefund('order-q', 'sweep retry');
+
+    const claim = mocks.query.mock.calls
+      .map(([sql]) => String(sql))
+      .find(sql => sql.includes("status = 'refund_pending'") && sql.includes('FOR UPDATE'));
+    expect(claim).toBeDefined();
+    expect(claim).toContain("last_error_code <> 'PAYMENT_AMOUNT_MISMATCH'");
+  });
+
+  it('unmatched-money recovery never erases the quarantine marker', async () => {
+    // The recovery UPDATE overwrote last_error_code unconditionally; on a
+    // quarantined row that erased the exact marker the refund gates key on
+    // (#278 round 8).
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-r' }] };
+      if (sql.includes('SELECT * FROM orders')) return { rows: [baseOrder] };
+      if (sql.includes("processing_status = 'unmatched'") && sql.includes('FOR UPDATE')) {
+        return { rows: [{ event_id: 'evt-m', event_type: 'refund.created' }] };
+      }
+      return { rows: [] };
+    });
+
+    await processStripeWebhookEvent(checkoutEvent());
+
+    const recovery = mocks.query.mock.calls
+      .map(([sql]) => String(sql))
+      .find(sql => sql.includes('UNMATCHED_MONEY_EVENT_RECOVERED'));
+    expect(recovery).toBeDefined();
+    expect(recovery).toContain("CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH'");
+  });
+
+  it('dedupes an identical quote fault and re-logs a CHANGED one', () => {
+    // The quote surface reports on change only, through the catalog's own
+    // canonical signature. The recovery axis of that signature - the
+    // resolution epoch, which re-arms the slot after a recovery no quote
+    // observed - is pinned against the REAL counter in priceCatalog.test.ts
+    // ('folds the resolution epoch into the signature'), because this suite
+    // stubs the catalog's state and cannot move a real epoch (#278 r8, r11).
+    clearDiagnosticChangeSlot('commerce.pay_and_send_unpriced:jit-letter');
+    const diag = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      mocks.jitEnabled.mockReturnValue(true);
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,
+        currency: 'usd', name: 'Pay & Send One Physical Letter',
+        description: 'x', mailType: 'letter'
+      });
+      mocks.describeUnpriced.mockReturnValue({
+        productCode: 'jit-letter',
+        rule: 'price.inactive',
+        diagnosticClass: 'configuration_error'
+      });
+
+      getSendEligibility(0, 2, 'letter'); // outage 1: logs
+      getSendEligibility(0, 2, 'letter'); // steady, identical: suppressed
+      mocks.describeUnpriced.mockReturnValue({
+        productCode: 'jit-letter',
+        rule: 'price.amount_mismatch',
+        diagnosticClass: 'configuration_error',
+        detail: 'expected 499 / stripe 599'
+      });
+      getSendEligibility(0, 2, 'letter'); // a DIFFERENT fault: logs
+
+      const lines = diag.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('"event":"commerce.pay_and_send_unpriced"'));
+      expect(lines).toHaveLength(2);
+      // and the figures reach the operator on the quote surface too
+      expect(lines[1]).toContain('expected 499 / stripe 599');
+    } finally {
+      diag.mockRestore();
+      clearDiagnosticChangeSlot('commerce.pay_and_send_unpriced:jit-letter');
+    }
+  });
+
+  it('cancels a sessionless pending JIT order priced under an OLD pin and starts fresh', async () => {
+    // Round 7's money-path find: session creation failed, the price was
+    // repointed+repinned, the customer retried inside the checkout window.
+    // Reusing the old row would build the NEW session against the OLD
+    // amount - customer pays 599 vs a 499 row, PAYMENT_AMOUNT_MISMATCH, and
+    // (before the sweep exclusion) an auto-refund of a legitimate purchase.
+    // Nothing was ever paid on a sessionless row, so it cancels free.
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit-v2', amountCents: 599,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const stale = {
+      ...baseOrder,
+      amount_cents: 499,
+      stripe_checkout_session_id: null,
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 45 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] }) // peek
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [stale] }) // active-order lookup
+      .mockResolvedValueOnce({ rows: [] }) // cancel UPDATE
+      .mockResolvedValueOnce({ rows: [] }) // order event
+      .mockResolvedValueOnce({ rows: [{ ...baseOrder, amount_cents: 599 }] }); // fresh INSERT
+    mocks.createJitSession.mockResolvedValue({
+      success: true, sessionId: 'cs-fresh', sessionUrl: 'https://s', expiresAt: new Date()
+    });
+
+    await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+    const cancel = mocks.query.mock.calls.find(([sql]) =>
+      String(sql).includes("'PRICE_CHANGED_BEFORE_SESSION'")
+    );
+    expect(cancel).toBeDefined();
+    expect(cancel?.[1]?.[0]).toBe('order-1');
+    // The code and its message move together, like every other cancel here.
+    // Round 12 fixed the sibling branch and left this one, so the reprice
+    // cancel kept the previous failure's text beside a fresh code (#278 r13).
+    expect(String(cancel?.[0])).toContain('last_error = $2');
+    expect(String(cancel?.[1]?.[1])).toMatch(/price changed/i);
+  });
+
+  it('reuses a pending JIT order untouched when its Stripe session already exists', async () => {
+    // The session fixes what the customer pays; it matches the row. Reuse.
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit-v2', amountCents: 599,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const withSession = {
+      ...baseOrder,
+      amount_cents: 499,
+      stripe_checkout_session_id: 'cs-old',
+      checkout_url: 'https://checkout.stripe.com/old',
+      checkout_expires_at: new Date(Date.now() + 45 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [withSession] });
+
+    const result = await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+
+    expect(result).toMatchObject({ orderId: 'order-1', reused: true });
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("'PRICE_CHANGED_BEFORE_SESSION'"),
+      expect.anything()
+    );
+  });
+
+  it('never auto-refunds a PAYMENT_AMOUNT_MISMATCH quarantine from the sweep', async () => {
+    // Round 6 gated the adoption PRODUCER of the quarantine; the sweep - the
+    // CONSUMER - would still have auto-refunded any normally-created order a
+    // Stripe-side amount change pushed into it. The exclusion lives in the
+    // sweep's own WHERE (#278 round 7).
+    mocks.query.mockResolvedValue({ rows: [], rowCount: 0 });
+    mocks.retrieveSession.mockResolvedValue(null);
+
+    await runCommerceMaintenance();
+
+    const sweep = mocks.query.mock.calls
+      .map(([sql]) => String(sql))
+      .find(sql => sql.includes("status = 'refund_pending'") && sql.includes('refund_attempts <'));
+    expect(sweep).toBeDefined();
+    expect(sweep).toContain("last_error_code <> 'PAYMENT_AMOUNT_MISMATCH'");
+  });
+
+  it('kicks the catalog with the JIT code even while Pay & Send is disabled', async () => {
+    // The disabled short-circuit must not starve the catalog's unsold-state
+    // clearing - that starvation is how toggle-off cooldowns survived to
+    // resurface on re-enable (#278 round 7).
+    mocks.jitEnabled.mockReturnValue(false);
+
+    const eligibility = getSendEligibility(0, 2, 'letter');
+
+    expect(eligibility.payAndSend.unavailableReason).toBe('Pay & Send is not enabled.');
+    expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-letter', 'send_eligibility_disabled');
+  });
+
+  it('refuses to adopt a paid session whose amount disagrees with the pin', async () => {
+    // The unit half of the round-6 gate: paid 999 against a 500 pin must NOT
+    // insert an order (an inserted mismatch reaches the order-type-agnostic
+    // refund sweep and auto-refunds a legitimate historical purchase); it
+    // books the money as unmatched for an operator instead.
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-mm' }] };
+      return { rows: [] };
+    });
+
+    await expect(processStripeWebhookEvent(checkoutEvent({
+      id: 'cs-mm',
+      client_reference_id: null,
+      metadata: { userId: 'user-1', productId: 'credit-pack-4' },
+      amount_total: 999
+    }) as never)).resolves.toMatchObject({ duplicate: false });
+
     expect(mocks.query).not.toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO orders'),
       expect.anything()
     );
-    expect(mocks.addCredits).not.toHaveBeenCalled();
-    // But refusing must not silently consume paid money either: the event stays
-    // unmatched and raises a durable alert, so a recovery path can find it once
-    // the amount is configured.
     expect(mocks.query).toHaveBeenCalledWith(
-      expect.stringContaining("processing_status = 'unmatched'"),
-      ['evt-1', 'pi-1']
+      expect.stringContaining("SET processing_status = 'unmatched'"),
+      expect.anything()
     );
-    expect(mocks.query).toHaveBeenCalledWith(
-      expect.stringContaining("'stripe_money_event_unmatched'"),
-      expect.arrayContaining(['evt-1'])
+  });
+
+  it('adopts a legacy session keyed by productCode, the key this codebase writes', async () => {
+    // Reconciliation replays events for sessions the CURRENT app created,
+    // whose metadata carries productCode only - reading just the legacy
+    // productId keys made those unadoptable (#278 review round 4).
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-pc' }] };
+      if (sql.includes('INSERT INTO orders')) {
+        return { rows: [{ ...baseOrder, order_id: 'stripe-cs-pc', order_type: 'letter_pack', product_code: 'credit-pack-4', credits: 4, status: 'paid' }] };
+      }
+      return { rows: [] };
+    });
+
+    await processStripeWebhookEvent(checkoutEvent({
+      id: 'cs-pc',
+      client_reference_id: null,
+      metadata: { userId: 'user-1', productCode: 'credit-pack-4' },
+      amount_total: 500
+    }) as never).catch(() => undefined);
+
+    const insert = mocks.query.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO orders')
     );
+    expect(insert?.[1]).toEqual(expect.arrayContaining(['credit-pack-4']));
+  });
+
+  it('does not retry an UNPAID event just because a price is cooling down', async () => {
+    // The throw exists to stop a PAYING customer being booked as unmatched
+    // money. This function is also reached for checkout.session.expired and
+    // async_payment_failed, which carry none - throwing for those made Stripe
+    // redeliver an event where "retry adoption" is meaningless, on the schedule
+    // that eventually disables a webhook endpoint (#278 review round 3).
+    mocks.describeUnpriced.mockReturnValue({
+      productCode: 'credit-pack-4',
+      rule: 'price.lookup_failed',
+      diagnosticClass: 'StripeConnectionError'
+    } as never);
+    mocks.getPackProduct.mockReturnValue({
+      productCode: 'credit-pack-4',
+      priceId: 'price-pack',
+      amountCents: 0,
+      currency: 'usd',
+      credits: 4,
+      name: 'Starter Pack',
+      description: 'Two prepaid letters'
+    });
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-expired' }] };
+      return { rows: [] };
+    });
+
+    await expect(processStripeWebhookEvent(checkoutEvent({
+      id: 'cs-expired',
+      client_reference_id: null,
+      metadata: { userId: 'user-1', productId: 'credit-pack-4' },
+      payment_status: 'unpaid',
+      amount_total: 0
+    }) as never)).resolves.toMatchObject({ duplicate: false });
+  });
+
+  it('keeps per-product fault dedupe under interleaved letter/postcard traffic', async () => {
+    // A single shared dedupe slot meant the letter and postcard faults
+    // evicted each other on every alternation, restoring exactly the
+    // one-error-line-per-quote flood the throttle exists to prevent (#278
+    // review round 4).
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      mocks.describeUnpriced.mockImplementation(((productCode: string) => ({
+        productCode,
+        rule: 'price.inactive',
+        diagnosticClass: 'configuration_error'
+      })) as never);
+      mocks.getJitProduct.mockImplementation(((mailType: string) => ({
+        productCode: mailType === 'letter' ? 'jit-letter' : 'jit-postcard',
+        priceId: 'price-jit',
+        amountCents: 0,
+        currency: 'usd',
+        name: 'Pay & Send',
+        description: 'One item'
+      })) as never);
+
+      for (let i = 0; i < 3; i += 1) {
+        getSendEligibility(0, 2, 'letter');
+        getSendEligibility(0, 1, 'postcard');
+      }
+
+      const emitted = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('commerce.pay_and_send_unpriced'));
+      expect(emitted).toHaveLength(2); // one per product, not one per quote
+    } finally {
+      diagnostic.mockRestore();
+    }
+  });
+
+  it('reports a steady Pay & Send pricing fault once, not once per quote', async () => {
+    // getSendEligibility is a synchronous accessor on the quote path, and the
+    // catalog's own header notes quotes vastly outnumber purchases - so an
+    // unconditional error line turned one persistent config fault into a
+    // continuous error stream scaling with traffic (#278 review round 3).
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      // The dedupe map is module state that survives between tests, so start
+      // from a RECOVERY: a healthy quote clears this product's entry (also
+      // pinning the clear-on-recovery path), making the count below exact.
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-letter', priceId: 'price-jit', amountCents: 499,
+        currency: 'usd', name: 'Pay & Send', description: 'One letter'
+      });
+      getSendEligibility(0, 2, 'letter');
+
+      mocks.describeUnpriced.mockReturnValue({
+        productCode: 'jit-letter',
+        rule: 'price.inactive',
+        diagnosticClass: 'configuration_error'
+      } as never);
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,
+        currency: 'usd', name: 'Pay & Send', description: 'One letter'
+      });
+
+      for (let i = 0; i < 5; i += 1) getSendEligibility(0, 2, 'letter');
+
+      const emitted = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('commerce.pay_and_send_unpriced'));
+      expect(emitted).toHaveLength(1);
+    } finally {
+      diagnostic.mockRestore();
+    }
   });
 
   // The gate is "did money move", not "which event carried the news". A
@@ -471,24 +1264,42 @@ describe('commerceService', () => {
     expect(mocks.createPackSession).not.toHaveBeenCalled();
   });
 
-  it('labels an unconfigured pack amount configuration_error, not a database fault', async () => {
-    // Issue #213: this guard throws before any query runs, so the handler's
-    // catch has no statement to blame and defaults an uncarried error to
-    // database_error - the mislabel that turned a missing
-    // STRIPE_STARTER_AMOUNT_CENTS into a schema hunt for a config problem.
-    mocks.getPackProduct.mockReturnValue({
-      productCode: 'credit-pack-4', priceId: 'price-pack', amountCents: 0,
-      currency: 'usd', name: 'Starter Pack', description: 'Two prepaid letters', credits: 4
-    });
+  it.each([
+    ['a real configuration fault', 'price.inactive', 'configuration_error', 'configuration_error'],
+    // The class the CATALOG recorded must survive, not be flattened. This
+    // guard throws 22 lines before createPackCheckoutSession, so the branch in
+    // stripeService that forwards the real class is unreachable on this path -
+    // hard-coding configuration_error here made the pack path structurally
+    // incapable of reporting a transient fault, and sent the operator hunting
+    // a config problem during a 30-second outage (#278 review round 2).
+    ['a Stripe outage', 'price.lookup_failed', 'StripeConnectionError', 'StripeConnectionError'],
+    // Never attempted or in flight: the catalog calls that transient by
+    // definition, and terminal is what cancels a customer's order.
+    ['a catalog that has not attempted yet', null, null, 'provider_error']
+  ])(
+    'carries the catalog class for %s, so #213 is not reintroduced one layer up',
+    async (_label, rule, catalogClass, expectedClass) => {
+      // Issue #213: this guard throws before any query runs, so the handler's
+      // catch has no statement to blame and defaults an uncarried error to
+      // database_error - the mislabel that turned a missing amount into a
+      // schema hunt for a config problem.
+      mocks.describeUnpriced.mockReturnValue(
+        rule ? ({ productCode: 'credit-pack-4', rule, diagnosticClass: catalogClass } as never) : null
+      );
+      mocks.getPackProduct.mockReturnValue({
+        productCode: 'credit-pack-4', priceId: 'price-pack', amountCents: 0,
+        currency: 'usd', name: 'Starter Pack', description: 'Two prepaid letters', credits: 4
+      });
 
-    const error = await createPackCheckout({
-      userId: 'user-1', userEmail: 'user@example.test', productId: 'credit-pack-4',
-      successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no'
-    } as never).catch(e => e);
+      const error = await createPackCheckout({
+        userId: 'user-1', userEmail: 'user@example.test', productId: 'credit-pack-4',
+        successUrl: 'https://example.test/ok', cancelUrl: 'https://example.test/no'
+      } as never).catch(e => e);
 
-    expect(error).toBeInstanceOf(PackAmountNotConfiguredError);
-    expect(error).toMatchObject({ diagnosticClass: 'configuration_error' });
-  });
+      expect(error).toBeInstanceOf(PackAmountNotConfiguredError);
+      expect(error).toMatchObject({ diagnosticClass: expectedClass });
+    }
+  );
 
   it('labels an unconfigured pack price id configuration_error before any order write', async () => {
     // The sibling guard, same #213 trap: a missing STRIPE_PRICE_* threw a bare
@@ -780,6 +1591,9 @@ describe('commerceService', () => {
   it('rejects cross-user draft checkout before calling Stripe', async () => {
     // Issue #150 added a send-block lookup ahead of the draft read. This account
     // is not blocked, so the original assertion below is unchanged.
+    // createJitCheckout peeks the draft's mail type (unlocked, advisory)
+    // before the money transaction, to ensure exactly one product's price.
+    mocks.query.mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] });
     mocks.query.mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] });
     mocks.query.mockResolvedValueOnce({
       rows: [
@@ -803,10 +1617,12 @@ describe('commerceService', () => {
       ...baseOrder,
       stripe_checkout_session_id: 'cs-1',
       checkout_url: 'https://checkout.stripe.com/c/pay/test',
-      checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+      checkout_expires_at: new Date(Date.now() + 45 * 60_000)
     };
     mocks.query
-      // Issue #150 added a send-block lookup ahead of the draft read.
+      // The draft-type peek runs first (unlocked, advisory), then the #150
+      // send-block lookup, then the FOR UPDATE draft read.
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
       .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
       .mockResolvedValueOnce({
         rows: [
@@ -920,6 +1736,75 @@ describe('commerceService', () => {
       unavailableReason: 'Pay & Send is not enabled.'
     });
   });
+
+  it('kicks its own catalog warmup and serves a formatted display amount', async () => {
+    // The accessor owns its warmup (a caller-by-convention kick left future
+    // surfaces and the stdio lane silently unavailable), and it serves the
+    // display string so widgets stop dividing minor units by 100 - which is
+    // 100x wrong for zero-decimal currencies (#278 round 6).
+    const eligibility = getSendEligibility(0, 2, 'letter');
+
+    expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-letter', 'send_eligibility');
+    expect(eligibility.payAndSend.displayAmount).toBe('4.99');
+  });
+
+  it('logs the boot race at WARN, and a recorded fault at ERROR', async () => {
+    // price.not_resolved is the quote-raced-the-warmup state - routine on
+    // every deploy and guaranteed on the first stdio quote. Five review
+    // angles corroborated that an error-level line there is a per-deploy
+    // false alarm; a RECORDED failure is news and stays at error (#278 r6).
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      // Recovery first: the dedupe map survives between tests.
+      getSendEligibility(0, 2, 'letter');
+
+      // Boot race: unpriced with NO recorded failure -> synthesized
+      // not_resolved -> warn.
+      mocks.describeUnpriced.mockReturnValue(null as never);
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,
+        currency: 'usd', name: 'Pay & Send', description: 'One letter'
+      });
+      getSendEligibility(0, 2, 'letter');
+
+      const warned = warnSpy.mock.calls.flat().map(String).join('\n');
+      const errored = errorSpy.mock.calls.flat().map(String).join('\n');
+      expect(warned).toContain('commerce.pay_and_send_unpriced');
+      expect(errored).not.toContain('commerce.pay_and_send_unpriced');
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    ['a permanently archived price', 'configuration_error', true, 'Pay & Send pricing is not configured.'],
+    ['a Stripe blip', 'StripeConnectionError', false, 'Pay & Send is temporarily unavailable. Please try again shortly.']
+  ])(
+    'tells the customer which kind of unavailable %s is',
+    (_label, diagnosticClass, terminal, expectedReason) => {
+      // Both used to produce the identical permanent-sounding "not configured"
+      // message, and getSendEligibility logged nothing at all - so a 30-second
+      // outage switched Pay & Send off across every quote and the operator
+      // heard about it from a customer (#278 review round 2).
+      mocks.describeUnpriced.mockReturnValue({
+        productCode: 'jit-letter',
+        rule: 'price.lookup_failed',
+        diagnosticClass,
+        terminal
+      } as never);
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,
+        currency: 'usd', name: 'Pay & Send', description: 'One letter'
+      });
+
+      expect(getSendEligibility(0, 2, 'letter').payAndSend).toMatchObject({
+        available: false,
+        unavailableReason: expectedReason
+      });
+    }
+  );
 
   it('reconciles a missed paid session before expiring pending checkouts', async () => {
     mocks.query.mockImplementation(async (sql: string) => {
@@ -1307,7 +2192,7 @@ describe('checkout refusal cleanup (#275)', () => {
   it('cancels the order when the price configuration is refused', async () => {
     mocks.createPackSession.mockResolvedValueOnce({
       success: false,
-      errorCode: 'PRICE_CONFIG_MISMATCH',
+      errorCode: 'PACK_AMOUNT_NOT_CONFIGURED',
       diagnosticClass: 'configuration_error',
       error: 'Configured amount does not match the Stripe price'
     });
@@ -1325,7 +2210,7 @@ describe('checkout refusal cleanup (#275)', () => {
   it('carries the real error code onto the order rather than a generic one', async () => {
     mocks.createPackSession.mockResolvedValueOnce({
       success: false,
-      errorCode: 'PRICE_CONFIG_MISMATCH',
+      errorCode: 'PACK_AMOUNT_NOT_CONFIGURED',
       diagnosticClass: 'configuration_error',
       error: 'Configured amount does not match the Stripe price'
     });
@@ -1335,7 +2220,7 @@ describe('checkout refusal cleanup (#275)', () => {
     const update = mocks.query.mock.calls.find(call =>
       /SET status = 'cancelled'/.test(String(call[0]))
     );
-    expect(update?.[1]).toContain('PRICE_CONFIG_MISMATCH');
+    expect(update?.[1]).toContain('PACK_AMOUNT_NOT_CONFIGURED');
   });
 
   it('leaves a transient provider failure pending, so a retry can still succeed', async () => {

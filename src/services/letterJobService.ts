@@ -6,6 +6,7 @@
  * later claims any due or stale rows with SKIP LOCKED.
  */
 
+import { boundedExponentialDelayMs } from '../utils/backoff.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { query, transaction } from '../db/index.js';
@@ -413,8 +414,7 @@ async function submitToProvider(
 }
 
 function retryDelayMilliseconds(attempts: number, random: () => number): number {
-  const base = Math.min(60 * 2 ** Math.max(0, attempts - 1), 60 * 60);
-  return base * 1000 + Math.floor(random() * 1000);
+  return boundedExponentialDelayMs(60_000, 60 * 60_000, attempts, random);
 }
 
 /** Canonical financial fulfillment lock order: funding order -> letter -> job. */

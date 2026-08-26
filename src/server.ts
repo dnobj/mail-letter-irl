@@ -36,7 +36,7 @@ import {
   Logger
 } from "./contracts/types.js";
 import { createLogger } from "./logging/index.js";
-import { classifyDiagnosticError } from "./utils/diagnosticLog.js";
+import { carriedDiagnosticClass, classifyDiagnosticError } from "./utils/diagnosticLog.js";
 
 const tools: McpToolDefinition<any, any>[] = [
   // ChatGPT currently appears to expose only the first 12 registered actions
@@ -179,11 +179,17 @@ export class LetterIrlServer {
         meta: tool.meta
       };
     } catch (error) {
+      // Prefer a class the failing layer already resolved (the same pattern as
+      // dashboardApiHandler and runMaintenance): tool-layer wrappers rebuild
+      // errors, and a rebuilt Error has neither .code nor .type, so without
+      // this the log recorded literally unknown_error for a fault the
+      // commerce layer had classified precisely (#278 review round 4).
+      const carried = carriedDiagnosticClass(error);
       requestLogger.error(
         {
           correlationId,
           event: "tool.invocation.failure",
-          errorClass: classifyDiagnosticError(error, "unknown_error")
+          errorClass: carried ?? classifyDiagnosticError(error, "unknown_error")
         },
         "Tool invocation failed"
       );

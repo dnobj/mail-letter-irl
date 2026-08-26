@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { getConfiguredProduct } from '../../../src/config/products.js';
 import {
   APPROVED_LIVE_PROVIDERS,
   ENV_VAR_MANIFEST,
@@ -23,11 +24,9 @@ const VALID_PROD: NodeJS.ProcessEnv = {
   STRIPE_SECRET_KEY: 'sk_live_unit_fixture',
   STRIPE_WEBHOOK_SECRET: 'whsec_unit_fixture',
   STRIPE_PRICE_STARTER: 'price_starter_unit_fixture',
-  STRIPE_STARTER_AMOUNT_CENTS: '500',
   STRIPE_PRICE_REGULAR: 'price_regular_unit_fixture',
-  STRIPE_REGULAR_AMOUNT_CENTS: '1000',
   STRIPE_PRICE_POWER: 'price_power_unit_fixture',
-  STRIPE_POWER_AMOUNT_CENTS: '9000',
+  STRIPE_CURRENCY: 'usd',
   LETTER_PROVIDER: 'postgrid',
   LETTER_PROVIDER_API_KEY: 'live_sk_unit_fixture',
   LETTER_PROVIDER_CONFIG: '{"mode":"live"}',
@@ -97,11 +96,84 @@ describe('resolveDeploymentMode', () => {
 });
 
 describe('validateDeploymentConfig in production', () => {
+  it('flags a whitespace-only STRIPE_CURRENCY, which the catalog treats as unset', () => {
+    // A paste artifact in a Railway field: "set" to a falsy check but unset
+    // to the catalog's trimming normalizer, which then validated every Price
+    // against the usd default with zero findings anywhere (#278 review r5).
+    const validation = validateDeploymentConfig(env({ STRIPE_CURRENCY: '   ' }), 'server');
+
+    expect(validation.findings.map(f => f.rule)).toContain('stripe.currency_unset');
+  });
+
+  it('reports ONE currency finding for one root cause, not two', () => {
+    // With Pay & Send enabled and both currency vars unset, the JIT check
+    // re-tested the pack check's own predicate, so a single root cause
+    // produced two findings under the identical rule id with conflicting
+    // text - and any surface that groups or counts by rule showed the rule
+    // twice (#278 round 10).
+    const bothUnset = env({
+      JIT_PURCHASE_ENABLED: 'true',
+      STRIPE_JIT_LETTER_PRICE_ID: 'price_jit_letter',
+      STRIPE_JIT_POSTCARD_PRICE_ID: 'price_jit_postcard',
+      STRIPE_CURRENCY: undefined,
+      JIT_CURRENCY: undefined
+    });
+
+    const validation = validateDeploymentConfig(bothUnset, 'server');
+
+    const [finding] = validation.findings.filter(f => f.rule === 'stripe.currency_unset');
+    expect(finding).toBeDefined();
+    // ...and it names EVERY family that inherits the unset value. The round-10
+    // dedupe deleted the Pay & Send half of the diagnosis instead of widening
+    // the survivor, so an operator fixed packs and still had Pay & Send
+    // failing on a fault nothing had mentioned (#278 rounds 11-12).
+    expect(finding.message).toMatch(/Pay & Send/);
+  });
+
+  it('still names JIT_CURRENCY when only IT is unset', () => {
+    const jitOnly = env({
+      JIT_PURCHASE_ENABLED: 'true',
+      STRIPE_JIT_LETTER_PRICE_ID: 'price_jit_letter',
+      STRIPE_JIT_POSTCARD_PRICE_ID: 'price_jit_postcard',
+      STRIPE_CURRENCY: 'usd',
+      JIT_CURRENCY: undefined
+    });
+
+    const validation = validateDeploymentConfig(jitOnly, 'server');
+
+    const [finding] = validation.findings.filter(f => f.rule === 'stripe.currency_unset');
+    expect(finding).toBeDefined();
+    // The message follows the predicate: this branch requires STRIPE_CURRENCY
+    // to be SET, so text asserting it is unset - and naming usd when the
+    // inherited currency is something else - would send a non-USD operator to
+    // create USD Prices and earn a terminal mismatch (#278 round 12).
+    expect(finding.message).not.toMatch(/neither is STRIPE_CURRENCY/);
+    expect(finding.message).toMatch(/usd/);
+  });
+
   it('accepts a completely configured production environment with no findings', () => {
     const validation = validateDeploymentConfig(VALID_PROD, 'server');
     expect(validation.mode).toBe('production');
     expect(validation.errors).toEqual([]);
     expect(validation.warnings).toEqual([]);
+  });
+
+  it('accepts a padded price id, because the runtime that resolves it trims', () => {
+    // #275 made products.ts trim every price id; this validator judged the
+    // RAW value, so a pasted leading space - the exact artifact the round-5
+    // STRIPE_CURRENCY trim cites - became a production BOOT error for an id
+    // the catalog resolves and sells. Development booted and sold, promotion
+    // crash-looped the API, and preflight (names only) stayed green
+    // (#278 round 9).
+    const padded = env({ STRIPE_PRICE_STARTER: ' price_starter_padded ' });
+
+    const validation = validateDeploymentConfig(padded, 'server');
+
+    expect(
+      validation.findings.filter(f => f.rule === 'stripe.pack_price_incomplete')
+    ).toEqual([]);
+    // The same value the catalog will resolve against.
+    expect(getConfiguredProduct('credit-pack-4', padded)?.priceId).toBe('price_starter_padded');
   });
 
   it.each([
@@ -113,9 +185,8 @@ describe('validateDeploymentConfig in production', () => {
     ['malformed webhook secret', { STRIPE_WEBHOOK_SECRET: 'not_a_webhook_secret' }, 'stripe.webhook_secret_malformed'],
     ['missing pack price', { STRIPE_PRICE_STARTER: undefined }, 'stripe.pack_price_incomplete'],
     ['pack price without price_ prefix', { STRIPE_PRICE_REGULAR: 'prod_something' }, 'stripe.pack_price_incomplete'],
-    ['missing pack amount', { STRIPE_POWER_AMOUNT_CENTS: undefined }, 'stripe.pack_price_incomplete'],
-    ['zero pack amount', { STRIPE_STARTER_AMOUNT_CENTS: '0' }, 'stripe.pack_price_incomplete'],
-    ['non-integer pack amount', { STRIPE_STARTER_AMOUNT_CENTS: 'five hundred' }, 'stripe.pack_price_incomplete'],
+    // NOT here: a padded price id. The catalog trims before resolving, so it
+    // is sellable - see the whitespace pin below.
     ['unset provider (implicit dummy)', { LETTER_PROVIDER: undefined }, 'provider.live_provider_required'],
     ['dummy provider', { LETTER_PROVIDER: 'dummy' }, 'provider.live_provider_required'],
     ['diy provider', { LETTER_PROVIDER: 'diy' }, 'provider.live_provider_required'],
@@ -172,7 +243,6 @@ describe('validateDeploymentConfig in production', () => {
     const jitOn = env({
       JIT_PURCHASE_ENABLED: 'true',
       STRIPE_JIT_LETTER_PRICE_ID: 'price_jit_letter_unit_fixture',
-      JIT_LETTER_AMOUNT_CENTS: '499'
       // postcard pair deliberately missing
     });
     const errors = ruleIds(jitOn, 'error');
@@ -183,7 +253,6 @@ describe('validateDeploymentConfig in production', () => {
       .map(f => f.message)
       .join('\n');
     expect(jitMessages).toContain('POSTCARD');
-    expect(jitMessages).not.toContain('JIT_LETTER_AMOUNT_CENTS');
   });
 
   it('warns rather than errors when production auth enforcement is staged off (server surface only)', () => {
@@ -376,14 +445,25 @@ describe('ENV_VAR_MANIFEST', () => {
       'LETTER_PROVIDER',
       'LETTER_PROVIDER_API_KEY',
       'STRIPE_PRICE_STARTER',
-      'STRIPE_STARTER_AMOUNT_CENTS',
       'STRIPE_PRICE_REGULAR',
-      'STRIPE_REGULAR_AMOUNT_CENTS',
       'STRIPE_PRICE_POWER',
-      'STRIPE_POWER_AMOUNT_CENTS',
       'TEMP_IMAGE_BUCKET_NAME'
     ]) {
       expect(names).toContain(required);
+    }
+
+    // Deleted in #275 stage A: amounts come from the Stripe Price itself, so a
+    // second copy in the environment can no longer drift from it. Asserted
+    // absent so the deletion cannot be quietly undone by a future edit that
+    // "restores" them for symmetry with the price ids.
+    for (const removed of [
+      'STRIPE_STARTER_AMOUNT_CENTS',
+      'STRIPE_REGULAR_AMOUNT_CENTS',
+      'STRIPE_POWER_AMOUNT_CENTS',
+      'JIT_LETTER_AMOUNT_CENTS',
+      'JIT_POSTCARD_AMOUNT_CENTS'
+    ]) {
+      expect(names).not.toContain(removed);
     }
   });
 

@@ -1,4 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Prices resolve lazily from Stripe (#275 stage A); /readyz reports whether
+// any ENABLED product is currently unpriceable, and kicks a re-attempt when
+// one is. Resolution itself is covered in priceCatalog.test.ts; this suite
+// stubs the accessors to exercise the readiness wiring in BOTH directions -
+// the failing branch had zero coverage in the first revision (#278 review).
+const priceCatalog = vi.hoisted(() => ({
+  unpriced: [] as Array<{ productCode: string; rule: string; diagnosticClass: string }>,
+  ensureCalls: 0,
+  lastEnv: undefined as NodeJS.ProcessEnv | undefined
+}));
+// The mock supplies DATA and never a verdict. An earlier version exported an
+// isPriceCatalogCold() the suite could hand-set, which let a cold-start test
+// pass against production code where that function could never return true
+// (#278 review round 3). Coldness is now derived from the failure rules, which
+// this mock reproduces faithfully because they are the catalog's own output.
+vi.mock('../../../src/services/priceCatalog.js', async importOriginal => {
+  // The state reads are stubbed; the SUMMARY FORMATTER is the real one.
+  // Re-typing that format here would rebuild the second copy whose drift
+  // these very tests exist to catch - round 7 fixed the class omission in the
+  // catalog's copy, round 8 in readiness's (#278 round 9).
+  const actual = await importOriginal<typeof import('../../../src/services/priceCatalog.js')>();
+  return {
+    formatPriceFailureSummary: actual.formatPriceFailureSummary,
+    getUnpricedProducts: (env?: NodeJS.ProcessEnv) => {
+      priceCatalog.lastEnv = env;
+      return priceCatalog.unpriced;
+    },
+    kickPriceCatalog: () => {
+      priceCatalog.ensureCalls += 1;
+    }
+  };
+});
 import { readFile } from 'node:fs/promises';
 
 /**
@@ -12,6 +45,12 @@ const { query } = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock('../../../src/db/index.js', () => ({ query }));
 
 import { getReadiness, resetReadinessCache } from '../../../src/mcp/readiness.js';
+
+beforeEach(() => {
+  priceCatalog.unpriced = [];
+  priceCatalog.ensureCalls = 0;
+  priceCatalog.lastEnv = undefined;
+});
 
 const READY_DEV: NodeJS.ProcessEnv = {
   NODE_ENV: 'production', // deployed development runs NODE_ENV=production
@@ -28,11 +67,8 @@ const READY_PROD: NodeJS.ProcessEnv = {
   STRIPE_SECRET_KEY: 'sk_live_readyz_fixture',
   STRIPE_WEBHOOK_SECRET: 'whsec_readyz_fixture',
   STRIPE_PRICE_STARTER: 'price_starter_readyz',
-  STRIPE_STARTER_AMOUNT_CENTS: '500',
   STRIPE_PRICE_REGULAR: 'price_regular_readyz',
-  STRIPE_REGULAR_AMOUNT_CENTS: '1000',
   STRIPE_PRICE_POWER: 'price_power_readyz',
-  STRIPE_POWER_AMOUNT_CENTS: '9000',
   LETTER_PROVIDER: 'postgrid',
   LETTER_PROVIDER_API_KEY: 'live_sk_readyz_fixture',
   LETTER_PROVIDER_CONFIG: '{"mode":"live"}',
@@ -67,7 +103,7 @@ describe('/readyz readiness report', () => {
       ready: true,
       mode: 'development',
       provider: 'dummy', // LETTER_PROVIDER unset: the implicit default, made visible
-      checks: { config: 'ok', database: 'ok', routing: 'ok' }
+      checks: { config: 'ok', database: 'ok', routing: 'ok', prices: 'ok' }
     });
   });
 
@@ -194,5 +230,398 @@ describe('/readyz readiness report', () => {
     const source = await readFile('src/mcp/httpServer.ts', 'utf8');
     const healthz = source.slice(source.indexOf('url.pathname === "/healthz"'));
     expect(healthz.slice(0, healthz.indexOf('return;'))).toContain('res.end("ok")');
+  });
+});
+
+describe('/readyz prices check (#275 stage A)', () => {
+  beforeEach(() => {
+    resetReadinessCache();
+    routableDb([{ mail_type: 'letter', provider: 'postgrid' }]);
+  });
+
+  it('fails closed, naming only the check, when an enabled product is unpriced', async () => {
+    // The failing branch had no coverage in the first revision - a refactor
+    // dropping the prices entry from `failing` would have passed the suite.
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-100', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
+    ];
+
+    const report = await getReadiness(READY_PROD);
+
+    expect(report.statusCode).toBe(503);
+    const body = JSON.parse(report.body);
+    expect(body.failing).toContain('prices');
+    // Privacy contract: the unauthenticated body never carries a rule id or a
+    // product code - those go to the server log.
+    expect(report.body).not.toContain('price.inactive');
+    expect(report.body).not.toContain('credit-pack-100');
+  });
+
+  it('kicks a re-attempt when failing, so a transient boot failure self-heals', async () => {
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-4', rule: 'price.not_resolved', diagnosticClass: 'provider_error' }
+    ];
+
+    await getReadiness();
+
+    expect(priceCatalog.ensureCalls).toBeGreaterThan(0);
+  });
+
+  it('does not touch the catalog resolver when healthy', async () => {
+    const report = await getReadiness(READY_PROD);
+
+    expect(report.statusCode).toBe(200);
+    expect(JSON.parse(report.body).checks.prices).toBe('ok');
+    expect(priceCatalog.ensureCalls).toBe(0);
+  });
+
+  it('keeps the ready-body checks object in step with the possible failing names', async () => {
+    // The checks literal is hand-written; this guard stops a fifth check being
+    // added to `failing` without appearing in the healthy body, or vice versa.
+    const report = await getReadiness(READY_PROD);
+    const checkNames = Object.keys(JSON.parse(report.body).checks).sort();
+    expect(checkNames).toEqual(['config', 'database', 'prices', 'routing']);
+  });
+
+  it('names every failing-list entry in the healthy body too', async () => {
+    // The reverse direction, which reading only the 200 body cannot see: a
+    // `failing.push('newcheck')` with no matching key in the hand-written
+    // `checks` literal passed the guard above untouched, and an operator got a
+    // 503 naming a check that appears in no ready body and no documentation
+    // (#278 review round 3). Read from source, like the route-registration
+    // guard in this suite.
+    const source = await readFile('src/mcp/readiness.ts', 'utf8');
+    const pushed = [...source.matchAll(/failing\.push\('([a-z_]+)'\)/g)].map(m => m[1]).sort();
+    const report = await getReadiness(READY_PROD);
+    const checkNames = Object.keys(JSON.parse(report.body).checks).sort();
+
+    expect(pushed.length).toBeGreaterThan(0);
+    expect(pushed).toEqual(checkNames);
+  });
+
+  it('kicks the resolver even for statically-unset prices', async () => {
+    // The suppression this replaces gated the self-heal off exactly the
+    // staleness it would have fixed: an id_not_configured recorded before the
+    // env var was set kept suppressing the kick after it was. The catalog's
+    // own cooldown ladder makes the kick a cheap synchronous no-op between
+    // attempts, so unconditional is safe (#278 review round 5).
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-4', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' }
+    ];
+
+    // No env argument: the kick is gated on the AMBIENT env, because it can
+    // only heal process.env's catalog - kicking for a custom-env caller would
+    // heal a different environment than the report described (#278 round 6).
+    await getReadiness();
+
+    expect(priceCatalog.ensureCalls).toBeGreaterThan(0);
+  });
+
+  it('suppresses the kick for a caller-supplied env it cannot heal', async () => {
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-4', rule: 'price.lookup_failed', diagnosticClass: 'StripeConnectionError' }
+    ];
+
+    await getReadiness(READY_PROD);
+
+    expect(priceCatalog.ensureCalls).toBe(0);
+  });
+
+  it('still re-attempts a fault that could clear on its own', async () => {
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-4', rule: 'price.lookup_failed', diagnosticClass: 'StripeConnectionError' }
+    ];
+
+    await getReadiness();
+
+    expect(priceCatalog.ensureCalls).toBeGreaterThan(0);
+  });
+
+  /**
+   * The gate mirrors validateStripe: STRIPE_PRICE_* are requiredIn
+   * 'production', downgraded to a warning outside it and skipped entirely in
+   * test/admin. Without this gate a development deploy - where those variables
+   * are legitimately unset, so every product is unpriced - answered 503
+   * forever and could never pass the documented post-deploy check. The
+   * READY_DEV fixture asserted prices:'ok' and passed anyway, because the
+   * suite mocks this very module: the divergence was structurally invisible
+   * (#278 review round 2).
+   */
+  it('does not fail a development deploy whose prices are legitimately unset', async () => {
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-4', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' },
+      { productCode: 'credit-pack-10', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' },
+      { productCode: 'credit-pack-100', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' }
+    ];
+
+    const report = await getReadiness(READY_DEV);
+
+    expect(report.statusCode).toBe(200);
+    // Ready, but honest about it: 'ok' here would be a lie the operator reads
+    // on the deploy check.
+    expect(JSON.parse(report.body).checks.prices).toBe('degraded');
+    expect(report.body).not.toContain('credit-pack-4');
+  });
+
+  it('leaves admin-mode production to the config check, not the prices one', async () => {
+    // validateStripe skips its price rules under ADMIN_ENABLED, so the gate
+    // here looked like it needed an admin term too. It does not:
+    // admin.enabled_in_production is itself a config ERROR, so such a deploy
+    // is already unready on `config` and an admin term in the prices gate
+    // would be unreachable. Pinned so nobody re-adds the dead condition.
+    priceCatalog.unpriced = [
+      { productCode: 'credit-pack-4', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' }
+    ];
+
+    const report = await getReadiness({ ...READY_PROD, ADMIN_ENABLED: 'true' });
+
+    expect(report.statusCode).toBe(503);
+    expect(JSON.parse(report.body).failing).toContain('config');
+  });
+
+  it('holds an UNREADY verdict briefly, so a warming instance stops lying fast', async () => {
+    // The few hundred ms between the port binding and a subsystem warming up.
+    // Caching that verdict for the full 5s pinned a healthy instance at 503
+    // across exactly the window the documented post-deploy check runs in, and
+    // the body carries only a check name so it is indistinguishable from a real
+    // fault (#278 review rounds 2 and 3).
+    vi.useFakeTimers();
+    try {
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.not_resolved', diagnosticClass: 'provider_error' }
+      ];
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+
+      // The warmup lands.
+      priceCatalog.unpriced = [];
+      vi.advanceTimersByTime(2_100);
+      const recovered = await getReadiness(READY_PROD);
+
+      expect(recovered.statusCode).toBe(200);
+      expect(JSON.parse(recovered.body).checks.prices).toBe('ok');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('applies the same short hold to a database fault, not just a price one', async () => {
+    // Stated generally on purpose: the pg pool opening its first connection
+    // has the same warmup shape as the catalog, and an earlier attempt that
+    // special-cased prices covered neither it nor routing.
+    vi.useFakeTimers();
+    try {
+      query.mockRejectedValue(new Error('still connecting'));
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+
+      routableDb([{ mail_type: 'letter', provider: 'postgrid' }]);
+      vi.advanceTimersByTime(2_100);
+
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still caches the unready verdict, so /readyz is never an open database probe', async () => {
+    // Shorter is not uncached: the route is unauthenticated, and each miss
+    // costs two database round-trips.
+    vi.useFakeTimers();
+    try {
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
+      ];
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+      const callsAfterFirst = query.mock.calls.length;
+
+      priceCatalog.unpriced = [];
+      vi.advanceTimersByTime(500);
+
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+      expect(query.mock.calls.length).toBe(callsAfterFirst);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('computes the cache expiry from the clock AFTER the checks, not before', async () => {
+    // The database and routing checks can take seconds (5s pool connect
+    // timeout, a Neon wake retry). An expiry computed from the entry
+    // timestamp was already in the past by the time it was written whenever
+    // the checks took longer than the TTL - the memo dead on arrival, and
+    // /readyz re-ran two database round-trips per probe in exactly the
+    // slow-database failure mode the cache exists to bound (#278 round 4).
+    vi.useFakeTimers();
+    try {
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
+      ];
+      query.mockImplementation(async (sql: string) => {
+        // The checks themselves consume 3s - longer than the 1s unready TTL.
+        vi.advanceTimersByTime(3_000);
+        if (sql.includes('provider_routing')) return { rows: [{ mail_type: 'letter', provider: 'postgrid' }] };
+        return { rows: [{ '?column?': 1 }] };
+      });
+
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+      const callsAfterFirst = query.mock.calls.length;
+
+      // 500ms later - inside the post-checks TTL. Must serve the memo.
+      vi.advanceTimersByTime(500);
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(503);
+      expect(query.mock.calls.length).toBe(callsAfterFirst);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-logs an identical unready episode after a recovery', async () => {
+    // Recovery must re-arm the readiness.failed slot: without the clear on
+    // the ready branch, a second outage with a byte-identical signature
+    // logged nothing for its entire duration (#278 round 8).
+    vi.useFakeTimers();
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const fault = [
+        { productCode: 'credit-pack-4', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
+      ];
+      priceCatalog.unpriced = fault;
+      await getReadiness(READY_PROD); // outage 1: logs
+
+      priceCatalog.unpriced = [];
+      vi.advanceTimersByTime(2_100);
+      await getReadiness(READY_PROD); // recovered: ready, re-arms the slot
+
+      priceCatalog.unpriced = fault;
+      vi.advanceTimersByTime(5_100); // past the ready memo TTL
+      await getReadiness(READY_PROD); // outage 2, identical: must log again
+
+      const emitted = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('"event":"readiness.failed"'));
+      expect(emitted).toHaveLength(2);
+    } finally {
+      diagnostic.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-logs when a price fault flips class under the same rule', async () => {
+    // A blip (provider_error) hardening into a terminal fault (the id now
+    // truly gone, or the key revoked) keeps the SAME rule. A class-blind
+    // dedupe signature suppressed exactly the transition the class
+    // vocabulary exists to surface (#278 round 8).
+    vi.useFakeTimers();
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.lookup_failed', diagnosticClass: 'provider_error' }
+      ];
+      await getReadiness(READY_PROD);
+      vi.advanceTimersByTime(2_100);
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.lookup_failed', diagnosticClass: 'resource_missing' }
+      ];
+      await getReadiness(READY_PROD);
+
+      const emitted = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('"event":"readiness.failed"'));
+      expect(emitted).toHaveLength(2);
+    } finally {
+      diagnostic.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('logs a steady failing verdict once, not once per recompute', async () => {
+    // At the short unready TTL an unconditional readiness.failed line was up
+    // to ~43,000 identical entries a day on a probed instance - the flood
+    // shape every other diagnostic in this file already dedupes (#278 r5).
+    vi.useFakeTimers();
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
+      ];
+
+      await getReadiness(READY_PROD);
+      vi.advanceTimersByTime(2_100);
+      await getReadiness(READY_PROD);
+      vi.advanceTimersByTime(2_100);
+      await getReadiness(READY_PROD);
+
+      const emitted = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('"event":"readiness.failed"'));
+      expect(emitted).toHaveLength(1);
+    } finally {
+      diagnostic.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("asks the catalog about the CALLER'S env, not ambient process.env", async () => {
+    // Every other check in the report reads the env parameter; a prices
+    // verdict computed from process.env stitched a report from two different
+    // environments - a 503 naming prices that no variable in the supplied env
+    // explained (#278 review round 5).
+    await getReadiness(READY_PROD);
+
+    expect(priceCatalog.lastEnv).toBe(READY_PROD);
+  });
+
+  it('does not re-log when only the ORDER of routing offenders changes', async () => {
+    // The offenders come from an ORDER BY-less query, so a heap-order flip
+    // between probes changed the dedupe signature with no state change and
+    // re-emitted the line the dedupe exists to suppress (#278 round 6).
+    vi.useFakeTimers();
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      let flip = false;
+      query.mockImplementation(async (sql: string) => {
+        if (sql.includes('provider_routing')) {
+          const rows = [
+            { mail_type: 'letter', provider: 'ghost-a' },
+            { mail_type: 'postcard', provider: 'ghost-b' }
+          ];
+          return { rows: flip ? [...rows].reverse() : rows };
+        }
+        return { rows: [{ '?column?': 1 }] };
+      });
+
+      await getReadiness(READY_PROD);
+      flip = true;
+      vi.advanceTimersByTime(2_100);
+      await getReadiness(READY_PROD);
+
+      const emitted = diagnostic.mock.calls
+        .flat()
+        .map(String)
+        .filter(line => line.includes('"event":"readiness.failed"'));
+      expect(emitted).toHaveLength(1);
+    } finally {
+      diagnostic.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('caches a READY verdict for the full TTL', async () => {
+    vi.useFakeTimers();
+    try {
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(200);
+
+      priceCatalog.unpriced = [
+        { productCode: 'credit-pack-4', rule: 'price.inactive', diagnosticClass: 'configuration_error' }
+      ];
+      vi.advanceTimersByTime(1_500);
+
+      // Still the memoized 200: only unready verdicts get the short hold.
+      expect((await getReadiness(READY_PROD)).statusCode).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

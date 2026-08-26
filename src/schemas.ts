@@ -145,6 +145,15 @@ const sendEligibilitySchema: JsonSchema = {
         available: { type: "boolean" },
         amountCents: { type: "integer" },
         currency: { type: "string" },
+        // Declared HERE as well as in zodSchemas.ts. This file is the schema
+        // /manifest.json publishes (manifest.ts -> LetterIrlServer.listTools),
+        // and it is a genuinely served surface: a consumer that derives the
+        // tool's output shape from the manifest saw no displayAmount, dropped
+        // it, and fell back to amountCents/100 - 100x wrong for a
+        // zero-decimal currency, the exact bug the server-side formatting was
+        // added to fix, still live on the second surface. Four round-10
+        // angles found it; schemaConsistency.test.ts now compares the layers.
+        displayAmount: { type: "string" },
         productDescription: { type: "string" },
         unavailableReason: { type: "string" }
       }

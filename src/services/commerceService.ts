@@ -4,6 +4,19 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type Stripe from 'stripe';
 import { query, transaction } from '../db/index.js';
+import {
+  describeUnpriced,
+  ensurePriceCatalog,
+  formatPriceFailureSummary,
+  kickPriceCatalog
+} from './priceCatalog.js';
+import {
+  PACK_PRODUCTS,
+  formatAmountForCurrency,
+  jitProductCode,
+  normalizedCurrency,
+  packCurrency
+} from '../config/products.js';
 import { lockAccountForBalanceChange } from './accountLock.js';
 import { addCreditsToLedgerWithClient } from './creditLedgerService.js';
 import { grantImageEntitlementWithClient } from './imageGenerationLimitService.js';
@@ -18,11 +31,19 @@ import {
   isJitPurchaseEnabled,
   retrieveCheckoutSession,
   retrieveRefund,
+  type CheckoutSessionResult,
   type CommerceProductConfig,
   type PackProductId
 } from './stripeService.js';
 import type { LetterDraft, MailType, Order, OrderStatus } from './types.js';
-import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import {
+  carriedDiagnosticClass,
+  classifyDiagnosticError,
+  clearDiagnosticChangeSlot,
+  isTerminalDiagnosticClass,
+  writeDiagnostic,
+  writeDiagnosticOnChange
+} from '../utils/diagnosticLog.js';
 
 // Must mirror idx_orders_active_jit_draft_unique in migration 023.
 export const ACTIVE_JIT_STATUSES: OrderStatus[] = [
@@ -123,6 +144,8 @@ export interface SendEligibility {
     available: boolean;
     amountCents?: number;
     currency?: string;
+    /** Pre-formatted per-currency amount for display surfaces. */
+    displayAmount?: string;
     productDescription?: string;
     unavailableReason?: string;
   };
@@ -152,31 +175,24 @@ export function getSendEligibility(
   mailType: MailType
 ): SendEligibility {
   const prepaidEligible = availableCredits >= requiredCredits;
-  const product = getJitProductConfig(mailType);
-  const configured = Boolean(product.priceId && product.amountCents > 0);
-  const allowedWithBalance = process.env.JIT_ALLOW_WITH_PREPAID_BALANCE === 'true';
-  const available =
-    isJitPurchaseEnabled() && configured && (!prepaidEligible || allowedWithBalance);
-  let unavailableReason: string | undefined;
-  if (!isJitPurchaseEnabled()) unavailableReason = 'Pay & Send is not enabled.';
-  else if (!configured) unavailableReason = 'Pay & Send pricing is not configured.';
-  else if (prepaidEligible && !allowedWithBalance) {
-    unavailableReason = 'Use your existing prepaid letter balance.';
-  }
-
+  // One enabled read per call (three separate env reads before, against this
+  // codebase's own hoisting standard), and the disabled default short-circuits
+  // before building a product config whose only fate was to be discarded
+  // (#278 round 7).
+  const jitEnabled = isJitPurchaseEnabled();
+  // ONE envelope. The round-7 short-circuit duplicated the whole
+  // prepaid/letterPack literal for the disabled path, so a change to either
+  // block had to be edited in two returns or the enabled and disabled quote
+  // surfaces diverged (#278 round 8). Only payAndSend is branch-dependent.
   return {
     prepaid: {
       eligible: prepaidEligible,
       requiredCredits,
       availableCredits
     },
-    payAndSend: {
-      available,
-      amountCents: configured ? product.amountCents : undefined,
-      currency: configured ? product.currency : undefined,
-      productDescription: configured ? product.name : undefined,
-      unavailableReason
-    },
+    payAndSend: jitEnabled
+      ? enabledPayAndSend(mailType, prepaidEligible)
+      : disabledPayAndSend(mailType),
     letterPack: {
       available: true,
       purchaseUrl:
@@ -187,16 +203,153 @@ export function getSendEligibility(
   };
 }
 
+function disabledPayAndSend(mailType: MailType): SendEligibility['payAndSend'] {
+  // Still kick with the code: the catalog's unsold gate clears leftover
+  // state recorded before the toggle - cooldowns AND memos, both mail types -
+  // so neither an un-archived Price nor an archived one resurfaces stale
+  // answers on re-enable. Without this, nothing would ever call with a JIT
+  // code while disabled (#278 rounds 7-8).
+  kickPriceCatalog(jitProductCode(mailType), 'send_eligibility_disabled');
+  return {
+    available: false,
+    unavailableReason: 'Pay & Send is not enabled.'
+  };
+}
+
+function enabledPayAndSend(
+  mailType: MailType,
+  prepaidEligible: boolean
+): SendEligibility['payAndSend'] {
+  const product = getJitProductConfig(mailType);
+  // The eligibility accessor owns its own warmup kick - UNGATED beyond the
+  // enabled check above, which is what makes the catalog's unsold-state
+  // clearing reachable: gating the kick harder meant nothing ever called with
+  // a JIT code while disabled, so toggle-off leftovers survived to resurface
+  // on re-enable, the exact bug the clearing exists for (#278 round 7).
+  kickPriceCatalog(product.productCode, 'send_eligibility');
+  const configured = Boolean(product.priceId && product.amountCents > 0);
+  if (configured) clearDiagnosticChangeSlot(`commerce.pay_and_send_unpriced:${product.productCode}`);
+  const allowedWithBalance = process.env.JIT_ALLOW_WITH_PREPAID_BALANCE === 'true';
+  const available = configured && (!prepaidEligible || allowedWithBalance);
+  let unavailableReason: string | undefined;
+  if (!configured) {
+    // Pay & Send just switched itself off for every quote. Before this, a
+    // 30-second Stripe blip and a permanently archived price produced the
+    // identical customer-facing "not configured" message and NO log line
+    // anywhere - the feature vanished silently and the operator learned about
+    // it from a customer (#278 review round 2). Say which it is, in both
+    // directions.
+    // Non-null by contract: the "unattempted means transient" policy lives in
+    // describeUnpriced, not in per-guard ?? chains (#278 rounds 5-6).
+    const failure = describeUnpriced(product.productCode);
+    const errorClass = failure.diagnosticClass;
+    const rule = failure.rule;
+    // Reported on CHANGE only. This is a synchronous accessor on the quote
+    // path, and the module header notes quotes vastly outnumber purchases - so
+    // an unconditional error line here turned one persistent config fault into
+    // a continuous error stream and a permanently firing alert, scaling with
+    // traffic rather than with the number of faults (#278 review round 3).
+    // Change-only via the ONE shared throttle (the bespoke per-product map
+    // this replaces had no reset hook and was the third hand-rolled copy of
+    // the helper built to own this, #278 round 7). price.not_resolved is the
+    // boot race - routine on every deploy - and logs at warn; a recorded
+    // failure is news and stays at error (#278 round 6, corroborated x5).
+    // The resolution epoch makes recovery part of the signature: without it,
+    // a fault recurring after a recovery no quote happened to observe (quiet
+    // hours, then re-broken) hashed identically and the second outage logged
+    // NOTHING for its whole duration (#278 round 8).
+    writeDiagnosticOnChange(
+      `commerce.pay_and_send_unpriced:${product.productCode}`,
+      formatPriceFailureSummary([failure]),
+      rule === 'price.not_resolved' ? 'warn' : 'error',
+      'commerce.pay_and_send_unpriced',
+      {
+        productCode: product.productCode,
+        rule,
+        errorClass,
+        // The figures, when the fault has them: an operator reading this line
+        // should not need the Stripe dashboard to see what disagreed.
+        ...(failure.detail ? { detail: failure.detail } : {})
+      }
+    );
+    unavailableReason = isTerminalDiagnosticClass(errorClass)
+      ? 'Pay & Send pricing is not configured.'
+      : 'Pay & Send is temporarily unavailable. Please try again shortly.';
+  } else if (prepaidEligible && !allowedWithBalance) {
+    unavailableReason = 'Use your existing prepaid letter balance.';
+  }
+
+  return {
+    available,
+    amountCents: configured ? product.amountCents : undefined,
+    currency: configured ? product.currency : undefined,
+    // Server-formatted for display: the widgets rendered amountCents/100
+    // themselves, which is 100x wrong for zero-decimal currencies this
+    // codebase declares supported (#278 round 6). Widgets prefer this and
+    // fall back to /100 for older servers.
+    displayAmount: configured
+      ? formatAmountForCurrency(product.amountCents, product.currency)
+      : undefined,
+    productDescription: configured ? product.name : undefined,
+    unavailableReason
+  };
+}
+
+/**
+ * Stripe's own floor for a Checkout Session's expires_at: it refuses a session
+ * whose expiry is nearer than this.
+ *
+ * A sessionless row must forward its stored expiry verbatim - the idempotency
+ * key that recovers a crashed attachment only replays for IDENTICAL
+ * parameters - so a row inside this floor cannot open a session at all and is
+ * retired in favour of a fresh one. How long a row stays reusable is
+ * therefore set by how far ABOVE this floor it was stamped, which is what
+ * CHECKOUT_REUSE_BUDGET_MINUTES below exists to guarantee (#278 r10-12).
+ */
+const STRIPE_MIN_CHECKOUT_WINDOW_MINUTES = 30;
+const STRIPE_MIN_CHECKOUT_WINDOW_MS = STRIPE_MIN_CHECKOUT_WINDOW_MS_OF(
+  STRIPE_MIN_CHECKOUT_WINDOW_MINUTES
+);
+function STRIPE_MIN_CHECKOUT_WINDOW_MS_OF(minutes: number): number {
+  return minutes * 60_000;
+}
+/** Clock/network margin on a stamped expiry, so it is still valid on arrival. */
+const CHECKOUT_STAMP_MARGIN_MS = 5_000;
+/**
+ * Headroom above Stripe's floor, so a sessionless row stays REUSABLE for a
+ * while. A window stamped at exactly the floor leaves none: round 10's reuse
+ * guard then cancelled every sessionless row more than five seconds old,
+ * which made the round-7 reprice branch dead code, churned a cancelled order
+ * per retry, and orphaned the Stripe session behind a crashed attachment
+ * instead of replaying its idempotency key (three round-11 angles).
+ */
+const CHECKOUT_REUSE_BUDGET_MINUTES = 10;
+
 function checkoutExpiry(draftExpiresAt: Date): Date {
   const configuredMinutes = Math.min(
     24 * 60,
-    Math.max(30, integerSetting('JIT_CHECKOUT_EXPIRY_MINUTES', 30))
+    Math.max(
+      STRIPE_MIN_CHECKOUT_WINDOW_MINUTES + CHECKOUT_REUSE_BUDGET_MINUTES,
+      // Default matches the floor below, so the declared default is a value
+      // the function can actually return (#278 round 12).
+      integerSetting('JIT_CHECKOUT_EXPIRY_MINUTES', 40)
+    )
   );
-  // Stripe requires expires_at to remain at least 30 minutes in the future
-  // when the API request arrives, so retain a small network/clock margin.
-  const configured = new Date(Date.now() + configuredMinutes * 60_000 + 5_000);
+  const configured = new Date(
+    Date.now() + configuredMinutes * 60_000 + CHECKOUT_STAMP_MARGIN_MS
+  );
   const draftExpiry = new Date(draftExpiresAt);
-  if (draftExpiry.getTime() - Date.now() < 30 * 60_000 + 5_000) {
+  // The floor INCLUDES the reuse budget, because the value actually stamped
+  // is min(configured, draftExpiry): raising only the configured branch left
+  // a draft in its last 40 minutes stamping barely above Stripe's floor, so
+  // the reuse window collapsed to seconds again for exactly those checkouts
+  // - the five-second window round 11 believed it had closed (#278 r12).
+  if (
+    draftExpiry.getTime() - Date.now() <
+    STRIPE_MIN_CHECKOUT_WINDOW_MS +
+      CHECKOUT_REUSE_BUDGET_MINUTES * 60_000 +
+      CHECKOUT_STAMP_MARGIN_MS
+  ) {
     throw Object.assign(
       new Error('Draft expires too soon to open a safe checkout. Please create a new preview.'),
       { code: 'DRAFT_TOO_CLOSE_TO_EXPIRY' }
@@ -287,7 +440,7 @@ async function recordOrderEvent(
  * forever (the pack INSERT omits checkout_expires_at, and the only sweeper for
  * session-less rows compares `checkout_expires_at <= NOW()`, which is never
  * true for NULL), and it blocks a JIT draft from prepaid sending for the whole
- * ~30 minute window behind a "checkout in progress" that does not exist.
+ * checkout window behind a "checkout in progress" that does not exist.
  *
  * So a terminal fault cancels the order and records the transition. Introduced
  * with the price-drift guard (#275): making that guard fire deterministically
@@ -361,18 +514,56 @@ async function attachCheckout(
   });
 }
 
+/**
+ * Mark the order's cleanup outcome and throw the carried-classification error
+ * in ONE place: the pack and JIT paths each duplicated a ~15-line mark+throw
+ * block whose four copies of `terminal ?? isTerminal(...)` could drift, and a
+ * drifted pair cancels the order as terminal while telling the customer to
+ * retry (#278 round 6). Terminality is derived from the class exactly once.
+ */
+async function failCheckoutCreation(
+  orderId: string,
+  checkout: CheckoutSessionResult,
+  fallbackMessage: string
+): Promise<Error> {
+  const diagnosticClass = checkout.diagnosticClass ?? 'provider_error';
+  await markCheckoutCreationFailure(orderId, checkout.error || fallbackMessage, {
+    errorCode: checkout.errorCode,
+    terminal: isTerminalDiagnosticClass(diagnosticClass)
+  });
+  // Returned, not thrown: `throw await` at the call site keeps TypeScript's
+  // control-flow narrowing of checkout.sessionId, which an awaited
+  // Promise<never> would not.
+  return Object.assign(new Error(checkout.error || fallbackMessage), {
+    code: checkout.errorCode,
+    diagnosticClass
+  });
+}
+
 export class PackAmountNotConfiguredError extends Error {
   readonly code = 'PACK_AMOUNT_NOT_CONFIGURED';
-  // A missing STRIPE_*_AMOUNT_CENTS is a configuration fault, not a database
-  // one. This guard throws before any query runs, so the checkout handler's
-  // catch has no query to blame and defaults an uncarried error to
-  // database_error - which is exactly what sent issue #213 on a schema hunt for
-  // a config problem. Carrying the real class makes the log name the right
-  // subsystem, the same mechanism #214 gave the Stripe-call path.
-  readonly diagnosticClass = 'configuration_error';
-  constructor(readonly productCode: string) {
+  // An unresolvable Stripe price is not a database fault. This guard throws
+  // before any query runs, so the checkout handler's catch has no query to
+  // blame and defaults an uncarried error to database_error - which is exactly
+  // what sent issue #213 on a schema hunt for a config problem. Carrying the
+  // real class makes the log name the right subsystem, the same mechanism #214
+  // gave the Stripe-call path.
+  //
+  // The class is supplied, not assumed. Hard-coding configuration_error here
+  // made the pack path structurally unable to report a transient fault: this
+  // throws 22 lines before createPackCheckoutSession, so the branch in
+  // stripeService that forwards the catalog's real class was dead, and a
+  // 30-second Stripe outage was logged as an operator-must-act config fault
+  // (#278 review round 2) - the #213 mislabel reintroduced one layer up.
+  readonly diagnosticClass: string;
+  constructor(readonly productCode: string, diagnosticClass = 'configuration_error') {
     super(`Pack amount is not configured for ${productCode}`);
     this.name = 'PackAmountNotConfiguredError';
+    // No separate `terminal` property: three review angles independently
+    // converged on carrying ONLY the class and deriving terminality at the
+    // decision points - a carried pair can be minted mismatched, and consumers
+    // were hedging with their own ?? re-derivations anyway (#278 round 6).
+    this.diagnosticClass = diagnosticClass;
   }
 }
 
@@ -381,19 +572,25 @@ export class PackAmountNotConfiguredError extends Error {
  * Amounts are never inferred from a Stripe Price ID: an unknown amount must
  * disable the purchase rather than create an order that cannot be reconciled or
  * refunded against a trusted figure.
+ *
+ * The catalog's recorded failure says WHY it is unpriceable, and the class
+ * travels with the error so the operator log names the right subsystem.
  */
 export function assertConfiguredAmount(
   product: Pick<CommerceProductConfig, 'amountCents'>,
   productCode: string
 ): void {
   if (!Number.isInteger(product.amountCents) || product.amountCents <= 0) {
-    throw new PackAmountNotConfiguredError(productCode);
+    throw new PackAmountNotConfiguredError(productCode, describeUnpriced(productCode).diagnosticClass);
   }
 }
 
 export async function createPackCheckout(
   params: CreatePackCheckoutParams
 ): Promise<CommerceCheckoutResult> {
+  // Prices resolve lazily (#275 stage A); every entrypoint that can reach a
+  // product config awaits this first, so no process needs a bootstrap call.
+  await ensurePriceCatalog(params.productId);
   const product = getPackProductConfig(params.productId);
   // Both guards throw before any query, so an uncarried error would take the
   // handler catch's database_error default and mislabel a non-database fault -
@@ -409,7 +606,7 @@ export async function createPackCheckout(
       diagnosticClass: 'configuration_error'
     });
   }
-  // A missing STRIPE_*_AMOUNT_CENTS must fail before any authoritative order
+  // An unresolved price must fail before any authoritative order
   // exists. Persisting a zero amount would make the order unreconcilable
   // against Stripe and would leave any later refund without a trusted amount.
   assertConfiguredAmount(product, params.productId);
@@ -443,17 +640,7 @@ export async function createPackCheckout(
     idempotencyKey
   });
   if (!checkout.success || !checkout.sessionId) {
-    await markCheckoutCreationFailure(orderId, checkout.error || 'Unknown Stripe error', {
-      errorCode: checkout.errorCode,
-      terminal: checkout.diagnosticClass === 'configuration_error'
-    });
-    // Carry the resolved provider class up to the handler's catch, so the log
-    // there names the real cause (e.g. resource_missing) instead of defaulting
-    // to database_error and pointing at the wrong subsystem. Issue #213.
-    throw Object.assign(
-      new Error(checkout.error || 'Failed to create checkout session'),
-      { diagnosticClass: checkout.diagnosticClass ?? 'provider_error' }
-    );
+    throw await failCheckoutCreation(orderId, checkout, 'Failed to create checkout session');
   }
   const order = await attachCheckout(
     orderId,
@@ -482,6 +669,14 @@ async function prepareJitOrder(
         code: 'DRAFT_NOT_OWNED'
       });
     }
+    if (draft.status === 'expired') {
+      // Distinguished from the generic invalid-state throw: the sweeper flips
+      // aged drafts to 'expired', and reporting those as DRAFT_INVALID_STATE
+      // told the customer the draft had "already been sent or cancelled" -
+      // false, and contradicting the message the SAME draft got one sweep
+      // cycle earlier from the expiry check below (#278 round 12).
+      throw Object.assign(new Error('Draft has expired'), { code: 'DRAFT_EXPIRED' });
+    }
     if (draft.status !== 'pending') {
       throw Object.assign(new Error(`Draft is ${draft.status}`), {
         code: 'DRAFT_INVALID_STATE'
@@ -492,6 +687,12 @@ async function prepareJitOrder(
         code: 'DRAFT_EXPIRED'
       });
     }
+
+    // ONE derivation for the whole transaction: the reprice branch and the
+    // insert below must price against the SAME row or they silently diverge
+    // (#278 round 8).
+    const actualMailType = (draft.mail_type || 'letter') as MailType;
+    const product = getJitProductConfig(actualMailType);
 
     const active = await client.query<Order>(
       `SELECT * FROM orders
@@ -507,31 +708,111 @@ async function prepareJitOrder(
       if (
         existing.status === 'checkout_pending' &&
         existing.checkout_expires_at &&
-        new Date(existing.checkout_expires_at).getTime() <= Date.now() &&
+        // Not just PAST: Stripe refuses a Checkout Session whose expires_at
+        // is under 30 minutes away, and a reused sessionless row forwards its
+        // stored expiry verbatim. A row created 10 minutes ago on the default
+        // 30-minute window has ~20 left, so every retry was rejected by
+        // Stripe and left pending - the customer could not open a checkout
+        // for that draft until the row finally aged out (#278 round 10).
+        new Date(existing.checkout_expires_at).getTime() <=
+          Date.now() + STRIPE_MIN_CHECKOUT_WINDOW_MS + CHECKOUT_STAMP_MARGIN_MS &&
         !existing.stripe_checkout_session_id
       ) {
+        // The audit trail distinguishes the two: a row still inside its own
+        // window was NOT "expired locally" - saying so in order history is a
+        // statement an operator would act on, and the round-10 gate started
+        // producing it for rows with most of their window left (#278 r11).
+        const past = new Date(existing.checkout_expires_at).getTime() <= Date.now();
         await client.query(
-          `UPDATE orders SET status = 'cancelled', updated_at = NOW()
+          `UPDATE orders SET status = 'cancelled',
+             last_error_code = $2, last_error = $3, updated_at = NOW()
            WHERE order_id = $1`,
-          [existing.order_id]
+          [
+            existing.order_id,
+            past ? 'CHECKOUT_EXPIRED' : 'CHECKOUT_WINDOW_TOO_SHORT',
+            // The PAIR, like every other code-setting path here. Writing only
+            // the code left the previous failure's message beside it, so the
+            // two columns described different events - in the branch added to
+            // make order history honest (#278 round 12).
+            past
+              ? 'Checkout window expired before a session was opened'
+              : 'Checkout window too short for Stripe to open a session'
+          ]
         );
         await recordOrderEvent(
           client,
           existing.order_id,
-          'checkout.expired_locally',
+          past ? 'checkout.expired_locally' : 'checkout.window_too_short',
           existing.status,
           'cancelled'
         );
-      } else {
+      } else if (existing.stripe_checkout_session_id || existing.checkout_url) {
+        // A Stripe session already exists: the customer will pay exactly what
+        // that session says, which matches this order row. Reuse is safe.
         return { order: existing, reused: true };
+      } else if (existing.status !== 'checkout_pending') {
+        // A sessionless row in a funded/held state exists only via operator
+        // surgery, but the reprice-cancel below must NEVER be the thing that
+        // clears a financial hold: leave the row exactly as found (#278 r8).
+        return { order: existing, reused: true };
+      } else if (product.amountCents <= 0) {
+        // amountCents 0 is the catalog's UNRESOLVED sentinel, not a price.
+        // Reading it as "price changed" cancelled a reusable order during a
+        // transient Stripe blip (three review angles flagged it; the
+        // enclosing transaction happened to roll the cancel back, but
+        // correctness must not lean on that). No verdict here: FALL THROUGH
+        // to the unpriced guard below, which throws without touching this
+        // reusable row (#278 round 8).
+      } else {
+        // SESSIONLESS pending order (its session creation previously failed).
+        // If the price changed since it was inserted - a repoint plus pin
+        // update between the failure and the retry - reusing it would build a
+        // NEW session at the new price against an order row recorded at the
+        // old one: the customer pays the new amount, the paid-amount check
+        // flags PAYMENT_AMOUNT_MISMATCH, and a legitimate purchase heads for
+        // the refund lane (#278 round 7). Nothing was ever paid on this row,
+        // so cancelling it is free; a fresh order is inserted below at the
+        // current price.
+        if (
+          existing.amount_cents === product.amountCents &&
+          // The same normalizer on BOTH sides: a legacy row's padded currency
+          // must not fail a comparison its paid-amount sibling passes (#278
+          // round 8).
+          normalizedCurrency(existing.currency, '') === normalizedCurrency(product.currency, '')
+        ) {
+          return { order: existing, reused: true };
+        }
+        await client.query(
+          `UPDATE orders SET status = 'cancelled',
+             last_error_code = 'PRICE_CHANGED_BEFORE_SESSION',
+             last_error = $2, updated_at = NOW()
+           WHERE order_id = $1 AND status = 'checkout_pending'`,
+          // The PAIR. This branch is reached only from a row whose session
+          // creation already failed, so last_error always holds that older,
+          // unrelated message - round 12 fixed the sibling 60 lines above
+          // and left this one (#278 round 13).
+          [existing.order_id, 'Configured price changed before a session was opened']
+        );
+        await recordOrderEvent(
+          client,
+          existing.order_id,
+          'checkout.repriced_locally',
+          existing.status,
+          'cancelled'
+        );
       }
     }
 
-    const actualMailType = (draft.mail_type || 'letter') as MailType;
-    const product = getJitProductConfig(actualMailType);
     if (!product.priceId || product.amountCents <= 0) {
+      const failure = describeUnpriced(product.productCode);
+      writeDiagnostic('error', 'commerce.jit_not_priced', {
+        productCode: product.productCode,
+        rule: failure.rule,
+        errorClass: failure.diagnosticClass
+      });
       throw Object.assign(new Error('Pay & Send pricing is not configured'), {
-        code: 'JIT_NOT_CONFIGURED'
+        code: 'JIT_NOT_CONFIGURED',
+        diagnosticClass: failure.diagnosticClass
       });
     }
     if (process.env.JIT_ALLOW_WITH_PREPAID_BALANCE !== 'true') {
@@ -575,12 +856,14 @@ async function prepareJitOrder(
 export async function createJitCheckout(
   params: CreateJitCheckoutParams
 ): Promise<CommerceCheckoutResult> {
+  // After the cheap synchronous guard, not before it: with Pay & Send disabled
+  // (the shipped default) the catalog work is for products this deployment
+  // does not sell, on a request that is about to throw anyway (#278 r3).
   if (!isJitPurchaseEnabled()) {
     throw Object.assign(new Error('Pay & Send is not currently enabled'), {
       code: 'JIT_DISABLED'
     });
   }
-
   // Issue #150: refuse a restricted account BEFORE taking payment.
   //
   // The send-path block in mailSendService deliberately exempts jit_order
@@ -600,12 +883,33 @@ export async function createJitCheckout(
     );
   }
 
+  // Which product is being bought decides which price must be verified, so
+  // read the draft's mail type BEFORE the money transaction (a network await
+  // must never run inside it) and ensure exactly that product - ensuring both
+  // JIT products coupled a letter checkout to a hanging postcard lookup
+  // (#278 round 5). USER-SCOPED and AFTER the send-block gate: an unscoped
+  // peek let any authenticated caller make another user's draft id steer
+  // catalog work before authorization said no (#278 round 7). Advisory only -
+  // prepareJitOrder re-reads FOR UPDATE and owns the real ownership check.
+  const draftPeek = await query<{ mail_type: string | null }>(
+    'SELECT mail_type FROM letter_drafts WHERE draft_id = $1 AND user_id = $2',
+    [params.draftId, params.userId]
+  );
+  const peekedMailType = (draftPeek.rows[0]?.mail_type || 'letter') as MailType;
+  await ensurePriceCatalog(jitProductCode(peekedMailType));
+
   const prepared = await prepareJitOrder(params);
   if (prepared.order.status !== 'checkout_pending' || prepared.order.checkout_url) {
     return asCheckoutResult(prepared.order, true);
   }
 
   const mailType = String(prepared.order.product_snapshot.mailType || 'letter') as MailType;
+  // ONE fresh derivation, as it was through round 10. Rounds 11-12 spliced
+  // the row's amount together with a live price id (and then the row's price
+  // id too), which round 13 showed strands a checkout on an archived Price
+  // that the pre-round-11 code completed successfully. The race that
+  // motivated the splice was a concurrent memo invalidation, and that
+  // machinery is gone (#278 round 13).
   const product = getJitProductConfig(mailType);
   const urls = jitReturnUrls(prepared.order.order_id);
   const checkout = await createJitCheckoutSession({
@@ -619,21 +923,11 @@ export async function createJitCheckout(
     idempotencyKey: prepared.order.idempotency_key
   });
   if (!checkout.success || !checkout.sessionId) {
-    await markCheckoutCreationFailure(
+    throw await failCheckoutCreation(
       prepared.order.order_id,
-      checkout.error || 'Unknown Stripe error',
-      {
-        errorCode: checkout.errorCode,
-        terminal: checkout.diagnosticClass === 'configuration_error'
-      }
+      checkout,
+      'Failed to create Pay & Send checkout'
     );
-    // Carry the class, as the pack sibling does. A bare Error drops it, the
-    // server logs `unknown_error`, and the tool tells the customer to retry a
-    // fault that can never succeed.
-    throw Object.assign(new Error(checkout.error || 'Failed to create Pay & Send checkout'), {
-      code: checkout.errorCode,
-      diagnosticClass: checkout.diagnosticClass ?? 'provider_error'
-    });
   }
 
   const order = await attachCheckout(
@@ -675,21 +969,64 @@ async function createLegacyPackOrder(
   session: Stripe.Checkout.Session
 ): Promise<Order | null> {
   const userId = session.metadata?.userId || session.metadata?.user_id;
-  const productCode = session.metadata?.productId || session.metadata?.product_id;
-  const product = productCode ? getPackProductConfig(productCode as PackProductId) : null;
-  if (!userId || !product) {
+  const productCode =
+    session.metadata?.productCode || session.metadata?.productId || session.metadata?.product_id;
+  // The STATIC table, not the resolved catalog: this session is already PAID,
+  // so refusing it over the current state of a Stripe lookup can only strand
+  // money (terminal-classed blips booked paying customers as permanently
+  // unmatched; transient-classed ones 500-looped the webhook). The pinned
+  // amount is the business agreement, and the GATE below adopts only on exact
+  // agreement with it - a mismatched historical payment goes to the
+  // unmatched-money lane for an operator, never into the order table (#278
+  // rounds 5-7; an earlier comment here claimed downstream quarantine was
+  // recoverable, which round 6 proved false: the refund sweep consumed it).
+  const definition = PACK_PRODUCTS.find(candidate => candidate.productCode === productCode);
+  if (!userId || !definition) {
     return null;
   }
-  // Without a configured amount this INSERT would violate the amount_cents
-  // CHECK and roll back the whole webhook transaction, including the event
-  // claim, leaving Stripe to retry forever with no operator signal. Refuse the
-  // adoption instead; the caller records a paid refusal as unmatched money.
-  if (!Number.isInteger(product.amountCents) || product.amountCents <= 0) {
-    writeDiagnostic('error', 'commerce.legacy_pack_amount_not_configured', {
-      productCode: product.productCode
+  // THE GATE (#278 round 6). If what the customer actually paid does not
+  // equal the pin, do NOT adopt: adopting would write the pinned amount onto
+  // the order, the paid-amount comparison would flag PAYMENT_AMOUNT_MISMATCH
+  // -> refund_pending, and the maintenance refund sweep is order-type
+  // agnostic - so a legitimate months-old purchase at a historical price
+  // would be AUTO-REFUNDED with no credits and no human decision. A paid
+  // session we decline to adopt takes the unmatched-money path instead:
+  // durable record, critical alert, operator review - origin/dev's exact
+  // semantics for money we cannot vouch for.
+  const paidAmount = session.amount_total ?? null;
+  const paidCurrency = normalizedCurrency(session.currency ?? undefined, '');
+  if (paidAmount !== definition.expectedAmountCents || paidCurrency !== packCurrency()) {
+    // Level follows whether money actually moved. This gate runs for EVERY
+    // legacy-metadata session, including checkout.session.expired and
+    // async_payment_failed, whose amount_total is a historical price nobody
+    // paid - logging those at error made an unpaid expiry indistinguishable
+    // from the real paid-mismatch alarm this event name exists for, and the
+    // payload carried no marker to tell them apart (#278 round 9).
+    const paid = session.payment_status === 'paid';
+    writeDiagnostic(paid ? 'error' : 'info', 'commerce.legacy_adoption_amount_mismatch', {
+      productCode: definition.productCode,
+      // Amounts here are Stripe's own public figures for this session plus a
+      // constant from source control - nothing secret.
+      paidAmount: paidAmount ?? 'none',
+      expectedAmount: definition.expectedAmountCents,
+      paidCurrency: paidCurrency || 'none',
+      paymentStatus: session.payment_status ?? 'unknown'
     });
     return null;
   }
+  const product = {
+    productCode: definition.productCode,
+    credits: definition.credits,
+    amountCents: definition.expectedAmountCents,
+    currency: packCurrency(),
+    // Satisfies the shared CommerceProductConfig shape only; nothing in the
+    // adoption path persists or reads a price id - productSnapshot serializes
+    // name/description/mailType, and the INSERT uses code/credits/amount/
+    // currency. Deliberately NOT an env read: this path is static-table only.
+    priceId: '',
+    name: definition.name,
+    description: definition.description
+  };
   const orderId = `stripe-${session.id}`;
   const inserted = await client.query<Order>(
     `INSERT INTO orders (
@@ -783,7 +1120,11 @@ export async function repairFulfilledPackGrant(
       order.stripe_checkout_session_id !== params.stripeSessionId ||
       order.credits !== params.expectedCredits ||
       order.amount_cents !== params.paidAmountCents ||
-      order.currency.toLowerCase() !== params.paidCurrency.toLowerCase()
+      // The shared normalizer, like every sibling gate: a legacy row with a
+      // padded currency passed the paid-amount check and then failed HERE, so
+      // the repair tool refused a grant every other gate had accepted
+      // (#278 round 10 - the last copy of the two-policies split).
+      normalizedCurrency(order.currency, '') !== normalizedCurrency(params.paidCurrency, '')
     ) {
       throw new Error('Pack reconciliation does not match a fulfilled authoritative order');
     }
@@ -859,8 +1200,11 @@ async function transitionPaidCheckout(
   }
 
   const paidAmount = session.amount_total || 0;
-  const paidCurrency = (session.currency || '').toLowerCase();
-  if (paidAmount !== order.amount_cents || paidCurrency !== order.currency.toLowerCase()) {
+  // The same normalizer as every other currency judgment (trim + lowercase):
+  // two policies judging one value let a padded currency pass one gate and
+  // fail its neighbor (#278 round 7).
+  const paidCurrency = normalizedCurrency(session.currency ?? undefined, '');
+  if (paidAmount !== order.amount_cents || paidCurrency !== normalizedCurrency(order.currency, '')) {
     await client.query(
       `UPDATE orders
        SET status = 'refund_pending', refund_pending_at = NOW(),
@@ -977,6 +1321,15 @@ async function processCheckoutSessionEvent(
   eventType: string,
   session: Stripe.Checkout.Session
 ): Promise<StripeEventProcessingResult> {
+  // NO price-catalog call here, deliberately. The money already moved:
+  // adoption prices from the static product table (createLegacyPackOrder),
+  // and the paid-amount comparison downstream verifies the charge against
+  // that independent figure. Putting a live Stripe read in front of this
+  // transaction spent five review rounds producing exactly the failure modes
+  // you would expect - webhook 500 loops on transient faults (the schedule on
+  // which Stripe disables an endpoint), paid money stranded as unmatched
+  // during a key rotation, Stripe latency inside the webhook budget - all for
+  // a lookup whose answer the table already knows (#278 review round 5).
   return transaction(async client => {
     if (!(await claimStripeEvent(client, eventId, eventType, session.id))) {
       return { duplicate: true };
@@ -1031,7 +1384,9 @@ async function processCheckoutSessionEvent(
            stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, $3),
            status = $4::varchar, refund_pending_at = CASE WHEN $4::varchar = 'refund_pending'
              THEN COALESCE(refund_pending_at, NOW()) ELSE refund_pending_at END,
-           last_error_code = 'UNMATCHED_MONEY_EVENT_RECOVERED', updated_at = NOW()
+           last_error_code = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH'
+             THEN last_error_code ELSE 'UNMATCHED_MONEY_EVENT_RECOVERED' END,
+           updated_at = NOW()
          WHERE order_id = $1`,
         [order.order_id, session.id, intentId, blockedStatus]
       );
@@ -2058,6 +2413,12 @@ export async function requestRefund(
        SELECT order_id, refund_attempts
        FROM orders
        WHERE order_id = $1 AND status = 'refund_pending'
+         -- The PAYMENT_AMOUNT_MISMATCH quarantine gate lives in the CLAIM,
+         -- not only in the maintenance sweep's candidate SELECT: any future
+         -- caller of this exported money-mover (an admin bulk-retry, another
+         -- sweep) must hit the same wall. Operator release = clearing the
+         -- marker (#278 round 8).
+         AND (last_error_code IS NULL OR last_error_code <> 'PAYMENT_AMOUNT_MISMATCH')
          AND stripe_payment_intent_id IS NOT NULL
          AND (
            refund_attempts = 0
@@ -2220,7 +2581,7 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
       }
     } catch (error) {
       writeDiagnostic('error', 'commerce.checkout_reconciliation_failed', {
-        errorClass: classifyDiagnosticError(error, 'provider_error')
+        errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error')
       });
     }
   }
@@ -2230,8 +2591,18 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
   // asynchronous payment may remain unpaid beyond its original expires_at.
   const orphaned = await query<{ order_id: string }>(
     `UPDATE orders SET status = 'cancelled', updated_at = NOW()
-     WHERE status = 'checkout_pending' AND checkout_expires_at <= NOW()
+     WHERE status = 'checkout_pending'
        AND stripe_checkout_session_id IS NULL
+       AND (
+         checkout_expires_at <= NOW()
+         -- Pack orders are inserted WITHOUT checkout_expires_at, and NULL <=
+         -- NOW() is UNKNOWN - so a pack whose session creation failed
+         -- non-terminally was a zombie this sweep could never reclaim,
+         -- stranded in checkout_pending forever with no alarm (the stuck-order
+         -- check watches paid statuses only). No session exists, so nothing
+         -- can ever pay it; a day is ample grace (#278 review round 4).
+         OR (checkout_expires_at IS NULL AND updated_at <= NOW() - INTERVAL '24 hours')
+       )
      RETURNING order_id`
   );
   expiredCheckouts += orphaned.rowCount || 0;
@@ -2241,6 +2612,19 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
     `SELECT order_id, last_error FROM orders
      WHERE status = 'refund_pending'
        AND stripe_payment_intent_id IS NOT NULL
+       -- A PAYMENT_AMOUNT_MISMATCH quarantine is a question for an operator,
+       -- never an instruction to refund: round 6 gated the legacy-adoption
+       -- PRODUCER of this state, but the sweep - the CONSUMER - would still
+       -- have auto-refunded any normally-created order that a Stripe-side
+       -- amount change (promo code, adaptive pricing, tax) pushed into the
+       -- quarantine, mass-refunding real customers with no human decision
+       -- (#278 round 7). Quarantined rows stay visible via the stuck-order
+       -- alarm; an operator releases them by clearing the code or refunding
+       -- deliberately. UNMATCHED_MONEY_EVENT_RECOVERED is NOT excluded: that
+       -- lane recovers refund/dispute events whose Stripe-side refund already
+       -- exists, and requestRefund discovers it (findPaymentRefund-first)
+       -- rather than creating another.
+       AND (last_error_code IS NULL OR last_error_code <> 'PAYMENT_AMOUNT_MISMATCH')
        AND refund_attempts < $2
        AND (
          refund_attempts = 0

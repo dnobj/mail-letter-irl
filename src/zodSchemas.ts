@@ -221,7 +221,7 @@ const statusTimelineEntryZ = z.object({
 
 const trackingSupportZ = z.enum(["none", "estimated_only", "carrier_tracking"]);
 
-const sendEligibilityZ = z.object({
+export const sendEligibilityZ = z.object({
   prepaid: z.object({
     eligible: z.boolean(),
     requiredCredits: z.number().int(),
@@ -231,6 +231,7 @@ const sendEligibilityZ = z.object({
     available: z.boolean(),
     amountCents: z.number().int().optional(),
     currency: z.string().optional(),
+    displayAmount: z.string().optional(),
     productDescription: z.string().optional(),
     unavailableReason: z.string().optional()
   }),

@@ -1,19 +1,33 @@
 /** Stripe adapter for hosted physical-goods checkout, events, and refunds. */
 
-import Stripe from 'stripe';
+import type Stripe from 'stripe';
 import type { MailType } from './types.js';
-import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import {
+  carriedDiagnosticClass,
+  classifyDiagnosticError,
+  writeDiagnostic
+} from '../utils/diagnosticLog.js';
+import {
+  describeUnpriced,
+  getResolvedPriceForProduct
+} from './priceCatalog.js';
+import { BACKGROUND_REQUEST_OPTIONS, getStripeClient } from './stripeClient.js';
+import {
+  PACK_PRODUCTS,
+  getConfiguredProduct,
+  jitCurrency,
+  jitProductDefinition,
+  packCurrency,
+  type PackProductId
+} from '../config/products.js';
 
-let stripeClient: Stripe | null = null;
-
-export function getStripeClient(): Stripe {
-  const apiKey = process.env.STRIPE_SECRET_KEY;
-  if (!apiKey) throw new Error('STRIPE_SECRET_KEY is not configured');
-  stripeClient ??= new Stripe(apiKey, { apiVersion: '2025-11-17.clover' });
-  return stripeClient;
-}
-
-export type PackProductId = 'credit-pack-4' | 'credit-pack-10' | 'credit-pack-100';
+// Re-exported because commerceService and the tool layer import them from
+// here; the definitions themselves live in the leaf module
+// src/config/products.ts so the manifest, the catalog, and the reconciliation
+// service read one table. (getStripeClient is NOT re-exported: its two real
+// consumers import it straight from ./stripeClient.js, and the comment that
+// used to claim otherwise named importers that do not exist - #278 review r3.)
+export { isJitPurchaseEnabled, type PackProductId } from '../config/products.js';
 
 export interface CommerceProductConfig {
   productCode: string;
@@ -26,91 +40,52 @@ export interface CommerceProductConfig {
   mailType?: MailType;
 }
 
-interface PackProductDefinition {
-  credits: number;
-  priceEnv: string;
-  amountEnv: string;
-  name: string;
-  description: string;
-}
-
-const PACK_PRODUCTS: Record<PackProductId, PackProductDefinition> = {
-  'credit-pack-4': {
-    credits: 4,
-    priceEnv: 'STRIPE_PRICE_STARTER',
-    amountEnv: 'STRIPE_STARTER_AMOUNT_CENTS',
-    name: 'Starter Pack - 2 Letters',
-    description: 'Two prepaid physical letters or postcards'
-  },
-  'credit-pack-10': {
-    credits: 10,
-    priceEnv: 'STRIPE_PRICE_REGULAR',
-    amountEnv: 'STRIPE_REGULAR_AMOUNT_CENTS',
-    name: 'Regular Pack - 5 Letters',
-    description: 'Five prepaid physical letters or postcards'
-  },
-  'credit-pack-100': {
-    credits: 100,
-    priceEnv: 'STRIPE_PRICE_POWER',
-    amountEnv: 'STRIPE_POWER_AMOUNT_CENTS',
-    name: 'Power Pack - 50 Letters',
-    description: 'Fifty prepaid physical letters or postcards'
-  }
-};
-
-function positiveInteger(value: string | undefined, fallback?: number): number {
-  const parsed = Number.parseInt(value || '', 10);
-  if (Number.isInteger(parsed) && parsed > 0) return parsed;
-  return fallback || 0;
-}
-
 export function getPackProductConfig(productId: PackProductId): CommerceProductConfig | null {
-  const definition = PACK_PRODUCTS[productId];
+  const definition = PACK_PRODUCTS.find(product => product.productCode === productId);
   if (!definition) return null;
+  // The amount comes from the resolved Stripe Price - there is no second copy
+  // to disagree with it (#275 stage A). Resolution is lazy: every async path
+  // that can reach this awaits ensurePriceCatalog() first. An unresolved
+  // product yields 0, which every caller's "not configured" guard refuses, so
+  // the purchase is disabled rather than transacted against a guess.
+  const configured = getConfiguredProduct(productId);
+  const resolved = getResolvedPriceForProduct(productId);
   return {
     productCode: productId,
     credits: definition.credits,
-    priceId: process.env[definition.priceEnv] || '',
-    // Never guess a financial amount from a price identifier. Missing config
-    // disables checkout and reconciliation instead of refunding a legitimate
-    // purchase against a stale hard-coded price.
-    amountCents: positiveInteger(process.env[definition.amountEnv]),
-    currency: (process.env.STRIPE_CURRENCY || 'usd').toLowerCase(),
+    // Not memo ?? env: getResolvedPriceForProduct only returns a memo that
+    // ALREADY equals the configured id and expected currency, so the two
+    // sources were identical by construction and the ?? read as if the memo
+    // could win - a trap armed the day the memo validity rule loosens (#278
+    // round 6). Only the amount genuinely depends on resolution.
+    priceId: configured?.priceId ?? '',
+    amountCents: resolved?.unitAmount ?? 0,
+    // The row's OWN expected currency: it is packCurrency(env) by
+    // construction, and re-reading the env for it made this accessor pay
+    // three derivations of one row per warm quote - the per-quote cost
+    // getConfiguredProduct was introduced to remove (#278 round 9).
+    currency: configured?.expectedCurrency ?? packCurrency(),
     name: definition.name,
     description: definition.description
   };
 }
 
 export function getJitProductConfig(mailType: MailType): CommerceProductConfig {
-  const isPostcard = mailType === 'postcard';
+  // The shared lookup, so the unknown-mail-type fallback policy is not
+  // written once here and once in jitProductCode - the quote path kicks and
+  // clears through one and prices through the other (#278 round 9).
+  const definition = jitProductDefinition(mailType);
+  const configured = getConfiguredProduct(definition.productCode);
+  const resolved = getResolvedPriceForProduct(definition.productCode);
   return {
-    productCode: isPostcard ? 'jit-postcard' : 'jit-letter',
+    productCode: definition.productCode,
     mailType,
-    priceId:
-      process.env[isPostcard ? 'STRIPE_JIT_POSTCARD_PRICE_ID' : 'STRIPE_JIT_LETTER_PRICE_ID'] || '',
-    amountCents: positiveInteger(
-      process.env[isPostcard ? 'JIT_POSTCARD_AMOUNT_CENTS' : 'JIT_LETTER_AMOUNT_CENTS']
-    ),
-    currency: (process.env.JIT_CURRENCY || process.env.STRIPE_CURRENCY || 'usd').toLowerCase(),
-    name: isPostcard ? 'Pay & Send One Physical Postcard' : 'Pay & Send One Physical Letter',
-    description: isPostcard
-      ? 'Payment authorizes Letter IRL to print and mail this exact postcard.'
-      : 'Payment authorizes Letter IRL to print and mail this exact letter.'
+    priceId: configured?.priceId ?? '',
+    amountCents: resolved?.unitAmount ?? 0,
+    currency: configured?.expectedCurrency ?? jitCurrency(),
+    name: definition.name,
+    description: definition.description
   };
-}
-
-export function isJitPurchaseEnabled(): boolean {
-  return process.env.JIT_PURCHASE_ENABLED === 'true';
-}
-
-export interface CheckoutSessionParams {
-  userId: string;
-  userEmail: string;
-  productId: PackProductId;
-  successUrl: string;
-  cancelUrl: string;
-  orderId?: string;
-  idempotencyKey?: string;
 }
 
 export interface CheckoutSessionResult {
@@ -120,11 +95,7 @@ export interface CheckoutSessionResult {
   expiresAt?: Date;
   error?: string;
   /** Stable, non-PII classification for configuration failures. */
-  errorCode?:
-    | 'PRICE_ID_NOT_CONFIGURED'
-    | 'PACK_AMOUNT_NOT_CONFIGURED'
-    | 'PRICE_CONFIG_MISMATCH'
-    | 'PROVIDER_ERROR';
+  errorCode?: 'PRICE_ID_NOT_CONFIGURED' | 'PACK_AMOUNT_NOT_CONFIGURED' | 'PROVIDER_ERROR';
   /**
    * The resolved diagnostic class for the failure - for a provider error, the
    * Stripe error's own code or type (e.g. `resource_missing`), already
@@ -146,117 +117,41 @@ interface HostedCheckoutParams {
   idempotencyKey: string;
 }
 
-/** Only the two fields the guard compares, both immutable on an existing Price. */
-interface PriceFacts {
-  unitAmount: number | null;
-  currency: string;
-}
-
-const priceFactsByPriceId = new Map<string, PriceFacts>();
-
-/**
- * Reads a Price once per process. Everything inside the try, so a non-object
- * resolution cannot throw a raw TypeError out of a function whose contract is
- * to RETURN a CheckoutSessionResult - that escape would strand the order and
- * land as `database_error` downstream, the #213 mislabel these guards exist to
- * prevent. Exported only so tests can clear it between cases.
- */
-export function __clearPriceFactsCache(): void {
-  priceFactsByPriceId.clear();
-}
-
-async function getVerifiedPriceFacts(priceId: string): Promise<PriceFacts> {
-  const memo = priceFactsByPriceId.get(priceId);
-  if (memo) return memo;
-  const price = await getStripeClient().prices.retrieve(priceId);
-  const facts: PriceFacts = {
-    unitAmount: price?.unit_amount ?? null,
-    currency: (price?.currency || '').trim().toLowerCase()
-  };
-  // A price we could not read as an object is not cached - it must not become
-  // a sticky refusal for the life of the process.
-  if (price && typeof price === 'object') priceFactsByPriceId.set(priceId, facts);
-  return facts;
-}
-
 async function createHostedCheckout(params: HostedCheckoutParams): Promise<CheckoutSessionResult> {
   if (!params.product.priceId) {
     return {
       success: false,
       errorCode: 'PRICE_ID_NOT_CONFIGURED',
+      diagnosticClass: 'configuration_error',
       error: `Price ID not configured for product: ${params.product.productCode}`
     };
   }
-  // Amounts are never inferred from a Price ID. Without an explicit
-  // STRIPE_*_AMOUNT_CENTS the purchase is disabled rather than transacted
-  // against a figure we cannot reconcile or refund.
+  // The amount comes from the resolved Stripe Price and nowhere else. An
+  // unpriceable product refuses rather than transacting against a figure we
+  // could not reconcile or refund - and the diagnosticClass carries WHY it is
+  // unpriceable, because the caller's cleanup keys off it: configuration_error
+  // (archived price, wrong currency, typo'd id, pack tiers sharing one id)
+  // cancels the order - retrying cannot help until a human changes config -
+  // while a transient lookup failure leaves it pending so a retry can succeed.
+  // A Stripe blip must never cancel a customer's order (#276 review, #278
+  // review).
   if (!Number.isInteger(params.product.amountCents) || params.product.amountCents <= 0) {
-    return {
-      success: false,
-      errorCode: 'PACK_AMOUNT_NOT_CONFIGURED',
-      error: `Amount not configured for product: ${params.product.productCode}`
-    };
-  }
-
-  // The amount above is what WE record, reconcile, and refund against. Stripe
-  // charges whatever the Price object says - the session below is built from
-  // the price id alone. Nothing compared the two, so a drifted pair billed one
-  // figure and booked another, silently, with a refund as the discovery event
-  // (issue #275). Verify before money moves, and refuse rather than transact.
-  //
-  // Memoized for the process lifetime, which costs nothing in freshness: on an
-  // existing Price, unit_amount and currency are IMMUTABLE - PriceUpdateParams
-  // exposes neither, so Stripe offers no way to change them. Drift can only
-  // come from repointing STRIPE_*_PRICE_ID, and nothing in src/ writes
-  // process.env, so that is a deploy. An earlier revision of this code argued
-  // against caching on the grounds that a Price could change underneath us;
-  // that was simply wrong about the API.
-  let price: PriceFacts;
-  try {
-    price = await getVerifiedPriceFacts(params.product.priceId);
-  } catch (error) {
-    // Unverifiable is not the same as mismatched: one is transient and retries,
-    // the other needs a human. Reporting them alike sends the wrong person.
-    const diagnosticClass = classifyDiagnosticError(error, 'provider_error');
-    writeDiagnostic('error', 'stripe.price_lookup_failed', { errorClass: diagnosticClass });
-    return {
-      success: false,
-      errorCode: 'PROVIDER_ERROR',
-      diagnosticClass,
-      error: 'Failed to verify the configured price'
-    };
-  }
-
-  // Trimmed on both sides. A trailing space in STRIPE_CURRENCY would otherwise
-  // refuse every purchase while reporting an amount fault - and unlike the
-  // amount vars, currency is neither trimmed by its producer nor validated at
-  // boot (see the follow-up issue).
-  const configuredCurrency = params.product.currency.trim().toLowerCase();
-  const amountMatches = price.unitAmount === params.product.amountCents;
-  const currencyMatches = price.currency === configuredCurrency;
-  if (!amountMatches || !currencyMatches) {
-    // Name the field that actually drifted. One predicate, three distinct
-    // faults: amount drift, currency-only drift where the numbers are
-    // identical, and a null unit_amount on a tiered or metered price.
-    const mismatched = [
-      ...(amountMatches ? [] : ['amount']),
-      ...(currencyMatches ? [] : ['currency'])
-    ].join(' and ');
-    writeDiagnostic('error', 'stripe.price_config_mismatch', {
+    // describeUnpriced owns the unattempted-means-transient policy; the ??
+    // triad this replaces was the last copy of it outside the catalog (#278
+    // round 7).
+    const failure = describeUnpriced(params.product.productCode);
+    const diagnosticClass = failure.diagnosticClass;
+    writeDiagnostic('error', 'stripe.product_not_priced', {
       orderType: params.orderType,
       productCode: params.product.productCode,
-      mismatched,
-      configuredAmountCents: params.product.amountCents,
-      // null for tiered/metered prices; render it rather than drop the field.
-      priceAmountCents: price.unitAmount ?? 'unset',
-      configuredCurrency,
-      priceCurrency: price.currency
+      rule: failure.rule,
+      errorClass: diagnosticClass
     });
     return {
       success: false,
-      errorCode: 'PRICE_CONFIG_MISMATCH',
-      diagnosticClass: 'configuration_error',
-      error: `Configured ${mismatched} does not match the Stripe price for product: ${params.product.productCode}`
+      errorCode: 'PACK_AMOUNT_NOT_CONFIGURED',
+      diagnosticClass,
+      error: `Amount not configured for product: ${params.product.productCode}`
     };
   }
 
@@ -287,9 +182,41 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
       expiresAt: session.expires_at ? new Date(session.expires_at * 1000) : params.expiresAt
     };
   } catch (error) {
-    const diagnosticClass = classifyDiagnosticError(error, 'provider_error');
+    // Carried-first, like every sibling catch this PR installed: without it,
+    // getStripeClient's missing-key configuration_error (a bare Error with no
+    // .code/.type) degraded to transient provider_error - order pending
+    // forever, log blaming Stripe for a missing credential (#278 round 7).
+    const diagnosticClass =
+      carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error');
+    // The parameter Stripe blamed, recorded because a rejected checkout is
+    // hard to diagnose without it. `param` is a fixed public StripeError
+    // field and is not caller-controlled, so it is safe to log.
+    //
+    // NOTE: rounds 10-12 also used this to invalidate the price memo, so an
+    // archived Price would self-heal. Round 10 added that because the
+    // no-self-heal behaviour IS defective - three round-10 angles found it and
+    // one reproduced it end to end. But the remedy produced a fresh
+    // correctness defect in three consecutive rounds (a remotely triggerable
+    // memo drop, two mechanisms that cancelled each other out, an unbounded
+    // Stripe re-read), so it was removed and the defect ACCEPTED rather than
+    // repaired a fourth time. This is a known cost, not an undefected one.
+    //
+    // What it costs, in full: an archived Price persists in the memo until
+    // the process restarts or the price id is repointed. `active` is not a
+    // signature input, so getUnpricedProducts() still returns [] - /readyz
+    // answers 200 'prices ok' and readiness kicks a re-read only when
+    // pricesOk is false, which means nothing re-reads. Quotes keep
+    // advertising it, and each purchase inserts an order row and then fails
+    // here with a non-terminal class. This log line is the ONLY signal, and
+    // it is unthrottled - one line per failed purchase (#278 r13/r14).
+    const offendingParam =
+      typeof (error as { param?: unknown })?.param === 'string'
+        ? (error as { param: string }).param
+        : '';
     writeDiagnostic('error', 'stripe.checkout_creation_failed', {
-      errorClass: diagnosticClass
+      errorClass: diagnosticClass,
+      productCode: params.product.productCode,
+      offendingParam: offendingParam || 'none'
     });
     return {
       success: false,
@@ -301,23 +228,6 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
 }
 
 /** Backward-compatible pack adapter used by older callers and tests. */
-export async function createCheckoutSession(
-  params: CheckoutSessionParams
-): Promise<CheckoutSessionResult> {
-  const product = getPackProductConfig(params.productId);
-  if (!product) return { success: false, error: `Invalid product ID: ${params.productId}` };
-  const orderId = params.orderId || `legacy-${params.userId}-${Date.now()}`;
-  return createHostedCheckout({
-    orderId,
-    orderType: 'letter_pack',
-    userEmail: params.userEmail,
-    product,
-    successUrl: params.successUrl,
-    cancelUrl: params.cancelUrl,
-    idempotencyKey: params.idempotencyKey || `legacy-pack:${orderId}`
-  });
-}
-
 export async function createPackCheckoutSession(
   params: Omit<HostedCheckoutParams, 'orderType'>
 ): Promise<CheckoutSessionResult> {
@@ -340,41 +250,26 @@ export function verifyWebhookSignature(
     return getStripeClient().webhooks.constructEvent(payload, signature, webhookSecret);
   } catch (error) {
     writeDiagnostic('warn', 'stripe.webhook_signature_invalid', {
-      errorClass: classifyDiagnosticError(error, 'provider_error')
+      // Carried FIRST. This try wraps getStripeClient(), whose missing-key
+      // throw carries configuration_error: bare classification filed a
+      // credential fault as a provider blip, so the operator chased a Stripe
+      // signing problem while every webhook failed on an unset key - the
+      // #213 mislabel, one function away from where round 7 fixed it
+      // (#278 round 9).
+      errorClass:
+        carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error')
     });
     return null;
   }
 }
 
-export interface CheckoutCompletedData {
-  userId: string;
-  credits: number;
-  productId: string;
-  sessionId: string;
-  amountPaid: number;
-  customerEmail: string;
-}
-
-/** Legacy session metadata extraction retained for rollout compatibility. */
-export async function extractCheckoutData(
-  session: Stripe.Checkout.Session
-): Promise<CheckoutCompletedData | null> {
-  const userId = session.metadata?.userId || session.metadata?.user_id;
-  const credits = Number.parseInt(session.metadata?.credits || '0', 10);
-  const productId = session.metadata?.productId || session.metadata?.product_id || '';
-  if (!userId || !credits || !productId) return null;
-  return {
-    userId,
-    credits,
-    productId,
-    sessionId: session.id,
-    amountPaid: (session.amount_total || 0) / 100,
-    customerEmail: session.customer_email || session.customer_details?.email || ''
-  };
-}
-
+// The four calls below run from maintenance sweeps and webhook recovery - no
+// customer is waiting, and the refund path spends a finite refund_attempts
+// budget BEFORE calling Stripe, never rolling it back on a throw. On the
+// shared client's interactive 10s/1 bound, a slow Stripe day burned attempts
+// without refunds.create ever being reached (#278 review round 4).
 export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe.Checkout.Session> {
-  return getStripeClient().checkout.sessions.retrieve(sessionId);
+  return getStripeClient().checkout.sessions.retrieve(sessionId, undefined, BACKGROUND_REQUEST_OPTIONS);
 }
 
 export async function createPaymentRefund(
@@ -387,22 +282,25 @@ export async function createPaymentRefund(
       payment_intent: paymentIntentId,
       metadata: { orderId }
     },
-    { idempotencyKey: `jit-refund:${orderId}:attempt:${attempt}` }
+    { ...BACKGROUND_REQUEST_OPTIONS, idempotencyKey: `jit-refund:${orderId}:attempt:${attempt}` }
   );
 }
 
 export async function retrieveRefund(refundId: string): Promise<Stripe.Refund> {
-  return getStripeClient().refunds.retrieve(refundId);
+  return getStripeClient().refunds.retrieve(refundId, undefined, BACKGROUND_REQUEST_OPTIONS);
 }
 
 export async function findPaymentRefund(
   paymentIntentId: string,
   orderId: string
 ): Promise<Stripe.Refund | null> {
-  const refunds = await getStripeClient().refunds.list({
-    payment_intent: paymentIntentId,
-    limit: 100
-  });
+  const refunds = await getStripeClient().refunds.list(
+    {
+      payment_intent: paymentIntentId,
+      limit: 100
+    },
+    BACKGROUND_REQUEST_OPTIONS
+  );
   return (
     refunds.data.find(
       refund =>

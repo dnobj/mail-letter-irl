@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Last updated: July 19, 2026
+Last updated: August 24, 2026
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
 
@@ -80,7 +80,7 @@ order they catch problems:
    In production it refuses: a missing/unapproved `LETTER_PROVIDER` (the
    implicit dummy default included), test-mode PostGrid or Stripe keys,
    `LETTER_PROVIDER_CONFIG` without `"mode": "live"`, missing pack
-   prices/amounts, incomplete JIT config while `JIT_PURCHASE_ENABLED=true`,
+   price ids (amounts resolve from the Prices themselves, #275), incomplete JIT config while `JIT_PURCHASE_ENABLED=true`,
    memory image storage or incomplete bucket credentials, and
    placeholder-shaped credentials. Outside production it refuses live-mode
    keys. A failed validation exits non-zero, so Railway keeps the previous
@@ -92,8 +92,24 @@ order they catch problems:
    registered (in production: non-dummy) provider; `503` with check names
    otherwise. Detail is in the server log under `readiness.failed`.
 
+   The `prices` check reports whether every enabled product's Stripe price has
+   resolved, and it is a **failure only in production** — mirroring the
+   validator, which requires `STRIPE_PRICE_*` in production and downgrades them
+   to a warning elsewhere. Outside production an unresolved price shows as
+   `"prices":"degraded"` in an otherwise-`200` body, with the product codes and
+   rules in the log under `readiness.prices_unresolved`. Immediately after a
+   restart the catalog may briefly be cold; that verdict is held for about two
+   seconds, not the usual five, so a healthy instance stops reporting itself
+   unready almost at once.
+
 **Rollout ordering warning:** set an environment's variables *before* deploying
-code that validates them. New variables are inert to a running image, but a
+code that validates them — and **delete** variables only *after* the build
+that stopped requiring them is serving. The five `STRIPE_*_AMOUNT_CENTS` /
+`JIT_*_AMOUNT_CENTS` variables this release removes are still boot-**errors**
+to the previous image's validator: deleting them from Railway while the old
+image can still crash-restart or redeploy bricks that image
+(`stripe.pack_price_incomplete`) — an outage caused by tidying too early
+(#278 review round 5). New variables are inert to a running image, but a
 crash-restart of an already-running service whose config has become invalid
 will boot-loop. In particular, `LETTER_IRL_DEPLOYMENT_ENVIRONMENT` must be set
 on every deployed service (`development` on dev API and maintenance,
@@ -137,7 +153,9 @@ As of July 16, 2026, development has the transactional-outbox release and hourly
    expect: a successful HTTP response proves the service is up, not that your deployment replaced
    the previous image. A failed pre-deploy leaves the old build serving and every other check green.
    `/readyz` must return `200` with `"mode":"development"` — a `503` names the failing check
-   (config, database, routing) and the detail is in the deploy log under `readiness.failed`.
+   (config, database, routing, prices) and the detail is in the deploy log under `readiness.failed`.
+   Outside production `prices` never fails the probe; check the body for
+   `"prices":"degraded"` instead.
 5. Run the automated suites in both repositories.
 6. Run the manual checks in [manual-tests.md](manual-tests.md), including zero balance, simulated purchase, confirmed send, status retrieval, image generation, and restart persistence.
 7. Confirm Serverless is enabled, leave development idle for more than ten minutes, and confirm both API and website sleep.
@@ -381,17 +399,19 @@ real migrations fail to converge.
 Configure development and production independently:
 
 - `STRIPE_JIT_LETTER_PRICE_ID` and `STRIPE_JIT_POSTCARD_PRICE_ID`
-- `JIT_LETTER_AMOUNT_CENTS`, `JIT_POSTCARD_AMOUNT_CENTS`, and `JIT_CURRENCY`
-- `JIT_CHECKOUT_EXPIRY_MINUTES`, `JIT_REFUND_RETRY_LIMIT`, and
+- `JIT_CURRENCY` (amounts come from the Stripe Prices above, not from variables).
+  Pay & Send may use a different currency from the packs; each product's Price
+  is validated against its own expected currency.
+- `JIT_CHECKOUT_EXPIRY_MINUTES` (minimum 40; default 40), `JIT_REFUND_RETRY_LIMIT`, and
   `JIT_REFUND_RETRY_DELAY_SECONDS` (minimum 30; default 300)
 - `IMAGE_ENTITLEMENTS_PER_PACK_LETTER` and `IMAGE_ENTITLEMENTS_PER_JIT_ORDER`
 - `IMAGE_RESERVATION_PRE_DISPATCH_TIMEOUT_MINUTES` (default 15) and
   `IMAGE_RESERVATION_PROVIDER_TIMEOUT_MINUTES` (default 30)
 - `LETTER_IRL_PACKS_URL`
 
-The configured cent amounts must exactly match their Stripe Prices. A paid
-amount or currency mismatch is quarantined as `refund_pending`; it is never
-fulfilled. Keep Stripe test/live keys, Price IDs, webhook secrets, Railway URLs,
+Amounts are read from the Stripe Prices themselves - there are no configured
+cent amounts to keep in step (#275). A paid amount or currency mismatch against
+the order row is quarantined as `refund_pending`; it is never fulfilled. Keep Stripe test/live keys, Price IDs, webhook secrets, Railway URLs,
 Neon databases, and PostGrid environments separated as described in
 `docs/infrastructure.md`.
 
@@ -532,10 +552,71 @@ Events without enough provider references remain open for operator
 reconciliation and must never be dismissed merely because replay is
 deduplicated.
 
-Pack amount variables (`STRIPE_*_AMOUNT_CENTS`) are required alongside price
-IDs. Missing amounts disable checkout/reconciliation; there are no runtime
-price fallbacks. Historical migration-021 rows whose one-cent value cannot be
-distinguished from its placeholder are marked `amount_known=false` by migration
+Pack amounts are **not** environment variables. They are resolved from the
+Stripe Price itself at startup (#275): a second copy in the environment could
+drift from the figure Stripe actually charges, and did so silently, with a
+refund as the discovery event. Set the price in Stripe and point
+`STRIPE_PRICE_*` at it; there is nothing to mirror.
+
+An unresolved price disables checkout for that product and makes `/readyz`
+report `prices` failing in production (`degraded` elsewhere). There are no
+runtime price fallbacks.
+
+A price must be **active**, **one-time** (a recurring Price cannot be used
+with a `payment`-mode Checkout Session), and must resolve to **exactly the
+amount and currency pinned for its product** in `src/config/products.ts`
+(`expectedAmountCents`). The pin is the two-source check: a transposed pair of
+`STRIPE_PRICE_*` values, an id pasted from the wrong product, or a repoint to
+any unrelated Price each resolves to a perfectly healthy Price — active,
+one-time, plausible — that no per-price rule can refuse; five review rounds
+proved every heuristic replacement (sanity bands, tier ordering, shared-id
+detection) leaked a silent-wrong-price case. Equality against the reviewed
+code table is deterministic, and it subsumes those heuristics: two products
+may share one Price exactly when their pinned amounts agree (the Pay & Send
+letter and postcard do), and there is no "sane range" question left when the
+exact figure is known.
+
+**Changing a price**: create the new Price in Stripe (amounts are immutable on
+an existing Price), then in one commit update `expectedAmountCents` in
+`src/config/products.ts` and repoint the price-id env var. A redeploy was
+already required — the id is an env var — so this adds a review, not a step.
+
+`STRIPE_CURRENCY` and `JIT_CURRENCY` appear in the manifest as **advisory**:
+`npm run preflight:cutover` lists them when unset in EITHER environment so a
+parity gap is visible before promotion, without failing the gate on a
+deployment that correctly relies on the defaults. (There is no configurable
+sanity band, and no separate sharing rule: the pin subsumes both — a shared
+Price is legitimate exactly when the pinned amounts agree, and the missold
+side of any other sharing is refused per product.)
+
+Resolution failures carry two things: the **class** (the Stripe error's own
+code, e.g. `resource_missing` for a typo'd id, or `configuration_error` for a
+rule this code enforces) and whether it is **terminal** — whether a human must
+act, derived from the class in exactly one place
+(`isTerminalDiagnosticClass`). Terminal faults (an archived or recurring
+Price, an amount or currency disagreeing with the product table, an id
+pointing at nothing, a revoked or restricted key, a Price below Stripe's own
+per-currency minimum) start their retry ladder at 30 seconds and back off
+toward a 15-minute ceiling; they cancel the affected order. Transient ones
+start at **2 seconds** — a warmup blip self-heals on the first purchase
+moments later — and cap at 2 minutes, which also bounds how long a purchase
+can be refused after Stripe recovers.
+
+**The webhook path does not read Stripe at all.** A paid legacy session is
+adopted at the product table's pinned amount, and the paid-amount comparison
+verifies the actual charge against that independent figure — a paid session that does NOT
+match the pin is deliberately **not adopted** — it takes the unmatched-money
+path (durable record, critical alert, operator review), because an adopted
+mismatch would reach the `PAYMENT_AMOUNT_MISMATCH` quarantine and the
+order-type-agnostic refund sweep, auto-refunding a legitimate historical
+purchase with no human decision (#278 round 6). Earlier revisions put a live price
+read in front of the webhook transaction; review rounds 4–5 showed every
+outcome that design permits is wrong (500 loops on the schedule Stripe uses
+to disable endpoints, or paid money booked unmatched during a key rotation). An
+unpaid event — an expired session — is never retried on a pricing fault,
+because there is no money at stake.
+
+Historical migration-021 rows whose one-cent value cannot be distinguished from its placeholder are marked `amount_known=false` by migration
 023 and excluded from revenue totals while retaining their audit value.
 
 After the migration and disabled deployment are healthy, validate both mail

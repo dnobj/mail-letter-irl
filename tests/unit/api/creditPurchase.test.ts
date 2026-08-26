@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { stripeMockModule } from '../../mocks/stripe.js';
 
 // Hoist mock functions so they're available when vi.mock is hoisted
 const { mockSessionCreate, mockSessionList, mockConstructEvent, mockPriceRetrieve } = vi.hoisted(() => ({
@@ -23,44 +24,51 @@ const { mockSessionCreate, mockSessionList, mockConstructEvent, mockPriceRetriev
 }));
 
 /**
- * Checkout now verifies the configured amount against the Stripe Price before
- * charging (issue #275), so these tests need a Price to verify against. The
- * stub derives the amount from the same env var the code reads, which is what
- * a correctly-configured Stripe would return - keeping the verification
- * transparent to tests that are about something else. Drift itself is covered
- * in tests/unit/services/stripePriceVerification.test.ts.
+ * Amounts come from the resolved Stripe Price (#275 stage A), reached through
+ * the catalog's injectable retriever seam. Resolution is LAZY - the checkout
+ * functions ensure it themselves - so unlike the previous eager design there
+ * is no load-before-env-stub ordering hazard for a beforeEach to get wrong
+ * (which one describe in this file did, making its checkout tests vacuous:
+ * #278 review).
  */
-function stubMatchingPrices(): void {
-  const amountEnvByPriceId: Record<string, string> = {
-    price_starter_mock: 'STRIPE_STARTER_AMOUNT_CENTS',
-    price_regular_mock: 'STRIPE_REGULAR_AMOUNT_CENTS',
-    price_power_mock: 'STRIPE_POWER_AMOUNT_CENTS',
-  };
-  mockPriceRetrieve.mockImplementation(async (priceId: string) => ({
-    unit_amount: Number.parseInt(process.env[amountEnvByPriceId[priceId] ?? ''] || '0', 10),
-    currency: (process.env.STRIPE_CURRENCY || 'usd').toLowerCase(),
-  }));
+const PRICE_FIXTURES: Record<string, number> = {
+  price_starter_mock: 500,
+  price_regular_mock: 1000,
+  price_power_mock: 9000,
+};
+
+async function configureStubbedPrices(): Promise<void> {
+  const { resetPriceCatalog, setPriceRetriever } = await import(
+    '../../../src/services/priceCatalog.js'
+  );
+  resetPriceCatalog();
+  setPriceRetriever(async (priceId: string) => {
+    const unitAmount = PRICE_FIXTURES[priceId];
+    if (unitAmount === undefined) {
+      throw Object.assign(new Error('No such price'), { code: 'resource_missing' });
+    }
+    return {
+      id: priceId,
+      active: true,
+      unit_amount: unitAmount,
+      currency: 'usd',
+      product: `prod_${priceId}`,
+    } as never;
+  });
 }
 
-// Mock Stripe as a class constructor
-vi.mock('stripe', () => {
-  return {
-    default: class MockStripe {
-      checkout = {
-        sessions: {
-          create: mockSessionCreate,
-          list: mockSessionList,
-        },
-      };
-      prices = {
-        retrieve: mockPriceRetrieve,
-      };
-      webhooks = {
-        constructEvent: mockConstructEvent,
-      };
-    },
-  };
-});
+// One shared MockStripe (tests/mocks/stripe.ts): the inline copies here and in
+// the price/reconciliation suites disagreed about the Stripe surface, and two
+// of them disagreed about whether a Price carries `active` - so they exercised
+// different validation paths for the same object (#278 review).
+vi.mock('stripe', () =>
+  stripeMockModule({
+    sessionCreate: mockSessionCreate,
+    sessionList: mockSessionList,
+    priceRetrieve: mockPriceRetrieve,
+    constructEvent: mockConstructEvent,
+  })
+);
 
 // Mock database
 vi.mock('../../../src/db/index.js', () => ({
@@ -70,30 +78,58 @@ vi.mock('../../../src/db/index.js', () => ({
 
 // Import after mocking
 import {
-  createCheckoutSession,
+  createPackCheckoutSession,
   getPackProductConfig,
   verifyWebhookSignature,
-  extractCheckoutData,
 } from '../../../src/services/stripeService.js';
 
+/**
+ * The legacy pack-checkout call shape, kept HERE rather than in production.
+ * src/services/stripeService.ts exported this adapter with no caller on this
+ * branch or on dev, and #278 round 9 deleted it the way round 8 deleted
+ * extractCheckoutData: a dead export this PR had modified (it gained the
+ * lazy ensure), so every future money-path change would have to be mirrored
+ * into an unreachable function that an entrypoint audit still counts. The
+ * behaviour these cases exercise is createHostedCheckout via
+ * createPackCheckoutSession; the shape below is reproduced exactly, including
+ * the invalid-product refusal and the legacy id fallbacks.
+ */
+async function createCheckoutSession(params: {
+  userId: string;
+  userEmail: string;
+  productId: string;
+  successUrl: string;
+  cancelUrl: string;
+  orderId?: string;
+  idempotencyKey?: string;
+}) {
+  const { ensurePriceCatalog } = await import('../../../src/services/priceCatalog.js');
+  await ensurePriceCatalog(params.productId);
+  const product = getPackProductConfig(params.productId as never);
+  if (!product) {
+    return { success: false as const, error: `Invalid product ID: ${params.productId}` };
+  }
+  const orderId = params.orderId || `legacy-${params.userId}-${Date.now()}`;
+  return createPackCheckoutSession({
+    orderId,
+    userEmail: params.userEmail,
+    product,
+    successUrl: params.successUrl,
+    cancelUrl: params.cancelUrl,
+    idempotencyKey: params.idempotencyKey || `legacy-pack:${orderId}`
+  });
+}
+
 describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    stubMatchingPrices();
+    await configureStubbedPrices();
     // Set required environment variables
     vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
     vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_mock');
     vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
     vi.stubEnv('STRIPE_PRICE_REGULAR', 'price_regular_mock');
     vi.stubEnv('STRIPE_PRICE_POWER', 'price_power_mock');
-    // Without these the amounts resolve to 0 and every checkout here exits at
-    // PACK_AMOUNT_NOT_CONFIGURED two guards early - so these tests never
-    // reached the price verification at all, and passed while proving nothing
-    // about it. Nothing supplies them ambiently: .env.test does not exist, so
-    // tests/setup.ts's dotenv.config is a silent no-op.
-    vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '500');
-    vi.stubEnv('STRIPE_REGULAR_AMOUNT_CENTS', '1000');
-    vi.stubEnv('STRIPE_POWER_AMOUNT_CENTS', '9000');
   });
 
   afterEach(() => {
@@ -101,7 +137,7 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
     vi.unstubAllEnvs();
   });
 
-  describe('createCheckoutSession', () => {
+  describe('pack checkout, through the legacy entrypoint shape', () => {
     it('should create checkout session for credit-pack-4', async () => {
       const result = await createCheckoutSession({
         userId: 'user-123',
@@ -130,7 +166,6 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
 
     it('should fail closed with a stable code when the price ID is not configured', async () => {
       vi.stubEnv('STRIPE_PRICE_STARTER', '');
-      vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '500');
 
       const result = await createCheckoutSession({
         userId: 'user-123',
@@ -144,20 +179,33 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
       expect(mockSessionCreate).not.toHaveBeenCalled();
     });
 
-    // A Stripe Price ID is not evidence of an amount. Without the explicit
-    // amount variable the legacy pack path must disable the purchase rather
-    // than fall back to a hard-coded figure that a later refund would trust.
+    // A Stripe Price ID is not evidence of a USABLE amount. When the Price
+    // cannot be resolved to one - archived, tiered, absurd, or unreachable -
+    // the purchase must be disabled rather than fall back to a hard-coded
+    // figure a later refund would trust. These are the relocated forms of the
+    // old "pack amount missing/zero/non-numeric" boot errors.
     it.each([
-      ['missing', undefined],
-      ['zero', '0'],
-      ['non-numeric', 'free'],
-      ['negative', '-500'],
-    ])('should fail closed when the pack amount is %s', async (_label, amount) => {
-      if (amount === undefined) {
-        vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '');
-      } else {
-        vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', amount);
-      }
+      ['archived', { active: false, unit_amount: 500 }],
+      ['tiered (no unit amount)', { active: true, unit_amount: null }],
+      ['implausibly small', { active: true, unit_amount: 1 }],
+      ['unreachable', null],
+    ])('should fail closed when the starter price is %s', async (_label, price) => {
+      const { resetPriceCatalog, setPriceRetriever } = await import(
+        '../../../src/services/priceCatalog.js'
+      );
+      resetPriceCatalog();
+      setPriceRetriever(async (priceId: string) => {
+        if (priceId === 'price_starter_mock') {
+          if (price === null) throw new Error('down');
+          return { id: priceId, currency: 'usd', ...price } as never;
+        }
+        return {
+          id: priceId,
+          active: true,
+          unit_amount: PRICE_FIXTURES[priceId],
+          currency: 'usd',
+        } as never;
+      });
 
       const result = await createCheckoutSession({
         userId: 'user-123',
@@ -171,13 +219,49 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
       expect(mockSessionCreate).not.toHaveBeenCalled();
     });
 
-    it('should read the amount only from configuration, with no built-in default', () => {
-      vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '777');
-      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 777 });
+    it('reads the amount from the resolved Stripe price, never a built-in default', async () => {
+      // Same intent as before #275 stage A - no hard-coded fallback amount can
+      // reach a customer - at its new source. The amount used to come from
+      // STRIPE_STARTER_AMOUNT_CENTS; it now comes from the Price itself.
+      const { ensurePriceCatalog, resetPriceCatalog, setPriceRetriever } = await import(
+        '../../../src/services/priceCatalog.js'
+      );
 
-      // Removing the variable must yield an unusable amount rather than the
-      // historical hard-coded 500.
-      vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '');
+      resetPriceCatalog();
+      // The Stripe Price must say exactly what the product table pins
+      // (500/1000/9000): a resolved-and-verified amount is served, anything
+      // else refuses. This is the two-source check in miniature (#278 r5).
+      const amounts: Record<string, number> = {
+        price_starter_mock: 500,
+        price_regular_mock: 1000,
+        price_power_mock: 9000
+      };
+      setPriceRetriever(async priceId => ({
+        id: priceId,
+        active: true,
+        unit_amount: amounts[priceId] ?? 999_999,
+        currency: 'usd',
+        product: 'prod_starter'
+      }) as never);
+      await ensurePriceCatalog();
+      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 500 });
+
+      // A healthy, active, plausible Price at the WRONG amount - a transposed
+      // or repointed env var - is refused, never served.
+      resetPriceCatalog();
+      setPriceRetriever(async priceId => ({
+        id: priceId,
+        active: true,
+        unit_amount: 777,
+        currency: 'usd',
+        product: 'prod_starter'
+      }) as never);
+      await ensurePriceCatalog();
+      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 0 });
+
+      // An unresolved price must yield an unusable amount rather than the
+      // historical hard-coded 500, so the caller's guard refuses the purchase.
+      resetPriceCatalog();
       expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 0 });
     });
 
@@ -196,41 +280,7 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
     });
   });
 
-  describe('extractCheckoutData', () => {
-    it('should extract user and credit info from checkout session', async () => {
-      const mockSession = {
-        id: 'cs_test_123',
-        client_reference_id: 'user-123',
-        customer_email: 'test@example.com',
-        amount_total: 399, // $3.99 in cents
-        metadata: {
-          userId: 'user-123',
-          productId: 'credit-pack-4',
-          credits: '4',
-        },
-      } as any;
-
-      const data = await extractCheckoutData(mockSession);
-
-      expect(data).not.toBeNull();
-      expect(data?.userId).toBe('user-123');
-      expect(data?.credits).toBe(4);
-      expect(data?.productId).toBe('credit-pack-4');
-      expect(data?.sessionId).toBe('cs_test_123');
-      expect(data?.amountPaid).toBe(3.99);
-    });
-
-    it('should return null when required metadata is missing', async () => {
-      const mockSession = {
-        id: 'cs_test_123',
-        metadata: {}, // Missing required fields
-      } as any;
-
-      const data = await extractCheckoutData(mockSession);
-
-      expect(data).toBeNull();
-    });
-  });
+  
 
   describe('webhook signature verification', () => {
     it('should return null when webhook secret is not configured', () => {
@@ -259,9 +309,11 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
 });
 
 describe('Checkout Session Error Handling', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    stubMatchingPrices();
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
+    await configureStubbedPrices();
   });
 
   afterEach(() => {
@@ -306,7 +358,6 @@ describe('Checkout Session Error Handling', () => {
     const sensitive = 'private Stripe failure cs_private pi_private auth0|private-user';
     vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
     vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
-    vi.stubEnv('STRIPE_STARTER_AMOUNT_CENTS', '500');
     mockSessionCreate.mockRejectedValueOnce(new Error(sensitive));
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 

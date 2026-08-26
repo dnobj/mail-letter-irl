@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { stripeMockModule } from '../../mocks/stripe.js';
 
 // Mock Stripe
 const { mockSessionsList, mockRefundsList, mockQuery, mockRepairPackGrant } = vi.hoisted(() => ({
@@ -25,20 +26,11 @@ const { mockSessionsList, mockRefundsList, mockQuery, mockRepairPackGrant } = vi
   mockRepairPackGrant: vi.fn()
 }));
 
-vi.mock('stripe', () => {
-  return {
-    default: class MockStripe {
-      checkout = {
-        sessions: {
-          list: mockSessionsList,
-        },
-      };
-      refunds = {
-        list: mockRefundsList,
-      };
-    },
-  };
-});
+// The one shared MockStripe (tests/mocks/stripe.ts). Unlisted surfaces are
+// inert stubs, so this suite carries no methods it never asserts on.
+vi.mock('stripe', () =>
+  stripeMockModule({ sessionList: mockSessionsList, refundList: mockRefundsList })
+);
 
 // Mock database
 vi.mock('../../../src/db/index.js', () => ({
@@ -52,6 +44,139 @@ import {
   autoFixMissingCredits,
   reconcileStripePayments
 } from '../../../src/services/stripeReconciliationService.js';
+
+describe('background Stripe budget (#278)', () => {
+  // Consolidating onto the shared client cut this job from stripe-node's 80s/2
+  // default to the interactive 10s/1. Unpinned, deleting the restoration left
+  // a paginated loop with no per-page recovery on a checkout-tuned budget: one
+  // slow page aborts the whole run, and creditExpirationWorker's catch
+  // swallows it unlogged (#278 review round 3).
+  it('stops walking SESSIONS on an empty page too', async () => {
+    // The refunds walk was created as a copy of the sessions one; round 10
+    // fixed only the copy, leaving the original able to hang the whole
+    // maintenance sweep on the same has_more-with-no-data page (#278 r11).
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_reconciliation');
+    mockSessionsList.mockResolvedValueOnce({ data: [], has_more: true });
+    mockRefundsList.mockResolvedValue({ data: [], has_more: false });
+    mockQuery.mockResolvedValue({ rows: [] });
+    mockSessionsList.mockClear();
+
+    await reconcileStripePayments(7);
+
+    expect(mockSessionsList).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops walking refunds on an empty page, whatever has_more says', async () => {
+    // The cursor advances only from the last item, so a has_more page with no
+    // data left it unmoved and re-issued the identical request forever - each
+    // a 60s call, no cap, no diagnostic - hanging the entire maintenance
+    // sweep for the life of the process. Five round-10 angles found it
+    // independently; the single-call code it replaced could not loop.
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_reconciliation');
+    mockSessionsList.mockResolvedValue({ data: [], has_more: false });
+    mockRefundsList.mockResolvedValueOnce({ data: [], has_more: true });
+    mockQuery.mockResolvedValue({ rows: [] });
+    // Calls only - the queued page above survives, and this suite has no
+    // per-test clear, so without this the count includes sibling tests.
+    mockRefundsList.mockClear();
+
+    await reconcileStripePayments(7);
+
+    expect(mockRefundsList).toHaveBeenCalledTimes(1);
+  });
+
+  it('judges currency by one policy, whatever case Stripe returns', async () => {
+    // NOT the padded-legacy-row story round 11 told: orders.currency is
+    // VARCHAR(3), so a padded value cannot be stored, and that test padded
+    // both sides and passed with the fix reverted. What is real and worth
+    // pinning is that the audit and the fulfilment gate judge this column by
+    // the same normalizer, so an upper-case Stripe currency against a
+    // lower-case row is not a discrepancy (#278 round 12).
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_reconciliation');
+    mockSessionsList.mockResolvedValueOnce({
+      data: [{
+        id: 'cs_padded',
+        metadata: { userId: 'user-1', productCode: 'credit-pack-4' },
+        client_reference_id: 'order-padded',
+        payment_status: 'paid',
+        amount_total: 500,
+        currency: 'USD',
+        created: Math.floor(Date.now() / 1000)
+      }],
+      has_more: false
+    });
+    mockRefundsList.mockResolvedValue({ data: [], has_more: false });
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM orders')) {
+        return {
+          rows: [{
+            order_id: 'order-padded',
+            order_type: 'letter_pack',
+            // The map keys on this, so it must be present or the row is
+            // never matched and the amount comparison is never reached.
+            stripe_checkout_session_id: 'cs_padded',
+            status: 'fulfilled',
+            user_id: 'user-1',
+            credits: 4,
+            amount_cents: 500,
+            currency: 'usd'
+          }]
+        };
+      }
+      return { rows: [] };
+    });
+
+    const result = await reconcileStripePayments(7);
+
+    expect(result.discrepancies.filter(d => d.type === 'amount_mismatch')).toEqual([]);
+  });
+
+  it('audits EVERY page of refunds, not just the newest hundred', async () => {
+    // Stripe returns refunds newest-first, so a single 100-item page drops
+    // the OLDEST refunds in the window - the aged, most likely unreconciled
+    // ones, in exactly the mass-refund incident this audit exists for. The
+    // sessions sweep beside it has always paginated (#278 round 9).
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_reconciliation');
+    mockSessionsList.mockResolvedValue({ data: [], has_more: false });
+    const firstPage = Array.from({ length: 100 }, (_unused, index) => ({
+      id: `re_${index}`,
+      status: 'failed',
+      payment_intent: null
+    }));
+    mockRefundsList
+      .mockResolvedValueOnce({ data: firstPage, has_more: true })
+      .mockResolvedValueOnce({
+        data: [{ id: 're_oldest', status: 'failed', payment_intent: null }],
+        has_more: false
+      });
+    mockQuery.mockResolvedValue({ rows: [] });
+    mockRefundsList.mockClear();
+
+    await reconcileStripePayments(7);
+
+    expect(mockRefundsList).toHaveBeenCalledTimes(2);
+    expect(mockRefundsList.mock.calls[1][0]).toMatchObject({ starting_after: 're_99' });
+  });
+
+  it('gives every outbound list call the background budget, not the checkout one', async () => {
+    // The default `stripe` parameter builds the shared client, so the key must
+    // be present; the module itself is mocked, so nothing leaves the process.
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_reconciliation');
+    mockSessionsList.mockResolvedValue({ data: [], has_more: false });
+    mockRefundsList.mockResolvedValue({ data: [] });
+    mockQuery.mockResolvedValue({ rows: [] });
+
+    await reconcileStripePayments(7);
+
+    for (const spy of [mockSessionsList, mockRefundsList]) {
+      expect(spy).toHaveBeenCalled();
+      expect(spy.mock.calls[0][1]).toMatchObject({
+        timeout: 60_000,
+        maxNetworkRetries: 2
+      });
+    }
+  });
+});
 
 describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
   beforeEach(() => {
