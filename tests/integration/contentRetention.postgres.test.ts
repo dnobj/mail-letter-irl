@@ -75,8 +75,8 @@ describePostgres('content retention sweep', () => {
     // Order-independence: every exact-count assertion below would otherwise be
     // hostage to what an earlier test happened to leave due.
     await pool.query(
-      `TRUNCATE credit_consumption, credit_transactions, credit_ledger,
-                letter_jobs, orders, letter_drafts, letters, users
+      `TRUNCATE redacted_content_quarantine, credit_consumption, credit_transactions,
+                credit_ledger, letter_jobs, orders, letter_drafts, letters, users
        RESTART IDENTITY CASCADE`
     );
   });
@@ -686,7 +686,8 @@ describePostgres('content retention sweep', () => {
         'draftsRedacted',
         'errors',
         'lettersRedacted',
-        'moreWaiting'
+        'moreWaiting',
+        'quarantinePurged'
       ]);
       expect(JSON.stringify(summary)).not.toContain(SECRET_BODY);
       expect(JSON.stringify(summary)).not.toContain(SECRET_STREET);
@@ -698,7 +699,12 @@ describePostgres('content retention sweep', () => {
       const summary = await retention.runRetentionSweep(0);
 
       expect(summary.lettersRedacted).toBe(0);
-      expect(summary.errors.join(' ')).toMatch(/positive integer/);
+      // Errors carry a CLASS, never the driver message - #153 forbids deleted
+      // content reappearing in logs, and this result is logged.
+      expect(summary.errors.join(' ')).toMatch(/^letters:/);
+      expect(summary.errors.join(' ')).not.toMatch(/received/);
+      // A failed sweep must not read as "caught up".
+      expect(summary.moreWaiting).toBe(true);
     });
   });
 });
