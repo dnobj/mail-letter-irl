@@ -230,6 +230,157 @@ describePostgres('content retention sweep', () => {
     return rows[0];
   }
 
+  async function seedContentDraft(options: {
+    daysAgo: number;
+    userId: string;
+    layout?: 'postcard' | 'header_image' | 'plain';
+  }): Promise<string> {
+    const draftId = randomUUID();
+    const layout = options.layout ?? 'plain';
+    const columns =
+      layout === 'postcard'
+        ? `, mail_type, front_image_data, front_image_url, postcard_size`
+        : layout === 'header_image'
+          ? `, layout_type, header_image_data, header_image_url`
+          : '';
+    const values =
+      layout === 'postcard'
+        ? `, 'postcard', 'data:image/jpeg;base64,SECRET', $6, '6x9'`
+        : layout === 'header_image'
+          ? `, 'header_image', 'data:image/jpeg;base64,SECRET', $6`
+          : '';
+    const params: unknown[] = [
+      draftId,
+      options.userId,
+      JSON.stringify({ name: 'Alex', addressLine1: SECRET_STREET }),
+      JSON.stringify({ name: 'Sam', addressLine1: SECRET_STREET }),
+      SECRET_BODY
+    ];
+    if (layout !== 'plain') params.push(SECRET_IMAGE_URL);
+    await pool.query(
+      `INSERT INTO letter_drafts (
+         draft_id, user_id, sender, recipient, body_text, sign_off,
+         required_credits, status, expires_at, consumed_at, created_at${columns}
+       ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, 'Yours, Alex', 2,
+                 'consumed',
+                 NOW() - make_interval(days => ${options.daysAgo}),
+                 NOW() - make_interval(days => ${options.daysAgo}),
+                 NOW() - make_interval(days => ${options.daysAgo})${values})`,
+      params
+    );
+    return draftId;
+  }
+
+  async function readDraft(draftId: string) {
+    const { rows } = await pool.query(
+      `SELECT sender, recipient, body_text, preview_html, required_credits,
+              front_image_data, front_image_url, header_image_data, header_image_url,
+              inline_image_data, redacted_at, mail_type
+         FROM letter_drafts WHERE draft_id = $1`,
+      [draftId]
+    );
+    return rows[0];
+  }
+
+  async function readQuarantine(sourceTable: string, sourceId: string) {
+    const { rows } = await pool.query(
+      `SELECT content, quarantined_at, purge_after
+         FROM redacted_content_quarantine
+        WHERE source_table = $1 AND source_id = $2`,
+      [sourceTable, sourceId]
+    );
+    return rows[0];
+  }
+
+  describe('quarantine', () => {
+    it('saves the content it removed, and the live row is empty', async () => {
+      const { letterId } = await seedSentLetter({ daysAgo: 120 });
+
+      await retention.purgeExpiredLetterContent();
+
+      const saved = await readQuarantine('letters', letterId);
+      expect(saved.content.content.bodyText).toBe(SECRET_BODY);
+      expect(saved.content.recipient.addressLine1).toBe(SECRET_STREET);
+      // The live row no longer holds it.
+      expect((await readLetter(letterId)).content).toEqual({});
+    });
+
+    it('sets the recovery window so the PUBLISHED total is met exactly', async () => {
+      const { letterId } = await seedSentLetter({ daysAgo: 120 });
+
+      await retention.purgeExpiredLetterContent(90);
+
+      const saved = await readQuarantine('letters', letterId);
+      const windowDays =
+        (new Date(saved.purge_after).getTime() - new Date(saved.quarantined_at).getTime()) /
+        86_400_000;
+      // 83 live + 7 quarantine = the published 90. Not 97.
+      expect(Math.round(windowDays)).toBe(7);
+    });
+
+    it('restores a letter and re-opens it to a future sweep', async () => {
+      // The property that makes every allow-list bet above survivable.
+      const { letterId } = await seedSentLetter({ daysAgo: 120 });
+      await retention.purgeExpiredLetterContent();
+      expect((await readLetter(letterId)).content).toEqual({});
+
+      expect(await retention.restoreQuarantinedContent('letters', letterId)).toBe(true);
+
+      const row = await readLetter(letterId);
+      expect(row.content.bodyText).toBe(SECRET_BODY);
+      expect(row.recipient.addressLine1).toBe(SECRET_STREET);
+      expect(row.redacted_at).toBeNull();
+      // The quarantine row is consumed, and the letter is due again.
+      expect(await readQuarantine('letters', letterId)).toBeUndefined();
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+    });
+
+    it('restores every draft column it cleared, images included', async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 120, userId, layout: 'header_image' });
+      await seedJitOrder({ userId, status: 'fulfilled', draftId });
+      await retention.purgePaidDraftContent();
+
+      expect(await retention.restoreQuarantinedContent('letter_drafts', draftId)).toBe(true);
+
+      const { rows } = await pool.query(
+        `SELECT sender, body_text, header_image_data, header_image_url, redacted_at
+           FROM letter_drafts WHERE draft_id = $1`,
+        [draftId]
+      );
+      expect(rows[0].body_text).toBe(SECRET_BODY);
+      expect(rows[0].sender.addressLine1).toBe(SECRET_STREET);
+      expect(rows[0].header_image_url).toBe(SECRET_IMAGE_URL);
+      expect(rows[0].header_image_data).toContain('base64');
+      expect(rows[0].redacted_at).toBeNull();
+    });
+
+    it('purges only quarantine rows whose recovery window has expired', async () => {
+      const { letterId: fresh } = await seedSentLetter({ daysAgo: 120 });
+      await retention.purgeExpiredLetterContent();
+      const { letterId: stale } = await seedSentLetter({ daysAgo: 120 });
+      await retention.purgeExpiredLetterContent();
+      await pool.query(
+        `UPDATE redacted_content_quarantine SET purge_after = NOW() - INTERVAL '1 hour'
+          WHERE source_id = $1`,
+        [stale]
+      );
+
+      expect(await retention.purgeExpiredQuarantine()).toBe(1);
+
+      expect(await readQuarantine('letters', stale)).toBeUndefined();
+      expect(await readQuarantine('letters', fresh)).toBeDefined();
+    });
+
+    it('reports false for a restore after the window closed', async () => {
+      const { letterId } = await seedSentLetter({ daysAgo: 120 });
+      await retention.purgeExpiredLetterContent();
+      await pool.query(`DELETE FROM redacted_content_quarantine WHERE source_id = $1`, [letterId]);
+
+      expect(await retention.restoreQuarantinedContent('letters', letterId)).toBe(false);
+    });
+  });
+
   describe('letters', () => {
     it('anonymizes content once the window has passed, and stamps redacted_at', async () => {
       const { letterId } = await seedSentLetter({ daysAgo: 91 });
@@ -245,12 +396,21 @@ describePostgres('content retention sweep', () => {
       expect(JSON.stringify(row)).not.toContain(SECRET_STREET);
     });
 
-    it('leaves a letter INSIDE the window untouched', async () => {
-      const { letterId } = await seedSentLetter({ daysAgo: 89 });
+    it('leaves a letter INSIDE the live window untouched', async () => {
+      // The LIVE window is 83 days, not 90: the quarantine carries the last 7
+      // so the published total is met exactly rather than overrun.
+      const { letterId } = await seedSentLetter({ daysAgo: 80 });
 
       expect(await retention.purgeExpiredLetterContent()).toBe(0);
 
       expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
+    });
+
+    it('redacts once the LIVE window passes, before the published total', async () => {
+      const { letterId } = await seedSentLetter({ daysAgo: 85 });
+
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+      expect((await readLetter(letterId)).content).toEqual({});
     });
 
     it('preserves the non-content columns it must not touch', async () => {
@@ -387,58 +547,6 @@ describePostgres('content retention sweep', () => {
   });
 
   describe('drafts', () => {
-    async function seedContentDraft(options: {
-      daysAgo: number;
-      userId: string;
-      layout?: 'postcard' | 'header_image' | 'plain';
-    }): Promise<string> {
-      const draftId = randomUUID();
-      const layout = options.layout ?? 'plain';
-      const columns =
-        layout === 'postcard'
-          ? `, mail_type, front_image_data, front_image_url, postcard_size`
-          : layout === 'header_image'
-            ? `, layout_type, header_image_data, header_image_url`
-            : '';
-      const values =
-        layout === 'postcard'
-          ? `, 'postcard', 'data:image/jpeg;base64,SECRET', $6, '6x9'`
-          : layout === 'header_image'
-            ? `, 'header_image', 'data:image/jpeg;base64,SECRET', $6`
-            : '';
-      const params: unknown[] = [
-        draftId,
-        options.userId,
-        JSON.stringify({ name: 'Alex', addressLine1: SECRET_STREET }),
-        JSON.stringify({ name: 'Sam', addressLine1: SECRET_STREET }),
-        SECRET_BODY
-      ];
-      if (layout !== 'plain') params.push(SECRET_IMAGE_URL);
-      await pool.query(
-        `INSERT INTO letter_drafts (
-           draft_id, user_id, sender, recipient, body_text, sign_off,
-           required_credits, status, expires_at, consumed_at, created_at${columns}
-         ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, 'Yours, Alex', 2,
-                   'consumed',
-                   NOW() - make_interval(days => ${options.daysAgo}),
-                   NOW() - make_interval(days => ${options.daysAgo}),
-                   NOW() - make_interval(days => ${options.daysAgo})${values})`,
-        params
-      );
-      return draftId;
-    }
-
-    async function readDraft(draftId: string) {
-      const { rows } = await pool.query(
-        `SELECT sender, recipient, body_text, preview_html, required_credits,
-                front_image_data, front_image_url, header_image_data, header_image_url,
-                inline_image_data, redacted_at, mail_type
-           FROM letter_drafts WHERE draft_id = $1`,
-        [draftId]
-      );
-      return rows[0];
-    }
-
     it('anonymizes a PAID draft at 90 days', async () => {
       const userId = await seedUser();
       const draftId = await seedContentDraft({ daysAgo: 120, userId });
