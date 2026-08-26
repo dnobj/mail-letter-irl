@@ -360,8 +360,13 @@ describePostgres('content retention sweep', () => {
       await retention.purgeExpiredLetterContent();
       const { letterId: stale } = await seedSentLetter({ daysAgo: 120 });
       await retention.purgeExpiredLetterContent();
+      // Age the WHOLE row: valid_quarantine_window requires purge_after to be
+      // after quarantined_at, so a fixture that only moves purge_after into the
+      // past is rejected - correctly, since a negative window is nonsense.
       await pool.query(
-        `UPDATE redacted_content_quarantine SET purge_after = NOW() - INTERVAL '1 hour'
+        `UPDATE redacted_content_quarantine
+            SET quarantined_at = NOW() - INTERVAL '10 days',
+                purge_after = NOW() - INTERVAL '1 hour'
           WHERE source_id = $1`,
         [stale]
       );
