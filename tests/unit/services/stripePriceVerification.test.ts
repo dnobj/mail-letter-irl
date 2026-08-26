@@ -357,23 +357,19 @@ describe('checkout pricing guards (#275)', () => {
     expect(JSON.stringify(result)).not.toContain(sensitive);
   });
 
-  it('drops the memo when Stripe rejects the request, so an archived price stops being sold', async () => {
-    // `active` is the one field validate() enforces that Stripe can change
-    // under us, and it is deliberately not a signature input - so an archived
-    // Price stayed memoized for the process lifetime: /readyz green, quotes
-    // still advertising it, and every purchase inserting an order row and
-    // then failing at session creation with a non-terminal class, stranding
-    // a checkout_pending row per attempt forever (#278 round 10, reproduced
-    // by three angles). The checkout rejection is the only moment this
-    // process can learn the memo is a lie.
+
+
+  it('leaves the price memo untouched when a checkout fails', async () => {
+    // Rounds 10-12 dropped the memo here so an archived Price would
+    // self-heal. That machinery produced a correctness defect in three
+    // consecutive review rounds and was removed: a checkout failure is now
+    // inert for the catalog, and the failure is diagnosed from the log line's
+    // offendingParam instead (#278 round 13).
     serveHealthyPrices();
     await ensurePriceCatalog();
-    expect(getResolvedPriceForProduct('credit-pack-10')).not.toBeNull();
-
     stripeMocks.sessionCreate.mockRejectedValue(
       Object.assign(new Error('This price is not active'), {
         type: 'StripeInvalidRequestError',
-        // Stripe names the offending parameter; that is the discriminator.
         param: 'line_items[0][price]'
       })
     );
@@ -387,40 +383,7 @@ describe('checkout pricing guards (#275)', () => {
       description: 'Five prepaid letters'
     });
 
-    // The memo is gone, so the next ensure re-reads it from Stripe - where it
-    // will record price.inactive and take readiness red.
-    expect(getResolvedPriceForProduct('credit-pack-10')).toBeNull();
-  });
-
-  it('keeps the memo when Stripe blames a CALLER-supplied parameter', () => {
-    // success_url, cancel_url and customer_email reach this call straight
-    // from a request body, and they all fail as the same catch-all class an
-    // archived price does. Keying the invalidation on the class alone let any
-    // authenticated caller delete a verified memo on demand - /readyz 503 and
-    // every OTHER customer's purchase refused until the next resolve. Three
-    // round-11 angles found it, one with a live probe (#278 round 11).
-    serveHealthyPrices();
-    return ensurePriceCatalog().then(async () => {
-      expect(getResolvedPriceForProduct('credit-pack-10')).not.toBeNull();
-
-      stripeMocks.sessionCreate.mockRejectedValue(
-        Object.assign(new Error('Not a valid URL'), {
-          type: 'StripeInvalidRequestError',
-          param: 'success_url'
-        })
-      );
-
-      await checkout({
-        productCode: 'credit-pack-10',
-        priceId: 'price_regular',
-        amountCents: 1000,
-        currency: 'usd',
-        name: 'Regular Pack',
-        description: 'Five prepaid letters'
-      });
-
-      expect(getResolvedPriceForProduct('credit-pack-10')).not.toBeNull();
-    });
+    expect(getResolvedPriceForProduct('credit-pack-10')).not.toBeNull();
   });
 
   it('classifies a missing key at the WEBHOOK catch as configuration, not a blip', () => {

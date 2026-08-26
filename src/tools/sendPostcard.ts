@@ -46,6 +46,14 @@ function publicStatus(status: LetterStatus): PublicStatus {
 
 function friendlyDraftError(error: unknown, draftId: string): Error {
   const code = (error as { code?: string })?.code;
+  if (code === 'ACCOUNT_SENDS_BLOCKED') {
+    // A SERVER-AUTHORED string. The upstream message interpolates
+    // users.sends_blocked_reason (an internal moderation label such as
+    // "payment_disputed"), and this formatter's default forwards whatever it
+    // is handed - so the label reached the customer here even after round 12
+    // fixed the checkout surface (#278 round 13).
+    return new Error('Sending is disabled on this account. Please contact support.');
+  }
   if (code === 'DRAFT_NOT_FOUND') {
     return new Error(`Postcard draft not found: ${draftId}. Please create a new postcard preview.`);
   }

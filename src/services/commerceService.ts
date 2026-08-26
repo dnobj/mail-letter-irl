@@ -395,15 +395,7 @@ function productSnapshot(product: CommerceProductConfig): Record<string, unknown
   return {
     name: product.name,
     description: product.description,
-    mailType: product.mailType,
-    // The price id belongs in the snapshot because it is the field Stripe
-    // charges from: without it, a checkout for a reused row took its AMOUNT
-    // from the row and its PRICE ID from a live catalog read, so a repoint
-    // between insert and session-create opened a session on the new Price
-    // while the row recorded the old figure - the customer pays one number,
-    // the row holds another, and the paid-amount check files a legitimate
-    // purchase as PAYMENT_AMOUNT_MISMATCH (#278 round 12).
-    priceId: product.priceId
+    mailType: product.mailType
   };
 }
 
@@ -792,9 +784,14 @@ async function prepareJitOrder(
         }
         await client.query(
           `UPDATE orders SET status = 'cancelled',
-             last_error_code = 'PRICE_CHANGED_BEFORE_SESSION', updated_at = NOW()
+             last_error_code = 'PRICE_CHANGED_BEFORE_SESSION',
+             last_error = $2, updated_at = NOW()
            WHERE order_id = $1 AND status = 'checkout_pending'`,
-          [existing.order_id]
+          // The PAIR. This branch is reached only from a row whose session
+          // creation already failed, so last_error always holds that older,
+          // unrelated message - round 12 fixed the sibling 60 lines above
+          // and left this one (#278 round 13).
+          [existing.order_id, 'Configured price changed before a session was opened']
         );
         await recordOrderEvent(
           client,
@@ -907,24 +904,13 @@ export async function createJitCheckout(
   }
 
   const mailType = String(prepared.order.product_snapshot.mailType || 'letter') as MailType;
-  // The row's OWN snapshot, not a fresh catalog read across the transaction
-  // boundary: re-deriving here meant a memo dropped by a parallel checkout in
-  // that window turned a healthy purchase into PACK_AMOUNT_NOT_CONFIGURED
-  // with a transient class, leaving the just-inserted row stranded in
-  // checkout_pending. createPackCheckout has always snapshotted (#278 r11).
-  const snapshot = prepared.order.product_snapshot;
-  const base = getJitProductConfig(mailType);
-  const product = {
-    ...base,
-    amountCents: prepared.order.amount_cents,
-    currency: prepared.order.currency,
-    // The price id from the SAME row as the amount. Rows written before this
-    // field was snapshotted fall back to the live value, which is the old
-    // behaviour rather than a new failure mode.
-    priceId: snapshot.priceId ? String(snapshot.priceId) : base.priceId,
-    name: snapshot.name ? String(snapshot.name) : base.name,
-    description: snapshot.description ? String(snapshot.description) : base.description
-  };
+  // ONE fresh derivation, as it was through round 10. Rounds 11-12 spliced
+  // the row's amount together with a live price id (and then the row's price
+  // id too), which round 13 showed strands a checkout on an archived Price
+  // that the pre-round-11 code completed successfully. The race that
+  // motivated the splice was a concurrent memo invalidation, and that
+  // machinery is gone (#278 round 13).
+  const product = getJitProductConfig(mailType);
   const urls = jitReturnUrls(prepared.order.order_id);
   const checkout = await createJitCheckoutSession({
     orderId: prepared.order.order_id,

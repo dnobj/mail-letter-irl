@@ -216,8 +216,6 @@ export function resetPriceCatalog(): void {
   attempts.clear();
   inFlight.clear();
   resolutionEpochs.clear();
-  lastInvalidatedAt.clear();
-  invalidations.clear();
   clearDiagnosticChangeSlot('stripe.price_catalog_resolved');
   generation += 1;
   jitter = () => 0;
@@ -361,63 +359,6 @@ function storedFailureIfCurrent(
  * price.inactive - at which point readiness goes red, quotes stop offering it,
  * and further purchases are refused BEFORE an order row exists (#278 r10).
  */
-const INVALIDATION_FLOOR_MS = 60_000;
-const lastInvalidatedAt = new Map<string, number>();
-/**
- * Per-product invalidation counter, checked by resolveOne's staleness guard.
- * Without it an invalidation raised while a lookup was already in the air was
- * a silent no-op: the flight had read Stripe BEFORE the archival and its
- * commit re-installed the very memo the invalidation existed to drop, putting
- * the process straight back into readiness-green-while-every-purchase-fails
- * (#278 round 11).
- */
-const invalidations = new Map<string, number>();
-
-function invalidationCount(productCode: string): number {
-  return invalidations.get(productCode) ?? 0;
-}
-
-export function invalidateResolvedPrice(productCode: string, reason: string): void {
-  // Rate-limited, because the trigger is necessarily coarse: the class that
-  // reports an archived Price is stripe-node's catch-all for any
-  // invalid_request without an allowlisted code, so a rejection caused by
-  // some OTHER parameter (an expires_at drift, a malformed url, an email
-  // Stripe dislikes) also lands here. There the re-read SUCCEEDS, no failure
-  // is recorded, nothing throttles, and the next attempt invalidates again -
-  // measured at one extra Stripe read per failing checkout, unbounded, plus
-  // a warn line each time. One invalidation is all the archived-Price case
-  // ever needs: its re-read records price.inactive and the terminal ladder
-  // takes over from there (#278 round 11).
-  // ALWAYS authoritative, and in this order. Round 11 put a rate-limit early
-  // return ABOVE these lines, so a throttled call dropped no memo AND never
-  // moved the counter that resolveOne's stale() reads - the two mechanisms
-  // added in that same commit to make invalidation authoritative cancelled
-  // each other out, and retries cluster inside the floor, so the throttled
-  // call was the common path. Four round-12 angles reproduced it (#278 r12).
-  invalidations.set(productCode, invalidationCount(productCode) + 1);
-  resolved.delete(productCode);
-  // The in-flight lookup goes too. Both flight guards key on configSignature,
-  // which an invalidation deliberately does not change, so the next ensure
-  // would otherwise JOIN a flight whose commit stale() is about to discard -
-  // re-reading nothing and leaving the caller with neither memo nor failure
-  // (#278 round 12).
-  inFlight.delete(productCode);
-  // Clear the ladder too: this is new evidence, not a repeat failure, so the
-  // re-read happens on the next call rather than after a cooldown.
-  failures.delete(productCode);
-  attempts.delete(productCode);
-  // Only the LOG is throttled. Throttling the invalidation itself was the
-  // defect above; the read it triggers is bounded by the trigger instead -
-  // Stripe must name the price as the offending parameter, and a genuinely
-  // bad price records a failure on the re-read, at which point the terminal
-  // ladder owns the retry rate.
-  const now = Date.now();
-  const last = lastInvalidatedAt.get(productCode);
-  if (last === undefined || now - last >= INVALIDATION_FLOOR_MS) {
-    lastInvalidatedAt.set(productCode, now);
-    writeDiagnostic('warn', 'stripe.price_memo_invalidated', { productCode, reason });
-  }
-}
 
 export function describeUnpriced(
   productCode: string,
@@ -540,12 +481,6 @@ function pruneStale(products: readonly ConfiguredProduct[]): void {
     const product = byCode.get(code);
     if (!product || !memoMatchesConfiguration(memo, product)) resolved.delete(code);
   }
-  // The log floor is configuration-scoped like everything else here: a
-  // timestamp earned under a dead configuration survived a repoint and
-  // suppressed the first report under the new one (#278 round 12).
-  for (const code of [...lastInvalidatedAt.keys()]) {
-    if (!byCode.has(code)) lastInvalidatedAt.delete(code);
-  }
 }
 
 function recordFailure(
@@ -584,7 +519,6 @@ function recordFailure(
 
 /** Resolve ONE product's price and commit the outcome, staleness-guarded. */
 async function resolveOne(product: ConfiguredProduct, startedGen: number): Promise<void> {
-  const startedInvalidations = invalidationCount(product.productCode);
   const signature = configSignature(product);
   // A commit is valid only if nothing moved underneath the lookup: not the
   // catalog generation (a reset), and not ANY part of the configuration - a
@@ -592,26 +526,14 @@ async function resolveOne(product: ConfiguredProduct, startedGen: number): Promi
   // the air (#278 rounds 5-6; round 5's guard checked the id only, so a
   // mid-flight currency fix could be poisoned by a verdict computed against
   // the dead snapshot).
-  const stale = (forSuccess = true): boolean => {
+  const stale = (): boolean => {
     if (generation !== startedGen) return true;
-    // An invalidation raised mid-flight discards a SUCCESS: it was read
-    // before the event that disproved it. Failures are exempt - see
-    // commitFailure, which passes `false` - because a recorded fault is
-    // evidence in its own right, and discarding it downgraded a correct
-    // terminal price.inactive to the synthesized transient record, telling
-    // the customer to retry a permanently archived Price (#278 rounds 11-12).
-    if (
-      forSuccess &&
-      invalidationCount(product.productCode) !== startedInvalidations
-    ) {
-      return true;
-    }
     const current = getConfiguredProduct(product.productCode);
     return !current || configSignature(current) !== signature;
   };
 
   const commitFailure = (rule: string, diagnosticClass: string, detail?: string): void => {
-    if (stale(false)) return;
+    if (stale()) return;
     recordFailure(product.productCode, signature, rule, diagnosticClass, Date.now(), detail);
   };
 

@@ -677,21 +677,21 @@ describe('commerceService', () => {
     expect(String(cancel?.[1]?.[2])).toMatch(/too short/i);
   });
 
-  it('charges the price id recorded on the row, not a later catalog read', async () => {
-    // The amount came from the row while the price id came from a live read,
-    // so a repoint between insert and session-create opened a session on the
-    // NEW Price against the OLD recorded amount - the customer pays one
-    // figure, the row holds another, and a legitimate purchase is filed as
-    // PAYMENT_AMOUNT_MISMATCH (#278 round 12).
+  it('prices a reused order from the LIVE catalog, so a repoint takes effect', async () => {
+    // Rounds 11-12 spliced the row's figures into this product, ending with
+    // the price id pinned to the row - which stranded a checkout on an
+    // archived Price that the pre-round-11 code completed successfully. The
+    // splice existed to survive a concurrent memo invalidation, and that
+    // machinery is gone, so this is one fresh derivation again (#278 r13).
     mocks.getJitProduct.mockReturnValue({
-      productCode: 'jit-letter', priceId: 'price-jit-REPOINTED', amountCents: 599,
+      productCode: 'jit-letter', priceId: 'price-jit-LIVE', amountCents: 499,
       currency: 'usd', name: 'Pay & Send One Physical Letter',
       description: 'x', mailType: 'letter'
     });
     const reusable = {
       ...baseOrder,
       amount_cents: 499,
-      product_snapshot: { ...baseOrder.product_snapshot, priceId: 'price-jit-AS-SOLD' },
+      product_snapshot: { ...baseOrder.product_snapshot },
       stripe_checkout_session_id: 'cs-existing',
       checkout_url: null,
       checkout_expires_at: new Date(Date.now() + 90 * 60_000)
@@ -716,10 +716,7 @@ describe('commerceService', () => {
 
     expect(mocks.createJitSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        product: expect.objectContaining({
-          priceId: 'price-jit-AS-SOLD',
-          amountCents: 499
-        })
+        product: expect.objectContaining({ priceId: 'price-jit-LIVE' })
       })
     );
   });
@@ -967,7 +964,12 @@ describe('commerceService', () => {
       String(sql).includes("'PRICE_CHANGED_BEFORE_SESSION'")
     );
     expect(cancel).toBeDefined();
-    expect(cancel?.[1]).toEqual(['order-1']);
+    expect(cancel?.[1]?.[0]).toBe('order-1');
+    // The code and its message move together, like every other cancel here.
+    // Round 12 fixed the sibling branch and left this one, so the reprice
+    // cancel kept the previous failure's text beside a fresh code (#278 r13).
+    expect(String(cancel?.[0])).toContain('last_error = $2');
+    expect(String(cancel?.[1]?.[1])).toMatch(/price changed/i);
   });
 
   it('reuses a pending JIT order untouched when its Stripe session already exists', async () => {

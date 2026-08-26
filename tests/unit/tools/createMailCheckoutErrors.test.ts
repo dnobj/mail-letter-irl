@@ -5,6 +5,7 @@
  * advice no retry can honor, and a blip must never read as permanent.
  */
 
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { friendlyCheckoutError } from '../../../src/tools/createMailCheckout.js';
 
@@ -68,4 +69,25 @@ describe('friendlyCheckoutError terminality (#278)', () => {
     );
     expect(friendly.message).not.toContain('cs_private');
   });
+});
+
+/**
+ * The same guarantee on the SEND surface. `friendlyCheckoutError` is
+ * default-deny (every branch returns server-authored text); the send tools'
+ * `friendlyDraftError` is default-allow, so an unmapped code forwards the
+ * upstream message verbatim - which for ACCOUNT_SENDS_BLOCKED carries the
+ * internal users.sends_blocked_reason label. Round 12 fixed the checkout
+ * surface only; four round-13 angles found the send path still open, and it
+ * is the higher-traffic one because Pay & Send ships disabled (#278 r13).
+ */
+describe('account-blocked wording on the send surface (#278)', () => {
+  it.each(['sendLetter', 'sendPostcard'])(
+    '%s maps ACCOUNT_SENDS_BLOCKED to server-authored text',
+    async tool => {
+      const source = await readFile(`src/tools/${tool}.ts`, 'utf8');
+
+      expect(source).toContain("code === 'ACCOUNT_SENDS_BLOCKED'");
+      expect(source).toContain('Sending is disabled on this account. Please contact support.');
+    }
+  );
 });

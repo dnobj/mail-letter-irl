@@ -9,7 +9,6 @@ import {
 } from '../utils/diagnosticLog.js';
 import {
   describeUnpriced,
-  invalidateResolvedPrice,
   getResolvedPriceForProduct
 } from './priceCatalog.js';
 import { BACKGROUND_REQUEST_OPTIONS, getStripeClient } from './stripeClient.js';
@@ -189,38 +188,27 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
     // forever, log blaming Stripe for a missing credential (#278 round 7).
     const diagnosticClass =
       carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error');
-    // Drop the memo ONLY when Stripe names the price as the offending
-    // parameter. An archived Price is the case the catalog cannot see on its
-    // own (`active` is mutable and deliberately not a signature input), but
-    // the class that reports it - StripeInvalidRequestError - is stripe-node's
-    // catch-all for ANY invalid_request without an allowlisted code, and this
-    // request carries user-supplied success_url, cancel_url and customer_email.
-    // Keying on the class alone therefore let any authenticated caller delete
-    // a verified memo on demand: /readyz went 503 and every OTHER customer's
-    // purchase was refused until the next resolve. Three round-11 angles found
-    // it, one with a live probe. Stripe's `param` is not caller-controlled, so
-    // it is the discriminator; if Stripe ever stops naming it, this falls back
-    // to the pre-round-10 behaviour (an archived Price persists until restart)
-    // rather than to a remotely triggerable one (#278 round 11).
+    // The parameter Stripe blamed, recorded because a rejected checkout is
+    // hard to diagnose without it. `param` is a fixed public StripeError
+    // field and is not caller-controlled, so it is safe to log.
+    //
+    // NOTE: rounds 10-12 also used this to invalidate the price memo, so an
+    // archived Price would self-heal. That machinery produced a correctness
+    // defect in three consecutive review rounds - a remotely triggerable
+    // memo drop, two mechanisms that cancelled each other out, and an
+    // unbounded Stripe re-read - and was removed. An archived Price now
+    // persists in the memo until the process restarts or the price id is
+    // repointed, which is the behaviour rounds 1-10 shipped and no review
+    // round ever found a defect in. The cost is bounded and visible: quotes
+    // keep advertising it and each purchase fails at session creation, with
+    // this log line naming the price as the offending parameter (#278 r13).
     const offendingParam =
       typeof (error as { param?: unknown })?.param === 'string'
         ? (error as { param: string }).param
         : '';
-    if (
-      offendingParam.includes('price') &&
-      (diagnosticClass === 'StripeInvalidRequestError' ||
-        diagnosticClass === 'resource_missing')
-    ) {
-      invalidateResolvedPrice(params.product.productCode, diagnosticClass);
-    }
     writeDiagnostic('error', 'stripe.checkout_creation_failed', {
       errorClass: diagnosticClass,
-      // The parameter Stripe blamed. It gates the whole memo-invalidation
-      // remedy, so if the guess about Stripe's wire shape is ever wrong the
-      // symptom is the round-10 bug with nothing in the log to distinguish
-      // it from correct behaviour. `param` is a fixed public StripeError
-      // field and not caller-controlled - the same reason it was chosen as
-      // the discriminator makes it safe to record (#278 round 12).
+      productCode: params.product.productCode,
       offendingParam: offendingParam || 'none'
     });
     return {
