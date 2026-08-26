@@ -1,23 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { migrate } from '../../src/cli/migrate.js';
 import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/disposableDatabase.js';
 
 /**
  * Issue #153 - enforce the published retention schedule.
  *
- * The decision record (2026-08-26) approved:
- *   sent letter content        -> anonymized 90 days after sending
- *   drafts attached to an order -> the same schedule
- *   unsent, unpaid drafts       -> deleted at 7 days (cleanupOldDrafts, unchanged)
+ *   sent letter content          -> anonymized at 90 days
+ *   drafts on a PAID order       -> the same schedule
+ *   drafts on an abandoned one   -> anonymized at 7 days (they cannot be deleted)
+ *   unsent, no order at all      -> deleted at 7 days by cleanupOldDrafts
  *
- * These run against real PostgreSQL because every property that matters here
- * is a property of the STATEMENT, not of the TypeScript around it: the
- * boundary comparison, the two NOT EXISTS holds, the idempotency predicate,
- * and the fact that anonymization leaves the financial audit trail standing.
- * A mocked query() proves none of them - it would happily accept a predicate
- * that matches every row in the table.
+ * These run against real PostgreSQL because every property that matters is a
+ * property of the STATEMENT: the boundary, the allow-list holds, the
+ * idempotency guard, and the fact that anonymization leaves the financial
+ * audit trail standing. A mocked query() would accept a predicate matching
+ * every row in the table - which is precisely how the first version of the
+ * unit suite passed while missing three fatal mutations.
+ *
+ * Each test truncates first, so none depends on another's leftovers and any
+ * one can be run in isolation.
  */
 
 const { Pool } = pg;
@@ -36,6 +39,7 @@ function databaseUrlForSchema(baseUrl: string, schema: string): string {
 
 const SECRET_BODY = 'Dear Sam, the thing we discussed is going ahead on Tuesday.';
 const SECRET_STREET = '221B Baker Street';
+const SECRET_IMAGE_URL = 'https://images.example.invalid/secret-photo.png';
 
 describePostgres('content retention sweep', () => {
   let adminPool: pg.Pool;
@@ -67,43 +71,51 @@ describePostgres('content retention sweep', () => {
     }
   });
 
+  beforeEach(async () => {
+    // Order-independence: every exact-count assertion below would otherwise be
+    // hostage to what an earlier test happened to leave due.
+    await pool.query(
+      `TRUNCATE credit_consumption, credit_transactions, credit_ledger,
+                letter_jobs, orders, letter_drafts, letters, users
+       RESTART IDENTITY CASCADE`
+    );
+  });
+
   async function seedUser(): Promise<string> {
     const userId = `user_${randomUUID()}`;
-    await pool.query(
-      `INSERT INTO users (user_id, email, credits) VALUES ($1, $2, 0)`,
-      [userId, `${userId}@test.invalid`]
-    );
+    await pool.query(`INSERT INTO users (user_id, email, credits) VALUES ($1, $2, 0)`, [
+      userId,
+      `${userId}@test.invalid`
+    ]);
     return userId;
   }
 
-  /** A sent letter carrying real content, dated `sentDaysAgo` days back. */
-  async function seedSentLetter(sentDaysAgo: number): Promise<{ userId: string; letterId: string }> {
-    const userId = await seedUser();
+  async function seedSentLetter(options: {
+    daysAgo: number;
+    status?: string;
+    userId?: string;
+  }): Promise<{ userId: string; letterId: string }> {
+    const userId = options.userId ?? (await seedUser());
     const letterId = `letter_${randomUUID()}`;
     await pool.query(
       `INSERT INTO letters (
-         letter_id, user_id, content, recipient, credits_cost, status,
-         preview_html, sent_at
-       ) VALUES ($1, $2, $3::jsonb, $4::jsonb, 2, 'sent', $5,
-                 NOW() - make_interval(days => $6::int))`,
+         letter_id, user_id, content, recipient, credits_cost, status, preview_html, sent_at
+       ) VALUES ($1, $2, $3::jsonb, $4::jsonb, 2, $5, $6,
+                 NOW() - make_interval(days => $7::int))`,
       [
         letterId,
         userId,
         JSON.stringify({ bodyText: SECRET_BODY, signOff: 'Yours, Alex' }),
         JSON.stringify({ name: 'Sam', addressLine1: SECRET_STREET, city: 'London' }),
+        options.status ?? 'delivered',
         `<p>${SECRET_BODY}</p>`,
-        sentDaysAgo
+        options.daysAgo
       ]
     );
     return { userId, letterId };
   }
 
-  /**
-   * A minimal draft row. jit_mail orders REQUIRE one: the schema's
-   * valid_order_draft check is
-   *   (order_type = 'jit_mail' AND draft_id IS NOT NULL) OR order_type = 'letter_pack'
-   * so an order fixture cannot reference a letter without a draft behind it.
-   */
+  /** jit_mail orders require credits IS NULL and a draft_id (migration 021). */
   async function seedDraft(userId: string, letterId?: string): Promise<string> {
     const draftId = randomUUID();
     await pool.query(
@@ -117,10 +129,6 @@ describePostgres('content retention sweep', () => {
     return draftId;
   }
 
-  /**
-   * A jit_mail order in a given status. credits MUST be NULL - valid_order_credits
-   * allows a positive credits value only for letter_pack.
-   */
   async function seedJitOrder(options: {
     userId: string;
     status: string;
@@ -139,261 +147,426 @@ describePostgres('content retention sweep', () => {
     return orderId;
   }
 
+  /**
+   * A PREPAID letter and the pack order that funded it, linked only through
+   * the ledger - which is the only link that exists for prepaid mail, because
+   * orders.letter_id is written solely on the jit path.
+   */
+  async function seedPrepaidLetterFundedByPack(options: {
+    daysAgo: number;
+    orderStatus: string;
+  }): Promise<{ letterId: string; orderId: string }> {
+    const userId = await seedUser();
+    const { letterId } = await seedSentLetter({ daysAgo: options.daysAgo, userId });
+    const orderId = `order_${randomUUID()}`;
+    await pool.query(
+      `INSERT INTO orders (
+         order_id, user_id, credits, amount_cents, currency, status,
+         order_type, product_code, idempotency_key
+       ) VALUES ($1, $2, 10, 1000, 'USD', $3, 'letter_pack', 'credit-pack-10', $4)`,
+      [orderId, userId, options.orderStatus, `idem_${orderId}`]
+    );
+    const lot = await pool.query<{ ledger_id: string }>(
+      `INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, source_order_id, expiration_policy, status
+       ) VALUES ($1, 10, 8, 'purchase', $2, $2, 'never', 'active')
+       RETURNING ledger_id`,
+      [userId, orderId]
+    );
+    const txn = await pool.query<{ transaction_id: number }>(
+      `INSERT INTO credit_transactions (
+         user_id, amount, balance_after, type, reference_type, reference_id
+       ) VALUES ($1, -2, 8, 'deduction', 'letter', $2)
+       RETURNING transaction_id`,
+      [userId, letterId]
+    );
+    await pool.query(
+      `INSERT INTO credit_consumption (transaction_id, ledger_id, amount, ledger_remaining_after)
+       VALUES ($1, $2, 2, 8)`,
+      [txn.rows[0].transaction_id, lot.rows[0].ledger_id]
+    );
+    return { letterId, orderId };
+  }
+
   async function readLetter(letterId: string) {
     const { rows } = await pool.query(
-      `SELECT content, recipient, preview_html, status, credits_cost, sent_at
+      `SELECT content, recipient, preview_html, status, credits_cost, sent_at, redacted_at
          FROM letters WHERE letter_id = $1`,
       [letterId]
     );
     return rows[0];
   }
 
-  it('anonymizes content once the retention window has passed', async () => {
-    const { letterId } = await seedSentLetter(91);
+  describe('letters', () => {
+    it('anonymizes content once the window has passed, and stamps redacted_at', async () => {
+      const { letterId } = await seedSentLetter({ daysAgo: 91 });
 
-    const redacted = await retention.purgeExpiredLetterContent();
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
 
-    expect(redacted).toBeGreaterThanOrEqual(1);
-    const row = await readLetter(letterId);
-    expect(row.content).toEqual({ redacted: true });
-    expect(row.recipient).toEqual({ redacted: true });
-    expect(row.preview_html).toBeNull();
-    // Nothing recognisable survives anywhere in the row.
-    expect(JSON.stringify(row)).not.toContain(SECRET_BODY);
-    expect(JSON.stringify(row)).not.toContain(SECRET_STREET);
-  });
+      const row = await readLetter(letterId);
+      expect(row.content).toEqual({});
+      expect(row.recipient).toEqual({});
+      expect(row.preview_html).toBeNull();
+      expect(row.redacted_at).not.toBeNull();
+      expect(JSON.stringify(row)).not.toContain(SECRET_BODY);
+      expect(JSON.stringify(row)).not.toContain(SECRET_STREET);
+    });
 
-  it('leaves a letter INSIDE the window untouched', async () => {
-    // The boundary is the whole guarantee. A predicate that redacted this row
-    // would be destroying content the policy promises to keep for disputes.
-    const { letterId } = await seedSentLetter(89);
+    it('leaves a letter INSIDE the window untouched', async () => {
+      const { letterId } = await seedSentLetter({ daysAgo: 89 });
 
-    await retention.purgeExpiredLetterContent();
+      expect(await retention.purgeExpiredLetterContent()).toBe(0);
 
-    const row = await readLetter(letterId);
-    expect(row.content.bodyText).toBe(SECRET_BODY);
-    expect(row.recipient.addressLine1).toBe(SECRET_STREET);
-  });
+      expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
+    });
 
-  it('preserves the non-content columns it is not allowed to touch', async () => {
-    const { letterId } = await seedSentLetter(120);
+    it('preserves the non-content columns it must not touch', async () => {
+      const { letterId } = await seedSentLetter({ daysAgo: 120 });
 
-    await retention.purgeExpiredLetterContent();
+      await retention.purgeExpiredLetterContent();
 
-    const row = await readLetter(letterId);
-    // Anonymize, never delete: the fulfilment and financial trail must stand.
-    expect(row.status).toBe('sent');
-    expect(row.credits_cost).toBe(2);
-    expect(row.sent_at).not.toBeNull();
-  });
+      const row = await readLetter(letterId);
+      expect(row.status).toBe('delivered');
+      expect(row.credits_cost).toBe(2);
+      expect(row.sent_at).not.toBeNull();
+    });
 
-  it('is idempotent - a second sweep re-redacts nothing', async () => {
-    await seedSentLetter(200);
+    it('is idempotent - a second sweep redacts nothing', async () => {
+      await seedSentLetter({ daysAgo: 200 });
 
-    const first = await retention.purgeExpiredLetterContent();
-    const second = await retention.purgeExpiredLetterContent();
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+      expect(await retention.purgeExpiredLetterContent()).toBe(0);
+    });
 
-    expect(first).toBeGreaterThanOrEqual(1);
-    // The constant sentinel is what makes this exact: a redaction stamp
-    // carrying a timestamp would re-match every previously redacted row.
-    expect(second).toBe(0);
-  });
+    it('can be re-swept after clearing redacted_at, which the sentinel could never do', async () => {
+      // The point of the column: a sweep that shipped with a missed content
+      // column can be fixed and re-run. The old '{"redacted":true}' sentinel
+      // marked such rows done forever.
+      const { letterId } = await seedSentLetter({ daysAgo: 200 });
+      await retention.purgeExpiredLetterContent();
 
-  it('HOLDS a letter that still has work in flight', async () => {
-    // letterJobService builds its provider params from letters.content and
-    // letters.recipient. Redacting under a live job would hand the provider
-    // an empty letter and an empty address.
-    const { letterId } = await seedSentLetter(365);
-    await pool.query(
-      `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key, next_attempt_at)
-       VALUES ($1, $2, 'pending', $3, NOW())`,
-      [`job_${randomUUID()}`, letterId, `idem_${letterId}`]
+      await pool.query(`UPDATE letters SET redacted_at = NULL WHERE letter_id = $1`, [letterId]);
+
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+    });
+
+    it.each(['draft', 'queued', 'processing', 'held'])(
+      'HOLDS a letter still in %s, however old',
+      async status => {
+        const { letterId } = await seedSentLetter({ daysAgo: 400, status });
+
+        expect(await retention.purgeExpiredLetterContent()).toBe(0);
+
+        expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
+      }
     );
 
-    await retention.purgeExpiredLetterContent();
+    it.each(['pending', 'processing', 'held', 'failed'])(
+      'HOLDS a letter whose job is %s - a failed job can still be dispatched',
+      async status => {
+        const { letterId } = await seedSentLetter({ daysAgo: 400 });
+        await pool.query(
+          `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key, next_attempt_at)
+           VALUES ($1, $2, $3, $4, NOW())`,
+          [`job_${randomUUID()}`, letterId, status, `idem_${letterId}`]
+        );
 
-    const row = await readLetter(letterId);
-    expect(row.content.bodyText).toBe(SECRET_BODY);
+        expect(await retention.purgeExpiredLetterContent()).toBe(0);
+      }
+    );
+
+    it('redacts once every job is settled', async () => {
+      const { letterId } = await seedSentLetter({ daysAgo: 400 });
+      await pool.query(
+        `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key, next_attempt_at)
+         VALUES ($1, $2, 'completed', $3, NOW())`,
+        [`job_${randomUUID()}`, letterId, `idem_${letterId}`]
+      );
+
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+    });
+
+    it('HOLDS a letter whose JIT order is disputed', async () => {
+      const { userId, letterId } = await seedSentLetter({ daysAgo: 400 });
+      await seedJitOrder({ userId, status: 'disputed', letterId });
+
+      expect(await retention.purgeExpiredLetterContent()).toBe(0);
+    });
+
+    it('HOLDS a PREPAID letter whose pack order is disputed', async () => {
+      // The defect this whole rework exists for. orders.letter_id is jit-only,
+      // so before the ledger arm this letter had NO hold at all and a pack
+      // chargeback destroyed the evidence for every letter it funded.
+      const { letterId } = await seedPrepaidLetterFundedByPack({
+        daysAgo: 400,
+        orderStatus: 'disputed'
+      });
+
+      expect(await retention.purgeExpiredLetterContent()).toBe(0);
+
+      expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
+    });
+
+    it('redacts a PREPAID letter once its pack order is settled', async () => {
+      const { letterId } = await seedPrepaidLetterFundedByPack({
+        daysAgo: 400,
+        orderStatus: 'fulfilled'
+      });
+
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+
+      expect((await readLetter(letterId)).content).toEqual({});
+    });
+
+    it('releases the hold once a dispute resolves', async () => {
+      const { letterId, orderId } = await seedPrepaidLetterFundedByPack({
+        daysAgo: 400,
+        orderStatus: 'disputed'
+      });
+      expect(await retention.purgeExpiredLetterContent()).toBe(0);
+
+      await pool.query(`UPDATE orders SET status = 'refunded' WHERE order_id = $1`, [orderId]);
+
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+      expect((await readLetter(letterId)).content).toEqual({});
+    });
+
+    it('purges a FAILED letter that was never sent, clocking from created_at', async () => {
+      // sent_at IS NULL for a letter that never reached the provider, so a
+      // predicate keyed on sent_at alone retained its content forever.
+      const userId = await seedUser();
+      const letterId = `letter_${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO letters (
+           letter_id, user_id, content, recipient, credits_cost, status, created_at
+         ) VALUES ($1, $2, $3::jsonb, $4::jsonb, 2, 'failed', NOW() - INTERVAL '200 days')`,
+        [
+          letterId,
+          userId,
+          JSON.stringify({ bodyText: SECRET_BODY }),
+          JSON.stringify({ addressLine1: SECRET_STREET })
+        ]
+      );
+
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+      expect((await readLetter(letterId)).content).toEqual({});
+    });
+
+    it('respects the batch limit', async () => {
+      await seedSentLetter({ daysAgo: 400 });
+      await seedSentLetter({ daysAgo: 400 });
+      await seedSentLetter({ daysAgo: 400 });
+
+      expect(await retention.purgeExpiredLetterContent(90, 2)).toBe(2);
+    });
   });
 
-  it('HOLDS a letter whose order is disputed, because the content is the evidence', async () => {
-    const { userId, letterId } = await seedSentLetter(365);
-    await seedJitOrder({ userId, status: 'disputed', letterId });
-
-    await retention.purgeExpiredLetterContent();
-
-    const row = await readLetter(letterId);
-    expect(row.content.bodyText).toBe(SECRET_BODY);
-  });
-
-  it('releases the hold once the dispute is resolved', async () => {
-    // #153 requires holds to be scoped and auditable, not a switch that
-    // silently disables cleanup forever.
-    const { userId, letterId } = await seedSentLetter(365);
-    const orderId = await seedJitOrder({ userId, status: 'refund_pending', letterId });
-    await retention.purgeExpiredLetterContent();
-    expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
-
-    await pool.query(`UPDATE orders SET status = 'fulfilled' WHERE order_id = $1`, [orderId]);
-    await retention.purgeExpiredLetterContent();
-
-    expect((await readLetter(letterId)).content).toEqual({ redacted: true });
-  });
-
-  it('respects the batch limit so one sweep cannot lock the table unbounded', async () => {
-    await seedSentLetter(400);
-    await seedSentLetter(400);
-    await seedSentLetter(400);
-
-    const first = await retention.purgeExpiredLetterContent(90, 2);
-
-    expect(first).toBe(2);
-  });
-
-  it('anonymizes a PAID draft, the rows cleanupOldDrafts can never reach', async () => {
-    // cleanupOldDrafts excludes any draft with an order row - correct for
-    // deletion, but it left paid drafts holding a full body and address
-    // forever. This is that gap.
-    const userId = await seedUser();
-    const draftId = randomUUID();
-    await pool.query(
-      `INSERT INTO letter_drafts (
-         draft_id, user_id, sender, recipient, body_text, sign_off,
-         required_credits, preview_html, status, expires_at, consumed_at, updated_at
-       ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, 'Yours, Alex', 2, $6,
-                 'consumed', NOW() - INTERVAL '120 days',
-                 NOW() - INTERVAL '120 days', NOW() - INTERVAL '120 days')`,
-      [
+  describe('drafts', () => {
+    async function seedContentDraft(options: {
+      daysAgo: number;
+      userId: string;
+      layout?: 'postcard' | 'header_image' | 'plain';
+    }): Promise<string> {
+      const draftId = randomUUID();
+      const layout = options.layout ?? 'plain';
+      const columns =
+        layout === 'postcard'
+          ? `, mail_type, front_image_data, front_image_url, postcard_size`
+          : layout === 'header_image'
+            ? `, layout_type, header_image_data, header_image_url`
+            : '';
+      const values =
+        layout === 'postcard'
+          ? `, 'postcard', 'data:image/jpeg;base64,SECRET', $6, '6x9'`
+          : layout === 'header_image'
+            ? `, 'header_image', 'data:image/jpeg;base64,SECRET', $6`
+            : '';
+      const params: unknown[] = [
         draftId,
-        userId,
+        options.userId,
         JSON.stringify({ name: 'Alex', addressLine1: SECRET_STREET }),
         JSON.stringify({ name: 'Sam', addressLine1: SECRET_STREET }),
-        SECRET_BODY,
-        `<p>${SECRET_BODY}</p>`
-      ]
-    );
-    await seedJitOrder({ userId, status: 'fulfilled', draftId });
-
-    const redacted = await retention.purgePaidDraftContent();
-
-    expect(redacted).toBeGreaterThanOrEqual(1);
-    const { rows } = await pool.query(
-      `SELECT sender, recipient, body_text, sign_off, preview_html, required_credits
-         FROM letter_drafts WHERE draft_id = $1`,
-      [draftId]
-    );
-    expect(rows[0].body_text).toBe('');
-    expect(rows[0].sender).toEqual({ redacted: true });
-    expect(rows[0].recipient).toEqual({ redacted: true });
-    expect(rows[0].preview_html).toBeNull();
-    expect(JSON.stringify(rows[0])).not.toContain(SECRET_STREET);
-    // Non-content, still load-bearing for refunds, and CHECK (> 0).
-    expect(rows[0].required_credits).toBe(2);
-  });
-
-  it('clears a paid POSTCARD image without tripping postcard_requires_image', async () => {
-    // This is the case that would abort the whole sweep. migration 012 has
-    //   CHECK (mail_type != 'postcard' OR front_image_data IS NOT NULL)
-    // with no condition on the row being spent, so NULLing the image throws
-    // and every other due row in the same statement is rolled back with it.
-    const userId = await seedUser();
-    const draftId = randomUUID();
-    await pool.query(
-      `INSERT INTO letter_drafts (
-         draft_id, user_id, sender, recipient, body_text, sign_off,
-         required_credits, status, expires_at, consumed_at, updated_at,
-         mail_type, front_image_data, front_image_url, postcard_size
-       ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, 'Yours, Alex', 2,
-                 'consumed', NOW() - INTERVAL '120 days',
-                 NOW() - INTERVAL '120 days', NOW() - INTERVAL '120 days',
-                 'postcard', $6, 'https://images.example.invalid/secret.png', '6x9')`,
-      [
-        draftId,
-        userId,
-        JSON.stringify({ name: 'Alex' }),
-        JSON.stringify({ name: 'Sam', addressLine1: SECRET_STREET }),
-        SECRET_BODY,
-        `data:image/jpeg;base64,${Buffer.from(SECRET_BODY).toString('base64')}`
-      ]
-    );
-    await seedJitOrder({ userId, status: 'fulfilled', draftId });
-
-    await expect(retention.purgePaidDraftContent()).resolves.toBeGreaterThanOrEqual(1);
-
-    const { rows } = await pool.query(
-      `SELECT front_image_data, front_image_url, mail_type
-         FROM letter_drafts WHERE draft_id = $1`,
-      [draftId]
-    );
-    // Emptied, not nulled - the constraint still has to hold afterwards.
-    expect(rows[0].front_image_data).toBe('');
-    expect(rows[0].front_image_url).toBeNull();
-    expect(rows[0].mail_type).toBe('postcard');
-    expect(JSON.stringify(rows[0])).not.toContain('secret.png');
-  });
-
-  it('leaves a null image on a letter draft null, rather than changing its shape', async () => {
-    const userId = await seedUser();
-    const draftId = randomUUID();
-    await pool.query(
-      `INSERT INTO letter_drafts (
-         draft_id, user_id, sender, recipient, body_text, sign_off,
-         required_credits, status, expires_at, consumed_at, updated_at
-       ) VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb, $3, 'x', 2,
-                 'consumed', NOW() - INTERVAL '150 days',
-                 NOW() - INTERVAL '150 days', NOW() - INTERVAL '150 days')`,
-      [draftId, userId, SECRET_BODY]
-    );
-    await seedJitOrder({ userId, status: 'fulfilled', draftId });
-
-    await retention.purgePaidDraftContent();
-
-    const { rows } = await pool.query(
-      `SELECT front_image_data, body_text FROM letter_drafts WHERE draft_id = $1`,
-      [draftId]
-    );
-    expect(rows[0].body_text).toBe('');
-    expect(rows[0].front_image_data).toBeNull();
-  });
-
-  it('leaves an UNPAID draft to cleanupOldDrafts rather than redacting it', async () => {
-    const userId = await seedUser();
-    const draftId = randomUUID();
-    await pool.query(
-      `INSERT INTO letter_drafts (
-         draft_id, user_id, sender, recipient, body_text, sign_off,
-         required_credits, status, expires_at, updated_at
-       ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, 'Yours, Alex', 2,
-                 'expired', NOW() - INTERVAL '200 days', NOW() - INTERVAL '200 days')`,
-      [
-        draftId,
-        userId,
-        JSON.stringify({ name: 'Alex' }),
-        JSON.stringify({ name: 'Sam' }),
         SECRET_BODY
-      ]
-    );
+      ];
+      if (layout !== 'plain') params.push(SECRET_IMAGE_URL);
+      await pool.query(
+        `INSERT INTO letter_drafts (
+           draft_id, user_id, sender, recipient, body_text, sign_off,
+           required_credits, status, expires_at, consumed_at, created_at${columns}
+         ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, 'Yours, Alex', 2,
+                   'consumed',
+                   NOW() - make_interval(days => ${options.daysAgo}),
+                   NOW() - make_interval(days => ${options.daysAgo}),
+                   NOW() - make_interval(days => ${options.daysAgo})${values})`,
+        params
+      );
+      return draftId;
+    }
 
-    await retention.purgePaidDraftContent();
+    async function readDraft(draftId: string) {
+      const { rows } = await pool.query(
+        `SELECT sender, recipient, body_text, preview_html, required_credits,
+                front_image_data, front_image_url, header_image_data, header_image_url,
+                inline_image_data, redacted_at, mail_type
+           FROM letter_drafts WHERE draft_id = $1`,
+        [draftId]
+      );
+      return rows[0];
+    }
 
-    const { rows } = await pool.query(
-      `SELECT body_text FROM letter_drafts WHERE draft_id = $1`,
-      [draftId]
-    );
-    // The 7-day deletion owns this row; redacting it here would leave an
-    // undeletable husk behind instead.
-    expect(rows[0].body_text).toBe(SECRET_BODY);
+    it('anonymizes a PAID draft at 90 days', async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 120, userId });
+      await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+      expect(await retention.purgePaidDraftContent()).toBe(1);
+
+      const row = await readDraft(draftId);
+      expect(row.body_text).toBe('');
+      expect(row.sender).toEqual({});
+      expect(row.recipient).toEqual({});
+      expect(row.redacted_at).not.toBeNull();
+      expect(row.required_credits).toBe(2);
+      expect(JSON.stringify(row)).not.toContain(SECRET_STREET);
+    });
+
+    it('HOLDS a paid draft whose order is still unsettled', async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 120, userId });
+      await seedJitOrder({ userId, status: 'fulfillment_pending', draftId });
+
+      // Charged, but the draft is still the only copy of what was bought.
+      expect(await retention.purgePaidDraftContent()).toBe(0);
+      expect((await readDraft(draftId)).body_text).toBe(SECRET_BODY);
+    });
+
+    it('clears a POSTCARD image without tripping postcard_requires_image', async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 120, userId, layout: 'postcard' });
+      await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+      await expect(retention.purgePaidDraftContent()).resolves.toBe(1);
+
+      const row = await readDraft(draftId);
+      expect(row.front_image_data).toBe('');
+      expect(row.front_image_url).toBeNull();
+      expect(row.mail_type).toBe('postcard');
+    });
+
+    it('clears a LAYOUT image without tripping header_layout_requires_image', async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 120, userId, layout: 'header_image' });
+      await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+      await expect(retention.purgePaidDraftContent()).resolves.toBe(1);
+
+      const row = await readDraft(draftId);
+      expect(row.header_image_data).toBe('');
+      expect(row.header_image_url).toBeNull();
+      expect(JSON.stringify(row)).not.toContain(SECRET_IMAGE_URL);
+    });
+
+    it('leaves a null image null rather than changing the column shape', async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 150, userId });
+      await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+      await retention.purgePaidDraftContent();
+
+      const row = await readDraft(draftId);
+      expect(row.front_image_data).toBeNull();
+      expect(row.header_image_data).toBeNull();
+      expect(row.inline_image_data).toBeNull();
+    });
+
+    it('does NOT treat an abandoned checkout as paid', async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 120, userId });
+      await seedJitOrder({ userId, status: 'cancelled', draftId });
+
+      expect(await retention.purgePaidDraftContent()).toBe(0);
+    });
+
+    it('anonymizes an ABANDONED-checkout draft at 7 days, not 90', async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 8, userId });
+      await seedJitOrder({ userId, status: 'cancelled', draftId });
+
+      expect(await retention.purgeAbandonedDraftContent()).toBe(1);
+
+      const row = await readDraft(draftId);
+      expect(row.body_text).toBe('');
+      expect(JSON.stringify(row)).not.toContain(SECRET_STREET);
+    });
+
+    it('leaves an abandoned draft inside the 7-day window alone', async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 3, userId });
+      await seedJitOrder({ userId, status: 'checkout_pending', draftId });
+
+      expect(await retention.purgeAbandonedDraftContent()).toBe(0);
+      expect((await readDraft(draftId)).body_text).toBe(SECRET_BODY);
+    });
+
+    it('never touches a PAID draft on the unpaid schedule', async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 30, userId });
+      await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+      expect(await retention.purgeAbandonedDraftContent()).toBe(0);
+      expect((await readDraft(draftId)).body_text).toBe(SECRET_BODY);
+    });
+
+    it('leaves an order-less draft to cleanupOldDrafts', async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 200, userId });
+
+      expect(await retention.purgePaidDraftContent()).toBe(0);
+      expect(await retention.purgeAbandonedDraftContent()).toBe(0);
+      expect((await readDraft(draftId)).body_text).toBe(SECRET_BODY);
+    });
+
+    it('confirms an abandoned draft genuinely CANNOT be deleted', async () => {
+      // The reason purgeAbandonedDraftContent exists at all: ON DELETE SET NULL
+      // plus valid_order_draft makes the delete a constraint violation, so
+      // cleanupOldDrafts can never reclaim these rows.
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 30, userId });
+      await seedJitOrder({ userId, status: 'cancelled', draftId });
+
+      await expect(
+        pool.query(`DELETE FROM letter_drafts WHERE draft_id = $1`, [draftId])
+      ).rejects.toThrow(/valid_order_draft/);
+    });
   });
 
-  it('reports counts and a more-waiting flag, and nothing else', async () => {
-    const summary = await retention.runRetentionSweep(90, 1);
+  describe('runRetentionSweep', () => {
+    it('reports counts only and no identifiers', async () => {
+      await seedSentLetter({ daysAgo: 400 });
 
-    expect(Object.keys(summary).sort()).toEqual([
-      'draftsRedacted',
-      'lettersRedacted',
-      'moreWaiting'
-    ]);
-    expect(JSON.stringify(summary)).not.toContain(SECRET_BODY);
-    expect(JSON.stringify(summary)).not.toContain(SECRET_STREET);
+      const summary = await retention.runRetentionSweep();
+
+      expect(summary.lettersRedacted).toBe(1);
+      expect(summary.errors).toEqual([]);
+      expect(Object.keys(summary).sort()).toEqual([
+        'abandonedDraftsRedacted',
+        'draftsRedacted',
+        'errors',
+        'lettersRedacted',
+        'moreWaiting'
+      ]);
+      expect(JSON.stringify(summary)).not.toContain(SECRET_BODY);
+      expect(JSON.stringify(summary)).not.toContain(SECRET_STREET);
+    });
+
+    it('refuses a window that would redact everything', async () => {
+      await seedSentLetter({ daysAgo: 1 });
+
+      const summary = await retention.runRetentionSweep(0);
+
+      expect(summary.lettersRedacted).toBe(0);
+      expect(summary.errors.join(' ')).toMatch(/positive integer/);
+    });
   });
 });
