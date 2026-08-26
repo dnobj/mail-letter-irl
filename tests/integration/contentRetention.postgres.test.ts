@@ -189,6 +189,38 @@ describePostgres('content retention sweep', () => {
     return { letterId, orderId };
   }
 
+  /**
+   * letter_jobs couples status to provider_outcome, and 'held' additionally
+   * requires held_at and hold_reason (valid_letter_job_outcome_state and
+   * valid_letter_job_hold, migration 023). A fixture that ignores the state
+   * machine is rejected outright, so derive the companion fields per status.
+   */
+  async function seedJob(letterId: string, status: string): Promise<void> {
+    const outcome =
+      status === 'completed'
+        ? 'accepted'
+        : status === 'held'
+          ? 'ambiguous'
+          : status === 'processing'
+            ? 'dispatching'
+            : 'not_dispatched';
+    await pool.query(
+      `INSERT INTO letter_jobs (
+         job_id, letter_id, status, idempotency_key, next_attempt_at,
+         provider_outcome, held_at, hold_reason
+       ) VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7)`,
+      [
+        `job_${randomUUID()}`,
+        letterId,
+        status,
+        `idem_${randomUUID()}`,
+        outcome,
+        status === 'held' ? new Date() : null,
+        status === 'held' ? 'ambiguous_provider_outcome' : null
+      ]
+    );
+  }
+
   async function readLetter(letterId: string) {
     const { rows } = await pool.query(
       `SELECT content, recipient, preview_html, status, credits_cost, sent_at, redacted_at
@@ -266,11 +298,7 @@ describePostgres('content retention sweep', () => {
       'HOLDS a letter whose job is %s - a failed job can still be dispatched',
       async status => {
         const { letterId } = await seedSentLetter({ daysAgo: 400 });
-        await pool.query(
-          `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key, next_attempt_at)
-           VALUES ($1, $2, $3, $4, NOW())`,
-          [`job_${randomUUID()}`, letterId, status, `idem_${letterId}`]
-        );
+        await seedJob(letterId, status);
 
         expect(await retention.purgeExpiredLetterContent()).toBe(0);
       }
@@ -278,11 +306,7 @@ describePostgres('content retention sweep', () => {
 
     it('redacts once every job is settled', async () => {
       const { letterId } = await seedSentLetter({ daysAgo: 400 });
-      await pool.query(
-        `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key, next_attempt_at)
-         VALUES ($1, $2, 'completed', $3, NOW())`,
-        [`job_${randomUUID()}`, letterId, `idem_${letterId}`]
-      );
+      await seedJob(letterId, 'completed');
 
       expect(await retention.purgeExpiredLetterContent()).toBe(1);
     });
