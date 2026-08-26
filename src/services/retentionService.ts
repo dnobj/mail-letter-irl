@@ -23,15 +23,21 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  *
  * So the sweep MOVES content into redacted_content_quarantine, and the
  * quarantine is purged on a pure time rule with no joins and no state machine.
- * The guards below now decide only WHEN content leaves the live tables, never
- * whether the removal can be undone. A wrong allow-list costs a recovery
- * window; restoreQuarantinedContent puts the row back.
+ * The guards below decide only WHEN content leaves the live tables. NOTE the
+ * recoverability that was meant to buy is NOT yet real: restoreQuarantinedContent
+ * has no operator entry point, so nothing deployed can invoke it (#153 review
+ * round 3). That is one of the reasons this ships in report mode.
  *
- * THE PUBLISHED NUMBER IS THE TOTAL EXPOSURE, NOT THE LIVE WINDOW
- * splitRetentionWindow divides it: content leaves the live tables at
- * (total - quarantine) days and the quarantine row purges at exactly `total`,
- * so no copy survives the published period. 90 becomes 83 live + 7 quarantine;
- * 7 becomes 4 + 3.
+ * THE PUBLISHED NUMBER IS MEANT TO BE THE TOTAL EXPOSURE
+ * splitRetentionWindow divides it so content leaves the live tables at
+ * (total - quarantine) days: 90 becomes 83 live + 7 quarantine, 7 becomes 4 + 3.
+ * CAVEAT, confirmed by review round 3: purge_after is stamped from NOW() at
+ * redaction rather than from the row's own clock, so the real total is
+ * (live window) + (however late the sweep ran) + (quarantine) - always more
+ * than the published number, and unbounded under backlog. Deriving it from the
+ * clock needs a GREATEST() floor, because a bare clock + total violates
+ * valid_quarantine_window for any already-overdue row and would abort the whole
+ * batch, oldest-first, on every run.
  *
  * EVERY GUARD IS AN ALLOW-LIST
  * A deny-list fails OPEN: the day a migration adds a status, every row sitting
@@ -708,7 +714,24 @@ export async function runRetentionPreview(
 }
 
 /**
- * One retention pass.
+ * One retention pass. ENFORCING - this removes customer content.
+ *
+ * DO NOT ENABLE CONTENT_RETENTION_MODE=enforce YET. Review round 3 confirmed
+ * four defects in this path that are not fixed:
+ *   - the quarantine ON CONFLICT branch overwrites a good saved copy with an
+ *     already-emptied live row, so the documented "clear redacted_at and
+ *     re-run" procedure destroys the content it was meant to protect;
+ *   - restoreQuarantinedContent runs its write-back and its delete as two
+ *     auto-committed statements, so a sweep landing between them loses both
+ *     copies and still reports success;
+ *   - purge_after is stamped from NOW() rather than the row's own clock, so
+ *     total exposure always exceeds the published period and is unbounded
+ *     under backlog;
+ *   - restoreQuarantinedContent has no operator entry point at all, so the
+ *     recovery this design is built around cannot actually be invoked.
+ * Report mode (the default) is unaffected: it shares the predicates and writes
+ * nothing. Fix these before flipping the mode.
+ *
  *
  * The sweeps are isolated from each other: they cover independent published
  * obligations, so a failure in one must not stop the others. Errors carry a
