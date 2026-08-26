@@ -209,6 +209,220 @@ const DRAFT_REDACTION_SET = `
             redacted_at = NOW()`;
 
 /**
+ * THE DUE PREDICATES, DEFINED ONCE.
+ *
+ * Each is shared verbatim between the REPORT path (a plain SELECT) and the
+ * ENFORCE path (the destructive CTE). That sharing is the point: a dry run is
+ * only evidence if it selects exactly the rows the real sweep would, and two
+ * hand-maintained copies would drift on the first edit.
+ *
+ * Parameters $1..$5 are identical in both paths; the enforce path appends its
+ * own LIMIT and quarantine-window parameters after them.
+ */
+const LETTER_DUE_PREDICATE = `        WHERE l.redacted_at IS NULL
+          AND COALESCE(l.sent_at, l.created_at) < NOW() - make_interval(days => $1::int)
+          AND l.status = ANY($2::varchar[])
+          AND NOT EXISTS (
+                SELECT 1 FROM letter_jobs j
+                 WHERE j.letter_id = l.letter_id
+                   AND NOT (j.status = ANY($3::varchar[]))
+              )
+          AND NOT EXISTS (
+                SELECT 1 FROM orders o
+                 WHERE o.letter_id = l.letter_id
+                   AND NOT (o.status = ANY($4::varchar[]))
+              )
+          AND NOT EXISTS (
+                SELECT 1
+                  FROM credit_transactions txn
+                  JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id
+                  JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id
+                  LEFT JOIN orders o ON o.order_id = lot.source_order_id
+                 WHERE txn.reference_type = 'letter'
+                   AND txn.type = 'deduction'
+                   AND txn.reference_id = l.letter_id
+                   AND (
+                         lot.status = 'revoked'
+                      OR (o.order_id IS NULL AND lot.source_type::text = ANY($5::varchar[]))
+                      OR (o.order_id IS NOT NULL AND NOT (o.status = ANY($4::varchar[])))
+                       )
+              )`;
+
+const PAID_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
+          AND COALESCE(d.consumed_at, d.created_at) < NOW() - make_interval(days => $1::int)
+          AND EXISTS (
+                SELECT 1 FROM orders o
+                 WHERE o.draft_id = d.draft_id
+                   AND o.status = ANY($2::varchar[])
+              )
+          AND NOT EXISTS (
+                SELECT 1 FROM orders o
+                 WHERE o.draft_id = d.draft_id
+                   AND NOT (o.status = ANY($3::varchar[]))
+              )
+          AND NOT EXISTS (
+                SELECT 1 FROM letter_jobs j
+                 WHERE d.consumed_letter_id IS NOT NULL
+                   AND j.letter_id = d.consumed_letter_id
+                   AND NOT (j.status = ANY($4::varchar[]))
+              )`;
+
+const ABANDONED_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
+          AND d.created_at < NOW() - make_interval(days => $1::int)
+          AND EXISTS (
+                SELECT 1 FROM orders o WHERE o.draft_id = d.draft_id
+              )
+          AND NOT EXISTS (
+                SELECT 1 FROM orders o
+                 WHERE o.draft_id = d.draft_id
+                   AND NOT (o.status = ANY($2::varchar[]))
+              )
+          AND NOT EXISTS (
+                SELECT 1 FROM letter_jobs j
+                 WHERE d.consumed_letter_id IS NOT NULL
+                   AND j.letter_id = d.consumed_letter_id
+                   AND NOT (j.status = ANY($3::varchar[]))
+              )`;
+
+export interface RetentionPreview {
+  /** Rows past the live window, ignoring every hold. */
+  pastWindow: number;
+  /** Rows that pass every hold - what an enforcing run would touch. */
+  due: number;
+  /** pastWindow - due: how much work the holds are actually doing. */
+  heldBack: number;
+  /** Age in days of the oldest and newest due row, or null when none are due. */
+  oldestDueDays: number | null;
+  newestDueDays: number | null;
+}
+
+const EMPTY_PREVIEW: RetentionPreview = {
+  pastWindow: 0,
+  due: 0,
+  heldBack: 0,
+  oldestDueDays: null,
+  newestDueDays: null
+};
+
+function toPreview(row: Record<string, unknown> | undefined): RetentionPreview {
+  if (!row) return EMPTY_PREVIEW;
+  const pastWindow = Number(row.past_window ?? 0);
+  const due = Number(row.due ?? 0);
+  return {
+    pastWindow,
+    due,
+    heldBack: pastWindow - due,
+    oldestDueDays:
+      row.oldest_due_days === null || row.oldest_due_days === undefined
+        ? null
+        : Math.floor(Number(row.oldest_due_days)),
+    newestDueDays:
+      row.newest_due_days === null || row.newest_due_days === undefined
+        ? null
+        : Math.floor(Number(row.newest_due_days))
+  };
+}
+
+/**
+ * REPORT MODE. Counts what an enforcing run would touch, and writes nothing.
+ *
+ * These are separate functions rather than a flag inside the destructive
+ * statements, deliberately. A boolean guarding an UPDATE is one inverted
+ * condition away from destroying data, and three review rounds of this feature
+ * have each found exactly that class of defect. A function whose SQL contains
+ * no INSERT, UPDATE or DELETE token cannot destroy anything however it is
+ * called, and a test can assert that property directly.
+ *
+ * heldBack is the number worth watching: if the holds catch nothing, or catch
+ * everything, the predicates are wrong in a way these counts will show long
+ * before any content is removed.
+ */
+export async function previewExpiredLetterContent(
+  retentionDays = 90
+): Promise<RetentionPreview> {
+  assertRetentionArgs(retentionDays, 1);
+  const { liveDays } = splitRetentionWindow(retentionDays);
+  const result = await query(
+    `SELECT
+       (SELECT COUNT(*) FROM letters l
+         WHERE l.redacted_at IS NULL
+           AND COALESCE(l.sent_at, l.created_at) < NOW() - make_interval(days => $1::int)
+       ) AS past_window,
+       (SELECT COUNT(*) FROM letters l
+${LETTER_DUE_PREDICATE}
+       ) AS due,
+       (SELECT MAX(EXTRACT(EPOCH FROM (NOW() - COALESCE(l.sent_at, l.created_at))) / 86400)
+          FROM letters l
+${LETTER_DUE_PREDICATE}
+       ) AS oldest_due_days,
+       (SELECT MIN(EXTRACT(EPOCH FROM (NOW() - COALESCE(l.sent_at, l.created_at))) / 86400)
+          FROM letters l
+${LETTER_DUE_PREDICATE}
+       ) AS newest_due_days`,
+    [
+      liveDays,
+      REDACTABLE_LETTER_STATUSES,
+      SETTLED_JOB_STATUSES,
+      SETTLED_ORDER_STATUSES,
+      MONEY_BACKED_SOURCE_TYPES
+    ]
+  );
+  return toPreview(result.rows[0] as Record<string, unknown> | undefined);
+}
+
+export async function previewPaidDraftContent(retentionDays = 90): Promise<RetentionPreview> {
+  assertRetentionArgs(retentionDays, 1);
+  const { liveDays } = splitRetentionWindow(retentionDays);
+  const result = await query(
+    `SELECT
+       (SELECT COUNT(*) FROM letter_drafts d
+         WHERE d.redacted_at IS NULL
+           AND COALESCE(d.consumed_at, d.created_at) < NOW() - make_interval(days => $1::int)
+       ) AS past_window,
+       (SELECT COUNT(*) FROM letter_drafts d
+${PAID_DRAFT_DUE_PREDICATE}
+       ) AS due,
+       (SELECT MAX(EXTRACT(EPOCH FROM (NOW() - COALESCE(d.consumed_at, d.created_at))) / 86400)
+          FROM letter_drafts d
+${PAID_DRAFT_DUE_PREDICATE}
+       ) AS oldest_due_days,
+       (SELECT MIN(EXTRACT(EPOCH FROM (NOW() - COALESCE(d.consumed_at, d.created_at))) / 86400)
+          FROM letter_drafts d
+${PAID_DRAFT_DUE_PREDICATE}
+       ) AS newest_due_days`,
+    [liveDays, PAID_ORDER_STATUSES, SETTLED_ORDER_STATUSES, SETTLED_JOB_STATUSES]
+  );
+  return toPreview(result.rows[0] as Record<string, unknown> | undefined);
+}
+
+export async function previewAbandonedDraftContent(
+  retentionDays = UNPAID_DRAFT_RETENTION_DAYS
+): Promise<RetentionPreview> {
+  assertRetentionArgs(retentionDays, 1);
+  const { liveDays } = splitRetentionWindow(retentionDays);
+  const result = await query(
+    `SELECT
+       (SELECT COUNT(*) FROM letter_drafts d
+         WHERE d.redacted_at IS NULL
+           AND d.created_at < NOW() - make_interval(days => $1::int)
+       ) AS past_window,
+       (SELECT COUNT(*) FROM letter_drafts d
+${ABANDONED_DRAFT_DUE_PREDICATE}
+       ) AS due,
+       (SELECT MAX(EXTRACT(EPOCH FROM (NOW() - d.created_at)) / 86400)
+          FROM letter_drafts d
+${ABANDONED_DRAFT_DUE_PREDICATE}
+       ) AS oldest_due_days,
+       (SELECT MIN(EXTRACT(EPOCH FROM (NOW() - d.created_at)) / 86400)
+          FROM letter_drafts d
+${ABANDONED_DRAFT_DUE_PREDICATE}
+       ) AS newest_due_days`,
+    [liveDays, NEVER_PAID_ORDER_STATUSES, SETTLED_JOB_STATUSES]
+  );
+  return toPreview(result.rows[0] as Record<string, unknown> | undefined);
+}
+
+/**
  * Anonymize letter content past the live window, saving it to quarantine.
  *
  * THE DISPUTE HOLD HAS TWO ARMS. orders.letter_id is written in exactly one
@@ -237,34 +451,7 @@ export async function purgeExpiredLetterContent(
     `WITH due AS (
        SELECT l.letter_id
          FROM letters l
-        WHERE l.redacted_at IS NULL
-          AND COALESCE(l.sent_at, l.created_at) < NOW() - make_interval(days => $1::int)
-          AND l.status = ANY($2::varchar[])
-          AND NOT EXISTS (
-                SELECT 1 FROM letter_jobs j
-                 WHERE j.letter_id = l.letter_id
-                   AND NOT (j.status = ANY($3::varchar[]))
-              )
-          AND NOT EXISTS (
-                SELECT 1 FROM orders o
-                 WHERE o.letter_id = l.letter_id
-                   AND NOT (o.status = ANY($4::varchar[]))
-              )
-          AND NOT EXISTS (
-                SELECT 1
-                  FROM credit_transactions txn
-                  JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id
-                  JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id
-                  LEFT JOIN orders o ON o.order_id = lot.source_order_id
-                 WHERE txn.reference_type = 'letter'
-                   AND txn.type = 'deduction'
-                   AND txn.reference_id = l.letter_id
-                   AND (
-                         lot.status = 'revoked'
-                      OR (o.order_id IS NULL AND lot.source_type::text = ANY($5::varchar[]))
-                      OR (o.order_id IS NOT NULL AND NOT (o.status = ANY($4::varchar[])))
-                       )
-              )
+${LETTER_DUE_PREDICATE}
         ORDER BY COALESCE(l.sent_at, l.created_at)
         LIMIT $6::int
         FOR UPDATE OF l SKIP LOCKED
@@ -316,24 +503,7 @@ export async function purgePaidDraftContent(
     `WITH due AS (
        SELECT d.draft_id
          FROM letter_drafts d
-        WHERE d.redacted_at IS NULL
-          AND COALESCE(d.consumed_at, d.created_at) < NOW() - make_interval(days => $1::int)
-          AND EXISTS (
-                SELECT 1 FROM orders o
-                 WHERE o.draft_id = d.draft_id
-                   AND o.status = ANY($2::varchar[])
-              )
-          AND NOT EXISTS (
-                SELECT 1 FROM orders o
-                 WHERE o.draft_id = d.draft_id
-                   AND NOT (o.status = ANY($3::varchar[]))
-              )
-          AND NOT EXISTS (
-                SELECT 1 FROM letter_jobs j
-                 WHERE d.consumed_letter_id IS NOT NULL
-                   AND j.letter_id = d.consumed_letter_id
-                   AND NOT (j.status = ANY($4::varchar[]))
-              )
+${PAID_DRAFT_DUE_PREDICATE}
         ORDER BY COALESCE(d.consumed_at, d.created_at)
         LIMIT $5::int
         FOR UPDATE OF d SKIP LOCKED
@@ -390,22 +560,7 @@ export async function purgeAbandonedDraftContent(
     `WITH due AS (
        SELECT d.draft_id
          FROM letter_drafts d
-        WHERE d.redacted_at IS NULL
-          AND d.created_at < NOW() - make_interval(days => $1::int)
-          AND EXISTS (
-                SELECT 1 FROM orders o WHERE o.draft_id = d.draft_id
-              )
-          AND NOT EXISTS (
-                SELECT 1 FROM orders o
-                 WHERE o.draft_id = d.draft_id
-                   AND NOT (o.status = ANY($2::varchar[]))
-              )
-          AND NOT EXISTS (
-                SELECT 1 FROM letter_jobs j
-                 WHERE d.consumed_letter_id IS NOT NULL
-                   AND j.letter_id = d.consumed_letter_id
-                   AND NOT (j.status = ANY($3::varchar[]))
-              )
+${ABANDONED_DRAFT_DUE_PREDICATE}
         ORDER BY d.created_at
         LIMIT $4::int
         FOR UPDATE OF d SKIP LOCKED
@@ -512,6 +667,44 @@ export async function restoreQuarantinedContent(
     [sourceTable, sourceId]
   );
   return true;
+}
+
+export interface RetentionPreviewResult {
+  letters: RetentionPreview;
+  paidDrafts: RetentionPreview;
+  abandonedDrafts: RetentionPreview;
+  errors: string[];
+}
+
+/**
+ * One REPORT pass: what an enforcing run would touch, without touching it.
+ *
+ * This is the default mode. Retention has been through three review rounds,
+ * each of which found the predicates selecting rows they should not have, so
+ * the sensible order is to let production tell us what the predicates actually
+ * match before anything acts on them. Nothing here writes.
+ */
+export async function runRetentionPreview(
+  retentionDays = 90
+): Promise<RetentionPreviewResult> {
+  const errors: string[] = [];
+  const run = async (label: string, task: () => Promise<RetentionPreview>) => {
+    try {
+      return await task();
+    } catch (error) {
+      errors.push(`${label}:${classifyDiagnosticError(error, 'unknown_error')}`);
+      return EMPTY_PREVIEW;
+    }
+  };
+
+  return {
+    letters: await run('letters', () => previewExpiredLetterContent(retentionDays)),
+    paidDrafts: await run('paid_drafts', () => previewPaidDraftContent(retentionDays)),
+    abandonedDrafts: await run('abandoned_drafts', () =>
+      previewAbandonedDraftContent(UNPAID_DRAFT_RETENTION_DAYS)
+    ),
+    errors
+  };
 }
 
 /**

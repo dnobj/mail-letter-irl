@@ -85,3 +85,35 @@ describe('enabledUnlessDisabled', () => {
     expect(enabledUnlessDisabled('FLAG', env('mabye'))).toBe(false);
   });
 });
+
+/**
+ * The retention mode gate. This is the single most important property of the
+ * report-only rollout: if the default were 'enforce', shipping it would start
+ * removing customer content on the next cron run.
+ */
+describe('retentionEnforces', () => {
+  const env = (value: string | undefined) =>
+    (value === undefined ? {} : { CONTENT_RETENTION_MODE: value }) as NodeJS.ProcessEnv;
+
+  it('REPORTS by default, so shipping this removes nothing', async () => {
+    const { retentionEnforces } = await import('../../../src/cli/runMaintenance.js');
+    expect(retentionEnforces(env(undefined))).toBe(false);
+  });
+
+  it('enforces only when the word is spelled out', async () => {
+    const { retentionEnforces } = await import('../../../src/cli/runMaintenance.js');
+    expect(retentionEnforces(env('enforce'))).toBe(true);
+    expect(retentionEnforces(env(' ENFORCE '))).toBe(true);
+  });
+
+  it.each(['report', 'true', '1', 'yes', 'on', 'enabled', 'enforced', 'enforc', ''])(
+    'reports for %s - anything not exactly the word',
+    async raw => {
+      // Deliberately NOT a boolean: 'true'/'1'/'yes' all read as enable in this
+      // repo's other flags, and any of them silently arming an irreversible
+      // sweep is the failure this shape exists to prevent.
+      const { retentionEnforces } = await import('../../../src/cli/runMaintenance.js');
+      expect(retentionEnforces(env(raw))).toBe(false);
+    }
+  );
+});

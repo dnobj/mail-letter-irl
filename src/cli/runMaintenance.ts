@@ -7,7 +7,7 @@ import { cleanupExpiredImages, closeTempImageStore } from '../services/tempImage
 import { runDailyMaintenance } from '../workers/creditExpirationWorker.js';
 import { runStatusSync } from '../workers/statusSyncWorker.js';
 import { runCommerceMaintenance } from '../services/commerceService.js';
-import { runRetentionSweep } from '../services/retentionService.js';
+import { runRetentionPreview, runRetentionSweep } from '../services/retentionService.js';
 import { enabledUnlessDisabled, positiveIntegerSetting } from '../utils/envSettings.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
 import {
@@ -53,6 +53,22 @@ async function runContentRetention(): Promise<void> {
   }
 }
 
+/**
+ * REPORT is the default, and enforcing requires typing the word.
+ *
+ * Retention has had three max-effort review rounds and every one found the
+ * predicates selecting rows they should not have. So the sweep ships in a mode
+ * that only counts: production tells us what the predicates actually match,
+ * and nothing acts on them until that evidence says the selection is right.
+ *
+ * Deliberately NOT a boolean, and deliberately not the same switch as
+ * CONTENT_RETENTION_ENABLED. An inverted boolean is one character away from
+ * destroying content; an unrecognised value here reports rather than enforces.
+ */
+export function retentionEnforces(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.CONTENT_RETENTION_MODE ?? '').trim().toLowerCase() === 'enforce';
+}
+
 async function contentRetentionPass(): Promise<void> {
   if (!enabledUnlessDisabled('CONTENT_RETENTION_ENABLED')) {
     console.log('[Maintenance] Retention sweep disabled by CONTENT_RETENTION_ENABLED');
@@ -60,6 +76,11 @@ async function contentRetentionPass(): Promise<void> {
   }
   const days = positiveIntegerSetting('CONTENT_RETENTION_DAYS', 90, 2);
   const size = positiveIntegerSetting('CONTENT_RETENTION_BATCH_SIZE', 500, 1, 5000);
+
+  if (!retentionEnforces()) {
+    await contentRetentionReport(days);
+    return;
+  }
 
   const retention = await runMaintenanceTaskIfDue('content-retention-sweep', ONE_DAY_MS, async () => {
     const result = await runRetentionSweep(days, size);
@@ -93,11 +114,52 @@ async function contentRetentionPass(): Promise<void> {
   }
 }
 
-export async function runMaintenance(): Promise<void> {
-  const batchLimit = Math.max(
-    1,
-    Number.parseInt(process.env.MAINTENANCE_OUTBOX_BATCH_SIZE || '25', 10)
+/**
+ * The report pass. Runs on its OWN maintenance_tasks key, so switching modes
+ * does not inherit the other mode's 24h gate, and so an operator can see at a
+ * glance which mode a database has been running.
+ *
+ * Counts and ages only - no ids, no addresses, nothing that could reconstruct
+ * content (#153). `heldBack` is the number to watch: holds that catch nothing,
+ * or catch everything, are wrong in a way these counts show before any content
+ * is removed.
+ */
+async function contentRetentionReport(days: number): Promise<void> {
+  const report = await runMaintenanceTaskIfDue('content-retention-report', ONE_DAY_MS, async () => {
+    const result = await runRetentionPreview(days);
+    if (result.errors.length > 0) {
+      throw Object.assign(new Error(`retention preview failed: ${result.errors.join(', ')}`), {
+        diagnosticClass: 'database_error'
+      });
+    }
+    return result;
+  });
+
+  console.log(
+    `[Maintenance] Retention REPORT ONLY (set CONTENT_RETENTION_MODE=enforce to act) ` +
+      `${report.ran ? 'completed' : 'not due'}`,
+    report.result ?? ''
   );
+  const result = report.result;
+  if (!result) return;
+  writeDiagnostic('info', 'retention.preview', {
+    lettersDue: result.letters.due,
+    lettersHeldBack: result.letters.heldBack,
+    // -1 means nothing was due; the age is only meaningful when lettersDue > 0.
+    lettersOldestDueDays: result.letters.oldestDueDays ?? -1,
+    paidDraftsDue: result.paidDrafts.due,
+    paidDraftsHeldBack: result.paidDrafts.heldBack,
+    abandonedDraftsDue: result.abandonedDrafts.due,
+    abandonedDraftsHeldBack: result.abandonedDrafts.heldBack
+  });
+}
+
+export async function runMaintenance(): Promise<void> {
+  // Was Math.max(1, Number.parseInt(...)), the shape envSettings exists to
+  // replace: '1e3' parses to 1, so a request for 1000 dispatched ONE letter a
+  // run, and a non-numeric value yielded NaN, which reached
+  // processDueLetterJobs and stopped paid mail entirely (#153 review round 3).
+  const batchLimit = positiveIntegerSetting('MAINTENANCE_OUTBOX_BATCH_SIZE', 25, 1);
   console.log(`[Maintenance] Starting one-shot run at ${new Date().toISOString()}`);
 
   // FIRST, and wrapped. Retention has its own maintenance_tasks row because

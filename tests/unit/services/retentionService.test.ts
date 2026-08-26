@@ -15,7 +15,11 @@ const {
   purgeExpiredQuarantine,
   restoreQuarantinedContent,
   runRetentionSweep,
-  splitRetentionWindow
+  splitRetentionWindow,
+  previewExpiredLetterContent,
+  previewPaidDraftContent,
+  previewAbandonedDraftContent,
+  runRetentionPreview
 } = await import('../../../src/services/retentionService.js');
 
 /**
@@ -470,6 +474,119 @@ describe('retention sweep guards (#153)', () => {
       // 365 -> 358 live for letters and paid drafts; 7 -> 4 for abandoned;
       // the quarantine purge takes only a batch limit.
       expect(windows).toEqual([358, 358, 4, 9]);
+    });
+  });
+
+  /**
+   * REPORT MODE. The point of these is the first test: report mode is proven
+   * harmless by the ABSENCE of write verbs in its SQL, not by a flag someone
+   * could invert. Three review rounds of this feature each found the
+   * predicates selecting rows they should not have, so the sweep ships
+   * counting-only until production evidence says the selection is right.
+   */
+  describe('report mode writes nothing', () => {
+    it.each([
+      ['letters', () => previewExpiredLetterContent()],
+      ['paid drafts', () => previewPaidDraftContent()],
+      ['abandoned drafts', () => previewAbandonedDraftContent()]
+    ])('%s preview issues a SELECT with no write verb and no lock', async (_name, run) => {
+      await run();
+
+      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      expect(sql.startsWith('SELECT')).toBe(true);
+      for (const verb of ['INSERT', 'UPDATE', 'DELETE', 'FOR UPDATE', 'TRUNCATE']) {
+        expect(sql).not.toContain(verb);
+      }
+    });
+
+    it('counts against the SAME predicate the enforcing sweep uses', async () => {
+      // A dry run is only evidence if it selects exactly the rows the real
+      // sweep would. The predicate is one shared constant, so this compares
+      // the two rendered statements rather than trusting that.
+      await previewExpiredLetterContent();
+      const previewSql = sqlFrom(mocks.query.mock.calls[0]);
+      mocks.query.mockClear();
+      await purgeExpiredLetterContent();
+      const enforceSql = sqlFrom(mocks.query.mock.calls[0]);
+
+      for (const clause of [
+        'AND l.status = ANY($2::varchar[])',
+        'AND NOT EXISTS ( SELECT 1 FROM letter_jobs j WHERE j.letter_id = l.letter_id ' +
+          'AND NOT (j.status = ANY($3::varchar[])) )',
+        'LEFT JOIN orders o ON o.order_id = lot.source_order_id'
+      ]) {
+        expect(previewSql).toContain(clause);
+        expect(enforceSql).toContain(clause);
+      }
+    });
+
+    it('reports the LIVE window, so the preview matches what enforcing would take', async () => {
+      await previewExpiredLetterContent(90);
+
+      expect((mocks.query.mock.calls[0][1] as unknown[])[0]).toBe(83);
+    });
+
+    it('separates rows past the window from rows the holds actually release', async () => {
+      // heldBack is the number worth watching: holds that catch nothing, or
+      // catch everything, are wrong in a way the counts show before any
+      // content is removed.
+      mocks.query.mockResolvedValue({
+        rows: [{ past_window: '900', due: '120', oldest_due_days: '400.7', newest_due_days: '83.2' }],
+        rowCount: 1
+      });
+
+      expect(await previewExpiredLetterContent()).toEqual({
+        pastWindow: 900,
+        due: 120,
+        heldBack: 780,
+        oldestDueDays: 400,
+        newestDueDays: 83
+      });
+    });
+
+    it('reports null ages rather than zero when nothing is due', async () => {
+      mocks.query.mockResolvedValue({
+        rows: [{ past_window: '0', due: '0', oldest_due_days: null, newest_due_days: null }],
+        rowCount: 1
+      });
+
+      expect(await previewExpiredLetterContent()).toMatchObject({
+        due: 0,
+        oldestDueDays: null,
+        newestDueDays: null
+      });
+    });
+
+    it('runs all three previews and keeps the unpaid window for abandoned drafts', async () => {
+      mocks.query.mockResolvedValue({
+        rows: [{ past_window: '5', due: '2', oldest_due_days: '100', newest_due_days: '90' }],
+        rowCount: 1
+      });
+
+      const result = await runRetentionPreview(365);
+
+      expect(result.errors).toEqual([]);
+      expect(result.letters.due).toBe(2);
+      const windows = mocks.query.mock.calls.map(call => (call[1] as unknown[])[0]);
+      // 365 -> 358 live for letters and paid drafts; the abandoned sweep keeps
+      // its own published 7 -> 4, regardless of the caller.
+      expect(windows).toEqual([358, 358, 4]);
+    });
+
+    it('carries an error class, never a driver message, when a preview fails', async () => {
+      mocks.query
+        .mockRejectedValueOnce(new Error('relation "letters" does not exist: 221B Baker Street'))
+        .mockResolvedValue({
+          rows: [{ past_window: '0', due: '0', oldest_due_days: null, newest_due_days: null }],
+          rowCount: 1
+        });
+
+      const result = await runRetentionPreview();
+
+      expect(result.errors[0]).toMatch(/^letters:/);
+      expect(JSON.stringify(result)).not.toContain('Baker Street');
+      // The other two still ran.
+      expect(mocks.query).toHaveBeenCalledTimes(3);
     });
   });
 });
