@@ -62,8 +62,9 @@ export interface RetentionSweepResult {
  *
  * 2. DISPUTE / REFUND HOLD. The content IS the evidence in a chargeback, and
  *    the published 90-day period names "delivery verification and disputes"
- *    as its reason. An order sitting in disputed or refund_pending holds its
- *    letter. #153 requires holds to be explicit, scoped and auditable rather
+ *    as its reason. An order sitting in disputed, refund_pending or held
+ *    holds its letter - 'held' is migration 023's JIT recovery state, which
+ *    is by definition awaiting an operator who may need to read it. #153 requires holds to be explicit, scoped and auditable rather
  *    than a switch that silently disables all cleanup - so this is scoped to
  *    the individual order, not the user and not the whole sweep.
  */
@@ -86,7 +87,7 @@ export async function purgeExpiredLetterContent(
           AND NOT EXISTS (
                 SELECT 1 FROM orders o
                  WHERE o.letter_id = l.letter_id
-                   AND o.status IN ('disputed', 'refund_pending')
+                   AND o.status IN ('disputed', 'refund_pending', 'held')
               )
         ORDER BY l.sent_at
         LIMIT $3::int
@@ -135,7 +136,7 @@ export async function purgePaidDraftContent(
           AND NOT EXISTS (
                 SELECT 1 FROM orders o
                  WHERE o.draft_id = d.draft_id
-                   AND o.status IN ('disputed', 'refund_pending')
+                   AND o.status IN ('disputed', 'refund_pending', 'held')
               )
           AND NOT EXISTS (
                 SELECT 1 FROM letter_jobs j

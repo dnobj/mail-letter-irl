@@ -98,6 +98,47 @@ describePostgres('content retention sweep', () => {
     return { userId, letterId };
   }
 
+  /**
+   * A minimal draft row. jit_mail orders REQUIRE one: the schema's
+   * valid_order_draft check is
+   *   (order_type = 'jit_mail' AND draft_id IS NOT NULL) OR order_type = 'letter_pack'
+   * so an order fixture cannot reference a letter without a draft behind it.
+   */
+  async function seedDraft(userId: string, letterId?: string): Promise<string> {
+    const draftId = randomUUID();
+    await pool.query(
+      `INSERT INTO letter_drafts (
+         draft_id, user_id, sender, recipient, body_text, sign_off,
+         required_credits, status, expires_at, consumed_letter_id
+       ) VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb, 'x', 'x', 2,
+                 'consumed', NOW() - INTERVAL '1 day', $3)`,
+      [draftId, userId, letterId ?? null]
+    );
+    return draftId;
+  }
+
+  /**
+   * A jit_mail order in a given status. credits MUST be NULL - valid_order_credits
+   * allows a positive credits value only for letter_pack.
+   */
+  async function seedJitOrder(options: {
+    userId: string;
+    status: string;
+    letterId?: string;
+    draftId?: string;
+  }): Promise<string> {
+    const orderId = `order_${randomUUID()}`;
+    const draftId = options.draftId ?? (await seedDraft(options.userId, options.letterId));
+    await pool.query(
+      `INSERT INTO orders (
+         order_id, user_id, credits, amount_cents, currency, status,
+         order_type, product_code, idempotency_key, draft_id, letter_id
+       ) VALUES ($1, $2, NULL, 499, 'USD', $3, 'jit_mail', 'jit-letter', $4, $5, $6)`,
+      [orderId, options.userId, options.status, `idem_${orderId}`, draftId, options.letterId ?? null]
+    );
+    return orderId;
+  }
+
   async function readLetter(letterId: string) {
     const { rows } = await pool.query(
       `SELECT content, recipient, preview_html, status, credits_cost, sent_at
@@ -164,8 +205,8 @@ describePostgres('content retention sweep', () => {
     // an empty letter and an empty address.
     const { letterId } = await seedSentLetter(365);
     await pool.query(
-      `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key)
-       VALUES ($1, $2, 'pending', $3)`,
+      `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key, next_attempt_at)
+       VALUES ($1, $2, 'pending', $3, NOW())`,
       [`job_${randomUUID()}`, letterId, `idem_${letterId}`]
     );
 
@@ -177,13 +218,7 @@ describePostgres('content retention sweep', () => {
 
   it('HOLDS a letter whose order is disputed, because the content is the evidence', async () => {
     const { userId, letterId } = await seedSentLetter(365);
-    await pool.query(
-      `INSERT INTO orders (
-         order_id, user_id, credits, amount_cents, currency, status,
-         order_type, product_code, idempotency_key, letter_id
-       ) VALUES ($1, $2, 2, 499, 'USD', 'disputed', 'jit_mail', 'jit-letter', $3, $4)`,
-      [`order_${randomUUID()}`, userId, `idem_${letterId}`, letterId]
-    );
+    await seedJitOrder({ userId, status: 'disputed', letterId });
 
     await retention.purgeExpiredLetterContent();
 
@@ -195,14 +230,7 @@ describePostgres('content retention sweep', () => {
     // #153 requires holds to be scoped and auditable, not a switch that
     // silently disables cleanup forever.
     const { userId, letterId } = await seedSentLetter(365);
-    const orderId = `order_${randomUUID()}`;
-    await pool.query(
-      `INSERT INTO orders (
-         order_id, user_id, credits, amount_cents, currency, status,
-         order_type, product_code, idempotency_key, letter_id
-       ) VALUES ($1, $2, 2, 499, 'USD', 'refund_pending', 'jit_mail', 'jit-letter', $3, $4)`,
-      [orderId, userId, `idem_${letterId}`, letterId]
-    );
+    const orderId = await seedJitOrder({ userId, status: 'refund_pending', letterId });
     await retention.purgeExpiredLetterContent();
     expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
 
@@ -244,13 +272,7 @@ describePostgres('content retention sweep', () => {
         `<p>${SECRET_BODY}</p>`
       ]
     );
-    await pool.query(
-      `INSERT INTO orders (
-         order_id, user_id, credits, amount_cents, currency, status,
-         order_type, product_code, idempotency_key, draft_id
-       ) VALUES ($1, $2, 2, 499, 'USD', 'fulfilled', 'jit_mail', 'jit-letter', $3, $4)`,
-      [`order_${randomUUID()}`, userId, `idem_${draftId}`, draftId]
-    );
+    await seedJitOrder({ userId, status: 'fulfilled', draftId });
 
     const redacted = await retention.purgePaidDraftContent();
 

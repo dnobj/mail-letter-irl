@@ -51,7 +51,7 @@ describe('retention sweep guards (#153)', () => {
 
       const sql = sqlFrom(mocks.query.mock.calls[0]);
       expect(sql).toContain('FROM orders');
-      expect(sql).toMatch(/o\.status IN \('disputed', 'refund_pending'\)/);
+      expect(sql).toMatch(/o\.status IN \('disputed', 'refund_pending', 'held'\)/);
     });
 
     it('scopes the dispute hold to the letter, never to the user or the sweep', async () => {
@@ -129,7 +129,7 @@ describe('retention sweep guards (#153)', () => {
       await purgePaidDraftContent();
 
       const sql = sqlFrom(mocks.query.mock.calls[0]);
-      expect(sql).toMatch(/o\.status IN \('disputed', 'refund_pending'\)/);
+      expect(sql).toMatch(/o\.status IN \('disputed', 'refund_pending', 'held'\)/);
       expect(sql).toMatch(/j\.status IN \('pending', 'processing', 'held'\)/);
     });
 
