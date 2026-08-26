@@ -193,15 +193,22 @@ async function createHostedCheckout(params: HostedCheckoutParams): Promise<Check
     // field and is not caller-controlled, so it is safe to log.
     //
     // NOTE: rounds 10-12 also used this to invalidate the price memo, so an
-    // archived Price would self-heal. That machinery produced a correctness
-    // defect in three consecutive review rounds - a remotely triggerable
-    // memo drop, two mechanisms that cancelled each other out, and an
-    // unbounded Stripe re-read - and was removed. An archived Price now
-    // persists in the memo until the process restarts or the price id is
-    // repointed, which is the behaviour rounds 1-10 shipped and no review
-    // round ever found a defect in. The cost is bounded and visible: quotes
-    // keep advertising it and each purchase fails at session creation, with
-    // this log line naming the price as the offending parameter (#278 r13).
+    // archived Price would self-heal. Round 10 added that because the
+    // no-self-heal behaviour IS defective - three round-10 angles found it and
+    // one reproduced it end to end. But the remedy produced a fresh
+    // correctness defect in three consecutive rounds (a remotely triggerable
+    // memo drop, two mechanisms that cancelled each other out, an unbounded
+    // Stripe re-read), so it was removed and the defect ACCEPTED rather than
+    // repaired a fourth time. This is a known cost, not an undefected one.
+    //
+    // What it costs, in full: an archived Price persists in the memo until
+    // the process restarts or the price id is repointed. `active` is not a
+    // signature input, so getUnpricedProducts() still returns [] - /readyz
+    // answers 200 'prices ok' and readiness kicks a re-read only when
+    // pricesOk is false, which means nothing re-reads. Quotes keep
+    // advertising it, and each purchase inserts an order row and then fails
+    // here with a non-terminal class. This log line is the ONLY signal, and
+    // it is unthrottled - one line per failed purchase (#278 r13/r14).
     const offendingParam =
       typeof (error as { param?: unknown })?.param === 'string'
         ? (error as { param: string }).param

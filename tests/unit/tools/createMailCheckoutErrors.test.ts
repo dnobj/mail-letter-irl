@@ -5,9 +5,10 @@
  * advice no retry can honor, and a blip must never read as permanent.
  */
 
-import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { friendlyCheckoutError } from '../../../src/tools/createMailCheckout.js';
+import { friendlyDraftError as letterDraftError } from '../../../src/tools/sendLetter.js';
+import { friendlyDraftError as postcardDraftError } from '../../../src/tools/sendPostcard.js';
 
 describe('friendlyCheckoutError terminality (#278)', () => {
   it('never tells a permanently blocked account to try again', () => {
@@ -81,13 +82,38 @@ describe('friendlyCheckoutError terminality (#278)', () => {
  * is the higher-traffic one because Pay & Send ships disabled (#278 r13).
  */
 describe('account-blocked wording on the send surface (#278)', () => {
-  it.each(['sendLetter', 'sendPostcard'])(
-    '%s maps ACCOUNT_SENDS_BLOCKED to server-authored text',
-    async tool => {
-      const source = await readFile(`src/tools/${tool}.ts`, 'utf8');
+  // Round 13 pinned this by GREPPING the two source files, which cannot fail
+  // for the defect it exists to catch: a round-14 angle replaced the branch's
+  // return with a no-op - so the raw label reached the customer again - and
+  // the suite still passed. Exercise the formatter instead (#278 round 14).
+  it.each([
+    ['send_letter', letterDraftError],
+    ['send_postcard', postcardDraftError]
+  ])('%s redacts the internal block label', (_name, friendlyDraftError) => {
+    // The shape mailSendService actually throws: draftError() Object.assigns
+    // .code onto an Error whose message interpolates users.sends_blocked_reason.
+    const upstream = Object.assign(
+      new Error('Sending is disabled on this account (payment_disputed). Contact support.'),
+      { code: 'ACCOUNT_SENDS_BLOCKED' }
+    );
 
-      expect(source).toContain("code === 'ACCOUNT_SENDS_BLOCKED'");
-      expect(source).toContain('Sending is disabled on this account. Please contact support.');
-    }
-  );
+    const friendly = friendlyDraftError(upstream, 'draft-1');
+
+    // The assertion that encodes the requirement: the moderation label is gone.
+    expect(friendly.message).not.toContain('payment_disputed');
+    expect(friendly.message).toBe('Sending is disabled on this account. Please contact support.');
+  });
+
+  it.each([
+    ['send_letter', letterDraftError],
+    ['send_postcard', postcardDraftError]
+  ])('%s reaches the block branch BEFORE any earlier return', (_name, friendlyDraftError) => {
+    // A grep passes on a branch placed below the default-allow tail. This
+    // fails if the branch is ever moved or made unreachable.
+    const upstream = Object.assign(new Error('raw upstream text'), {
+      code: 'ACCOUNT_SENDS_BLOCKED'
+    });
+
+    expect(friendlyDraftError(upstream, 'draft-1').message).not.toBe('raw upstream text');
+  });
 });

@@ -341,25 +341,6 @@ function storedFailureIfCurrent(
   return stored;
 }
 
-/**
- * Drop a product's memo so the next ensure re-reads it from Stripe.
- *
- * `active` is the ONE field validate() enforces that Stripe lets change under
- * us, and it is deliberately not in the signature (it is not a configuration
- * input). So an archived Price stayed memoized for the process lifetime:
- * /readyz answered 200 with prices ok, quotes kept advertising the price, and
- * every purchase inserted an authoritative order row and then failed at
- * session creation with a non-terminal class - stranding a checkout_pending
- * row per attempt, forever, with nothing in the log to say why. Three round-10
- * angles found it and one reproduced it end to end.
- *
- * The checkout path calls this when Stripe rejects the request itself, which
- * is the only moment anything in this process learns the memo is a lie. The
- * re-read then either rebuilds the memo (the fault was elsewhere) or records
- * price.inactive - at which point readiness goes red, quotes stop offering it,
- * and further purchases are refused BEFORE an order row exists (#278 r10).
- */
-
 export function describeUnpriced(
   productCode: string,
   env: NodeJS.ProcessEnv = process.env

@@ -44,7 +44,7 @@ function publicStatus(status: LetterStatus): PublicStatus {
   return status;
 }
 
-function friendlyDraftError(error: unknown, draftId: string): Error {
+export function friendlyDraftError(error: unknown, draftId: string): Error {
   const code = (error as { code?: string })?.code;
   if (code === 'ACCOUNT_SENDS_BLOCKED') {
     // A SERVER-AUTHORED string. The upstream message interpolates
