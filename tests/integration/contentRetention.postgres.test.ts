@@ -332,7 +332,7 @@ describePostgres('content retention sweep', () => {
     expect(JSON.stringify(rows[0])).not.toContain('secret.png');
   });
 
-  it('leaves a letter draft's null image null instead of changing its shape', async () => {
+  it('leaves a null image on a letter draft null, rather than changing its shape', async () => {
     const userId = await seedUser();
     const draftId = randomUUID();
     await pool.query(
