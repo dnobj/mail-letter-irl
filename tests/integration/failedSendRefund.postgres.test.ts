@@ -91,14 +91,28 @@ describePostgres('failed send returns the pack', () => {
 
     const lots: { id: string; expiry: Date }[] = [];
     for (const [index, amount] of [options.lotA, options.lotB].entries()) {
+      // A real order per lot. Migration 027 refuses a purchase grant that names
+      // no funding order, and source_order_id carries a foreign key - so the
+      // bare `order_${index}` string this fixture used before was describing a
+      // ledger state the production code cannot actually produce.
+      const orderId = `order_${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (
+           order_id, user_id, order_type, product_code, product_snapshot, credits,
+           amount_cents, currency, idempotency_key, status
+         ) VALUES ($1, $2, 'letter_pack', 'credit-pack-4', '{}'::jsonb, $3,
+                   500, 'usd', $4, 'fulfilled')`,
+        [orderId, userId, amount, `pack-checkout:${orderId}`]
+      );
       const inserted = await pool.query<{ ledger_id: string; expires_at: Date }>(
         `INSERT INTO credit_ledger (
            user_id, initial_amount, remaining_amount, source_type,
-           source_reference_id, activated_at, expires_at, expiration_policy, status
-         ) VALUES ($1, $2, $2, 'purchase', $3, NOW(),
+           source_reference_id, source_order_id, activated_at, expires_at,
+           expiration_policy, status
+         ) VALUES ($1, $2, $2, 'purchase', $3, $3, NOW(),
                    NOW() + ($4 || ' days')::interval, 'days_from_activation', 'active')
          RETURNING ledger_id, expires_at`,
-        [userId, amount, `order_${index}`, String(100 * (index + 1))]
+        [userId, amount, orderId, String(100 * (index + 1))]
       );
       lots.push({ id: inserted.rows[0].ledger_id, expiry: inserted.rows[0].expires_at });
     }
@@ -307,11 +321,13 @@ describePostgres('failed send returns the pack', () => {
     /**
      * A pack bought through a real order, then spent on a letter.
      *
-     * seedSpentLetter's lots carry synthetic references, which is enough for the
-     * return itself but cannot exercise the refund claw-back: that matches lots
-     * by order id or checkout session (commerceService.revokePackCredits). The
-     * two systems meet on the lot the return posts, so the seam needs a real
-     * order standing behind the credits.
+     * seedSpentLetter now seeds a real order per lot too - migration 027
+     * refuses a purchase grant that names none, and source_order_id carries a
+     * foreign key - so the difference between the two helpers is no longer the
+     * order. It is the PAYMENT INTENT: revokePackCredits matches lots by order
+     * id or checkout session (commerceService.revokePackCredits), and only this
+     * helper sets stripe_payment_intent_id, which is what the refund claw-back
+     * resolves against. The two systems meet on the lot the return posts.
      */
     async function seedPackOrderLetter(options: { credits: number; spend: number }): Promise<{
       userId: string;
@@ -339,8 +355,9 @@ describePostgres('failed send returns the pack', () => {
       const lot = await pool.query<{ ledger_id: string }>(
         `INSERT INTO credit_ledger (
            user_id, initial_amount, remaining_amount, source_type,
-           source_reference_id, activated_at, expires_at, expiration_policy, status
-         ) VALUES ($1, $2, $2, 'purchase', $3, NOW(), NOW() + INTERVAL '730 days',
+           source_reference_id, source_order_id, activated_at, expires_at,
+           expiration_policy, status
+         ) VALUES ($1, $2, $2, 'purchase', $3, $3, NOW(), NOW() + INTERVAL '730 days',
                    'days_from_activation', 'active')
          RETURNING ledger_id`,
         [userId, options.credits, orderId]

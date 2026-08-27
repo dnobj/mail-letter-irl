@@ -25,6 +25,8 @@ const REQUIRED = [
   'failedSendRefund.postgres.test.ts',
   'refundFinalization.postgres.test.ts',
   'commerceAlertTransition.postgres.test.ts',
+  'contentRetention.postgres.test.ts',
+  'purchaseIdempotency.postgres.test.ts',
 ];
 
 /**
