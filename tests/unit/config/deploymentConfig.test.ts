@@ -36,7 +36,12 @@ const VALID_PROD: NodeJS.ProcessEnv = {
   TEMP_IMAGE_BUCKET_REGION: 'unit-fixture-region',
   TEMP_IMAGE_BUCKET_ACCESS_KEY_ID: 'unit-fixture-access-key',
   TEMP_IMAGE_BUCKET_SECRET_ACCESS_KEY: 'unit-fixture-secret-key',
-  LETTER_IRL_OAUTH_CIMD_ENFORCEMENT: 'true'
+  LETTER_IRL_OAUTH_CIMD_ENFORCEMENT: 'true',
+  // Required in production since #157: both have localhost fallbacks, and an
+  // unset LETTER_IRL_ALLOWED_HOSTS makes DNS-rebinding protection reject every
+  // request to the public hostname while /readyz still answers 200.
+  LETTER_IRL_ALLOWED_HOSTS: 'api.fixture.example',
+  LETTER_IRL_ALLOWED_ORIGINS: 'https://chatgpt.com'
 };
 
 const VALID_DEV: NodeJS.ProcessEnv = {
@@ -192,6 +197,9 @@ describe('validateDeploymentConfig in production', () => {
     ['diy provider', { LETTER_PROVIDER: 'diy' }, 'provider.live_provider_required'],
     ['unregistered lob provider', { LETTER_PROVIDER: 'lob' }, 'provider.live_provider_required'],
     ['missing provider key', { LETTER_PROVIDER_API_KEY: undefined }, 'provider.api_key_required'],
+    ['missing allowed hosts', { LETTER_IRL_ALLOWED_HOSTS: undefined }, 'http.allowed_hosts_required'],
+    ['blank allowed hosts', { LETTER_IRL_ALLOWED_HOSTS: '   ' }, 'http.allowed_hosts_required'],
+    ['missing allowed origins', { LETTER_IRL_ALLOWED_ORIGINS: undefined }, 'http.allowed_origins_required'],
     ['missing provider config', { LETTER_PROVIDER_CONFIG: undefined }, 'provider.live_mode_required'],
     ['test-mode provider config', { LETTER_PROVIDER_CONFIG: '{"mode":"test"}' }, 'provider.live_mode_required'],
     ['provider config without mode', { LETTER_PROVIDER_CONFIG: '{"verbose":true}' }, 'provider.live_mode_required'],
@@ -262,6 +270,26 @@ describe('validateDeploymentConfig in production', () => {
     expect(
       validateDeploymentConfig(enforcementOff, 'maintenance').findings.map(f => f.rule)
     ).not.toContain('auth.enforcement_disabled_in_production');
+  });
+
+  it('does not require the HTTP allowlists on the maintenance surface', () => {
+    // The maintenance service is a cron that serves no HTTP, so it has no
+    // Host or Origin to allowlist. Requiring these of it would fail the one
+    // job that dispatches paid mail, for a setting it cannot use - the same
+    // shape as the retention wrapper that exists because an unrelated
+    // housekeeping failure could stop the outbox.
+    const noAllowlists = env({
+      LETTER_IRL_ALLOWED_HOSTS: undefined,
+      LETTER_IRL_ALLOWED_ORIGINS: undefined
+    });
+    const maintenanceRules = validateDeploymentConfig(noAllowlists, 'maintenance')
+      .findings.map(f => f.rule);
+
+    expect(maintenanceRules).not.toContain('http.allowed_hosts_required');
+    expect(maintenanceRules).not.toContain('http.allowed_origins_required');
+    // And the server surface still refuses, so this is a scoping assertion
+    // rather than an accidental removal of the rule.
+    expect(ruleIds(noAllowlists, 'error')).toContain('http.allowed_hosts_required');
   });
 
   it('collects every failure instead of stopping at the first', () => {

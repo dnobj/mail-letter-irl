@@ -764,6 +764,43 @@ export function validateDeploymentConfig(
   validatePlaceholders(env, findings);
 
   if (production && surface === 'server') {
+    // The origin/host allowlists have LOCALHOST fallbacks, and an unset one is
+    // silent in opposite and equally bad ways (#157):
+    //
+    //   LETTER_IRL_ALLOWED_HOSTS unset -> the allowlist is 0.0.0.0/localhost,
+    //     which is handed to the MCP transports with
+    //     enableDnsRebindingProtection: true. Every request to the real
+    //     hostname is then rejected - while /healthz and /readyz, which are
+    //     plain routes outside the transport, keep answering 200. So the
+    //     promotion's own success check passes on a deployment that serves
+    //     nothing. That is the worst shape a failure can have.
+    //
+    //   LETTER_IRL_ALLOWED_ORIGINS unset -> production CORS allowlists
+    //     http://localhost:4173 and :8090. Fails open rather than closed.
+    //
+    // Neither variable is in the preflight manifest, so nothing else catches
+    // them. Errors rather than warnings: the fallbacks are development
+    // conveniences and there is no production configuration in which either
+    // being absent is correct.
+    if (!env.LETTER_IRL_ALLOWED_HOSTS?.trim()) {
+      findings.push({
+        severity: 'error',
+        rule: 'http.allowed_hosts_required',
+        message:
+          'LETTER_IRL_ALLOWED_HOSTS is required in production; the localhost fallback ' +
+          'makes DNS-rebinding protection reject every request to the public hostname ' +
+          'while /readyz still reports healthy'
+      });
+    }
+    if (!env.LETTER_IRL_ALLOWED_ORIGINS?.trim()) {
+      findings.push({
+        severity: 'error',
+        rule: 'http.allowed_origins_required',
+        message:
+          'LETTER_IRL_ALLOWED_ORIGINS is required in production; the fallback allowlists ' +
+          'localhost origins'
+      });
+    }
     if (env.LETTER_IRL_REQUIRE_AUTH === 'false') {
       findings.push({
         severity: 'warning',

@@ -32,6 +32,12 @@ import {
 import { validatePromoCodePublic } from "../services/promoService.js";
 import { closePool } from "../db/index.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
+import {
+  readRequestBody,
+  MCP_BODY_LIMIT_BYTES,
+  WEBHOOK_BODY_LIMIT_BYTES,
+  JSON_API_BODY_LIMIT_BYTES
+} from '../utils/requestBody.js';
 import { isDebugEnabled } from "../utils/debug.js";
 import {
   assertValidOAuthConfig,
@@ -153,17 +159,23 @@ type SseSession = {
 /**
  * Parse request body with timeout and error handling
  */
-function parseRequestBody(req: http.IncomingMessage, timeoutMs = 30000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    const timeout = setTimeout(() => {
-      reject(new Error('Request body timeout'));
-    }, timeoutMs);
+function parseRequestBody(
+  req: http.IncomingMessage,
+  limitBytes: number,
+  timeoutMs = 30000
+): Promise<string> {
+  // limitBytes is REQUIRED and deliberately has no default. This function had a
+  // 30-second timeout and no size cap, so the bound was bandwidth x 30s - and
+  // /webhooks/stripe reaches it before authentication, because Stripe signs the
+  // body and the signature cannot be checked until it is read (#157). A default
+  // would let the next route added here inherit the same hole silently.
+  return readRequestBody(req, { limitBytes, timeoutMs });
+}
 
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => { clearTimeout(timeout); resolve(body); });
-    req.on('error', (err) => { clearTimeout(timeout); reject(err); });
-  });
+/** 413, 408, or 400 - so a refused body is not reported as a parse failure. */
+function bodyErrorStatus(error: unknown): number {
+  const status = (error as { statusCode?: unknown } | undefined)?.statusCode;
+  return typeof status === 'number' ? status : 400;
 }
 
 function getAllowedHosts(): string[] {
@@ -540,7 +552,7 @@ export async function startHttpServer() {
       }
 
       try {
-        const body = await parseRequestBody(req);
+        const body = await parseRequestBody(req, JSON_API_BODY_LIMIT_BYTES);
         if (body) {
           JSON.parse(body);
         }
@@ -622,7 +634,7 @@ export async function startHttpServer() {
       }
       // Parse JSON body with timeout
       try {
-        const body = await parseRequestBody(req);
+        const body = await parseRequestBody(req, JSON_API_BODY_LIMIT_BYTES);
         (req as any).body = body ? JSON.parse(body) : {};
         await handleCreateCheckoutSession(req as any, res as any);
       } catch (error) {
@@ -637,13 +649,15 @@ export async function startHttpServer() {
     if (url.pathname === "/webhooks/stripe" && req.method === "POST") {
       // Keep raw body for signature verification with timeout
       try {
-        const body = await parseRequestBody(req);
+        const body = await parseRequestBody(req, WEBHOOK_BODY_LIMIT_BYTES);
         (req as any).body = body; // Raw string for Stripe signature verification
         await handleStripeWebhook(req as any, res as any);
       } catch (error) {
+        // A refused body is 413, not 408. Stripe retries on both, but the
+        // status is the only signal telling an operator which happened.
         console.error('Error parsing Stripe webhook body');
-        res.statusCode = 408;
-        res.end('Request timeout or error');
+        res.statusCode = bodyErrorStatus(error);
+        res.end(res.statusCode === 413 ? 'Payload too large' : 'Request timeout or error');
       }
       return;
     }
@@ -874,7 +888,7 @@ export async function startHttpServer() {
         writeDiagnostic("info", "mcp.server_connected");
 
         // For Streamable HTTP POST, parse body and handle request with timeout
-        const body = await parseRequestBody(req);
+        const body = await parseRequestBody(req, MCP_BODY_LIMIT_BYTES);
 
         const parsedBody = body ? JSON.parse(body) : undefined;
         writeDiagnostic("info", "mcp.request_parsed");
