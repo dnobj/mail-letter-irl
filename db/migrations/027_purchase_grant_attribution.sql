@@ -32,13 +32,20 @@
 -- BEFORE INSERT has exactly the reach we want and no more: every write path
 -- including raw SQL, and by construction never an existing row.
 
+-- The column test is deliberate. commerceAcid exercises out-of-order migration
+-- application (023 before a later 022), and PL/pgSQL resolves NEW.<field> at
+-- EXECUTION time - so a bare NEW.source_order_id raises `record "new" has no
+-- field "source_order_id"` on any schema where 023 has not landed yet. Reading
+-- through to_jsonb lets the trigger stand down on a schema that has no column
+-- to attribute against, where the protection would be meaningless anyway.
 CREATE OR REPLACE FUNCTION reject_unattributed_purchase_grant()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.source_type = 'purchase' AND NEW.source_order_id IS NULL THEN
+  IF NEW.source_type = 'purchase'
+     AND to_jsonb(NEW) ? 'source_order_id'
+     AND to_jsonb(NEW)->>'source_order_id' IS NULL THEN
     RAISE EXCEPTION
-      'purchase credit grants must set source_order_id (ledger %, user %)',
-      NEW.ledger_id, NEW.user_id
+      'purchase credit grants must set source_order_id (user %)', NEW.user_id
       USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;

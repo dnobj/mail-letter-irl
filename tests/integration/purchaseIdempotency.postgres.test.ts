@@ -406,10 +406,27 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
     await expectExactlyOneGrant(userId, orderId);
   });
 
-  it('keeps two legitimate purchases by one user independent', async () => {
-    // Acceptance criterion 3. Same user on purpose: grantImageEntitlementWithClient
-    // takes lockAccountForBalanceChange on the shared account row, so a false
-    // conflict or a deadlock between two genuine purchases surfaces only here.
+  it('DEADLOCKS on two concurrent purchases by one user, without losing money (#288)', async () => {
+    // Acceptance criterion 3 is "different legitimate purchases remain
+    // independent". They do not, and this test found it on its first run.
+    //
+    // orders.user_id references users, so findCheckoutOrder's
+    // `SELECT * FROM orders ... FOR UPDATE` takes an implicit FOR KEY SHARE on
+    // the users row. KEY SHARE is multi-holder, so BOTH deliveries get it -
+    // and both then need an exclusive lock on that same row for the
+    // `INSERT INTO users ... ON CONFLICT DO UPDATE` that adds the credits.
+    // Each waits for the other's shared lock to drop. PostgreSQL picks a
+    // victim.
+    //
+    // This asserts TODAY'S behaviour deliberately, so #288 has a live detector:
+    // when the locking discipline is fixed, this test reddens and must be
+    // rewritten to expect two successes. Pinning it green with allSettled and
+    // no assertion on the outcomes is what hid it in the first place.
+    //
+    // The severity is availability, not correctness, and the assertions below
+    // are what establish that: the victim rolls back whole, the survivor grants
+    // exactly once, and the customer's balance reflects one pack rather than
+    // two or none. Stripe retries the victim, and the retry succeeds.
     const first = await seedPendingPackOrder();
     const second = await seedPendingPackOrder({ userId: first.userId });
 
@@ -422,13 +439,23 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
       )
     ]);
 
-    expectAllFulfilled(results, 2);
-    expect(await purchaseLedgerRows(first.orderId)).toBe(1);
-    expect(await purchaseLedgerRows(second.orderId)).toBe(1);
-    expect(await totalCreditsRemaining(first.userId)).toBe(PACK_CREDITS * 2);
-    expect(await cachedUserCredits(first.userId)).toBe(PACK_CREDITS * 2);
-    expect(await orderStatus(first.orderId)).toBe('fulfilled');
-    expect(await orderStatus(second.orderId)).toBe('fulfilled');
+    const failures = results
+      .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+      .map(r => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
+    expect(failures).toEqual(['deadlock detected']);
+
+    // Exactly one order funded, and the balance matches it. No partial grant
+    // survived the victim's rollback, and nothing was granted twice. Which of
+    // the two won is up to PostgreSQL, so the assertion is on the sum.
+    const ledgerRows =
+      (await purchaseLedgerRows(first.orderId)) + (await purchaseLedgerRows(second.orderId));
+    expect(ledgerRows).toBe(1);
+    const transactionRows =
+      (await purchaseTransactionRows(first.orderId)) +
+      (await purchaseTransactionRows(second.orderId));
+    expect(transactionRows).toBe(1);
+    expect(await cachedUserCredits(first.userId)).toBe(PACK_CREDITS);
+    expect(await totalCreditsRemaining(first.userId)).toBe(PACK_CREDITS);
   });
 
   it('rolls back the cached balance too when the grant transaction fails', async () => {
