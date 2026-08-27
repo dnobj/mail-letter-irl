@@ -78,7 +78,14 @@ const READY_PROD: NodeJS.ProcessEnv = {
   TEMP_IMAGE_BUCKET_REGION: 'readyz-region',
   TEMP_IMAGE_BUCKET_ACCESS_KEY_ID: 'readyz-access-key',
   TEMP_IMAGE_BUCKET_SECRET_ACCESS_KEY: 'readyz-secret-key',
-  LETTER_IRL_OAUTH_CIMD_ENFORCEMENT: 'true'
+  LETTER_IRL_OAUTH_CIMD_ENFORCEMENT: 'true',
+  // Required in production since #157. Worth noting WHY readiness cares:
+  // /readyz is a plain route outside the MCP transport, so without these it
+  // would answer 200 while the transport's DNS-rebinding protection rejected
+  // every request to the public hostname. The boot rule is what stops a
+  // deployment passing its own promotion check while serving nothing.
+  LETTER_IRL_ALLOWED_HOSTS: 'api.fixture.example',
+  LETTER_IRL_ALLOWED_ORIGINS: 'https://chatgpt.com'
 };
 
 function routableDb(rows: Array<{ mail_type: string; provider: string }> = []): void {

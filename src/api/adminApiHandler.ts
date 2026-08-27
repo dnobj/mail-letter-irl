@@ -9,6 +9,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
+import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
 import { createHash } from 'node:crypto';
 import { authenticateAdmin, validateAdminRequestBoundary } from './middleware/adminAuth.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
@@ -70,18 +71,18 @@ function sendJson(res: ServerResponse, statusCode: number, data: any) {
  * Parse JSON body from request
  */
 async function parseBody(req: IncomingMessage): Promise<any> {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => {
-      try {
-        resolve(body ? JSON.parse(body) : {});
-      } catch (error) {
-        reject(new Error('Invalid JSON'));
-      }
-    });
-    req.on('error', reject);
-  });
+  // Bounded. This previously accumulated without a cap, which on a public
+  // route is a memory-exhaustion denial of service (#157). readRequestBody
+  // also decodes once at the end, so a multi-byte character split across two
+  // chunks is no longer corrupted into replacement characters.
+  const body = await readRequestBody(req, { limitBytes: JSON_API_BODY_LIMIT_BYTES });
+  try {
+    return body ? JSON.parse(body) : {};
+  } catch {
+    // A RequestBodyTooLargeError from above propagates with its own 413 rather
+    // than being flattened into this parse error.
+    throw new Error('Invalid JSON');
+  }
 }
 
 /**
