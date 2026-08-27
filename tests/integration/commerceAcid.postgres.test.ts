@@ -1632,6 +1632,22 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
       );
       await migrate({ connectionString: url, migrationsDirectory: directory });
 
+      // 027's guards were installed above, on a schema with no source_order_id
+      // column, so they stood themselves down. They must start enforcing now
+      // that 023 has landed - that self-starting behaviour is the entire reason
+      // they read the column through to_jsonb instead of naming it directly,
+      // and without this assertion nothing would notice the guards staying
+      // permanently inert on any database migrated in this order.
+      await expect(
+        pool.query(
+          `INSERT INTO credit_ledger (
+             user_id, initial_amount, remaining_amount, source_type,
+             source_reference_id, activated_at, expiration_policy, status
+           ) VALUES ('legacy-amount-user', 1, 1, 'purchase', 'no-order',
+                     NOW(), 'never', 'active')`
+        )
+      ).rejects.toMatchObject({ code: '23514' });
+
       const rows = await pool.query<{
         order_id: string; amount_known: boolean; amount_cents: number; treatment: string | null;
       }>(

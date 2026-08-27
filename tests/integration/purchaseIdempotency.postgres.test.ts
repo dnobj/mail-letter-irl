@@ -635,6 +635,39 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
     await expect(insertLedgerRow(userId, null, 'promo')).resolves.toBeDefined();
   });
 
+  it('refuses to disown a purchase grant from its order, but still lets it be spent', async () => {
+    // The second half of 027, and the half an INSERT-only guard misses.
+    //
+    // 023 declares source_order_id REFERENCES orders(order_id) ON DELETE SET
+    // NULL, so deleting an order clears the link by UPDATE with no INSERT
+    // anywhere - dropping a committed grant out of the partial index's
+    // predicate, after which a re-grant for a recreated order succeeds. The
+    // guard is a TRANSITION check (not-null becoming null), which is why it
+    // does not have the problem a CHECK constraint would.
+    const { userId, orderId, sessionId } = await seedPendingPackOrder();
+    await commerce.processStripeWebhookEvent(
+      paidEvent({ eventId: `evt_${sessionId}`, sessionId }) as never
+    );
+
+    await expect(
+      pool.query(`UPDATE credit_ledger SET source_order_id = NULL WHERE source_order_id = $1`, [
+        orderId
+      ])
+    ).rejects.toMatchObject({ code: '23514' });
+
+    // Consumption is the hot path over this table and must be untouched: the
+    // guard fires on the link being cleared, not on the row being written.
+    await expect(
+      pool.query(
+        `UPDATE credit_ledger SET remaining_amount = remaining_amount - 1
+         WHERE source_order_id = $1`,
+        [orderId]
+      )
+    ).resolves.toMatchObject({ rowCount: 1 });
+    expect(await purchaseLedgerRows(orderId)).toBe(1);
+    expect(await totalCreditsRemaining(userId)).toBe(PACK_CREDITS - 1);
+  });
+
   it('never double-grants an order stranded at paid, and reports the failure', async () => {
     // 'paid' is deliberately absent from FUNDED_OR_REVERSED_ORDER_STATUSES, so
     // layer 3 does NOT fire for an order left in that state and the replay

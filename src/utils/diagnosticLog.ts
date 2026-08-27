@@ -16,6 +16,12 @@ const SAFE_ERROR_CODES = new Set([
   "ENOTFOUND",
   "ETIMEDOUT",
   "23505",
+  // check_violation. Migration 027 raises this when a purchase credit grant
+  // does not name its funding order, or when one is disowned from it. Its
+  // sibling 23505 was already here; without this the only signal an operator
+  // gets for the guard actually firing is the generic database_error, which is
+  // the mislabel #213 was about.
+  "23514",
   "28P01",
   "3D000",
   "42P01",

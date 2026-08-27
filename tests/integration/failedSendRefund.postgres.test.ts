@@ -321,11 +321,13 @@ describePostgres('failed send returns the pack', () => {
     /**
      * A pack bought through a real order, then spent on a letter.
      *
-     * seedSpentLetter's lots carry synthetic references, which is enough for the
-     * return itself but cannot exercise the refund claw-back: that matches lots
-     * by order id or checkout session (commerceService.revokePackCredits). The
-     * two systems meet on the lot the return posts, so the seam needs a real
-     * order standing behind the credits.
+     * seedSpentLetter now seeds a real order per lot too - migration 027
+     * refuses a purchase grant that names none, and source_order_id carries a
+     * foreign key - so the difference between the two helpers is no longer the
+     * order. It is the PAYMENT INTENT: revokePackCredits matches lots by order
+     * id or checkout session (commerceService.revokePackCredits), and only this
+     * helper sets stripe_payment_intent_id, which is what the refund claw-back
+     * resolves against. The two systems meet on the lot the return posts.
      */
     async function seedPackOrderLetter(options: { credits: number; spend: number }): Promise<{
       userId: string;

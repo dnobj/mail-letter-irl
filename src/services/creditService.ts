@@ -39,7 +39,6 @@ import {
   hasSufficientCredits as ledgerHasSufficientCredits,
 } from './creditLedgerService.js';
 
-// Default expiration for purchased credits (2 years)
 /**
  * Add credits with full ledger options
  *
