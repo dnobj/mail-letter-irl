@@ -451,9 +451,9 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
          'cs_acid_jit', 'pi_acid_jit', 'jit-checkout:reconcile-jit', 'fulfillment_pending');
        INSERT INTO credit_ledger (
          user_id, initial_amount, remaining_amount, source_type, source_reference_id,
-         activated_at, expiration_policy, status
+         source_order_id, activated_at, expiration_policy, status
        ) VALUES ('reconcile-pack-user', 4, 4, 'purchase', 'reconcile-pack-order',
-         NOW(), 'days_from_activation', 'active')`
+         'reconcile-pack-order', NOW(), 'days_from_activation', 'active')`
     );
     const created = Math.floor(Date.now() / 1000);
     const stripe = {

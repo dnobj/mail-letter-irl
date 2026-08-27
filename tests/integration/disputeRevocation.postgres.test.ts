@@ -123,8 +123,9 @@ describePostgres('dispute and refund pack revocation', () => {
     await pool.query(
       `INSERT INTO credit_ledger (
          user_id, initial_amount, remaining_amount, source_type,
-         source_reference_id, activated_at, expires_at, expiration_policy, status
-       ) VALUES ($1, $2, $3, 'purchase', $4, NOW(), NOW() + INTERVAL '730 days',
+         source_reference_id, source_order_id, activated_at, expires_at,
+         expiration_policy, status
+       ) VALUES ($1, $2, $3, 'purchase', $4, $4, NOW(), NOW() + INTERVAL '730 days',
                  'days_from_activation', 'active')`,
       [userId, options.credits, remaining, orderId]
     );

@@ -91,14 +91,28 @@ describePostgres('failed send returns the pack', () => {
 
     const lots: { id: string; expiry: Date }[] = [];
     for (const [index, amount] of [options.lotA, options.lotB].entries()) {
+      // A real order per lot. Migration 027 refuses a purchase grant that names
+      // no funding order, and source_order_id carries a foreign key - so the
+      // bare `order_${index}` string this fixture used before was describing a
+      // ledger state the production code cannot actually produce.
+      const orderId = `order_${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (
+           order_id, user_id, order_type, product_code, product_snapshot, credits,
+           amount_cents, currency, idempotency_key, status
+         ) VALUES ($1, $2, 'letter_pack', 'credit-pack-4', '{}'::jsonb, $3,
+                   500, 'usd', $4, 'fulfilled')`,
+        [orderId, userId, amount, `pack-checkout:${orderId}`]
+      );
       const inserted = await pool.query<{ ledger_id: string; expires_at: Date }>(
         `INSERT INTO credit_ledger (
            user_id, initial_amount, remaining_amount, source_type,
-           source_reference_id, activated_at, expires_at, expiration_policy, status
-         ) VALUES ($1, $2, $2, 'purchase', $3, NOW(),
+           source_reference_id, source_order_id, activated_at, expires_at,
+           expiration_policy, status
+         ) VALUES ($1, $2, $2, 'purchase', $3, $3, NOW(),
                    NOW() + ($4 || ' days')::interval, 'days_from_activation', 'active')
          RETURNING ledger_id, expires_at`,
-        [userId, amount, `order_${index}`, String(100 * (index + 1))]
+        [userId, amount, orderId, String(100 * (index + 1))]
       );
       lots.push({ id: inserted.rows[0].ledger_id, expiry: inserted.rows[0].expires_at });
     }
@@ -339,8 +353,9 @@ describePostgres('failed send returns the pack', () => {
       const lot = await pool.query<{ ledger_id: string }>(
         `INSERT INTO credit_ledger (
            user_id, initial_amount, remaining_amount, source_type,
-           source_reference_id, activated_at, expires_at, expiration_policy, status
-         ) VALUES ($1, $2, $2, 'purchase', $3, NOW(), NOW() + INTERVAL '730 days',
+           source_reference_id, source_order_id, activated_at, expires_at,
+           expiration_policy, status
+         ) VALUES ($1, $2, $2, 'purchase', $3, $3, NOW(), NOW() + INTERVAL '730 days',
                    'days_from_activation', 'active')
          RETURNING ledger_id`,
         [userId, options.credits, orderId]

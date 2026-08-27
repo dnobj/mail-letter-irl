@@ -25,7 +25,7 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  * of them working while none of them existed.
  *
  * ON ASSERTING THE SETTLED RESULTS. Several tests below drive two concurrent
- * deliveries and then assert `results.map(r => r.status)`. That is not
+ * deliveries and pass the settled results to expectAllFulfilled. That is not
  * ceremony. The first revision of this suite awaited Promise.allSettled and
  * discarded what it returned, and the consequence was that removing the
  * FOR UPDATE at commerceService.ts:957/:961 left ALL twelve tests green: the
@@ -80,6 +80,26 @@ async function settleAll(steps: Array<() => Promise<unknown>>): Promise<void> {
       // Deliberately swallowed: one failed teardown must not skip the rest.
     }
   }
+}
+
+/**
+ * Assert every concurrent delivery resolved, and say WHY if one did not.
+ *
+ * `expect(results.map(r => r.status)).toEqual([...])` reports only
+ * 'rejected' vs 'fulfilled', which turns a real defect into a guessing game -
+ * the first CI run of the independent-purchases case below failed exactly that
+ * way and carried no reason with it. Mapping the rejections to their messages
+ * puts the driver error in the assertion output.
+ */
+function expectAllFulfilled(results: PromiseSettledResult<unknown>[], expected: number): void {
+  const failures = results
+    .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+    .map(r => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
+  expect(failures).toEqual([]);
+  // The count is passed in rather than read back off `results`, which would be
+  // a tautology: it guards against a future edit dropping a delivery from the
+  // array and leaving a "concurrency" test driving one call.
+  expect(results).toHaveLength(expected);
 }
 
 const PACK_CREDITS = 4;
@@ -347,7 +367,7 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
       commerce.processStripeWebhookEvent(event as never)
     ]);
 
-    expect(results.map(r => r.status)).toEqual(['fulfilled', 'fulfilled']);
+    expectAllFulfilled(results, 2);
     // Exactly one caller must be told it lost. Without this the test cannot
     // tell layer 1 doing its job from layer 3 quietly covering for it, and it
     // stays green when claimStripeEvent is stubbed to `return true`.
@@ -382,7 +402,7 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
       )
     ]);
 
-    expect(results.map(r => r.status)).toEqual(['fulfilled', 'fulfilled']);
+    expectAllFulfilled(results, 2);
     await expectExactlyOneGrant(userId, orderId);
   });
 
@@ -402,7 +422,7 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
       )
     ]);
 
-    expect(results.map(r => r.status)).toEqual(['fulfilled', 'fulfilled']);
+    expectAllFulfilled(results, 2);
     expect(await purchaseLedgerRows(first.orderId)).toBe(1);
     expect(await purchaseLedgerRows(second.orderId)).toBe(1);
     expect(await totalCreditsRemaining(first.userId)).toBe(PACK_CREDITS * 2);
