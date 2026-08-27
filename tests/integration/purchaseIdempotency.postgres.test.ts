@@ -91,6 +91,7 @@ async function settleAll(steps: Array<() => Promise<unknown>>): Promise<void> {
  * way and carried no reason with it. Mapping the rejections to their messages
  * puts the driver error in the assertion output.
  */
+/** Rejected settlements as `SQLSTATE: message`, for legible assertion output. */
 function rejectionSummaries(results: PromiseSettledResult<unknown>[]): string[] {
   return results
     .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
@@ -103,6 +104,13 @@ function rejectionSummaries(results: PromiseSettledResult<unknown>[]): string[] 
     });
 }
 
+/**
+ * Assert every concurrent delivery resolved, and say WHY if one did not.
+ *
+ * Asserting only `r.status` reports 'rejected' with no reason, which turns a
+ * real defect into a guessing game - the first CI run of the independent
+ * purchases case failed exactly that way.
+ */
 function expectAllFulfilled(results: PromiseSettledResult<unknown>[], expected: number): void {
   const failures = rejectionSummaries(results);
   expect(failures).toEqual([]);
@@ -458,13 +466,29 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
     const failures = results
       .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
       .map(r => (r.reason as { code?: string } | undefined)?.code ?? 'no-code');
-    // 40P01, not the message: server text is translated under a non-English
-    // lc_messages, so asserting on it pins the runner's locale.
+
+    // BOTH outcomes are accepted, and this is not hedging.
     //
-    // If this ever reads [] instead, the two deliveries serialised - which is
-    // #288 being FIXED, not a flake. Update this test to expect two successes
-    // rather than weakening it.
-    expect(failures).toEqual(['40P01']);
+    // #288's cycle is undiagnosed. Tracing the lock order gives a chain, not a
+    // cycle: both deliveries take distinct orders rows, then the one shared
+    // users row via INSERT ... ON CONFLICT DO UPDATE. Nothing establishes that
+    // an interleaving which serialises cleanly is impossible - so pinning
+    // exactly one 40P01 would be pinning a race, and the day it serialised the
+    // suite would redden with no code change and no defect.
+    //
+    // What IS invariant is the money, and that is asserted below in whichever
+    // world we landed in. A third outcome - some other error, or two failures -
+    // fails here, which is the regression this needs to catch.
+    expect([[], ['40P01']]).toContainEqual(failures);
+    const deadlocked = failures.length === 1;
+    if (!deadlocked) {
+      // #288 has been fixed, or this runner serialised. Either way the pair
+      // must have granted independently, which is what criterion 3 asks for.
+      expect(await purchaseLedgerRows(first.orderId)).toBe(1);
+      expect(await purchaseLedgerRows(second.orderId)).toBe(1);
+      expect(await cachedUserCredits(first.userId)).toBe(PACK_CREDITS * 2);
+      return;
+    }
 
     // Exactly one order funded, and the balance matches it. No partial grant
     // survived the victim's rollback, and nothing was granted twice. Which of
@@ -501,16 +525,19 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
 
     // Fault injection at the last write of the grant, so the rollback has the
     // most to undo: users.credits and the ledger row are both already written.
-    await pool.query(`
-      CREATE OR REPLACE FUNCTION lirl_fail_grant() RETURNS TRIGGER AS $$
-      BEGIN RAISE EXCEPTION 'injected failure'; END;
-      $$ LANGUAGE plpgsql;
-      DROP TRIGGER IF EXISTS lirl_fail_grant ON credit_transactions;
-      CREATE TRIGGER lirl_fail_grant BEFORE INSERT ON credit_transactions
-        FOR EACH ROW EXECUTE FUNCTION lirl_fail_grant();
-    `);
     let results: PromiseSettledResult<unknown>[];
     try {
+      // Inside the try: if this rejects client-side after the server applied it
+      // - a socket drop, a timeout - the trigger would otherwise survive into
+      // every later test in this block, and no TRUNCATE can clear a trigger.
+      await pool.query(`
+        CREATE OR REPLACE FUNCTION lirl_fail_grant() RETURNS TRIGGER AS $$
+        BEGIN RAISE EXCEPTION 'injected failure'; END;
+        $$ LANGUAGE plpgsql;
+        DROP TRIGGER IF EXISTS lirl_fail_grant ON credit_transactions;
+        CREATE TRIGGER lirl_fail_grant BEFORE INSERT ON credit_transactions
+          FOR EACH ROW EXECUTE FUNCTION lirl_fail_grant();
+      `);
       results = await Promise.allSettled([
         commerce.processStripeWebhookEvent(
           paidEvent({ eventId: `evt_${doomed.sessionId}`, sessionId: doomed.sessionId }) as never
@@ -532,9 +559,13 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
     expect(await cachedUserCredits(funded.userId)).toBe(PACK_CREDITS);
     expect(await totalCreditsRemaining(funded.userId)).toBe(PACK_CREDITS);
     expect(await purchaseLedgerRows(doomed.orderId)).toBe(0);
-    expect(await purchaseTransactionRows(doomed.orderId)).toBe(0);
     expect(await orderStatus(doomed.orderId)).toBe('checkout_pending');
-    expect(await orderStatus(funded.orderId)).toBe('fulfilled');
+    // NOT asserted, deliberately: purchaseTransactionRows(doomed) and
+    // orderStatus(funded). The injected trigger raises on every
+    // credit_transactions insert, so the first can only ever read 0; and every
+    // statement in transitionPaidCheckout is parameterised on the order being
+    // processed, so the second cannot be touched by the doomed call. Both would
+    // pass with the rollback removed entirely.
     // The event claim must roll back with everything else, or Stripe's retry
     // would be swallowed as a duplicate and the payment never booked at all.
     expect(await claimedEvents(`evt_${doomed.sessionId}`)).toBe(0);
