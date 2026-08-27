@@ -272,6 +272,41 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
     expect(await orderStatus(orderId)).toBe('refund_pending');
   });
 
+  it('leaves a mismatched payment for an operator instead of auto-refunding it', async () => {
+    // Acceptance criterion 4 is "rejected AND observable". Rejection is the
+    // test above; this is the observability half, and the more dangerous one.
+    //
+    // The maintenance sweep refunds refund_pending orders automatically, and
+    // excludes PAYMENT_AMOUNT_MISMATCH by one clause. Without that clause any
+    // Stripe-side amount change - a promo code, adaptive pricing, tax - would
+    // push real customers into the quarantine and the sweep would mass-refund
+    // every one of them with no human in the loop (#278 round 7). This test is
+    // what reddens if the clause is edited out.
+    const { orderId, sessionId } = await seedPendingPackOrder();
+    await commerce.processStripeWebhookEvent(
+      paidEvent({ eventId: `evt_${sessionId}`, sessionId, amountCents: 100 }) as never
+    );
+    // The sweep also requires a payment intent, so the order qualifies on
+    // every count except the exclusion under test.
+    const { rows } = await pool.query<{ intent: string | null }>(
+      `SELECT stripe_payment_intent_id AS intent FROM orders WHERE order_id = $1`,
+      [orderId]
+    );
+    expect(rows[0].intent).not.toBeNull();
+    await pool.query(
+      `UPDATE orders SET updated_at = NOW() - INTERVAL '90 minutes' WHERE order_id = $1`,
+      [orderId]
+    );
+
+    const maintenance = await commerce.runCommerceMaintenance();
+
+    expect(maintenance.refundAttempts).toBe(0);
+    // And it is not silently parked either: the stuck-order alarm is what
+    // brings an operator to it.
+    expect(maintenance.stuckOrders).toBeGreaterThanOrEqual(1);
+    expect(await orderStatus(orderId)).toBe('refund_pending');
+  });
+
   it('rejects a second purchase ledger row for one order at the DATABASE boundary', async () => {
     // Layer 4 on its own, with the application code removed from the picture.
     // If migration 023's partial index is ever dropped or its predicate edited,
