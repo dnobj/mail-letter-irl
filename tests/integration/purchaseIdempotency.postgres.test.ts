@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { copyFile, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { migrate } from '../../src/cli/migrate.js';
@@ -379,3 +382,122 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
     expect(await totalCreditsRemaining(userId)).toBe(PACK_CREDITS);
   });
 });
+
+/**
+ * Migration 023 applied to a database that ALREADY contains a double grant.
+ *
+ * This is the last case #152's test mandate names, and it needs its own
+ * database because the point is the state of the schema BEFORE 023 exists:
+ * `credit_ledger.source_order_id` has not been added yet, so historical rows
+ * carry only `source_reference_id`.
+ *
+ * The property under test is that 023 is safe to deploy over real history. Its
+ * backfill adopts only unambiguous rows - exactly one purchase row pointing at
+ * one order - and leaves anything already duplicated NULL, so the unique index
+ * it then creates cannot fail on, or silently paper over, a pre-existing
+ * double grant. A migration that aborted here would block every later
+ * migration on any database that had ever double-granted.
+ */
+describePostgres('migration 023 over pre-existing duplicate grants (#152)', () => {
+  let adminPool: pg.Pool;
+  let pool: pg.Pool;
+  let schema: string;
+  let scoped: string;
+  let staging: string;
+
+  const CLEAN_ORDER = 'order_clean_backfill';
+  const DUPLICATED_ORDER = 'order_already_double_granted';
+
+  /** Copy the repository migrations whose numeric prefix is below `limit`. */
+  async function stageMigrationsBelow(limit: number): Promise<string> {
+    const directory = path.join(staging, `upto_${limit}`);
+    await mkdir(directory, { recursive: true });
+    const files = (await readdir(repositoryMigrations)).filter(
+      file => file.endsWith('.sql') && Number.parseInt(file.slice(0, 3), 10) < limit
+    );
+    for (const file of files) {
+      await copyFile(path.join(repositoryMigrations, file), path.join(directory, file));
+    }
+    return directory;
+  }
+
+  beforeAll(async () => {
+    const baseUrl = validateDisposableDatabaseUrl(process.env.LIRL_TEST_DATABASE_URL);
+    adminPool = new Pool({ connectionString: baseUrl });
+    schema = schemaName('lirl_idem_mig');
+    await adminPool.query(`CREATE SCHEMA ${schema}`);
+    scoped = databaseUrlForSchema(baseUrl, schema);
+    staging = await mkdtemp(path.join(tmpdir(), 'lirl-152-'));
+
+    await migrate({
+      connectionString: scoped,
+      migrationsDirectory: await stageMigrationsBelow(23)
+    });
+    pool = new Pool({ connectionString: scoped, max: 4 });
+  }, 180_000);
+
+  afterAll(async () => {
+    await pool?.end();
+    if (staging) await rm(staging, { recursive: true, force: true });
+    if (adminPool) {
+      await adminPool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await adminPool.end();
+    }
+  });
+
+  it('adopts unambiguous history, leaves a duplicated pair null, and completes', async () => {
+    await pool.query(
+      `INSERT INTO users (user_id, email, credits) VALUES ('mig-user', 'mig@test.invalid', 0)`
+    );
+    await pool.query(
+      `INSERT INTO orders (
+         order_id, user_id, order_type, product_code, product_snapshot, credits,
+         amount_cents, currency, idempotency_key, status
+       ) VALUES
+         ($1, 'mig-user', 'letter_pack', 'credit-pack-4', '{}'::jsonb, 4, 500, 'usd',
+          'pack-checkout:clean', 'fulfilled'),
+         ($2, 'mig-user', 'letter_pack', 'credit-pack-4', '{}'::jsonb, 4, 500, 'usd',
+          'pack-checkout:dup', 'fulfilled')`,
+      [CLEAN_ORDER, DUPLICATED_ORDER]
+    );
+    // Pre-023 history: source_order_id does not exist yet, so the only link
+    // back to the order is source_reference_id.
+    await pool.query(
+      `INSERT INTO credit_ledger (
+         ledger_id, user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, expires_at
+       ) VALUES
+         (gen_random_uuid(), 'mig-user', 4, 4, 'purchase', $1, NOW() + INTERVAL '365 days'),
+         (gen_random_uuid(), 'mig-user', 4, 4, 'purchase', $2, NOW() + INTERVAL '365 days'),
+         (gen_random_uuid(), 'mig-user', 4, 4, 'purchase', $2, NOW() + INTERVAL '365 days')`,
+      [CLEAN_ORDER, DUPLICATED_ORDER]
+    );
+
+    // The whole point: this must not abort.
+    await expect(
+      migrate({ connectionString: scoped, migrationsDirectory: repositoryMigrations })
+    ).resolves.toBeUndefined();
+
+    const adopted = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM credit_ledger WHERE source_order_id = $1`,
+      [CLEAN_ORDER]
+    );
+    expect(Number(adopted.rows[0].count)).toBe(1);
+
+    const abstained = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM credit_ledger
+       WHERE source_reference_id = $1 AND source_order_id IS NULL`,
+      [DUPLICATED_ORDER]
+    );
+    expect(Number(abstained.rows[0].count)).toBe(2);
+
+    // And the index the backfill was protecting is actually there afterwards.
+    const index = await pool.query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes
+       WHERE schemaname = $1 AND indexname = 'idx_credit_ledger_purchase_order_unique'`,
+      [schema]
+    );
+    expect(index.rowCount).toBe(1);
+  }, 180_000);
+});
+
