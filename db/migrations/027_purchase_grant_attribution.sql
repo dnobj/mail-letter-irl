@@ -138,10 +138,19 @@ BEGIN
       ('reject_purchase_grant_disowning',    'BEFORE UPDATE')
     ) AS t(trigger_name, timing)
   LOOP
+    -- to_regclass, NOT `c.relname = 'credit_ledger'`. A bare relname matches
+    -- credit_ledger in EVERY schema of the database, while the DROP below
+    -- resolves through search_path to exactly one - so on a database holding
+    -- more than one migrated schema, the guard saw a sibling schema's trigger
+    -- and then failed dropping a trigger that was never in this one. CI
+    -- reproduced it immediately, because each integration suite migrates its
+    -- own schema into the same database. Any deployment with more than one
+    -- migrated schema would have hit it too.
     IF EXISTS (
-      SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-      WHERE t.tgname = guard.trigger_name
-        AND c.relname = 'credit_ledger' AND NOT t.tgisinternal
+      SELECT 1 FROM pg_trigger
+      WHERE tgname = guard.trigger_name
+        AND tgrelid = to_regclass('credit_ledger')
+        AND NOT tgisinternal
     ) THEN
       EXECUTE format('DROP TRIGGER %I ON credit_ledger', guard.trigger_name);
     END IF;
