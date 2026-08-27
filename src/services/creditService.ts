@@ -65,6 +65,14 @@ export async function addCredits(params: AddCreditsParams): Promise<CreditOperat
     credits,
     sourceType: 'purchase',
     sourceReferenceId: orderId,
+    // Load-bearing, and the reason this line is not a duplicate of the one
+    // above it: migration 023's unique index is on source_order_id, partial on
+    // `source_order_id IS NOT NULL AND source_type = 'purchase'`. A purchase
+    // grant written with only sourceReferenceId set is INVISIBLE to that index
+    // and can therefore be made twice for one order - the exact defect #152
+    // exists to close. This function has no callers today; the line is here so
+    // that acquiring one does not quietly reopen the hole.
+    sourceOrderId: orderId,
     expirationDays: DEFAULT_PURCHASE_EXPIRATION_DAYS,
     description: description || `Purchased ${credits} credits`,
   });
