@@ -91,10 +91,20 @@ async function settleAll(steps: Array<() => Promise<unknown>>): Promise<void> {
  * way and carried no reason with it. Mapping the rejections to their messages
  * puts the driver error in the assertion output.
  */
-function expectAllFulfilled(results: PromiseSettledResult<unknown>[], expected: number): void {
-  const failures = results
+function rejectionSummaries(results: PromiseSettledResult<unknown>[]): string[] {
+  return results
     .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-    .map(r => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
+    .map(r => {
+      const reason = r.reason as { code?: string; message?: string } | undefined;
+      // SQLSTATE first: server messages are translated under a non-English
+      // lc_messages, so asserting on text pins the runner's locale rather than
+      // the database's behaviour.
+      return `${reason?.code ?? 'no-code'}: ${reason?.message ?? String(r.reason)}`;
+    });
+}
+
+function expectAllFulfilled(results: PromiseSettledResult<unknown>[], expected: number): void {
+  const failures = rejectionSummaries(results);
   expect(failures).toEqual([]);
   // The count is passed in rather than read back off `results`, which would be
   // a tautology: it guards against a future edit dropping a delivery from the
@@ -410,13 +420,19 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
     // Acceptance criterion 3 is "different legitimate purchases remain
     // independent". They do not, and this test found it on its first run.
     //
-    // orders.user_id references users, so findCheckoutOrder's
-    // `SELECT * FROM orders ... FOR UPDATE` takes an implicit FOR KEY SHARE on
-    // the users row. KEY SHARE is multi-holder, so BOTH deliveries get it -
-    // and both then need an exclusive lock on that same row for the
-    // `INSERT INTO users ... ON CONFLICT DO UPDATE` that adds the credits.
-    // Each waits for the other's shared lock to drop. PostgreSQL picks a
-    // victim.
+    // The two deliveries contend on ONE users row: both call
+    // `INSERT INTO users ... ON CONFLICT (user_id) DO UPDATE` to add credits,
+    // and ON CONFLICT DO UPDATE takes a stronger tuple lock than a plain
+    // UPDATE. The exact acquisition order that closes the cycle is NOT yet
+    // diagnosed - an earlier revision of this comment asserted that
+    // findCheckoutOrder's `SELECT ... FOR UPDATE` takes an implicit FOR KEY
+    // SHARE on the parent users row, which is wrong: a FOR UPDATE with no OF
+    // list locks only rows of tables in its own FROM list, and the referential
+    // triggers that do take FOR KEY SHARE fire on INSERT or on UPDATE OF
+    // user_id, neither of which happens here.
+    //
+    // The wrong mechanism is worse than none, because the fix gets designed
+    // from it. #288 carries the correction and the open question.
     //
     // This asserts TODAY'S behaviour deliberately, so #288 has a live detector:
     // when the locking discipline is fixed, this test reddens and must be
@@ -441,8 +457,14 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
 
     const failures = results
       .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-      .map(r => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
-    expect(failures).toEqual(['deadlock detected']);
+      .map(r => (r.reason as { code?: string } | undefined)?.code ?? 'no-code');
+    // 40P01, not the message: server text is translated under a non-English
+    // lc_messages, so asserting on it pins the runner's locale.
+    //
+    // If this ever reads [] instead, the two deliveries serialised - which is
+    // #288 being FIXED, not a flake. Update this test to expect two successes
+    // rather than weakening it.
+    expect(failures).toEqual(['40P01']);
 
     // Exactly one order funded, and the balance matches it. No partial grant
     // survived the victim's rollback, and nothing was granted twice. Which of
@@ -463,24 +485,37 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
     // reason: addCreditsToLedgerWithClient increments users.credits BEFORE it
     // inserts the ledger row. A partial commit would leave a customer holding
     // credits with no ledger entry behind them - money invented by a crash.
-    const { userId, orderId, sessionId } = await seedPendingPackOrder();
+    //
+    // A PRIOR successful purchase is seeded first, and the rejection REASON is
+    // asserted. Without both, this test was vacuous: every post-condition was
+    // also its pre-state, so `throw new Error('boom')` as the first line of the
+    // transaction callback - a failure that never touches the database at all -
+    // satisfied all six assertions and the rollback was never exercised.
+    const funded = await seedPendingPackOrder();
+    await commerce.processStripeWebhookEvent(
+      paidEvent({ eventId: `evt_${funded.sessionId}`, sessionId: funded.sessionId }) as never
+    );
+    expect(await cachedUserCredits(funded.userId)).toBe(PACK_CREDITS);
+
+    const doomed = await seedPendingPackOrder({ userId: funded.userId });
 
     // Fault injection at the last write of the grant, so the rollback has the
     // most to undo: users.credits and the ledger row are both already written.
     await pool.query(`
-      CREATE FUNCTION lirl_fail_grant() RETURNS TRIGGER AS $$
+      CREATE OR REPLACE FUNCTION lirl_fail_grant() RETURNS TRIGGER AS $$
       BEGIN RAISE EXCEPTION 'injected failure'; END;
       $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS lirl_fail_grant ON credit_transactions;
       CREATE TRIGGER lirl_fail_grant BEFORE INSERT ON credit_transactions
         FOR EACH ROW EXECUTE FUNCTION lirl_fail_grant();
     `);
+    let results: PromiseSettledResult<unknown>[];
     try {
-      const [outcome] = await Promise.allSettled([
+      results = await Promise.allSettled([
         commerce.processStripeWebhookEvent(
-          paidEvent({ eventId: `evt_${sessionId}`, sessionId }) as never
+          paidEvent({ eventId: `evt_${doomed.sessionId}`, sessionId: doomed.sessionId }) as never
         )
       ]);
-      expect(outcome.status).toBe('rejected');
     } finally {
       await pool.query(`
         DROP TRIGGER IF EXISTS lirl_fail_grant ON credit_transactions;
@@ -488,13 +523,21 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
       `);
     }
 
-    expect(await cachedUserCredits(userId)).toBe(0);
-    expect(await purchaseLedgerRows(orderId)).toBe(0);
-    expect(await purchaseTransactionRows(orderId)).toBe(0);
-    expect(await orderStatus(orderId)).toBe('checkout_pending');
+    // P0001 is a bare RAISE EXCEPTION - proof the injected trigger is what
+    // failed, not something incidental on the way to it.
+    expect(rejectionSummaries(results)).toEqual(['P0001: injected failure']);
+
+    // The balance is back to ONE pack, not two and not zero: the second grant's
+    // users.credits increment was undone while the first survived.
+    expect(await cachedUserCredits(funded.userId)).toBe(PACK_CREDITS);
+    expect(await totalCreditsRemaining(funded.userId)).toBe(PACK_CREDITS);
+    expect(await purchaseLedgerRows(doomed.orderId)).toBe(0);
+    expect(await purchaseTransactionRows(doomed.orderId)).toBe(0);
+    expect(await orderStatus(doomed.orderId)).toBe('checkout_pending');
+    expect(await orderStatus(funded.orderId)).toBe('fulfilled');
     // The event claim must roll back with everything else, or Stripe's retry
     // would be swallowed as a duplicate and the payment never booked at all.
-    expect(await claimedEvents(`evt_${sessionId}`)).toBe(0);
+    expect(await claimedEvents(`evt_${doomed.sessionId}`)).toBe(0);
   });
 
   it('refuses a CONFLICTING amount for the same session and grants nothing', async () => {
@@ -536,24 +579,52 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
 
   it('refuses to refund a quarantined mismatch even when asked directly', async () => {
     // The PAYMENT_AMOUNT_MISMATCH wall exists in TWO places: the maintenance
-    // sweep's candidate SELECT, and requestRefund's own claim CTE. The first
-    // revision of this suite drove only the sweep, which meant deleting either
-    // copy alone left it green - each covered for the other.
+    // sweep's candidate SELECT, and requestRefund's own claim CTE. This drives
+    // requestRefund directly, which is the copy that matters - the wall every
+    // future caller hits, sweep or not.
     //
-    // This drives requestRefund directly, the copy that matters: the wall every
-    // future caller hits, sweep or not. It is observable without a Stripe key
-    // because the claim CTE increments refund_attempts BEFORE any Stripe call,
-    // so refund_attempts staying 0 means the claim refused - not that Stripe
-    // was unreachable.
-    const { orderId, sessionId } = await seedPendingPackOrder();
+    // `false` alone proves nothing: requestRefund also returns false when the
+    // retry limit is zero, and when the order has no payment intent. So the
+    // preconditions are asserted, and a CONTROL order identical but for the
+    // error code establishes that the claim would otherwise have succeeded.
+    // Observing orders.refund_attempts rather than the boolean is what makes
+    // this work without a Stripe key: the claim CTE increments it BEFORE any
+    // Stripe call, so 0 means the claim refused and 1 means it did not.
+    const quarantined = await seedPendingPackOrder();
     await commerce.processStripeWebhookEvent(
-      paidEvent({ eventId: `evt_${sessionId}`, sessionId, amountCents: 100 }) as never
+      paidEvent({
+        eventId: `evt_${quarantined.sessionId}`,
+        sessionId: quarantined.sessionId,
+        amountCents: 100
+      }) as never
+    );
+    // Precondition: the order qualifies for a refund on every count except the
+    // clause under test. Without this the test passes when the payment intent
+    // is missing, which is a different refusal entirely.
+    expect(await orderColumn<string | null>(quarantined.orderId, 'stripe_payment_intent_id')).not.
+      toBeNull();
+    expect(await orderColumn<number>(quarantined.orderId, 'refund_attempts')).toBe(0);
+    expect(await orderStatus(quarantined.orderId)).toBe('refund_pending');
+
+    const control = await seedPendingPackOrder();
+    await pool.query(
+      `UPDATE orders
+       SET status = 'refund_pending', refund_pending_at = NOW(),
+           stripe_payment_intent_id = $2, last_error_code = 'JIT_FULFILLMENT_REJECTED'
+       WHERE order_id = $1`,
+      [control.orderId, `pi_${control.sessionId}`]
     );
 
-    await expect(commerce.requestRefund(orderId, 'operator asked')).resolves.toBe(false);
+    await expect(commerce.requestRefund(quarantined.orderId, 'operator asked')).resolves.toBe(
+      false
+    );
+    await commerce.requestRefund(control.orderId, 'operator asked');
 
-    expect(await orderColumn<number>(orderId, 'refund_attempts')).toBe(0);
-    expect(await orderStatus(orderId)).toBe('refund_pending');
+    // The control was claimed; the quarantined order was not. Only the
+    // PAYMENT_AMOUNT_MISMATCH clause separates them.
+    expect(await orderColumn<number>(quarantined.orderId, 'refund_attempts')).toBe(0);
+    expect(await orderColumn<number>(control.orderId, 'refund_attempts')).toBe(1);
+    expect(await orderStatus(quarantined.orderId)).toBe('refund_pending');
   });
 
   it('does not let the maintenance sweep auto-refund a quarantined mismatch', async () => {
@@ -562,13 +633,19 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
     // quarantine and the sweep refunds every one of them with no human in the
     // loop (#278 round 7).
     //
-    // The CONTROL order is what makes this falsifiable. It is identical except
-    // for the error code, so it proves the sweep WOULD have claimed the
-    // quarantined order: control refund_attempts goes to 1 (the claim CTE
-    // increments before the Stripe call, which then fails for want of a key in
-    // CI), quarantined stays 0. Asserting the returned refundAttempts instead
-    // is unfalsifiable - that only rises when requestRefund returns true, which
-    // needs a live Stripe call CI never has.
+    // The CONTROL order is what makes this falsifiable: identical except for
+    // the error code, so control refund_attempts goes to 1 while quarantined
+    // stays 0. Asserting the returned refundAttempts instead is unfalsifiable -
+    // that only rises when requestRefund returns true, which needs a live
+    // Stripe call CI never has.
+    //
+    // HONEST LIMIT: this pins the QUARANTINE, not the sweep's own copy of the
+    // clause. Delete only the sweep's candidate filter and the order reaches
+    // requestRefund, whose identical clause refuses it with no write, and every
+    // assertion below still passes. The two copies cover for each other and
+    // neither can be isolated through this surface; the sweep's copy is
+    // defence-in-depth in front of the claim CTE, which is the wall that
+    // actually holds. The test above drives that wall directly.
     const quarantined = await seedPendingPackOrder();
     await commerce.processStripeWebhookEvent(
       paidEvent({
@@ -628,7 +705,11 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
     const { userId } = await seedPendingPackOrder();
 
     await expect(insertLedgerRow(userId, null, 'purchase')).rejects.toMatchObject({
-      code: '23514'
+      code: '23514',
+      // Named, so a future CHECK added to credit_ledger cannot satisfy this
+      // assertion in 027's place - the sibling above pins a constraint name for
+      // the same reason.
+      message: expect.stringContaining('must set source_order_id')
     });
     // Non-purchase grants are unaffected: promo, signup and adjustment credits
     // have no funding order by design.
@@ -653,7 +734,10 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
       pool.query(`UPDATE credit_ledger SET source_order_id = NULL WHERE source_order_id = $1`, [
         orderId
       ])
-    ).rejects.toMatchObject({ code: '23514' });
+    ).rejects.toMatchObject({
+      code: '23514',
+      message: expect.stringContaining('cannot be disowned')
+    });
 
     // Consumption is the hot path over this table and must be untouched: the
     // guard fires on the link being cleared, not on the row being written.

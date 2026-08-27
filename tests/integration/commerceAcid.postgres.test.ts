@@ -1646,7 +1646,10 @@ describePostgres('commerce ACID on disposable PostgreSQL', () => {
            ) VALUES ('legacy-amount-user', 1, 1, 'purchase', 'no-order',
                      NOW(), 'never', 'active')`
         )
-      ).rejects.toMatchObject({ code: '23514' });
+      ).rejects.toMatchObject({
+        code: '23514',
+        message: expect.stringContaining('must set source_order_id')
+      });
 
       const rows = await pool.query<{
         order_id: string; amount_known: boolean; amount_cents: number; treatment: string | null;

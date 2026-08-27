@@ -97,49 +97,60 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DO $$
-BEGIN
-  -- Catalog lookups, so a first deploy takes no lock on credit_ledger here.
-  IF EXISTS (
-    SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-    WHERE t.tgname = 'reject_unattributed_purchase_grant'
-      AND c.relname = 'credit_ledger' AND NOT t.tgisinternal
-  ) THEN
-    DROP TRIGGER reject_unattributed_purchase_grant ON credit_ledger;
-  END IF;
-  IF EXISTS (
-    SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-    WHERE t.tgname = 'reject_purchase_grant_disowning'
-      AND c.relname = 'credit_ledger' AND NOT t.tgisinternal
-  ) THEN
-    DROP TRIGGER reject_purchase_grant_disowning ON credit_ledger;
-  END IF;
-END $$;
-
+-- Drop, create and harden in ONE dynamic block.
+--
+-- The previous revision wrote these as top-level statements and CI reported
+-- `trigger "reject_unattributed_purchase_grant" for table "credit_ledger" does
+-- not exist` from the ALTER. The migrator sends each file as a single
+-- multi-statement simple query, so the whole string is parsed before any of it
+-- runs; going through EXECUTE defers every name resolution to the moment that
+-- statement actually executes, which is the only ordering guarantee worth
+-- relying on here.
+--
+-- The drops are guarded by a catalog lookup rather than written as
+-- DROP TRIGGER IF EXISTS, because that form takes ACCESS EXCLUSIVE on the table
+-- before it checks whether the trigger exists - which would block reads as well
+-- as writes on the live credits table during the FIRST deploy, when the trigger
+-- cannot possibly be there.
+--
 -- The WHEN clauses reference source_type only, which has existed since 003, so
 -- they parse on every schema this can land on. They keep promo, signup_bonus,
 -- refund, adjustment and legacy writes - and every consumption UPDATE of a
 -- non-purchase lot - out of PL/pgSQL entirely.
-CREATE TRIGGER reject_unattributed_purchase_grant
-  BEFORE INSERT ON credit_ledger
-  FOR EACH ROW
-  WHEN (NEW.source_type = 'purchase')
-  EXECUTE FUNCTION reject_unattributed_purchase_grant();
-
-CREATE TRIGGER reject_purchase_grant_disowning
-  BEFORE UPDATE ON credit_ledger
-  FOR EACH ROW
-  WHEN (NEW.source_type = 'purchase')
-  EXECUTE FUNCTION reject_purchase_grant_disowning();
-
+--
 -- ENABLE ALWAYS, not the default ENABLE ORIGIN: otherwise
 -- `SET session_replication_role = 'replica'` - which is what
 -- `pg_restore --data-only --disable-triggers` sets - walks straight past both
 -- guards and reinstates exactly the rows they exist to refuse.
-ALTER TABLE credit_ledger
-  ENABLE ALWAYS TRIGGER reject_unattributed_purchase_grant;
-ALTER TABLE credit_ledger
-  ENABLE ALWAYS TRIGGER reject_purchase_grant_disowning;
+DO $do$
+DECLARE
+  guard RECORD;
+BEGIN
+  FOR guard IN
+    SELECT * FROM (VALUES
+      ('reject_unattributed_purchase_grant', 'BEFORE INSERT'),
+      ('reject_purchase_grant_disowning',    'BEFORE UPDATE')
+    ) AS t(trigger_name, timing)
+  LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+      WHERE t.tgname = guard.trigger_name
+        AND c.relname = 'credit_ledger' AND NOT t.tgisinternal
+    ) THEN
+      EXECUTE format('DROP TRIGGER %I ON credit_ledger', guard.trigger_name);
+    END IF;
+
+    EXECUTE format(
+      'CREATE TRIGGER %I %s ON credit_ledger FOR EACH ROW '
+      || 'WHEN (NEW.source_type = ''purchase'') EXECUTE FUNCTION %I()',
+      guard.trigger_name, guard.timing, guard.trigger_name
+    );
+    EXECUTE format(
+      'ALTER TABLE credit_ledger ENABLE ALWAYS TRIGGER %I', guard.trigger_name
+    );
+  END LOOP;
+END
+$do$;
 
 COMMENT ON FUNCTION reject_unattributed_purchase_grant() IS
   'Issue #152: a new purchase grant must name its funding order, so it falls inside idx_credit_ledger_purchase_order_unique. INSERT only - pre-023 rows with a NULL source_order_id are untouched and stay consumable.';
