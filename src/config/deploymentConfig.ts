@@ -133,6 +133,23 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     checkedBy: 'env.deployment_environment_required'
   },
   {
+    // services: ['api'] only. The maintenance cron serves no HTTP, so it has no
+    // Host or Origin to allowlist - and listing it here would make the preflight
+    // demand a variable that service cannot use.
+    name: 'LETTER_IRL_ALLOWED_HOSTS',
+    requiredIn: 'production',
+    secret: false,
+    services: ['api'],
+    checkedBy: 'http.allowed_hosts_required'
+  },
+  {
+    name: 'LETTER_IRL_ALLOWED_ORIGINS',
+    requiredIn: 'production',
+    secret: false,
+    services: ['api'],
+    checkedBy: 'http.allowed_origins_required'
+  },
+  {
     name: 'LETTER_PROVIDER',
     requiredIn: 'production',
     secret: false,

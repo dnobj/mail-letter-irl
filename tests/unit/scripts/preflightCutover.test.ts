@@ -32,6 +32,13 @@ const FULL_PRODUCTION_NAMES = [
   // preflight reported full parity while the two environments disagreed about
   // the store currency (#278 review round 2).
   'STRIPE_CURRENCY',
+  // Added with #157. Both have localhost fallbacks and neither was in the
+  // manifest, so the preflight reported full parity for a production API that
+  // would then reject every request to its own hostname - the MCP transports
+  // get LETTER_IRL_ALLOWED_HOSTS with enableDnsRebindingProtection: true, while
+  // /readyz sits outside the transport and keeps answering 200.
+  'LETTER_IRL_ALLOWED_HOSTS',
+  'LETTER_IRL_ALLOWED_ORIGINS',
   'TEMP_IMAGE_BUCKET_NAME',
   'TEMP_IMAGE_BUCKET_ENDPOINT',
   'TEMP_IMAGE_BUCKET_ACCESS_KEY_ID',
