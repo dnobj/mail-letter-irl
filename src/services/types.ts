@@ -48,14 +48,6 @@ export interface CreditTransaction {
   created_at: Date;
 }
 
-export interface AddCreditsParams {
-  userId: string;
-  email: string;
-  credits: number;
-  orderId: string;
-  description?: string;
-}
-
 export interface DeductCreditsParams {
   userId: string;
   credits: number;
