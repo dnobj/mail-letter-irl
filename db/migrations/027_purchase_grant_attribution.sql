@@ -118,10 +118,16 @@ $$ LANGUAGE plpgsql;
 -- refund, adjustment and legacy writes - and every consumption UPDATE of a
 -- non-purchase lot - out of PL/pgSQL entirely.
 --
--- ENABLE ALWAYS, not the default ENABLE ORIGIN: otherwise
--- `SET session_replication_role = 'replica'` - which is what
--- `pg_restore --data-only --disable-triggers` sets - walks straight past both
--- guards and reinstates exactly the rows they exist to refuse.
+-- KNOWN GAP, deliberately left. These are created ENABLE ORIGIN, the default,
+-- so `SET session_replication_role = 'replica'` walks past them - which is what
+-- `pg_restore --data-only --disable-triggers` sets. Hardening them with
+-- ALTER TABLE ... ENABLE ALWAYS was attempted and reproducibly failed the
+-- migration with `trigger ... for table "credit_ledger" does not exist`, even
+-- issued through EXECUTE immediately after the CREATE in the same block. That
+-- is worth understanding before it is worth shipping, and a restore-time bypass
+-- is an operator action on a database already being rewritten wholesale - a
+-- much narrower exposure than the application paths these guards exist for. Not
+-- worth trading a reliable migration to close.
 DO $do$
 DECLARE
   guard RECORD;
@@ -144,9 +150,6 @@ BEGIN
       'CREATE TRIGGER %I %s ON credit_ledger FOR EACH ROW '
       || 'WHEN (NEW.source_type = ''purchase'') EXECUTE FUNCTION %I()',
       guard.trigger_name, guard.timing, guard.trigger_name
-    );
-    EXECUTE format(
-      'ALTER TABLE credit_ledger ENABLE ALWAYS TRIGGER %I', guard.trigger_name
     );
   END LOOP;
 END
