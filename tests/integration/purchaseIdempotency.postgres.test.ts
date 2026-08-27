@@ -296,10 +296,20 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
       [orderId]
     );
     expect(rows[0].intent).not.toBeNull();
-    await pool.query(
-      `UPDATE orders SET updated_at = NOW() - INTERVAL '90 minutes' WHERE order_id = $1`,
-      [orderId]
-    );
+    // orders carries a BEFORE UPDATE trigger that rewrites updated_at to NOW(),
+    // so ageing the row means suspending it for exactly this statement. That
+    // the column cannot be back-dated by an ordinary UPDATE is a property worth
+    // having - it is what makes the stuck-order clock trustworthy - but it does
+    // mean a test cannot simulate the passage of time without saying so.
+    await pool.query('ALTER TABLE orders DISABLE TRIGGER update_orders_updated_at');
+    try {
+      await pool.query(
+        `UPDATE orders SET updated_at = NOW() - INTERVAL '90 minutes' WHERE order_id = $1`,
+        [orderId]
+      );
+    } finally {
+      await pool.query('ALTER TABLE orders ENABLE TRIGGER update_orders_updated_at');
+    }
 
     const maintenance = await commerce.runCommerceMaintenance();
 
