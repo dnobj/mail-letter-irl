@@ -159,9 +159,12 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
   it('grants exactly once for a single delivery, as the baseline', async () => {
     const { userId, orderId, sessionId } = await seedPendingPackOrder();
 
+    // The whole shape, not a subset: `status` is what the webhook handler
+    // reports back to Stripe, and a grant that silently stopped short of
+    // fulfilled would still satisfy an assertion on `duplicate` alone.
     await expect(
       commerce.processStripeWebhookEvent(paidEvent({ eventId: `evt_${sessionId}`, sessionId }) as never)
-    ).resolves.toEqual({ duplicate: false });
+    ).resolves.toEqual({ duplicate: false, orderId, status: 'fulfilled' });
 
     expect(await purchaseLedgerRows(orderId)).toBe(1);
     expect(await totalCreditsRemaining(userId)).toBe(PACK_CREDITS);
@@ -173,7 +176,9 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
     const event = paidEvent({ eventId: `evt_${sessionId}`, sessionId });
 
     await expect(commerce.processStripeWebhookEvent(event as never)).resolves.toEqual({
-      duplicate: false
+      duplicate: false,
+      orderId,
+      status: 'fulfilled'
     });
     // Stripe redelivers on any non-2xx, and on its own retry schedule for days.
     await expect(commerce.processStripeWebhookEvent(event as never)).resolves.toEqual({
