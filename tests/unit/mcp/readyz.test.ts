@@ -55,7 +55,7 @@ beforeEach(() => {
 const READY_DEV: NodeJS.ProcessEnv = {
   NODE_ENV: 'production', // deployed development runs NODE_ENV=production
   LETTER_IRL_DEPLOYMENT_ENVIRONMENT: 'development',
-  DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+  DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
   STRIPE_SECRET_KEY: 'sk_test_readyz_fixture',
   STRIPE_WEBHOOK_SECRET: 'whsec_readyz_fixture'
 };
@@ -63,7 +63,7 @@ const READY_DEV: NodeJS.ProcessEnv = {
 const READY_PROD: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
   LETTER_IRL_DEPLOYMENT_ENVIRONMENT: 'production',
-  DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+  DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
   STRIPE_SECRET_KEY: 'sk_live_readyz_fixture',
   STRIPE_WEBHOOK_SECRET: 'whsec_readyz_fixture',
   STRIPE_PRICE_STARTER: 'price_starter_readyz',

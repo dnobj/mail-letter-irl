@@ -106,7 +106,7 @@ For full address validation support:
 3. **Update .env:**
    ```bash
    # Current Print & Mail API key (keep as-is)
-   LETTER_PROVIDER_API_KEY=test_sk_ertXEPkwdcvuubGby49cKC
+   LETTER_PROVIDER_API_KEY=test_sk_REPLACE_WITH_YOUR_POSTGRID_TEST_KEY
 
    # NEW: Address Verification API key
    POSTGRID_ADDRESS_VERIFICATION_API_KEY=test_addver_YOUR_KEY_HERE

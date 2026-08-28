@@ -26,6 +26,7 @@ import {
   normalizedCurrency,
   packCurrency
 } from './products.js';
+import { isDebugEnabled } from '../utils/debug.js';
 
 export type DeploymentMode = 'production' | 'development' | 'test';
 
@@ -825,6 +826,128 @@ function validatePlaceholders(env: NodeJS.ProcessEnv, findings: ConfigFinding[])
   }
 }
 
+/**
+ * What TLS a DATABASE_URL will actually get (#157).
+ *
+ * The obvious reading of `src/db/index.ts` was that production ran without
+ * certificate verification, because it passed
+ *
+ *   ssl: NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined
+ *
+ * That line was DEAD CODE, and the conclusion drawn from it was wrong.
+ * node-postgres merges a parsed connection string OVER the explicit config -
+ * `Object.assign({}, config, parse(config.connectionString))` in
+ * pg/lib/connection-parameters.js - so whenever the URL carries an `sslmode`
+ * parameter, whatever `ssl` the caller passed is discarded. Verified against
+ * pg 8.16.3: with a Neon URL, `rejectUnauthorized` true, false and undefined
+ * all produce exactly the same effective config.
+ *
+ * And that effective config is `{}`. pg-connection-string only applies libpq's
+ * semantics - where `require` means "encrypt but do not verify" - when
+ * `uselibpqcompat` is set. It is not set here, so `sslmode=require` falls
+ * through its switch unchanged, leaving `ssl = {}`. pg then hands that to
+ * tls.connect adding only `servername`, and Node defaults `rejectUnauthorized`
+ * to true. So production HAS been verifying certificates, including the
+ * hostname, all along.
+ *
+ * Which makes this a latent fault rather than an open one, and changes what
+ * needs fixing. Two things silently turn verification off:
+ *
+ *   1. A DATABASE_URL with NO sslmode parameter. Then pg never sets ssl from
+ *      the string, the explicit option DOES apply, and in production that
+ *      option said `rejectUnauthorized: false`. The fallback case - the one
+ *      where an operator pastes a bare URL - was the one case that skipped
+ *      verification. That option is now deleted.
+ *   2. `uselibpqcompat=true` in the URL, which switches `require` and `prefer`
+ *      to libpq's unverified meaning. The option exists in pg today and is
+ *      where the library is heading, so a future default flip would silently
+ *      disable verification on a URL nobody edited.
+ *
+ * Hence a check rather than a setting: the safe state is already the default,
+ * and what it needs is something that notices when it stops being.
+ */
+export interface DatabaseTlsPosture {
+  /** Whether the connection will be encrypted at all. */
+  encrypted: boolean;
+  /** Whether the server certificate and hostname will be verified. */
+  verified: boolean;
+  /** Present when the URL could not be parsed. */
+  unparseable?: boolean;
+  /** Short explanation, for the finding message. */
+  detail: string;
+}
+
+/**
+ * Mirrors pg-connection-string's NON-libpq branch, which is the one this
+ * process runs. Kept deliberately close to that switch so the two can be
+ * compared line by line if pg's behaviour ever changes.
+ */
+export function databaseTlsPosture(connectionString?: string): DatabaseTlsPosture {
+  if (!connectionString) {
+    return { encrypted: false, verified: false, detail: 'no DATABASE_URL is set' };
+  }
+
+  let params: URLSearchParams;
+  try {
+    params = new URL(connectionString).searchParams;
+  } catch {
+    // A warning, not an error. pg accepts connection strings the WHATWG URL
+    // parser rejects, and refusing to boot over a URL that works would be a
+    // fresh way for production to fail on its own strictness.
+    return {
+      encrypted: false,
+      verified: false,
+      unparseable: true,
+      detail: 'DATABASE_URL could not be parsed, so its TLS mode is unknown'
+    };
+  }
+
+  const sslmode = params.get('sslmode');
+  const libpqCompat = (params.get('uselibpqcompat') || '').toLowerCase() === 'true';
+
+  if (!sslmode) {
+    // pg leaves ssl unset, which for a deployed database means plaintext.
+    return {
+      encrypted: false,
+      verified: false,
+      detail: 'DATABASE_URL sets no sslmode, so the connection is not encrypted'
+    };
+  }
+
+  if (sslmode === 'disable') {
+    return { encrypted: false, verified: false, detail: 'sslmode=disable turns TLS off' };
+  }
+
+  if (sslmode === 'no-verify') {
+    return {
+      encrypted: true,
+      verified: false,
+      detail: 'sslmode=no-verify encrypts but does not check the certificate'
+    };
+  }
+
+  if (libpqCompat && (sslmode === 'require' || sslmode === 'prefer')) {
+    return {
+      encrypted: true,
+      verified: false,
+      detail:
+        'uselibpqcompat=true gives sslmode=' + sslmode + ' its libpq meaning, which skips verification'
+    };
+  }
+
+  if (sslmode === 'prefer') {
+    // Encrypted and verified as pg behaves today, but the name promises a
+    // silent downgrade to plaintext and libpq compat would make it unverified.
+    return {
+      encrypted: true,
+      verified: true,
+      detail: 'sslmode=prefer verifies today, but its name allows a downgrade'
+    };
+  }
+
+  return { encrypted: true, verified: true, detail: 'sslmode=' + sslmode + ' verifies the certificate' };
+}
+
 export function validateDeploymentConfig(
   env: NodeJS.ProcessEnv = process.env,
   surface: ValidationSurface = 'server'
@@ -947,6 +1070,66 @@ export function validateDeploymentConfig(
         message:
           'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT is not enabled; OAuth configuration is not strictly validated at boot'
       });
+    }
+  }
+
+  if (production) {
+    // Both surfaces connect to the database, so this is NOT gated on
+    // surface === 'server' the way the HTTP allowlists are.
+    const tls = databaseTlsPosture(env.DATABASE_URL);
+    if (tls.unparseable) {
+      findings.push({
+        severity: 'warning',
+        rule: 'database.tls_unknown',
+        message: tls.detail
+      });
+    } else if (!tls.encrypted) {
+      findings.push({
+        severity: 'error',
+        rule: 'database.tls_required',
+        message: tls.detail + '; production carries customer content and must use TLS'
+      });
+    } else if (!tls.verified) {
+      findings.push({
+        severity: 'error',
+        rule: 'database.tls_verification_required',
+        message:
+          tls.detail + '; an unverified connection cannot tell the real database from an impostor'
+      });
+    }
+  }
+
+  if (production) {
+    // Debug flags, graduated by what each actually exposes rather than by the
+    // word "debug" (#157).
+    //
+    // DEBUG is an ERROR because it does not merely add logging: it un-404s
+    // /debug/widgets, an UNAUTHENTICATED route that answers with
+    // Access-Control-Allow-Origin: * and discloses the widget directory,
+    // process.cwd() and absolute container paths. A route that should not
+    // exist in production is not a verbosity setting, and unsetting the
+    // variable fixes it in seconds.
+    if (isDebugEnabled(env.DEBUG)) {
+      findings.push({
+        severity: 'error',
+        rule: 'debug.enabled_in_production',
+        message:
+          'DEBUG is enabled, which serves the unauthenticated /debug/widgets route and discloses container paths'
+      });
+    }
+
+    // These two only widen log records - counts and image parameter shapes, no
+    // letter content - so they warn. Worth reporting because nothing else
+    // would: neither appears in ENV_VAR_MANIFEST, so the cutover preflight
+    // cannot see them either way.
+    for (const name of ['DEBUG_CONTENT', 'DEBUG_IMAGE'] as const) {
+      if (env[name] === 'true') {
+        findings.push({
+          severity: 'warning',
+          rule: 'debug.verbose_logging_in_production',
+          message: name + ' is enabled in production, which widens what reaches the logs'
+        });
+      }
     }
   }
 
