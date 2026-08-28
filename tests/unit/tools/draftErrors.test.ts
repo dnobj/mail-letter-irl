@@ -9,7 +9,7 @@ import {
 /**
  * The send surface's redaction guarantee, made exhaustive (#179).
  *
- * mailSendService throws fifteen distinct codes through draftError(), and the
+ * mailSendService throws sixteen distinct codes through draftError(), and the
  * formatter branched on eight. The tail was `return error instanceof Error ?
  * error : ...`, so the other seven forwarded the service's own message
  * verbatim - and those messages interpolate draft ids, order ids and raw
@@ -42,7 +42,7 @@ describe('draft error coverage', () => {
   it('finds the codes it is guarding', () => {
     // If draftError() is renamed or the call shape changes, fail loudly rather
     // than silently guard an empty list.
-    expect(codesThrownByService().length).toBeGreaterThanOrEqual(15);
+    expect(codesThrownByService().length).toBeGreaterThanOrEqual(16);
   });
 
   it('handles every code the service throws', () => {

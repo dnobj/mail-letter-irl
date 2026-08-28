@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   deductCredits: vi.fn(),
@@ -273,5 +273,84 @@ describe('createMailOrderFromDraft', () => {
     ).rejects.toMatchObject({ code: 'DRAFT_CHECKOUT_PENDING' });
     expect(deductCredits).not.toHaveBeenCalled();
     expect(createOutboxJob).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The beta cohort gate (#179), and the one place it must NOT apply.
+   *
+   * The exemption is the interesting half. This function runs during Pay & Send
+   * FULFILMENT, after Stripe has already charged the customer, so a refusal
+   * here would take the money and withhold the send in the same transaction -
+   * leaving funds stranded and needing a refund. Pay & Send is gated earlier,
+   * in createJitCheckout, before any charge exists. Exactly the reasoning the
+   * sends_blocked check beside it already uses.
+   */
+  describe('the beta cohort gate', () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    const gateUp = () => {
+      vi.stubEnv('LETTER_IRL_BETA_GATE_ENABLED', 'true');
+      vi.stubEnv('LETTER_IRL_BETA_ALLOWED_SUBJECTS', 'auth0|admitted');
+      vi.stubEnv('LETTER_IRL_ADMIN_USER_IDS', '');
+    };
+
+    it('refuses a prepaid send from a subject outside the cohort', async () => {
+      gateUp();
+      await expect(
+        createMailOrderFromDraft({
+          draftId: 'draft-1',
+          userId: 'user-1',
+          mailType: 'letter'
+        })
+      ).rejects.toMatchObject({ code: 'BETA_ACCESS_DENIED' });
+      // No money moved and nothing was queued for the printer.
+      expect(deductCredits).not.toHaveBeenCalled();
+      expect(createOutboxJob).not.toHaveBeenCalled();
+    });
+
+    it('EXEMPTS jit_order funding, because the customer has already been charged', async () => {
+      gateUp();
+      commerceOrder = {
+        order_id: 'order-jit',
+        order_type: 'jit_mail',
+        user_id: 'user-1',
+        draft_id: 'draft-1',
+        status: 'paid'
+      };
+
+      // user-1 is NOT in the cohort, and this still goes through. Refusing
+      // would strand a real payment.
+      await createMailOrderFromDraft({
+        draftId: 'draft-1',
+        userId: 'user-1',
+        mailType: 'letter',
+        funding: { type: 'jit_order', orderId: 'order-jit' }
+      });
+
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets an admitted subject send on prepaid balance', async () => {
+      gateUp();
+      draft.user_id = 'auth0|admitted';
+
+      await createMailOrderFromDraft({
+        draftId: 'draft-1',
+        userId: 'auth0|admitted',
+        mailType: 'letter'
+      });
+
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('stands aside entirely while the gate is down', async () => {
+      vi.stubEnv('LETTER_IRL_BETA_GATE_ENABLED', 'false');
+      await createMailOrderFromDraft({
+        draftId: 'draft-1',
+        userId: 'user-1',
+        mailType: 'letter'
+      });
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
   });
 });

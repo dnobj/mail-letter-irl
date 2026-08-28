@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { transaction } from '../db/index.js';
 import { deductCreditsFromLedgerWithClient } from './creditLedgerService.js';
+import { isBetaAccessAllowed, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
 import { createLetterJobWithClient } from './letterJobService.js';
 import type { Letter, LetterDraft, LetterJob, Order, PostcardDraft } from './types.js';
 
@@ -140,6 +141,15 @@ export async function createMailOrderFromDraftWithClient(
   // Send is blocked earlier instead, in createJitCheckout, before any charge
   // exists. Prepaid sends have no such problem: no money moves at this point.
   if (funding.type !== 'jit_order') {
+    // Inside the same exemption, for the same reason spelled out above: this
+    // function runs during Pay & Send FULFILMENT, after Stripe has charged the
+    // customer, so refusing here would take the money and withhold the send.
+    // Pay & Send is gated earlier, in createJitCheckout, before any charge.
+    //
+    // Checked before the query because it needs no database round trip.
+    if (!isBetaAccessAllowed(params.userId)) {
+      throw draftError('BETA_ACCESS_DENIED', BETA_ACCESS_MESSAGE);
+    }
     const blockResult = await client.query<{ sends_blocked_reason: string | null }>(
       'SELECT sends_blocked_reason FROM users WHERE user_id = $1',
       [params.userId]

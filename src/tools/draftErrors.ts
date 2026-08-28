@@ -26,6 +26,8 @@
  * replace a useful message with a shrug.
  */
 
+import { BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
+
 export type DraftMailType = 'letter' | 'postcard';
 
 /**
@@ -37,6 +39,7 @@ export type DraftMailType = 'letter' | 'postcard';
  */
 export const HANDLED_DRAFT_ERROR_CODES = [
   'ACCOUNT_SENDS_BLOCKED',
+  'BETA_ACCESS_DENIED',
   'DRAFT_CANCELLED',
   'DRAFT_CHECKOUT_PENDING',
   'DRAFT_EXPIRED',
@@ -69,6 +72,13 @@ export function friendlyDraftError(
   // checkout surface (#278 round 13). Kept first so it can never be shadowed.
   if (code === 'ACCOUNT_SENDS_BLOCKED') {
     return new Error('Sending is disabled on this account. Please contact support.');
+  }
+
+  // Already a fixed, server-authored, customer-appropriate string - but it
+  // gets an explicit branch rather than relying on the no-code passthrough, so
+  // the exhaustiveness test covers it like every other code.
+  if (code === 'BETA_ACCESS_DENIED') {
+    return new Error(BETA_ACCESS_MESSAGE);
   }
 
   if (code === 'DRAFT_NOT_FOUND') {

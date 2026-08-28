@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type Stripe from 'stripe';
 import { query, transaction } from '../db/index.js';
+import { assertBetaAccess } from '../auth/betaAccess.js';
 import {
   describeUnpriced,
   ensurePriceCatalog,
@@ -588,6 +589,9 @@ export function assertConfiguredAmount(
 export async function createPackCheckout(
   params: CreatePackCheckoutParams
 ): Promise<CommerceCheckoutResult> {
+  // Before the catalog work and long before Stripe. A refused account must not
+  // be charged, and must not cost us a Stripe API call to find that out.
+  assertBetaAccess(params.userId);
   // Prices resolve lazily (#275 stage A); every entrypoint that can reach a
   // product config awaits this first, so no process needs a bootstrap call.
   await ensurePriceCatalog(params.productId);
@@ -864,6 +868,11 @@ export async function createJitCheckout(
       code: 'JIT_DISABLED'
     });
   }
+
+  // Same placement rationale as the sends_blocked check below: refuse BEFORE
+  // any charge exists. Blocking during fulfilment would strand the customer's
+  // money.
+  assertBetaAccess(params.userId);
   // Issue #150: refuse a restricted account BEFORE taking payment.
   //
   // The send-path block in mailSendService deliberately exempts jit_order

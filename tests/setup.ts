@@ -17,6 +17,17 @@ dotenv.config({ path: '.env.test' });
 process.env.NODE_ENV = 'test';
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://localhost/letterirl_test';
 
+// The limited-beta gate (#179) is ON when unset, by design: an unconfigured
+// production must be guarded, not open. That default would refuse every
+// fixture user in this suite, so the test environment matches local
+// development and .env.example, both of which set it false.
+//
+// Set with the same || idiom as the line above, so a test that WANTS the gate
+// up can still override it - and several do, either by handing the betaAccess
+// helpers an explicit env object or with vi.stubEnv.
+process.env.LETTER_IRL_BETA_GATE_ENABLED =
+  process.env.LETTER_IRL_BETA_GATE_ENABLED || 'false';
+
 // Mock console.log in tests to reduce noise (optional - comment out to see logs)
 // vi.spyOn(console, 'log').mockImplementation(() => {});
 

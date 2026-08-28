@@ -199,6 +199,10 @@ describe('configuration is read per call', () => {
     // adminAuth.ts captures its id list at module load. If this module ever
     // did the same, a test would need a fresh import to see a change - and an
     // operator would need a redeploy where they expected a restart.
+    // tests/setup.ts defaults the gate OFF for the suite, so this case has to
+    // raise it explicitly - otherwise it would assert nothing.
+    process.env.LETTER_IRL_BETA_GATE_ENABLED = 'true';
+    process.env.LETTER_IRL_ADMIN_USER_IDS = '';
     process.env.LETTER_IRL_BETA_ALLOWED_SUBJECTS = '';
     expect(isBetaAccessAllowed(SUBJECT)).toBe(false);
 
