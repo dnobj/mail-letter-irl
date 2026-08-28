@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   deductCredits: vi.fn(),
@@ -13,6 +13,10 @@ let draft: DraftState;
 let savedLetter: Record<string, any> | null;
 let commerceOrder: Record<string, any> | null;
 let activeCheckout = false;
+// Today's letter counts, for the daily caps (#179). Defaults of 0 keep every
+// pre-existing test on the "well under the ceiling" path.
+let lettersTodayForUser = 0;
+let lettersTodayGlobal = 0;
 let transactionChain: Promise<unknown>;
 
 const client = {
@@ -62,6 +66,12 @@ const client = {
         : null;
       return { rows: commerceOrder ? [{ ...commerceOrder }] : [] };
     }
+    if (sql.includes('COUNT(*) AS count') && sql.includes('FROM letters')) {
+      // The caps FAIL CLOSED, so an unanswered COUNT is a refusal rather than
+      // a pass - which is why this branch has to exist at all.
+      const scoped = sql.includes('user_id = $1');
+      return { rows: [{ count: String(scoped ? lettersTodayForUser : lettersTodayGlobal) }] };
+    }
     return { rows: [] };
   })
 };
@@ -100,6 +110,8 @@ describe('createMailOrderFromDraft', () => {
     savedLetter = null;
     commerceOrder = null;
     activeCheckout = false;
+    lettersTodayForUser = 0;
+    lettersTodayGlobal = 0;
     draft = {
       draft_id: 'draft-1',
       user_id: 'user-1',
@@ -273,5 +285,179 @@ describe('createMailOrderFromDraft', () => {
     ).rejects.toMatchObject({ code: 'DRAFT_CHECKOUT_PENDING' });
     expect(deductCredits).not.toHaveBeenCalled();
     expect(createOutboxJob).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The beta cohort gate (#179), and the one place it must NOT apply.
+   *
+   * The exemption is the interesting half. This function runs during Pay & Send
+   * FULFILMENT, after Stripe has already charged the customer, so a refusal
+   * here would take the money and withhold the send in the same transaction -
+   * leaving funds stranded and needing a refund. Pay & Send is gated earlier,
+   * in createJitCheckout, before any charge exists. Exactly the reasoning the
+   * sends_blocked check beside it already uses.
+   */
+  describe('the beta cohort gate', () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    const gateUp = () => {
+      vi.stubEnv('LETTER_IRL_BETA_GATE_ENABLED', 'true');
+      vi.stubEnv('LETTER_IRL_BETA_ALLOWED_SUBJECTS', 'auth0|admitted');
+      vi.stubEnv('LETTER_IRL_ADMIN_USER_IDS', '');
+    };
+
+    it('refuses a prepaid send from a subject outside the cohort', async () => {
+      gateUp();
+      await expect(
+        createMailOrderFromDraft({
+          draftId: 'draft-1',
+          userId: 'user-1',
+          mailType: 'letter'
+        })
+      ).rejects.toMatchObject({ code: 'BETA_ACCESS_DENIED' });
+      // No money moved and nothing was queued for the printer.
+      expect(deductCredits).not.toHaveBeenCalled();
+      expect(createOutboxJob).not.toHaveBeenCalled();
+    });
+
+    it('EXEMPTS jit_order funding, because the customer has already been charged', async () => {
+      gateUp();
+      commerceOrder = {
+        order_id: 'order-jit',
+        order_type: 'jit_mail',
+        user_id: 'user-1',
+        draft_id: 'draft-1',
+        status: 'paid'
+      };
+
+      // user-1 is NOT in the cohort, and this still goes through. Refusing
+      // would strand a real payment.
+      await createMailOrderFromDraft({
+        draftId: 'draft-1',
+        userId: 'user-1',
+        mailType: 'letter',
+        funding: { type: 'jit_order', orderId: 'order-jit' }
+      });
+
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets an admitted subject send on prepaid balance', async () => {
+      gateUp();
+      draft.user_id = 'auth0|admitted';
+
+      await createMailOrderFromDraft({
+        draftId: 'draft-1',
+        userId: 'auth0|admitted',
+        mailType: 'letter'
+      });
+
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('stands aside entirely while the gate is down', async () => {
+      vi.stubEnv('LETTER_IRL_BETA_GATE_ENABLED', 'false');
+      await createMailOrderFromDraft({
+        draftId: 'draft-1',
+        userId: 'user-1',
+        mailType: 'letter'
+      });
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * The daily mail caps (#179).
+   *
+   * The check runs AFTER deductCreditsFromLedgerWithClient, because that call
+   * has already taken users FOR UPDATE and the per-account count needs to be
+   * serialised. So the credit really is deducted before the refusal - and the
+   * only thing that gives it back is the transaction rolling back. That is the
+   * property worth asserting, not merely that it threw.
+   */
+  describe('the daily mail caps', () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it('refuses over the per-account cap and rolls the deduction back', async () => {
+      vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP', '3');
+      lettersTodayForUser = 4; // includes the row this send inserted
+
+      await expect(
+        createMailOrderFromDraft({
+          draftId: 'draft-1',
+          userId: 'user-1',
+          mailType: 'letter'
+        })
+      ).rejects.toMatchObject({ code: 'ACCOUNT_DAILY_MAIL_CAP' });
+
+      // The deduction DID happen - the check deliberately sits after it - and
+      // the rollback is what undoes it.
+      expect(deductCredits).toHaveBeenCalledTimes(1);
+      // Nothing reached the printer, and the draft is spendable again.
+      expect(createOutboxJob).not.toHaveBeenCalled();
+      expect(draft.status).toBe('pending');
+      expect(savedLetter).toBeNull();
+    });
+
+    it('refuses over the global ceiling', async () => {
+      vi.stubEnv('LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING', '25');
+      lettersTodayGlobal = 26;
+
+      await expect(
+        createMailOrderFromDraft({
+          draftId: 'draft-1',
+          userId: 'user-1',
+          mailType: 'letter'
+        })
+      ).rejects.toMatchObject({ code: 'GLOBAL_DAILY_MAIL_CEILING' });
+      expect(createOutboxJob).not.toHaveBeenCalled();
+    });
+
+    it('stops on the kill switch', async () => {
+      vi.stubEnv('LETTER_IRL_MAIL_SENDING_ENABLED', 'false');
+      await expect(
+        createMailOrderFromDraft({
+          draftId: 'draft-1',
+          userId: 'user-1',
+          mailType: 'letter'
+        })
+      ).rejects.toMatchObject({ code: 'MAIL_SENDING_DISABLED' });
+      expect(createOutboxJob).not.toHaveBeenCalled();
+    });
+
+    it('EXEMPTS jit_order funding from the caps as well as the gate', async () => {
+      // The customer has already been charged. A ceiling reached between their
+      // payment and their fulfilment must not strand their money - Pay & Send
+      // is capped in createJitCheckout instead, before the charge.
+      vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP', '0');
+      vi.stubEnv('LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING', '0');
+      lettersTodayForUser = 99;
+      lettersTodayGlobal = 99;
+      commerceOrder = {
+        order_id: 'order-jit',
+        order_type: 'jit_mail',
+        user_id: 'user-1',
+        draft_id: 'draft-1',
+        status: 'paid'
+      };
+
+      await createMailOrderFromDraft({
+        draftId: 'draft-1',
+        userId: 'user-1',
+        mailType: 'letter',
+        funding: { type: 'jit_order', orderId: 'order-jit' }
+      });
+
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets an ordinary send through well under the caps', async () => {
+      await createMailOrderFromDraft({
+        draftId: 'draft-1',
+        userId: 'user-1',
+        mailType: 'letter'
+      });
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
   });
 });

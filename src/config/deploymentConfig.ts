@@ -344,6 +344,110 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     secret: true,
     services: ['api', 'maintenance'],
     checkedBy: 'bucket.config_required'
+  },
+  /**
+   * Limited beta: cohort gate and spend ceilings (#179).
+   *
+   * Every entry here is ADVISORY and owned by no rule. All six have working
+   * defaults in src/auth/betaAccess.ts, so none of them should ever stop a
+   * deployment from booting - they are listed because the preflight's name
+   * diff is the only thing that can tell an operator "production and
+   * development disagree about who is admitted", and it can only report names
+   * the manifest carries. An unlisted access-control variable is the same
+   * blindness that let the two HTTP allowlists diverge unnoticed.
+   *
+   * services: ['api'] throughout. The maintenance cron authenticates nobody
+   * and sends no mail of its own, so demanding these of it would be asking for
+   * variables that service cannot use.
+   */
+  {
+    name: 'LETTER_IRL_BETA_GATE_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    /**
+     * Not new, and previously listed nowhere - which is the problem. It has
+     * always chosen who reaches /api/admin, and since the beta gate unions it
+     * into the admitted cohort it now grants access to the whole app. A
+     * variable carrying that much authority was invisible to the preflight's
+     * name diff, so nothing could report that production and development
+     * disagree about who the operators are.
+     *
+     * Not secret: a subject identifies an account but authenticates nothing,
+     * and marking it secret would enrol it in the placeholder scan, which
+     * hunts fake credentials.
+     */
+    name: 'LETTER_IRL_ADMIN_USER_IDS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    // The invite list, as Auth0 subjects. Not secret: a subject identifies an
+    // account but authenticates nothing, and marking it secret would put it in
+    // the placeholder scan, which looks for fake CREDENTIALS.
+    name: 'LETTER_IRL_BETA_ALLOWED_SUBJECTS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_MAIL_SENDING_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * Image generation, which is NOT new - and that is the point.
+   *
+   * LETTER_IRL_IMAGE_GEN_MODE defaults to "on", but generateImageForMail.ts
+   * short-circuits on a missing OPENAI_API_KEY BEFORE the mode is ever read,
+   * so production has been silently degrading every request to the free
+   * redirect card. That is a fine state for a beta and nobody chose it:
+   * neither variable appeared in this manifest, so the preflight reported full
+   * parity while the paid path was quietly unavailable. Listing them does not
+   * turn the feature on; it makes its absence something an operator can see.
+   */
+  {
+    name: 'OPENAI_API_KEY',
+    requiredIn: 'production',
+    advisory: true,
+    secret: true,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_IMAGE_GEN_MODE',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
   }
 ];
 
@@ -862,6 +966,16 @@ export function validateDeploymentConfig(
   const service = surface === 'maintenance' ? 'maintenance' : 'api';
   for (const entry of ENV_VAR_MANIFEST) {
     if (entry.checkedBy) continue;
+    // Advisory entries are skipped too, because that is what the flag has
+    // always claimed to mean: "listed so the cutover preflight can DIFF it,
+    // but absence is not a failure - the code has a working default". The
+    // boot loop never read the flag, so an advisory entry with no owning
+    // rule would still have refused to start. That was invisible only
+    // because both existing advisory entries also carry checkedBy and were
+    // already skipped by the line above - so this changes NOTHING today and
+    // stops the next advisory entry from becoming a fresh way for
+    // production to refuse to boot (#278 round 3, in a new place).
+    if (entry.advisory) continue;
     if (!entry.services.includes(service)) continue;
     if (entry.requiredIn === 'production' && !production) continue;
     // Symmetric to the line above. Without it a development-only entry would

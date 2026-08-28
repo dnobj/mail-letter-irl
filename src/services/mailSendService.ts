@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { transaction } from '../db/index.js';
 import { deductCreditsFromLedgerWithClient } from './creditLedgerService.js';
+import { isBetaAccessAllowed, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
+import { assertMailWithinDailyCaps } from './betaSpendLimits.js';
 import { createLetterJobWithClient } from './letterJobService.js';
 import type { Letter, LetterDraft, LetterJob, Order, PostcardDraft } from './types.js';
 
@@ -140,6 +142,15 @@ export async function createMailOrderFromDraftWithClient(
   // Send is blocked earlier instead, in createJitCheckout, before any charge
   // exists. Prepaid sends have no such problem: no money moves at this point.
   if (funding.type !== 'jit_order') {
+    // Inside the same exemption, for the same reason spelled out above: this
+    // function runs during Pay & Send FULFILMENT, after Stripe has charged the
+    // customer, so refusing here would take the money and withhold the send.
+    // Pay & Send is gated earlier, in createJitCheckout, before any charge.
+    //
+    // Checked before the query because it needs no database round trip.
+    if (!isBetaAccessAllowed(params.userId)) {
+      throw draftError('BETA_ACCESS_DENIED', BETA_ACCESS_MESSAGE);
+    }
     const blockResult = await client.query<{ sends_blocked_reason: string | null }>(
       'SELECT sends_blocked_reason FROM users WHERE user_id = $1',
       [params.userId]
@@ -240,6 +251,22 @@ export async function createMailOrderFromDraftWithClient(
       description: `${params.mailType === 'postcard' ? 'Postcard' : 'Letter'} to ${String(draft.recipient.name || 'recipient')}`
     });
     creditsRemaining = deduction.user.credits;
+
+    // AFTER the deduction, on purpose: deductCreditsFromLedgerWithClient has
+    // already taken users FOR UPDATE, so the per-account count is serialised
+    // for free. Taking that lock earlier to serialise this check would give
+    // users -> orders here while the refund paths go orders -> letters ->
+    // users: opposite order, same objects, a real deadlock.
+    //
+    // inFlight is 0 because the letters row was inserted above, so the count
+    // already includes this send. A throw rolls the whole transaction back,
+    // deduction included.
+    //
+    // Prepaid only. jit_order funding is exempt for the reason spelled out at
+    // the send-block guard: this runs after Stripe has charged the customer,
+    // and refusing here would strand their money. Pay & Send is capped in
+    // createJitCheckout instead, before any charge exists.
+    await assertMailWithinDailyCaps(client, params.userId, 0);
   } else {
     creditsRemaining = await loadCreditsRemaining(client, params.userId);
   }
