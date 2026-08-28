@@ -11,7 +11,11 @@ import { getUser } from '../services/userService.js';
 import { validatePromoCode, redeemPromoCode, getUserRedemptions } from '../services/promoService.js';
 import { getLedgerEntries } from '../services/creditLedgerService.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
-import { authenticateRestRequest, type RestAuthInfo as AuthInfo } from './middleware/restAuth.js';
+import {
+  authenticateRestRequest,
+  restAuthErrorLabel,
+  type RestAuthInfo as AuthInfo
+} from './middleware/restAuth.js';
 
 /**
  * Send JSON response
@@ -39,7 +43,10 @@ export async function handleCreditApiRequest(
   // Authenticate request
   const auth = await authenticateRestRequest(req);
   if (!auth.ok) {
-    sendJson(res, 401, { error: 'Unauthorized', message: auth.message });
+    // Status comes from the auth layer: 401 rejected, 403 not admitted,
+    // 503 server not configured. Hardcoding 401 told a refused beta user to
+    // authenticate again, which succeeds and is refused again.
+    sendJson(res, auth.status, { error: restAuthErrorLabel(auth.status), message: auth.message });
     return true;
   }
   const authInfo = auth.user;

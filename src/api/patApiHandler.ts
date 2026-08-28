@@ -14,6 +14,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
 import { validateAuthorizationHeader, type AuthenticatedUser } from '../auth/tokenValidator.js';
+import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
 import { createToken, listTokens, revokeToken } from '../services/patService.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
@@ -62,7 +63,16 @@ export async function handlePATApiRequest(
   let authInfo: AuthenticatedUser;
   try {
     authInfo = await validateAuthorizationHeader(req.headers.authorization);
-  } catch {
+  } catch (error) {
+    // A refused beta account authenticated correctly, so it gets 403 and no
+    // invitation to retry.
+    if (error instanceof BetaAccessDeniedError) {
+      sendJson(res, 403, {
+        error: 'Forbidden',
+        message: BETA_ACCESS_MESSAGE,
+      });
+      return true;
+    }
     sendJson(res, 401, {
       error: 'Unauthorized',
       message: 'Authentication failed',

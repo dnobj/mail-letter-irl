@@ -22,6 +22,7 @@ import http from 'node:http';
 import { AuthenticatedUser } from '../../services/types.js';
 import { parseCookies } from '../../utils/cookies.js';
 import { validateJWTToken } from '../../auth/tokenValidator.js';
+import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../auth/betaAccess.js';
 
 function respond(res: http.ServerResponse | undefined, statusCode: number, body: Record<string, unknown>): void {
   if (!res) return;
@@ -68,6 +69,13 @@ export async function authenticateHttpRequest(
       email: typeof user.claims.email === 'string' ? user.claims.email : undefined
     };
   } catch (error: unknown) {
+    // Not an authentication failure: the token was good and the account is
+    // simply not admitted. 401 here would send the caller back to Auth0 to
+    // succeed and be refused again.
+    if (error instanceof BetaAccessDeniedError) {
+      respond(res, 403, { error: BETA_ACCESS_MESSAGE });
+      return null;
+    }
     // validateJWTToken already emitted the structured diagnostic.
     const message = error instanceof Error ? error.message : '';
     if (message === 'OAuth validation not configured') {
