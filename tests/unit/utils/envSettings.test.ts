@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { enabledUnlessDisabled, positiveIntegerSetting } from '../../../src/utils/envSettings.js';
+import {
+  enabledUnlessDisabled,
+  onUnlessExplicitlyDisabled,
+  positiveIntegerSetting
+} from '../../../src/utils/envSettings.js';
 
 /**
  * These exist because the shape they replace was a live, catastrophic bug on
@@ -116,4 +120,55 @@ describe('retentionEnforces', () => {
       expect(retentionEnforces(env(raw))).toBe(false);
     }
   );
+});
+
+/**
+ * The access-gate polarity (#179).
+ *
+ * enabledUnlessDisabled was the obvious helper to reach for and is the wrong
+ * one: it returns false for anything it does not recognise, so
+ * LETTER_IRL_BETA_GATE_ENABLED=fasle would have DISABLED the beta gate and
+ * opened production to everyone. Correct for a kill switch, backwards for a
+ * guard.
+ */
+describe('onUnlessExplicitlyDisabled', () => {
+  const env = (value: string | undefined) =>
+    (value === undefined ? {} : { FLAG: value }) as NodeJS.ProcessEnv;
+
+  it('is on when unset, so an unconfigured deployment is guarded, not open', () => {
+    expect(onUnlessExplicitlyDisabled('FLAG', env(undefined))).toBe(true);
+  });
+
+  it.each(['false', 'FALSE', 'False', '0', 'no', 'off', 'disabled', ' off ', 'ofF '])(
+    'turns off only for the explicit negative %s',
+    raw => {
+      expect(onUnlessExplicitlyDisabled('FLAG', env(raw))).toBe(false);
+    }
+  );
+
+  it.each(['true', '1', 'yes', 'on', 'enabled'])('stays on for %s', raw => {
+    expect(onUnlessExplicitlyDisabled('FLAG', env(raw))).toBe(true);
+  });
+
+  it('STAYS ON for a typo rather than opening the gate', () => {
+    // The reason this function exists. Every one of these is a plausible
+    // mis-keying of "false", and each would have admitted the world.
+    for (const typo of ['fasle', 'flase', 'fales', 'nope', 'disable', 'noo']) {
+      expect(onUnlessExplicitlyDisabled('FLAG', env(typo)), typo).toBe(true);
+    }
+  });
+
+  it('disagrees with enabledUnlessDisabled on exactly the case that matters', () => {
+    // Pinned as a PAIR so the two cannot be quietly unified. They agree when
+    // the value is readable and diverge when it is not, and that divergence is
+    // the entire design: a typo must leave a guard UP and a kill switch DOWN.
+    for (const readable of ['true', 'on', '1', 'false', 'off', '0', undefined]) {
+      expect(
+        onUnlessExplicitlyDisabled('FLAG', env(readable)),
+        `readable value ${String(readable)} should agree`
+      ).toBe(enabledUnlessDisabled('FLAG', env(readable)));
+    }
+    expect(onUnlessExplicitlyDisabled('FLAG', env('fasle'))).toBe(true);
+    expect(enabledUnlessDisabled('FLAG', env('fasle'))).toBe(false);
+  });
 });

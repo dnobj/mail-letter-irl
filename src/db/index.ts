@@ -27,7 +27,26 @@ if (process.env.NODE_ENV === 'production' && !isPooledConnectionString(process.e
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+  // TLS: verify, and never fall back to plaintext.
+  //
+  // node-postgres merges the parsed connection string OVER this config
+  // (Object.assign in pg/lib/connection-parameters.js), so wherever the URL
+  // carries an sslmode this key is DISCARDED - with a Neon URL, true, false
+  // and undefined all resolve identically to {}, which Node then verifies by
+  // default. So for the normal case this line is inert, and the old
+  // `rejectUnauthorized: false` was never what production actually did.
+  //
+  // It is live in exactly one shape: a URL with NO sslmode. There the string
+  // sets nothing, this option applies, and it used to say false - the bare
+  // fallback URL an operator is most likely to paste was the one connection
+  // that skipped verification. Deleting the option outright would be worse
+  // still, dropping that case to plaintext. true is the only value that is
+  // inert where it is ignored and correct where it is not.
+  //
+  // It cannot fix sslmode=no-verify, sslmode=disable or uselibpqcompat=true,
+  // because those come from the URL and win. databaseTlsPosture() in
+  // src/config/deploymentConfig.ts refuses those at boot.
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : undefined,
   max: 5,
   idleTimeoutMillis: 10_000,
   connectionTimeoutMillis: 5_000,

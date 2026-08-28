@@ -20,7 +20,7 @@ import {
 const VALID_PROD: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
   LETTER_IRL_DEPLOYMENT_ENVIRONMENT: 'production',
-  DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+  DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
   STRIPE_SECRET_KEY: 'sk_live_unit_fixture',
   STRIPE_WEBHOOK_SECRET: 'whsec_unit_fixture',
   STRIPE_PRICE_STARTER: 'price_starter_unit_fixture',
@@ -47,7 +47,7 @@ const VALID_PROD: NodeJS.ProcessEnv = {
 const VALID_DEV: NodeJS.ProcessEnv = {
   NODE_ENV: 'production', // deployed development runs NODE_ENV=production
   LETTER_IRL_DEPLOYMENT_ENVIRONMENT: 'development',
-  DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+  DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
   STRIPE_SECRET_KEY: 'sk_test_unit_fixture',
   STRIPE_WEBHOOK_SECRET: 'whsec_unit_fixture'
 };
@@ -377,7 +377,7 @@ describe('validateDeploymentConfig outside production', () => {
   it('skips pack and JIT checks entirely in test mode so unit fixtures stay minimal', () => {
     const testMode: NodeJS.ProcessEnv = {
       NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+      DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
       STRIPE_SECRET_KEY: 'sk_test_unit_fixture',
       STRIPE_WEBHOOK_SECRET: 'whsec_unit_fixture',
       JIT_PURCHASE_ENABLED: 'true' // the legacyAdminRoutes fixture does this with no JIT config
@@ -392,7 +392,7 @@ describe('validateDeploymentConfig outside production', () => {
   it('keeps the local admin mode bootable without any Stripe configuration', () => {
     const adminLocal: NodeJS.ProcessEnv = {
       NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+      DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
       ADMIN_ENABLED: 'true'
     };
     expect(validateDeploymentConfig(adminLocal, 'server').errors).toEqual([]);
@@ -404,7 +404,7 @@ describe('validateDeploymentConfig outside production', () => {
     // exactly the live-key-outside-production scenario (review round 1).
     const adminWithLiveKey: NodeJS.ProcessEnv = {
       NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+      DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
       ADMIN_ENABLED: 'true',
       STRIPE_SECRET_KEY: 'sk_live_unit_fixture'
     };
@@ -510,5 +510,152 @@ describe('ENV_VAR_MANIFEST', () => {
 
   it('approves exactly the providers production may run on', () => {
     expect(APPROVED_LIVE_PROVIDERS).toEqual(['postgrid']);
+  });
+});
+
+/**
+ * Debug flags in production (#157).
+ *
+ * Graduated by what each actually exposes, not by the word "debug". DEBUG
+ * un-404s /debug/widgets - unauthenticated, Access-Control-Allow-Origin: *,
+ * disclosing the widget directory, process.cwd() and absolute container paths.
+ * That is a route that should not exist in production, so it errors.
+ * DEBUG_CONTENT and DEBUG_IMAGE only widen log records (counts and image
+ * parameter shapes, no letter content), so they warn.
+ *
+ * Nothing else would report any of them: none appears in ENV_VAR_MANIFEST, so
+ * the cutover preflight cannot see them in either direction.
+ */
+describe('debug flags in production (#157)', () => {
+  const findings = (overrides: Record<string, string | undefined>) =>
+    validateDeploymentConfig(env(overrides), 'server').findings;
+  const rules = (overrides: Record<string, string | undefined>) =>
+    findings(overrides).map(f => f.rule);
+
+  it('is silent when none is set', () => {
+    expect(rules({})).not.toContain('debug.enabled_in_production');
+    expect(rules({})).not.toContain('debug.verbose_logging_in_production');
+  });
+
+  it.each(['true', '1', 'yes', 'on', 'letter-irl:*', '*'])(
+    'ERRORS for DEBUG=%s, because it serves an unauthenticated route',
+    raw => {
+      // The spellings isDebugEnabled accepts. Testing only 'true' would miss
+      // the namespace forms, which is how a DEBUG=letter-irl:* left over from
+      // an investigation would survive a check.
+      const found = findings({ DEBUG: raw }).find(f => f.rule === 'debug.enabled_in_production');
+      expect(found, `DEBUG=${raw} went unreported`).toBeDefined();
+      expect(found?.severity).toBe('error');
+    }
+  );
+
+  it.each(['false', '0', 'off', 'no', ''])('accepts DEBUG=%s', raw => {
+    expect(rules({ DEBUG: raw })).not.toContain('debug.enabled_in_production');
+  });
+
+  it.each(['DEBUG_CONTENT', 'DEBUG_IMAGE'])('WARNS for %s, which only widens logs', name => {
+    const found = findings({ [name]: 'true' }).find(
+      f => f.rule === 'debug.verbose_logging_in_production'
+    );
+    expect(found).toBeDefined();
+    expect(found?.severity).toBe('warning');
+    // A warning must not stop a boot.
+    expect(validateDeploymentConfig(env({ [name]: 'true' }), 'server').errors).toEqual([]);
+  });
+
+  it('leaves development alone', () => {
+    const dev = validateDeploymentConfig(
+      { ...VALID_DEV, DEBUG: 'true', DEBUG_IMAGE: 'true' },
+      'server'
+    );
+    expect(dev.findings.map(f => f.rule)).not.toContain('debug.enabled_in_production');
+  });
+
+  it('covers the maintenance surface as well', () => {
+    expect(
+      validateDeploymentConfig(env({ DEBUG: 'true' }), 'maintenance').findings.map(f => f.rule)
+    ).toContain('debug.enabled_in_production');
+  });
+});
+
+/**
+ * Advisory entries must never be a new way for production to refuse to start
+ * (#179).
+ *
+ * The manifest's own interface says advisory means "listed so the cutover
+ * preflight can DIFF it, but absence is not a failure - the code has a working
+ * default". The boot loop never actually read the flag; it skipped only on
+ * checkedBy, and both pre-existing advisory entries happened to carry one, so
+ * the gap was invisible. Adding the first advisory entry WITHOUT an owning rule
+ * would have made an unset variable with a perfectly good default stop the
+ * deployment - the #278 round 3 failure, in a new place.
+ */
+describe('advisory manifest entries (#179)', () => {
+  const advisory = ENV_VAR_MANIFEST.filter(entry => entry.advisory);
+
+  it('is guarding something', () => {
+    expect(advisory.length).toBeGreaterThan(0);
+  });
+
+  it('blocks no boot in either mode when every one of them is absent', () => {
+    // The general property, so a future advisory entry is covered without
+    // anyone remembering to extend this file.
+    for (const [label, base] of [
+      ['production', VALID_PROD],
+      ['development', VALID_DEV]
+    ] as const) {
+      const stripped: NodeJS.ProcessEnv = { ...base };
+      for (const entry of advisory) {
+        delete stripped[entry.name];
+        for (const alias of entry.aliases ?? []) delete stripped[alias];
+      }
+      const result = validateDeploymentConfig(stripped, 'server');
+      for (const entry of advisory) {
+        expect(
+          result.errors.join(' | '),
+          `${entry.name} blocked ${label} boot despite being advisory`
+        ).not.toContain(entry.name);
+      }
+    }
+  });
+
+  it('keeps the beta variables advisory, ownerless and api-only', () => {
+    // Named explicitly as well as covered generically: these six are the ones
+    // whose absence is the NORMAL state, because every default lives in code.
+    const beta = ENV_VAR_MANIFEST.filter(entry =>
+      /^LETTER_IRL_(BETA_|MAIL_SENDING_)/.test(entry.name)
+    );
+    expect(beta.map(entry => entry.name).sort()).toEqual([
+      'LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS',
+      'LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP',
+      'LETTER_IRL_BETA_ALLOWED_SUBJECTS',
+      'LETTER_IRL_BETA_GATE_ENABLED',
+      'LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING',
+      'LETTER_IRL_MAIL_SENDING_ENABLED'
+    ]);
+    for (const entry of beta) {
+      expect(entry.advisory, `${entry.name} would become a new boot requirement`).toBe(true);
+      expect(entry.checkedBy, `${entry.name} has no owning rule to claim it`).toBeUndefined();
+      // The maintenance cron authenticates nobody and sends no mail of its
+      // own, so demanding these of it would ask for variables it cannot use.
+      expect(entry.services, `${entry.name} is an API concern`).toEqual(['api']);
+    }
+    // A subject identifies an account but authenticates nothing. Marking it
+    // secret would put it in the placeholder scan, which hunts fake
+    // CREDENTIALS and would have nothing useful to say about an Auth0 sub.
+    const subjects = beta.find(e => e.name === 'LETTER_IRL_BETA_ALLOWED_SUBJECTS');
+    expect(subjects?.secret).toBe(false);
+  });
+
+  it('lists the image-generation pair, so its absence is chosen not accidental', () => {
+    // LETTER_IRL_IMAGE_GEN_MODE defaults to "on", but generateImageForMail.ts
+    // short-circuits on a missing OPENAI_API_KEY before the mode is read - so
+    // production silently degraded every request to the free redirect card
+    // while the preflight reported full parity, because neither name was here.
+    const byName = new Map(ENV_VAR_MANIFEST.map(entry => [entry.name, entry]));
+    expect(byName.get('OPENAI_API_KEY')?.advisory).toBe(true);
+    expect(byName.get('OPENAI_API_KEY')?.secret).toBe(true);
+    expect(byName.get('LETTER_IRL_IMAGE_GEN_MODE')?.advisory).toBe(true);
+    expect(byName.get('LETTER_IRL_IMAGE_GEN_MODE')?.secret).toBe(false);
   });
 });

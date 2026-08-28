@@ -11,6 +11,7 @@ import { processLetterJob } from '../services/letterJobService.js';
 import { createMailOrderFromDraft } from '../services/mailSendService.js';
 import { hasReturnAddress } from '../services/returnAddressService.js';
 import type { LetterStatus } from '../services/types.js';
+import { friendlyDraftError as sharedDraftError } from './draftErrors.js';
 
 interface SendLetterInput {
   draftId: string;
@@ -45,40 +46,13 @@ function publicStatus(status: LetterStatus): PublicStatus {
   return status;
 }
 
+/**
+ * Kept as a named export with its original two-argument shape so callers and
+ * tests are unchanged; the wording now lives in one place. See
+ * src/tools/draftErrors.ts for why the default stopped forwarding.
+ */
 export function friendlyDraftError(error: unknown, draftId: string): Error {
-  const code = (error as { code?: string })?.code;
-  if (code === 'ACCOUNT_SENDS_BLOCKED') {
-    // A SERVER-AUTHORED string. The upstream message interpolates
-    // users.sends_blocked_reason (an internal moderation label such as
-    // "payment_disputed"), and this formatter's default forwards whatever it
-    // is handed - so the label reached the customer here even after round 12
-    // fixed the checkout surface (#278 round 13).
-    return new Error('Sending is disabled on this account. Please contact support.');
-  }
-  if (code === 'DRAFT_NOT_FOUND') {
-    return new Error(`Draft not found: ${draftId}. Please call quote_and_preview_letter to create a new draft.`);
-  }
-  if (code === 'DRAFT_NOT_OWNED') {
-    return new Error('This draft does not belong to your account. Please create a new letter draft.');
-  }
-  if (code === 'DRAFT_EXPIRED') {
-    return new Error('Draft has expired (drafts are valid for 24 hours). Please create a new letter draft.');
-  }
-  if (code === 'DRAFT_CANCELLED') {
-    return new Error('This draft was cancelled. Please create a new letter draft.');
-  }
-  if (code === 'DRAFT_CHECKOUT_PENDING') {
-    return new Error(
-      'This draft has an active Pay & Send checkout. Complete or wait for that checkout to expire before using prepaid balance.'
-    );
-  }
-  if (code === 'DRAFT_WRONG_MAIL_TYPE') {
-    return new Error('This is a postcard draft. Please use send_postcard instead.');
-  }
-  if (code === 'DRAFT_INCOMPLETE') {
-    return new Error('This draft is in an incomplete state. Please contact Letter IRL support before retrying.');
-  }
-  return error instanceof Error ? error : new Error('Unable to send letter');
+  return sharedDraftError(error, draftId, 'letter');
 }
 
 async function handler(

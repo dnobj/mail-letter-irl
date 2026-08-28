@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type Stripe from 'stripe';
 import { query, transaction } from '../db/index.js';
+import { assertBetaAccess } from '../auth/betaAccess.js';
+import { assertChargeWithinDailyCap, assertMailWithinDailyCaps } from './betaSpendLimits.js';
 import {
   describeUnpriced,
   ensurePriceCatalog,
@@ -588,6 +590,9 @@ export function assertConfiguredAmount(
 export async function createPackCheckout(
   params: CreatePackCheckoutParams
 ): Promise<CommerceCheckoutResult> {
+  // Before the catalog work and long before Stripe. A refused account must not
+  // be charged, and must not cost us a Stripe API call to find that out.
+  assertBetaAccess(params.userId);
   // Prices resolve lazily (#275 stage A); every entrypoint that can reach a
   // product config awaits this first, so no process needs a bootstrap call.
   await ensurePriceCatalog(params.productId);
@@ -610,6 +615,10 @@ export async function createPackCheckout(
   // exists. Persisting a zero amount would make the order unreconcilable
   // against Stripe and would leave any later refund without a trusted amount.
   assertConfiguredAmount(product, params.productId);
+
+  // Before the order row and long before Stripe. Buying credits is not
+  // mailing, so only the charge ceiling applies here.
+  await assertChargeWithinDailyCap(params.userId, product.amountCents);
 
   const orderId = randomUUID();
   const idempotencyKey = `pack-checkout:${orderId}`;
@@ -864,6 +873,11 @@ export async function createJitCheckout(
       code: 'JIT_DISABLED'
     });
   }
+
+  // Same placement rationale as the sends_blocked check below: refuse BEFORE
+  // any charge exists. Blocking during fulfilment would strand the customer's
+  // money.
+  assertBetaAccess(params.userId);
   // Issue #150: refuse a restricted account BEFORE taking payment.
   //
   // The send-path block in mailSendService deliberately exempts jit_order
@@ -897,6 +911,19 @@ export async function createJitCheckout(
   );
   const peekedMailType = (draftPeek.rows[0]?.mail_type || 'letter') as MailType;
   await ensurePriceCatalog(jitProductCode(peekedMailType));
+
+  // Pay & Send is the one path that both charges AND mails, so both ceilings
+  // apply - and both are checked HERE, before prepareJitOrder creates an order
+  // and before any Stripe session exists. The send path exempts jit_order
+  // funding precisely because this is where it gets capped.
+  //
+  // inFlight is 1: the letters row is not written until fulfilment, so today's
+  // count does not yet include this send.
+  await assertMailWithinDailyCaps({ query }, params.userId, 1);
+  await assertChargeWithinDailyCap(
+    params.userId,
+    getJitProductConfig(peekedMailType).amountCents
+  );
 
   const prepared = await prepareJitOrder(params);
   if (prepared.order.status !== 'checkout_pending' || prepared.order.checkout_url) {

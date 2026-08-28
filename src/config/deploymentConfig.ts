@@ -26,6 +26,7 @@ import {
   normalizedCurrency,
   packCurrency
 } from './products.js';
+import { isDebugEnabled } from '../utils/debug.js';
 
 export type DeploymentMode = 'production' | 'development' | 'test';
 
@@ -343,6 +344,110 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     secret: true,
     services: ['api', 'maintenance'],
     checkedBy: 'bucket.config_required'
+  },
+  /**
+   * Limited beta: cohort gate and spend ceilings (#179).
+   *
+   * Every entry here is ADVISORY and owned by no rule. All six have working
+   * defaults in src/auth/betaAccess.ts, so none of them should ever stop a
+   * deployment from booting - they are listed because the preflight's name
+   * diff is the only thing that can tell an operator "production and
+   * development disagree about who is admitted", and it can only report names
+   * the manifest carries. An unlisted access-control variable is the same
+   * blindness that let the two HTTP allowlists diverge unnoticed.
+   *
+   * services: ['api'] throughout. The maintenance cron authenticates nobody
+   * and sends no mail of its own, so demanding these of it would be asking for
+   * variables that service cannot use.
+   */
+  {
+    name: 'LETTER_IRL_BETA_GATE_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    /**
+     * Not new, and previously listed nowhere - which is the problem. It has
+     * always chosen who reaches /api/admin, and since the beta gate unions it
+     * into the admitted cohort it now grants access to the whole app. A
+     * variable carrying that much authority was invisible to the preflight's
+     * name diff, so nothing could report that production and development
+     * disagree about who the operators are.
+     *
+     * Not secret: a subject identifies an account but authenticates nothing,
+     * and marking it secret would enrol it in the placeholder scan, which
+     * hunts fake credentials.
+     */
+    name: 'LETTER_IRL_ADMIN_USER_IDS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    // The invite list, as Auth0 subjects. Not secret: a subject identifies an
+    // account but authenticates nothing, and marking it secret would put it in
+    // the placeholder scan, which looks for fake CREDENTIALS.
+    name: 'LETTER_IRL_BETA_ALLOWED_SUBJECTS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_MAIL_SENDING_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * Image generation, which is NOT new - and that is the point.
+   *
+   * LETTER_IRL_IMAGE_GEN_MODE defaults to "on", but generateImageForMail.ts
+   * short-circuits on a missing OPENAI_API_KEY BEFORE the mode is ever read,
+   * so production has been silently degrading every request to the free
+   * redirect card. That is a fine state for a beta and nobody chose it:
+   * neither variable appeared in this manifest, so the preflight reported full
+   * parity while the paid path was quietly unavailable. Listing them does not
+   * turn the feature on; it makes its absence something an operator can see.
+   */
+  {
+    name: 'OPENAI_API_KEY',
+    requiredIn: 'production',
+    advisory: true,
+    secret: true,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_IMAGE_GEN_MODE',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
   }
 ];
 
@@ -721,6 +826,128 @@ function validatePlaceholders(env: NodeJS.ProcessEnv, findings: ConfigFinding[])
   }
 }
 
+/**
+ * What TLS a DATABASE_URL will actually get (#157).
+ *
+ * The obvious reading of `src/db/index.ts` was that production ran without
+ * certificate verification, because it passed
+ *
+ *   ssl: NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined
+ *
+ * That line was DEAD CODE, and the conclusion drawn from it was wrong.
+ * node-postgres merges a parsed connection string OVER the explicit config -
+ * `Object.assign({}, config, parse(config.connectionString))` in
+ * pg/lib/connection-parameters.js - so whenever the URL carries an `sslmode`
+ * parameter, whatever `ssl` the caller passed is discarded. Verified against
+ * pg 8.16.3: with a Neon URL, `rejectUnauthorized` true, false and undefined
+ * all produce exactly the same effective config.
+ *
+ * And that effective config is `{}`. pg-connection-string only applies libpq's
+ * semantics - where `require` means "encrypt but do not verify" - when
+ * `uselibpqcompat` is set. It is not set here, so `sslmode=require` falls
+ * through its switch unchanged, leaving `ssl = {}`. pg then hands that to
+ * tls.connect adding only `servername`, and Node defaults `rejectUnauthorized`
+ * to true. So production HAS been verifying certificates, including the
+ * hostname, all along.
+ *
+ * Which makes this a latent fault rather than an open one, and changes what
+ * needs fixing. Two things silently turn verification off:
+ *
+ *   1. A DATABASE_URL with NO sslmode parameter. Then pg never sets ssl from
+ *      the string, the explicit option DOES apply, and in production that
+ *      option said `rejectUnauthorized: false`. The fallback case - the one
+ *      where an operator pastes a bare URL - was the one case that skipped
+ *      verification. That option is now deleted.
+ *   2. `uselibpqcompat=true` in the URL, which switches `require` and `prefer`
+ *      to libpq's unverified meaning. The option exists in pg today and is
+ *      where the library is heading, so a future default flip would silently
+ *      disable verification on a URL nobody edited.
+ *
+ * Hence a check rather than a setting: the safe state is already the default,
+ * and what it needs is something that notices when it stops being.
+ */
+export interface DatabaseTlsPosture {
+  /** Whether the connection will be encrypted at all. */
+  encrypted: boolean;
+  /** Whether the server certificate and hostname will be verified. */
+  verified: boolean;
+  /** Present when the URL could not be parsed. */
+  unparseable?: boolean;
+  /** Short explanation, for the finding message. */
+  detail: string;
+}
+
+/**
+ * Mirrors pg-connection-string's NON-libpq branch, which is the one this
+ * process runs. Kept deliberately close to that switch so the two can be
+ * compared line by line if pg's behaviour ever changes.
+ */
+export function databaseTlsPosture(connectionString?: string): DatabaseTlsPosture {
+  if (!connectionString) {
+    return { encrypted: false, verified: false, detail: 'no DATABASE_URL is set' };
+  }
+
+  let params: URLSearchParams;
+  try {
+    params = new URL(connectionString).searchParams;
+  } catch {
+    // A warning, not an error. pg accepts connection strings the WHATWG URL
+    // parser rejects, and refusing to boot over a URL that works would be a
+    // fresh way for production to fail on its own strictness.
+    return {
+      encrypted: false,
+      verified: false,
+      unparseable: true,
+      detail: 'DATABASE_URL could not be parsed, so its TLS mode is unknown'
+    };
+  }
+
+  const sslmode = params.get('sslmode');
+  const libpqCompat = (params.get('uselibpqcompat') || '').toLowerCase() === 'true';
+
+  if (!sslmode) {
+    // pg leaves ssl unset, which for a deployed database means plaintext.
+    return {
+      encrypted: false,
+      verified: false,
+      detail: 'DATABASE_URL sets no sslmode, so the connection is not encrypted'
+    };
+  }
+
+  if (sslmode === 'disable') {
+    return { encrypted: false, verified: false, detail: 'sslmode=disable turns TLS off' };
+  }
+
+  if (sslmode === 'no-verify') {
+    return {
+      encrypted: true,
+      verified: false,
+      detail: 'sslmode=no-verify encrypts but does not check the certificate'
+    };
+  }
+
+  if (libpqCompat && (sslmode === 'require' || sslmode === 'prefer')) {
+    return {
+      encrypted: true,
+      verified: false,
+      detail:
+        'uselibpqcompat=true gives sslmode=' + sslmode + ' its libpq meaning, which skips verification'
+    };
+  }
+
+  if (sslmode === 'prefer') {
+    // Encrypted and verified as pg behaves today, but the name promises a
+    // silent downgrade to plaintext and libpq compat would make it unverified.
+    return {
+      encrypted: true,
+      verified: true,
+      detail: 'sslmode=prefer verifies today, but its name allows a downgrade'
+    };
+  }
+
+  return { encrypted: true, verified: true, detail: 'sslmode=' + sslmode + ' verifies the certificate' };
+}
+
 export function validateDeploymentConfig(
   env: NodeJS.ProcessEnv = process.env,
   surface: ValidationSurface = 'server'
@@ -739,6 +966,16 @@ export function validateDeploymentConfig(
   const service = surface === 'maintenance' ? 'maintenance' : 'api';
   for (const entry of ENV_VAR_MANIFEST) {
     if (entry.checkedBy) continue;
+    // Advisory entries are skipped too, because that is what the flag has
+    // always claimed to mean: "listed so the cutover preflight can DIFF it,
+    // but absence is not a failure - the code has a working default". The
+    // boot loop never read the flag, so an advisory entry with no owning
+    // rule would still have refused to start. That was invisible only
+    // because both existing advisory entries also carry checkedBy and were
+    // already skipped by the line above - so this changes NOTHING today and
+    // stops the next advisory entry from becoming a fresh way for
+    // production to refuse to boot (#278 round 3, in a new place).
+    if (entry.advisory) continue;
     if (!entry.services.includes(service)) continue;
     if (entry.requiredIn === 'production' && !production) continue;
     // Symmetric to the line above. Without it a development-only entry would
@@ -833,6 +1070,66 @@ export function validateDeploymentConfig(
         message:
           'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT is not enabled; OAuth configuration is not strictly validated at boot'
       });
+    }
+  }
+
+  if (production) {
+    // Both surfaces connect to the database, so this is NOT gated on
+    // surface === 'server' the way the HTTP allowlists are.
+    const tls = databaseTlsPosture(env.DATABASE_URL);
+    if (tls.unparseable) {
+      findings.push({
+        severity: 'warning',
+        rule: 'database.tls_unknown',
+        message: tls.detail
+      });
+    } else if (!tls.encrypted) {
+      findings.push({
+        severity: 'error',
+        rule: 'database.tls_required',
+        message: tls.detail + '; production carries customer content and must use TLS'
+      });
+    } else if (!tls.verified) {
+      findings.push({
+        severity: 'error',
+        rule: 'database.tls_verification_required',
+        message:
+          tls.detail + '; an unverified connection cannot tell the real database from an impostor'
+      });
+    }
+  }
+
+  if (production) {
+    // Debug flags, graduated by what each actually exposes rather than by the
+    // word "debug" (#157).
+    //
+    // DEBUG is an ERROR because it does not merely add logging: it un-404s
+    // /debug/widgets, an UNAUTHENTICATED route that answers with
+    // Access-Control-Allow-Origin: * and discloses the widget directory,
+    // process.cwd() and absolute container paths. A route that should not
+    // exist in production is not a verbosity setting, and unsetting the
+    // variable fixes it in seconds.
+    if (isDebugEnabled(env.DEBUG)) {
+      findings.push({
+        severity: 'error',
+        rule: 'debug.enabled_in_production',
+        message:
+          'DEBUG is enabled, which serves the unauthenticated /debug/widgets route and discloses container paths'
+      });
+    }
+
+    // These two only widen log records - counts and image parameter shapes, no
+    // letter content - so they warn. Worth reporting because nothing else
+    // would: neither appears in ENV_VAR_MANIFEST, so the cutover preflight
+    // cannot see them either way.
+    for (const name of ['DEBUG_CONTENT', 'DEBUG_IMAGE'] as const) {
+      if (env[name] === 'true') {
+        findings.push({
+          severity: 'warning',
+          rule: 'debug.verbose_logging_in_production',
+          message: name + ' is enabled in production, which widens what reaches the logs'
+        });
+      }
     }
   }
 
