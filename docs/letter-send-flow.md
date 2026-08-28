@@ -1,282 +1,92 @@
-# Letter Send Flow - Technical Reference
+# Letter and Postcard Send Flow
 
-**Last Updated:** May 30, 2026
-**Purpose:** Technical reference for letter and postcard send flows, including draft-based idempotency
+Last updated: August 5, 2026
 
-This document describes the complete flow for sending letters and postcards, including the draft-based idempotency system, credit deduction, job queuing, and delivery.
+This document describes the current draft, payment, outbox, and provider workflow for letters and postcards.
 
----
+## Preview
 
-## Overview
+Preview tools validate the user's input, render the appropriate widget, and create a 24-hour database draft. Previewing does not deduct a letter send and does not create a provider order.
 
-The letter and postcard sending process uses a **two-phase commit** pattern with drafts:
+| Tool | Layout | Text limit |
+| --- | --- | --- |
+| `quote_and_preview_letter` | text only | 1,600 characters / 24 lines |
+| `quote_and_preview_letter_with_header_image` | image at top | 1,100 characters / 17 lines |
+| `quote_and_preview_letter_with_image` | image after signature | 800 characters / 12 lines |
+| `quote_and_preview_postcard` | image front, message back | postcard-specific message limit |
 
-1. **Quote Phase** (quote tools) - Creates a draft, locks in pricing
-   - `quote_and_preview_letter`
-   - `quote_and_preview_letter_with_header_image`
-   - `quote_and_preview_letter_with_image`
-   - `quote_and_preview_postcard`
+The preview response includes a `draftId`. Sending is a separate, explicit tool call requiring `confirm: true`.
 
-2. **Send Phase** (send tools) - Consumes draft, deducts credits, queues job
-   - `send_letter` (for all letter drafts)
-   - `send_postcard` (for postcard drafts)
+## Confirmed Send Transaction
 
-This prevents duplicate sends and ensures credits are deducted exactly once.
+`send_letter` and `send_postcard` call the same atomic service. Inside one PostgreSQL transaction the service:
 
----
+1. selects the draft `FOR UPDATE`;
+2. validates ownership, mail type, state, and expiry;
+3. returns the existing order if the draft was already consumed;
+4. inserts the Letter IRL order;
+5. locks and deducts prepaid sends from the user's ledger;
+6. marks the draft consumed and links it to the order;
+7. inserts one `letter_jobs` outbox row;
+8. commits.
 
-## Flow Diagram
+Any error rolls back every effect. An insufficient balance therefore creates no order, consumes no draft, inserts no job, and deducts no sends.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           QUOTE PHASE                                        │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  User Request                                                                │
-│       │                                                                      │
-│       ▼                                                                      │
-│  quote_and_preview_[tool_variant](recipient, body, sender, signOff, image?)  │
-│       │                                                                      │
-│       ├──► Calculate required credits (based on page count)                  │
-│       │                                                                      │
-│       ├──► Generate preview HTML                                             │
-│       │                                                                      │
-│       ├──► CREATE DRAFT in letter_drafts table                               │
-│       │    - status: 'pending'                                               │
-│       │    - expires_at: NOW() + 24 hours                                    │
-│       │    - Stores: sender, recipient, body, signOff, required_credits      │
-│       │                                                                      │
-│       ▼                                                                      │
-│  Return: { draftId, previewHtml, requiredCredits, canSendNow }              │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    │ User confirms
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            SEND PHASE                                        │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  send_letter/send_postcard(draftId, confirm: true)                           │
-│       │                                                                      │
-│       ├──► CONSUME DRAFT (atomic operation)                                  │
-│       │    - Validates: draft exists, owned by user, not expired             │
-│       │    - Updates status: 'pending' → 'consumed'                          │
-│       │    - Sets consumed_at timestamp                                      │
-│       │                                                                      │
-│       │    IF draft already consumed:                                        │
-│       │       └──► Return existing letter (idempotent retry)                 │
-│       │                                                                      │
-│       ├──► DEDUCT CREDITS                                                    │
-│       │    - Uses credit_ledger (FIFO by expiration)                         │
-│       │    - Records in credit_consumption table                             │
-│       │    - Atomic transaction with SELECT FOR UPDATE                       │
-│       │                                                                      │
-│       ├──► CREATE LETTER in letters table                                    │
-│       │    - status: 'queued'                                                │
-│       │    - Links to draft via letter_drafts.letter_id                      │
-│       │                                                                      │
-│       ├──► QUEUE JOB via pg-boss                                             │
-│       │    - Creates entry in letter_jobs table                              │
-│       │    - Adds job to pgboss.job queue                                    │
-│       │                                                                      │
-│       ▼                                                                      │
-│  Return: { orderId, status: 'queued_for_print', creditsRemaining }          │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    │ Background worker picks up job
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         PROCESSING PHASE                                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  letterWorker.ts (pg-boss worker)                                            │
-│       │                                                                      │
-│       ├──► Update letter status: 'queued' → 'processing'                     │
-│       │                                                                      │
-│       ├──► Get active provider (PostGrid in production)                      │
-│       │                                                                      │
-│       ├──► SEND TO PROVIDER                                                  │
-│       │    - PostGrid: Create letter via API                                 │
-│       │    - Returns: tracking_id, cost_cents, expected_delivery             │
-│       │                                                                      │
-│       ├──► Update letter with provider response                              │
-│       │    - status: 'processing' → 'sent'                                   │
-│       │    - tracking_id, provider, cost_cents, expected_delivery            │
-│       │                                                                      │
-│       ├──► Update job status: 'completed'                                    │
-│       │                                                                      │
-│       │    ON FAILURE:                                                       │
-│       │       ├──► Increment attempts                                        │
-│       │       ├──► If attempts < max_attempts: retry with backoff            │
-│       │       └──► If attempts >= max_attempts: mark as 'failed'             │
-│       │                                                                      │
-│       ▼                                                                      │
-│  Letter delivered to PostGrid for printing and mailing                       │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+Database constraints enforce one outbox row and one stable idempotency key per letter. Concurrent calls serialize on the draft lock, so the second call returns the first order.
 
----
+## Immediate Provider Submission
 
-## Database Tables Involved
+After the transaction commits, the send tool claims its outbox row and submits it immediately. The PostGrid request uses the Letter IRL `letter_id` as `Idempotency-Key`.
 
-### letter_drafts
-Stores draft letters before confirmation.
+A claimed job is submitted to the provider exactly once. A successful response records the provider order ID and marks the job completed. Any outcome that does not prove what happened — `5xx`, timeout, transport loss, an unreadable body — may mean the piece was accepted and physically mailed, so it is never resubmitted: the job is held with `provider_outcome = 'ambiguous'` for operator reconciliation. Only an explicit provider rejection, which proves no mail exists, is terminal.
 
-| Column | Description |
-|--------|-------------|
-| draft_id | UUID primary key |
-| user_id | Owner of the draft |
-| status | 'pending', 'consumed', 'expired', 'cancelled' |
-| sender | JSONB - sender address |
-| recipient | JSONB - recipient address |
-| body_text | Letter content |
-| sign_off | Closing (e.g., "Sincerely,") |
-| required_credits | Credits needed to send |
-| preview_html | Generated preview |
-| expires_at | Draft expiration (24 hours from creation) |
-| consumed_at | When draft was used to send |
-| letter_id | Links to letters table after send |
+The tool response reports one of:
 
-### letters
-Stores sent letters.
+- `accepted`: provider submission completed;
+- `pending`: the transaction committed and recovery is scheduled;
+- `failed`: provider submission reached a terminal failure.
 
-| Column | Description |
-|--------|-------------|
-| letter_id | UUID primary key |
-| user_id | Sender |
-| content | JSONB - full letter content |
-| recipient | JSONB - recipient address |
-| credits_cost | Credits charged |
-| status | 'queued', 'processing', 'sent', 'failed', 'cancelled' |
-| tracking_id | Provider tracking ID (PostGrid) |
-| provider | 'postgrid', 'dummy' |
-| cost_cents | Actual provider cost |
-| expected_delivery | Provider ETA |
+## Terminal Failure and the Letter Pack
 
-### letter_jobs
-Tracks background job processing.
+A confirmed send consumes the Letter Pack before the provider is called, so a terminal failure owes the customer compensation. A pay-per-send order moves to `refund_pending` and Stripe settles it. A prepaid send has its pack returned to the credit ledger.
 
-| Column | Description |
-|--------|-------------|
-| job_id | UUID primary key |
-| letter_id | Foreign key to letters |
-| status | 'pending', 'processing', 'completed', 'failed' |
-| attempts | Number of tries |
-| max_attempts | Retry limit (default: 3) |
-| error_message | Last error if failed |
+The return posts new compensating lots rather than reversing the original ones. It mirrors the original per-lot split recorded in `credit_consumption`, and each returned lot inherits its source lot's expiry, because credits are consumed FIFO by `expires_at` and collapsing them would silently move credits between expiry windows. It stores a stable failure code, never provider text.
 
-### credit_ledger
-Stores credit balances with expiration.
+Three paths reach it, and all three are guarded by the same exactly-once check, so replayed failure handling, an operator retry that fails again, and two concurrent handlers all return one pack:
 
-| Column | Description |
-|--------|-------------|
-| entry_id | Serial primary key |
-| user_id | Credit owner |
-| source_type | 'purchase', 'promo', 'adjustment' |
-| original_amount | Credits added |
-| remaining_amount | Credits available |
-| expires_at | Expiration date (null = never) |
-| status | 'active', 'consumed', 'expired' |
+- an explicit provider rejection during dispatch;
+- a terminal failure *before* dispatch, where the job never left `provider_outcome = 'not_dispatched'` and no mail can exist;
+- an operator resolving an ambiguous hold as a confirmed rejection.
 
-### credit_consumption
-Links credit usage to letters.
+Once a pack has been returned, an operator retry of that job is refused. Nothing re-deducts on the way back through the outbox, so resending would give the customer the pack and the letter; selling them a new send is a deliberate decision rather than a side effect of a retry.
 
-| Column | Description |
-|--------|-------------|
-| consumption_id | Serial primary key |
-| ledger_entry_id | Source credit entry |
-| letter_id | Letter that used credits |
-| amount_consumed | Credits used |
+An ambiguous outcome returns nothing. The piece may physically exist, and an unnecessary hold is recoverable while refunding posted mail is not.
 
----
+## Hourly Recovery
 
-## Key Code Files
+Railway runs `npm run maintenance` once per hour. Outbox recovery atomically claims due rows with `FOR UPDATE SKIP LOCKED`, allowing safe concurrency. A job left in processing with a lock older than 15 minutes is treated as stale and can be reclaimed.
 
-| File | Purpose |
-|------|---------|
-| `src/tools/quoteAndPreview.ts` | Creates drafts, generates previews |
-| `src/tools/sendLetter.ts` | Consumes drafts, deducts credits, queues jobs |
-| `src/services/draftService.ts` | Draft CRUD operations |
-| `src/services/creditLedgerService.ts` | Credit deduction with FIFO |
-| `src/services/letterJobService.ts` | Job queue integration |
-| `src/workers/letterWorker.ts` | Background job processor |
-| `src/services/providers/PostGridProvider.ts` | PostGrid API integration |
+The same stable provider idempotency key is reused after timeout or process restart. This protects against a provider order succeeding while the application loses the response.
 
----
+Maintenance also performs image cleanup and conditionally runs six-hour provider status synchronization and daily credit/draft/payment maintenance. It closes all database and bucket clients before exit.
 
-## Idempotency Guarantees
+## Status Retrieval
 
-### Draft Consumption
-- Draft status is updated atomically: `pending` → `consumed`
-- If `send_letter` is called twice with same `draftId`:
-  - First call: Draft consumed, letter created, credits deducted
-  - Second call: Returns existing letter with `isRetry: true`
+`get_order_status` and `list_orders` read Letter IRL's persisted order state. Provider status synchronization updates accepted orders on its six-hour cadence. A user can retrieve the order immediately even while provider recovery is pending.
 
-### Credit Deduction
-- Uses `SELECT FOR UPDATE` to lock user row during transaction
-- Credits deducted from `credit_ledger` using FIFO (oldest first)
-- Consumption recorded in `credit_consumption` for audit
+## Image Handling
 
-### Job Processing
-- pg-boss handles job deduplication
-- Jobs have unique `letter_id` as natural key
-- Retry logic with exponential backoff (max 3 attempts)
+Generated images receive a capability URL backed by a private Railway bucket. The URL is valid for 15 minutes and remains usable across API restarts. Once a preview consumes an image, the draft/order contains the data needed for provider submission; maintenance removes expired temporary bucket objects.
 
----
+## Required Tests
 
-## Error Handling
+- duplicate and concurrent send calls create one order and one deduction;
+- insufficient balance rolls back all effects;
+- `429`, `503`, timeout, and network failures are held as ambiguous rather than resubmitted;
+- a terminal failure returns the customer's Letter Pack exactly once, and an ambiguous one never does;
+- a process restart after provider submission does not create a second provider order;
+- hourly maintenance recovers due and stale rows;
+- generated images remain available after API restart for 15 minutes;
+- documented ChatGPT preview, purchase, send, and status flows pass in development.
 
-### Draft Errors
-| Error Code | Meaning |
-|------------|---------|
-| DRAFT_NOT_FOUND | Invalid draftId |
-| DRAFT_NOT_OWNED | Draft belongs to different user |
-| DRAFT_EXPIRED | Draft older than 24 hours |
-| DRAFT_CANCELLED | Draft was explicitly cancelled |
-
-### Credit Errors
-| Error | Meaning |
-|-------|---------|
-| INSUFFICIENT_CREDITS | User balance < required credits |
-
-### Job Errors
-- Transient failures: Retried automatically
-- Permanent failures: Marked as 'failed', letter status updated
-- Failed letters can be retried via admin panel
-
----
-
-## Configuration
-
-### Environment Variables
-| Variable | Purpose |
-|----------|---------|
-| LETTER_PROVIDER | 'postgrid' or 'dummy' |
-| POSTGRID_API_KEY | PostGrid API credentials |
-| DUMMY_PROVIDER_DELAY_MS | Simulated delay for testing |
-| DUMMY_PROVIDER_FAIL_RATE | Failure rate for testing |
-
-### Job Queue Settings
-- Queue name: `send-letter`
-- Retry limit: 3 attempts
-- Retry delay: 60 seconds (exponential backoff)
-- Job expiration: 7 days
-
----
-
-## Monitoring
-
-### Admin Dashboard
-Access at `http://localhost:8788/admin` (local only)
-
-- **Dashboard**: Letter counts, job status, failed jobs
-- **Letters**: Search and view letter details
-- **Jobs**: View job history, retry failed jobs
-
-### Key Metrics
-- Letters by status (queued, processing, sent, failed)
-- Failed jobs needing attention
-- Credit consumption trends
+See [manual-tests.md](manual-tests.md) and [idle-cost-operations.md](idle-cost-operations.md).

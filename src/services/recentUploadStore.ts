@@ -39,7 +39,7 @@ export async function setRecentUploadedImage(
     );
   } catch (err) {
     // DB write is best-effort — in-memory store is the primary fast path
-    console.error("recentUploadStore: DB write failed", err);
+    console.error("recentUploadStore: DB write failed");
   }
 }
 
@@ -92,7 +92,7 @@ export async function getRecentUploadedImage(
       ageMs
     };
   } catch (err) {
-    console.error("recentUploadStore: DB read failed", err);
+    console.error("recentUploadStore: DB read failed");
     return null;
   }
 }

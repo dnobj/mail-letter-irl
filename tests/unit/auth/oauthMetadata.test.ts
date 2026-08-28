@@ -1,172 +1,109 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  getOpenIdConfiguration,
+  getProtectedResourceMetadata
+} from "../../../src/auth/metadata.js";
+import { SUPPORTED_GRANT_TYPES } from "../../../src/auth/oauthConfig.js";
+
+const issuer = "https://dev-test.auth0.com/";
+const resource = "https://letter-irl-api-development.up.railway.app/mcp";
+
+describe("OAuth metadata", () => {
+  beforeEach(() => {
+    vi.stubEnv("LETTER_IRL_PUBLIC_BASE_URL", resource.replace(/\/mcp$/, ""));
+    vi.stubEnv("LETTER_IRL_MCP_RESOURCE", resource);
+    vi.stubEnv("LETTER_IRL_OAUTH_ISSUER", issuer);
+    vi.stubEnv("LETTER_IRL_OAUTH_AUTH_ENDPOINT", `${issuer}authorize`);
+    vi.stubEnv("LETTER_IRL_OAUTH_TOKEN_ENDPOINT", `${issuer}oauth/token`);
+    vi.stubEnv("LETTER_IRL_OAUTH_JWKS_URI", `${issuer}.well-known/jwks.json`);
+    vi.stubEnv("LETTER_IRL_OAUTH_AUDIENCE", resource);
+    vi.stubEnv(
+      "LETTER_IRL_OAUTH_SCOPES",
+      "openid profile email offline_access mail:read mail:draft mail:send"
+    );
+    vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "false");
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("publishes the exact MCP resource, Auth0 issuer, and supported scopes", () => {
+    expect(getProtectedResourceMetadata()).toEqual({
+      resource,
+      authorization_servers: [issuer],
+      scopes_supported: [
+        "openid",
+        "profile",
+        "email",
+        // Requested so Auth0 issues a refresh token; never demanded by a tool.
+        "offline_access",
+        "mail:read",
+        "mail:draft",
+        "mail:send"
+      ]
+    });
+  });
+
+  it("does not invent CIMD, registration, redirect, or confidential-client capabilities", () => {
+    const metadata = getOpenIdConfiguration(resource.replace(/\/mcp$/, "")) as Record<
+      string,
+      unknown
+    >;
+
+    expect(metadata.code_challenge_methods_supported).toEqual(["S256"]);
+    // Both grants, and refresh_token for a concrete reason: this document is
+    // the authorization-server metadata in static-DCR mode, and a client that
+    // reads no refresh_token grant will not request offline_access, so the
+    // connection dies at access-token expiry (issue #160). It must also stay
+    // consistent with the /oauth/register response, which already claims both.
+    expect(metadata.grant_types_supported).toEqual([...SUPPORTED_GRANT_TYPES]);
+    expect(metadata.token_endpoint_auth_methods_supported).toEqual(["none"]);
+    expect(metadata).not.toHaveProperty("client_id_metadata_document_supported");
+    expect(metadata).not.toHaveProperty("registration_endpoint");
+    expect(metadata).not.toHaveProperty("redirect_uris_supported");
+  });
+
+  it("advertises the static registration route only in rollback mode", () => {
+    vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "true");
+    vi.stubEnv("CHATGPT_STATIC_CLIENT_ID", "rollback-client");
+
+    expect(
+      getOpenIdConfiguration("https://dev-api.example.com").registration_endpoint
+    ).toBe("https://dev-api.example.com/oauth/register");
+    expect(
+      getOpenIdConfiguration("https://dev-api.example.com").issuer
+    ).toBe("https://dev-api.example.com");
+    expect(
+      getProtectedResourceMetadata("https://dev-api.example.com")
+        .authorization_servers
+    ).toEqual(["https://dev-api.example.com"]);
+  });
+});
+
 /**
- * Unit tests for OAuth Metadata Endpoints
+ * The bug this guards (issue #160): the metadata document advertised
+ * `["authorization_code"]` while /oauth/register simultaneously told the client
+ * it could use `refresh_token`. In static-DCR mode this document is the
+ * authorization-server metadata ChatGPT reads, so it took the server at its
+ * word, never requested `offline_access`, and every session died at
+ * access-token expiry - recoverable only by a human clicking Reconnect and
+ * re-consenting, which also meant no unattended test outlived a token lifetime.
  *
- * Tests the Protected Resource Metadata (RFC 9470) and
- * OAuth Authorization Server Metadata for spec compliance.
- *
- * Related: OpenAI Apps SDK submission requirements
+ * Advertising `offline_access` in scopes_supported is necessary but not
+ * sufficient: a client will not ask for a refresh token from a server that says
+ * it cannot redeem one.
  */
-
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-
-const mockIssuer = 'https://dev-test.auth0.com/';
-const mockAuthEndpoint = 'https://dev-test.auth0.com/authorize';
-const mockTokenEndpoint = 'https://dev-test.auth0.com/oauth/token';
-const mockJwksUri = 'https://dev-test.auth0.com/.well-known/jwks.json';
-const mockRegistrationEndpoint = 'https://dev-test.auth0.com/oidc/register';
-const mockScopes = 'openid email profile';
-const mockBaseUrl = 'https://api.letterirl.com';
-
-describe('Protected Resource Metadata (RFC 9470)', () => {
-  beforeEach(() => {
-    vi.stubEnv('LETTER_IRL_OAUTH_ISSUER', mockIssuer);
-    vi.stubEnv('LETTER_IRL_OAUTH_AUTH_ENDPOINT', mockAuthEndpoint);
-    vi.stubEnv('LETTER_IRL_OAUTH_TOKEN_ENDPOINT', mockTokenEndpoint);
-    vi.stubEnv('LETTER_IRL_OAUTH_JWKS_URI', mockJwksUri);
-    vi.stubEnv('LETTER_IRL_OAUTH_REGISTRATION_ENDPOINT', mockRegistrationEndpoint);
-    vi.stubEnv('LETTER_IRL_OAUTH_SCOPES', mockScopes);
+describe("refresh-token grant advertisement (issue #160)", () => {
+  it("advertises the refresh_token grant, so clients request offline_access", () => {
+    expect(SUPPORTED_GRANT_TYPES).toContain("refresh_token");
+    expect(SUPPORTED_GRANT_TYPES).toContain("authorization_code");
   });
 
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.resetModules();
-  });
-
-  it('should return resource field matching baseUrl', async () => {
-    const { getProtectedResourceMetadata } = await import('../../../src/auth/metadata.js');
-    const metadata = getProtectedResourceMetadata(mockBaseUrl);
-
-    expect(metadata.resource).toBe(mockBaseUrl);
-  });
-
-  it('should return authorization_servers array containing issuer', async () => {
-    const { getProtectedResourceMetadata } = await import('../../../src/auth/metadata.js');
-    const metadata = getProtectedResourceMetadata(mockBaseUrl);
-
-    expect(metadata.authorization_servers).toBeInstanceOf(Array);
-    expect(metadata.authorization_servers).toContain(mockIssuer);
-  });
-
-  it('should return scopes_supported array', async () => {
-    const { getProtectedResourceMetadata } = await import('../../../src/auth/metadata.js');
-    const metadata = getProtectedResourceMetadata(mockBaseUrl);
-
-    expect(metadata.scopes_supported).toBeInstanceOf(Array);
-    expect(metadata.scopes_supported).toContain('openid');
-    expect(metadata.scopes_supported).toContain('email');
-    expect(metadata.scopes_supported).toContain('profile');
-  });
-
-  it('should return jwks_uri', async () => {
-    const { getProtectedResourceMetadata } = await import('../../../src/auth/metadata.js');
-    const metadata = getProtectedResourceMetadata(mockBaseUrl);
-
-    expect(metadata.jwks_uri).toBe(mockJwksUri);
-  });
-
-  it('should NOT return legacy fields (issuer, resource_documentation)', async () => {
-    const { getProtectedResourceMetadata } = await import('../../../src/auth/metadata.js');
-    const metadata = getProtectedResourceMetadata(mockBaseUrl) as Record<string, unknown>;
-
-    expect(metadata).not.toHaveProperty('issuer');
-    expect(metadata).not.toHaveProperty('resource_documentation');
-  });
-});
-
-describe('OAuth Authorization Server Metadata', () => {
-  beforeEach(() => {
-    vi.stubEnv('LETTER_IRL_OAUTH_ISSUER', mockIssuer);
-    vi.stubEnv('LETTER_IRL_OAUTH_AUTH_ENDPOINT', mockAuthEndpoint);
-    vi.stubEnv('LETTER_IRL_OAUTH_TOKEN_ENDPOINT', mockTokenEndpoint);
-    vi.stubEnv('LETTER_IRL_OAUTH_JWKS_URI', mockJwksUri);
-    vi.stubEnv('LETTER_IRL_OAUTH_REGISTRATION_ENDPOINT', mockRegistrationEndpoint);
-    vi.stubEnv('LETTER_IRL_OAUTH_SCOPES', mockScopes);
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.resetModules();
-  });
-
-  it('should include S256 in code_challenge_methods_supported', async () => {
-    const { getOpenIdConfiguration } = await import('../../../src/auth/metadata.js');
-    const metadata = getOpenIdConfiguration(mockBaseUrl);
-
-    expect(metadata.code_challenge_methods_supported).toContain('S256');
-  });
-
-  it('should include "none" in token_endpoint_auth_methods_supported', async () => {
-    const { getOpenIdConfiguration } = await import('../../../src/auth/metadata.js');
-    const metadata = getOpenIdConfiguration(mockBaseUrl);
-
-    expect(metadata.token_endpoint_auth_methods_supported).toContain('none');
-  });
-
-  it('should include "refresh_token" in grant_types_supported', async () => {
-    const { getOpenIdConfiguration } = await import('../../../src/auth/metadata.js');
-    const metadata = getOpenIdConfiguration(mockBaseUrl);
-
-    expect(metadata.grant_types_supported).toContain('refresh_token');
-    expect(metadata.grant_types_supported).toContain('authorization_code');
-  });
-
-  it('should advertise client_id_metadata_document_supported', async () => {
-    const { getOpenIdConfiguration } = await import('../../../src/auth/metadata.js');
-    const metadata = getOpenIdConfiguration(mockBaseUrl);
-
-    expect(metadata.client_id_metadata_document_supported).toBe(true);
-  });
-
-  it('should include registration_endpoint pointing to server /oauth/register', async () => {
-    const { getOpenIdConfiguration } = await import('../../../src/auth/metadata.js');
-    const metadata = getOpenIdConfiguration(mockBaseUrl);
-
-    expect(metadata.registration_endpoint).toBe(`${mockBaseUrl}/oauth/register`);
-  });
-
-  it('should include all required redirect URIs', async () => {
-    const { getOpenIdConfiguration } = await import('../../../src/auth/metadata.js');
-    const metadata = getOpenIdConfiguration(mockBaseUrl);
-
-    expect(metadata.redirect_uris_supported).toContain('https://chat.openai.com/aip/auth/callback');
-    expect(metadata.redirect_uris_supported).toContain('https://chatgpt.com/connector_platform_oauth_redirect');
-    expect(metadata.redirect_uris_supported).toContain('https://platform.openai.com/apps-manage/oauth');
-    expect(metadata.redirect_uris_supported).toContain('http://localhost:18883/oauth/callback');
-  });
-});
-
-describe('Discovery Metadata Consistency', () => {
-  beforeEach(() => {
-    vi.stubEnv('LETTER_IRL_OAUTH_ISSUER', mockIssuer);
-    vi.stubEnv('LETTER_IRL_OAUTH_AUTH_ENDPOINT', mockAuthEndpoint);
-    vi.stubEnv('LETTER_IRL_OAUTH_TOKEN_ENDPOINT', mockTokenEndpoint);
-    vi.stubEnv('LETTER_IRL_OAUTH_JWKS_URI', mockJwksUri);
-    vi.stubEnv('LETTER_IRL_OAUTH_REGISTRATION_ENDPOINT', mockRegistrationEndpoint);
-    vi.stubEnv('LETTER_IRL_OAUTH_SCOPES', mockScopes);
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.resetModules();
-  });
-
-  it('should have grant_types that match DCR response grant_types', async () => {
-    const { getOpenIdConfiguration } = await import('../../../src/auth/metadata.js');
-    const metadata = getOpenIdConfiguration(mockBaseUrl);
-
-    // DCR response returns grant_types: ["authorization_code", "refresh_token"]
-    const dcrGrantTypes = ['authorization_code', 'refresh_token'];
-
-    for (const grantType of dcrGrantTypes) {
-      expect(metadata.grant_types_supported).toContain(grantType);
-    }
-  });
-
-  it('should have auth methods that include DCR client method ("none")', async () => {
-    const { getOpenIdConfiguration } = await import('../../../src/auth/metadata.js');
-    const metadata = getOpenIdConfiguration(mockBaseUrl);
-
-    // DCR response returns token_endpoint_auth_method: "none"
-    expect(metadata.token_endpoint_auth_methods_supported).toContain('none');
+  it("advertises offline_access alongside it, since one is useless without the other", () => {
+    const metadata = getOpenIdConfiguration(resource.replace(/\/mcp$/, "")) as Record<
+      string,
+      unknown
+    >;
+    expect(metadata.scopes_supported).toContain("offline_access");
+    expect(metadata.grant_types_supported).toContain("refresh_token");
   });
 });

@@ -15,6 +15,9 @@ export type LetterLayoutType = 'text_only' | 'header_image' | 'inline_image';
  * Letter parameters for sending
  */
 export interface LetterParams {
+  /** Stable key used to make provider retries safe. */
+  idempotencyKey?: string;
+
   /** Recipient's full name */
   recipientName: string;
 
@@ -197,6 +200,9 @@ export interface LetterFulfillmentProvider {
    */
   sendLetter(params: LetterParams): Promise<LetterResult>;
 
+  /** Send a postcard when the provider supports postcards. */
+  sendPostcard?(params: PostcardParams): Promise<PostcardResult>;
+
   /**
    * Get delivery status of a letter
    * @param trackingId Provider-specific tracking ID
@@ -274,6 +280,12 @@ export interface AddressValidationResult {
     message: string;
   }>;
 
+  /**
+   * True when verification itself failed (network, auth, timeout) rather
+   * than the address - the address was never actually judged.
+   */
+  transportError?: boolean;
+
   /** Additional details (county, congressional district, etc.) */
   details?: Record<string, any>;
 
@@ -302,6 +314,9 @@ export type PostcardSize = '6x4' | '6x9' | '6x11';
  * Postcard parameters for sending
  */
 export interface PostcardParams {
+  /** Stable key used to make provider retries safe. */
+  idempotencyKey?: string;
+
   /** Recipient's full name */
   recipientName: string;
 

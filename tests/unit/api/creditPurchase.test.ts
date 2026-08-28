@@ -13,30 +13,62 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { stripeMockModule } from '../../mocks/stripe.js';
 
 // Hoist mock functions so they're available when vi.mock is hoisted
-const { mockSessionCreate, mockSessionList, mockConstructEvent } = vi.hoisted(() => ({
+const { mockSessionCreate, mockSessionList, mockConstructEvent, mockPriceRetrieve } = vi.hoisted(() => ({
   mockSessionCreate: vi.fn(),
   mockSessionList: vi.fn(),
   mockConstructEvent: vi.fn(),
+  mockPriceRetrieve: vi.fn(),
 }));
 
-// Mock Stripe as a class constructor
-vi.mock('stripe', () => {
-  return {
-    default: class MockStripe {
-      checkout = {
-        sessions: {
-          create: mockSessionCreate,
-          list: mockSessionList,
-        },
-      };
-      webhooks = {
-        constructEvent: mockConstructEvent,
-      };
-    },
-  };
-});
+/**
+ * Amounts come from the resolved Stripe Price (#275 stage A), reached through
+ * the catalog's injectable retriever seam. Resolution is LAZY - the checkout
+ * functions ensure it themselves - so unlike the previous eager design there
+ * is no load-before-env-stub ordering hazard for a beforeEach to get wrong
+ * (which one describe in this file did, making its checkout tests vacuous:
+ * #278 review).
+ */
+const PRICE_FIXTURES: Record<string, number> = {
+  price_starter_mock: 500,
+  price_regular_mock: 1000,
+  price_power_mock: 9000,
+};
+
+async function configureStubbedPrices(): Promise<void> {
+  const { resetPriceCatalog, setPriceRetriever } = await import(
+    '../../../src/services/priceCatalog.js'
+  );
+  resetPriceCatalog();
+  setPriceRetriever(async (priceId: string) => {
+    const unitAmount = PRICE_FIXTURES[priceId];
+    if (unitAmount === undefined) {
+      throw Object.assign(new Error('No such price'), { code: 'resource_missing' });
+    }
+    return {
+      id: priceId,
+      active: true,
+      unit_amount: unitAmount,
+      currency: 'usd',
+      product: `prod_${priceId}`,
+    } as never;
+  });
+}
+
+// One shared MockStripe (tests/mocks/stripe.ts): the inline copies here and in
+// the price/reconciliation suites disagreed about the Stripe surface, and two
+// of them disagreed about whether a Price carries `active` - so they exercised
+// different validation paths for the same object (#278 review).
+vi.mock('stripe', () =>
+  stripeMockModule({
+    sessionCreate: mockSessionCreate,
+    sessionList: mockSessionList,
+    priceRetrieve: mockPriceRetrieve,
+    constructEvent: mockConstructEvent,
+  })
+);
 
 // Mock database
 vi.mock('../../../src/db/index.js', () => ({
@@ -46,14 +78,52 @@ vi.mock('../../../src/db/index.js', () => ({
 
 // Import after mocking
 import {
-  createCheckoutSession,
+  createPackCheckoutSession,
+  getPackProductConfig,
   verifyWebhookSignature,
-  extractCheckoutData,
 } from '../../../src/services/stripeService.js';
 
+/**
+ * The legacy pack-checkout call shape, kept HERE rather than in production.
+ * src/services/stripeService.ts exported this adapter with no caller on this
+ * branch or on dev, and #278 round 9 deleted it the way round 8 deleted
+ * extractCheckoutData: a dead export this PR had modified (it gained the
+ * lazy ensure), so every future money-path change would have to be mirrored
+ * into an unreachable function that an entrypoint audit still counts. The
+ * behaviour these cases exercise is createHostedCheckout via
+ * createPackCheckoutSession; the shape below is reproduced exactly, including
+ * the invalid-product refusal and the legacy id fallbacks.
+ */
+async function createCheckoutSession(params: {
+  userId: string;
+  userEmail: string;
+  productId: string;
+  successUrl: string;
+  cancelUrl: string;
+  orderId?: string;
+  idempotencyKey?: string;
+}) {
+  const { ensurePriceCatalog } = await import('../../../src/services/priceCatalog.js');
+  await ensurePriceCatalog(params.productId);
+  const product = getPackProductConfig(params.productId as never);
+  if (!product) {
+    return { success: false as const, error: `Invalid product ID: ${params.productId}` };
+  }
+  const orderId = params.orderId || `legacy-${params.userId}-${Date.now()}`;
+  return createPackCheckoutSession({
+    orderId,
+    userEmail: params.userEmail,
+    product,
+    successUrl: params.successUrl,
+    cancelUrl: params.cancelUrl,
+    idempotencyKey: params.idempotencyKey || `legacy-pack:${orderId}`
+  });
+}
+
 describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    await configureStubbedPrices();
     // Set required environment variables
     vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
     vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_mock');
@@ -67,7 +137,7 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
     vi.unstubAllEnvs();
   });
 
-  describe('createCheckoutSession', () => {
+  describe('pack checkout, through the legacy entrypoint shape', () => {
     it('should create checkout session for credit-pack-4', async () => {
       const result = await createCheckoutSession({
         userId: 'user-123',
@@ -94,15 +164,105 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
       expect(result.error).toContain('Invalid product ID');
     });
 
-    it('should fail when price ID is not configured', async () => {
-      // Remove the price environment variable
+    it('should fail closed with a stable code when the price ID is not configured', async () => {
       vi.stubEnv('STRIPE_PRICE_STARTER', '');
 
-      // Re-import to pick up new env vars (need to reset module cache)
-      vi.resetModules();
+      const result = await createCheckoutSession({
+        userId: 'user-123',
+        userEmail: 'test@example.com',
+        productId: 'credit-pack-4',
+        successUrl: 'https://example.com/success',
+        cancelUrl: 'https://example.com/cancel',
+      });
 
-      // The test validates the error handling path
-      // In production, missing STRIPE_PRICE_* should return an error
+      expect(result).toMatchObject({ success: false, errorCode: 'PRICE_ID_NOT_CONFIGURED' });
+      expect(mockSessionCreate).not.toHaveBeenCalled();
+    });
+
+    // A Stripe Price ID is not evidence of a USABLE amount. When the Price
+    // cannot be resolved to one - archived, tiered, absurd, or unreachable -
+    // the purchase must be disabled rather than fall back to a hard-coded
+    // figure a later refund would trust. These are the relocated forms of the
+    // old "pack amount missing/zero/non-numeric" boot errors.
+    it.each([
+      ['archived', { active: false, unit_amount: 500 }],
+      ['tiered (no unit amount)', { active: true, unit_amount: null }],
+      ['implausibly small', { active: true, unit_amount: 1 }],
+      ['unreachable', null],
+    ])('should fail closed when the starter price is %s', async (_label, price) => {
+      const { resetPriceCatalog, setPriceRetriever } = await import(
+        '../../../src/services/priceCatalog.js'
+      );
+      resetPriceCatalog();
+      setPriceRetriever(async (priceId: string) => {
+        if (priceId === 'price_starter_mock') {
+          if (price === null) throw new Error('down');
+          return { id: priceId, currency: 'usd', ...price } as never;
+        }
+        return {
+          id: priceId,
+          active: true,
+          unit_amount: PRICE_FIXTURES[priceId],
+          currency: 'usd',
+        } as never;
+      });
+
+      const result = await createCheckoutSession({
+        userId: 'user-123',
+        userEmail: 'test@example.com',
+        productId: 'credit-pack-4',
+        successUrl: 'https://example.com/success',
+        cancelUrl: 'https://example.com/cancel',
+      });
+
+      expect(result).toMatchObject({ success: false, errorCode: 'PACK_AMOUNT_NOT_CONFIGURED' });
+      expect(mockSessionCreate).not.toHaveBeenCalled();
+    });
+
+    it('reads the amount from the resolved Stripe price, never a built-in default', async () => {
+      // Same intent as before #275 stage A - no hard-coded fallback amount can
+      // reach a customer - at its new source. The amount used to come from
+      // STRIPE_STARTER_AMOUNT_CENTS; it now comes from the Price itself.
+      const { ensurePriceCatalog, resetPriceCatalog, setPriceRetriever } = await import(
+        '../../../src/services/priceCatalog.js'
+      );
+
+      resetPriceCatalog();
+      // The Stripe Price must say exactly what the product table pins
+      // (500/1000/9000): a resolved-and-verified amount is served, anything
+      // else refuses. This is the two-source check in miniature (#278 r5).
+      const amounts: Record<string, number> = {
+        price_starter_mock: 500,
+        price_regular_mock: 1000,
+        price_power_mock: 9000
+      };
+      setPriceRetriever(async priceId => ({
+        id: priceId,
+        active: true,
+        unit_amount: amounts[priceId] ?? 999_999,
+        currency: 'usd',
+        product: 'prod_starter'
+      }) as never);
+      await ensurePriceCatalog();
+      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 500 });
+
+      // A healthy, active, plausible Price at the WRONG amount - a transposed
+      // or repointed env var - is refused, never served.
+      resetPriceCatalog();
+      setPriceRetriever(async priceId => ({
+        id: priceId,
+        active: true,
+        unit_amount: 777,
+        currency: 'usd',
+        product: 'prod_starter'
+      }) as never);
+      await ensurePriceCatalog();
+      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 0 });
+
+      // An unresolved price must yield an unusable amount rather than the
+      // historical hard-coded 500, so the caller's guard refuses the purchase.
+      resetPriceCatalog();
+      expect(getPackProductConfig('credit-pack-4')).toMatchObject({ amountCents: 0 });
     });
 
     it('should handle emails without @ symbol gracefully', async () => {
@@ -120,41 +280,7 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
     });
   });
 
-  describe('extractCheckoutData', () => {
-    it('should extract user and credit info from checkout session', async () => {
-      const mockSession = {
-        id: 'cs_test_123',
-        client_reference_id: 'user-123',
-        customer_email: 'test@example.com',
-        amount_total: 399, // $3.99 in cents
-        metadata: {
-          userId: 'user-123',
-          productId: 'credit-pack-4',
-          credits: '4',
-        },
-      } as any;
-
-      const data = await extractCheckoutData(mockSession);
-
-      expect(data).not.toBeNull();
-      expect(data?.userId).toBe('user-123');
-      expect(data?.credits).toBe(4);
-      expect(data?.productId).toBe('credit-pack-4');
-      expect(data?.sessionId).toBe('cs_test_123');
-      expect(data?.amountPaid).toBe(3.99);
-    });
-
-    it('should return null when required metadata is missing', async () => {
-      const mockSession = {
-        id: 'cs_test_123',
-        metadata: {}, // Missing required fields
-      } as any;
-
-      const data = await extractCheckoutData(mockSession);
-
-      expect(data).toBeNull();
-    });
-  });
+  
 
   describe('webhook signature verification', () => {
     it('should return null when webhook secret is not configured', () => {
@@ -183,8 +309,16 @@ describe('Credit Purchase Flow (US-PURCHASE-01)', () => {
 });
 
 describe('Checkout Session Error Handling', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
+    await configureStubbedPrices();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it('should handle missing STRIPE_SECRET_KEY gracefully', async () => {
@@ -218,6 +352,52 @@ describe('Checkout Session Error Handling', () => {
     expect(expectedResponseShape).toHaveProperty('success');
     expect(expectedResponseShape).toHaveProperty('sessionId');
     expect(expectedResponseShape).toHaveProperty('sessionUrl');
+  });
+
+  it('does not log or return arbitrary Stripe checkout exceptions', async () => {
+    const sensitive = 'private Stripe failure cs_private pi_private auth0|private-user';
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
+    mockSessionCreate.mockRejectedValueOnce(new Error(sensitive));
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const result = await createCheckoutSession({
+      userId: 'auth0|private-user',
+      userEmail: 'private@example.test',
+      productId: 'credit-pack-4',
+      successUrl: 'https://example.test/success',
+      cancelUrl: 'https://example.test/cancel'
+    });
+
+    const output = diagnostic.mock.calls.flat().map(String).join('\n');
+    expect(output).toContain('"event":"stripe.checkout_creation_failed"');
+    // The result now carries a stable, non-PII classification for the caller's
+    // own catch (issue #213). For a bare Error with no Stripe code/type that is
+    // 'provider_error'; the raw message is never surfaced.
+    expect(result).toEqual({
+      success: false,
+      errorCode: 'PROVIDER_ERROR',
+      diagnosticClass: 'provider_error',
+      error: 'Failed to create checkout session'
+    });
+    expect(output).not.toContain(sensitive);
+    expect(JSON.stringify(result)).not.toContain(sensitive);
+  });
+
+  it('does not log arbitrary webhook verification exceptions', () => {
+    const sensitive = 'private signature failure whsec_private evt_private';
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_mock');
+    mockConstructEvent.mockImplementationOnce(() => {
+      throw new Error(sensitive);
+    });
+    const diagnostic = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(verifyWebhookSignature('private-body', 'private-signature')).toBeNull();
+
+    const output = diagnostic.mock.calls.flat().map(String).join('\n');
+    expect(output).toContain('"event":"stripe.webhook_signature_invalid"');
+    expect(output).not.toContain(sensitive);
   });
 });
 

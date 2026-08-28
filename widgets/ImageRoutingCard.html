@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image for Mail</title>
+    <style>
+      /* Letter IRL design system (widget-design-package, Aug 2026). Follows
+         the host theme in both directions - fixes the fixed-navy debt. */
+      :root{--sf:#fff;--sf2:#fafafa;--bd:#e4e4e7;--bd2:#f0f0f2;--tx:#111113;--tb:#3f3f46;--mut:#71717a;--faint:#a1a1aa}
+      .dark{--sf:#2a2a2e;--sf2:#232327;--bd:#3a3a40;--bd2:#323238;--tx:#f4f4f5;--tb:#d4d4d8;--mut:#a1a1aa;--faint:#71717a}
+      *{box-sizing:border-box}
+      body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--tb)}
+      .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;overflow:hidden;max-width:100%}
+      .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
+      .logo{width:17px;height:11px;flex:none;display:block}
+      /* One parametric SVG for both themes (assets/brand/letterirl-mark-small.svg):
+         the mark reads --li-blue, which the dark scope lightens. */
+      .dark{--li-blue:#6f98f2}
+      .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
+      .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
+      .bd{padding:14px}
+      h3{margin:0;font-size:15px;font-weight:600;color:var(--tx);letter-spacing:-.01em}
+      .ex{font-size:12.5px;line-height:1.55;color:var(--mut);margin:6px 0 0}
+      .inrow{display:flex;gap:6px;margin-top:11px}
+      .inrow input{flex:1;min-width:0;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tb);font-size:12px;padding:9px 10px;font-family:inherit}
+      .btnc{border:1px solid var(--bd);background:var(--sf);color:var(--tx);border-radius:8px;font-size:12px;font-weight:600;padding:0 13px;cursor:pointer;flex:none;font-family:inherit}
+      .btnc:hover{background:var(--sf2)}
+      .url{display:flex;gap:8px;align-items:center;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:6px 6px 6px 10px;margin-top:11px}
+      .url code{flex:1;font-size:10.5px;color:var(--mut);word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+      .url .btnc{padding:6px 12px}
+      .preview-wrap{text-align:center;margin-top:11px}
+      .preview-wrap img{max-width:100%;max-height:320px;border-radius:10px;border:1px solid var(--bd)}
+      .hint{font-size:11px;color:var(--faint);line-height:1.5;margin:9px 0 0}
+      .credit{font-size:11.5px;color:var(--mut);margin:9px 0 0}
+      .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
+      .sk{background:linear-gradient(90deg,var(--bd2) 25%,var(--bd) 50%,var(--bd2) 75%);background-size:200% 100%;animation:sh 1.4s infinite;border-radius:6px}
+      @keyframes sh{to{background-position:-200% 0}}
+      .dots span{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--faint);margin-right:4px;animation:blink 1.2s infinite}
+      .dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}
+      @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+      .hidden{display:none !important}
+    </style>
+  </head>
+  <body>
+    <div class="w">
+      <div class="hd"><span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 21"><path fill="none" stroke="var(--li-blue,#2563eb)" stroke-width="3" stroke-linejoin="round" d="M11.3 2.4c5.2 0 9.4 3.3 9.4 7.4 0 4.1-4.2 7.4-9.4 7.4-.8 0-1.6-.1-2.4-.2l-5.7 2.6 1.8-4.1C3 14.2 1.9 12 1.9 9.8c0-4.1 4.2-7.4 9.4-7.4Z"></path><g transform="rotate(-8 24 8.6)"><rect x="16.5" y="3" width="14.6" height="10" rx="1.6" fill="var(--li-orange,#f97316)"></rect><path fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" d="m18 4.7 5.8 4 5.8-4"></path></g></svg></span><b>Letter IRL</b><span class="ctx">Image</span></div>
+      <div class="bd">
+        <!-- LOADING: default until toolOutput carries a mode, so users never
+             read "no credits" while their credit is in fact being spent. -->
+        <div id="state-loading">
+          <h3>Working on your image&hellip; <span class="dots"><span></span><span></span><span></span></span></h3>
+          <p class="ex">Letter IRL is preparing your image request.</p>
+          <div class="sk" style="height:120px;margin-top:11px;border-radius:10px"></div>
+        </div>
+
+        <!-- GENERATED mode: image created in-turn with a Letter IRL credit -->
+        <div id="state-generated" class="hidden">
+          <h3>Your image is ready</h3>
+          <div class="preview-wrap">
+            <img id="preview-img" src="" alt="Generated image preview" />
+          </div>
+          <p class="credit" id="credit-line"></p>
+          <div class="url">
+            <code id="url-text"></code>
+            <button class="btnc" id="btn-copy-url" type="button">Copy</button>
+          </div>
+          <p class="hint">Created by Letter IRL. Tip: ask again without @Letter IRL and ChatGPT will generate free.</p>
+        </div>
+
+        <!-- REDIRECT mode: explanation + copy-ready prompt -->
+        <div id="state-redirect" class="hidden">
+          <h3 id="redirect-title">Generate this with ChatGPT</h3>
+          <p class="ex" id="explain-text"></p>
+          <div class="inrow prompt-row">
+            <input id="prompt-field" type="text" readonly value="" />
+            <button class="btnc" id="btn-copy-prompt" type="button">Copy</button>
+          </div>
+        </div>
+      </div>
+      <p class="rev">routing t14</p>
+    </div>
+
+    <script>
+      (function () {
+        function nonEmptyString(value) {
+          return typeof value === "string" && value.trim() ? value : null;
+        }
+
+        function toolOutput() {
+          return (window.openai && window.openai.toolOutput) || {};
+        }
+
+        function hiddenMeta() {
+          return (window.openai && window.openai.toolResponseMetadata) || {};
+        }
+
+        function applyTheme() {
+          var theme = (window.openai && window.openai.theme) || "light";
+          document.documentElement.classList.toggle("dark", theme === "dark");
+        }
+
+        function wireCopy(buttonId, getText) {
+          var btn = document.getElementById(buttonId);
+          btn.addEventListener("click", function () {
+            var text = getText();
+            if (!text) return;
+            var done = function () {
+              btn.textContent = "Copied!";
+              setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+            };
+            var fail = function () {
+              btn.textContent = "Copy failed";
+              setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(done, function () {
+                fallbackCopy(text, done, fail);
+              });
+            } else {
+              fallbackCopy(text, done, fail);
+            }
+          });
+        }
+
+        // execCommand fallback for webviews without the async clipboard API.
+        // Uses a transient off-screen textarea (NOT display:none - hidden
+        // elements cannot hold a selection) and only reports success when the
+        // copy actually took.
+        function fallbackCopy(text, done, fail) {
+          var scratch = document.createElement("textarea");
+          scratch.value = text;
+          scratch.setAttribute("readonly", "");
+          scratch.style.position = "fixed";
+          scratch.style.left = "-9999px";
+          scratch.style.top = "0";
+          document.body.appendChild(scratch);
+          scratch.focus();
+          scratch.select();
+          var ok = false;
+          try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+          document.body.removeChild(scratch);
+          if (ok) done(); else fail();
+        }
+
+        function render() {
+          applyTheme();
+          var out = toolOutput();
+          var meta = hiddenMeta();
+          var mode = out.mode === "generated" || out.mode === "redirect" ? out.mode : null;
+          var generated = mode === "generated";
+
+          document.getElementById("state-loading").classList.toggle("hidden", mode !== null);
+          document.getElementById("state-generated").classList.toggle("hidden", !generated);
+          document.getElementById("state-redirect").classList.toggle("hidden", mode !== "redirect");
+          if (mode === null) return;
+
+          if (generated) {
+            var preview = nonEmptyString(meta.generatedImagePreview);
+            var url = nonEmptyString(out.generatedImageUrl) || nonEmptyString(meta.generatedImageUrl);
+            var img = document.getElementById("preview-img");
+            if (preview) {
+              img.src = "data:image/jpeg;base64," + preview;
+            } else if (url) {
+              img.src = url;
+            }
+            document.getElementById("url-text").textContent = url || "";
+            var remaining = out.generationsRemaining;
+            document.getElementById("credit-line").textContent =
+              typeof remaining === "number"
+                ? "Used 1 Letter IRL image credit · " + remaining + " remaining"
+                : "Created with a Letter IRL image credit";
+          } else {
+            var p = nonEmptyString(out.prompt);
+            // "handoff" = confirmed desktop, where built-in generation runs in
+            // this same turn; the card is a fallback, not an instruction.
+            var handoff = out.redirectStyle === "handoff";
+            var row = document.querySelector(".prompt-row");
+            var title = document.getElementById("redirect-title");
+            var explain = document.getElementById("explain-text");
+            if (p) {
+              row.classList.remove("hidden");
+              document.getElementById("prompt-field").value = p.trim();
+              if (handoff) {
+                title.textContent = "ChatGPT will generate this free";
+                explain.textContent =
+                  "No Letter IRL credit needed. Reply \"go ahead\" to generate it - or copy the prompt and send it without @Letter IRL.";
+              } else {
+                title.textContent = "Generate this with ChatGPT";
+                explain.textContent =
+                  "Letter IRL credits aren't available for this, but ChatGPT's own generator is free: copy the prompt and resend it without @Letter IRL. Then say \"make it a postcard.\"";
+              }
+            } else {
+              // No prompt to copy (status no_prompt) - an empty copy field
+              // with a dead button would be worse than none.
+              row.classList.add("hidden");
+              explain.textContent =
+                "Tell me what image you want, or just ask ChatGPT directly - without mentioning Letter IRL - and it will generate it free.";
+            }
+          }
+        }
+
+        wireCopy("btn-copy-prompt", function () {
+          return document.getElementById("prompt-field").value;
+        });
+        wireCopy("btn-copy-url", function () {
+          return document.getElementById("url-text").textContent;
+        });
+
+        render();
+        window.addEventListener("openai:set_globals", render);
+      })();
+    </script>
+  </body>
+</html>

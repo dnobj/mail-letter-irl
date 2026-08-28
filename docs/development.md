@@ -50,10 +50,10 @@ Both repositories use the same branching strategy: `feature/*` → `dev` → `ma
 │  Auth0: dev-ky21dxn3qmi71hjl.us.auth0.com (dev tenant)          │
 │         Account: dnicholl@objective.works                        │
 │  Neon: dev branch (copy of production)                          │
-│  Railway API: Railway dev environment                            │
+│  Railway API: letter-irl-api-development.up.railway.app          │
 │  Railway Website: mail-letter-irl-website-development...        │
 │  Stripe: test mode                                               │
-│  PostGrid: dummy provider                                        │
+│  PostGrid: test mode                                             │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -81,9 +81,9 @@ master/main (production) ──────────────────�
 | Auth0 Tenant | `dev-njmdyqf8n25rqgy7` (dnicholl@letterirl.com) | `dev-ky21dxn3qmi71hjl` (dnicholl@objective.works) |
 | Neon Branch | `production` | `dev` (synced via `npm run dev:sync`) |
 | Stripe Mode | Live (`sk_live_`) | Test (`sk_test_`) |
-| PostGrid | Live (real mail) | Dummy (no mail) |
+| PostGrid | Live (real mail) | Test mode (no real mail) |
 | Admin Routes | Disabled | Disabled |
-| API URL | `api.letterirl.com` | Railway dev environment |
+| API URL | `api.letterirl.com` | `letter-irl-api-development.up.railway.app` |
 | Website URL | `letterirl.com` | `mail-letter-irl-website-development.up.railway.app` |
 
 ---
@@ -460,9 +460,9 @@ CREATE TABLE example (
 **Development Environment:**
 - API Branch: `dev`
 - Website Branch: `dev`
-- API URL: Railway dev environment
+- API URL: `https://letter-irl-api-development.up.railway.app`
 - Website URL: `https://mail-letter-irl-website-development.up.railway.app`
-- Test credentials (test Stripe, dummy PostGrid)
+- Test credentials (test Stripe, PostGrid test mode)
 - Admin routes disabled
 
 ### Environment Variables on Railway
@@ -471,7 +471,7 @@ Production and development environments have different values:
 - Different Auth0 tenants
 - Different Neon branches
 - Different Stripe modes (live vs test)
-- Different PostGrid modes (live vs dummy)
+- Different PostGrid modes (live vs test)
 
 ---
 
@@ -544,7 +544,7 @@ npm run dev  # Logs to stdout
 ## Security Notes
 
 - Never commit `.env` files
-- Admin routes are disabled in production (`ADMIN_ENABLED=false`)
+- Legacy public admin routes are forced off in every environment; `ADMIN_ENABLED=true` fails startup
 - All MCP tools require authentication
 - Stripe webhooks verified via signature
 - PostGrid API key is test mode in development

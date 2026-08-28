@@ -1,6 +1,6 @@
 # ChatGPT App Submission
 
-Last verified: March 17, 2026
+Last verified: July 23, 2026
 
 This document is a derived checklist for Letter IRL's OpenAI submission. Official OpenAI and MCP docs are the source of truth; this file tracks how the current codebase lines up with them.
 
@@ -9,7 +9,8 @@ For owner-managed submission tasks such as organization verification, screenshot
 ## Current submission posture
 
 - Transport: Streamable HTTP MCP server at `https://api.letterirl.com/mcp`
-- Auth: OAuth with protected resource metadata, authorization server metadata, per-tool `securitySchemes`, and tool-result auth challenges via `mcp/www_authenticate`
+- Auth: Auth0 public CIMD with authorization code + PKCE S256, exact `/mcp`
+  audience/resource, per-tool scopes, and `mcp/www_authenticate` challenges
 - UI: Widgets served as MCP resources with `text/html;profile=mcp-app`
 - Onboarding: supported via app description, app instructions, and the `get_started` tool/widget
 - Compatibility manifest: runtime-derived at `/manifest.json`; checked-in `manifest.json` is a generated snapshot
@@ -25,8 +26,9 @@ For owner-managed submission tasks such as organization verification, screenshot
 ## Runtime checklist
 
 - [x] `/.well-known/oauth-protected-resource`
-- [x] `/.well-known/oauth-authorization-server`
-- [x] `client_id_metadata_document_supported: true`
+- [x] Protected-resource metadata points to the real Auth0 issuer
+- [ ] Owner verifies Auth0 discovery advertises CIMD after DEV configuration
+- [x] Letter IRL does not synthesize authorization-server/CIMD capabilities
 - [x] Tool-level `securitySchemes`
 - [x] `_meta["mcp/www_authenticate"]` on auth-required tool errors
 - [x] Widget MIME `text/html;profile=mcp-app`
@@ -70,7 +72,8 @@ npm run build
 - [x] Confirm your OpenAI Platform account has the `Owner` role for the submitting organization. `dnicholl@objective.works` is listed as Organization Owner.
 - [x] Confirm the OpenAI project used for submission has global data residency. Dashboard `GEOGRAPHY` column shows `Global`.
 - [x] Verify the production MCP server and OAuth endpoints are live on the public domains you will submit. May 31, 2026 check: `api.letterirl.com` manifest, OAuth metadata, MCP CORS preflight, and unauthenticated auth challenge all advertise the canonical production domain.
-- [ ] Review the production widget CSP and confirm it allows only the exact required domains
+- [x] Review the production widget CSP and confirm it allows only the exact required domains (issue #228; one deliberate exclusion - the Azure blob host behind Library picks - recorded in `docs/learnings/widget-csp-enforcement.md`)
+- [ ] After the app leaves dev mode, confirm the widget header no longer shows the "CSP off" pill. This cannot be checked on a dev-mode connector, where enforcement is off regardless of what we declare.
 - [ ] Review submission copy for Letter Packs / pre-paid letter sends wording and remove generic credit/token framing from user-facing materials
 - [ ] Capture final submission assets: logo, screenshots, app description, company URL, privacy policy URL, support contact, and localization fields
 - [ ] Locate and review final demo videos using `docs/app-submission/owner-checklist.md`

@@ -4,326 +4,112 @@
     <meta charset="utf-8" />
     <title>ImageUploadCard</title>
     <style>
-      :root {
-        --bg-primary: #ffffff;
-        --bg-secondary: #f8fafc;
-        --text-primary: #1f2933;
-        --text-secondary: #61748f;
-        --border-color: #e2e8f0;
-        --accent-warning: #b91c1c;
-        --accent-warning-bg: #fee2e2;
-        --accent-primary: #2563eb;
-        --accent-primary-hover: #1d4ed8;
-
-        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: transparent;
-        color: var(--text-primary);
-      }
-
-      .dark {
-        --bg-primary: #1e293b;
-        --bg-secondary: #0f172a;
-        --text-primary: #f1f5f9;
-        --text-secondary: #94a3b8;
-        --border-color: #334155;
-        --accent-warning: #f87171;
-        --accent-warning-bg: #7f1d1d;
-        --accent-primary: #3b82f6;
-        --accent-primary-hover: #60a5fa;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        padding: 1rem;
-        background: transparent;
-      }
-
-      .card {
-        width: 100%;
-        border-radius: 12px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border-color);
-        overflow: hidden;
-      }
-
-      /* State: Select */
-      .select-state {
-        padding: 1.5rem;
-        text-align: center;
-      }
-
-      .select-icon {
-        font-size: 2.5rem;
-        margin-bottom: 0.75rem;
-      }
-
-      .select-title {
-        font-size: 1rem;
-        font-weight: 600;
-        margin: 0 0 0.25rem;
-        color: var(--text-primary);
-      }
-
-      .select-guidance {
-        font-size: 0.85rem;
-        color: var(--text-secondary);
-        margin: 0 0 1rem;
-      }
-
-      .select-formats {
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-        margin: 0.75rem 0 0;
-      }
-
-      /* Buttons */
-      .btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.4rem;
-        padding: 0.6rem 1.25rem;
-        border-radius: 8px;
-        font-size: 0.9rem;
-        font-weight: 600;
-        cursor: pointer;
-        border: none;
-        transition: background 0.15s ease;
-      }
-
-      .btn-primary {
-        background: var(--accent-primary);
-        color: #fff;
-      }
-
-      .btn-primary:hover {
-        background: var(--accent-primary-hover);
-      }
-
-      .btn-secondary {
-        background: transparent;
-        color: var(--accent-primary);
-        border: 1px solid var(--border-color);
-      }
-
-      .btn-secondary:hover {
-        background: var(--bg-secondary);
-      }
-
-      /* State: Preview (before upload) */
-      .preview-state {
-        padding: 1rem;
-      }
-
-      .preview-image-container {
-        width: 100%;
-        border-radius: 8px;
-        overflow: hidden;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-color);
-        margin-bottom: 0.75rem;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        max-height: 250px;
-      }
-
-      .preview-image-container img {
-        max-width: 100%;
-        max-height: 250px;
-        object-fit: contain;
-        display: block;
-      }
-
-      .preview-file-info {
-        font-size: 0.8rem;
-        color: var(--text-secondary);
-        margin-bottom: 0.75rem;
-      }
-
-      .preview-actions {
-        display: flex;
-        gap: 0.5rem;
-      }
-
-      .preview-actions .btn {
-        flex: 1;
-      }
-
-      /* State: Uploading */
-      .uploading-state {
-        padding: 2rem 1.5rem;
-        text-align: center;
-      }
-
-      .spinner {
-        width: 32px;
-        height: 32px;
-        border: 3px solid var(--border-color);
-        border-top-color: var(--accent-primary);
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-        margin: 0 auto 0.75rem;
-      }
-
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
-
-      .uploading-text {
-        font-size: 0.9rem;
-        color: var(--text-secondary);
-        margin: 0;
-      }
-
-      /* State: Done (after upload) */
-      .done-state {
-        padding: 1rem;
-      }
-
-      .done-label {
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin: 0 0 0.5rem;
-      }
-
-      .done-image-container {
-        width: 100%;
-        border-radius: 8px;
-        overflow: hidden;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-color);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        max-height: 250px;
-      }
-
-      .done-image-container img {
-        max-width: 100%;
-        max-height: 250px;
-        object-fit: contain;
-        display: block;
-      }
-
-      /* URL display */
-      .url-display {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border-color);
-        border-radius: 8px;
-        padding: 0.5rem 0.75rem;
-        margin-top: 0.75rem;
-      }
-
-      .url-display code {
-        flex: 1;
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-        word-break: break-all;
-        font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
-      }
-
-      .btn-copy {
-        flex-shrink: 0;
-        background: transparent;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        padding: 0.3rem 0.6rem;
-        font-size: 0.7rem;
-        color: var(--text-secondary);
-        cursor: pointer;
-        transition: background 0.15s ease;
-      }
-
-      .btn-copy:hover {
-        background: var(--bg-primary);
-      }
-
-      /* State: Error */
-      .error-state {
-        padding: 1.5rem;
-        text-align: center;
-      }
-
-      .error-message {
-        font-size: 0.85rem;
-        color: var(--accent-warning);
-        background: var(--accent-warning-bg);
-        padding: 0.75rem 1rem;
-        border-radius: 8px;
-        margin: 0;
-      }
-
-      /* Utility */
-      .hidden {
-        display: none !important;
-      }
+      /* Letter IRL design system (widget-design-package, Aug 2026). */
+      :root{--sf:#fff;--sf2:#fafafa;--bd:#e4e4e7;--bd2:#f0f0f2;--tx:#111113;--tb:#3f3f46;--mut:#71717a;--faint:#a1a1aa;--pri:#111113;--prit:#fff;--er:#dc2626;--erbg:#fef2f2}
+      .dark{--sf:#2a2a2e;--sf2:#232327;--bd:#3a3a40;--bd2:#323238;--tx:#f4f4f5;--tb:#d4d4d8;--mut:#a1a1aa;--faint:#71717a;--pri:#f4f4f5;--prit:#111113;--er:#f87171;--erbg:rgba(248,113,113,.12)}
+      *{box-sizing:border-box}
+      body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--tb)}
+      .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;overflow:hidden;max-width:100%}
+      .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
+      .logo{width:17px;height:11px;flex:none;display:block}
+      /* One parametric SVG for both themes (assets/brand/letterirl-mark-small.svg):
+         the mark reads --li-blue, which the dark scope lightens. */
+      .dark{--li-blue:#6f98f2}
+      .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
+      .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
+      .bd{padding:14px}
+      h3{margin:0;font-size:15px;font-weight:600;color:var(--tx);letter-spacing:-.01em}
+      .ex{font-size:12.5px;line-height:1.55;color:var(--mut);margin:5px 0 0}
+      .btn{display:flex;width:100%;justify-content:center;align-items:center;gap:7px;border-radius:999px;padding:9px 16px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;box-sizing:border-box;border:none;transition:opacity .15s ease,background .15s ease}
+      .btn-p{background:var(--pri);color:var(--prit)}
+      .btn-s{background:transparent;color:var(--tx);border:1px solid var(--bd)}
+      .btn-s:hover{background:var(--sf2)}
+      .btn[disabled]{opacity:.45;cursor:default}
+      .tile{width:40px;height:40px;border-radius:11px;border:1px solid var(--bd);background:var(--sf2);display:flex;align-items:center;justify-content:center;color:var(--tx);margin:2px auto 10px}
+      .imgbox{background:var(--sf2);border:1px solid var(--bd);border-radius:10px;overflow:hidden;display:flex;justify-content:center;align-items:center;max-height:250px}
+      .imgbox img{max-width:100%;max-height:250px;object-fit:contain;display:block}
+      .finfo{font-size:11.5px;color:var(--mut);text-align:center;margin:9px 0 0}
+      .hint{font-size:11px;color:var(--faint);line-height:1.5;margin:9px 0 0;text-align:center}
+      .status{font-size:11.5px;color:var(--mut);text-align:center;margin:8px 0 0}
+      .ulabel{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 8px}
+      .url{display:flex;gap:8px;align-items:center;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:6px 6px 6px 10px;margin-top:11px}
+      .url code{flex:1;font-size:10.5px;color:var(--mut);word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+      .btnc{border:1px solid var(--bd);background:var(--sf);color:var(--tx);border-radius:8px;font-size:12px;font-weight:600;padding:6px 12px;cursor:pointer;flex:none;font-family:inherit}
+      .btnc:hover{background:var(--sf2)}
+      .errp{background:var(--erbg);border:1px solid rgba(220,38,38,.25);border-radius:10px;padding:11px 13px;font-size:12.5px;line-height:1.5;color:var(--er);text-align:center}
+      .spin{width:26px;height:26px;border:3px solid var(--bd);border-top-color:var(--tx);border-radius:50%;animation:rot 1s linear infinite;margin:6px auto 10px}
+      @keyframes rot{to{transform:rotate(360deg)}}
+      .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
+      .hidden{display:none !important}
     </style>
   </head>
   <body>
-    <div class="card">
+    <div class="w">
+      <div class="hd"><span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 21"><path fill="none" stroke="var(--li-blue,#2563eb)" stroke-width="3" stroke-linejoin="round" d="M11.3 2.4c5.2 0 9.4 3.3 9.4 7.4 0 4.1-4.2 7.4-9.4 7.4-.8 0-1.6-.1-2.4-.2l-5.7 2.6 1.8-4.1C3 14.2 1.9 12 1.9 9.8c0-4.1 4.2-7.4 9.4-7.4Z"></path><g transform="rotate(-8 24 8.6)"><rect x="16.5" y="3" width="14.6" height="10" rx="1.6" fill="var(--li-orange,#f97316)"></rect><path fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" d="m18 4.7 5.8 4 5.8-4"></path></g></svg></span><b>Letter IRL</b><span class="ctx">Photo</span></div>
+
       <!-- Select State -->
-      <div id="state-select" class="select-state">
-        <div class="select-icon">&#x1F4F7;</div>
-        <p class="select-title">Upload a Photo</p>
-        <p id="guidance-text" class="select-guidance">Select a photo to use in your letter or postcard.</p>
-        <button class="btn btn-primary" id="btn-select" type="button">Select Photo</button>
-        <p class="select-formats">JPEG, PNG, or WebP &middot; Max 10 MB</p>
+      <div id="state-select" class="bd" style="text-align:center">
+        <div class="tile"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>
+        <h3>Upload a Photo</h3>
+        <p id="guidance-text" class="ex">Select a photo to use in your letter or postcard.</p>
+        <div style="display:grid;gap:8px;margin-top:13px">
+          <button class="btn btn-p" id="btn-select" type="button">Select Photo</button>
+          <button class="btn btn-s hidden" id="btn-library" type="button">Choose from Library</button>
+        </div>
+        <p id="library-status" class="status hidden"></p>
+        <p class="hint">JPEG, PNG, or WebP &middot; Max 10 MB</p>
         <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp" class="hidden" />
       </div>
 
       <!-- Preview State (before upload) -->
-      <div id="state-preview" class="preview-state hidden">
-        <div class="preview-image-container">
+      <div id="state-preview" class="bd hidden">
+        <div class="imgbox">
           <img id="preview-img" src="" alt="Selected photo preview" />
         </div>
-        <p id="file-info" class="preview-file-info"></p>
-        <div class="preview-actions">
-          <button class="btn btn-secondary" id="btn-change" type="button">Choose Different</button>
-          <button class="btn btn-primary" id="btn-use" type="button">Use This Photo</button>
+        <p id="file-info" class="finfo"></p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+          <button class="btn btn-s" id="btn-change" type="button">Choose Different</button>
+          <button class="btn btn-p" id="btn-use" type="button">Use This Photo</button>
         </div>
       </div>
 
       <!-- Uploading State -->
-      <div id="state-uploading" class="uploading-state hidden">
-        <div class="spinner"></div>
-        <p class="uploading-text">Uploading...</p>
+      <div id="state-uploading" class="bd hidden" style="text-align:center;padding:26px 14px">
+        <div class="spin"></div>
+        <h3 style="font-size:14px">Uploading&hellip;</h3>
+        <p class="ex">Adding your photo to ChatGPT's files.</p>
       </div>
 
       <!-- Done State (after upload) -->
-      <div id="state-done" class="done-state hidden">
-        <p class="done-label">Uploaded Photo</p>
-        <div class="done-image-container">
+      <div id="state-done" class="bd hidden">
+        <p id="done-label" class="ulabel">Uploaded Photo</p>
+        <div class="imgbox">
           <img id="done-img" src="" alt="Uploaded photo" />
         </div>
-        <div class="url-display">
+        <p id="done-note" class="hint hidden"></p>
+        <div class="url">
           <code id="url-text"></code>
-          <button class="btn-copy" id="btn-copy" type="button">Copy</button>
+          <button class="btnc" id="btn-copy" type="button">Copy</button>
         </div>
       </div>
 
       <!-- Error State -->
-      <div id="state-error" class="error-state hidden">
-        <p id="error-message" class="error-message"></p>
+      <div id="state-error" class="bd hidden">
+        <p id="error-message" class="errp"></p>
+        <p class="hint">Ask again in the conversation to retry.</p>
       </div>
+
+      <p class="rev">upload t14</p>
     </div>
 
     <script>
       (function () {
-        // --- Theme ---
-        var theme = (window.openai && window.openai.theme) ? window.openai.theme : "light";
-        if (theme === "dark") {
-          document.documentElement.classList.add("dark");
+        // --- Theme (re-applied on set_globals: globals can arrive late) ---
+        function applyTheme() {
+          var theme = (window.openai && window.openai.theme) ? window.openai.theme : "light";
+          document.documentElement.classList.toggle("dark", theme === "dark");
         }
+        applyTheme();
 
         // --- DOM refs ---
         var stateSelect = document.getElementById("state-select");
@@ -333,19 +119,43 @@
         var stateError = document.getElementById("state-error");
 
         var btnSelect = document.getElementById("btn-select");
+        var btnLibrary = document.getElementById("btn-library");
+        var libraryStatus = document.getElementById("library-status");
         var btnChange = document.getElementById("btn-change");
         var btnUse = document.getElementById("btn-use");
         var btnCopy = document.getElementById("btn-copy");
         var fileInput = document.getElementById("file-input");
         var previewImg = document.getElementById("preview-img");
         var doneImg = document.getElementById("done-img");
+        var doneLabel = document.getElementById("done-label");
+        var doneNote = document.getElementById("done-note");
         var fileInfo = document.getElementById("file-info");
         var guidanceText = document.getElementById("guidance-text");
         var errorMessage = document.getElementById("error-message");
         var urlText = document.getElementById("url-text");
 
+        // Under an enforced widget CSP, a ChatGPT Library pick's download URL
+        // is served from a blob host that is deliberately NOT in
+        // resourceDomains (issue #228), so the browser refuses to paint the
+        // thumbnail. Nothing else about the pick is affected: the URL travels
+        // to the server over the window.openai bridge, and the preview tool
+        // fetches the image from Node, where page CSP does not apply. So this
+        // is a routine, expected state rather than a failure - say so.
+        var THUMBNAIL_UNAVAILABLE =
+          "Thumbnail can't be shown here - your photo will appear in the preview.";
+
         var selectedFile = null;
         var previewDataUrl = null;
+        // Set when the pending preview came from the ChatGPT Library picker
+        // (window.openai.selectFiles) instead of a local file. The file already
+        // lives in ChatGPT's file store, so "Use This Photo" skips uploadFile
+        // and goes straight to the confirm/follow-up handoff with its URL.
+        var libraryFile = null;
+        // Monotonic guard: every user-initiated source action bumps this, and
+        // a library pick that resolves late (the picker is user-paced) checks
+        // its captured generation before touching state, so a stale resolve
+        // can never clobber a newer local selection or in-flight upload.
+        var flowGen = 0;
         var debugEnabled = false;
         var debugEndpoint = "";
         var debugSessionId = "upload-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
@@ -375,6 +185,43 @@
           } catch (e) { /* ignore */ }
         }
         hydrateFromToolOutput();
+
+        // --- ChatGPT Library picker availability ---
+        // selectFiles is plan/region-gated and typed optional on the host
+        // bridge, so the button only appears when the API is actually there.
+        // Re-checked on openai:set_globals because bridge globals can arrive
+        // after initial load.
+        function selectFilesAvailable() {
+          return !!(window.openai && typeof window.openai.selectFiles === "function");
+        }
+
+        function updateLibraryAvailability() {
+          btnLibrary.classList.toggle("hidden", !selectFilesAvailable());
+        }
+
+        function showLibraryStatus(msg) {
+          libraryStatus.textContent = msg || "";
+          libraryStatus.classList.toggle("hidden", !msg);
+        }
+
+        function scrubMessage(err) {
+          var msg = (err && err.message) || err || "Unknown error";
+          // Host error strings can embed signed URLs; keep diagnostics URL-free.
+          // (blob: URLs embed an https origin, so the first alternative covers
+          // them; data: requires a mime-ish continuation to spare plain prose.)
+          return String(msg).replace(/(?:https?:\/\/|data:[\w.+-]+\/)\S+/gi, "[url]");
+        }
+
+        function displayMessage(err, fallback) {
+          // Only surface host text to the user when it is an actual message;
+          // "[object Object]" from a non-Error rejection is beacon material,
+          // not UI copy.
+          if (!(err instanceof Error || typeof err === "string")) {
+            return fallback;
+          }
+          var msg = scrubMessage(err);
+          return msg === "Unknown error" ? fallback : msg;
+        }
 
         function debugLog(message, data) {
           if (!debugEnabled) return;
@@ -432,7 +279,10 @@
           } else {
             nextStep = 'call a preview tool with imageUrl "' + downloadUrl + '"';
           }
-          return "Image upload completed. Please " + nextStep + ".";
+          var lead = reason === "library_pick_complete"
+            ? "Image selected from the ChatGPT library."
+            : "Image upload completed.";
+          return lead + " Please " + nextStep + ".";
         }
 
         async function sendFollowUpFallback(downloadUrl, reason) {
@@ -449,12 +299,8 @@
             debugLog("sendFollowUpMessage.success");
             debugBeacon("sendFollowUpMessage.success");
           } catch (e) {
-            debugLog("sendFollowUpMessage.error", {
-              message: (e && e.message) || "Unknown error"
-            });
-            debugBeacon("sendFollowUpMessage.error", {
-              message: (e && e.message) || "Unknown error"
-            });
+            debugLog("sendFollowUpMessage.error", { message: scrubMessage(e) });
+            debugBeacon("sendFollowUpMessage.error", { message: scrubMessage(e) });
           }
         }
 
@@ -504,8 +350,9 @@
           var reader = new FileReader();
           reader.onload = function (e) {
             previewDataUrl = e.target.result;
+            previewImg.onerror = null;
             previewImg.src = previewDataUrl;
-            fileInfo.textContent = file.name + " \u00B7 " + formatFileSize(file.size);
+            fileInfo.textContent = file.name + " · " + formatFileSize(file.size);
             showState("preview");
           };
           reader.onerror = function () {
@@ -514,8 +361,99 @@
           reader.readAsDataURL(file);
         }
 
+        // --- Shared handoff tail (local upload + Library pick both land here) ---
+        async function finishWithDownloadUrl(downloadUrl, previewSrc, reason) {
+          // Show done state with image preview + URL
+          doneLabel.textContent = reason === "library_pick_complete" ? "Selected Photo" : "Uploaded Photo";
+          doneNote.classList.add("hidden");
+          doneImg.classList.remove("hidden");
+          doneImg.onerror = function () {
+            doneImg.classList.add("hidden");
+            doneNote.textContent = THUMBNAIL_UNAVAILABLE;
+            doneNote.classList.remove("hidden");
+            debugLog("doneImage.blocked");
+            debugBeacon("doneImage.blocked", { reason: reason });
+          };
+          doneImg.src = previewSrc || "";
+          urlText.textContent = downloadUrl;
+          showState("done");
+
+          // callTool stores the URL server-side but does NOT create a new
+          // ChatGPT conversation turn. We always need sendFollowUpMessage
+          // to prompt ChatGPT to act on the uploaded image.
+          if (window.openai && window.openai.callTool) {
+            try {
+              debugLog("callTool.start", { toolName: "confirm_uploaded_image" });
+              debugBeacon("callTool.start", { toolName: "confirm_uploaded_image" });
+              await window.openai.callTool("confirm_uploaded_image", {
+                imageUrl: downloadUrl,
+                context: uploadContext || undefined
+              });
+              debugLog("callTool.success", { toolName: "confirm_uploaded_image" });
+              debugBeacon("callTool.success", { toolName: "confirm_uploaded_image" });
+            } catch (callErr) {
+              debugLog("callTool.error", { message: scrubMessage(callErr) });
+              debugBeacon("callTool.error", { message: scrubMessage(callErr) });
+            }
+          } else {
+            debugLog("callTool.unavailable");
+            debugBeacon("callTool.unavailable");
+          }
+
+          // Always send a follow-up message so ChatGPT knows the image
+          // is ready and has the URL to act on.
+          await sendFollowUpFallback(downloadUrl, reason);
+        }
+
         // --- Upload via OpenAI SDK ---
         async function uploadAndSend() {
+          // Invalidate-only bump: no generation is captured here. Once the
+          // uploading state renders there are no clickable controls left, so
+          // nothing can race this flow - the bump exists only to discard a
+          // library pick still pending from before this click.
+          flowGen++;
+
+          if (libraryFile && libraryFile.fileId) {
+            // Library files already live in ChatGPT's store; no upload needed.
+            // The pick-time URL is a temporary cache URL and the pick-to-confirm
+            // gap is user-paced, so re-resolve a fresh one from the durable
+            // fileId now instead of handing off a possibly expired link.
+            var libFileId = libraryFile.fileId;
+            showState("uploading");
+            debugLog("library.use", { fileId: libFileId });
+            debugBeacon("library.use", { fileId: libFileId });
+
+            try {
+              var freshUrl = null;
+              try {
+                var freshResult = await window.openai.getFileDownloadUrl({ fileId: libFileId });
+                freshUrl = (freshResult && (freshResult.downloadUrl || freshResult.download_url)) || null;
+                debugLog("library.refreshDownloadUrl.success", { hasDownloadUrl: !!freshUrl });
+                debugBeacon("library.refreshDownloadUrl.success", { hasDownloadUrl: !!freshUrl });
+              } catch (refreshErr) {
+                debugLog("library.refreshDownloadUrl.error", { message: scrubMessage(refreshErr) });
+                debugBeacon("library.refreshDownloadUrl.error", { message: scrubMessage(refreshErr) });
+              }
+
+              if (!freshUrl) {
+                // Routine failure (temporary URLs age out, but this branch
+                // also covers network/bridge errors), so recover to the
+                // two-button select state instead of the dead-end error state.
+                libraryFile = null;
+                showState("select");
+                showLibraryStatus("Couldn't get a fresh link for that photo — please pick it again.");
+                return;
+              }
+
+              await finishWithDownloadUrl(freshUrl, freshUrl, "library_pick_complete");
+            } catch (libErr) {
+              debugLog("library.use.error", { message: scrubMessage(libErr) });
+              debugBeacon("library.use.error", { message: scrubMessage(libErr) });
+              showError("Something went wrong with that library photo. Please try again.");
+            }
+            return;
+          }
+
           if (!selectedFile) {
             showError("No file selected.");
             return;
@@ -532,6 +470,7 @@
             debugBeacon("uploadFile.success", { fileId: fileId || null });
 
             if (!fileId) {
+              debugLog("uploadFile.missingFileId");
               debugBeacon("uploadFile.missingFileId");
               showError("Upload failed — no file ID returned.");
               return;
@@ -547,74 +486,171 @@
             debugBeacon("getFileDownloadUrl.success", { hasDownloadUrl: !!downloadUrl });
 
             if (!downloadUrl) {
+              debugLog("getFileDownloadUrl.missingUrl", { fileId: fileId });
               debugBeacon("getFileDownloadUrl.missingUrl", { fileId: fileId });
               showError("Upload succeeded but could not get download URL.");
               return;
             }
 
-            // Show done state with image preview + URL
-            doneImg.src = previewDataUrl || "";
-            urlText.textContent = downloadUrl;
-            showState("done");
+            await finishWithDownloadUrl(downloadUrl, previewDataUrl, "upload_complete");
+          } catch (err) {
+            debugLog("uploadAndSend.error", { message: scrubMessage(err) });
+            debugBeacon("uploadAndSend.error", { message: scrubMessage(err) });
+            showError(displayMessage(err, "Upload failed. Please try again."));
+          }
+        }
 
-            // callTool stores the URL server-side but does NOT create a new
-            // ChatGPT conversation turn. We always need sendFollowUpMessage
-            // to prompt ChatGPT to act on the uploaded image.
-            if (window.openai && window.openai.callTool) {
-              try {
-                debugLog("callTool.start", { toolName: "confirm_uploaded_image" });
-                debugBeacon("callTool.start", { toolName: "confirm_uploaded_image" });
-                await window.openai.callTool("confirm_uploaded_image", {
-                  imageUrl: downloadUrl,
-                  context: uploadContext || undefined
-                });
-                debugLog("callTool.success", { toolName: "confirm_uploaded_image" });
-                debugBeacon("callTool.success", { toolName: "confirm_uploaded_image" });
-              } catch (callErr) {
-                debugLog("callTool.error", {
-                  message: (callErr && callErr.message) || "Unknown error"
-                });
-                debugBeacon("callTool.error", {
-                  message: (callErr && callErr.message) || "Unknown error"
-                });
+        // --- Pick from the ChatGPT Library (window.openai.selectFiles) ---
+        // The decisive #227 experiment: does the Library picker expose
+        // ChatGPT-GENERATED images (not just uploads)? Every phase beacons so
+        // dev runs leave a server-side trail either way.
+        async function pickFromLibrary() {
+          if (btnLibrary.disabled) {
+            return;
+          }
+          var gen = ++flowGen;
+          btnLibrary.disabled = true;
+          showLibraryStatus("Opening your ChatGPT library…");
+          debugLog("selectFiles.start");
+          debugBeacon("selectFiles.start");
+
+          // Escape hatch: selectFiles is user-paced (someone can browse their
+          // library for minutes), so we never time the promise out - but if
+          // the host API is broken and never settles, re-enable the button so
+          // the user can retry. A retry bumps flowGen, which discards this
+          // pick if it ever resolves after all. Two minutes keeps the hatch
+          // out of the way of legitimate slow browsing.
+          var stuckTimer = setTimeout(function () {
+            debugLog("selectFiles.stuck");
+            debugBeacon("selectFiles.stuck");
+            if (gen === flowGen) {
+              showLibraryStatus("Still waiting for the library… if nothing opened, try again.");
+            }
+            btnLibrary.disabled = false;
+          }, 120000);
+
+          try {
+            var files;
+            try {
+              files = await window.openai.selectFiles();
+            } catch (e) {
+              debugLog("selectFiles.error", { message: scrubMessage(e) });
+              debugBeacon("selectFiles.error", { message: scrubMessage(e) });
+              if (gen === flowGen) {
+                showLibraryStatus("Library selection failed or was canceled.");
               }
-            } else {
-              debugLog("callTool.unavailable");
-              debugBeacon("callTool.unavailable");
+              return;
+            }
+            if (gen !== flowGen) {
+              return;
             }
 
-            // Always send a follow-up message so ChatGPT knows the upload
-            // is complete and has the URL to act on.
-            await sendFollowUpFallback(downloadUrl, "upload_complete");
-          } catch (err) {
-            debugLog("uploadAndSend.error", {
-              message: (err && err.message) || "Unknown error"
-            });
-            debugBeacon("uploadAndSend.error", {
-              message: (err && err.message) || "Unknown error"
-            });
-            var errMsg = (err && err.message) || "Upload failed. Please try again.";
-            showError(errMsg);
+            if (!files || !files.length) {
+              debugLog("selectFiles.empty");
+              debugBeacon("selectFiles.empty");
+              showLibraryStatus("No file was selected.");
+              return;
+            }
+
+            var picked = files[0] || {};
+            var fileId = picked.fileId || picked.file_id;
+            var fileName = picked.fileName || picked.file_name || "Library file";
+            var mimeType = picked.mimeType || picked.mime_type || "";
+            debugLog("selectFiles.success", { count: files.length, fileId: fileId || null, mimeType: mimeType || null });
+            debugBeacon("selectFiles.success", { count: files.length, fileId: fileId || null, mimeType: mimeType || null, fileName: fileName });
+
+            if (!fileId) {
+              debugLog("selectFiles.missingFileId");
+              debugBeacon("selectFiles.missingFileId");
+              showLibraryStatus("The library did not return a usable file ID.");
+              return;
+            }
+
+            if (mimeType && ACCEPTED_TYPES.indexOf(mimeType) === -1) {
+              debugLog("selectFiles.unsupportedType", { mimeType: mimeType });
+              debugBeacon("selectFiles.unsupportedType", { mimeType: mimeType });
+              showLibraryStatus("Unsupported format (" + mimeType + "). Please pick a JPEG, PNG, or WebP image.");
+              return;
+            }
+
+            var downloadUrl = null;
+            try {
+              debugLog("library.getFileDownloadUrl.start", { fileId: fileId });
+              debugBeacon("library.getFileDownloadUrl.start", { fileId: fileId });
+              var urlResult = await window.openai.getFileDownloadUrl({ fileId: fileId });
+              downloadUrl = (urlResult && (urlResult.downloadUrl || urlResult.download_url)) || null;
+              debugLog("library.getFileDownloadUrl.success", { hasDownloadUrl: !!downloadUrl });
+              debugBeacon("library.getFileDownloadUrl.success", { hasDownloadUrl: !!downloadUrl });
+            } catch (e) {
+              debugLog("library.getFileDownloadUrl.error", { message: scrubMessage(e) });
+              debugBeacon("library.getFileDownloadUrl.error", { message: scrubMessage(e) });
+            }
+            if (gen !== flowGen) {
+              return;
+            }
+
+            if (!downloadUrl) {
+              showLibraryStatus("Could not get a download link for that library file.");
+              return;
+            }
+
+            selectedFile = null;
+            previewDataUrl = null;
+            // Deliberately no downloadUrl here: the confirm path re-resolves a
+            // fresh one from the durable fileId, and keeping the pick-time URL
+            // around would be a trap for a future edit to hand it off stale.
+            libraryFile = { fileId: fileId, fileName: fileName, mimeType: mimeType };
+
+            var pickedNote = files.length > 1 ? " · using the first of " + files.length + " selected" : "";
+            var baseInfo = fileName + (mimeType ? " · " + mimeType : "") + " · from your ChatGPT library" + pickedNote;
+            previewImg.onerror = function () {
+              debugLog("library.previewImage.error");
+              debugBeacon("library.previewImage.error");
+              fileInfo.textContent = baseInfo + " · " + THUMBNAIL_UNAVAILABLE;
+            };
+            previewImg.src = downloadUrl;
+            fileInfo.textContent = baseInfo;
+            showLibraryStatus("");
+            showState("preview");
+          } finally {
+            clearTimeout(stuckTimer);
+            btnLibrary.disabled = false;
           }
         }
 
         // --- Event handlers ---
         btnSelect.addEventListener("click", function () {
+          showLibraryStatus("");
           fileInput.click();
+        });
+
+        btnLibrary.addEventListener("click", function () {
+          pickFromLibrary();
         });
 
         fileInput.addEventListener("change", function () {
           if (fileInput.files && fileInput.files[0]) {
+            flowGen++;
+            libraryFile = null;
+            showLibraryStatus("");
             onFileSelected(fileInput.files[0]);
           }
         });
 
         btnChange.addEventListener("click", function () {
+          // A library pick returns to the two-button select state; only the
+          // local-file path re-opens the file dialog straight away.
+          var fromLibrary = !!libraryFile;
+          flowGen++;
           fileInput.value = "";
           selectedFile = null;
           previewDataUrl = null;
+          libraryFile = null;
+          showLibraryStatus("");
           showState("select");
-          fileInput.click();
+          if (!fromLibrary) {
+            fileInput.click();
+          }
         });
 
         btnUse.addEventListener("click", function () {
@@ -632,7 +668,12 @@
 
         // --- Initialize ---
         showState("select");
-        window.addEventListener("openai:set_globals", hydrateFromToolOutput);
+        updateLibraryAvailability();
+        window.addEventListener("openai:set_globals", function () {
+          applyTheme();
+          hydrateFromToolOutput();
+          updateLibraryAvailability();
+        });
       })();
     </script>
   </body>

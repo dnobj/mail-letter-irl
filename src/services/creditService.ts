@@ -16,10 +16,10 @@
  */
 
 import { transaction, query } from '../db/index.js';
+import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import {
   User,
   CreditTransaction,
-  AddCreditsParams,
   DeductCreditsParams,
   RefundCreditsParams,
   GetTransactionsParams,
@@ -38,41 +38,6 @@ import {
   getAvailableCredits,
   hasSufficientCredits as ledgerHasSufficientCredits,
 } from './creditLedgerService.js';
-
-// Default expiration for purchased credits (2 years)
-const DEFAULT_PURCHASE_EXPIRATION_DAYS = 730;
-
-/**
- * Add credits to user account (from purchase)
- *
- * - Creates user if doesn't exist
- * - Adds credits to balance
- * - Creates ledger entry with expiration
- * - Increments lifetime credits_purchased
- * - Records transaction in audit trail
- * - All operations are atomic (uses transaction)
- *
- * @throws Error if credits <= 0
- */
-export async function addCredits(params: AddCreditsParams): Promise<CreditOperationResult> {
-  const { userId, email, credits, orderId, description } = params;
-
-  // Use ledger service with purchase defaults
-  const result = await addCreditsToLedger({
-    userId,
-    email,
-    credits,
-    sourceType: 'purchase',
-    sourceReferenceId: orderId,
-    expirationDays: DEFAULT_PURCHASE_EXPIRATION_DAYS,
-    description: description || `Purchased ${credits} credits`,
-  });
-
-  return {
-    user: result.user,
-    transaction: result.transaction,
-  };
-}
 
 /**
  * Add credits with full ledger options
@@ -183,7 +148,7 @@ export async function getBalance(userId: string): Promise<CreditBalance> {
   );
 
   if (result.rows.length === 0) {
-    throw new Error(`User not found: ${userId}`);
+    throw new Error('User not found');
   }
 
   const user = result.rows[0];
@@ -309,7 +274,7 @@ export async function adjustCredits(
       );
 
       if (userResult.rows.length === 0) {
-        throw new Error(`User not found: ${userId}`);
+        throw new Error('User not found');
       }
 
       const user = userResult.rows[0];
@@ -371,7 +336,10 @@ export async function adjustCredits(
 
       const txn = txResult.rows[0];
 
-      console.log(`🔧 Adjusted ${amount} credits for ${userId}: ${reason}, new balance: ${user.credits}`);
+      writeDiagnostic('info', 'credits.adjusted', {
+        amount,
+        newBalance: user.credits
+      });
 
       return { user, transaction: txn };
     });

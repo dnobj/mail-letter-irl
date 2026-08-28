@@ -1,6 +1,6 @@
 # Database Schema
 
-**Last Updated:** January 28, 2026
+**Last Updated:** July 19, 2026
 **Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
 This document describes the Letter IRL database schema as deployed in production (Neon PostgreSQL).
@@ -9,7 +9,8 @@ This document describes the Letter IRL database schema as deployed in production
 
 ## Overview
 
-**14 Tables** across 14 migrations:
+The schema is forward-migrated. Admin foundation migration 022 requires #69's distinct JIT commerce
+migration 021 as its immediate predecessor.
 
 | Category | Tables |
 |----------|--------|
@@ -20,6 +21,7 @@ This document describes the Letter IRL database schema as deployed in production
 | Promos | `promo_campaigns`, `promo_redemptions` |
 | Feedback | `feature_requests` |
 | System | `migrations`, `personal_access_tokens` |
+| Admin foundation | `admin_environment_marker`, `admin_audit_events`, `admin_command_runs`, `admin_operations` |
 
 ---
 
@@ -417,6 +419,44 @@ User-submitted feature requests for product feedback.
 
 ---
 
+### admin_environment_marker
+
+Singleton database identity used to fail closed when a development/production selection does not match
+the connected branch. Provisioning inserts either `development` or `production`; migration 022 does not
+guess or seed it. A constant unique index enforces at most one row.
+
+### admin_audit_events
+
+Append-only actor/action/target/outcome history. UUIDs, stable error codes, session hashes, reasons, and
+three bounded JSONB summaries support later authenticated reads, reveals, and commands. A trigger rejects
+every `UPDATE` and `DELETE`; public privileges are revoked and provisioned application roles receive no
+mutation privilege beyond `INSERT`.
+
+Indexes cover environment plus actor/time, environment plus target/time, and correlation ID. Audit
+retention and archival must be approved before any production access; application rollback retains all
+rows.
+
+### admin_command_runs
+
+Durable command state keyed uniquely by `(environment, idempotency_key)`. The table stores the actor SID,
+preview digest, expected version, timestamps, correlation ID, bounded sanitized result, and stable error
+code. Status and timing constraints reject inconsistent outcomes.
+
+### admin_operations
+
+Environment-scoped provider-operation queue for a later deployed worker. Each command can enqueue one
+operation. Payload/result size, status, attempts, lock, and completion constraints support deterministic
+claim/retry behavior; a partial index covers claimable pending rows.
+
+### Admin grants and provisioning
+
+Migration 022 revokes `PUBLIC` privileges but creates no role or credential. The explicit provisioning
+script requires pre-existing, environment-specific reader/operator login roles, verifies migrations 021
+and 022 plus the database marker, rejects privileged roles, and reapplies a narrow grant set. Production
+provisioning and the first production connection remain separate owner-approved operations.
+
+---
+
 ## Migrations History
 
 | # | File | Description |
@@ -438,6 +478,11 @@ User-submitted feature requests for product feedback.
 | 15 | 015_provider_routing.sql | Provider routing system |
 | 16 | 016_feature_requests.sql | Feature request submission (US-FEEDBACK-01) |
 | 17 | 017_feature_request_contact.sql | Add contact email and consent fields |
+| 18 | 018_image_generation_tracking.sql | Track image generations used |
+| 19 | 019_recent_uploads.sql | Durable recent-upload fallback |
+| 20 | 020_transactional_outbox.sql | Durable mail outbox and maintenance state |
+| 21 | 021_jit_commerce_foundation.sql | JIT commerce foundation owned by issue #69 |
+| 22 | 022_admin_audit.sql | Environment marker, append-only audit, command runs, operations, and grants foundation |
 
 ---
 
@@ -492,3 +537,43 @@ All tables with `updated_at` columns have triggers calling `update_updated_at_co
 - promo_campaigns
 - letter_drafts
 - stripe_disputes
+
+# Commerce and image entitlements (migration 021)
+
+`orders` is authoritative for both `letter_pack` and `jit_mail` purchases. It
+stores the server-selected product snapshot, exact amount/currency, unique
+Stripe Checkout Session and PaymentIntent IDs, an application idempotency key,
+the bound draft/letter for JIT mail, and payment/fulfillment/refund timestamps.
+A partial unique index permits only one active JIT order per draft.
+
+`stripe_webhook_events` claims each verified Stripe event ID in the same
+transaction as its order transition. `commerce_order_events` provides a
+sanitized transition audit trail. `letters.funding_type` records either
+`prepaid_balance` or `jit_order`, and JIT-funded letters reference exactly one
+commerce order.
+
+`image_entitlements` replaces the lifetime `credits_purchased` formula with
+explicit replay-safe grants. `image_generation_reservations` binds each atomic
+generation reservation to its exact grant so failed provider calls can release
+the correct unit. Migration 021 preserves previously earned allowances as a
+`legacy_migration` grant.
+
+Migration 023 extends each reservation with a durable dispatch lease and
+provider outcome state. `reserved` means no provider dispatch has been durably
+authorized, `dispatched` is the pre-network boundary, `consumed` and `released`
+are definite outcomes, and `ambiguous` quarantines an outcome that cannot be
+proved after dispatch. Ambiguous rows retain quota until provider evidence or
+an explicit customer-compensation decision resolves them. A unique non-null
+provider request ID supports reconciliation without exposing it in logs.
+`commerce_operator_audit_events` records privacy-minimized hashes for the
+authenticated actor, target, and idempotency key plus constrained before/after
+state and provider-evidence classifications. It is append-only, has no user or
+domain foreign keys that could block account deletion, and expires into an
+owner-controlled retention workflow. The durable audit insert and exact
+reservation/entitlement mutation share one transaction.
+
+`commerce_operational_alerts` stores sanitized Stripe dispute work in the same
+transaction as `stripe_webhook_events`. Its unique source-event/type key makes
+replay safe, while open/acknowledged/resolved states survive process restarts.
+The same table surfaces ambiguous mail dispatch and refund-after-dispatch work;
+operator transitions are idempotent and append an audit event atomically.

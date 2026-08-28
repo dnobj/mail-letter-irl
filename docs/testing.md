@@ -4,17 +4,19 @@
 
 This document describes the testing strategy and infrastructure for Letter IRL.
 
+Changes to financial, balance, order, draft, fulfillment, refund, or administrative mutations must also satisfy the commit, rollback, replay, crash/recovery, and concurrency coverage in the [ACID Transaction Standard](acid-transaction-standard.md). Mock-based unit tests alone do not prove database locking, constraints, isolation, or rollback behavior.
+
 ---
 
 ## Overview
 
 Letter IRL uses a **hybrid testing approach**:
 
-| Test Type | External Services | Speed | Purpose |
-|-----------|------------------|-------|---------|
-| **Unit Tests** | Mocked | ~100ms | Business logic in isolation |
-| **Integration Tests** | Test Mode APIs | ~1-3s | Real API contracts |
-| **E2E Tests** | Test Mode APIs | ~5-10s | Full system verification |
+| Test Type             | External Services | Speed  | Purpose                     |
+| --------------------- | ----------------- | ------ | --------------------------- |
+| **Unit Tests**        | Mocked            | ~100ms | Business logic in isolation |
+| **Integration Tests** | Test Mode APIs    | ~1-3s  | Real API contracts          |
+| **E2E Tests**         | Test Mode APIs    | ~5-10s | Full system verification    |
 
 ---
 
@@ -74,24 +76,27 @@ tests/
 ### Users (based on Personas)
 
 ```typescript
-import { testUsers } from '../../fixtures/users';
+import { testUsers } from "../../fixtures/users";
 
-testUsers.sarah    // Occasional sender (4 credits)
-testUsers.marcus   // Regular correspondent (10 credits)
-testUsers.eleanor  // Legacy connector (2 credits)
-testUsers.david    // Business user (50 credits)
-testUsers.alex     // Promo hunter (promo credits only)
-testUsers.newUser  // New user (0 credits)
+testUsers.sarah; // Occasional sender (4 credits)
+testUsers.marcus; // Regular correspondent (10 credits)
+testUsers.eleanor; // Legacy connector (2 credits)
+testUsers.david; // Business user (50 credits)
+testUsers.alex; // Promo hunter (promo credits only)
+testUsers.newUser; // New user (0 credits)
 ```
 
 ### Credit Ledger Entries
 
 ```typescript
-import { createLedgerEntry, createFIFOTestEntries } from '../../fixtures/credits';
+import {
+  createLedgerEntry,
+  createFIFOTestEntries,
+} from "../../fixtures/credits";
 
 // Single entry
 const entry = createLedgerEntry(userId, 10, {
-  sourceType: 'purchase',
+  sourceType: "purchase",
   expiresInDays: 730,
 });
 
@@ -102,14 +107,18 @@ const entries = createFIFOTestEntries(userId);
 ### Letters and Drafts
 
 ```typescript
-import { testDrafts, testAddresses, testLetterContent } from '../../fixtures/letters';
+import {
+  testDrafts,
+  testAddresses,
+  testLetterContent,
+} from "../../fixtures/letters";
 
 // Pre-built draft scenarios
-testDrafts.pending()      // Valid pending draft
-testDrafts.consumed()     // Already used (idempotency test)
-testDrafts.expired()      // Past expiration
-testDrafts.cancelled()    // Cancelled by user
-testDrafts.differentUser() // Belongs to another user
+testDrafts.pending(); // Valid pending draft
+testDrafts.consumed(); // Already used (idempotency test)
+testDrafts.expired(); // Past expiration
+testDrafts.cancelled(); // Cancelled by user
+testDrafts.differentUser(); // Belongs to another user
 ```
 
 ---
@@ -119,26 +128,26 @@ testDrafts.differentUser() // Belongs to another user
 For unit tests, mock the database layer:
 
 ```typescript
-import { vi, beforeEach } from 'vitest';
+import { vi, beforeEach } from "vitest";
 
 // Mock before importing the service
-vi.mock('../../../src/db/index.js', () => ({
+vi.mock("../../../src/db/index.js", () => ({
   query: vi.fn(),
   transaction: vi.fn(),
 }));
 
-import * as db from '../../../src/db/index.js';
-import { someFunction } from '../../../src/services/myService.js';
+import * as db from "../../../src/db/index.js";
+import { someFunction } from "../../../src/services/myService.js";
 
-describe('myService', () => {
+describe("myService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('should do something', async () => {
+  it("should do something", async () => {
     // Setup mock response
     vi.mocked(db.query).mockResolvedValueOnce({
-      rows: [{ id: 1, name: 'test' }],
+      rows: [{ id: 1, name: "test" }],
       rowCount: 1,
     });
 
@@ -147,8 +156,8 @@ describe('myService', () => {
 
     // Verify
     expect(db.query).toHaveBeenCalledWith(
-      expect.stringContaining('SELECT'),
-      expect.any(Array)
+      expect.stringContaining("SELECT"),
+      expect.any(Array),
     );
   });
 });
@@ -169,11 +178,13 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 ```
 
 Test cards:
+
 - `4242424242424242` - Success
 - `4000000000000002` - Declined
 - `4000000000009995` - Insufficient funds
 
 Forward webhooks locally:
+
 ```bash
 stripe listen --forward-to localhost:8090/api/stripe/webhook
 ```
@@ -197,10 +208,10 @@ For unit tests, mock JWT validation. For integration tests, you can use test tok
 
 Tests are mapped to user stories from [user-stories.md](user-stories.md):
 
-| Test File | User Stories |
-|-----------|--------------|
-| `creditLedgerService.test.ts` | US-2.1, US-2.3, US-2.7 |
-| `draftService.test.ts` | US-1.1, US-1.3, US-6.1, US-6.7 |
+| Test File                     | User Stories                   |
+| ----------------------------- | ------------------------------ |
+| `creditLedgerService.test.ts` | US-2.1, US-2.3, US-2.7         |
+| `draftService.test.ts`        | US-1.1, US-1.3, US-6.1, US-6.7 |
 
 ---
 
@@ -280,25 +291,43 @@ jobs:
 Integration tests with real APIs require secrets:
 
 ```yaml
-  integration-tests:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    env:
-      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_KEY }}
-      POSTGRID_API_KEY: ${{ secrets.POSTGRID_TEST_KEY }}
+integration-tests:
+  if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+  env:
+    STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_KEY }}
+    POSTGRID_API_KEY: ${{ secrets.POSTGRID_TEST_KEY }}
 ```
+
+The admin foundation database integration specs are opt-in and refuse non-loopback databases or database
+names that do not contain `test`. Set `LETTER_IRL_ADMIN_TEST_DATABASE_URL` to an isolated local PostgreSQL
+test database. Never point these tests at Neon.
+
+```powershell
+$env:LETTER_IRL_ADMIN_TEST_DATABASE_URL='postgresql://postgres:test-only@127.0.0.1:55432/letter_irl_admin_test'
+npx vitest run tests/integration/admin
+```
+
+Both specs read migrations 021, 022, and 023 only from this repository's `db/migrations`. There is no path
+override, so an external or synthetic `021_jit_commerce_foundation.sql` cannot be substituted for the real
+one. `adminFoundationDatabase.test.ts` proves the `001-020 -> 021 -> 022` sequence and the constraint,
+immutability, and least-privilege behavior of migration 022. `adminMigrationOrder.test.ts` additionally
+proves that `001-020 -> 021 -> 023 -> 022` and `001-020 -> 021 -> 022 -> 023` converge on identical
+columns, constraints, defaults, indexes, triggers, functions, and table privileges, and that migration 022
+fails closed when 021 is absent. See the
+[migration 021/022/023 integration gate](deployment.md#migration-021022023-integration-gate).
 
 ---
 
 ## Current Coverage
 
-| Service | Unit Tests | Integration Tests |
-|---------|------------|-------------------|
-| creditLedgerService | 19 tests | - |
-| draftService | 17 tests | - |
-| creditService | - | - |
-| letterJobService | - | - |
-| stripeService | - | - |
-| promoService | - | - |
+| Service             | Unit Tests | Integration Tests |
+| ------------------- | ---------- | ----------------- |
+| creditLedgerService | 19 tests   | -                 |
+| draftService        | 17 tests   | -                 |
+| creditService       | -          | -                 |
+| letterJobService    | -          | -                 |
+| stripeService       | -          | -                 |
+| promoService        | -          | -                 |
 
 **Total: 36 tests**
 

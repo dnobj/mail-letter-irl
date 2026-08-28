@@ -1,8 +1,8 @@
 /**
  * Temporary Image Handler
  *
- * Serves generated images from the in-memory temp store.
- * Images are stored when the generate_image tool runs and served here
+ * Serves generated images from the private temporary image store.
+ * Images were stored by the removed generate_image_fallback tool and served here; the endpoint remains for any unexpired tokens and possible future writers (see docs/learnings/generate-image-removal-decision.md)
  * so the preview tools can download them via imageUrl.
  *
  * Route: GET /api/temp-image/:token
@@ -27,7 +27,7 @@ export async function handleTempImageRequest(
   }
 
   const token = match[1];
-  const base64Data = getImage(token);
+  const base64Data = await getImage(token);
 
   if (!base64Data) {
     res.writeHead(404, { "Content-Type": "application/json" });

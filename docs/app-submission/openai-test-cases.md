@@ -6,6 +6,12 @@
 
 See also: [demo-scenarios.md](./demo-scenarios.md) for the recommended submission video flows and narration ideas.
 
+Authentication prerequisite: execute these cases only after the owner imports
+the current ChatGPT CIMD URL into the matching Auth0 environment as a public
+PKCE S256 client with no secret and grants the dedicated exact `/mcp` audience.
+The browser task must also run the OAuth migration cases in
+`docs/manual-tests.md`; code review must not claim those live cases passed.
+
 ---
 
 ## App Description

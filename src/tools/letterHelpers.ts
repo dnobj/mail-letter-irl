@@ -10,6 +10,7 @@
 import { Address, ToolContext, LetterLayoutType } from "../contracts/types.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
 import { getLetterProvider } from "../services/providers/index.js";
+import { assessValidation } from "../services/addressVerificationPolicy.js";
 import type { AddressValidationInput, AddressValidationResult } from "../services/providers/types.js";
 import {
   estimateRequiredCredits,
@@ -17,6 +18,7 @@ import {
   validateCharacterLimit,
 } from "../services/previewService.js";
 import { createDraft } from "../services/draftService.js";
+import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 import {
   DELIVERY_CLASS,
   DELIVERY_DISCLAIMER,
@@ -43,6 +45,12 @@ export interface PreparedSender {
 export interface ValidationResults {
   senderValidation?: AddressValidationResult;
   recipientValidation?: AddressValidationResult;
+  /**
+   * One sentence per address that proceeded without full verification
+   * (secondary-unit unconfirmed, or the verification service unavailable).
+   * Surfaced to the model via the tool summary so the user hears it once.
+   */
+  addressWarnings?: string[];
 }
 
 export interface LetterQuoteOutput {
@@ -50,6 +58,13 @@ export interface LetterQuoteOutput {
   lettersRequired: number;
   canSendNow: boolean;
   reasonCannotSend?: string;
+  // Required by quoteAndPreviewOutputZ, which every letter preview tool is
+  // registered with. Omitting it here made the field impossible to forget in
+  // quoteAndPreview.ts and impossible to remember in this builder: the MCP
+  // layer rejected the response with -32602 before a draftId ever reached the
+  // caller, so no letter could be sent through any of the three tools that
+  // build their output here. See tests/unit/tools/outputSchemaConformance.test.ts.
+  sendEligibility: SendEligibility;
   deliveryClass: string;
   estimatedDeliveryDays?: number;
   deliveryEstimate?: string;
@@ -64,19 +79,20 @@ export interface LetterQuoteOutput {
   usedSavedReturnAddress?: boolean;
   savedReturnAddressNote?: string;
   senderAddressValidation?: {
-    status: 'verified' | 'corrected' | 'failed';
+    status: 'verified' | 'corrected' | 'failed' | 'unverified';
     originalAddress: Address;
     verifiedAddress?: Address;
     errors?: string[];
     suggestions?: string;
   };
   recipientAddressValidation?: {
-    status: 'verified' | 'corrected' | 'failed';
+    status: 'verified' | 'corrected' | 'failed' | 'unverified';
     originalAddress: Address;
     verifiedAddress?: Address;
     errors?: string[];
     suggestions?: string;
   };
+  addressWarnings?: string[];
 }
 
 // ============================================================================
@@ -184,8 +200,7 @@ export async function prepareSender(
         {
           correlationId: context.correlationId,
           event: "quote.letter.using_saved_address",
-          savedAddressCity: savedAddress.city,
-          savedAddressState: savedAddress.state
+          savedAddressAvailable: true
         },
         "Using saved return address for sender"
       );
@@ -250,17 +265,19 @@ export function validateAddresses(
 export async function validateAddressesWithProvider(
   sender: Address,
   recipient: Address,
-  context: ToolContext
+  context: ToolContext,
+  eventPrefix = "quote.letter"
 ): Promise<ValidationResults> {
   const provider = getLetterProvider();
   let senderValidation: AddressValidationResult | undefined;
   let recipientValidation: AddressValidationResult | undefined;
+  const addressWarnings: string[] = [];
 
   if (provider.validateAddress) {
     context.logger.info(
       {
         correlationId: context.correlationId,
-        event: "quote.letter.validating_addresses"
+        event: `${eventPrefix}.validating_addresses`
       },
       "Validating addresses with provider"
     );
@@ -292,59 +309,55 @@ export async function validateAddressesWithProvider(
     context.logger.info(
       {
         correlationId: context.correlationId,
-        event: "quote.letter.addresses_validated",
+        event: `${eventPrefix}.addresses_validated`,
         senderStatus: senderValidation.status,
         recipientStatus: recipientValidation.status
       },
       "Address validation complete"
     );
 
-    // Check for failures
-    const hasFailures = senderValidation.status === 'failed' || recipientValidation.status === 'failed';
+    // Policy pass (issue #200): secondary-unit and service failures proceed
+    // with a warning; only genuine address failures block.
+    const senderAssessment = assessValidation('Sender', senderValidation);
+    const recipientAssessment = assessValidation('Recipient', recipientValidation);
 
-    if (hasFailures) {
-      const errorParts: string[] = [];
-
-      if (senderValidation.status === 'failed') {
-        const errorMsg = senderValidation.errors?.map(e => e.message).join('; ') || 'Address is invalid or undeliverable';
-        errorParts.push(`❌ Sender address is INVALID: ${errorMsg}`);
-
-        if (senderValidation.verifiedAddress) {
-          errorParts.push(
-            `   Suggested correction:\n` +
-            `   ${senderValidation.verifiedAddress.line1}\n` +
-            `   ${senderValidation.verifiedAddress.line2 ? senderValidation.verifiedAddress.line2 + '\n   ' : ''}` +
-            `   ${senderValidation.verifiedAddress.city}, ${senderValidation.verifiedAddress.state} ${senderValidation.verifiedAddress.postalCode}`
-          );
-        }
-      }
-
-      if (recipientValidation.status === 'failed') {
-        const errorMsg = recipientValidation.errors?.map(e => e.message).join('; ') || 'Address is invalid or undeliverable';
-        errorParts.push(`❌ Recipient address is INVALID: ${errorMsg}`);
-
-        if (recipientValidation.verifiedAddress) {
-          errorParts.push(
-            `   Suggested correction:\n` +
-            `   ${recipientValidation.verifiedAddress.line1}\n` +
-            `   ${recipientValidation.verifiedAddress.line2 ? recipientValidation.verifiedAddress.line2 + '\n   ' : ''}` +
-            `   ${recipientValidation.verifiedAddress.city}, ${recipientValidation.verifiedAddress.state} ${recipientValidation.verifiedAddress.postalCode}`
-          );
-        }
-      }
-
+    const blocked = [senderAssessment, recipientAssessment].filter(
+      (a) => a.outcome === 'blocked'
+    );
+    if (blocked.length > 0) {
       context.logger.warn(
         {
           correlationId: context.correlationId,
-          event: "quote.letter.address_validation_failed",
+          event: `${eventPrefix}.address_validation_failed`,
           senderStatus: senderValidation.status,
-          recipientStatus: recipientValidation.status
+          recipientStatus: recipientValidation.status,
+          senderOutcome: senderAssessment.outcome,
+          recipientOutcome: recipientAssessment.outcome
         },
         "Address validation failed - invalid addresses"
       );
 
       throw new Error(
-        `Address validation failed:\n\n${errorParts.join('\n\n')}\n\nPlease correct the invalid address(es) and try again.`
+        `Address validation failed:\n\n${blocked
+          .map((a) => a.blockText)
+          .join('\n\n')}\n\nPlease correct the invalid address(es) and try again.`
+      );
+    }
+
+    for (const assessment of [senderAssessment, recipientAssessment]) {
+      if (assessment.outcome === 'unverified' && assessment.warning) {
+        addressWarnings.push(assessment.warning);
+      }
+    }
+    if (addressWarnings.length > 0) {
+      context.logger.info(
+        {
+          correlationId: context.correlationId,
+          event: `${eventPrefix}.address_unverified_proceeding`,
+          senderOutcome: senderAssessment.outcome,
+          recipientOutcome: recipientAssessment.outcome
+        },
+        "Proceeding with unverified address(es) per policy"
       );
     }
 
@@ -353,9 +366,8 @@ export async function validateAddressesWithProvider(
       context.logger.info(
         {
           correlationId: context.correlationId,
-          event: "quote.letter.sender_address_corrected",
-          original: `${sender.addressLine1}, ${sender.city}, ${sender.state} ${sender.postalCode}`,
-          corrected: `${senderValidation.verifiedAddress.line1}, ${senderValidation.verifiedAddress.city}, ${senderValidation.verifiedAddress.state} ${senderValidation.verifiedAddress.postalCode}`
+          event: `${eventPrefix}.sender_address_corrected`,
+          correctionApplied: true
         },
         "Auto-applying corrected sender address"
       );
@@ -374,9 +386,8 @@ export async function validateAddressesWithProvider(
       context.logger.info(
         {
           correlationId: context.correlationId,
-          event: "quote.letter.recipient_address_corrected",
-          original: `${recipient.addressLine1}, ${recipient.city}, ${recipient.state} ${recipient.postalCode}`,
-          corrected: `${recipientValidation.verifiedAddress.line1}, ${recipientValidation.verifiedAddress.city}, ${recipientValidation.verifiedAddress.state} ${recipientValidation.verifiedAddress.postalCode}`
+          event: `${eventPrefix}.recipient_address_corrected`,
+          correctionApplied: true
         },
         "Auto-applying corrected recipient address"
       );
@@ -392,7 +403,24 @@ export async function validateAddressesWithProvider(
     }
   }
 
-  return { senderValidation, recipientValidation };
+  return {
+    senderValidation,
+    recipientValidation,
+    addressWarnings: addressWarnings.length > 0 ? addressWarnings : undefined
+  };
+}
+
+/**
+ * The status a validation result should carry in tool output: a "failed"
+ * result that policy allowed through reads as "unverified", never "failed".
+ */
+export function outputValidationStatus(
+  validation: AddressValidationResult
+): 'verified' | 'corrected' | 'failed' | 'unverified' {
+  if (validation.status === 'failed') {
+    return 'unverified';
+  }
+  return validation.status;
 }
 
 // ============================================================================
@@ -425,12 +453,7 @@ export function validateCharacterLimitForLayout(
         lineLimit: charValidation.lineLimit,
         newlineCount,
         signOffLength: signOff.length,
-        // Only log actual content in development/debug mode
-        ...(isDebug && {
-          bodyText,
-          signOff,
-          bodyTextEscaped: JSON.stringify(bodyText)  // Shows \n characters explicitly
-        })
+        debugMode: isDebug
       },
       "Letter exceeds one-page limit"
     );
@@ -459,6 +482,7 @@ export interface CreateLetterDraftParams {
   inlineImageUrl?: string;
   senderValidation?: AddressValidationResult;
   recipientValidation?: AddressValidationResult;
+  addressWarnings?: string[];
   usedSavedReturnAddress: boolean;
   savedReturnAddressNote?: string;
   context: ToolContext;
@@ -467,6 +491,7 @@ export interface CreateLetterDraftParams {
 export async function createLetterDraftAndBuildOutput(
   params: CreateLetterDraftParams
 ): Promise<LetterQuoteOutput> {
+
   const {
     sender,
     recipient,
@@ -481,6 +506,7 @@ export async function createLetterDraftAndBuildOutput(
     inlineImageUrl,
     senderValidation,
     recipientValidation,
+    addressWarnings,
     usedSavedReturnAddress,
     savedReturnAddressNote,
     context
@@ -539,7 +565,6 @@ export async function createLetterDraftAndBuildOutput(
     {
       correlationId: context.correlationId,
       event: "quote.letter.draft_created",
-      draftId: draftResult.draftId,
       layoutType,
       expiresAt: draftResult.expiresAt.toISOString()
     },
@@ -554,6 +579,7 @@ export async function createLetterDraftAndBuildOutput(
     lettersRequired,
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
+    sendEligibility: getSendEligibility(available, requiredCredits, "letter"),
     deliveryClass: DELIVERY_CLASS,
     deliveryEstimate: DELIVERY_ESTIMATE,
     deliveryDisclaimer: DELIVERY_DISCLAIMER,
@@ -566,12 +592,13 @@ export async function createLetterDraftAndBuildOutput(
     inlineImagePreview,
     usedSavedReturnAddress: usedSavedReturnAddress || undefined,
     savedReturnAddressNote,
+    addressWarnings,
   };
 
   // Add address validation results
   if (senderValidation) {
     output.senderAddressValidation = {
-      status: senderValidation.status,
+      status: outputValidationStatus(senderValidation),
       originalAddress: sender,
       verifiedAddress: senderValidation.verifiedAddress ? {
         name: sender.name,
@@ -591,7 +618,7 @@ export async function createLetterDraftAndBuildOutput(
 
   if (recipientValidation) {
     output.recipientAddressValidation = {
-      status: recipientValidation.status,
+      status: outputValidationStatus(recipientValidation),
       originalAddress: recipient,
       verifiedAddress: recipientValidation.verifiedAddress ? {
         name: recipient.name,

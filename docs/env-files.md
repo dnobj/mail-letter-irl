@@ -7,8 +7,6 @@ This document describes all environment configuration files used in the Letter I
 | File | Purpose | Command |
 |------|---------|---------|
 | `.env` | Production config (Railway) | `npm start` |
-| `.env.admin` | Admin panel (prod DB) | `npm run admin` |
-| `.env.admin.dev` | Admin panel (dev DB) | `npm run admin:dev` |
 | `.env.dev` | Development server | `npm run dev:env` |
 | `.env.local` | Local overrides | `npm run dev:local` |
 | `.env.test` | Test database | `npm test` |
@@ -30,39 +28,15 @@ Main configuration file used by Railway deployment. Contains:
 
 ---
 
-### `.env.admin` - Admin Panel (Production)
+### Local admin configuration
 
-Minimal config for running the admin panel locally against the **production** database.
+`.env.admin` and `.env.admin.dev` are unsupported. Public admin routes are forced off, and
+`ADMIN_ENABLED=true` fails public-server startup. Never store a production database URL or an admin role
+credential in a workstation `.env` file.
 
-```bash
-npm run admin
-# Visit http://localhost:8788/admin
-```
-
-**Key settings:**
-- `ADMIN_ENABLED=true` - Enables admin routes
-- `ADMIN_LOCAL_ONLY=true` - Restricts access to localhost
-- `DISABLE_WORKERS=true` - Prevents competing with Railway workers
-- `DATABASE_URL` - Production Neon database
-
-**Use case:** View production data, manually trigger syncs, debug issues.
-
----
-
-### `.env.admin.dev` - Admin Panel (Development)
-
-Same as `.env.admin` but connects to the **development** Neon branch.
-
-```bash
-npm run admin:dev
-# Visit http://localhost:8788/admin
-```
-
-**Key settings:**
-- `DATABASE_URL` - Neon **dev branch** connection string
-- `LETTER_PROVIDER_API_KEY` - PostGrid test key (for status sync)
-
-**Use case:** Test admin features, sync dev letter statuses, verify dashboard changes.
+The approved local operator runtime will read non-secret JSON from
+`%LOCALAPPDATA%/LetterIRL/admin/<environment>.json` and retrieve credentials from an approved vault. Slice
+1 provides strict parsing and a grant-provisioning command, but no local browser server or UI.
 
 ---
 
@@ -83,6 +57,15 @@ npm run dev:env
 - Optional `DEBUG=true` to enable extra diagnostics (defaults to false when unset)
 
 **Use case:** Local development with full functionality.
+
+`.env.dev` is a local-development file, not the source of truth for deployed
+development credentials. It may still contain template or stale values. For
+operations against the deployed development environment (including database
+migrations), use the `letter-irl-api` variables from Railway's `development`
+environment. Verify the Railway environment, pooled Neon hostname, and current
+migration ledger before making changes. If `.env.dev` fails validation, never
+fall back to `.env` or any production credential, and never persist a retrieved
+Railway secret into the repository.
 
 ---
 
@@ -122,7 +105,7 @@ Each environment file has a corresponding `.example` template:
 | Template | Copy to |
 |----------|---------|
 | `.env.example` | `.env` |
-| `.env.admin.example` | `.env.admin` |
+| `.env.admin.example` | Legacy tombstone; do not copy |
 | `.env.dev.example` | `.env.dev` |
 | `.env.test.example` | `.env.test` |
 
@@ -132,8 +115,8 @@ Letter IRL uses [Neon PostgreSQL branching](https://neon.tech/docs/introduction/
 
 | Branch | Purpose | Used By |
 |--------|---------|---------|
-| `production` | Live user data | `.env`, `.env.admin` |
-| `dev` | Development/testing | `.env.dev`, `.env.admin.dev` |
+| `production` | Live user data | Railway `.env` only; no workstation admin `.env` |
+| `dev` | Development/testing | `.env.dev` for the public development server |
 
 ### Sync Dev from Production
 
@@ -152,32 +135,11 @@ This script:
 
 ## Common Tasks
 
-### Run Admin Panel Against Dev Database
+### Local admin status
 
-```bash
-npm run admin:dev
-# Open http://localhost:8788/admin
-```
-
-### Trigger PostGrid Status Sync (Dev)
-
-```bash
-# Start admin server
-npm run admin:dev
-
-# In another terminal, or via browser:
-curl -X POST http://localhost:8788/api/admin/sync/statuses
-```
-
-### Switch Between Production and Dev Admin
-
-```bash
-# Production database
-npm run admin
-
-# Development database
-npm run admin:dev
-```
+There is no supported local admin browser workflow until issue #162 slices 2 and 3 land. Do not use the
+legacy page or `/api/admin` handlers. Database grant provisioning is a separate, explicit operation; see
+[admin-panel-guide.md](admin-panel-guide.md).
 
 ---
 
@@ -185,7 +147,7 @@ npm run admin:dev
 
 1. **Never commit `.env` files** - All are gitignored
 2. **Use `.example` templates** - Safe to commit, contain no secrets
-3. **Admin is localhost-only** - `ADMIN_LOCAL_ONLY=true` blocks remote access
+3. **Legacy admin is disabled** - public admin routes return 404 in every environment
 4. **Separate Auth0 tenants** - Dev and prod users are isolated
 5. **Stripe test keys** - Dev uses `sk_test_*`, prod uses `sk_live_*`
 

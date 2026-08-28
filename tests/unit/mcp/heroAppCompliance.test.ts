@@ -14,31 +14,102 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import {
+  WIDGET_CSP_CANONICAL,
+  WIDGET_CSP_LEGACY,
+  WIDGET_DEFINITIONS
+} from '../../../src/mcp/registerTools.js';
 
 // Widget directory path
 const widgetDir = path.resolve(__dirname, '../../../widgets');
 
 describe('Hero App SDK Compliance (Issue #42)', () => {
   describe('US-MCP-07: Widget Resources', () => {
+    /**
+     * These three tests used to assert on literals they had just written -
+     * `const expected = ['https://chatgpt.com']; expect(expected).toContain(
+     * 'https://chatgpt.com')` - importing nothing from src. They looked like
+     * CSP coverage and were tautologies. They now read the shipped constants.
+     */
     describe('CSP Configuration', () => {
-      it('should include chatgpt.com in connect_domains', () => {
-        // CSP must include ChatGPT domain for internal communication
-        const expectedDomains = ['https://chatgpt.com'];
-        expect(expectedDomains).toContain('https://chatgpt.com');
+      it('includes chatgpt.com in connect domains, for the widget bridge', () => {
+        expect(WIDGET_CSP_CANONICAL.connectDomains).toContain('https://chatgpt.com');
+        expect(WIDGET_CSP_LEGACY.connect_domains).toContain('https://chatgpt.com');
       });
 
-      it('should include backend API URL in connect_domains', () => {
-        // CSP must include our API URL for widget → backend calls
-        // Default: https://api.letterirl.com
-        // Configurable via LETTER_IRL_API_URL env var
-        const apiUrl = process.env.LETTER_IRL_API_URL ?? 'https://api.letterirl.com';
-        expect(apiUrl).toMatch(/^https:\/\//);
+      it('includes the backend API origin in connect domains, for widget -> server calls', () => {
+        // ImageUploadCard's diagnostic beacon posts here; the origin is
+        // env-derived, so assert the shape rather than a hardcoded host.
+        const apiOrigins = WIDGET_CSP_CANONICAL.connectDomains.filter(
+          domain => domain !== 'https://chatgpt.com'
+        );
+        expect(apiOrigins).toHaveLength(1);
+        expect(apiOrigins[0]).toMatch(/^https:\/\//);
+        // Origin only - a path here would silently widen nothing and mislead.
+        expect(apiOrigins[0]).toBe(new URL(apiOrigins[0]).origin);
       });
 
-      it('should have resource_domains for OpenAI static assets', () => {
-        // Required for loading OpenAI's static assets
-        const resourceDomains = ['https://*.oaistatic.com'];
-        expect(resourceDomains[0]).toBe('https://*.oaistatic.com');
+      it('includes OpenAI static assets in resource domains', () => {
+        expect(WIDGET_CSP_CANONICAL.resourceDomains).toContain('https://*.oaistatic.com');
+        expect(WIDGET_CSP_LEGACY.resource_domains).toContain('https://*.oaistatic.com');
+      });
+
+      it('keeps the two key families in lockstep', () => {
+        // The canonical ui.csp keys are what ChatGPT reads today; the
+        // snake_case aliases are the compatibility shape. They must describe
+        // the same policy or one surface silently permits more than the other.
+        expect(WIDGET_CSP_LEGACY.connect_domains).toEqual(WIDGET_CSP_CANONICAL.connectDomains);
+        expect(WIDGET_CSP_LEGACY.resource_domains).toEqual(WIDGET_CSP_CANONICAL.resourceDomains);
+        expect(WIDGET_CSP_LEGACY.redirect_domains).toEqual(WIDGET_CSP_CANONICAL.redirectDomains);
+      });
+
+      /**
+       * Issue #228. ChatGPT's Library picker hands back a download URL on an
+       * Azure blob host, which `https://*.oaiusercontent.com` does not cover.
+       * It is deliberately absent: trusting `*.blob.core.windows.net` would
+       * trust all of Azure blob storage, and the subdomain varies by region.
+       *
+       * The cost is two thumbnails inside ImageUploadCard, which degrade to an
+       * explanatory line. The picked image itself is unaffected - it reaches
+       * the server over the window.openai bridge and is fetched from Node,
+       * where page CSP does not apply - so the postcard preview still shows it.
+       *
+       * Pinned so that "the thumbnail is broken, add the host" has to argue
+       * with this decision rather than quietly widen the policy.
+       */
+      it('deliberately does not trust the Azure blob host behind Library picks', () => {
+        const allDomains = [
+          ...WIDGET_CSP_CANONICAL.connectDomains,
+          ...WIDGET_CSP_CANONICAL.resourceDomains,
+          ...WIDGET_CSP_CANONICAL.redirectDomains
+        ];
+        for (const domain of allDomains) {
+          expect(domain).not.toContain('blob.core.windows.net');
+        }
+      });
+
+      it('every widget degrades rather than breaking when a remote image is blocked', async () => {
+        // The flip side of the exclusion above: a widget that points an <img>
+        // at a host the CSP does not allow must handle the failure. Today only
+        // ImageUploadCard loads a remote image at all.
+        const html = await fs.readFile(
+          path.join(widgetDir, 'ImageUploadCard.html'),
+          'utf-8'
+        );
+        // Both remote-image sinks carry an error handler.
+        expect(html).toMatch(/previewImg\.onerror\s*=/);
+        expect(html).toMatch(/doneImg\.onerror\s*=/);
+        // ...and both explain themselves with the same shared copy.
+        const uses = html.match(/THUMBNAIL_UNAVAILABLE/g) ?? [];
+        expect(uses.length).toBeGreaterThanOrEqual(3); // declaration + 2 sinks
+
+        // No other widget may quietly acquire a remote image sink without a
+        // CSP decision: they render data: URIs only.
+        for (const { name } of WIDGET_DEFINITIONS.filter(w => w.name !== 'ImageUploadCard')) {
+          const other = await fs.readFile(path.join(widgetDir, `${name}.html`), 'utf-8');
+          const remoteSrc = other.match(/\.src\s*=\s*(?!["'`]data:)["'`]https?:/g) ?? [];
+          expect(remoteSrc, `${name} loads a hardcoded remote image`).toHaveLength(0);
+        }
       });
     });
 

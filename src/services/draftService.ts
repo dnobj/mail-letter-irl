@@ -7,6 +7,7 @@
 
 import { query, transaction } from '../db/index.js';
 import type pg from 'pg';
+import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import type {
   LetterDraft,
   CreateDraftParams,
@@ -63,7 +64,7 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
 
   const draft = result.rows[0];
 
-  console.log(`📝 Draft created: ${draft.draft_id} (layout: ${layoutType}, expires: ${expiresAt.toISOString()})`);
+  writeDiagnostic('info', 'draft.created', { layoutType, expiresInHours });
 
   return {
     draftId: draft.draft_id,
@@ -106,7 +107,7 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
 
   const draft = result.rows[0];
 
-  console.log(`📮 Postcard draft created: ${draft.draft_id} (expires: ${expiresAt.toISOString()})`);
+  writeDiagnostic('info', 'draft.postcard_created', { postcardSize, expiresInHours });
 
   return {
     draftId: draft.draft_id,
@@ -172,7 +173,7 @@ export async function consumeDraft(params: ConsumeDraftParams): Promise<ConsumeD
 
     // Check if already consumed (idempotent retry)
     if (draft.status === 'consumed') {
-      console.log(`📝 Draft already consumed: ${params.draftId} -> letter ${draft.consumed_letter_id}`);
+      console.log('📝 Draft already consumed');
       return {
         draft,
         alreadyConsumed: true,
@@ -209,7 +210,7 @@ export async function consumeDraft(params: ConsumeDraftParams): Promise<ConsumeD
     );
 
     const consumedDraft = updateResult.rows[0];
-    console.log(`📝 Draft consumed: ${params.draftId} (letter ID will be linked after creation)`);
+    console.log('📝 Draft consumed (letter ID will be linked after creation)');
 
     return {
       draft: consumedDraft,
@@ -230,7 +231,7 @@ export async function linkDraftToLetter(draftId: string, letterId: string): Prom
      WHERE draft_id = $1 AND status = 'consumed'`,
     [draftId, letterId]
   );
-  console.log(`📝 Draft linked to letter: ${draftId} -> ${letterId}`);
+  console.log('📝 Draft linked to letter');
 }
 
 // ============================================================================
@@ -297,6 +298,9 @@ export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<numbe
     `DELETE FROM letter_drafts
      WHERE status IN ('consumed', 'expired', 'cancelled')
        AND updated_at < $1
+       AND NOT EXISTS (
+         SELECT 1 FROM orders WHERE orders.draft_id = letter_drafts.draft_id
+       )
      RETURNING draft_id`,
     [cutoffDate]
   );
@@ -324,7 +328,7 @@ export async function cancelDraft(draftId: string, userId: string): Promise<bool
 
   const cancelled = (result.rowCount ?? 0) > 0;
   if (cancelled) {
-    console.log(`📝 Draft cancelled: ${draftId}`);
+    console.log('📝 Draft cancelled');
   }
 
   return cancelled;

@@ -6,6 +6,7 @@
 
 import { query } from '../db/index.js';
 import { User, CreateUserParams } from './types.js';
+import { writeDiagnostic } from '../utils/diagnosticLog.js';
 
 /**
  * Get user by ID
@@ -18,7 +19,7 @@ export async function getUser(userId: string): Promise<User> {
   );
 
   if (result.rows.length === 0) {
-    throw new Error(`User not found: ${userId}`);
+    throw new Error('User not found');
   }
 
   return result.rows[0];
@@ -61,7 +62,7 @@ export async function createUser(params: CreateUserParams): Promise<User> {
     [userId, email]
   );
 
-  console.log(`📝 Created new user: ${userId} (${email})`);
+  writeDiagnostic('info', 'identity.user_created');
   return result.rows[0];
 }
 
@@ -76,7 +77,6 @@ export async function getOrCreateUser(userId: string, email: string): Promise<Us
   if (existing) {
     // Update email if it changed
     if (existing.email !== email) {
-      console.log(`📝 Updating email for ${userId}: ${existing.email} → ${email}`);
       return await updateUserEmail(userId, email);
     }
     return existing;
@@ -99,10 +99,10 @@ export async function updateUserEmail(userId: string, email: string): Promise<Us
   );
 
   if (result.rows.length === 0) {
-    throw new Error(`User not found: ${userId}`);
+    throw new Error('User not found');
   }
 
-  console.log(`📝 Updated email for ${userId}: ${email}`);
+  writeDiagnostic('info', 'identity.email_updated');
   return result.rows[0];
 }
 
@@ -140,5 +140,5 @@ export async function deleteUser(userId: string): Promise<void> {
     [userId]
   );
 
-  console.log(`🗑️  Deleted user: ${userId}`);
+  writeDiagnostic('info', 'identity.user_deleted');
 }

@@ -8,6 +8,7 @@
  */
 
 import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
+import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import {
   quoteAndPreviewLetterWithImageInputSchema,
   quoteAndPreviewOutputSchema
@@ -45,7 +46,7 @@ interface QuoteAndPreviewLetterWithImageInput {
 // Constants
 // ============================================================================
 
-const OUTPUT_TEMPLATE = "ui://widgets/LetterPreviewCard.html";
+const OUTPUT_TEMPLATE = widgetTemplateUri("LetterPreviewCard");
 
 // ============================================================================
 // Handler
@@ -86,7 +87,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "quote.letter.image.from_url",
-        imageUrl: imageSource.substring(0, 100)
+        imageSource: "provided"
       },
       "Using image from URL"
     );
@@ -164,7 +165,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "quote.letter.image.failed",
-        error: error instanceof Error ? error.message : 'Unknown error'
+        errorClass: 'validation_error'
       },
       "Image processing failed"
     );
@@ -181,7 +182,7 @@ async function handler(
   validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context);
 
   // Validate with PostGrid provider
-  const { senderValidation, recipientValidation } = await validateAddressesWithProvider(
+  const { senderValidation, recipientValidation, addressWarnings } = await validateAddressesWithProvider(
     sender,
     input.recipient,
     context
@@ -201,6 +202,7 @@ async function handler(
     savedReturnAddressNote,
     senderValidation,
     recipientValidation,
+    addressWarnings,
     context
   });
 }

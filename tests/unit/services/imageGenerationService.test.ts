@@ -68,6 +68,18 @@ describe("imageGenerationService", () => {
       expect(mockFetch).toHaveBeenCalledOnce();
     });
 
+    it("should persist the dispatch boundary before provider I/O", async () => {
+      const beforeDispatch = vi.fn();
+      mockSuccessResponse();
+
+      await generateImage("a sunset", { beforeDispatch });
+
+      expect(beforeDispatch).toHaveBeenCalledOnce();
+      expect(beforeDispatch.mock.invocationCallOrder[0]).toBeLessThan(
+        mockFetch.mock.invocationCallOrder[0]
+      );
+    });
+
     it("should call the correct API endpoint", async () => {
       mockSuccessResponse();
 
@@ -186,7 +198,9 @@ describe("imageGenerationService", () => {
 
   describe("generateImage - validation", () => {
     it("should throw INVALID_PROMPT for empty prompt", async () => {
-      await expect(generateImage("")).rejects.toThrow("describe the image");
+      const beforeDispatch = vi.fn();
+      await expect(generateImage("", { beforeDispatch })).rejects.toThrow("describe the image");
+      expect(beforeDispatch).not.toHaveBeenCalled();
     });
 
     it("should throw INVALID_PROMPT for whitespace-only prompt", async () => {
@@ -195,8 +209,12 @@ describe("imageGenerationService", () => {
 
     it("should throw MISSING_API_KEY when env var not set", async () => {
       delete process.env.OPENAI_API_KEY;
+      const beforeDispatch = vi.fn();
 
-      await expect(generateImage("a sunset")).rejects.toThrow("not configured");
+      await expect(generateImage("a sunset", { beforeDispatch })).rejects.toThrow(
+        "not configured"
+      );
+      expect(beforeDispatch).not.toHaveBeenCalled();
     });
 
     it("should throw ImageGenerationError for validation failures", async () => {
@@ -226,27 +244,29 @@ describe("imageGenerationService", () => {
       );
     });
 
-    it("should throw API_ERROR for 500 status with message", async () => {
+    it("should quarantine a 500 response as an ambiguous provider outcome", async () => {
       mockErrorResponse(500, undefined, "Internal server error");
 
-      await expect(generateImage("a sunset")).rejects.toThrow(
-        "Internal server error"
-      );
+      await expect(generateImage("a sunset")).rejects.toMatchObject({
+        code: "AMBIGUOUS_PROVIDER_OUTCOME",
+        outcome: "ambiguous"
+      });
     });
 
-    it("should throw API_ERROR with fallback message for unknown errors", async () => {
+    it("should quarantine a 503 response without a parseable provider error", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 503,
         json: () => Promise.resolve({})
       });
 
-      await expect(generateImage("a sunset")).rejects.toThrow(
-        "Please try again"
-      );
+      await expect(generateImage("a sunset")).rejects.toMatchObject({
+        code: "AMBIGUOUS_PROVIDER_OUTCOME",
+        outcome: "ambiguous"
+      });
     });
 
-    it("should throw API_ERROR when response has no b64_json", async () => {
+    it("should quarantine a successful response with no usable image as ambiguous", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -255,7 +275,10 @@ describe("imageGenerationService", () => {
           })
       });
 
-      await expect(generateImage("a sunset")).rejects.toThrow("no data");
+      await expect(generateImage("a sunset")).rejects.toMatchObject({
+        code: "AMBIGUOUS_PROVIDER_OUTCOME",
+        outcome: "ambiguous"
+      });
     });
 
     it("should handle JSON parse failure in error response", async () => {
@@ -265,9 +288,19 @@ describe("imageGenerationService", () => {
         json: () => Promise.reject(new Error("invalid json"))
       });
 
-      await expect(generateImage("a sunset")).rejects.toThrow(
-        "Please try again"
-      );
+      await expect(generateImage("a sunset")).rejects.toMatchObject({
+        code: "AMBIGUOUS_PROVIDER_OUTCOME",
+        outcome: "ambiguous"
+      });
+    });
+
+    it("should classify a transport failure after dispatch as ambiguous", async () => {
+      mockFetch.mockRejectedValueOnce(new Error("network timeout"));
+
+      await expect(generateImage("a sunset")).rejects.toMatchObject({
+        code: "AMBIGUOUS_PROVIDER_OUTCOME",
+        outcome: "ambiguous"
+      });
     });
   });
 });

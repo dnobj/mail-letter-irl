@@ -1,7 +1,7 @@
 # Privacy Policy
 
 **Effective Date:** December 2025
-**Last Updated:** December 2025
+**Last Updated:** August 26, 2026
 
 ---
 
@@ -101,7 +101,7 @@ We may disclose information if required by law (e.g., subpoena, court order) or 
 | Data Type | Retention Period |
 |-----------|-----------------|
 | **Letter Content** | 90 days after sending (for delivery verification and disputes) |
-| **Letter Drafts** | Deleted automatically after 24 hours if not sent |
+| **Letter Drafts** | Unsent drafts expire after 24 hours, and their content is deleted within 7 days. Drafts you have paid for follow the letter-content schedule above. |
 | **Account Data** | Retained while your account is active |
 | **Transaction History** | Retained for accounting and legal compliance |
 | **Expired Credits** | Records retained, but credits no longer usable |

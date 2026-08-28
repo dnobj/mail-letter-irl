@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { FileAccountStore } from "./store/fileAccountStore.js";
 import {
   // Letter tools - three separate tools for different layouts
@@ -7,6 +7,8 @@ import {
   quoteAndPreviewLetterWithHeaderImageTool,
   quoteAndPreviewLetterWithImageTool,
   sendLetterTool,
+  createMailCheckoutTool,
+  getPurchaseStatusTool,
   // Account and order management tools
   getOrderStatusTool,
   getAccountBalanceTool,
@@ -22,8 +24,8 @@ import {
   getStartedTool,
   // Image upload tool
   uploadImageTool,
-  // Image generation tool
-  generateImageTool,
+  // Image-intent router (returns routing guidance; does not generate)
+  generateImageForMailTool,
   // Confirm uploaded image tool (widget relay)
   confirmUploadedImageTool
 } from "./tools/index.js";
@@ -34,16 +36,19 @@ import {
   Logger
 } from "./contracts/types.js";
 import { createLogger } from "./logging/index.js";
+import { carriedDiagnosticClass, classifyDiagnosticError } from "./utils/diagnosticLog.js";
 
-const tools: McpToolDefinition<unknown, unknown>[] = [
+const tools: McpToolDefinition<any, any>[] = [
   // ChatGPT currently appears to expose only the first 12 registered actions
-  // for this dev app. Keep core preview/send/status and image generation
-  // inside that first page of tools; place auxiliary/internal tools later.
+  // for this dev app. Keep core preview/send/status inside that first page of
+  // tools; place auxiliary/internal tools later.
   // Letter tools - three separate tools for different layouts
   quoteAndPreviewLetterTextOnlyTool,
   quoteAndPreviewLetterWithHeaderImageTool,
   quoteAndPreviewLetterWithImageTool,
   sendLetterTool,
+  createMailCheckoutTool,
+  getPurchaseStatusTool,
   // Account and order management tools
   getOrderStatusTool,
   getAccountBalanceTool,
@@ -51,8 +56,9 @@ const tools: McpToolDefinition<unknown, unknown>[] = [
   // Postcard tools
   quoteAndPreviewPostcardTool,
   sendPostcardTool,
-  // Image generation tool
-  generateImageTool,
+  // Image-intent router: must stay inside the exposed set so @-mention
+  // generate requests land on it instead of a capability narration.
+  generateImageForMailTool,
   // Keep saved return address setup in the primary exposed set.
   setReturnAddressTool,
   getReturnAddressTool,
@@ -81,6 +87,20 @@ export interface ServerRequest<Input> {
 export interface ServerResponse<Output> {
   result: Output;
   meta: Record<string, unknown>;
+}
+
+export function summarizeToolInput(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== "object") {
+    return { type: typeof input };
+  }
+  const entries = Object.entries(input as Record<string, unknown>).slice(0, 8);
+  return {
+    fieldCount: Object.keys(input as Record<string, unknown>).length,
+    fields: entries.map(([name, value]) => ({
+      name,
+      type: Array.isArray(value) ? "array" : value === null ? "null" : typeof value
+    }))
+  };
 }
 
 export class LetterIrlServer {
@@ -112,25 +132,6 @@ export class LetterIrlServer {
     };
   }
 
-  private obfuscateUserId(userId: string): string {
-    return createHash("sha256").update(userId).digest("hex").slice(0, 12);
-  }
-
-  private summarizeInput(input: unknown): Record<string, unknown> {
-    if (!input || typeof input !== "object") {
-      return { type: typeof input };
-    }
-    const entries = Object.entries(input as Record<string, unknown>)
-      .slice(0, 8)
-      .map(([key, value]) => {
-        if (typeof value === "object" && value !== null) {
-          return [key, "[object]"];
-        }
-        return [key, value];
-      });
-    return Object.fromEntries(entries);
-  }
-
   async execute<Input, Output>(
     request: ServerRequest<Input>
   ): Promise<ServerResponse<Output>> {
@@ -140,18 +141,16 @@ export class LetterIrlServer {
     }
 
     const correlationId = randomUUID();
-    const userHash = this.obfuscateUserId(request.userId);
     const requestLogger = this.logger.child({
       correlationId,
-      toolName: request.toolName,
-      userHash
+      toolName: request.toolName
     });
 
     requestLogger.info(
       {
         correlationId,
         event: "tool.invocation.start",
-        inputSummary: this.summarizeInput(request.input)
+        inputSummary: summarizeToolInput(request.input)
       },
       "Tool invocation started"
     );
@@ -180,11 +179,17 @@ export class LetterIrlServer {
         meta: tool.meta
       };
     } catch (error) {
+      // Prefer a class the failing layer already resolved (the same pattern as
+      // dashboardApiHandler and runMaintenance): tool-layer wrappers rebuild
+      // errors, and a rebuilt Error has neither .code nor .type, so without
+      // this the log recorded literally unknown_error for a fault the
+      // commerce layer had classified precisely (#278 review round 4).
+      const carried = carriedDiagnosticClass(error);
       requestLogger.error(
         {
           correlationId,
           event: "tool.invocation.failure",
-          errorMessage: error instanceof Error ? error.message : "Unknown error"
+          errorClass: carried ?? classifyDiagnosticError(error, "unknown_error")
         },
         "Tool invocation failed"
       );
@@ -195,6 +200,7 @@ export class LetterIrlServer {
   listTools() {
     return tools.map((tool) => ({
       name: tool.name,
+      title: tool.title,
       description: tool.description,
       readOnly: tool.readOnly,
       inputSchema: tool.inputSchema,

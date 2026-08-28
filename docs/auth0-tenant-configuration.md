@@ -1,8 +1,20 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** December 29, 2025
+**Last Updated:** July 23, 2026
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
+
+## Current configuration contract
+
+Development and production each use a dedicated Auth0 MCP API whose identifier
+is the exact canonical environment `/mcp` URL. ChatGPT is a manually imported,
+strict third-party public CIMD application using authorization code + PKCE S256
+and no token endpoint authentication. Grant only `mail:read`, `mail:draft`, and
+`mail:send`. Keep website/REST applications and Claude/PAT paths separate.
+
+The DCR/static-client sections below document the temporary rollback baseline,
+not the desired configuration. Do not enable them in a normal CIMD rollout.
+`private_key_jwt`/Auth0 Enterprise is not part of this design.
 
 ## Tenants Overview
 
@@ -36,14 +48,15 @@ Use this table to verify each application has the correct settings:
 |-------------|------|-------------------|---------------------|-------------------|
 | **Mail Letter IRL** | SPA | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect`<br>`https://platform.openai.com/apps-manage/oauth` | `https://chat.openai.com`<br>`https://chatgpt.com`<br>`https://platform.openai.com` | N/A |
 | **Letter IRL API** | M2M | None | None | N/A |
-| **ChatGPT (DCR)** | Generic | `https://chatgpt.com/connector_platform_oauth_redirect` | N/A | Uses domain-level |
+| **ChatGPT public CIMD** | Strict third-party public client | Exact current `https://chatgpt.com/connector/oauth/{callback_id}` from CIMD | N/A | Audited eligible connections |
 
 ### Tenant-Level Settings Checklist
 
 | Setting | Location | Required Value |
 |---------|----------|----------------|
-| DCR Enabled | Settings → Advanced | ✅ Enabled |
-| Default Audience | Settings → General → API Authorization | `https://letter-irl/api` |
+| CIMD registration | Settings → Advanced | Enabled for the target environment |
+| MCP API identifier | Applications → APIs | Exact canonical environment `/mcp` URL |
+| DCR Enabled | Settings → Advanced | Rollback inventory only |
 | Friendly Name | Settings → General | `Letter IRL` |
 | Google Connection | Connections | `is_domain_connection: true` |
 | Microsoft Connection | Connections | `is_domain_connection: true` |
@@ -55,13 +68,18 @@ Use this table to verify each application has the correct settings:
 
 | Setting | Value | Status (Dev) | Status (Prod) |
 |---------|-------|--------------|---------------|
-| Friendly Name | `Letter IRL` | ✅ Applied | ⏳ Pending |
-| Logo URL | `https://letterirl.com/logo.jpg` | ✅ Applied | ⏳ Pending |
-| Favicon URL | `https://letterirl.com/favicon.ico` | ✅ Applied | ⏳ Pending |
-| Primary Color | `#1a8ccc` | ✅ Applied | ⏳ Pending |
-| Page Background | `#ffffff` | ✅ Applied | ⏳ Pending |
-| ChatGPT MCP App Name | `Letter IRL` | ✅ Applied | ⏳ Pending |
-| ChatGPT MCP App Logo | `https://letterirl.com/logo.jpg` | ✅ Applied | ⏳ Pending |
+| Friendly Name | `Letter IRL` | ✅ Applied | ✅ Applied |
+| Logo URL | `https://letterirl.com/logo.jpg` | ✅ Applied | ✅ Applied |
+| Favicon URL | `https://letterirl.com/favicon.ico` | ✅ Applied | ❓ Unverified |
+| Primary Color | `#1a8ccc` | ✅ Applied | ❓ Unverified |
+| Page Background | `#ffffff` | ✅ Applied | ❓ Unverified |
+| ChatGPT MCP App Name | `Letter IRL` | ✅ Applied | ❓ Unverified |
+| ChatGPT MCP App Logo | `https://letterirl.com/logo.jpg` | ✅ Applied | ❓ Unverified |
+
+Production rows corrected 2026-08-24: friendly name and logo were audited
+directly and are applied, having been listed as Pending since July. The
+remaining rows were not inspected and are marked unverified rather than assumed
+either way - a checklist that guesses is worse than one that admits a gap.
 
 ---
 
@@ -69,9 +87,9 @@ Use this table to verify each application has the correct settings:
 
 This Auth0 tenant is configured to support:
 - **ChatGPT MCP Server** with OAuth 2.1 + PKCE authentication
-- **Dynamic Client Registration (RFC 7591)** for ChatGPT apps
+- **Manual public CIMD registration** for ChatGPT apps
 - **5 Authentication Methods**: Google, Microsoft, Apple, GitHub, Email/Password
-- **Domain-level connections** to support third-party dynamically registered clients
+- **Audited eligible connections** for strict third-party CIMD clients
 
 ---
 
@@ -82,7 +100,7 @@ This Auth0 tenant is configured to support:
 | **Domain** | `dev-ky21dxn3qmi71hjl.us.auth0.com` |
 | **Region** | US (dev) |
 | **Default Audience** | `https://letter-irl/api` |
-| **OIDC DCR Enabled** | ✅ Yes (required for ChatGPT) |
+| **OIDC DCR Enabled** | Rollback inventory only; not required by ChatGPT CIMD |
 
 ### Important Endpoints
 
@@ -290,7 +308,7 @@ Dynamically registered via RFC 7591 when ChatGPT connects to the MCP server. Mul
 
 Auth0's Management API with 200+ scopes for programmatic tenant administration.
 
-### 2. Letter IRL API
+### 2. Legacy website/REST Letter IRL API
 
 | Property | Value |
 |----------|-------|
@@ -298,23 +316,108 @@ Auth0's Management API with 200+ scopes for programmatic tenant administration.
 | **Name** | Letter IRL API |
 | **Scopes** | None configured |
 
-**Critical:** This identifier is set as the **Default Audience** in tenant settings (Settings → General → API Authorization Settings). This is required because ChatGPT does not send the `audience` parameter during OAuth flows.
+This identifier remains for website/REST compatibility. Do not repurpose it for
+ChatGPT. The dedicated MCP API identifier exactly equals the environment's
+canonical `/mcp` resource.
 
 ---
 
 ## Key Settings for ChatGPT MCP
 
-### Required Auth0 Configuration
+### Required Auth0 CIMD Configuration
 
-1. **Dynamic Client Registration (DCR)**
-   - **Location:** Settings → Advanced → OIDC Dynamic Application Registration
-   - **Status:** ✅ Enabled
-   - **Why:** ChatGPT requires RFC 7591 for automatic client registration
+1. **Client ID Metadata Document registration**
+   - Import the current OpenAI-hosted HTTPS CIMD URL manually.
+   - Verify public client, authorization code, PKCE S256, and no token endpoint
+     authentication.
 
-2. **Default Audience**
-   - **Location:** Settings → General → API Authorization Settings
-   - **Value:** `https://letter-irl/api`
-   - **Why:** ChatGPT doesn't send `audience` parameter; this provides default
+2. **Dedicated MCP resource/API**
+   - Identifier: exact canonical environment `/mcp` URL.
+   - Permissions: `mail:read`, `mail:draft`, and `mail:send`.
+   - Enable the resource-parameter compatibility profile when Auth0 requires it.
+   - **Allow Offline Access: enabled.** Without it Auth0 issues no refresh token
+     however the client asks, and the connection dies at access-token expiry with
+     a human re-consent as the only recovery (issue #160).
+
+2b. **Production tenant status** (built 2026-08-24, issue #158)
+
+   The production tenant had **no MCP API at all** until this date - only the
+   legacy `https://letter-irl/api` resource server. That is why production
+   advertised `scopes_supported: ["openid","email","profile"]` with no product
+   scopes: there were none in the tenant to advertise.
+
+   | Item | State | Verified by |
+   |---|---|---|
+   | API `Letter IRL MCP`, identifier `https://api.letterirl.com/mcp` | Created | Dashboard, id `6a8bafc38557d1cb6fa22153` |
+   | Signing `RS256`, token profile `access_token` | Set | Matches DEV; `validateOAuthConfig` requires RS256 |
+   | Access token lifetime 86400 / web 7200 | Set | Read back after reload |
+   | **Allow Offline Access** | **Enabled** | Read back after reload |
+   | `mail:read` / `mail:draft` / `mail:send` with descriptions | Added | Read back after reload |
+   | CIMD registration (tenant Advanced) | **Enabled** | `client_id_metadata_document_supported: true` in published metadata |
+
+   Still outstanding in this tenant:
+
+   - **No CIMD client is imported.** The ChatGPT applications present are static
+     clients, two of them in *permissive* third-party mode where the contract at
+     the top of this document specifies strict. The CIMD client cannot be
+     imported until a production ChatGPT connector exists to publish its
+     `client.json`.
+   - Refresh-token rotation and the 30-day/15-day lifetimes in 2a have nothing to
+     apply to yet, being client settings.
+   - **Dynamic Client Registration: disabled 2026-08-24.** Per the contract above
+     it is rollback inventory only, and CIMD now supersedes it. Verified off by
+     reading the tenant Advanced setting back after a reload. Note the tenant
+     still publishes `registration_endpoint` in its metadata either way - the DEV
+     tenant does too - so the published document is NOT a way to check this. Read
+     the setting.
+   - **`Prod-to-Dev Sync (Management API)`** - client id
+     `TZEuAJ6kTYFTXJRtu8fgUlPiqh9FAMMS`. Renamed 2026-08-24 from
+     `Letter IRL API (Test Application)`, which was actively misleading: it holds
+     **Auth0 Management API access (4 of 273 permissions)** and is the client
+     `scripts/dev-sync.ts` authenticates as, via `AUTH0_PROD_CLIENT_ID` /
+     `AUTH0_PROD_CLIENT_SECRET`, to read production users for the prod-to-dev
+     sync. Deleting it as the "test app" it appeared to be would have broken that
+     script silently - nothing in the repo names it, only an env var holding its
+     id, so searching the codebase for the app name finds nothing.
+
+     Its description now says the same thing inside the dashboard, so the next
+     person does not have to reconstruct it from grants.
+
+     The rename is safe because `AUTH0_PROD_CLIENT_ID` refers to it by id, and
+     the client id is unchanged. Grants verified unchanged afterwards. It holds
+     **no** `mail:*` grants (0 of 3 on the MCP API), so it cannot mint tokens
+     carrying product scopes.
+
+     **Creating an API creates one of these every time.** The `Letter IRL MCP`
+     API created earlier the same day produced `Letter IRL MCP (Test Application)`
+     as a side effect; it had zero grants anywhere and was deleted. Check for it
+     after any future API creation.
+
+2a. **Refresh token settings on the CIMD client** (owner decision, 2026-08-23)
+
+   Verified live in the DEV tenant on 2026-08-23. Rotation and both lifetimes
+   were already configured; only **Allow Offline Access** on the API above was
+   off, which is why no refresh token was ever issued.
+
+   | Setting | Value | Why |
+   |---|---|---|
+   | Allow Refresh Token Rotation | **Enabled** | Each use replaces the token; reuse of a retired one signals theft |
+   | Rotation Overlap Period | **0 seconds** | No window in which a retired token still works - the strictest setting |
+   | Maximum (absolute) lifetime | **30 days** (2592000s) | An abandoned grant dies within a month |
+   | Idle lifetime | **15 days** (1296000s) | A dormant connection lapses sooner than an active one |
+
+   The approved decision said 14 days idle; the tenant already had 15. The
+   difference is immaterial to the intent (roughly a fortnight) and the existing
+   value was deliberate, so reality is recorded here rather than adjusted to
+   match a round number.
+
+   These bound a real exposure: a refresh token carrying `mail:send` is a standing
+   ability to spend a customer's credits and post physical mail whenever their
+   ChatGPT account asks. Revocation must still take effect immediately - that is
+   CIMD-02b in docs/manual-tests.md, and it is the check that keeps this honest.
+
+   The same settings must be applied to the **production** tenant at cutover
+   (#158). They are not inherited from DEV.
 
 3. **Domain-Level Connections**
    - **All 5 connections** must have `is_domain_connection: true`

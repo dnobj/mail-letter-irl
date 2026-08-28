@@ -18,6 +18,7 @@
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import { query } from '../db/index.js';
+import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import type {
   PersonalAccessToken,
   CreateTokenResult,
@@ -116,7 +117,7 @@ export async function createToken(
 
   const row = result.rows[0];
 
-  console.log(`🔑 Created PAT "${name}" for user ${userId} (token_id: ${row.token_id})`);
+  writeDiagnostic('info', 'auth.pat_created');
 
   return {
     token: rawToken,
@@ -155,7 +156,7 @@ export async function revokeToken(
 
   // Idempotent: if already revoked, return success
   if (token.status === 'revoked') {
-    console.log(`🔑 PAT ${tokenId} already revoked for user ${userId}`);
+    writeDiagnostic('info', 'auth.pat_already_revoked');
     return { success: true, alreadyRevoked: true };
   }
 
@@ -167,7 +168,7 @@ export async function revokeToken(
     [tokenId]
   );
 
-  console.log(`🔑 Revoked PAT ${tokenId} for user ${userId}`);
+  writeDiagnostic('info', 'auth.pat_revoked');
 
   return { success: true, alreadyRevoked: false };
 }

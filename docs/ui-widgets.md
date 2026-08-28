@@ -1,22 +1,38 @@
 # UI Widgets
 
-**Last Updated:** May 30, 2026
+**Last Updated:** August 20, 2026
 
-Letter IRL registers five OpenAI Apps SDK widgets as MCP resources with `ui://` URIs and `text/html;profile=mcp-app`. Tool results keep model-facing data in `structuredContent` and send large render payloads, such as preview HTML and generated image thumbnails, through widget-only `_meta`.
+Letter IRL registers four OpenAI Apps SDK widgets as MCP resources with `ui://` URIs and `text/html;profile=mcp-app`. Widget template URIs are versioned (`ui://widgets/<name>.html@v<N>` via `src/mcp/widgetUris.ts`) because the native mobile apps cache widget metadata aggressively (issue #235); bump `WIDGET_TEMPLATE_VERSION` on any widget change — a digest-pinning test enforces this — and the legacy unversioned URI stays registered as a transition alias for stale clients. Tool results keep model-facing data in `structuredContent` and send large render payloads, such as preview HTML and compressed letter-image previews, through widget-only `_meta`.
 
 ## Registered Widgets
 
 - `LetterPreviewCard`: Shows text-only, header-image, and enclosed-image letter drafts. Reads letter preview HTML from `_meta.previewHtml`, displays delivery/cost context, and can call `send_letter` only after the user explicitly confirms.
 - `PostcardPreviewCard`: Shows postcard front and back previews from `_meta.previewFrontHtml` and `_meta.previewBackHtml`, then can call `send_postcard` only after explicit user confirmation.
-- `GenerateImageCard`: Shows a lightweight generated-image preview from `_meta.generatedImagePreview` and relays the generated image URL for use with postcard or letter preview tools.
-- `ImageUploadCard`: Opens a file picker fallback for image handoff problems, uploads a photo, and calls `confirm_uploaded_image` with the resulting `imageUrl`.
+- `ImageUploadCard`: Opens a file picker fallback for image handoff problems, uploads a photo, and calls `confirm_uploaded_image` with the resulting `imageUrl`. When the host exposes `window.openai.selectFiles` (plan/region-gated), it also offers a "Choose from Library" button that picks a file already in the user's ChatGPT Library and reuses the same confirm/follow-up handoff without re-uploading; because pick-time download URLs are temporary, a fresh URL is re-resolved via `getFileDownloadUrl` when the user confirms.
 - `GetStartedCard`: Presents onboarding guidance, purchase prerequisite messaging, and example prompts for new users.
 
 ## Runtime Bridge Notes
 
 - Widgets currently use the `window.openai` compatibility bridge, including `toolOutput`, `toolResponseMetadata`, `callTool`, and `sendFollowUpMessage` where needed.
 - Current OpenAI guidance prefers MCP Apps bridge notifications for new widget work, including tool-result and tool-input notifications. Treat a future bridge migration as a focused widget task, not as part of routine tool changes.
-- Widget resource metadata includes canonical `ui` metadata plus legacy `openai/*` aliases for compatibility.
+- Widget resource metadata includes canonical `ui` metadata plus legacy `openai/*` aliases for compatibility. The connector detail panel renders our `ui.csp` back verbatim, which is how we know the canonical key is the one being read (issue #228).
+
+### Content Security Policy
+
+The declared policy (`WIDGET_CSP_CANONICAL` in `src/mcp/registerTools.ts`) allows
+only what a widget genuinely loads: our API origin (the upload widget's
+diagnostic beacon, and the temp-image URL the image card can fall back to),
+OpenAI's static and user-content hosts, and Stripe plus the letter-pack origin as
+redirect targets. Everything else a widget displays is a `data:` URI produced
+server-side, so it needs no host at all.
+
+One host is **deliberately excluded**: the Azure blob host behind ChatGPT Library
+picks. Trusting it would mean trusting all of Azure blob storage for a thumbnail
+that the next screen renders anyway, so `ImageUploadCard` degrades to an
+explanatory line instead. The picked image is unaffected - it reaches the server
+over the `window.openai` bridge and is fetched from Node, outside CSP's reach.
+See `docs/learnings/widget-csp-enforcement.md` for the evidence and for how to
+reproduce enforcement locally (dev-mode ChatGPT never enforces it).
 
 ## UX and Safety Guidelines
 
@@ -24,3 +40,17 @@ Letter IRL registers five OpenAI Apps SDK widgets as MCP resources with `ui://` 
 - Keep previews mobile-friendly and resilient to delayed or repeated render lifecycle events.
 - Clearly show recipient context before confirmation when available.
 - Prefer direct conversation image reuse or `imageUrl` handoff before opening the upload widget.
+
+# Pay & Send preview actions
+
+When prepaid balance is sufficient, letter and postcard preview widgets retain
+their existing Send action. When it is insufficient, the widgets render the
+server-provided alternatives:
+
+- **Pay & Send** calls `create_mail_checkout`, displays the exact physical item
+  and amount, and opens Stripe with `window.openai.openExternal`.
+- **Buy a Letter Pack** opens the configured `LETTER_IRL_PACKS_URL`.
+
+After opening checkout, the widget polls `get_purchase_status` for a bounded
+period and shows webhook delay as processing rather than failure. Widget CSP is
+limited to the configured Letter IRL endpoint and Stripe-hosted Checkout.

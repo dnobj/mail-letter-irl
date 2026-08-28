@@ -1,5 +1,12 @@
 # OAuth & Identity Plan (Google Cloud + Firestore)
 
+> Superseded for ChatGPT MCP authentication by
+> `docs/oauth-cimd-migration-plan.md`. The active architecture is Auth0 manual
+> public CIMD, authorization code + PKCE S256, no client secret, a dedicated
+> exact `/mcp` audience, and `mail:read`/`mail:draft`/`mail:send`. DCR and the
+> static registration route are temporary rollback compatibility only.
+> Website/REST and Claude/PAT authentication remain separate.
+
 This plan outlines how to add per-user identity using Auth0 (for RFC 7591 support) while keeping Firestore and the rest of the stack on Google Cloud. The goal is to let ChatGPT authenticate each end user, so Letter IRL can map tool calls to individual Firestore accounts.
 
 ## 1. Google Cloud Setup
@@ -32,7 +39,8 @@ Action items:
    - `LETTER_IRL_OAUTH_SCOPES` (`openid email profile`)
    - `LETTER_IRL_OAUTH_AUDIENCE` (Auth0 API identifier, e.g., `https://letter-irl/api`)
    - `LETTER_IRL_OAUTH_CLIENT_ID` (Mail Letter IRL application)
-   - `LETTER_IRL_OAUTH_CLIENT_SECRET` if you want to echo it in `/oauth/register`
+   - ChatGPT has no Letter IRL-held client secret; the static registration
+     settings exist only for the explicitly enabled rollback mode.
 
 ## 4. Validate Tokens on Every Tool Call
 1. Use `jose` (already in the repo) with Auth0’s JWKS to verify ID tokens.

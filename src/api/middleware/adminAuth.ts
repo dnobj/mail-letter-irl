@@ -9,19 +9,16 @@
  * - ADMIN_LOCAL_ONLY restricts to localhost connections only
  */
 
+import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'http';
-import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { validateJWTToken } from '../../auth/tokenValidator.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../../utils/diagnosticLog.js';
 
 // Admin feature flags
 // ADMIN_ENABLED: Must be 'true' to enable admin routes (disabled by default)
 // ADMIN_LOCAL_ONLY: If 'true', only localhost can access admin routes
 const ADMIN_ENABLED = process.env.ADMIN_ENABLED === 'true';
 const ADMIN_LOCAL_ONLY = process.env.ADMIN_LOCAL_ONLY === 'true';
-
-// Create JWKS client for Auth0 (only if admin is enabled)
-const JWKS = ADMIN_ENABLED && process.env.LETTER_IRL_OAUTH_JWKS_URI
-  ? createRemoteJWKSet(new URL(process.env.LETTER_IRL_OAUTH_JWKS_URI))
-  : null;
 
 // Admin user IDs (comma-separated in .env)
 // Example: LETTER_IRL_ADMIN_USER_IDS=auth0|123,auth0|456
@@ -78,17 +75,8 @@ export async function authenticateAdmin(
     return null;
   }
 
-  // Allow localhost requests without authentication
-  if (isLocalhost && !isProxied) {
-    console.log('✅ Admin API: Localhost access (no auth required)');
-    return {
-      userId: 'localhost-admin',
-      email: 'localhost@admin',
-      isAdmin: true
-    };
-  }
-
-  // For remote access, require Authorization header
+  // Localhost is a network boundary, not an identity. Authentication and
+  // allow-list attribution remain mandatory below.
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -106,18 +94,17 @@ export async function authenticateAdmin(
   let email: string | undefined;
 
   try {
-    if (!JWKS) {
-      throw new Error('JWKS not configured');
-    }
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer: process.env.LETTER_IRL_OAUTH_ISSUER,
-      audience: process.env.LETTER_IRL_OAUTH_AUDIENCE
-    });
-
-    userId = payload.sub!;
-    email = payload.email as string | undefined;
+    // Issue #209: validate through the shared validator so the accepted
+    // audience set has one source of truth. This was the fifth copy of a raw
+    // single-value audience check; the operator interface (#162) would have
+    // rejected every website-audience token the moment it authenticated one.
+    const user = await validateJWTToken(token);
+    userId = user.userId;
+    email = typeof user.claims.email === 'string' ? user.claims.email : undefined;
   } catch (error) {
-    console.error('Admin auth - JWT validation failed:', error);
+    writeDiagnostic('error', 'auth.admin_validation_failed', {
+      errorClass: classifyDiagnosticError(error, 'authorization_error')
+    });
     sendJson(res, 401, {
       error: 'Unauthorized',
       message: 'Invalid or expired token'
@@ -129,7 +116,7 @@ export async function authenticateAdmin(
   const isAdmin = ADMIN_USER_IDS.includes(userId);
 
   if (!isAdmin) {
-    console.warn(`Admin access denied for user: ${userId}`);
+    writeDiagnostic('warn', 'auth.admin_access_denied');
     sendJson(res, 403, {
       error: 'Forbidden',
       message: 'Admin access required. Contact administrator for access.'
@@ -137,7 +124,7 @@ export async function authenticateAdmin(
     return null;
   }
 
-  console.log(`✅ Admin authenticated: ${userId} (${email})`);
+  writeDiagnostic('info', 'auth.admin_authenticated');
 
   return {
     userId,
@@ -174,4 +161,50 @@ export function isAdminEnabled(): boolean {
  */
 export function isAdminLocalOnly(): boolean {
   return ADMIN_LOCAL_ONLY;
+}
+
+function equalSecret(left: string, right: string): boolean {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** Fail-closed browser/readback and CSRF boundary for the temporary local API. */
+export function validateAdminRequestBoundary(req: IncomingMessage, res: ServerResponse): boolean {
+  const allowedOrigin = process.env.ADMIN_ALLOWED_ORIGIN;
+  const csrfSecret = process.env.ADMIN_CSRF_TOKEN;
+  if (process.env.ADMIN_LOCAL_ONLY !== 'true' || !allowedOrigin || !csrfSecret) {
+    sendJson(res, 404, { error: 'Not found' });
+    return false;
+  }
+  let expected: URL;
+  try {
+    expected = new URL(allowedOrigin);
+  } catch {
+    sendJson(res, 404, { error: 'Not found' });
+    return false;
+  }
+  const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress || '');
+  const forwarded = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.headers['ngrok-agent-ips'];
+  const origin = req.headers.origin;
+  const fetchSite = req.headers['sec-fetch-site'];
+  if (!local || forwarded || req.headers.host !== expected.host ||
+      (origin !== undefined && origin !== allowedOrigin) ||
+      (fetchSite !== undefined && !['same-origin', 'none'].includes(String(fetchSite)))) {
+    sendJson(res, 404, { error: 'Not found' });
+    return false;
+  }
+  if (req.method === 'OPTIONS' || req.headers['x-letter-irl-admin'] !== 'local-operator') {
+    sendJson(res, 403, { error: 'Forbidden' });
+    return false;
+  }
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method || '')) {
+    const contentType = String(req.headers['content-type'] || '').split(';', 1)[0].trim();
+    const supplied = String(req.headers['x-csrf-token'] || '');
+    if (contentType !== 'application/json' || !supplied || !equalSecret(supplied, csrfSecret)) {
+      sendJson(res, 403, { error: 'Forbidden' });
+      return false;
+    }
+  }
+  return true;
 }

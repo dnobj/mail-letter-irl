@@ -5,22 +5,22 @@
 
 The runtime MCP registry is the source of truth. The checked-in `manifest.json` is generated from that registry with `npm run manifest:generate`, and submission-facing tests verify that the manifest, widget list, and runtime tool registry stay aligned.
 
-Letter IRL currently exposes **17 tools**:
+Letter IRL currently exposes **19 tools**:
 
 ## Onboarding
 
-- `get_started`: Show a short getting-started guide with setup steps and example prompts. Read-only. Uses `ui://widgets/GetStartedCard.html`.
+- `get_started`: Show a short getting-started guide with setup steps and example prompts. Read-only. Uses `ui://widgets/GetStartedCard.html@v<N>`.
 
 ## Letter Drafts and Sending
 
-- `quote_and_preview_letter`: Create a free draft preview for a text-only physical letter. Requires a real U.S. recipient address, `bodyText`, and `signOff`; sender is optional when a saved return address exists. Creates a draft, so it is not read-only. Uses `ui://widgets/LetterPreviewCard.html`.
-- `quote_and_preview_letter_with_header_image`: Create a free draft preview for a letter with a header image at the top. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterPreviewCard.html`.
-- `quote_and_preview_letter_with_image`: Create a free draft preview for a letter with an enclosed image after the signature. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterPreviewCard.html`.
+- `quote_and_preview_letter`: Create a free draft preview for a text-only physical letter. Requires a real U.S. recipient address, `bodyText`, and `signOff`; sender is optional when a saved return address exists. Creates a draft, so it is not read-only. Uses `ui://widgets/LetterPreviewCard.html@v<N>`.
+- `quote_and_preview_letter_with_header_image`: Create a free draft preview for a letter with a header image at the top. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterPreviewCard.html@v<N>`.
+- `quote_and_preview_letter_with_image`: Create a free draft preview for a letter with an enclosed image after the signature. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterPreviewCard.html@v<N>`.
 - `send_letter`: Send a letter from a prior draft. Requires `draftId` and `confirm: true`. Idempotent retries with the same draft return the existing order rather than charging twice.
 
 ## Postcards
 
-- `quote_and_preview_postcard`: Create a free draft preview for a 6x9 physical postcard with a front image and back message. Accepts an attached image or `imageUrl`; sender is optional when a saved return address exists. Creates a draft and uses `ui://widgets/PostcardPreviewCard.html`.
+- `quote_and_preview_postcard`: Create a free draft preview for a 6x9 physical postcard with a front image and back message. Accepts an attached image or `imageUrl`; sender is optional when a saved return address exists. Creates a draft and uses `ui://widgets/PostcardPreviewCard.html@v<N>`.
 - `send_postcard`: Send a postcard from a prior draft. Requires `draftId` and `confirm: true`. Idempotent retries with the same draft return the existing order rather than charging twice.
 
 ## Account, Orders, and Return Address
@@ -34,8 +34,8 @@ Letter IRL currently exposes **17 tools**:
 
 ## Images
 
-- `generate_image`: Generate artwork through Letter IRL when this app is selected and native ChatGPT image generation is unavailable or blocked. Returns a widget preview and an image URL path for follow-up preview tools. Uses `ui://widgets/GenerateImageCard.html`.
-- `upload_image`: Open the image upload widget as a fallback when direct attachment or `imageUrl` handoff does not work. Uses `ui://widgets/ImageUploadCard.html`.
+- `generate_image_for_mail`: hybrid image tool for requests addressed to Letter IRL. With Letter IRL image credits (pack/JIT grants plus a one-time starter allowance) it generates in-turn via the OpenAI Images API and returns an imageUrl for previews; without credits, or past the global daily ceiling, it returns a redirect card with a copy-ready prompt for free built-in generation. Never hard-fails. See docs/learnings/generate-image-removal-decision.md Addendum 3.
+- `upload_image`: Open the image upload widget as a fallback when direct attachment or `imageUrl` handoff does not work. Uses `ui://widgets/ImageUploadCard.html@v<N>`.
 - `confirm_uploaded_image`: Internal widget relay that confirms an uploaded image and returns the `imageUrl` plus next-step guidance.
 
 ## Feedback
@@ -49,7 +49,7 @@ Letter IRL currently exposes **17 tools**:
 - Tool responses split data intentionally:
   - `structuredContent`: compact model-facing fields validated by the runtime output schema.
   - `content`: short model narration.
-  - `_meta`: widget-only fields such as preview HTML and generated image previews.
+  - `_meta`: widget-only fields such as preview HTML and compressed letter-image previews.
 - Preview tools create database draft records, so they are write tools even though they do not send mail or charge the user.
 - Send tools require a draft and explicit confirmation. The assistant must not claim mail was sent unless the corresponding send tool succeeds.
 
@@ -61,3 +61,30 @@ Run these after tool, schema, or widget changes:
 npm run manifest:generate
 npm run test:submission
 ```
+
+# Pay & Send tools
+
+## `create_mail_checkout`
+
+Input: `{ draftId: string }`.
+
+Creates or reuses the one active hosted checkout for an authenticated user's
+pending letter or postcard draft. The tool never accepts a price, currency,
+Stripe Price ID, recipient, or mail content. It returns the commerce `orderId`,
+hosted `checkoutUrl`, exact server-configured amount/currency, product
+description, expiry, and current order status. Payment is authorization to mail
+the immutable draft; the model must not call `send_letter` or `send_postcard`
+after payment.
+
+## `get_purchase_status`
+
+Input: `{ orderId: string }`.
+
+Returns sanitized, owner-scoped purchase state:
+`pending_payment`, `processing`, `sent`, `payment_failed`, `refund_pending`,
+`refunded`, or `cancelled`. It exposes no card, billing, address, content, or raw
+Stripe data.
+
+Preview tools retain `canSendNow` for compatibility and now also return
+`sendEligibility`, containing prepaid eligibility, Pay & Send availability and
+exact price, and the configured letter-pack destination.

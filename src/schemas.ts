@@ -50,9 +50,16 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
     image: {
       type: "object",
       description: "Header image file attachment (recommended method)",
+      // The Apps SDK file-param contract requires ALL FOUR properties declared
+      // and ONLY download_url + file_id required; a deviating schema is
+      // silently rejected by the platform's tool scan, which disables the
+      // file transform entirely and leaves the model improvising bare
+      // strings (issue #227's tool-call evidence).
       properties: {
         download_url: { type: "string" },
-        file_id: { type: "string" }
+        file_id: { type: "string" },
+        mime_type: { type: "string" },
+        file_name: { type: "string" }
       },
       required: ["download_url", "file_id"]
     },
@@ -80,9 +87,12 @@ export const quoteAndPreviewLetterWithImageInputSchema: JsonSchema = {
     image: {
       type: "object",
       description: "Image file attachment (recommended method)",
+      // Same four-property contract as the header-image schema above.
       properties: {
         download_url: { type: "string" },
-        file_id: { type: "string" }
+        file_id: { type: "string" },
+        mime_type: { type: "string" },
+        file_name: { type: "string" }
       },
       required: ["download_url", "file_id"]
     },
@@ -115,14 +125,59 @@ export const quoteAndPreviewInputSchema: JsonSchema = {
   }
 };
 
+const sendEligibilitySchema: JsonSchema = {
+  type: "object",
+  required: ["prepaid", "payAndSend", "letterPack"],
+  properties: {
+    prepaid: {
+      type: "object",
+      required: ["eligible", "requiredCredits", "availableCredits"],
+      properties: {
+        eligible: { type: "boolean" },
+        requiredCredits: { type: "integer" },
+        availableCredits: { type: "integer" }
+      }
+    },
+    payAndSend: {
+      type: "object",
+      required: ["available"],
+      properties: {
+        available: { type: "boolean" },
+        amountCents: { type: "integer" },
+        currency: { type: "string" },
+        // Declared HERE as well as in zodSchemas.ts. This file is the schema
+        // /manifest.json publishes (manifest.ts -> LetterIrlServer.listTools),
+        // and it is a genuinely served surface: a consumer that derives the
+        // tool's output shape from the manifest saw no displayAmount, dropped
+        // it, and fell back to amountCents/100 - 100x wrong for a
+        // zero-decimal currency, the exact bug the server-side formatting was
+        // added to fix, still live on the second surface. Four round-10
+        // angles found it; schemaConsistency.test.ts now compares the layers.
+        displayAmount: { type: "string" },
+        productDescription: { type: "string" },
+        unavailableReason: { type: "string" }
+      }
+    },
+    letterPack: {
+      type: "object",
+      required: ["available", "purchaseUrl"],
+      properties: {
+        available: { type: "boolean" },
+        purchaseUrl: { type: "string" }
+      }
+    }
+  }
+};
+
 export const quoteAndPreviewOutputSchema: JsonSchema = {
   type: "object",
-  required: ["previewHtml", "lettersRequired", "canSendNow", "draftId", "draftExpiresAt", "layoutType"],
+  required: ["previewHtml", "lettersRequired", "canSendNow", "sendEligibility", "draftId", "draftExpiresAt", "layoutType"],
   properties: {
     previewHtml: { type: "string" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for standard letter)" },
     canSendNow: { type: "boolean" },
     reasonCannotSend: { type: "string" },
+    sendEligibility: sendEligibilitySchema,
     deliveryClass: { type: "string" },
     estimatedDeliveryDays: { type: "integer" },
     deliveryEstimate: { type: "string" },
@@ -207,6 +262,65 @@ export const sendLetterOutputSchema: JsonSchema = {
   }
 };
 
+export const createMailCheckoutInputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId"],
+  properties: {
+    draftId: {
+      type: "string",
+      description: "Owned pending draft ID from a letter or postcard preview"
+    }
+  }
+};
+
+export const createMailCheckoutOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["orderId", "amountCents", "currency", "productDescription", "status", "reused", "message"],
+  properties: {
+    orderId: { type: "string" },
+    checkoutUrl: { type: "string", description: "Stripe-hosted checkout URL" },
+    amountCents: { type: "integer" },
+    currency: { type: "string" },
+    productDescription: { type: "string" },
+    expiresAt: { type: "string" },
+    status: { type: "string" },
+    reused: { type: "boolean" },
+    message: { type: "string" }
+  }
+};
+
+export const getPurchaseStatusInputSchema: JsonSchema = {
+  type: "object",
+  required: ["orderId"],
+  properties: {
+    orderId: {
+      type: "string",
+      description: "Commerce order ID returned by checkout"
+    }
+  }
+};
+
+export const getPurchaseStatusOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["orderId", "purchaseStatus", "orderStatus", "productDescription", "amountCents", "currency", "updatedAt", "message"],
+  properties: {
+    orderId: { type: "string" },
+    purchaseStatus: {
+      type: "string",
+      enum: ["pending_payment", "processing", "sent", "payment_failed", "refund_pending", "refunded", "cancelled"]
+    },
+    orderStatus: { type: "string" },
+    productDescription: { type: "string" },
+    amountCents: { type: "integer" },
+    currency: { type: "string" },
+    mailType: { type: "string", enum: ["letter", "postcard"] },
+    letterId: { type: "string" },
+    checkoutExpiresAt: { type: "string" },
+    updatedAt: { type: "string" },
+    message: { type: "string" }
+  }
+};
+
 export const getOrderStatusInputSchema: JsonSchema = {
   type: "object",
   properties: {
@@ -275,8 +389,8 @@ export const getAccountBalanceOutputSchema: JsonSchema = {
         }
       }
     },
-    imageGenerationsRemaining: { type: "integer", description: "Number of AI image generations remaining (5 per letter purchased)" },
-    imageGenerationsAllowance: { type: "integer", description: "Total AI image generations allowed based on letters purchased" }
+    imageGenerationsRemaining: { type: "integer", description: "Number of explicit image-entitlement units remaining" },
+    imageGenerationsAllowance: { type: "integer", description: "Total image-entitlement units granted by qualifying purchases" }
   }
 };
 
@@ -345,28 +459,32 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
     image: {
       type: "object",
       description: "Image file attachment for postcard front (recommended method)",
+      // Same four-property contract as the letter image schemas above.
       properties: {
         download_url: { type: "string" },
-        file_id: { type: "string" }
+        file_id: { type: "string" },
+        mime_type: { type: "string" },
+        file_name: { type: "string" }
       },
       required: ["download_url", "file_id"]
     },
     imageUrl: {
       type: "string",
-      description: "REQUIRED when using a generated image: set this to the generatedImageUrl value returned by the generate_image tool. This is the URL of the image for the postcard front."
+      description: "REQUIRED when using a hosted image: set this to the imageUrl returned by confirm_uploaded_image (the upload widget flow) or another publicly accessible image URL. This is the URL of the image for the postcard front."
     }
   }
 };
 
 export const quoteAndPreviewPostcardOutputSchema: JsonSchema = {
   type: "object",
-  required: ["previewFrontHtml", "previewBackHtml", "lettersRequired", "canSendNow", "draftId", "draftExpiresAt"],
+  required: ["previewFrontHtml", "previewBackHtml", "lettersRequired", "canSendNow", "sendEligibility", "draftId", "draftExpiresAt"],
   properties: {
     previewFrontHtml: { type: "string", description: "HTML preview of postcard front (image)" },
     previewBackHtml: { type: "string", description: "HTML preview of postcard back (message)" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for 6x9 postcard)" },
     canSendNow: { type: "boolean" },
     reasonCannotSend: { type: "string" },
+    sendEligibility: sendEligibilitySchema,
     deliveryClass: { type: "string" },
     estimatedDeliveryDays: { type: "integer" },
     deliveryEstimate: { type: "string" },
@@ -549,53 +667,6 @@ export const uploadImageOutputSchema: JsonSchema = {
     debugEndpoint: {
       type: "string",
       description: "Optional absolute URL for debug beacon ingestion"
-    }
-  }
-};
-
-// ============================================================================
-// Generate Image Schemas (AI image generation via OpenAI)
-// ============================================================================
-
-export const generateImageInputSchema: JsonSchema = {
-  type: "object",
-  required: ["prompt"],
-  properties: {
-    prompt: {
-      type: "string",
-      description: "Description of the image to generate (e.g., 'a sunset over mountains')"
-    },
-    context: {
-      type: "string",
-      enum: ["postcard", "header_image", "inline_image"],
-      description: "What the image will be used for. Determines optimal dimensions."
-    }
-  }
-};
-
-export const generateImageOutputSchema: JsonSchema = {
-  type: "object",
-  required: ["message", "suggestedNextStep", "generatedImagePreview", "generatedImageUrl", "generationsRemaining"],
-  properties: {
-    message: {
-      type: "string",
-      description: "Human-friendly summary message"
-    },
-    suggestedNextStep: {
-      type: "string",
-      description: "Guidance on what tool to call next with the imageUrl"
-    },
-    generatedImagePreview: {
-      type: "string",
-      description: "Tiny base64-encoded JPEG preview (~15KB, for widget display only)"
-    },
-    generatedImageUrl: {
-      type: "string",
-      description: "URL to download the full-resolution generated image"
-    },
-    generationsRemaining: {
-      type: "integer",
-      description: "Number of image generations remaining in quota (5 per letter purchased)"
     }
   }
 };

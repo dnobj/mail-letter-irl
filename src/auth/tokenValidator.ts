@@ -1,39 +1,65 @@
-import { createRemoteJWKSet, jwtVerify, JWTVerifyOptions } from "jose";
+import {
+  createRemoteJWKSet,
+  jwtVerify,
+  JWTVerifyGetKey,
+  JWTVerifyOptions
+} from "jose";
 import {
   validateToken as validatePAT,
   updateLastUsed,
-  TOKEN_PREFIX as PAT_PREFIX,
+  TOKEN_PREFIX as PAT_PREFIX
 } from "../services/patService.js";
+import { getOAuthConfig } from "./oauthConfig.js";
+import {
+  classifyDiagnosticError,
+  writeDiagnostic
+} from "../utils/diagnosticLog.js";
+import { InsufficientScopeError } from "./oauthChallenge.js";
 
 export interface AuthenticatedUser {
   userId: string;
   claims: Record<string, unknown>;
   token: string;
-  authType: 'jwt' | 'pat';
+  authType: "jwt" | "pat";
+  scopes: string[];
 }
 
-const issuer = process.env.LETTER_IRL_OAUTH_ISSUER;
-const jwksUri = process.env.LETTER_IRL_OAUTH_JWKS_URI;
-const audienceEnv = process.env.LETTER_IRL_OAUTH_AUDIENCE;
+const remoteKeySets = new Map<string, JWTVerifyGetKey>();
 
-if (!issuer || !jwksUri) {
-  console.warn(
-    "LETTER_IRL_OAUTH_ISSUER or LETTER_IRL_OAUTH_JWKS_URI not set. OAuth validation is disabled."
-  );
+function getRemoteKeySet(jwksUri: string): JWTVerifyGetKey {
+  const existing = remoteKeySets.get(jwksUri);
+  if (existing) {
+    return existing;
+  }
+  const created = createRemoteJWKSet(new URL(jwksUri));
+  remoteKeySets.set(jwksUri, created);
+  return created;
 }
 
-const jwks = jwksUri ? createRemoteJWKSet(new URL(jwksUri)) : undefined;
-const audiences = audienceEnv?.split(",").map((val) => val.trim()).filter(Boolean);
+export function parseTokenScopes(claims: Record<string, unknown>): string[] {
+  const raw = claims.scope ?? claims.scp;
+  if (Array.isArray(raw)) {
+    return raw.filter((scope): scope is string => typeof scope === "string");
+  }
+  if (typeof raw === "string") {
+    return raw.split(/\s+/).filter(Boolean);
+  }
+  return [];
+}
 
-/**
- * Validate Authorization header and return authenticated user
- *
- * Supports two authentication methods:
- * 1. JWT tokens from Auth0 (OAuth flow for ChatGPT)
- * 2. Personal Access Tokens (PAT) for MCP clients
- *
- * PAT tokens are detected by their prefix: "lirl_pat_"
- */
+export function requireScopes(
+  user: AuthenticatedUser,
+  requiredScopes: readonly string[]
+): void {
+  if (user.authType === "pat") {
+    return;
+  }
+  const missing = requiredScopes.filter((scope) => !user.scopes.includes(scope));
+  if (missing.length > 0) {
+    throw new InsufficientScopeError(missing);
+  }
+}
+
 export async function validateAuthorizationHeader(
   authorizationHeader?: string
 ): Promise<AuthenticatedUser> {
@@ -47,31 +73,24 @@ export async function validateAuthorizationHeader(
   }
 
   const token = match[1];
-
-  // Detect PAT by prefix and route to PAT validation
   if (token.startsWith(PAT_PREFIX)) {
-    return await validatePATToken(token);
+    return validatePATToken(token);
   }
-
-  // Default to JWT validation
-  return await validateJWTToken(token);
+  return validateJWTToken(token);
 }
 
-/**
- * Validate a Personal Access Token (US-MCP-03)
- */
 async function validatePATToken(token: string): Promise<AuthenticatedUser> {
   const result = await validatePAT(token);
-
   if (!result.valid) {
     throw new Error(result.error || "Invalid token");
   }
 
-  // Update last_used_at asynchronously (don't block response)
   if (result.tokenId) {
-    updateLastUsed(result.tokenId).catch((err) =>
-      console.error("🔑 Failed to update PAT last_used_at:", err)
-    );
+    updateLastUsed(result.tokenId).catch((error) => {
+      writeDiagnostic("error", "auth.pat_last_used_update_failed", {
+        errorClass: classifyDiagnosticError(error, "database_error")
+      });
+    });
   }
 
   return {
@@ -79,35 +98,55 @@ async function validatePATToken(token: string): Promise<AuthenticatedUser> {
     claims: { authType: "pat", tokenId: result.tokenId },
     token,
     authType: "pat",
+    scopes: []
   };
 }
 
-/**
- * Validate a JWT token via Auth0 JWKS
- */
-async function validateJWTToken(token: string): Promise<AuthenticatedUser> {
-  if (!issuer || !jwks) {
+export async function validateJWTToken(
+  token: string,
+  keySet?: JWTVerifyGetKey,
+  requiredScopes: readonly string[] = []
+): Promise<AuthenticatedUser> {
+  const config = getOAuthConfig();
+  if (!config.issuer || !config.jwksUri || config.audience.length === 0) {
     throw new Error("OAuth validation not configured");
   }
 
   const options: JWTVerifyOptions = {
-    issuer,
+    issuer: config.issuer,
+    audience: config.audience.length === 1 ? config.audience[0] : config.audience,
+    algorithms: config.algorithms
   };
 
-  if (audiences && audiences.length > 0) {
-    options.audience = audiences.length === 1 ? audiences[0] : audiences;
-  }
+  try {
+    const { payload } = await jwtVerify(
+      token,
+      keySet ?? getRemoteKeySet(config.jwksUri),
+      options
+    );
+    const userId =
+      typeof payload.sub === "string"
+        ? payload.sub.trim()
+        : typeof payload.user_id === "string"
+          ? payload.user_id.trim()
+          : "";
+    if (!userId) {
+      throw new Error("Token is missing a valid subject (sub)");
+    }
 
-  const { payload } = await jwtVerify(token, jwks, options);
-  const userId = (payload.sub as string) ?? (payload.user_id as string);
-  if (!userId) {
-    throw new Error("Token is missing subject (sub)");
+    const user: AuthenticatedUser = {
+      userId,
+      claims: payload,
+      token,
+      authType: "jwt",
+      scopes: parseTokenScopes(payload)
+    };
+    requireScopes(user, requiredScopes);
+    return user;
+  } catch (error) {
+    writeDiagnostic("warn", "auth.jwt_rejected", {
+      errorClass: classifyDiagnosticError(error, "authorization_error")
+    });
+    throw error;
   }
-
-  return {
-    userId,
-    claims: payload,
-    token,
-    authType: "jwt",
-  };
 }

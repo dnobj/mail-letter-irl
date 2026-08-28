@@ -37,7 +37,7 @@ async function main() {
 
   // send_letter uses draft-based input: { draftId, confirm }
   // The draft contains all letter content from quote_and_preview_letter
-  const send = await server.execute({
+  const send = await server.execute<{ draftId: string; confirm: boolean }, any>({
     toolName: "send_letter",
     input: {
       draftId: preview.result.draftId,
@@ -48,7 +48,7 @@ async function main() {
   console.log("Order queued:", send.result.orderId);
 
   console.log("\n--- Flow B: Check Status ---");
-  const status = await server.execute({
+  const status = await server.execute<Record<string, never>, any>({
     toolName: "get_order_status",
     input: {},
     userId
@@ -56,7 +56,7 @@ async function main() {
   console.log("Latest status:", status.result.currentStatus);
 
   console.log("\n--- Flow C: Check Balance ---");
-  const balance = await server.execute({
+  const balance = await server.execute<Record<string, never>, any>({
     toolName: "get_account_balance",
     input: {},
     userId
@@ -65,6 +65,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("Flow harness failed:", error);
+  console.error("Flow harness failed");
   process.exitCode = 1;
 });

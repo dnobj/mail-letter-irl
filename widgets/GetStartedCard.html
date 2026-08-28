@@ -5,89 +5,89 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Letter IRL Getting Started</title>
     <style>
-      :root {
-        color-scheme: light;
-        --bg: #f7f0e6;
-        --card: #fffaf4;
-        --ink: #2b241d;
-        --muted: #6b5b4c;
-        --border: #dcc6ac;
-        --accent: #9f4f2b;
-      }
-
-      body {
-        margin: 0;
-        font-family: Georgia, "Times New Roman", serif;
-        background: linear-gradient(180deg, #f3e8d9 0%, var(--bg) 100%);
-        color: var(--ink);
-      }
-
-      .card {
-        margin: 0;
-        padding: 20px;
-        border: 1px solid var(--border);
-        border-radius: 18px;
-        background: var(--card);
-      }
-
-      h1 {
-        margin: 0 0 10px;
-        font-size: 24px;
-      }
-
-      p {
-        margin: 0 0 12px;
-        line-height: 1.5;
-      }
-
-      .step {
-        margin-top: 14px;
-        padding: 12px 14px;
-        border-radius: 12px;
-        background: #f9f1e7;
-        border: 1px solid #ead8c2;
-      }
-
-      .label {
-        display: inline-block;
-        margin-bottom: 6px;
-        font-size: 12px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--accent);
-      }
-
-      ul {
-        margin: 10px 0 0 18px;
-        padding: 0;
-        color: var(--muted);
-      }
-
-      li + li {
-        margin-top: 8px;
-      }
+      /* Letter IRL design system (widget-design-package, Aug 2026): system-ui
+         chrome, Georgia only inside paper artifacts, paper stays cream in
+         both themes. */
+      :root{--sf:#fff;--sf2:#fafafa;--bd:#e4e4e7;--bd2:#f0f0f2;--tx:#111113;--tb:#3f3f46;--mut:#71717a;--faint:#a1a1aa}
+      .dark{--sf:#2a2a2e;--sf2:#232327;--bd:#3a3a40;--bd2:#323238;--tx:#f4f4f5;--tb:#d4d4d8;--mut:#a1a1aa;--faint:#71717a}
+      *{box-sizing:border-box}
+      body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+      .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;color:var(--tb);overflow:hidden}
+      .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
+      .logo{width:17px;height:11px;flex:none;display:block}
+      /* One parametric SVG for both themes (assets/brand/letterirl-mark-small.svg):
+         the mark reads --li-blue, which the dark scope lightens. */
+      .dark{--li-blue:#6f98f2}
+      .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
+      .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
+      .bd{padding:14px}
+      .title{margin:0;font-family:Georgia,"Times New Roman",serif;font-size:18px;font-weight:600;color:var(--tx);letter-spacing:-.01em}
+      .ov{font-size:13px;line-height:1.55;color:var(--tb);margin:7px 0 0}
+      .paper{margin-top:14px}
+      .plabel{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 4px}
+      .ptext{font-size:12.5px;line-height:1.55;color:var(--tb);margin:0}
+      .paper ul{margin:2px 0 0;padding:0;list-style:none}
+      .paper li{font-size:12.5px;line-height:1.5;color:var(--tb);padding:4px 0}
+      .paper li:last-child{padding-bottom:0}
+      .paper li::before{content:"\201C";color:var(--faint);margin-right:2px}
+      .paper li::after{content:"\201D";color:var(--faint);margin-left:2px}
+      .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
+      .sk{background:linear-gradient(90deg,var(--bd2) 25%,var(--bd) 50%,var(--bd2) 75%);background-size:200% 100%;animation:sh 1.4s infinite;border-radius:6px}
+      @keyframes sh{to{background-position:-200% 0}}
+      .hidden{display:none !important}
     </style>
   </head>
   <body>
-    <article class="card">
-      <h1 id="title">Get Started with Letter IRL</h1>
-      <p id="overview"></p>
-      <div class="step">
-        <div class="label">Before You Send</div>
-        <p id="purchase-step"></p>
+    <div class="w">
+      <div class="hd"><span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 21"><path fill="none" stroke="var(--li-blue,#2563eb)" stroke-width="3" stroke-linejoin="round" d="M11.3 2.4c5.2 0 9.4 3.3 9.4 7.4 0 4.1-4.2 7.4-9.4 7.4-.8 0-1.6-.1-2.4-.2l-5.7 2.6 1.8-4.1C3 14.2 1.9 12 1.9 9.8c0-4.1 4.2-7.4 9.4-7.4Z"></path><g transform="rotate(-8 24 8.6)"><rect x="16.5" y="3" width="14.6" height="10" rx="1.6" fill="var(--li-orange,#f97316)"></rect><path fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" d="m18 4.7 5.8 4 5.8-4"></path></g></svg></span><b>Letter IRL</b><span class="ctx">About</span></div>
+      <div class="bd">
+        <!-- Skeleton until toolOutput arrives -->
+        <div id="state-loading">
+          <div class="sk" style="height:20px;width:70%"></div>
+          <div class="sk" style="height:12px;margin-top:10px"></div>
+          <div class="sk" style="height:12px;width:85%;margin-top:6px"></div>
+          <div class="sk" style="height:10px;width:34%;margin-top:16px"></div>
+          <div class="sk" style="height:12px;margin-top:8px"></div>
+          <div class="sk" style="height:12px;width:80%;margin-top:6px"></div>
+          <div class="sk" style="height:10px;width:34%;margin-top:16px"></div>
+          <div class="sk" style="height:12px;width:65%;margin-top:8px"></div>
+          <div class="sk" style="height:12px;width:72%;margin-top:6px"></div>
+          <div class="sk" style="height:12px;width:58%;margin-top:6px"></div>
+        </div>
+        <div id="state-ready" class="hidden">
+          <h1 class="title" id="title">Get Started with Letter IRL</h1>
+          <p class="ov" id="overview"></p>
+          <div class="paper">
+            <p class="plabel">Before You Send</p>
+            <p class="ptext" id="purchase-step"></p>
+          </div>
+          <div class="paper">
+            <p class="plabel">Try One Of These</p>
+            <ul id="example-prompts"></ul>
+          </div>
+        </div>
       </div>
-      <div class="step">
-        <div class="label">Try One Of These</div>
-        <ul id="example-prompts"></ul>
-      </div>
-    </article>
+      <p class="rev">started t14</p>
+    </div>
 
     <script>
+      function applyTheme() {
+        const theme = window.openai?.theme ?? "light";
+        document.documentElement.classList.toggle("dark", theme === "dark");
+      }
+
       function render() {
+        applyTheme();
         const output = window.openai?.toolOutput ?? {};
         const responseMeta = window.openai?.toolResponseMetadata ?? {};
         const state = { ...responseMeta, ...output };
+
+        const hasData = Boolean(
+          state.overview || state.purchaseStep || (state.examplePrompts || []).length
+        );
+        document.getElementById("state-loading").classList.toggle("hidden", hasData);
+        document.getElementById("state-ready").classList.toggle("hidden", !hasData);
+        if (!hasData) return;
 
         document.getElementById("title").textContent =
           state.title || "Get Started with Letter IRL";

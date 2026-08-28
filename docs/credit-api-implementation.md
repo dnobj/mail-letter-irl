@@ -1,5 +1,32 @@
 # Credit API Implementation Guide
 
+> **SUPERSEDED — do not implement from this document.**
+>
+> This guide describes the pre-ledger credit design, in which a grant wrote
+> `users.credits` and a `credit_transactions` row and nothing else. That design
+> was replaced by the credit ledger in migration `003_credit_ledger.sql`, and
+> the worked implementations below have not been updated.
+>
+> **Why it matters rather than merely being stale.** The `addCredits` shown here
+> never writes `credit_ledger`. A grant built from this document is invisible to
+> `idx_credit_ledger_purchase_order_unique` (migration 023) and to the
+> attribution trigger (migration 027), which is precisely the double-grant
+> shape issue #152 exists to eliminate. `creditService.addCredits` itself no
+> longer exists.
+>
+> **For the current behaviour, read the code, not this file:**
+>
+> | What | Where |
+> |---|---|
+> | The grant itself | `src/services/creditLedgerService.ts` — `addCreditsToLedger`, `addCreditsToLedgerWithClient` |
+> | The purchase path | `src/services/commerceService.ts` — `transitionPaidCheckout` |
+> | Consumption (FIFO by expiry) | `src/services/creditLedgerService.ts` — `deductCreditsFromLedger` |
+> | What a purchase grant must satisfy | `db/migrations/023_jit_recovery_state_machines.sql`, `db/migrations/027_purchase_grant_attribution.sql` |
+> | Executable specification | `tests/integration/purchaseIdempotency.postgres.test.ts` |
+>
+> Retained for the design rationale and the API-shape discussion below, which
+> are still broadly accurate. Every code block is not.
+
 ## Overview
 
 The Credit API manages user credit balances, transactions, and audit trails. This is the foundation for both ACP credit purchases and letter sending.

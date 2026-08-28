@@ -5,49 +5,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
 import { getBalance, getTransactions, getDetailedBalance } from '../services/creditService.js';
 import { getUser } from '../services/userService.js';
 import { validatePromoCode, redeemPromoCode, getUserRedemptions } from '../services/promoService.js';
 import { getLedgerEntries } from '../services/creditLedgerService.js';
-
-// Create JWKS client for Auth0
-const JWKS = createRemoteJWKSet(
-  new URL(process.env.LETTER_IRL_OAUTH_JWKS_URI!)
-);
-
-interface AuthInfo {
-  userId: string;
-  email?: string;
-}
-
-/**
- * Authenticate request and extract user info from JWT
- */
-async function authenticateRequest(req: IncomingMessage): Promise<AuthInfo | null> {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const token = authHeader.substring(7);
-
-  try {
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer: process.env.LETTER_IRL_OAUTH_ISSUER,
-      audience: process.env.LETTER_IRL_OAUTH_AUDIENCE
-    });
-
-    return {
-      userId: payload.sub!,
-      email: payload.email as string | undefined
-    };
-  } catch (error) {
-    console.error('JWT validation failed:', error);
-    return null;
-  }
-}
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import { authenticateRestRequest, type RestAuthInfo as AuthInfo } from './middleware/restAuth.js';
 
 /**
  * Send JSON response
@@ -73,14 +37,12 @@ export async function handleCreditApiRequest(
   }
 
   // Authenticate request
-  const authInfo = await authenticateRequest(req);
-  if (!authInfo) {
-    sendJson(res, 401, {
-      error: 'Unauthorized',
-      message: 'Missing or invalid Authorization header'
-    });
+  const auth = await authenticateRestRequest(req);
+  if (!auth.ok) {
+    sendJson(res, 401, { error: 'Unauthorized', message: auth.message });
     return true;
   }
+  const authInfo = auth.user;
 
   // Route handlers
   try {
@@ -145,15 +107,12 @@ export async function handleCreditApiRequest(
     return true;
 
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const errorStack = error instanceof Error ? error.stack : undefined;
-    console.error('Credit API error:', errorMessage);
-    if (errorStack) {
-      console.error('Stack trace:', errorStack);
-    }
+    writeDiagnostic('error', 'credits.api_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
     sendJson(res, 500, {
       error: 'Internal server error',
-      message: errorMessage
+      message: 'Unable to complete credit request'
     });
     return true;
   }
@@ -328,18 +287,18 @@ async function handleGetLedgerEntries(
  * Parse JSON body from request
  */
 async function parseBody(req: IncomingMessage): Promise<any> {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-    req.on('end', () => {
-      try {
-        resolve(body ? JSON.parse(body) : {});
-      } catch (error) {
-        reject(new Error('Invalid JSON'));
-      }
-    });
-    req.on('error', reject);
-  });
+  // Bounded. This previously accumulated without a cap, which on a public
+  // route is a memory-exhaustion denial of service (#157). readRequestBody
+  // also decodes once at the end, so a multi-byte character split across two
+  // chunks is no longer corrupted into replacement characters.
+  const body = await readRequestBody(req, { limitBytes: JSON_API_BODY_LIMIT_BYTES });
+  try {
+    return body ? JSON.parse(body) : {};
+  } catch {
+    // A RequestBodyTooLargeError from above propagates with its own 413 rather
+    // than being flattened into this parse error.
+    throw new Error('Invalid JSON');
+  }
 }
 
 /**

@@ -3,6 +3,8 @@ export { quoteAndPreviewLetterTextOnlyTool } from "./quoteAndPreviewLetterTextOn
 export { quoteAndPreviewLetterWithHeaderImageTool } from "./quoteAndPreviewLetterWithHeaderImage.js";
 export { quoteAndPreviewLetterWithImageTool } from "./quoteAndPreviewLetterWithImage.js";
 export { sendLetterTool } from "./sendLetter.js";
+export { createMailCheckoutTool } from "./createMailCheckout.js";
+export { getPurchaseStatusTool } from "./getPurchaseStatus.js";
 
 // Account and order management tools
 export { getOrderStatusTool } from "./getOrderStatus.js";
@@ -22,9 +24,7 @@ export { getStartedTool } from "./getStarted.js";
 
 // Image upload tool (US-POSTCARD-04: Widget-based upload)
 export { uploadImageTool } from "./uploadImage.js";
-
-// Image generation tool (AI-generated images via OpenAI)
-export { generateImageTool } from "./generateImage.js";
+export { generateImageForMailTool } from "./generateImageForMail.js";
 
 // Confirm uploaded image tool (widget relay for upload URL)
 export { confirmUploadedImageTool } from "./confirmUploadedImage.js";

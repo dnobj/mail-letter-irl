@@ -48,14 +48,6 @@ export interface CreditTransaction {
   created_at: Date;
 }
 
-export interface AddCreditsParams {
-  userId: string;
-  email: string;
-  credits: number;
-  orderId: string;
-  description?: string;
-}
-
 export interface DeductCreditsParams {
   userId: string;
   credits: number;
@@ -97,17 +89,51 @@ export interface TransactionHistoryResult {
 // Order Types
 // ============================================================================
 
-export type OrderStatus = 'pending' | 'completed' | 'failed' | 'refunded';
+export type CommerceOrderType = 'letter_pack' | 'jit_mail';
+
+export type OrderStatus =
+  | 'checkout_pending'
+  | 'paid'
+  | 'fulfillment_pending'
+  | 'fulfilled'
+  | 'payment_failed'
+  | 'refund_pending'
+  | 'refunded'
+  | 'disputed'
+  | 'held'
+  | 'cancelled';
 
 export interface Order {
   order_id: string;
   user_id: string;
-  credits: number;
+  order_type: CommerceOrderType;
+  draft_id?: string;
+  letter_id?: string;
+  product_code: string;
+  product_snapshot: Record<string, unknown>;
+  credits?: number;
   amount_cents: number;
+  amount_known?: boolean;
   currency: string;
+  payment_provider: string;
+  stripe_checkout_session_id?: string;
   stripe_payment_intent_id?: string;
+  stripe_refund_id?: string;
+  idempotency_key: string;
+  checkout_url?: string;
+  checkout_expires_at?: Date;
   status: OrderStatus;
+  paid_at?: Date;
+  fulfillment_started_at?: Date;
+  fulfilled_at?: Date;
+  payment_failed_at?: Date;
+  refund_pending_at?: Date;
+  refunded_at?: Date;
+  refund_attempts: number;
+  last_error_code?: string;
+  last_error?: string;
   created_at: Date;
+  updated_at: Date;
   completed_at?: Date;
 }
 
@@ -115,7 +141,8 @@ export interface Order {
 // Letter Types
 // ============================================================================
 
-export type LetterStatus = 'draft' | 'queued' | 'processing' | 'sent' | 'failed' | 'cancelled';
+export type LetterStatus = 'draft' | 'queued' | 'processing' | 'held' | 'sent' | 'accepted' |
+  'in_transit' | 'delivered' | 'returned' | 'failed' | 'cancelled';
 
 export interface Letter {
   letter_id: string;
@@ -125,6 +152,8 @@ export interface Letter {
   credits_cost: number;
   status: LetterStatus;
   mail_type: MailType;
+  funding_type: 'prepaid_balance' | 'jit_order';
+  funding_order_id?: string;
   preview_html?: string;
   tracking_id?: string;
   created_at: Date;
@@ -132,10 +161,30 @@ export interface Letter {
 }
 
 // ============================================================================
+// Image Entitlement Types
+// ============================================================================
+
+export type ImageEntitlementStatus = 'active' | 'depleted' | 'expired' | 'revoked';
+
+export interface ImageEntitlement {
+  entitlement_id: string;
+  user_id: string;
+  source_type: string;
+  source_reference_id: string;
+  source_order_id?: string;
+  quantity: number;
+  consumed_quantity: number;
+  status: ImageEntitlementStatus;
+  expires_at?: Date;
+  created_at: Date;
+  updated_at: Date;
+}
+
+// ============================================================================
 // Letter Job Types
 // ============================================================================
 
-export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+export type JobStatus = 'pending' | 'processing' | 'held' | 'completed' | 'failed' | 'cancelled';
 
 export interface LetterJob {
   job_id: string;
@@ -144,11 +193,23 @@ export interface LetterJob {
   attempts: number;
   max_attempts: number;
   scheduled_at: Date;
+  idempotency_key: string;
+  next_attempt_at: Date;
+  locked_at?: Date;
+  provider_order_id?: string;
+  provider_outcome: 'not_dispatched' | 'dispatching' | 'accepted' | 'definite_failure' | 'ambiguous';
+  provider_dispatch_started_at?: Date;
+  held_at?: Date;
+  hold_reason?: string;
+  operator_resolution?: string;
+  resolved_at?: Date;
+  last_error?: string;
   started_at?: Date;
   completed_at?: Date;
   error_message?: string;
   metadata?: any; // JSON
   created_at: Date;
+  updated_at: Date;
 }
 
 // ============================================================================
@@ -247,6 +308,11 @@ export interface AddCreditsToLedgerParams {
   credits: number;
   sourceType: CreditSourceType;
   sourceReferenceId?: string;
+  /**
+   * Authoritative commerce order that funded this grant. Setting it engages the
+   * database uniqueness guard that makes a replayed purchase grant impossible.
+   */
+  sourceOrderId?: string;
   sourceMetadata?: Record<string, unknown>;
   expirationPolicy?: ExpirationPolicy;
   expiresAt?: Date;           // For fixed_date policy
@@ -406,6 +472,7 @@ export type DraftStatus = 'pending' | 'consumed' | 'expired' | 'cancelled';
 export interface LetterDraft {
   draft_id: string;
   user_id: string;
+  mail_type?: MailType;
   sender: Record<string, unknown>;       // Address JSON
   recipient: Record<string, unknown>;    // Address JSON
   body_text: string;

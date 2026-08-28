@@ -83,6 +83,38 @@ describe('draftService', () => {
       );
     });
 
+    it('does not log draft, user, recipient, or address identifiers', async () => {
+      const mockDraft = testDrafts.pending();
+      vi.mocked(db.query).mockResolvedValueOnce({
+        rows: [{ draft_id: mockDraft.draft_id, expires_at: mockDraft.expires_at }],
+        rowCount: 1,
+        command: 'INSERT',
+        oid: 0,
+        fields: []
+      });
+      const diagnostic = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+      await createDraft({
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender,
+        recipient: testAddresses.validRecipient,
+        bodyText: testLetterContent.shortLetter.bodyText,
+        signOff: testLetterContent.shortLetter.signOff,
+        requiredCredits: 2
+      });
+
+      const output = diagnostic.mock.calls.flat().map(String).join('\n');
+      expect(output).toContain('"event":"draft.created"');
+      for (const value of [
+        mockDraft.draft_id,
+        testUsers.sarah.user_id,
+        testAddresses.validRecipient.name,
+        testAddresses.validRecipient.addressLine1
+      ]) {
+        expect(output).not.toContain(value);
+      }
+    });
+
     it('should create a draft with custom expiration', async () => {
       const mockDraft = createTestDraft(testUsers.sarah.user_id, {
         expiresInHours: 12,

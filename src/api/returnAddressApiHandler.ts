@@ -8,50 +8,14 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
 import {
   getReturnAddress,
   setReturnAddress,
   clearReturnAddress
 } from '../services/returnAddressService.js';
-
-// Create JWKS client for Auth0
-const JWKS = createRemoteJWKSet(
-  new URL(process.env.LETTER_IRL_OAUTH_JWKS_URI!)
-);
-
-interface AuthInfo {
-  userId: string;
-  email?: string;
-}
-
-/**
- * Authenticate request and extract user info from JWT
- */
-async function authenticateRequest(req: IncomingMessage): Promise<AuthInfo | null> {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const token = authHeader.substring(7);
-
-  try {
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer: process.env.LETTER_IRL_OAUTH_ISSUER,
-      audience: process.env.LETTER_IRL_OAUTH_AUDIENCE
-    });
-
-    return {
-      userId: payload.sub!,
-      email: payload.email as string | undefined
-    };
-  } catch (error) {
-    console.error('JWT validation failed:', error);
-    return null;
-  }
-}
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import { authenticateRestRequest, type RestAuthInfo as AuthInfo } from './middleware/restAuth.js';
 
 /**
  * Send JSON response
@@ -66,20 +30,18 @@ function sendJson(res: ServerResponse, statusCode: number, data: any) {
  * Parse request body as JSON
  */
 async function parseBody(req: IncomingMessage): Promise<any> {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk.toString();
-    });
-    req.on('end', () => {
-      try {
-        resolve(body ? JSON.parse(body) : {});
-      } catch (error) {
-        reject(new Error('Invalid JSON body'));
-      }
-    });
-    req.on('error', reject);
-  });
+  // Bounded. This previously accumulated without a cap, which on a public
+  // route is a memory-exhaustion denial of service (#157). readRequestBody
+  // also decodes once at the end, so a multi-byte character split across two
+  // chunks is no longer corrupted into replacement characters.
+  const body = await readRequestBody(req, { limitBytes: JSON_API_BODY_LIMIT_BYTES });
+  try {
+    return body ? JSON.parse(body) : {};
+  } catch {
+    // A RequestBodyTooLargeError from above propagates with its own 413 rather
+    // than being flattened into this parse error.
+    throw new Error('Invalid JSON body');
+  }
 }
 
 /**
@@ -97,14 +59,12 @@ export async function handleReturnAddressApiRequest(
   }
 
   // Authenticate request
-  const authInfo = await authenticateRequest(req);
-  if (!authInfo) {
-    sendJson(res, 401, {
-      error: 'Unauthorized',
-      message: 'Missing or invalid Authorization header'
-    });
+  const auth = await authenticateRestRequest(req);
+  if (!auth.ok) {
+    sendJson(res, 401, { error: 'Unauthorized', message: auth.message });
     return true;
   }
+  const authInfo = auth.user;
 
   const userId = authInfo.userId;
 
@@ -196,7 +156,9 @@ export async function handleReturnAddressApiRequest(
     return true;
 
   } catch (error) {
-    console.error('Return address API error:', error);
+    writeDiagnostic('error', 'address.api_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
     sendJson(res, 500, {
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error'

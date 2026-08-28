@@ -47,23 +47,29 @@ describe("Compatibility manifest", () => {
     expect(manifest.servers[0].url).toBe("https://api.letterirl.com/mcp");
     expect(manifest.servers[0].healthUrl).toBe("https://api.letterirl.com/healthz");
     expect(manifest.servers[0].auth.authorizationServer).toBe(
-      "https://api.letterirl.com/.well-known/oauth-authorization-server"
+      process.env.LETTER_IRL_OAUTH_ISSUER ??
+        "https://dev-njmdyqf8n25rqgy7.us.auth0.com/"
     );
   });
 
-  it("should advertise generate_image as a fallback when native image generation is unavailable", () => {
-    const generateImageTool = buildManifest().tools.find((tool) => tool.name === "generate_image");
-
-    expect(generateImageTool?.description).toContain("native ChatGPT image generation is unavailable");
-    expect(generateImageTool?.description).toContain("Use this even if the user has not yet asked to mail it");
+  it("does not advertise any server-side image GENERATOR", () => {
+    // generate_image (later generate_image_fallback) was REMOVED after the
+    // #227 investigation; the HYBRID generate_image_for_mail that replaced it
+    // (Addendum 3) generates only against the user's entitlements and is
+    // deliberately NOT in this pin. The pin guards against the old
+    // unconditional generator names returning via a bad merge or revert.
+    // Decision record: docs/learnings/generate-image-removal-decision.md
+    const toolNames = buildManifest().tools.map((tool) => tool.name);
+    expect(toolNames).not.toContain("generate_image_fallback");
+    expect(toolNames).not.toContain("generate_image");
   });
 
-  it("should keep generate_image inside the first 12 registered tools for ChatGPT exposure", () => {
-    const firstTwelveToolNames = new LetterIrlServer()
-      .listTools()
-      .slice(0, 12)
-      .map((tool) => tool.name);
-
-    expect(firstTwelveToolNames).toContain("generate_image");
+  it("advertises the hybrid image tool honestly", () => {
+    const tool = buildManifest().tools.find((t) => t.name === "generate_image_for_mail");
+    // Generates only against the user's Letter IRL credits; otherwise routes
+    // to built-in generation. Both halves must stay stated.
+    expect(tool?.description).toContain("Letter IRL image credits");
+    expect(tool?.description).toContain("built-in image generation");
+    expect(tool?.description).toContain("Never refuse an image request");
   });
 });

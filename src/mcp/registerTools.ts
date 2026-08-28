@@ -6,11 +6,14 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { LetterIrlServer } from "../server.js";
 import { toolInputSchemas } from "./toolSchemas.js";
+import { widgetTemplateUri } from "./widgetUris.js";
 import {
   quoteAndPreviewInputZ,
   quoteAndPreviewLetterWithHeaderImageInputZ,
   quoteAndPreviewLetterWithImageInputZ,
   sendLetterInputZ,
+  createMailCheckoutInputZ,
+  getPurchaseStatusInputZ,
   getOrderStatusInputZ,
   getAccountBalanceInputZ,
   listOrdersInputZ,
@@ -22,10 +25,12 @@ import {
   submitFeatureRequestInputZ,
   getStartedInputZ,
   uploadImageInputZ,
-  generateImageInputZ,
+  generateImageForMailInputZ,
   confirmUploadedImageInputZ,
   quoteAndPreviewOutputZ,
   sendLetterOutputZ,
+  createMailCheckoutOutputZ,
+  getPurchaseStatusOutputZ,
   getOrderStatusOutputZ,
   getAccountBalanceOutputZ,
   listOrdersOutputZ,
@@ -37,13 +42,23 @@ import {
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
   uploadImageOutputZ,
-  generateImageOutputZ,
+  generateImageForMailOutputZ,
   confirmUploadedImageOutputZ
 } from "../zodSchemas.js";
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
-import { getOrCreateUser } from "../services/userService.js";
 import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
 import { ToolMeta } from "../contracts/types.js";
+import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
+import { SESSION_SCOPES } from "../auth/oauthConfig.js";
+import { prepareAuthenticatedUser } from "../auth/identity.js";
+import {
+  classifyDiagnosticError,
+  writeDiagnostic
+} from "../utils/diagnosticLog.js";
+import {
+  buildInsufficientScopeToolResult,
+  InsufficientScopeError
+} from "../auth/oauthChallenge.js";
 
 /**
  * Build MCP tool annotations from tool definition.
@@ -73,6 +88,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'get_account_balance',
     'list_orders',
     'get_order_status',
+    'get_purchase_status',
     'get_return_address'
   ];
 
@@ -84,8 +100,9 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'quote_and_preview_postcard',
     'send_letter',
     'send_postcard',
+    'create_mail_checkout',
     'set_return_address',  // Validates address via PostGrid
-    'generate_image'       // Calls OpenAI Images API
+    'generate_image_for_mail' // Calls the OpenAI Images API when credits allow
   ];
 
   // Tools where repeated calls with same args have no additional effect
@@ -94,6 +111,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
   const idempotentTools = [
     'send_letter',           // Draft consumption makes retries safe
     'send_postcard',         // Draft consumption makes retries safe
+    'create_mail_checkout',  // Reuses the active checkout for a draft
     'set_return_address',    // Setting same address twice = no change
     'clear_return_address',  // Clearing twice = no additional effect
     'confirm_uploaded_image' // Repeating the same relay overwrites with the same value
@@ -123,19 +141,10 @@ export const WIDGET_DEFINITIONS = [
   { name: "LetterPreviewCard", description: "Shows letter preview with cost, delivery info, and status" },
   { name: "PostcardPreviewCard", description: "Shows postcard front/back preview with cost, delivery info, and status" },
   { name: "ImageUploadCard", description: "File picker widget for uploading photos to use in letters or postcards" },
-  { name: "GenerateImageCard", description: "Preview widget for AI-generated images with upload to use in letters or postcards" },
   { name: "GetStartedCard", description: "Getting-started guide for new users with setup steps and example prompts" },
+  { name: "ImageRoutingCard", description: "Shows a generated image with its credit line, or image-routing guidance with a copy-ready prompt" },
 ];
 
-/**
- * Widget domain for CSP isolation.
- * Per OpenAI examples, this should be https://chatgpt.com for widgets
- * running in the ChatGPT environment.
- * Required for app submission.
- *
- * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
- */
-const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? "https://api.letterirl.com";
 
 /**
  * Backend API URL for widget CSP.
@@ -143,8 +152,57 @@ const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? "https://api.lette
  *
  * @see US-MCP-07: Widget Resources
  */
-const WIDGET_API_URL = process.env.LETTER_IRL_API_URL ?? "https://api.letterirl.com";
+const WIDGET_API_URL =
+  process.env.LETTER_IRL_API_URL ??
+  process.env.LETTER_IRL_PUBLIC_BASE_URL ??
+  "https://api.letterirl.com";
 export const WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
+
+export function normalizeHttpsOrigin(
+  value: string,
+  fallback = "https://api.letterirl.com"
+): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") {
+      throw new Error("Widget API URL must use HTTPS");
+    }
+    return url.origin;
+  } catch {
+    return fallback;
+  }
+}
+
+const WIDGET_API_ORIGIN = normalizeHttpsOrigin(WIDGET_API_URL);
+
+/**
+ * Widget domain, published as `ui.domain` and `openai/widgetDomain`.
+ * Required for app submission.
+ *
+ * Defined below WIDGET_API_ORIGIN so it can default to the same origin the
+ * CSP lists. It used to hardcode api.letterirl.com, which made dev
+ * self-contradictory: the connector panel showed `domain:
+ * "https://api.letterirl.com"` beside CSP entries that were all the Railway
+ * dev host. An explicit LETTER_IRL_WIDGET_DOMAIN still overrides.
+ *
+ * The previous comment here claimed this "should be https://chatgpt.com per
+ * OpenAI examples". Not acted on: ChatGPT demonstrably accepts the current
+ * value - the connector panel renders our `ui` block, CSP and all - so
+ * changing a submission-relevant field on the strength of an old comment
+ * would be a guess with a regression attached (issue #228).
+ *
+ * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
+ */
+const WIDGET_DOMAIN = process.env.LETTER_IRL_WIDGET_DOMAIN ?? WIDGET_API_ORIGIN;
+const WIDGET_PACKS_ORIGIN = normalizeHttpsOrigin(
+  process.env.LETTER_IRL_PACKS_URL ??
+    process.env.LETTER_IRL_PUBLIC_BASE_URL ??
+    "https://letterirl.com",
+  "https://letterirl.com"
+);
+const WIDGET_REDIRECT_ORIGINS = Array.from(
+  new Set(["https://checkout.stripe.com", WIDGET_PACKS_ORIGIN])
+);
 
 /**
  * Content Security Policy for widgets.
@@ -155,11 +213,20 @@ export const WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
  * @see https://developers.openai.com/apps-sdk/build/chatgpt-ui/
  * @see US-MCP-07: Widget Resources
  */
-const WIDGET_CSP = {
-  connect_domains: ["https://chatgpt.com", WIDGET_API_URL],
-  resource_domains: ["https://*.oaistatic.com"],
+// *.oaiusercontent.com covers ChatGPT file-attachment download URLs
+// (getFileDownloadUrl / fileParams), which ImageUploadCard renders as the
+// preview for Library picks.
+export const WIDGET_CSP_CANONICAL = {
+  connectDomains: ["https://chatgpt.com", WIDGET_API_ORIGIN],
+  resourceDomains: ["https://*.oaistatic.com", "https://*.oaiusercontent.com", WIDGET_API_ORIGIN],
+  redirectDomains: WIDGET_REDIRECT_ORIGINS
+};
+
+export const WIDGET_CSP_LEGACY = {
+  connect_domains: ["https://chatgpt.com", WIDGET_API_ORIGIN],
+  resource_domains: ["https://*.oaistatic.com", "https://*.oaiusercontent.com", WIDGET_API_ORIGIN],
   // frame_domains not included - we don't use iframes
-  // redirect_domains not included - we don't use openExternal
+  redirect_domains: WIDGET_REDIRECT_ORIGINS
 };
 
 // Resolve widget directory relative to this module
@@ -167,14 +234,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_WIDGET_DIR = process.env.LETTER_IRL_WIDGET_DIR ?? path.resolve(__dirname, "../../widgets");
 
-function getOauthScopes(): string[] {
-  return (process.env.LETTER_IRL_OAUTH_SCOPES ?? "openid email profile")
-    .split(/[,\s]+/)
-    .map((scope) => scope.trim())
-    .filter(Boolean);
-}
-
-export function buildToolSecuritySchemes(requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false") {
+export function buildToolSecuritySchemes(
+  toolName: string,
+  requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false"
+) {
   if (!requireAuth) {
     return [{ type: "noauth" }];
   }
@@ -182,12 +245,34 @@ export function buildToolSecuritySchemes(requireAuth = process.env.LETTER_IRL_RE
   return [
     {
       type: "oauth2",
-      scopes: getOauthScopes()
+      // Two different questions, and they must not be conflated:
+      //
+      //   getRequiredToolScopes  - what this tool ENFORCES on every call
+      //   this list              - what the client ASKS THE USER TO GRANT
+      //
+      // ChatGPT builds its authorization request from the union of these
+      // per-tool lists, not from scopes_supported. That was the whole of the
+      // #160 refresh-token bug: offline_access was advertised in the
+      // protected-resource metadata, in openid-configuration, and in the 401
+      // challenge, and requested from none of them - because it appeared in no
+      // tool's securitySchemes. Every grant recorded exactly
+      // "mail:draft mail:read mail:send", the union of the enforced scopes.
+      //
+      // Session scopes go here and nowhere else. They must never reach
+      // getRequiredToolScopes: PAT callers authorize with no scopes at all, so
+      // a tool demanding one would deny them permanently
+      // (tests/unit/auth/sessionScopes.test.ts pins that).
+      //
+      // Applied to every tool deliberately. A typed @-mention scopes the turn's
+      // toolset, so a session scope carried by only some tools would be
+      // requested only sometimes.
+      scopes: [...getRequiredToolScopes(toolName), ...SESSION_SCOPES]
     }
   ];
 }
 
 export function buildToolMeta(
+  toolName: string,
   meta: ToolMeta,
   requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false"
 ): ToolMeta {
@@ -196,7 +281,7 @@ export function buildToolMeta(
   const existingUi = (meta.ui as Record<string, unknown> | undefined) ?? {};
 
   return {
-    securitySchemes: buildToolSecuritySchemes(requireAuth),
+    securitySchemes: buildToolSecuritySchemes(toolName, requireAuth),
     ...meta,
     ui: {
       ...existingUi,
@@ -211,12 +296,12 @@ export function buildWidgetResourceMeta(description: string) {
     ui: {
       description,
       domain: WIDGET_DOMAIN,
-      csp: WIDGET_CSP,
+      csp: WIDGET_CSP_CANONICAL,
       prefersBorder: true
     },
     "openai/widgetPrefersBorder": true,
     "openai/widgetDomain": WIDGET_DOMAIN,
-    "openai/widgetCSP": WIDGET_CSP,
+    "openai/widgetCSP": WIDGET_CSP_LEGACY,
     "openai/widgetDescription": description
   };
 }
@@ -233,7 +318,6 @@ export function buildWidgetResourceMeta(description: string) {
  */
 async function registerWidgetResources(mcpServer: McpServer) {
   for (const widget of WIDGET_DEFINITIONS) {
-    const uri = `ui://widgets/${widget.name}.html`;
     const filePath = path.join(DEFAULT_WIDGET_DIR, `${widget.name}.html`);
 
     // Check if widget file exists before registering
@@ -244,28 +328,43 @@ async function registerWidgetResources(mcpServer: McpServer) {
       continue;
     }
 
-    // Register widget resource with canonical ui.* metadata and
-    // legacy openai/* aliases for compatibility.
-    mcpServer.registerResource(
-      widget.name,
-      uri,
-      {},  // Empty options per docs
-      async () => {
-        console.log(`🎨 Widget resource requested: ${uri}`);
-        const html = await fs.readFile(filePath, "utf-8");
-        console.log(`🎨 Returning widget HTML (${html.length} bytes)`);
-        return {
-          contents: [{
-            uri,
-            mimeType: WIDGET_MIME_TYPE,
-            text: html,
-            _meta: buildWidgetResourceMeta(widget.description)
-          }]
-        };
-      }
-    );
+    // Register the versioned URI plus the legacy unversioned URI as a
+    // transition alias: native mobile clients hold cached tool lists whose
+    // outputTemplate still points at the unversioned form, and resources/read
+    // is an exact-string lookup - without the alias those clients would get
+    // ResourceNotFound (no widget at all) instead of a stale widget. Remove
+    // the alias once cached tool lists have aged out (issue #235).
+    const versionedUri = widgetTemplateUri(widget.name);
+    const legacyUri = `ui://widgets/${widget.name}.html`;
+    const registrations: Array<[string, string]> = [
+      [widget.name, versionedUri],
+      [`${widget.name}-legacy`, legacyUri]
+    ];
 
-    console.log(`📦 Registered widget resource: ${uri}`);
+    for (const [registrationName, uri] of registrations) {
+      // Register widget resource with canonical ui.* metadata and
+      // legacy openai/* aliases for compatibility.
+      mcpServer.registerResource(
+        registrationName,
+        uri,
+        {},  // Empty options per docs
+        async () => {
+          console.log(`🎨 Widget resource requested: ${uri}`);
+          const html = await fs.readFile(filePath, "utf-8");
+          console.log(`🎨 Returning widget HTML (${html.length} bytes)`);
+          return {
+            contents: [{
+              uri,
+              mimeType: WIDGET_MIME_TYPE,
+              text: html,
+              _meta: buildWidgetResourceMeta(widget.description)
+            }]
+          };
+        }
+      );
+
+      console.log(`📦 Registered widget resource: ${uri}`);
+    }
   }
 }
 
@@ -279,6 +378,8 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   quote_and_preview_letter_with_header_image: quoteAndPreviewLetterWithHeaderImageInputZ,
   quote_and_preview_letter_with_image: quoteAndPreviewLetterWithImageInputZ,
   send_letter: sendLetterInputZ,
+  create_mail_checkout: createMailCheckoutInputZ,
+  get_purchase_status: getPurchaseStatusInputZ,
   // Account and order management tools
   get_order_status: getOrderStatusInputZ,
   get_account_balance: getAccountBalanceInputZ,
@@ -294,8 +395,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_started: getStartedInputZ,
   // Image upload tool
   upload_image: uploadImageInputZ,
-  // Image generation tool
-  generate_image: generateImageInputZ,
+  generate_image_for_mail: generateImageForMailInputZ,
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageInputZ
 };
@@ -306,6 +406,8 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   quote_and_preview_letter_with_header_image: quoteAndPreviewOutputZ,
   quote_and_preview_letter_with_image: quoteAndPreviewOutputZ,
   send_letter: sendLetterOutputZ,
+  create_mail_checkout: createMailCheckoutOutputZ,
+  get_purchase_status: getPurchaseStatusOutputZ,
   // Account and order management tools
   get_order_status: getOrderStatusOutputZ,
   get_account_balance: getAccountBalanceOutputZ,
@@ -321,8 +423,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_started: getStartedOutputZ,
   // Image upload tool
   upload_image: uploadImageOutputZ,
-  // Image generation tool
-  generate_image: generateImageOutputZ,
+  generate_image_for_mail: generateImageForMailOutputZ,
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageOutputZ
 };
@@ -337,54 +438,87 @@ export function getZodOutputShape(name: string) {
   return schema?.shape;
 }
 
+type PartitionedToolResult = {
+  structuredContent: Record<string, unknown>;
+  _meta: Record<string, unknown>;
+};
+
+/** Keep widget-only previews out of model context while retaining chainable URLs. */
+export function partitionToolResult(
+  result: Record<string, unknown>,
+  meta: Record<string, unknown> = {}
+): PartitionedToolResult {
+  const {
+    previewHtml,
+    previewFrontHtml,
+    previewBackHtml,
+    inlineImageData,
+    headerImageData,
+    frontImageData,
+    generatedImagePreview,
+    headerImagePreview,
+    inlineImagePreview,
+    // get_started's card copy. Display-only: the model does not act on any of
+    // it, and when it could see it, it restated the whole card in prose
+    // directly beneath a card already showing it. Same reasoning as the
+    // preview HTML above - a widget needs it, the model does not.
+    title,
+    overview,
+    purchaseStep,
+    examplePrompts,
+    ...modelFacingData
+  } = result;
+
+  return {
+    structuredContent: modelFacingData,
+    _meta: {
+      ...meta,
+      ...(previewHtml !== undefined ? { previewHtml } : {}),
+      ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
+      ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
+      // The letter card's images. Small by construction - the builder
+      // compresses them to roughly 3KB for exactly this trip - so unlike the
+      // *ImageData fields above they are forwarded rather than dropped. They
+      // travel here rather than in structuredContent for the same reason as
+      // everything else in this list: a widget needs them, the model does not.
+      //
+      // Before this they were in neither channel. The output schema does not
+      // declare them, so ChatGPT dropped them when it filtered
+      // structuredContent against the published schema, and nothing put them
+      // in _meta - a letter with a header or inline image rendered its card
+      // without one, silently. (The filtering is client-side: at SDK 1.29.0
+      // the server validates the result and ships it unstripped. Issue #257.)
+      ...(title !== undefined ? { title } : {}),
+      ...(overview !== undefined ? { overview } : {}),
+      ...(purchaseStep !== undefined ? { purchaseStep } : {}),
+      ...(examplePrompts !== undefined ? { examplePrompts } : {}),
+      ...(headerImagePreview !== undefined ? { headerImagePreview } : {}),
+      ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {}),
+      ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
+      ...(modelFacingData.generatedImageUrl !== undefined
+        ? { generatedImageUrl: modelFacingData.generatedImageUrl }
+        : {})
+    }
+  };
+}
+
 export async function registerLetterTools(
   mcpServer: McpServer,
   appServer: LetterIrlServer,
   authInfo: AuthenticatedUser | null = null
 ) {
   const userId = authInfo?.userId ?? DEFAULT_USER_ID;
-  console.log(`Registering Letter IRL tools for user: ${userId}`);
+  writeDiagnostic("info", "mcp.tools_registering", {
+    authType: authInfo?.authType ?? "disabled"
+  });
 
-  // Auto-create user if they don't exist (with email from Auth0 userinfo endpoint)
   if (authInfo) {
-    let email = (authInfo.claims.email as string) || null;
-
-    // If email not in JWT claims, fetch it from Auth0 userinfo endpoint
-    if (!email) {
-      try {
-        const issuer = process.env.LETTER_IRL_OAUTH_ISSUER;
-        if (issuer) {
-          const userinfoUrl = `${issuer}userinfo`;
-          console.log(`🔍 Fetching user info from: ${userinfoUrl}`);
-
-          const response = await fetch(userinfoUrl, {
-            headers: {
-              'Authorization': `Bearer ${authInfo.token}`
-            }
-          });
-
-          if (response.ok) {
-            const userInfo = await response.json();
-            email = userInfo.email || userInfo.sub || 'unknown@example.com';
-            console.log(`✅ Retrieved email from userinfo: ${email}`);
-          } else {
-            console.warn(`⚠️  Failed to fetch userinfo: ${response.status} ${response.statusText}`);
-            email = 'unknown@example.com';
-          }
-        } else {
-          email = 'unknown@example.com';
-        }
-      } catch (error) {
-        console.error(`⚠️  Error fetching userinfo:`, error);
-        email = 'unknown@example.com';
-      }
-    }
-
     try {
-      await getOrCreateUser(userId, email ?? "unknown@example.com");
-      console.log(`✅ User ready: ${userId} (${email})`);
+      await prepareAuthenticatedUser(authInfo);
     } catch (error) {
-      console.error(`⚠️  Failed to create user ${userId}:`, error);
+      writeDiagnostic("error", "auth.user_preparation_failed", {
+        errorClass: classifyDiagnosticError(error, "database_error")
+      });
     }
   }
 
@@ -408,23 +542,29 @@ export async function registerLetterTools(
     mcpServer.registerTool(
       tool.name,
       {
-        title: tool.description,  // Use description as title
+        title: tool.title ?? tool.description,  // Short label when provided; description otherwise
         description: tool.description,
         inputSchema: inputShape,
         outputSchema: outputShape,
         annotations,
-        _meta: buildToolMeta(tool.meta)  // Contains auth metadata and OpenAI widget/runtime hints
+        _meta: buildToolMeta(tool.name, tool.meta)
       },
-      async (args, extra) => {
+      async (args: Record<string, unknown>, extra: any) => {
+        try {
+          authorizeTool(tool.name, authInfo);
+        } catch (error) {
+          if (error instanceof InsufficientScopeError) {
+            return buildInsufficientScopeToolResult(error);
+          }
+          throw error;
+        }
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
         const extraMeta = extra._meta as Record<string, unknown> | undefined;
         const userAgent = extractUserAgent(argsMeta, extraMeta);
         const isMobile = userAgent ? isMobileClient(userAgent) : undefined;
 
-        console.log(
-          `Tool request ${tool.name} payload: ${JSON.stringify(args)} for user: ${userId} (mobile: ${isMobile ?? 'unknown'})`
-        );
+        console.log(`Tool request ${tool.name} (mobile: ${isMobile ?? 'unknown'})`);
 
         const { result, meta } = await appServer.execute({
           toolName: tool.name,
@@ -442,50 +582,24 @@ export async function registerLetterTools(
         //
         // US-MCP-07: Separate heavy data (previewHtml) into _meta to reduce model context bloat.
         // The model doesn't need raw HTML; it gets the summaryText narration instead.
-        const resultObj = result as Record<string, unknown>;
-        // Extract heavy data that the model doesn't need - only the widget uses it
-        // Letters have previewHtml, postcards have previewFrontHtml/previewBackHtml
-        // Image data (base64) should ONLY go to the widget, not to the model
-        // This prevents 60K+ token responses from confusing ChatGPT
-        const {
-          previewHtml,
-          previewFrontHtml,
-          previewBackHtml,
-          inlineImageData,        // Letter inline image (base64) - widget doesn't need
-          headerImageData,        // Letter header image (base64) - widget doesn't need
-          frontImageData,         // Postcard front image (base64) - widget doesn't need
-          generatedImagePreview,  // Tiny preview (~15KB) for GenerateImageCard widget
-          generatedImageUrl,      // Temp URL for full image download
-          ...modelFacingData
-        } = resultObj;
+        const { structuredContent, _meta } = partitionToolResult(
+          result as Record<string, unknown>,
+          meta
+        );
 
         const response = {
-          structuredContent: modelFacingData,  // Lean data for model (no HTML)
+          structuredContent,
           content: [
             {
               type: "text" as const,
               text: summaryText
             }
           ],
-          _meta: {
-            ...meta,
-            // Heavy data for widget only (→ window.openai.toolResponseMetadata)
-            // Widget reads this via window.openai.toolResponseMetadata.previewHtml
-            ...(previewHtml !== undefined ? { previewHtml } : {}),
-            // Postcard-specific preview fields
-            ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
-            ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
-            // GenerateImageCard widget data (via _meta since structuredContent/state can be null)
-            ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
-            ...(generatedImageUrl !== undefined ? { generatedImageUrl } : {})
-          }
+          _meta
         };
 
         console.log(`📤 Tool response ${tool.name}:`);
-        console.log(`   structuredContent: ${JSON.stringify(modelFacingData)}`);
-        if (previewHtml) {
-          console.log(`   _meta.previewHtml: [${(previewHtml as string).length} bytes]`);
-        }
+        console.log(`   structuredContent keys: ${Object.keys(structuredContent).join(", ")}`);
 
         return response;
       }
@@ -494,7 +608,7 @@ export async function registerLetterTools(
 
 }
 
-function summarizeToolResult(
+export function summarizeToolResult(
   toolName: string,
   result: Record<string, unknown>
 ): string {
@@ -519,6 +633,10 @@ function summarizeToolResult(
       }
       if (usedSaved) {
         summary += " Using your saved return address.";
+      }
+      const warnings = result.addressWarnings as string[] | undefined;
+      if (warnings?.length) {
+        summary += ` Note: ${warnings.join(' ')}`;
       }
       return summary;
     }
@@ -561,6 +679,10 @@ function summarizeToolResult(
       if (usedSaved) {
         summary += " Using your saved return address.";
       }
+      const warnings = result.addressWarnings as string[] | undefined;
+      if (warnings?.length) {
+        summary += ` Note: ${warnings.join(' ')}`;
+      }
       return summary;
     }
     case "send_postcard": {
@@ -578,16 +700,32 @@ function summarizeToolResult(
       return message || "Feature request submitted.";
     }
     case "get_started": {
-      const overview = result.overview as string | undefined;
-      return overview || "Letter IRL getting-started guide ready.";
+      // The summary used to be the card's own `overview` sentence, so the
+      // model received the card's copy as its account of what happened and
+      // dutifully restated it - overview, purchase step, and all three example
+      // prompts, immediately below a card already showing them. Same fix as
+      // the image routing card: the card is the single voice, and the model
+      // adds at most one sentence.
+      return (
+        "The getting-started card is displayed above and already shows the overview, " +
+        "the pre-pay step, and example prompts. Add at most ONE short sentence of your " +
+        "own, or nothing at all. Never restate the card's contents or re-list the examples."
+      );
     }
     case "upload_image": {
       const message = result.message as string;
       return message || "Photo picker ready. Waiting for user to select a photo.";
     }
-    case "generate_image": {
-      const message = result.message as string;
-      return message || "Image generated. Use the imageUrl with a preview tool.";
+    case "generate_image_for_mail": {
+      // Generated mode narrates the credit-spend message (which embeds the
+      // IMPORTANT chain-to-preview directive); redirect mode rides
+      // suggestedNextStep - the strongest steering channel either way.
+      if (result.mode === "generated") {
+        const message = result.message as string;
+        return message || "Image generated. Use the imageUrl with a preview tool.";
+      }
+      const suggestedNextStep = result.suggestedNextStep as string;
+      return suggestedNextStep || "Guide the user to resend the prompt without mentioning Letter IRL.";
     }
     case "confirm_uploaded_image": {
       const suggestedNextStep = result.suggestedNextStep as string;

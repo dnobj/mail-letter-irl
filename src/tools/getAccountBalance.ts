@@ -17,8 +17,6 @@ interface GetAccountBalanceOutput {
   lettersRemaining: number;
   canSendStandardLetter: boolean;
   message?: string;
-  userEmail?: string;
-  authProvider?: string;
   lettersExpiringSoon?: number;
   expiringLettersDetails?: ExpiringLettersInfo[];
   imageGenerationsRemaining?: number;
@@ -135,8 +133,6 @@ async function handler(
       lettersRemaining,
       lettersExpiringSoon,
       canSendStandardLetter,
-      userId,
-      email,
       authProvider
     },
     "Retrieved account balance from database"
@@ -146,8 +142,6 @@ async function handler(
     lettersRemaining,
     canSendStandardLetter,
     message,
-    userEmail: email,
-    authProvider,
     lettersExpiringSoon: lettersExpiringSoon > 0 ? lettersExpiringSoon : undefined,
     expiringLettersDetails: expiringLettersDetails.length > 0 ? expiringLettersDetails : undefined,
     imageGenerationsRemaining,

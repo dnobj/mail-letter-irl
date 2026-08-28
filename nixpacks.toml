@@ -1,15 +1,13 @@
-# Railway/Nixpacks Configuration
-# Skip TypeScript compilation since we use tsx at runtime
+# Railway/Nixpacks configuration for compiled production JavaScript.
 
 [phases.setup]
-nixPkgs = ["nodejs_20"]
+nixPkgs = ["nodejs_22"]
 
 [phases.install]
 cmds = ["npm ci"]
 
-# Skip build phase - tsx runs TypeScript directly
 [phases.build]
-cmds = []
+cmds = ["npm run build"]
 
 [start]
 cmd = "npm start"

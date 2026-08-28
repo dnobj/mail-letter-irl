@@ -1,0 +1,946 @@
+import { randomUUID } from 'node:crypto';
+import { copyFile, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import pg from 'pg';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { migrate } from '../../src/cli/migrate.js';
+import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/disposableDatabase.js';
+
+/**
+ * Issue #152 - purchase idempotency at the DATABASE boundary.
+ *
+ * Five layers stand between a replayed Stripe event and a second credit grant:
+ *
+ *   1. claimStripeEvent  INSERT ... ON CONFLICT (event_id) DO NOTHING
+ *   2. findCheckoutOrder SELECT ... FOR UPDATE on the order row
+ *   3. transitionPaidCheckout early-returns for FUNDED_OR_REVERSED statuses
+ *   4. migration 023's partial unique index on credit_ledger(source_order_id)
+ *   5. migration 027's BEFORE INSERT trigger, which keeps new purchase rows
+ *      inside layer 4's reach
+ *
+ * Real PostgreSQL is mandatory and a mocked client would be actively
+ * misleading: four of those five ARE database behaviour - conflict resolution,
+ * row locking, a partial index, a trigger - and a mock would report every one
+ * of them working while none of them existed.
+ *
+ * ON ASSERTING THE SETTLED RESULTS. Several tests below drive two concurrent
+ * deliveries and pass the settled results to expectAllFulfilled. That is not
+ * ceremony. The first revision of this suite awaited Promise.allSettled and
+ * discarded what it returned, and the consequence was that removing the
+ * FOR UPDATE at commerceService.ts:957/:961 left ALL twelve tests green: the
+ * loser read the order unlocked, evaluated the status guard against its own
+ * stale in-memory row, proceeded, and died on a 23505 that nothing observed.
+ * The row counts were identical either way. Binding the results is what makes
+ * layers 2 and 3 individually mutation-sensitive.
+ *
+ * ON users.credits. addCreditsToLedgerWithClient increments users.credits
+ * BEFORE it inserts the ledger row, so a suite that only counts ledger rows
+ * cannot see a double grant that lands in the cached balance. Appending
+ * `ON CONFLICT DO NOTHING` to the ledger INSERT - the natural way to make the
+ * 23505 below "go away" - left six tests green while a replay credited a
+ * customer 8 credits for a 4-credit pack. Every grant assertion here checks the
+ * ledger, the cached balance, AND the credit_transactions row, because
+ * criterion 1 says one grant and one purchase transaction.
+ *
+ * ORDERING CONSTRAINT: process.env.DATABASE_URL must be assigned before the
+ * first import of src/db/index.js, which builds its Pool at module scope. The
+ * static `migrate` import above is safe because src/cli/migrate.ts uses its own
+ * pg.Pool. Adding any static import here that transitively reaches
+ * src/db/index.js would silently bind the service pool to tests/setup.ts's
+ * fallback URL, whose public schema has no tables, and every commerce call
+ * would fail 42P01 - which this repo's diagnostics collapse to database_error.
+ */
+
+const { Pool } = pg;
+const enabled = process.env.LIRL_RUN_POSTGRES_INTEGRATION === 'true';
+const describePostgres = enabled ? describe : describe.skip;
+
+function schemaName(prefix: string): string {
+  return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+}
+
+function databaseUrlForSchema(baseUrl: string, schema: string): string {
+  const parsed = new URL(baseUrl);
+  parsed.searchParams.set('options', `-c search_path=${schema},public`);
+  return parsed.toString();
+}
+
+/**
+ * Run every cleanup step even if an earlier one rejects. Block 2 previously
+ * awaited pool.end() first, and pg rejects that if a client errors while
+ * draining - which skipped both the temp-directory removal and the DROP SCHEMA
+ * below it, leaking a 26-table schema per aborted run.
+ */
+async function settleAll(steps: Array<() => Promise<unknown>>): Promise<void> {
+  for (const step of steps) {
+    try {
+      await step();
+    } catch {
+      // Deliberately swallowed: one failed teardown must not skip the rest.
+    }
+  }
+}
+
+/**
+ * Assert every concurrent delivery resolved, and say WHY if one did not.
+ *
+ * `expect(results.map(r => r.status)).toEqual([...])` reports only
+ * 'rejected' vs 'fulfilled', which turns a real defect into a guessing game -
+ * the first CI run of the independent-purchases case below failed exactly that
+ * way and carried no reason with it. Mapping the rejections to their messages
+ * puts the driver error in the assertion output.
+ */
+/** Rejected settlements as `SQLSTATE: message`, for legible assertion output. */
+function rejectionSummaries(results: PromiseSettledResult<unknown>[]): string[] {
+  return results
+    .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+    .map(r => {
+      const reason = r.reason as { code?: string; message?: string } | undefined;
+      // SQLSTATE first: server messages are translated under a non-English
+      // lc_messages, so asserting on text pins the runner's locale rather than
+      // the database's behaviour.
+      return `${reason?.code ?? 'no-code'}: ${reason?.message ?? String(r.reason)}`;
+    });
+}
+
+/**
+ * Assert every concurrent delivery resolved, and say WHY if one did not.
+ *
+ * Asserting only `r.status` reports 'rejected' with no reason, which turns a
+ * real defect into a guessing game - the first CI run of the independent
+ * purchases case failed exactly that way.
+ */
+function expectAllFulfilled(results: PromiseSettledResult<unknown>[], expected: number): void {
+  const failures = rejectionSummaries(results);
+  expect(failures).toEqual([]);
+  // The count is passed in rather than read back off `results`, which would be
+  // a tautology: it guards against a future edit dropping a delivery from the
+  // array and leaving a "concurrency" test driving one call.
+  expect(results).toHaveLength(expected);
+}
+
+const PACK_CREDITS = 4;
+const PACK_AMOUNT_CENTS = 500;
+
+describePostgres('purchase idempotency at the database boundary (#152)', () => {
+  let adminPool: pg.Pool;
+  let pool: pg.Pool;
+  let schema: string;
+  let commerce: typeof import('../../src/services/commerceService.js');
+  let closeServicePool: (() => Promise<void>) | undefined;
+
+  beforeAll(async () => {
+    const baseUrl = validateDisposableDatabaseUrl(process.env.LIRL_TEST_DATABASE_URL);
+    adminPool = new Pool({ connectionString: baseUrl });
+    schema = schemaName('lirl_idem');
+    await adminPool.query(`CREATE SCHEMA ${schema}`);
+    const scoped = databaseUrlForSchema(baseUrl, schema);
+    await migrate({ connectionString: scoped, migrationsDirectory: repositoryMigrations });
+    pool = new Pool({ connectionString: scoped, max: 8 });
+
+    process.env.DATABASE_URL = scoped;
+    commerce = await import('../../src/services/commerceService.js');
+    closeServicePool = (await import('../../src/db/index.js')).closePool;
+  }, 180_000);
+
+  afterAll(async () => {
+    await settleAll([
+      async () => closeServicePool?.(),
+      async () => pool?.end(),
+      async () => adminPool?.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`),
+      async () => adminPool?.end()
+    ]);
+  });
+
+  beforeEach(async () => {
+    // commerce_operator_audit_events and redacted_content_quarantine have no
+    // foreign key to anything here, so CASCADE can never reach them. Neither is
+    // written by a path this suite exercises today, and the audit table also
+    // carries an append-only trigger that rejects DELETE - so the day one of
+    // them IS written, only naming it here would clear it. The retention work
+    // shipped exactly this bug.
+    await pool.query(
+      `TRUNCATE commerce_operational_alerts, commerce_operator_audit_events,
+                redacted_content_quarantine, stripe_webhook_events,
+                commerce_order_events, credit_consumption, credit_transactions,
+                credit_ledger, image_entitlements, orders, users
+       RESTART IDENTITY CASCADE`
+    );
+  });
+
+  /** A user plus a pack order parked at checkout_pending, ready to be paid. */
+  async function seedPendingPackOrder(options: { userId?: string } = {}): Promise<{
+    userId: string; orderId: string; sessionId: string;
+  }> {
+    const suffix = randomUUID().replace(/-/g, '').slice(0, 12);
+    const userId = options.userId ?? `user_${suffix}`;
+    const orderId = `order_${suffix}`;
+    const sessionId = `cs_${suffix}`;
+    if (!options.userId) {
+      await pool.query(`INSERT INTO users (user_id, email, credits) VALUES ($1, $2, 0)`, [
+        userId,
+        `${userId}@test.invalid`
+      ]);
+    }
+    await pool.query(
+      `INSERT INTO orders (
+         order_id, user_id, order_type, product_code, product_snapshot, credits,
+         amount_cents, currency, stripe_checkout_session_id, idempotency_key, status
+       ) VALUES ($1, $2, 'letter_pack', 'credit-pack-4', '{}'::jsonb, $3,
+                 $4, 'usd', $5, $6, 'checkout_pending')`,
+      [orderId, userId, PACK_CREDITS, PACK_AMOUNT_CENTS, sessionId, `pack-checkout:${suffix}`]
+    );
+    return { userId, orderId, sessionId };
+  }
+
+  function paidEvent(options: {
+    eventId: string;
+    sessionId: string;
+    amountCents?: number;
+    currency?: string;
+    type?: string;
+  }): unknown {
+    return {
+      id: options.eventId,
+      type: options.type ?? 'checkout.session.completed',
+      data: {
+        object: {
+          id: options.sessionId,
+          client_reference_id: null,
+          metadata: {},
+          payment_intent: `pi_${options.sessionId}`,
+          payment_status: 'paid',
+          amount_total: options.amountCents ?? PACK_AMOUNT_CENTS,
+          currency: options.currency ?? 'usd',
+          expires_at: Math.floor(Date.now() / 1000) + 3600
+        }
+      }
+    };
+  }
+
+  async function scalar(sql: string, params: unknown[]): Promise<number> {
+    const { rows } = await pool.query<{ value: string }>(sql, params);
+    return Number(rows[0].value);
+  }
+
+  const purchaseLedgerRows = (orderId: string) =>
+    scalar(
+      `SELECT COUNT(*)::text AS value FROM credit_ledger
+       WHERE source_order_id = $1 AND source_type = 'purchase'`,
+      [orderId]
+    );
+
+  const purchaseTransactionRows = (orderId: string) =>
+    scalar(
+      `SELECT COUNT(*)::text AS value FROM credit_transactions
+       WHERE reference_id = $1 AND type = 'purchase'`,
+      [orderId]
+    );
+
+  const totalCreditsRemaining = (userId: string) =>
+    scalar(
+      `SELECT COALESCE(SUM(remaining_amount), 0)::text AS value
+       FROM credit_ledger WHERE user_id = $1`,
+      [userId]
+    );
+
+  const cachedUserCredits = (userId: string) =>
+    scalar(`SELECT credits::text AS value FROM users WHERE user_id = $1`, [userId]);
+
+  const claimedEvents = (eventId: string) =>
+    scalar(`SELECT COUNT(*)::text AS value FROM stripe_webhook_events WHERE event_id = $1`, [
+      eventId
+    ]);
+
+  /** Column names here are literals at every call site; never caller input. */
+  async function orderColumn<T>(orderId: string, column: string): Promise<T> {
+    const { rows } = await pool.query(`SELECT ${column} AS value FROM orders WHERE order_id = $1`, [
+      orderId
+    ]);
+    return rows[0].value as T;
+  }
+
+  const orderStatus = (orderId: string) => orderColumn<string>(orderId, 'status');
+
+  /**
+   * Every place a single successful pack grant must show up. Asserting only
+   * credit_ledger is what let the users.credits path go unchecked.
+   */
+  async function expectExactlyOneGrant(userId: string, orderId: string): Promise<void> {
+    expect(await purchaseLedgerRows(orderId)).toBe(1);
+    expect(await purchaseTransactionRows(orderId)).toBe(1);
+    expect(await totalCreditsRemaining(userId)).toBe(PACK_CREDITS);
+    expect(await cachedUserCredits(userId)).toBe(PACK_CREDITS);
+  }
+
+  function insertLedgerRow(
+    userId: string,
+    orderId: string | null,
+    sourceType: string
+  ): Promise<pg.QueryResult> {
+    return pool.query(
+      `INSERT INTO credit_ledger (
+         ledger_id, user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, source_order_id, expires_at
+       ) VALUES (gen_random_uuid(), $1, $2, $2, $3::credit_source_type,
+                 COALESCE($4, 'legacy-ref'), $4, NOW() + INTERVAL '365 days')`,
+      [userId, PACK_CREDITS, sourceType, orderId]
+    );
+  }
+
+  /**
+   * orders carries a BEFORE UPDATE trigger that rewrites updated_at to NOW(),
+   * so ageing a row means suspending it. That the column cannot be back-dated
+   * by an ordinary UPDATE is a property worth having - it is what makes the
+   * stuck-order clock trustworthy - but a test cannot simulate elapsed time
+   * without saying so.
+   *
+   * All statements run on ONE client inside a transaction, so an abrupt process
+   * death rolls the DISABLE back instead of leaving the trigger off in a schema
+   * whose afterAll never ran.
+   */
+  async function ageOrdersPastStuckThreshold(orderIds: string[]): Promise<void> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('ALTER TABLE orders DISABLE TRIGGER update_orders_updated_at');
+      await client.query(
+        `UPDATE orders SET updated_at = NOW() - INTERVAL '90 minutes' WHERE order_id = ANY($1)`,
+        [orderIds]
+      );
+      await client.query('ALTER TABLE orders ENABLE TRIGGER update_orders_updated_at');
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  it('grants exactly once for a single delivery, as the baseline', async () => {
+    const { userId, orderId, sessionId } = await seedPendingPackOrder();
+
+    await expect(
+      commerce.processStripeWebhookEvent(
+        paidEvent({ eventId: `evt_${sessionId}`, sessionId }) as never
+      )
+    ).resolves.toEqual({ duplicate: false, orderId, status: 'fulfilled' });
+
+    await expectExactlyOneGrant(userId, orderId);
+    expect(await orderStatus(orderId)).toBe('fulfilled');
+  });
+
+  it('treats a replay of the SAME event id as a duplicate and grants nothing further', async () => {
+    const { userId, orderId, sessionId } = await seedPendingPackOrder();
+    const event = paidEvent({ eventId: `evt_${sessionId}`, sessionId });
+
+    await expect(commerce.processStripeWebhookEvent(event as never)).resolves.toEqual({
+      duplicate: false,
+      orderId,
+      status: 'fulfilled'
+    });
+    // Stripe redelivers on any non-2xx, and on its own retry schedule for days.
+    //
+    // NOTE for acceptance criterion 2 ("return the existing completed result on
+    // replay"): the duplicate branch returns ONLY { duplicate: true } - no
+    // orderId, no status. This assertion is exact so the gap is recorded rather
+    // than glossed. If the branch is ever changed to look up and return the
+    // bound order, this test reddens and should be updated.
+    await expect(commerce.processStripeWebhookEvent(event as never)).resolves.toEqual({
+      duplicate: true
+    });
+
+    await expectExactlyOneGrant(userId, orderId);
+  });
+
+  it('grants once when TWO DIFFERENT event ids arrive for the same session', async () => {
+    // Sequential, so the row lock is never contended: this pins layer 3, the
+    // funded-status early return, and nothing else.
+    const { userId, orderId, sessionId } = await seedPendingPackOrder();
+
+    await commerce.processStripeWebhookEvent(
+      paidEvent({ eventId: `evt_a_${sessionId}`, sessionId }) as never
+    );
+    await commerce.processStripeWebhookEvent(
+      paidEvent({
+        eventId: `evt_b_${sessionId}`,
+        sessionId,
+        type: 'checkout.session.async_payment_succeeded'
+      }) as never
+    );
+
+    await expectExactlyOneGrant(userId, orderId);
+  });
+
+  it('grants once under CONCURRENT delivery of the same event id', async () => {
+    const { userId, orderId, sessionId } = await seedPendingPackOrder();
+    const event = paidEvent({ eventId: `evt_${sessionId}`, sessionId });
+
+    // Genuinely simultaneous: transaction() takes a separate connection per
+    // call, so these are two concurrent PostgreSQL sessions, not one.
+    const results = await Promise.allSettled([
+      commerce.processStripeWebhookEvent(event as never),
+      commerce.processStripeWebhookEvent(event as never)
+    ]);
+
+    expectAllFulfilled(results, 2);
+    // Exactly one caller must be told it lost. Without this the test cannot
+    // tell layer 1 doing its job from layer 3 quietly covering for it, and it
+    // stays green when claimStripeEvent is stubbed to `return true`.
+    const duplicates = results
+      .filter((r): r is PromiseFulfilledResult<{ duplicate: boolean }> => r.status === 'fulfilled')
+      .filter(r => r.value.duplicate === true);
+    expect(duplicates).toHaveLength(1);
+
+    await expectExactlyOneGrant(userId, orderId);
+  });
+
+  it('grants once under CONCURRENT delivery of two different event ids', async () => {
+    // The worst case the issue names: two deliveries racing with nothing in
+    // common but the order they both want to fund. Layer 1 cannot help - both
+    // events claim successfully - so layers 2 and 3 are load-bearing here, and
+    // asserting that NEITHER call rejected is what detects their removal.
+    // Deleting the FOR UPDATE, or deleting 'fulfilled' from
+    // FUNDED_OR_REVERSED_ORDER_STATUSES, each turn one 'fulfilled' into
+    // 'rejected' via an unhandled 23505.
+    const { userId, orderId, sessionId } = await seedPendingPackOrder();
+
+    const results = await Promise.allSettled([
+      commerce.processStripeWebhookEvent(
+        paidEvent({ eventId: `evt_a_${sessionId}`, sessionId }) as never
+      ),
+      commerce.processStripeWebhookEvent(
+        paidEvent({
+          eventId: `evt_b_${sessionId}`,
+          sessionId,
+          type: 'checkout.session.async_payment_succeeded'
+        }) as never
+      )
+    ]);
+
+    expectAllFulfilled(results, 2);
+    await expectExactlyOneGrant(userId, orderId);
+  });
+
+  it('DEADLOCKS on two concurrent purchases by one user, without losing money (#288)', async () => {
+    // Acceptance criterion 3 is "different legitimate purchases remain
+    // independent". They do not, and this test found it on its first run.
+    //
+    // The two deliveries contend on ONE users row: both call
+    // `INSERT INTO users ... ON CONFLICT (user_id) DO UPDATE` to add credits,
+    // and ON CONFLICT DO UPDATE takes a stronger tuple lock than a plain
+    // UPDATE. The exact acquisition order that closes the cycle is NOT yet
+    // diagnosed - an earlier revision of this comment asserted that
+    // findCheckoutOrder's `SELECT ... FOR UPDATE` takes an implicit FOR KEY
+    // SHARE on the parent users row, which is wrong: a FOR UPDATE with no OF
+    // list locks only rows of tables in its own FROM list, and the referential
+    // triggers that do take FOR KEY SHARE fire on INSERT or on UPDATE OF
+    // user_id, neither of which happens here.
+    //
+    // The wrong mechanism is worse than none, because the fix gets designed
+    // from it. #288 carries the correction and the open question.
+    //
+    // This asserts TODAY'S behaviour deliberately, so #288 has a live detector:
+    // when the locking discipline is fixed, this test reddens and must be
+    // rewritten to expect two successes. Pinning it green with allSettled and
+    // no assertion on the outcomes is what hid it in the first place.
+    //
+    // The severity is availability, not correctness, and the assertions below
+    // are what establish that: the victim rolls back whole, the survivor grants
+    // exactly once, and the customer's balance reflects one pack rather than
+    // two or none. Stripe retries the victim, and the retry succeeds.
+    const first = await seedPendingPackOrder();
+    const second = await seedPendingPackOrder({ userId: first.userId });
+
+    const results = await Promise.allSettled([
+      commerce.processStripeWebhookEvent(
+        paidEvent({ eventId: `evt_${first.sessionId}`, sessionId: first.sessionId }) as never
+      ),
+      commerce.processStripeWebhookEvent(
+        paidEvent({ eventId: `evt_${second.sessionId}`, sessionId: second.sessionId }) as never
+      )
+    ]);
+
+    const failures = results
+      .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+      .map(r => (r.reason as { code?: string } | undefined)?.code ?? 'no-code');
+
+    // BOTH outcomes are accepted, and this is not hedging.
+    //
+    // #288's cycle is undiagnosed. Tracing the lock order gives a chain, not a
+    // cycle: both deliveries take distinct orders rows, then the one shared
+    // users row via INSERT ... ON CONFLICT DO UPDATE. Nothing establishes that
+    // an interleaving which serialises cleanly is impossible - so pinning
+    // exactly one 40P01 would be pinning a race, and the day it serialised the
+    // suite would redden with no code change and no defect.
+    //
+    // What IS invariant is the money, and that is asserted below in whichever
+    // world we landed in. A third outcome - some other error, or two failures -
+    // fails here, which is the regression this needs to catch.
+    expect([[], ['40P01']]).toContainEqual(failures);
+    const deadlocked = failures.length === 1;
+    if (!deadlocked) {
+      // #288 has been fixed, or this runner serialised. Either way the pair
+      // must have granted independently, which is what criterion 3 asks for.
+      expect(await purchaseLedgerRows(first.orderId)).toBe(1);
+      expect(await purchaseLedgerRows(second.orderId)).toBe(1);
+      expect(await cachedUserCredits(first.userId)).toBe(PACK_CREDITS * 2);
+      return;
+    }
+
+    // Exactly one order funded, and the balance matches it. No partial grant
+    // survived the victim's rollback, and nothing was granted twice. Which of
+    // the two won is up to PostgreSQL, so the assertion is on the sum.
+    const ledgerRows =
+      (await purchaseLedgerRows(first.orderId)) + (await purchaseLedgerRows(second.orderId));
+    expect(ledgerRows).toBe(1);
+    const transactionRows =
+      (await purchaseTransactionRows(first.orderId)) +
+      (await purchaseTransactionRows(second.orderId));
+    expect(transactionRows).toBe(1);
+    expect(await cachedUserCredits(first.userId)).toBe(PACK_CREDITS);
+    expect(await totalCreditsRemaining(first.userId)).toBe(PACK_CREDITS);
+  });
+
+  it('rolls back the cached balance too when the grant transaction fails', async () => {
+    // The mandate names rollback, and it is load-bearing for one specific
+    // reason: addCreditsToLedgerWithClient increments users.credits BEFORE it
+    // inserts the ledger row. A partial commit would leave a customer holding
+    // credits with no ledger entry behind them - money invented by a crash.
+    //
+    // A PRIOR successful purchase is seeded first, and the rejection REASON is
+    // asserted. Without both, this test was vacuous: every post-condition was
+    // also its pre-state, so `throw new Error('boom')` as the first line of the
+    // transaction callback - a failure that never touches the database at all -
+    // satisfied all six assertions and the rollback was never exercised.
+    const funded = await seedPendingPackOrder();
+    await commerce.processStripeWebhookEvent(
+      paidEvent({ eventId: `evt_${funded.sessionId}`, sessionId: funded.sessionId }) as never
+    );
+    expect(await cachedUserCredits(funded.userId)).toBe(PACK_CREDITS);
+
+    const doomed = await seedPendingPackOrder({ userId: funded.userId });
+
+    // Fault injection at the last write of the grant, so the rollback has the
+    // most to undo: users.credits and the ledger row are both already written.
+    let results: PromiseSettledResult<unknown>[];
+    try {
+      // Inside the try: if this rejects client-side after the server applied it
+      // - a socket drop, a timeout - the trigger would otherwise survive into
+      // every later test in this block, and no TRUNCATE can clear a trigger.
+      await pool.query(`
+        CREATE OR REPLACE FUNCTION lirl_fail_grant() RETURNS TRIGGER AS $$
+        BEGIN RAISE EXCEPTION 'injected failure'; END;
+        $$ LANGUAGE plpgsql;
+        DROP TRIGGER IF EXISTS lirl_fail_grant ON credit_transactions;
+        CREATE TRIGGER lirl_fail_grant BEFORE INSERT ON credit_transactions
+          FOR EACH ROW EXECUTE FUNCTION lirl_fail_grant();
+      `);
+      results = await Promise.allSettled([
+        commerce.processStripeWebhookEvent(
+          paidEvent({ eventId: `evt_${doomed.sessionId}`, sessionId: doomed.sessionId }) as never
+        )
+      ]);
+    } finally {
+      await pool.query(`
+        DROP TRIGGER IF EXISTS lirl_fail_grant ON credit_transactions;
+        DROP FUNCTION IF EXISTS lirl_fail_grant();
+      `);
+    }
+
+    // P0001 is a bare RAISE EXCEPTION - proof the injected trigger is what
+    // failed, not something incidental on the way to it.
+    expect(rejectionSummaries(results)).toEqual(['P0001: injected failure']);
+
+    // The balance is back to ONE pack, not two and not zero: the second grant's
+    // users.credits increment was undone while the first survived.
+    expect(await cachedUserCredits(funded.userId)).toBe(PACK_CREDITS);
+    expect(await totalCreditsRemaining(funded.userId)).toBe(PACK_CREDITS);
+    expect(await purchaseLedgerRows(doomed.orderId)).toBe(0);
+    expect(await orderStatus(doomed.orderId)).toBe('checkout_pending');
+    // NOT asserted, deliberately: purchaseTransactionRows(doomed) and
+    // orderStatus(funded). The injected trigger raises on every
+    // credit_transactions insert, so the first can only ever read 0; and every
+    // statement in transitionPaidCheckout is parameterised on the order being
+    // processed, so the second cannot be touched by the doomed call. Both would
+    // pass with the rollback removed entirely.
+    // The event claim must roll back with everything else, or Stripe's retry
+    // would be swallowed as a duplicate and the payment never booked at all.
+    expect(await claimedEvents(`evt_${doomed.sessionId}`)).toBe(0);
+  });
+
+  it('refuses a CONFLICTING amount for the same session and grants nothing', async () => {
+    const { userId, orderId, sessionId } = await seedPendingPackOrder();
+
+    await commerce.processStripeWebhookEvent(
+      paidEvent({ eventId: `evt_${sessionId}`, sessionId, amountCents: 100 }) as never
+    );
+
+    expect(await purchaseLedgerRows(orderId)).toBe(0);
+    expect(await cachedUserCredits(userId)).toBe(0);
+    expect(await orderStatus(orderId)).toBe('refund_pending');
+    expect(await orderColumn<string>(orderId, 'last_error_code')).toBe('PAYMENT_AMOUNT_MISMATCH');
+    // The attributable signal an operator can actually search for. The
+    // stuck-order alarm emits a bare count across three statuses and cannot
+    // tell a quarantine from refund backlog; this row names the reason.
+    expect(
+      await scalar(
+        `SELECT COUNT(*)::text AS value FROM commerce_order_events
+         WHERE order_id = $1 AND metadata->>'reason' = 'payment_amount_mismatch'`,
+        [orderId]
+      )
+    ).toBe(1);
+  });
+
+  it('refuses a CONFLICTING currency for the same session and grants nothing', async () => {
+    const { userId, orderId, sessionId } = await seedPendingPackOrder();
+
+    // The amount deliberately MATCHES, so only the currency half of the
+    // predicate can be what refuses.
+    await commerce.processStripeWebhookEvent(
+      paidEvent({ eventId: `evt_${sessionId}`, sessionId, currency: 'gbp' }) as never
+    );
+
+    expect(await purchaseLedgerRows(orderId)).toBe(0);
+    expect(await cachedUserCredits(userId)).toBe(0);
+    expect(await orderStatus(orderId)).toBe('refund_pending');
+  });
+
+  it('refuses to refund a quarantined mismatch even when asked directly', async () => {
+    // The PAYMENT_AMOUNT_MISMATCH wall exists in TWO places: the maintenance
+    // sweep's candidate SELECT, and requestRefund's own claim CTE. This drives
+    // requestRefund directly, which is the copy that matters - the wall every
+    // future caller hits, sweep or not.
+    //
+    // `false` alone proves nothing: requestRefund also returns false when the
+    // retry limit is zero, and when the order has no payment intent. So the
+    // preconditions are asserted, and a CONTROL order identical but for the
+    // error code establishes that the claim would otherwise have succeeded.
+    // Observing orders.refund_attempts rather than the boolean is what makes
+    // this work without a Stripe key: the claim CTE increments it BEFORE any
+    // Stripe call, so 0 means the claim refused and 1 means it did not.
+    const quarantined = await seedPendingPackOrder();
+    await commerce.processStripeWebhookEvent(
+      paidEvent({
+        eventId: `evt_${quarantined.sessionId}`,
+        sessionId: quarantined.sessionId,
+        amountCents: 100
+      }) as never
+    );
+    // Precondition: the order qualifies for a refund on every count except the
+    // clause under test. Without this the test passes when the payment intent
+    // is missing, which is a different refusal entirely.
+    expect(await orderColumn<string | null>(quarantined.orderId, 'stripe_payment_intent_id')).not.
+      toBeNull();
+    expect(await orderColumn<number>(quarantined.orderId, 'refund_attempts')).toBe(0);
+    expect(await orderStatus(quarantined.orderId)).toBe('refund_pending');
+
+    const control = await seedPendingPackOrder();
+    await pool.query(
+      `UPDATE orders
+       SET status = 'refund_pending', refund_pending_at = NOW(),
+           stripe_payment_intent_id = $2, last_error_code = 'JIT_FULFILLMENT_REJECTED'
+       WHERE order_id = $1`,
+      [control.orderId, `pi_${control.sessionId}`]
+    );
+
+    await expect(commerce.requestRefund(quarantined.orderId, 'operator asked')).resolves.toBe(
+      false
+    );
+    await commerce.requestRefund(control.orderId, 'operator asked');
+
+    // The control was claimed; the quarantined order was not. Only the
+    // PAYMENT_AMOUNT_MISMATCH clause separates them.
+    expect(await orderColumn<number>(quarantined.orderId, 'refund_attempts')).toBe(0);
+    expect(await orderColumn<number>(control.orderId, 'refund_attempts')).toBe(1);
+    expect(await orderStatus(quarantined.orderId)).toBe('refund_pending');
+  });
+
+  it('does not let the maintenance sweep auto-refund a quarantined mismatch', async () => {
+    // The mass-refund guard. Without it, any Stripe-side amount change - a
+    // promo code, adaptive pricing, tax - pushes real customers into the
+    // quarantine and the sweep refunds every one of them with no human in the
+    // loop (#278 round 7).
+    //
+    // The CONTROL order is what makes this falsifiable: identical except for
+    // the error code, so control refund_attempts goes to 1 while quarantined
+    // stays 0. Asserting the returned refundAttempts instead is unfalsifiable -
+    // that only rises when requestRefund returns true, which needs a live
+    // Stripe call CI never has.
+    //
+    // HONEST LIMIT: this pins the QUARANTINE, not the sweep's own copy of the
+    // clause. Delete only the sweep's candidate filter and the order reaches
+    // requestRefund, whose identical clause refuses it with no write, and every
+    // assertion below still passes. The two copies cover for each other and
+    // neither can be isolated through this surface; the sweep's copy is
+    // defence-in-depth in front of the claim CTE, which is the wall that
+    // actually holds. The test above drives that wall directly.
+    const quarantined = await seedPendingPackOrder();
+    await commerce.processStripeWebhookEvent(
+      paidEvent({
+        eventId: `evt_${quarantined.sessionId}`,
+        sessionId: quarantined.sessionId,
+        amountCents: 100
+      }) as never
+    );
+
+    const control = await seedPendingPackOrder();
+    await pool.query(
+      `UPDATE orders
+       SET status = 'refund_pending', refund_pending_at = NOW(),
+           stripe_payment_intent_id = $2, last_error_code = 'JIT_FULFILLMENT_REJECTED'
+       WHERE order_id = $1`,
+      [control.orderId, `pi_${control.sessionId}`]
+    );
+
+    await ageOrdersPastStuckThreshold([quarantined.orderId, control.orderId]);
+
+    const maintenance = await commerce.runCommerceMaintenance();
+
+    expect(await orderColumn<number>(quarantined.orderId, 'refund_attempts')).toBe(0);
+    expect(await orderColumn<number>(control.orderId, 'refund_attempts')).toBe(1);
+    expect(await orderStatus(quarantined.orderId)).toBe('refund_pending');
+    // And the quarantined order is not silently parked: the stuck-order alarm
+    // is what brings an operator to it.
+    expect(maintenance.stuckOrders).toBeGreaterThanOrEqual(1);
+  });
+
+  it('rejects a second purchase ledger row for one order at the DATABASE boundary', async () => {
+    // Layer 4 alone, with the application removed from the picture - including
+    // the source_type half of the index predicate: a refund row naming the SAME
+    // order must still be allowed, or the index would be blocking legitimate
+    // compensation rather than double grants.
+    const { userId, orderId, sessionId } = await seedPendingPackOrder();
+    await commerce.processStripeWebhookEvent(
+      paidEvent({ eventId: `evt_${sessionId}`, sessionId }) as never
+    );
+
+    await expect(insertLedgerRow(userId, orderId, 'purchase')).rejects.toMatchObject({
+      code: '23505',
+      constraint: 'idx_credit_ledger_purchase_order_unique'
+    });
+    await expect(insertLedgerRow(userId, orderId, 'refund')).resolves.toBeDefined();
+
+    expect(await purchaseLedgerRows(orderId)).toBe(1);
+  });
+
+  it('rejects a purchase grant that names no order at all', async () => {
+    // Migration 027. Layer 4 is PARTIAL on `source_order_id IS NOT NULL`, so
+    // before this trigger a purchase row with a NULL source_order_id inserted
+    // freely and a second one inserted beside it - the index appeared to
+    // protect the table while protecting nothing for those rows. No static
+    // check could close it: three raw INSERT INTO credit_ledger statements in
+    // src/ omit the source_order_id column entirely.
+    const { userId } = await seedPendingPackOrder();
+
+    await expect(insertLedgerRow(userId, null, 'purchase')).rejects.toMatchObject({
+      code: '23514',
+      // Named, so a future CHECK added to credit_ledger cannot satisfy this
+      // assertion in 027's place - the sibling above pins a constraint name for
+      // the same reason.
+      message: expect.stringContaining('must set source_order_id')
+    });
+    // Non-purchase grants are unaffected: promo, signup and adjustment credits
+    // have no funding order by design.
+    await expect(insertLedgerRow(userId, null, 'promo')).resolves.toBeDefined();
+  });
+
+  it('refuses to disown a purchase grant from its order, but still lets it be spent', async () => {
+    // The second half of 027, and the half an INSERT-only guard misses.
+    //
+    // 023 declares source_order_id REFERENCES orders(order_id) ON DELETE SET
+    // NULL, so deleting an order clears the link by UPDATE with no INSERT
+    // anywhere - dropping a committed grant out of the partial index's
+    // predicate, after which a re-grant for a recreated order succeeds. The
+    // guard is a TRANSITION check (not-null becoming null), which is why it
+    // does not have the problem a CHECK constraint would.
+    const { userId, orderId, sessionId } = await seedPendingPackOrder();
+    await commerce.processStripeWebhookEvent(
+      paidEvent({ eventId: `evt_${sessionId}`, sessionId }) as never
+    );
+
+    await expect(
+      pool.query(`UPDATE credit_ledger SET source_order_id = NULL WHERE source_order_id = $1`, [
+        orderId
+      ])
+    ).rejects.toMatchObject({
+      code: '23514',
+      message: expect.stringContaining('cannot be disowned')
+    });
+
+    // Consumption is the hot path over this table and must be untouched: the
+    // guard fires on the link being cleared, not on the row being written.
+    await expect(
+      pool.query(
+        `UPDATE credit_ledger SET remaining_amount = remaining_amount - 1
+         WHERE source_order_id = $1`,
+        [orderId]
+      )
+    ).resolves.toMatchObject({ rowCount: 1 });
+    expect(await purchaseLedgerRows(orderId)).toBe(1);
+    expect(await totalCreditsRemaining(userId)).toBe(PACK_CREDITS - 1);
+  });
+
+  it('never double-grants an order stranded at paid, and reports the failure', async () => {
+    // 'paid' is deliberately absent from FUNDED_OR_REVERSED_ORDER_STATUSES, so
+    // layer 3 does NOT fire for an order left in that state and the replay
+    // reaches the ledger INSERT. Layer 4 stops the double grant, but nothing
+    // catches the 23505: the call rejects, which is a non-2xx to Stripe and an
+    // indefinite redelivery loop, and runCommerceMaintenance's recovery query
+    // is order_type = 'jit_mail', so a letter_pack at 'paid' is never swept.
+    //
+    // The rejection is ASSERTED rather than tolerated because it is the actual
+    // behaviour - hiding it behind allSettled would let a future change that
+    // silently double-grants pass this test.
+    const { userId, orderId, sessionId } = await seedPendingPackOrder();
+    await commerce.processStripeWebhookEvent(
+      paidEvent({ eventId: `evt_${sessionId}`, sessionId }) as never
+    );
+    await pool.query(`UPDATE orders SET status = 'paid' WHERE order_id = $1`, [orderId]);
+
+    const [outcome] = await Promise.allSettled([
+      commerce.processStripeWebhookEvent(
+        paidEvent({ eventId: `evt_replay_${sessionId}`, sessionId }) as never
+      )
+    ]);
+
+    expect(outcome.status).toBe('rejected');
+    await expectExactlyOneGrant(userId, orderId);
+  });
+});
+
+/**
+ * Migrations 023 and 027 applied to a database that ALREADY contains a double
+ * grant.
+ *
+ * This needs its own database because the point is the state of the schema
+ * BEFORE 023 exists: `credit_ledger.source_order_id` has not been added yet, so
+ * historical rows carry only `source_reference_id`.
+ *
+ * 023's backfill adopts only unambiguous rows - exactly one purchase row
+ * pointing at one order - and leaves anything already duplicated NULL, so the
+ * unique index it then creates cannot fail on, or silently paper over, a
+ * pre-existing double grant. A migration that aborted here would block every
+ * later migration on any database that had ever double-granted.
+ *
+ * It also proves 027 is safe over that history. 027 is a BEFORE INSERT trigger
+ * rather than a CHECK constraint precisely because a CHECK - even NOT VALID -
+ * is enforced on UPDATE, and credit_ledger rows are updated on every
+ * consumption. The last assertion here is that a surviving legacy lot is still
+ * spendable; with a CHECK it would not be.
+ */
+describePostgres('migrations 023 and 027 over pre-existing duplicate grants (#152)', () => {
+  let adminPool: pg.Pool;
+  let pool: pg.Pool;
+  let schema: string;
+  let scoped: string;
+  let staging: string;
+
+  const CLEAN_ORDER = 'order_clean_backfill';
+  const DUPLICATED_ORDER = 'order_already_double_granted';
+
+  /** Copy the repository migrations whose numeric prefix is below `limit`. */
+  async function stageMigrationsBelow(limit: number): Promise<string> {
+    const directory = path.join(staging, `upto_${limit}`);
+    await mkdir(directory, { recursive: true });
+    const files = (await readdir(repositoryMigrations)).filter(
+      file => file.endsWith('.sql') && Number.parseInt(file.slice(0, 3), 10) < limit
+    );
+    for (const file of files) {
+      await copyFile(path.join(repositoryMigrations, file), path.join(directory, file));
+    }
+    return directory;
+  }
+
+  beforeAll(async () => {
+    const baseUrl = validateDisposableDatabaseUrl(process.env.LIRL_TEST_DATABASE_URL);
+    adminPool = new Pool({ connectionString: baseUrl });
+    schema = schemaName('lirl_idem_mig');
+    await adminPool.query(`CREATE SCHEMA ${schema}`);
+    scoped = databaseUrlForSchema(baseUrl, schema);
+    staging = await mkdtemp(path.join(tmpdir(), 'lirl-152-'));
+
+    await migrate({
+      connectionString: scoped,
+      migrationsDirectory: await stageMigrationsBelow(23)
+    });
+    pool = new Pool({ connectionString: scoped, max: 4 });
+  }, 180_000);
+
+  afterAll(async () => {
+    await settleAll([
+      async () => pool?.end(),
+      async () => (staging ? rm(staging, { recursive: true, force: true }) : undefined),
+      async () => adminPool?.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`),
+      async () => adminPool?.end()
+    ]);
+  });
+
+  it('adopts unambiguous history, leaves a duplicated pair null, and completes', async () => {
+    await pool.query(
+      `INSERT INTO users (user_id, email, credits) VALUES ('mig-user', 'mig@test.invalid', 0)`
+    );
+    await pool.query(
+      `INSERT INTO orders (
+         order_id, user_id, order_type, product_code, product_snapshot, credits,
+         amount_cents, currency, idempotency_key, status
+       ) VALUES
+         ($1, 'mig-user', 'letter_pack', 'credit-pack-4', '{}'::jsonb, 4, 500, 'usd',
+          'pack-checkout:clean', 'fulfilled'),
+         ($2, 'mig-user', 'letter_pack', 'credit-pack-4', '{}'::jsonb, 4, 500, 'usd',
+          'pack-checkout:dup', 'fulfilled')`,
+      [CLEAN_ORDER, DUPLICATED_ORDER]
+    );
+    // Pre-023 history: source_order_id does not exist yet, so the only link
+    // back to the order is source_reference_id.
+    await pool.query(
+      `INSERT INTO credit_ledger (
+         ledger_id, user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, expires_at
+       ) VALUES
+         (gen_random_uuid(), 'mig-user', 4, 4, 'purchase', $1, NOW() + INTERVAL '365 days'),
+         (gen_random_uuid(), 'mig-user', 4, 4, 'purchase', $2, NOW() + INTERVAL '365 days'),
+         (gen_random_uuid(), 'mig-user', 4, 4, 'purchase', $2, NOW() + INTERVAL '365 days')`,
+      [CLEAN_ORDER, DUPLICATED_ORDER]
+    );
+
+    // The whole point: this must not abort.
+    await expect(
+      migrate({ connectionString: scoped, migrationsDirectory: repositoryMigrations })
+    ).resolves.toBeUndefined();
+
+    const adopted = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM credit_ledger WHERE source_order_id = $1`,
+      [CLEAN_ORDER]
+    );
+    expect(Number(adopted.rows[0].count)).toBe(1);
+
+    const abstained = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM credit_ledger
+       WHERE source_reference_id = $1 AND source_order_id IS NULL`,
+      [DUPLICATED_ORDER]
+    );
+    expect(Number(abstained.rows[0].count)).toBe(2);
+
+    // And the index the backfill was protecting is actually there afterwards.
+    const index = await pool.query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes
+       WHERE schemaname = $1 AND indexname = 'idx_credit_ledger_purchase_order_unique'`,
+      [schema]
+    );
+    expect(index.rowCount).toBe(1);
+
+    // 027 is BEFORE INSERT, so the surviving NULL rows are still spendable. A
+    // CHECK constraint here - even NOT VALID - would raise on this UPDATE and
+    // make every legacy lot unspendable, which is why it is a trigger.
+    await expect(
+      pool.query(
+        `UPDATE credit_ledger SET remaining_amount = remaining_amount - 1
+         WHERE source_reference_id = $1 AND source_order_id IS NULL`,
+        [DUPLICATED_ORDER]
+      )
+    ).resolves.toMatchObject({ rowCount: 2 });
+  }, 180_000);
+});

@@ -15,14 +15,17 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import { LetterIrlServer } from '../../../src/server.js';
 import {
   buildAnnotations,
   buildToolMeta,
   buildToolSecuritySchemes,
   getZodInputShape,
-  getZodOutputShape
+  getZodOutputShape,
+  summarizeToolResult
 } from '../../../src/mcp/registerTools.js';
+import { getStartedTool } from '../../../src/tools/index.js';
 
 /**
  * Tool definitions matching the actual tools in the codebase.
@@ -39,6 +42,7 @@ const readOnlyTools = [
   { name: 'get_started', readOnly: true },
   { name: 'get_account_balance', readOnly: true },
   { name: 'get_order_status', readOnly: true },
+  { name: 'get_purchase_status', readOnly: true },
   { name: 'get_return_address', readOnly: true },
   { name: 'list_orders', readOnly: true },
 ];
@@ -59,11 +63,12 @@ const sendTools = [
 
 // Other write tools
 const otherWriteTools = [
+  { name: 'create_mail_checkout', readOnly: false },
   { name: 'set_return_address', readOnly: false },
   { name: 'confirm_uploaded_image', readOnly: false },
   { name: 'submit_feature_request', readOnly: false },
   { name: 'upload_image', readOnly: false },
-  { name: 'generate_image', readOnly: false },
+  { name: 'generate_image_for_mail', readOnly: false },
 ];
 
 // Destructive tools: delete user data
@@ -91,8 +96,8 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       }
     );
 
-    it('should have exactly 5 read-only tools', () => {
-      expect(readOnlyTools.length).toBe(5);
+    it('should have exactly 6 read-only tools', () => {
+      expect(readOnlyTools.length).toBe(6);
     });
   });
 
@@ -246,44 +251,44 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
   });
 
   describe('Tool Classification Summary', () => {
-    it('should cover all 17 registered tools in annotation checks', () => {
+    it('should cover all 19 registered tools in annotation checks', () => {
       const runtimeToolNames = new LetterIrlServer().listTools().map((tool) => tool.name).sort();
       const checkedToolNames = allTools.map((tool) => tool.name).sort();
 
-      expect(allTools.length).toBe(17);
+      expect(allTools.length).toBe(19);
       expect(checkedToolNames).toEqual(runtimeToolNames);
     });
 
-    it('should have 5 read-only tools', () => {
+    it('should have 6 read-only tools', () => {
       const readOnlyCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === true;
       }).length;
-      expect(readOnlyCount).toBe(5);
+      expect(readOnlyCount).toBe(6);
     });
 
-    it('should have 12 write tools (non-read-only)', () => {
+    it('should have 13 write tools (non-read-only)', () => {
       const writeCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === false;
       }).length;
-      expect(writeCount).toBe(12);
+      expect(writeCount).toBe(13);
     });
 
-    it('should have 8 open-world tools (call external APIs)', () => {
+    it('should have 9 open-world tools (call external APIs)', () => {
       const openWorldCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.openWorldHint === true;
       }).length;
-      expect(openWorldCount).toBe(8);
+      expect(openWorldCount).toBe(9);
     });
 
-    it('should have 5 idempotent tools (send + address management + upload relay)', () => {
+    it('should have 6 idempotent tools (send + checkout + address management + upload relay)', () => {
       const idempotentCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.idempotentHint === true;
       }).length;
-      expect(idempotentCount).toBe(5);
+      expect(idempotentCount).toBe(6);
     });
 
     it('should have 1 destructive tool', () => {
@@ -339,23 +344,27 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
 
   describe('Tool Auth Metadata', () => {
     it('should declare oauth2 security scheme when auth is required', () => {
-      expect(buildToolSecuritySchemes(true)).toEqual([
+      expect(buildToolSecuritySchemes('get_account_balance', true)).toEqual([
         {
           type: 'oauth2',
-          scopes: ['openid', 'email', 'profile']
+          // offline_access rides along on every tool because ChatGPT builds
+          // its authorization request from the union of these lists, not from
+          // scopes_supported (issue #160). It is requested, never enforced.
+          scopes: ['mail:read', 'offline_access']
         }
       ]);
     });
 
     it('should declare noauth security scheme when auth is disabled', () => {
-      expect(buildToolSecuritySchemes(false)).toEqual([{ type: 'noauth' }]);
+      expect(buildToolSecuritySchemes('send_letter', false)).toEqual([{ type: 'noauth' }]);
     });
 
     it('should merge securitySchemes into tool metadata', () => {
       expect(
         buildToolMeta(
+          'quote_and_preview_letter',
           {
-            'openai/outputTemplate': 'ui://widgets/LetterPreviewCard.html',
+            'openai/outputTemplate': widgetTemplateUri('LetterPreviewCard'),
             'openai/widgetAccessible': true
           },
           true
@@ -364,12 +373,12 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
         securitySchemes: [
           {
             type: 'oauth2',
-            scopes: ['openid', 'email', 'profile']
+            scopes: ['mail:draft', 'offline_access']
           }
         ],
         'openai/widgetAccessible': true,
         ui: {
-          resourceUri: 'ui://widgets/LetterPreviewCard.html',
+          resourceUri: widgetTemplateUri('LetterPreviewCard'),
           widgetAccessible: true
         }
       });
@@ -424,6 +433,30 @@ describe('OpenAI Apps SDK Submission Compliance', () => {
     it('clear_return_address has destructiveHint: true', () => {
       const annotations = buildAnnotations({ name: 'clear_return_address', readOnly: false });
       expect(annotations.destructiveHint).toBe(true);
+    });
+  });
+
+  describe('tool summaries do not duplicate their widget', () => {
+    /**
+     * The summary is the model's account of what the tool did. When it is the
+     * card's own copy, the model restates the card immediately below a card
+     * already showing it - which is exactly what get_started did: the summary
+     * was `result.overview`, and the reply re-explained the app and re-listed
+     * all three example prompts under a card containing both.
+     *
+     * Same contract as the image routing card: the widget is the single voice,
+     * the model adds at most one sentence.
+     */
+    it('get_started tells the model the card already speaks, and does not echo it', async () => {
+      const output = await getStartedTool.handler({}, {} as never);
+      const summary = summarizeToolResult('get_started', output as unknown as Record<string, unknown>);
+
+      expect(summary).not.toContain(output.overview);
+      expect(summary).not.toContain(output.purchaseStep);
+      for (const prompt of output.examplePrompts) {
+        expect(summary, `summary re-lists the example prompt "${prompt}"`).not.toContain(prompt);
+      }
+      expect(summary.toLowerCase()).toContain('one short sentence');
     });
   });
 });

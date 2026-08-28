@@ -209,31 +209,17 @@ Each tool:
 
 ### OpenAI Apps SDK / ChatGPT
 
-**File Attachments** (`fileParams`):
-- Desktop: Works reliably when app is selected first (see timing note below)
-- Mobile: **Unreliable** - ChatGPT mobile app doesn't always pass file attachments to MCP tools
+**File Attachments** (`fileParams`) — updated August 2026 (issue #227):
+- The handoff of ChatGPT-generated images to Letter IRL tools **works directly** on desktop web, mobile web, and the native mobile app. Verified end-to-end 2026-08-20/21 with real drafts on every surface.
+- This REQUIRED two things that landed in August 2026: the served file-param schemas conforming exactly to the Apps SDK contract (PRs #231–#233 — the earlier `z.any()`/union schemas silently disabled the transform), and a connector **Refresh** (not Reconnect) so ChatGPT re-ingests the schemas.
+- Mechanism note: the model passes a `/mnt/data/...` sandbox path string in its visible tool input; ChatGPT's platform transform swaps in the real `{download_url, file_id}` object on the wire. A path string in the dev panel's Request display does NOT mean the handoff failed — judge by the tool response.
 
-**Desktop Timing Requirement**:
-- **Critical**: The Letter IRL app must be **active/selected** when uploading images
-- If user uploads an image BEFORE selecting the app, ChatGPT passes a local path string instead of `fileParams`
-- **Solution**: Always select the Letter IRL app first, then upload images
-- This ensures proper file attachment handling
-
-**Workaround for Mobile** (US-POSTCARD-04):
-- Guide users to "optimize for print quality" by preprocessing image with Code Interpreter
-- ChatGPT resizes image to 1872×1248 (6×9 @ 300 DPI recommended resolution)
-- Preprocessed file CAN be passed to MCP tools on mobile
-- Framed as "print optimization" rather than technical workaround
-- Direct URL fallback (`imageUrl` parameter) always works
-
-**Workaround for AI-Generated Images**:
-- When ChatGPT generates an image using ChatGPT Images (GPT Image 1.5, released December 16, 2025), it cannot pass the image directly to MCP tools
-- **Solution**: Ask ChatGPT to modify the generated image (resize, adjust, crop, etc.)
-- Example prompts: "Resize this image to 1872×1248 pixels" or "Crop this to postcard dimensions"
-- This creates a new file reference via Code Interpreter that CAN be passed to tools
-- The modified image becomes accessible through `fileParams`
+**Superseded guidance** (kept for history — accurate before the August 2026 schema fixes):
+- ~~Generated images "cannot pass directly to MCP tools"; workaround was Code Interpreter resize/crop to mint a passable file reference.~~ No longer needed on any tested surface. The Code Interpreter resize still works and remains harmless if a model chooses it.
+- Desktop timing (app selected before upload) and mobile flakiness remain worth watching; when a handoff DOES fail, the recovery path is `upload_image` — its widget's "Choose from Library" picker lists generated images and preserves the exact image the user approved (PR #234). Letter IRL's own generator was removed entirely in Aug 2026 (docs/learnings/generate-image-removal-decision.md).
 
 **References**:
+- Issue #227 (full evidence trail: experiments, schema fixes, per-surface verification)
 - [OpenAI Community Discussion - Mobile Issues](https://community.openai.com/t/apps-sdk-on-mobile-devices/1366422)
 - [ChatGPT Images (GPT Image 1.5) Announcement](https://openai.com/index/new-chatgpt-images-is-here/) (December 16, 2025)
 
@@ -284,14 +270,14 @@ Letter IRL uses **base64 data URIs** for reliability and control.
 ### Current Limitations
 
 1. **Postcard Size**: Only 6×9 supported (PostGrid supports 6×4 and 6×11 as well)
-2. **Image Processing**: Cannot accept AI-generated images directly from ChatGPT Images (GPT Image 1.5) - see GitHub issue #67 (workaround available)
-3. **Mobile File Attachments**: Unreliable on ChatGPT mobile (workaround in place via Code Interpreter preprocessing)
+2. ~~**Image Processing**: Cannot accept AI-generated images directly~~ — RESOLVED August 2026: direct handoff works on all tested surfaces after the fileParams schema fixes (#231–#233) plus connector Refresh; see issue #227 and Platform-Specific Notes above
+3. **Mobile File Attachments**: Historically unreliable on ChatGPT mobile; direct handoff verified working August 2026, with `upload_image`'s Library picker as the recovery path if it regresses
 4. **Desktop Timing**: App must be selected before uploading images (local path issue)
 5. **File Size**: 5-10 MB limits (reasonable for most use cases)
 
 ### GitHub Issue #67 (OpenAI Apps SDK)
 
-**Status**: OPEN (as of January 2026)
+**Status**: Superseded for Letter IRL, August 2026 — the scenarios below stopped reproducing once our served file-param schemas conformed to the Apps SDK contract (#231–#233) and the connector was Refreshed; see issue #227. Section kept as the historical record of the pre-fix behavior.
 
 **Problem**: ChatGPT cannot pass certain image types to MCP tools
 

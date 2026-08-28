@@ -12,8 +12,10 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
+import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
 import { validateAuthorizationHeader, type AuthenticatedUser } from '../auth/tokenValidator.js';
 import { createToken, listTokens, revokeToken } from '../services/patService.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 /**
  * Send JSON response
@@ -28,20 +30,18 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown) {
  * Read request body as JSON
  */
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', (chunk) => {
-      body += chunk.toString();
-    });
-    req.on('end', () => {
-      try {
-        resolve(body ? JSON.parse(body) : {});
-      } catch (error) {
-        reject(new Error('Invalid JSON body'));
-      }
-    });
-    req.on('error', reject);
-  });
+  // Bounded. This previously accumulated without a cap, which on a public
+  // route is a memory-exhaustion denial of service (#157). readRequestBody
+  // also decodes once at the end, so a multi-byte character split across two
+  // chunks is no longer corrupted into replacement characters.
+  const body = await readRequestBody(req, { limitBytes: JSON_API_BODY_LIMIT_BYTES });
+  try {
+    return body ? JSON.parse(body) : {};
+  } catch {
+    // A RequestBodyTooLargeError from above propagates with its own 413 rather
+    // than being flattened into this parse error.
+    throw new Error('Invalid JSON body');
+  }
 }
 
 /**
@@ -62,10 +62,10 @@ export async function handlePATApiRequest(
   let authInfo: AuthenticatedUser;
   try {
     authInfo = await validateAuthorizationHeader(req.headers.authorization);
-  } catch (error) {
+  } catch {
     sendJson(res, 401, {
       error: 'Unauthorized',
-      message: error instanceof Error ? error.message : 'Authentication failed',
+      message: 'Authentication failed',
     });
     return true;
   }
@@ -114,10 +114,12 @@ export async function handlePATApiRequest(
     sendJson(res, 404, { error: 'Not found' });
     return true;
   } catch (error) {
-    console.error('🔑 PAT API error:', error);
+    writeDiagnostic('error', 'auth.pat_api_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
     sendJson(res, 500, {
       error: 'Internal Server Error',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: 'Unable to complete token request',
     });
     return true;
   }

@@ -4,451 +4,165 @@
     <meta charset="utf-8" />
     <title>PostcardPreviewCard</title>
     <style>
-      :root {
-        --bg-primary: #ffffff;
-        --bg-secondary: #f8fafc;
-        --text-primary: #1f2933;
-        --text-secondary: #61748f;
-        --border-color: #e2e8f0;
-        --accent-success: #065f46;
-        --accent-success-bg: #d1fae5;
-        --accent-warning: #b91c1c;
-        --accent-warning-bg: #fee2e2;
-        --accent-primary: #2563eb;
-        --accent-primary-hover: #1d4ed8;
-        --accent-primary-disabled: #93c5fd;
-        --preview-bg: #fefefe;
-
-        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: transparent;
-        color: var(--text-primary);
-      }
-
-      .dark {
-        --bg-primary: #1e293b;
-        --bg-secondary: #0f172a;
-        --text-primary: #f1f5f9;
-        --text-secondary: #94a3b8;
-        --border-color: #334155;
-        --accent-success: #34d399;
-        --accent-success-bg: #064e3b;
-        --accent-warning: #f87171;
-        --accent-warning-bg: #7f1d1d;
-        --accent-primary: #3b82f6;
-        --accent-primary-hover: #60a5fa;
-        --accent-primary-disabled: #1e3a5f;
-        --preview-bg: #1e293b;
-      }
-
-      /* Dark mode scrollbar styling */
-      .dark ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-
-      .dark ::-webkit-scrollbar-track {
-        background: var(--bg-secondary);
-        border-radius: 4px;
-      }
-
-      .dark ::-webkit-scrollbar-thumb {
-        background: var(--border-color);
-        border-radius: 4px;
-      }
-
-      .dark ::-webkit-scrollbar-thumb:hover {
-        background: var(--text-secondary);
-      }
-
-      /* Firefox scrollbar support */
-      .dark * {
-        scrollbar-width: thin;
-        scrollbar-color: var(--border-color) var(--bg-secondary);
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        padding: 1rem;
-        background: transparent;
-        overflow: hidden;  /* Prevent scrollbars */
-      }
-
-      /* Override injected postcard-front styles (which have fixed pixel dimensions) */
-      .postcard-front {
-        width: 100% !important;
-        height: auto !important;
-        max-width: 100% !important;
-      }
-
-      .postcard-front img {
-        width: 100% !important;
-        height: auto !important;
-        aspect-ratio: 9 / 6;
-        object-fit: cover;
-      }
-
-      .card {
-        width: 100%;
-        border-radius: 12px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border-color);
-        overflow: hidden;
-      }
+      /* Letter IRL design system (widget-design-package, Aug 2026). The
+         postcard back and message box are paper artifacts: cream in both
+         themes - printed mail stays paper. */
+      :root{--sf:#fff;--sf2:#fafafa;--bd:#e4e4e7;--bd2:#f0f0f2;--tx:#111113;--tb:#3f3f46;--mut:#71717a;--faint:#a1a1aa;--pri:#111113;--prit:#fff;--ok:#16a34a;--okbg:#f0fdf4;--er:#dc2626;--erbg:#fef2f2}
+      .dark{--sf:#2a2a2e;--sf2:#232327;--bd:#3a3a40;--bd2:#323238;--tx:#f4f4f5;--tb:#d4d4d8;--mut:#a1a1aa;--faint:#71717a;--pri:#f4f4f5;--prit:#111113;--ok:#34d399;--okbg:rgba(52,211,153,.13);--er:#f87171;--erbg:rgba(248,113,113,.12)}
+      *{box-sizing:border-box}
+      body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--tb);overflow:hidden}
+      .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;overflow:hidden;max-width:100%}
+      .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
+      .logo{width:17px;height:11px;flex:none;display:block}
+      /* One parametric SVG for both themes (assets/brand/letterirl-mark-small.svg):
+         the mark reads --li-blue, which the dark scope lightens. */
+      .dark{--li-blue:#6f98f2}
+      .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
+      .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
 
       /* Preview tabs */
-      .preview-tabs {
-        display: flex;
-        border-bottom: 1px solid var(--border-color);
-      }
-
-      .preview-tab {
-        flex: 1;
-        padding: 0.75rem 1rem;
-        font-size: 0.9rem;
-        font-weight: 600;
-        text-align: center;
-        cursor: pointer;
-        background: transparent;
-        border: none;
-        color: var(--text-secondary);
-        transition: all 0.15s ease;
-      }
-
-      .preview-tab:hover {
-        color: var(--text-primary);
-        background: var(--bg-secondary);
-      }
-
-      .preview-tab.active {
-        color: var(--accent-primary);
-        border-bottom: 2px solid var(--accent-primary);
-        margin-bottom: -1px;
-      }
+      .preview-tabs{display:flex;border-bottom:1px solid var(--bd2)}
+      .preview-tab{flex:1;text-align:center;padding:9px 4px;font-size:12.5px;font-weight:600;color:var(--mut);border-bottom:2px solid transparent;background:transparent;border-top:none;border-left:none;border-right:none;cursor:pointer;font-family:inherit;transition:color .15s ease}
+      .preview-tab:hover{color:var(--tx)}
+      .preview-tab.active{color:var(--tx);border-bottom-color:var(--tx)}
 
       /* Preview panes */
-      .preview-container {
-        position: relative;
-        overflow: hidden;  /* Prevent scrollbars on preview area */
-      }
+      .preview-container{position:relative;overflow:hidden}
+      .preview-pane{padding:14px 14px 0;overflow:hidden}
+      .preview-pane.hidden{display:none !important}
+      .preview-pane.front-preview{display:flex;justify-content:center;align-items:center}
+      /* Override injected postcard-front styles (fixed pixel dimensions) */
+      .postcard-front{width:100% !important;height:auto !important;max-width:100% !important}
+      .postcard-front img{width:100% !important;height:auto !important;aspect-ratio:9/6;object-fit:cover}
+      .preview-pane img{width:100%;max-width:100%;height:auto;border-radius:8px;border:1px solid var(--bd);aspect-ratio:9/6;object-fit:cover}
+      .preview-pane.back-preview{display:flex;justify-content:center;align-items:center}
 
-      .preview-pane {
-        padding: 0.75rem;
-        background: var(--preview-bg);
-        border-bottom: 1px solid var(--border-color);
-        overflow: hidden;  /* Prevent scrollbars */
-      }
+      /* Postcard back mockup - paper artifact, cream in both themes */
+      .postcard-back-mockup{width:100%;aspect-ratio:9/6;background:#fdfcf8;border:1px solid #e6e0d2;border-radius:8px;box-shadow:0 2px 8px rgba(43,36,29,.1);display:flex;overflow:hidden;color:#2b241d}
+      .postcard-message-side{width:53%;padding:11px 12px;border-right:1px solid #e6e0d2;display:flex;align-items:flex-start}
+      .postcard-message-text{font-family:Georgia,"Times New Roman",serif;font-size:9.5px;line-height:1.6;color:#4a4036;white-space:pre-wrap;word-wrap:break-word}
+      .postcard-address-side{width:47%;padding:9px 10px;position:relative;display:flex;flex-direction:column;justify-content:flex-end}
+      .postcard-stamp{position:absolute;top:9px;right:10px;width:32px;height:38px;border:1.5px dashed #c8b393;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:6px;letter-spacing:.12em;color:#a8916b}
+      .postcard-recipient{font-family:"Courier New",monospace;font-size:8.5px;line-height:1.5;color:#2b241d;text-transform:uppercase;margin-bottom:5px}
+      .postcard-recipient .name{font-weight:700}
+      .postcard-return-address{position:absolute;top:9px;left:10px;font-family:"Courier New",monospace;font-size:6.5px;line-height:1.45;color:#8a7a64;text-transform:uppercase}
 
-      .preview-pane.hidden {
-        display: none !important;
-      }
+      /* Meta info rows */
+      .meta{padding:0 14px 14px}
+      .rows{margin:12px 0 0}
+      .info-row{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--bd2);font-size:12.5px}
+      .info-row:last-of-type{border-bottom:none}
+      .info-label{color:var(--mut);flex:none}
+      .info-value{color:var(--tx);font-weight:500;text-align:right}
+      .info-value.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+      .status-pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;border-radius:999px;padding:2px 9px}
+      .status-pill.ok{color:var(--ok);background:var(--okbg)}
+      .status-pill.alert{color:var(--er);background:var(--erbg)}
 
-      .preview-pane.front-preview {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-      }
+      /* Paper message box */
+      .message-box{background:#fdfcf8;border:1px solid #e6e0d2;border-radius:8px;padding:9px 11px;margin-top:11px}
+      .message-box .info-label{margin-bottom:4px;display:block;font-size:11px}
+      .message-text{font-family:Georgia,"Times New Roman",serif;font-size:11.5px;line-height:1.55;color:#4a4036;white-space:pre-wrap;word-wrap:break-word}
 
-      .preview-pane img {
-        width: 100%;
-        max-width: 100%;
-        height: auto;
-        border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        aspect-ratio: 9 / 6;
-        object-fit: cover;
-      }
+      .note{background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--mut);line-height:1.45;margin-top:10px}
 
-      .preview-pane.back-preview {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-      }
-
-      /* Postcard back mockup */
-      .postcard-back-mockup {
-        width: 100%;
-        aspect-ratio: 9 / 6;
-        background: #fffef8;
-        border-radius: 4px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-        display: flex;
-        overflow: hidden;
-      }
-
-      .postcard-message-side {
-        width: 50%;
-        padding: 12px;
-        border-right: 1px solid #ddd;
-        display: flex;
-        align-items: flex-start;
-      }
-
-      .postcard-message-text {
-        font-family: "Georgia", "Times New Roman", serif;
-        font-size: 0.75rem;
-        line-height: 1.5;
-        color: #333;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-      }
-
-      .postcard-address-side {
-        width: 50%;
-        padding: 12px;
-        position: relative;
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-end;
-      }
-
-      .postcard-stamp {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        width: 36px;
-        height: 44px;
-        border: 1.5px dashed #999;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 6px;
-        color: #999;
-        text-align: center;
-      }
-
-      .postcard-recipient {
-        font-family: "Courier New", monospace;
-        font-size: 0.65rem;
-        line-height: 1.4;
-        color: #333;
-      }
-
-      .postcard-recipient .name {
-        font-weight: bold;
-        text-transform: uppercase;
-      }
-
-      .postcard-return-address {
-        position: absolute;
-        top: 8px;
-        left: 8px;
-        font-family: "Courier New", monospace;
-        font-size: 0.55rem;
-        line-height: 1.3;
-        color: #555;
-      }
-
-      /* Message box in meta section */
-      .message-box {
-        padding: 0.75rem;
-        background: var(--bg-secondary);
-        border-radius: 8px;
-        border: 1px solid var(--border-color);
-      }
-
-      .message-text {
-        font-family: "Georgia", "Times New Roman", serif;
-        font-size: 0.9rem;
-        line-height: 1.5;
-        color: var(--text-primary);
-        white-space: pre-wrap;
-        word-wrap: break-word;
-      }
-
-      .meta {
-        padding: 1rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-      }
-
-      .info-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 0.9rem;
-      }
-
-      .info-label {
-        color: var(--text-secondary);
-      }
-
-      .info-value {
-        font-weight: 600;
-        color: var(--text-primary);
-      }
-
-      .status-pill {
-        display: inline-flex;
-        align-items: center;
-        padding: 0.35rem 0.65rem;
-        border-radius: 999px;
-        font-size: 0.8rem;
-        font-weight: 600;
-      }
-
-      .status-pill.ok {
-        background: var(--accent-success-bg);
-        color: var(--accent-success);
-      }
-
-      .status-pill.alert {
-        background: var(--accent-warning-bg);
-        color: var(--accent-warning);
-      }
-
-      .note {
-        font-size: 0.85rem;
-        color: var(--text-secondary);
-        padding: 0.75rem;
-        background: var(--bg-secondary);
-        border-radius: 8px;
-        border: 1px solid var(--border-color);
-      }
-
-      /* Send button styles */
-      .send-button {
-        width: 100%;
-        padding: 0.75rem 1rem;
-        font-size: 1rem;
-        font-weight: 600;
-        color: #ffffff;
-        background: var(--accent-primary);
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: background 0.15s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-      }
-
-      .send-button:hover:not(:disabled) {
-        background: var(--accent-primary-hover);
-      }
-
-      .send-button:disabled {
-        background: var(--accent-primary-disabled);
-        cursor: not-allowed;
-        opacity: 0.7;
-      }
-
-      .send-button.loading {
-        pointer-events: none;
-      }
-
-      .send-button .spinner {
-        width: 1rem;
-        height: 1rem;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: #ffffff;
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-      }
-
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
+      /* Action buttons: primary ink pill (inverts in dark), secondary outline */
+      .send-button{display:flex;width:100%;justify-content:center;align-items:center;gap:7px;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;box-sizing:border-box;border:none;margin-top:12px;background:var(--pri);color:var(--prit);transition:opacity .15s ease}
+      .send-button:hover:not(:disabled){opacity:.88}
+      .send-button:disabled{opacity:.45;cursor:not-allowed}
+      .send-button.loading{pointer-events:none}
+      .send-button .spinner{width:1rem;height:1rem;border:2px solid rgba(128,128,128,.35);border-top-color:currentColor;border-radius:50%;animation:spin .8s linear infinite}
+      .purchase-actions{display:grid;gap:0}
+      .send-button.secondary{color:var(--tx);background:transparent;border:1px solid var(--bd);margin-top:8px}
+      .send-button.secondary:hover:not(:disabled){background:var(--sf2);opacity:1}
+      @keyframes spin{to{transform:rotate(360deg)}}
 
       /* Success/Error states */
-      .send-result {
-        padding: 0.75rem;
-        border-radius: 8px;
-        font-size: 0.9rem;
-        text-align: center;
-      }
+      .send-result{border-radius:8px;font-size:12px;line-height:1.5;text-align:center;padding:9px 11px;margin-top:11px}
+      .send-result.success{background:var(--okbg);color:var(--ok)}
+      .send-result.error{background:var(--erbg);border:1px solid rgba(220,38,38,.25);color:var(--er)}
 
-      .send-result.success {
-        background: var(--accent-success-bg);
-        color: var(--accent-success);
-      }
-
-      .send-result.error {
-        background: var(--accent-warning-bg);
-        color: var(--accent-warning);
-      }
-
-      /* Loading state */
+      /* Loading shimmer */
       .loading .info-value,
-      .loading .status-pill {
-        background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border-color) 50%, var(--bg-secondary) 75%);
-        background-size: 200% 100%;
-        animation: shimmer 1.5s infinite;
-        color: transparent;
-        border-radius: 4px;
-        min-width: 60px;
-      }
-
-      .loading .status-pill {
-        min-width: 100px;
-      }
-
-      @keyframes shimmer {
-        0% { background-position: 200% 0; }
-        100% { background-position: -200% 0; }
-      }
-
-      .preview-loading {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 100px;
-        color: var(--text-secondary);
-        font-style: italic;
-      }
+      .loading .status-pill{background:linear-gradient(90deg,var(--bd2) 25%,var(--bd) 50%,var(--bd2) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;color:transparent;border-radius:4px;min-width:60px}
+      .loading .status-pill{min-width:100px}
+      @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+      .preview-loading{display:flex;align-items:center;justify-content:center;min-height:100px;color:var(--faint);font-size:11.5px;width:100%}
+      .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
+      .hidden{display:none !important}
     </style>
   </head>
   <body>
-    <div class="card" id="card">
+    <div class="w" id="card">
+      <div class="hd"><span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 21"><path fill="none" stroke="var(--li-blue,#2563eb)" stroke-width="3" stroke-linejoin="round" d="M11.3 2.4c5.2 0 9.4 3.3 9.4 7.4 0 4.1-4.2 7.4-9.4 7.4-.8 0-1.6-.1-2.4-.2l-5.7 2.6 1.8-4.1C3 14.2 1.9 12 1.9 9.8c0-4.1 4.2-7.4 9.4-7.4Z"></path><g transform="rotate(-8 24 8.6)"><rect x="16.5" y="3" width="14.6" height="10" rx="1.6" fill="var(--li-orange,#f97316)"></rect><path fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" d="m18 4.7 5.8 4 5.8-4"></path></g></svg></span><b>Letter IRL</b><span class="ctx">Postcard</span></div>
       <div class="preview-tabs">
-        <button class="preview-tab active" id="tab-front" data-tab="front">Front (Image)</button>
-        <button class="preview-tab" id="tab-back" data-tab="back">Back (Message)</button>
+        <button class="preview-tab active" id="tab-front" data-tab="front">
+          Front (Image)
+        </button>
+        <button class="preview-tab" id="tab-back" data-tab="back">
+          Back (Message)
+        </button>
       </div>
       <div class="preview-container">
         <div class="preview-pane front-preview" id="preview-front">
-          <em>Loading preview...</em>
+          <div class="preview-loading">Loading postcard preview&hellip;</div>
         </div>
         <div class="preview-pane back-preview hidden" id="preview-back">
-          <em>Loading preview...</em>
+          <div class="preview-loading">Loading message preview&hellip;</div>
         </div>
       </div>
       <div class="meta">
-        <div class="info-row">
-          <span class="info-label">Cost</span>
-          <span class="info-value" id="cost"></span>
+        <div class="rows">
+          <div class="info-row">
+            <span class="info-label">Cost</span>
+            <span class="info-value" id="cost"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Delivery</span>
+            <span class="info-value" id="delivery"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Status</span>
+            <span class="status-pill" id="status-pill"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label" id="id-label">Draft</span>
+            <span class="info-value mono" id="id-value"></span>
+          </div>
+          <div class="info-row" id="recipient-row" style="display: none">
+            <span class="info-label">To</span>
+            <span class="info-value" id="recipient-name"></span>
+          </div>
         </div>
-        <div class="info-row">
-          <span class="info-label">Delivery</span>
-          <span class="info-value" id="delivery"></span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">Status</span>
-          <span class="status-pill" id="status-pill"></span>
-        </div>
-        <div class="info-row">
-          <span class="info-label" id="id-label">Draft</span>
-          <span class="info-value" id="id-value"></span>
-        </div>
-        <div class="info-row" id="recipient-row" style="display: none;">
-          <span class="info-label">To</span>
-          <span class="info-value" id="recipient-name"></span>
-        </div>
-        <div class="message-box" id="message-box" style="display: none;">
-          <div class="info-label" style="margin-bottom: 0.5rem;">Message</div>
+        <div class="message-box" id="message-box" style="display: none">
+          <span class="info-label">Message</span>
           <div class="message-text" id="message-text"></div>
         </div>
-        <div class="note" id="note" style="display: none;"></div>
+        <div class="note" id="note" style="display: none"></div>
         <!-- Send button -->
         <button class="send-button" id="send-button" disabled>
           <span id="send-button-text">Send Postcard</span>
         </button>
-        <div id="error-message" class="send-result error" style="display: none;"></div>
+        <div
+          class="purchase-actions"
+          id="purchase-actions"
+          style="display: none"
+        >
+          <button class="send-button" id="pay-send-button">
+            <span id="pay-send-button-text">Pay &amp; Send</span>
+          </button>
+          <button class="send-button secondary" id="buy-pack-button">
+            Buy a Letter Pack
+          </button>
+          <div class="note">Checkout opens in your browser. This card updates automatically once payment completes.</div>
+        </div>
+        <div
+          id="error-message"
+          class="send-result error"
+          style="display: none"
+        ></div>
       </div>
+      <p class="rev">postcard t14</p>
     </div>
 
     <script type="module">
@@ -457,20 +171,39 @@
 
       let dataLoaded = false;
       let currentDraftId = null;
+      let currentEligibility = null;
       let sendInProgress = false;
-      let currentTab = 'front';
+      let checkoutInProgress = false;
+      let currentTab = "front";
+
+      function applyTheme() {
+        const theme = window.openai?.theme ?? "light";
+        document.documentElement.classList.toggle("dark", theme === "dark");
+      }
 
       // Tab switching
       function switchTab(tab) {
         currentTab = tab;
-        document.getElementById("tab-front").classList.toggle("active", tab === "front");
-        document.getElementById("tab-back").classList.toggle("active", tab === "back");
-        document.getElementById("preview-front").classList.toggle("hidden", tab !== "front");
-        document.getElementById("preview-back").classList.toggle("hidden", tab !== "back");
+        document
+          .getElementById("tab-front")
+          .classList.toggle("active", tab === "front");
+        document
+          .getElementById("tab-back")
+          .classList.toggle("active", tab === "back");
+        document
+          .getElementById("preview-front")
+          .classList.toggle("hidden", tab !== "front");
+        document
+          .getElementById("preview-back")
+          .classList.toggle("hidden", tab !== "back");
       }
 
-      document.getElementById("tab-front").addEventListener("click", () => switchTab("front"));
-      document.getElementById("tab-back").addEventListener("click", () => switchTab("back"));
+      document
+        .getElementById("tab-front")
+        .addEventListener("click", () => switchTab("front"));
+      document
+        .getElementById("tab-back")
+        .addEventListener("click", () => switchTab("back"));
 
       function showLoading() {
         const card = document.getElementById("card");
@@ -478,9 +211,9 @@
 
         // Show loading state
         document.getElementById("preview-front").innerHTML =
-          '<div class="preview-loading">Loading postcard preview...</div>';
+          '<div class="preview-loading">Loading postcard preview…</div>';
         document.getElementById("preview-back").innerHTML =
-          '<div class="preview-loading">Loading message preview...</div>';
+          '<div class="preview-loading">Loading message preview…</div>';
         document.getElementById("cost").textContent = "-";
         document.getElementById("delivery").textContent = "-";
 
@@ -502,6 +235,7 @@
       }
 
       function render() {
+        applyTheme();
         const state = window.openai?.toolOutput;
 
         // Check if we have actual data
@@ -528,6 +262,7 @@
           lettersRequired,
           canSendNow,
           reasonCannotSend,
+          sendEligibility,
           deliveryClass,
           estimatedDeliveryDays,
           deliveryEstimate,
@@ -537,18 +272,21 @@
           message,
           recipientName,
           recipientAddressLine1,
+          recipientAddressLine2,
           recipientCity,
           recipientState,
           recipientPostalCode,
           senderName,
           senderAddressLine1,
+          senderAddressLine2,
           senderCity,
           senderState,
-          senderPostalCode
+          senderPostalCode,
         } = state;
 
         // Store draftId for send button
         currentDraftId = draftId;
+        currentEligibility = sendEligibility || null;
 
         // Render front preview (image)
         const previewFront = document.getElementById("preview-front");
@@ -556,32 +294,43 @@
         if (frontContent) {
           previewFront.innerHTML = frontContent;
         } else {
-          previewFront.innerHTML = "<em>No image preview available</em>";
+          previewFront.innerHTML = '<div class="preview-loading">No image preview available</div>';
         }
 
         // Render back preview (postcard mockup)
         const previewBack = document.getElementById("preview-back");
         if (message) {
           // Escape HTML helper
-          const escapeHtml = (str) => (str || '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
+          const escapeHtml = (str) =>
+            (str || "")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
 
           const escapedMessage = escapeHtml(message);
 
           // Build full recipient address
-          const escapedRecipientName = escapeHtml(recipientName || 'Recipient');
-          const escapedRecipientStreet = escapeHtml(recipientAddressLine1 || '');
+          const escapedRecipientName = escapeHtml(recipientName || "Recipient");
+          const escapedRecipientStreet = escapeHtml(
+            recipientAddressLine1 || "",
+          );
+          const escapedRecipientUnit = escapeHtml(recipientAddressLine2 || "");
           const escapedRecipientCityLine = escapeHtml(
-            [recipientCity, recipientState, recipientPostalCode].filter(Boolean).join(', ').replace(/, (\d)/, ' $1')
+            [recipientCity, recipientState, recipientPostalCode]
+              .filter(Boolean)
+              .join(", ")
+              .replace(/, (\d)/, " $1"),
           );
 
           // Build full sender address
           const escapedSenderName = escapeHtml(senderName);
-          const escapedSenderStreet = escapeHtml(senderAddressLine1 || '');
+          const escapedSenderStreet = escapeHtml(senderAddressLine1 || "");
+          const escapedSenderUnit = escapeHtml(senderAddressLine2 || "");
           const escapedSenderCityLine = escapeHtml(
-            [senderCity, senderState, senderPostalCode].filter(Boolean).join(', ').replace(/, (\d)/, ' $1')
+            [senderCity, senderState, senderPostalCode]
+              .filter(Boolean)
+              .join(", ")
+              .replace(/, (\d)/, " $1"),
           );
 
           previewBack.innerHTML = `
@@ -591,23 +340,29 @@
               </div>
               <div class="postcard-address-side">
                 <div class="postcard-stamp">STAMP</div>
-                ${escapedSenderName ? `
+                ${
+                  escapedSenderName
+                    ? `
                 <div class="postcard-return-address">
                   <div>${escapedSenderName}</div>
                   <div>${escapedSenderStreet}</div>
+                  ${escapedSenderUnit ? `<div>${escapedSenderUnit}</div>` : ""}
                   <div>${escapedSenderCityLine}</div>
                 </div>
-                ` : ''}
+                `
+                    : ""
+                }
                 <div class="postcard-recipient">
                   <div class="name">${escapedRecipientName}</div>
                   <div>${escapedRecipientStreet}</div>
+                  ${escapedRecipientUnit ? `<div>${escapedRecipientUnit}</div>` : ""}
                   <div>${escapedRecipientCityLine}</div>
                 </div>
               </div>
             </div>
           `;
         } else {
-          previewBack.innerHTML = "<em>No message preview available</em>";
+          previewBack.innerHTML = '<div class="preview-loading">No message preview available</div>';
         }
 
         // Show message and recipient in meta section
@@ -668,10 +423,39 @@
         // Update send button state
         const sendButton = document.getElementById("send-button");
         const sendButtonText = document.getElementById("send-button-text");
+        const purchaseActions = document.getElementById("purchase-actions");
+        const paySendButton = document.getElementById("pay-send-button");
+        const paySendButtonText = document.getElementById(
+          "pay-send-button-text",
+        );
+        const buyPackButton = document.getElementById("buy-pack-button");
 
-        if (!sendInProgress) {
+        if (!sendInProgress && !checkoutInProgress) {
+          sendButton.style.display = canSendNow ? "flex" : "none";
           sendButton.disabled = !canSendNow;
-          sendButtonText.textContent = canSendNow ? "Send Postcard" : (reasonCannotSend ?? "Cannot Send");
+          sendButtonText.textContent = "Send Postcard";
+
+          const payAndSend = sendEligibility?.payAndSend;
+          const letterPack = sendEligibility?.letterPack;
+          purchaseActions.style.display =
+            !canSendNow || payAndSend?.available ? "grid" : "none";
+          paySendButton.style.display = payAndSend?.available ? "flex" : "none";
+          paySendButton.disabled = !payAndSend?.available;
+          if (payAndSend?.available && payAndSend.amountCents) {
+            // Server-formatted per currency. The fallback matters more than it
+            // looks: a connector that has not re-ingested the tool schema
+            // strips unknown fields, so displayAmount is absent on stale
+            // connections and the fallback IS the display - make it
+            // currency-aware too (#278 round 7).
+            const zeroDecimal = ['bif','clp','djf','gnf','jpy','kmf','krw','mga','pyg','rwf','ugx','vnd','vuv','xaf','xof','xpf'];
+            const threeDecimal = ['bhd','jod','kwd','omr','tnd'];
+            const ccy = String(payAndSend.currency || 'usd').toLowerCase();
+            const decimals = zeroDecimal.includes(ccy) ? 0 : threeDecimal.includes(ccy) ? 3 : 2;
+            const amount = payAndSend.displayAmount || (payAndSend.amountCents / Math.pow(10, decimals)).toFixed(decimals);
+            paySendButtonText.textContent = `Pay & Send (${String(payAndSend.currency || "usd").toUpperCase()} ${amount})`;
+          }
+          buyPackButton.style.display =
+            !canSendNow && letterPack?.available ? "flex" : "none";
         }
       }
 
@@ -704,14 +488,15 @@
           // Call send_postcard via OpenAI callTool
           const result = await window.openai.callTool("send_postcard", {
             draftId: currentDraftId,
-            confirm: true
+            confirm: true,
           });
 
           // Extract orderId
-          const orderId = result?.orderId
-            || result?.structuredContent?.orderId
-            || result?.content?.[0]?.text?.match(/Order ID: ([a-f0-9-]+)/i)?.[1]
-            || null;
+          const orderId =
+            result?.orderId ||
+            result?.structuredContent?.orderId ||
+            result?.content?.[0]?.text?.match(/Order ID: ([a-f0-9-]+)/i)?.[1] ||
+            null;
 
           // Update status pill to show sent
           statusPill.classList.remove("ok", "alert");
@@ -728,7 +513,7 @@
           // Keep button disabled
         } catch (error) {
           // Show error message
-          errorMessage.textContent = `Failed to send: ${error.message || 'Unknown error'}`;
+          errorMessage.textContent = `Failed to send: ${error.message || "Unknown error"}`;
           errorMessage.style.display = "block";
 
           // Reset button for retry
@@ -745,14 +530,100 @@
         }
       }
 
-      // Attach click handler
-      document.getElementById("send-button").addEventListener("click", handleSend);
-
-      // Apply theme
-      const theme = window.openai?.theme ?? "light";
-      if (theme === "dark") {
-        document.documentElement.classList.add("dark");
+      function toolData(result) {
+        return result?.structuredContent || result || {};
       }
+
+      async function pollPurchaseStatus(orderId) {
+        const statusPill = document.getElementById("status-pill");
+        for (let attempt = 0; attempt < 24; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+          const status = toolData(
+            await window.openai.callTool("get_purchase_status", { orderId }),
+          );
+          if (status.purchaseStatus === "processing") {
+            statusPill.classList.remove("alert");
+            statusPill.classList.add("ok");
+            statusPill.textContent = "Paid - preparing mail";
+            continue;
+          }
+          if (status.purchaseStatus === "sent") {
+            statusPill.classList.remove("alert");
+            statusPill.classList.add("ok");
+            statusPill.textContent = "Sent!";
+            return;
+          }
+          if (
+            [
+              "payment_failed",
+              "refund_pending",
+              "refunded",
+              "cancelled",
+            ].includes(status.purchaseStatus)
+          ) {
+            statusPill.classList.remove("ok");
+            statusPill.classList.add("alert");
+            statusPill.textContent = status.message || status.purchaseStatus;
+            return;
+          }
+        }
+        statusPill.textContent = "Checkout open - status may take a moment";
+      }
+
+      async function handlePayAndSend() {
+        if (checkoutInProgress || !currentDraftId) return;
+        const button = document.getElementById("pay-send-button");
+        const buttonText = document.getElementById("pay-send-button-text");
+        const errorMessage = document.getElementById("error-message");
+        const idLabel = document.getElementById("id-label");
+        const idValue = document.getElementById("id-value");
+        checkoutInProgress = true;
+        errorMessage.style.display = "none";
+        button.disabled = true;
+        button.classList.add("loading");
+        buttonText.innerHTML =
+          '<span class="spinner"></span> Preparing checkout...';
+        try {
+          const result = toolData(
+            await window.openai.callTool("create_mail_checkout", {
+              draftId: currentDraftId,
+            }),
+          );
+          if (!result.checkoutUrl) {
+            throw new Error(result.message || "Checkout URL was not returned");
+          }
+          idLabel.textContent = "Purchase";
+          idValue.textContent = result.orderId;
+          button.classList.remove("loading");
+          buttonText.textContent = "Checkout Opened";
+          await window.openai.openExternal({ href: result.checkoutUrl });
+          void pollPurchaseStatus(result.orderId).catch(() => undefined);
+        } catch (error) {
+          errorMessage.textContent = `Unable to open checkout: ${error.message || "Unknown error"}`;
+          errorMessage.style.display = "block";
+          button.classList.remove("loading");
+          button.disabled = false;
+          buttonText.textContent = "Retry Pay & Send";
+          checkoutInProgress = false;
+        }
+      }
+
+      async function handleBuyPack() {
+        const purchaseUrl = currentEligibility?.letterPack?.purchaseUrl;
+        if (!purchaseUrl) return;
+        await window.openai.openExternal({ href: purchaseUrl });
+      }
+
+      // Attach click handler
+      document
+        .getElementById("send-button")
+        .addEventListener("click", handleSend);
+      document
+        .getElementById("pay-send-button")
+        .addEventListener("click", handlePayAndSend);
+      document
+        .getElementById("buy-pack-button")
+        .addEventListener("click", handleBuyPack);
 
       // Initial render (will show loading state)
       render();

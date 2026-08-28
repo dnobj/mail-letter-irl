@@ -14,6 +14,7 @@ import { DummyProvider } from './DummyProvider.js';
 import { PostGridProvider } from './PostGridProvider.js';
 import { DIYProvider } from './DIYProvider.js';
 import { query } from '../../db/index.js';
+import { isProductionEnv } from '../../config/deploymentConfig.js';
 
 /**
  * Registry of available providers
@@ -89,7 +90,7 @@ export function getLetterProvider(): LetterFulfillmentProvider {
     try {
       additionalConfig = JSON.parse(configJson);
     } catch (error) {
-      console.warn('⚠️  Failed to parse LETTER_PROVIDER_CONFIG:', error);
+      console.warn('⚠️  Failed to parse LETTER_PROVIDER_CONFIG');
     }
   }
 
@@ -110,10 +111,13 @@ export function getLetterProvider(): LetterFulfillmentProvider {
 }
 
 /**
- * Reset cached provider (useful for testing)
+ * Reset cached providers (useful for testing)
  */
 export function resetProvider(): void {
   cachedProvider = null;
+  // Also drop the by-name cache: a provider cached under one environment's
+  // rules must not survive into a test that stubs different ones.
+  providersByName.clear();
   console.log('🔄 Reset cached letter provider');
 }
 
@@ -130,6 +134,15 @@ const providersByName = new Map<string, LetterFulfillmentProvider>();
  */
 export function getProviderByName(providerName: string): LetterFulfillmentProvider {
   const normalizedName = providerName.toLowerCase();
+
+  // Production never dispatches real mail to the dummy provider, no matter
+  // who asked. The provider_routing table overrides the environment and is
+  // invisible to boot-time validation, so a routing row naming 'dummy' would
+  // otherwise sail through issue #155's startup checks and "fulfill" letters
+  // with fabricated tracking IDs.
+  if (normalizedName === 'dummy' && isProductionEnv()) {
+    throw new Error('The dummy provider is not allowed in production');
+  }
 
   // Check cache first
   if (providersByName.has(normalizedName)) {
@@ -149,7 +162,7 @@ export function getProviderByName(providerName: string): LetterFulfillmentProvid
     try {
       additionalConfig = JSON.parse(configJson);
     } catch (error) {
-      console.warn('⚠️  Failed to parse LETTER_PROVIDER_CONFIG:', error);
+      console.warn('⚠️  Failed to parse LETTER_PROVIDER_CONFIG');
     }
   }
 
@@ -167,7 +180,15 @@ export function getProviderByName(providerName: string): LetterFulfillmentProvid
     console.log(`✅ Initialized provider by name: ${config.displayName}`);
     return provider;
   } catch (error) {
-    console.warn(`⚠️  Failed to create provider ${providerName}, falling back to default:`, error);
+    // In production a construction failure must surface, not degrade: the
+    // default this used to fall back to is the dummy provider, which reports
+    // success without mailing anything. A failed send is recoverable - the
+    // job system retries; a fake successful send is silent customer harm.
+    if (isProductionEnv()) {
+      console.error(`❌ Failed to create provider ${providerName} in production`);
+      throw error;
+    }
+    console.warn(`⚠️  Failed to create provider ${providerName}, falling back to default`);
     return getLetterProvider();
   }
 }
@@ -195,7 +216,7 @@ export async function getProviderRouting(mailType: MailType): Promise<string> {
       return providerName;
     }
   } catch (error) {
-    console.warn(`⚠️  Failed to get routing for ${mailType}:`, error);
+    console.warn(`⚠️  Failed to get routing for ${mailType}`);
   }
 
   // Fall back to default provider
@@ -256,7 +277,8 @@ function initializeProviders(): void {
       apiKey: config.credentials.apiKey,
       mode: config.config?.mode ?? 'test',
       verbose: config.config?.verbose ?? true,
-      baseUrl: config.config?.baseUrl
+      baseUrl: config.config?.baseUrl,
+      timeoutMs: config.config?.timeoutMs
     };
 
     return new PostGridProvider(config, options);

@@ -187,6 +187,7 @@ describe('rateLimit middleware', () => {
     });
 
     it('should return true (blocked) and send 429 when IP limit exceeded', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       const req = createMockRequest('172.16.0.2');
       const res = createMockResponse();
 
@@ -207,6 +208,9 @@ describe('rateLimit middleware', () => {
       const body = JSON.parse(res._body);
       expect(body.error).toBe('Too Many Requests');
       expect(body.retryAfter).toBeGreaterThan(0);
+      const logged = warn.mock.calls.flat().map(String).join('\n');
+      expect(logged).toContain('Rate limit hit (IP scope)');
+      expect(logged).not.toContain('172.16.0.2');
     });
 
     it('should return true (blocked) when global limit exceeded even if IP limit OK', () => {

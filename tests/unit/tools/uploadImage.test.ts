@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import { uploadImageTool } from "../../../src/tools/uploadImage.js";
 import type { ToolContext } from "../../../src/contracts/types.js";
 
@@ -163,7 +164,7 @@ describe("upload_image tool", () => {
 
     it("should reference ImageUploadCard widget in meta", () => {
       expect(uploadImageTool.meta["openai/outputTemplate"]).toBe(
-        "ui://widgets/ImageUploadCard.html"
+        widgetTemplateUri("ImageUploadCard")
       );
     });
 

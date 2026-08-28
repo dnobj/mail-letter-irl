@@ -3,13 +3,14 @@ import dotenv from "dotenv";
 dotenv.config({ override: false });
 import http from "node:http";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promises as fs } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { LetterIrlServer } from "../server.js";
 import { registerLetterTools } from "./registerTools.js";
+import { logMcpClientRequests } from "./clientRequestLog.js";
 import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
 import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
 import { stringifyManifest } from "./manifest.js";
@@ -29,13 +30,35 @@ import {
   handleStripeWebhook
 } from "../api/dashboardApiHandler.js";
 import { validatePromoCodePublic } from "../services/promoService.js";
-import { initializeJobQueue, stopJobQueue } from "../services/jobQueue.js";
 import { closePool } from "../db/index.js";
-import { startLetterWorker } from "../workers/letterWorker.js";
-import { startCreditExpirationWorker } from "../workers/creditExpirationWorker.js";
-import { startStatusSyncWorker, stopStatusSyncWorker } from "../workers/statusSyncWorker.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
+import {
+  readRequestBody,
+  MCP_BODY_LIMIT_BYTES,
+  WEBHOOK_BODY_LIMIT_BYTES,
+  JSON_API_BODY_LIMIT_BYTES
+} from '../utils/requestBody.js';
 import { isDebugEnabled } from "../utils/debug.js";
+import {
+  assertValidOAuthConfig,
+  getOAuthConfig,
+  isCimdEnforcementEnabled,
+  SUPPORTED_GRANT_TYPES
+} from "../auth/oauthConfig.js";
+import { classifyOAuthRoute } from "../auth/oauthRoutes.js";
+import {
+  classifyDiagnosticError,
+  writeDiagnostic
+} from "../utils/diagnosticLog.js";
+import { buildWwwAuthenticateChallenge } from "../auth/oauthChallenge.js";
+import {
+  findCoupledFeatureFlagWarnings,
+  validatePublicServerAdminConfiguration
+} from "../admin/config.js";
+import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
+import { getReadiness } from "./readiness.js";
+import { kickPriceCatalog } from "../services/priceCatalog.js";
+import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,42 +87,66 @@ const PUBLIC_BASE_URL =
 const REQUIRE_AUTH = process.env.LETTER_IRL_REQUIRE_AUTH !== "false";
 const DEBUG_ENABLED = isDebugEnabled();
 
-// Environment variable validation
-const REQUIRED_ENV_VARS = [
-  'DATABASE_URL',
-  'LETTER_IRL_OAUTH_JWKS_URI',
-  'LETTER_IRL_OAUTH_ISSUER',
-  'LETTER_IRL_OAUTH_AUDIENCE',
-];
+// Environment validation lives in src/config/deploymentConfig.ts (issue #155):
+// one validator, shared with the maintenance entrypoint, that fails a
+// misconfigured production boot instead of letting it serve /healthz and fake
+// its way through fulfillment.
 
-// Only require these in production (not for local admin mode)
-const PRODUCTION_ENV_VARS = [
-  'STRIPE_SECRET_KEY',
-  'STRIPE_WEBHOOK_SECRET',
-];
+/**
+ * Build identity, for verifying which revision is actually serving.
+ *
+ * Railway injects these at build time; they are absent when running locally,
+ * where "unknown" is the honest answer rather than a fabricated value.
+ *
+ * Exposed as response headers on /healthz rather than in the body, because the
+ * body is asserted to be exactly "ok" by docs/manual-tests.md and is consumed by
+ * the Railway healthcheck. A header is additive and breaks neither.
+ */
+export const BUILD_COMMIT = process.env.RAILWAY_GIT_COMMIT_SHA ?? "unknown";
+export const BUILD_BRANCH = process.env.RAILWAY_GIT_BRANCH ?? "unknown";
 
-function validateEnvironment() {
-  const missing: string[] = [];
+export function validateEnvironment() {
+  validatePublicServerAdminConfiguration(process.env);
 
-  for (const envVar of REQUIRED_ENV_VARS) {
-    if (!process.env[envVar]) {
-      missing.push(envVar);
+  // Warn, never throw. The operator recovery routes these flags depend on are
+  // denied by the legacy admin guard, but failing startup on a flag combination
+  // would boot-loop a running deployment.
+  for (const flag of findCoupledFeatureFlagWarnings(process.env)) {
+    console.warn(
+      `[admin] ${flag}=true while public /api/admin* routes are denied; issue #69 operator recovery is unreachable. See docs/deployment.md#operator-recovery-interaction`
+    );
+  }
+
+  // Fail closed on invalid deployment configuration (issue #155). Throws with
+  // every problem named at once; the entrypoint's catch turns that into a
+  // non-zero exit, so a misconfigured deploy never serves traffic. Warnings
+  // are printed except under test, where the pinned boot-validation contract
+  // counts warn lines exactly (tests/unit/mcp/legacyAdminRoutes.test.ts).
+  let deployment;
+  try {
+    deployment = assertValidDeploymentConfig(process.env, 'server');
+  } catch (error) {
+    // Print the validator's message HERE, where the failure is known to be
+    // configuration and the message is value-free by construction (it names
+    // variables, never values). The entrypoint's catch deliberately logs only
+    // an error class - correct for arbitrary runtime errors, which may carry
+    // sensitive detail, but it would leave the operator with one word and no
+    // variable names for a config failure (review round 1).
+    console.error(error instanceof Error ? error.message : String(error));
+    throw error;
+  }
+  if (deployment.mode !== 'test') {
+    for (const warning of deployment.warnings) {
+      console.warn(`[config] ${warning}`);
     }
   }
 
-  // Check production vars unless ADMIN_ENABLED is true (local admin mode)
-  if (process.env.ADMIN_ENABLED !== 'true') {
-    for (const envVar of PRODUCTION_ENV_VARS) {
-      if (!process.env[envVar]) {
-        missing.push(envVar);
-      }
-    }
-  }
-
-  if (missing.length > 0) {
-    console.error('❌ Missing required environment variables:');
-    missing.forEach(v => console.error(`   - ${v}`));
-    process.exit(1);
+  if (REQUIRE_AUTH && isCimdEnforcementEnabled()) {
+    assertValidOAuthConfig();
+  } else if (REQUIRE_AUTH) {
+    console.warn(
+      "[auth] Strict CIMD startup enforcement is disabled; enable LETTER_IRL_OAUTH_CIMD_ENFORCEMENT only at the coordinated cutover"
+    );
   }
 }
 
@@ -112,17 +159,23 @@ type SseSession = {
 /**
  * Parse request body with timeout and error handling
  */
-function parseRequestBody(req: http.IncomingMessage, timeoutMs = 30000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    const timeout = setTimeout(() => {
-      reject(new Error('Request body timeout'));
-    }, timeoutMs);
+function parseRequestBody(
+  req: http.IncomingMessage,
+  limitBytes: number,
+  timeoutMs = 30000
+): Promise<string> {
+  // limitBytes is REQUIRED and deliberately has no default. This function had a
+  // 30-second timeout and no size cap, so the bound was bandwidth x 30s - and
+  // /webhooks/stripe reaches it before authentication, because Stripe signs the
+  // body and the signature cannot be checked until it is read (#157). A default
+  // would let the next route added here inherit the same hole silently.
+  return readRequestBody(req, { limitBytes, timeoutMs });
+}
 
-    req.on('data', chunk => { body += chunk.toString(); });
-    req.on('end', () => { clearTimeout(timeout); resolve(body); });
-    req.on('error', (err) => { clearTimeout(timeout); reject(err); });
-  });
+/** 413, 408, or 400 - so a refused body is not reported as a parse failure. */
+function bodyErrorStatus(error: unknown): number {
+  const status = (error as { statusCode?: unknown } | undefined)?.statusCode;
+  return typeof status === 'number' ? status : 400;
 }
 
 function getAllowedHosts(): string[] {
@@ -219,6 +272,7 @@ export async function startHttpServer() {
   validateEnvironment();
 
   const letterServer = new LetterIrlServer();
+  let cachedToolNames: Set<string> | null = null;
   const sseSessions = new Map<string, SseSession>();
   const allowedHosts = getAllowedHosts();
   const allowedOrigins = getAllowedOrigins();
@@ -281,23 +335,14 @@ export async function startHttpServer() {
       enableDnsRebindingProtection: true
     });
 
-    const validationError = sseTransport.validateRequestHeaders(req);
-    if (validationError) {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          error: validationError
-        })
-      );
-      return;
-    }
-
     sseTransport.onclose = async () => {
       sseSessions.delete(sseTransport.sessionId);
       await sessionServer.close();
     };
     sseTransport.onerror = (error) => {
-      console.error("SSE transport error", error);
+      writeDiagnostic("error", "mcp.sse_transport_error", {
+        errorClass: classifyDiagnosticError(error, "transport_error")
+      });
     };
 
     try {
@@ -307,15 +352,19 @@ export async function startHttpServer() {
         transport: sseTransport,
         authInfo
       });
-      console.log(
-        `SSE session established id=${sseTransport.sessionId} user=${authInfo?.userId ?? "anonymous"}`
-      );
+      writeDiagnostic("info", "mcp.sse_session_established", {
+        authType: authInfo?.authType ?? "disabled"
+      });
     } catch (error) {
-      console.error("Failed to start SSE session", error);
+      writeDiagnostic("error", "mcp.sse_session_start_failed", {
+        errorClass: classifyDiagnosticError(error, "transport_error")
+      });
       try {
         await sessionServer.close();
       } catch (closeError) {
-        console.warn("Failed to close SSE session server", closeError);
+        writeDiagnostic("warn", "mcp.sse_session_close_failed", {
+          errorClass: classifyDiagnosticError(closeError, "transport_error")
+        });
       }
       if (!res.headersSent) {
         res.writeHead(500, { "Content-Type": "application/json" });
@@ -353,7 +402,9 @@ export async function startHttpServer() {
     try {
       await session.transport.handlePostMessage(req, res);
     } catch (error) {
-      console.error("Failed to process SSE message", error);
+      writeDiagnostic("error", "mcp.sse_message_failed", {
+        errorClass: classifyDiagnosticError(error, "transport_error")
+      });
       if (!res.headersSent) {
         res.writeHead(500).end("Failed to process message");
       }
@@ -363,9 +414,32 @@ export async function startHttpServer() {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? `${DEFAULT_HOST}:${DEFAULT_PORT}`}`);
 
+    if (denyLegacyPublicAdminRoute(url.pathname, res)) {
+      return;
+    }
+
     if (url.pathname === "/healthz") {
       res.statusCode = 200;
+      // Deploy verification: a status code alone cannot distinguish a new build
+      // from an old one still serving after a failed deploy.
+      res.setHeader("X-Build-Commit", BUILD_COMMIT);
+      res.setHeader("X-Build-Branch", BUILD_BRANCH);
+      res.setHeader("Cache-Control", "no-store");
       res.end("ok");
+      return;
+    }
+
+    if (url.pathname === "/readyz") {
+      // Readiness as distinct from liveness (issue #155): configured, database
+      // reachable, mail routing pointed at real providers. /healthz stays a
+      // pure process probe - its body is contractually pinned to "ok".
+      const readiness = await getReadiness();
+      res.statusCode = readiness.statusCode;
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("X-Build-Commit", BUILD_COMMIT);
+      res.setHeader("X-Build-Branch", BUILD_BRANCH);
+      res.setHeader("Cache-Control", "no-store");
+      res.end(readiness.body);
       return;
     }
 
@@ -402,7 +476,9 @@ export async function startHttpServer() {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.end(stringifyManifest(getPublicBaseUrl(req)));
       } catch (error) {
-        console.error("Manifest generation failed", error);
+        writeDiagnostic("error", "mcp.manifest_generation_failed", {
+          errorClass: classifyDiagnosticError(error, "configuration_error")
+        });
         res.statusCode = 500;
         res.end("Manifest generation error");
       }
@@ -476,16 +552,11 @@ export async function startHttpServer() {
       }
 
       try {
-        const body = await parseRequestBody(req);
-        const payload = body ? JSON.parse(body) : {};
-        console.log(
-          JSON.stringify({
-            level: "debug",
-            timestamp: new Date().toISOString(),
-            event: "widget.diagnostic",
-            diagnostic: payload
-          })
-        );
+        const body = await parseRequestBody(req, JSON_API_BODY_LIMIT_BYTES);
+        if (body) {
+          JSON.parse(body);
+        }
+        writeDiagnostic("info", "widget.diagnostic_received");
         res.statusCode = 204;
         res.end();
       } catch (error: any) {
@@ -542,6 +613,19 @@ export async function startHttpServer() {
       return;
     }
 
+    // Server-controlled Stripe return page. It intentionally shows no order
+    // details; authenticated status is available only through get_purchase_status.
+    if (url.pathname === '/purchase/return' && req.method === 'GET') {
+      const cancelled = url.searchParams.get('outcome') === 'cancelled';
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.end(
+        `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Letter IRL</title></head><body style="font-family:system-ui;max-width:36rem;margin:4rem auto;padding:1rem"><h1>${cancelled ? 'Checkout cancelled' : 'Payment received'}</h1><p>${cancelled ? 'Your draft was not sent. Return to ChatGPT to retry or choose a letter pack.' : 'Return to ChatGPT. Letter IRL will update the purchase status as soon as Stripe confirms payment.'}</p></body></html>`
+      );
+      return;
+    }
+
     // Stripe Checkout API
     if (url.pathname === "/api/stripe/create-checkout-session" && req.method === "POST") {
       // Rate limit checkout attempts
@@ -550,11 +634,11 @@ export async function startHttpServer() {
       }
       // Parse JSON body with timeout
       try {
-        const body = await parseRequestBody(req);
+        const body = await parseRequestBody(req, JSON_API_BODY_LIMIT_BYTES);
         (req as any).body = body ? JSON.parse(body) : {};
         await handleCreateCheckoutSession(req as any, res as any);
       } catch (error) {
-        console.error('Error parsing checkout request body:', error);
+        console.error('Error parsing checkout request body');
         res.statusCode = 408;
         res.end('Request timeout or error');
       }
@@ -565,13 +649,15 @@ export async function startHttpServer() {
     if (url.pathname === "/webhooks/stripe" && req.method === "POST") {
       // Keep raw body for signature verification with timeout
       try {
-        const body = await parseRequestBody(req);
+        const body = await parseRequestBody(req, WEBHOOK_BODY_LIMIT_BYTES);
         (req as any).body = body; // Raw string for Stripe signature verification
         await handleStripeWebhook(req as any, res as any);
       } catch (error) {
-        console.error('Error parsing Stripe webhook body:', error);
-        res.statusCode = 408;
-        res.end('Request timeout or error');
+        // A refused body is 413, not 408. Stripe retries on both, but the
+        // status is the only signal telling an operator which happened.
+        console.error('Error parsing Stripe webhook body');
+        res.statusCode = bodyErrorStatus(error);
+        res.end(res.statusCode === 413 ? 'Payload too large' : 'Request timeout or error');
       }
       return;
     }
@@ -603,7 +689,7 @@ export async function startHttpServer() {
           campaignName: result.campaign?.name,
         }));
       } catch (error) {
-        console.error('Error validating promo code:', error);
+        console.error('Error validating promo code');
         res.statusCode = 500;
         res.end(JSON.stringify({ valid: false, reason: 'Internal error' }));
       }
@@ -616,19 +702,16 @@ export async function startHttpServer() {
       return;
     }
 
-    // Handle CORS preflight for admin API routes
-    if (url.pathname.startsWith('/api/admin/') && req.method === 'OPTIONS') {
-      respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
-      return;
-    }
-
     if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.png" || url.pathname === "/favicon.svg") {
       res.statusCode = 204;
       res.end();
       return;
     }
 
-    if (matchesWellKnownRoute(url.pathname, OPENID_CONFIG_ROUTE)) {
+    if (
+      classifyOAuthRoute(url.pathname, req.method ?? "GET") ===
+      "authorization-server-proxy"
+    ) {
       const payload = getOpenIdConfiguration(getPublicBaseUrl(req));
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
@@ -636,16 +719,11 @@ export async function startHttpServer() {
       return;
     }
 
-    if (matchesWellKnownRoute(url.pathname, PROTECTED_RESOURCE_ROUTE)) {
+    if (
+      classifyOAuthRoute(url.pathname, req.method ?? "GET") ===
+      "protected-resource"
+    ) {
       const payload = getProtectedResourceMetadata(getPublicBaseUrl(req));
-      res.statusCode = 200;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify(payload));
-      return;
-    }
-
-    if (matchesWellKnownRoute(url.pathname, AUTHORIZATION_SERVER_ROUTE)) {
-      const payload = getOpenIdConfiguration(getPublicBaseUrl(req));
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(payload));
@@ -657,15 +735,17 @@ export async function startHttpServer() {
     // Aligned with MCP Nov 2025 spec direction (CIMD replacing DCR)
     // GitHub Issue: #20
     if (url.pathname === "/oauth/register" && req.method === "POST") {
-      const staticClientId = process.env.CHATGPT_STATIC_CLIENT_ID;
+      const oauthConfig = getOAuthConfig();
+      const staticClientId = oauthConfig.staticClientId;
 
-      if (!staticClientId) {
-        console.error("[DCR] CHATGPT_STATIC_CLIENT_ID not configured");
-        res.statusCode = 503;
+      if (
+        classifyOAuthRoute(url.pathname, req.method) !== "static-registration" ||
+        !staticClientId
+      ) {
+        res.statusCode = 404;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({
-          error: "server_error",
-          error_description: "OAuth client registration is not configured"
+          error: "not_found"
         }));
         return;
       }
@@ -675,17 +755,12 @@ export async function startHttpServer() {
         client_id: staticClientId,
         client_id_issued_at: Math.floor(Date.now() / 1000),
         token_endpoint_auth_method: "none",
-        grant_types: ["authorization_code", "refresh_token"],
+        grant_types: [...SUPPORTED_GRANT_TYPES],
         response_types: ["code"],
-        redirect_uris: [
-          "https://chat.openai.com/aip/auth/callback",
-          "https://chatgpt.com/connector_platform_oauth_redirect",
-          "https://platform.openai.com/apps-manage/oauth",
-          "http://localhost:18883/oauth/callback"
-        ]
+        redirect_uris: oauthConfig.staticRedirectUris
       };
 
-      console.log(`[DCR] Returning static client_id: ${staticClientId.substring(0, 8)}...`);
+      writeDiagnostic("info", "auth.static_registration_returned");
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(response));
@@ -774,6 +849,9 @@ export async function startHttpServer() {
         return; // Rate limited
       }
 
+      // Cached once: the registry is static for the process lifetime.
+      cachedToolNames ??= new Set(letterServer.listTools().map((tool) => tool.name));
+
       if (!req.headers.origin) {
         req.headers.origin = FALLBACK_ORIGIN;
       }
@@ -783,12 +861,12 @@ export async function startHttpServer() {
         return;
       }
 
-      console.log(
-        `MCP request ${new Date().toISOString()} method=${req.method} host=${req.headers.host} origin=${req.headers.origin} user=${authInfo?.userId ?? "anonymous"}`
-      );
+      writeDiagnostic("info", "mcp.request_received", {
+        method: req.method ?? "unknown",
+        authType: authInfo?.authType ?? "disabled"
+      });
 
-      // Create transport first (passes res directly to constructor)
-      const sessionTransport = new StreamableHTTPServerTransport(res, {
+      const sessionTransport = new StreamableHTTPServerTransport({
         allowedHosts,
         allowedOrigins,
         enableDnsRebindingProtection: true
@@ -799,7 +877,7 @@ export async function startHttpServer() {
 
       // Clean up when response closes
       res.on('close', async () => {
-        console.log(`Streamable HTTP connection closed, session=${sessionTransport.sessionId}`);
+        writeDiagnostic("info", "mcp.connection_closed");
         await sessionServer.close();
       });
 
@@ -807,20 +885,28 @@ export async function startHttpServer() {
         // Connect the MCP server to the transport
         console.log('Connecting MCP server to Streamable HTTP transport...');
         await sessionServer.connect(sessionTransport);
-        console.log(`MCP server connected, session=${sessionTransport.sessionId}`);
+        writeDiagnostic("info", "mcp.server_connected");
 
         // For Streamable HTTP POST, parse body and handle request with timeout
-        const body = await parseRequestBody(req);
+        const body = await parseRequestBody(req, MCP_BODY_LIMIT_BYTES);
 
-        console.log(`Received POST body: ${body.substring(0, 200)}`);
         const parsedBody = body ? JSON.parse(body) : undefined;
-        console.log(`Parsed request: method=${parsedBody?.method || 'unknown'}`);
+        writeDiagnostic("info", "mcp.request_parsed");
+
+        // Issue #235 observability: which client class asked for what, and
+        // which metadata revisions a tools/list response served.
+        logMcpClientRequests(
+          parsedBody,
+          req.headers["user-agent"],
+          cachedToolNames ?? new Set()
+        );
 
         await sessionTransport.handleRequest(req, res, parsedBody);
         console.log(`Request handled successfully`);
       } catch (error) {
-        console.error("MCP request failed", error);
-        console.error("Error stack:", error instanceof Error ? error.stack : 'no stack');
+        writeDiagnostic("error", "mcp.request_failed", {
+          errorClass: classifyDiagnosticError(error, "transport_error")
+        });
         if (!res.headersSent) {
           res.statusCode = 500;
           res.end("Internal Server Error");
@@ -836,6 +922,13 @@ export async function startHttpServer() {
   await new Promise<void>((resolve) => {
     server.listen(DEFAULT_PORT, DEFAULT_HOST, () => {
       console.log(`Letter IRL MCP HTTP server listening on http://${DEFAULT_HOST}:${DEFAULT_PORT}`);
+      // Price warmup AFTER the port binds, fire-and-forget (#275 stage A). An
+      // earlier revision awaited this above, ~650 lines before listen, which
+      // meant a Stripe outage held the socket closed - a probe against a
+      // closed port cannot report "unready", so the comment promising /healthz
+      // would answer was false (#278 review). Resolution is lazy at every
+      // consuming path anyway; this only saves the first request the latency.
+      kickPriceCatalog(undefined, "http_listen");
       console.log(`  MCP endpoint: http://${DEFAULT_HOST}:${DEFAULT_PORT}${MCP_PATH}`);
       console.log(`  SSE stream: http://${DEFAULT_HOST}:${DEFAULT_PORT}${SSE_PATH}`);
       console.log(
@@ -846,34 +939,16 @@ export async function startHttpServer() {
     });
   });
 
-  // Initialize job queue and start workers (unless DISABLE_WORKERS is set)
-  if (process.env.DISABLE_WORKERS === 'true') {
-    console.log('');
-    console.log('⚠️  Workers disabled (DISABLE_WORKERS=true)');
-    console.log('   Admin-only mode - no job processing');
-    console.log('');
-  } else {
-    try {
-      console.log('');
-      await initializeJobQueue();
-      await startLetterWorker();
-      await startCreditExpirationWorker();
-      await startStatusSyncWorker();
-      console.log('');
-    } catch (error) {
-      console.error('❌ Failed to initialize job queue:', error);
-      console.error('⚠️  Server will continue without background job processing');
-    }
-  }
+  console.log('Background maintenance is disabled in the API process; use npm run maintenance.');
 
   const close = async () => {
     console.log('\n🛑 Shutting down gracefully...');
     try {
-      stopStatusSyncWorker();
-      await stopJobQueue();
       await closePool();
     } catch (error) {
-      console.error('Error during shutdown:', error);
+      writeDiagnostic("error", "server.shutdown_failed", {
+        errorClass: classifyDiagnosticError(error, "database_error")
+      });
     }
     server.close(() => process.exit(0));
   };
@@ -882,9 +957,11 @@ export async function startHttpServer() {
   process.on("SIGTERM", close);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   startHttpServer().catch((error) => {
-    console.error("Failed to start HTTP MCP server", error);
+    writeDiagnostic("error", "server.start_failed", {
+      errorClass: classifyDiagnosticError(error, "configuration_error")
+    });
     process.exit(1);
   });
 }
@@ -901,7 +978,9 @@ async function authenticateRequest(
     try {
       return await validateAuthorizationHeader(req.headers.authorization);
     } catch (error) {
-      console.warn("Optional auth validation failed", error);
+      writeDiagnostic("warn", "auth.optional_validation_failed", {
+        errorClass: classifyDiagnosticError(error, "authorization_error")
+      });
       return null;
     }
   }
@@ -933,21 +1012,4 @@ async function authenticateRequest(
   }
 }
 
-export function buildWwwAuthenticateChallenge(message: string, publicBaseUrl = PUBLIC_BASE_URL): string {
-  const scopes = (process.env.LETTER_IRL_OAUTH_SCOPES ?? "openid email profile")
-    .split(/[,\s]+/)
-    .map((scope) => scope.trim())
-    .filter(Boolean)
-    .join(" ");
-
-  return [
-    `Bearer realm="Letter IRL"`,
-    `resource_metadata="${publicBaseUrl}${PROTECTED_RESOURCE_ROUTE}"`,
-    `authorization_uri="${publicBaseUrl}${AUTHORIZATION_SERVER_ROUTE}"`,
-    scopes ? `scope="${scopes}"` : undefined,
-    `error="invalid_token"`,
-    `error_description="${message.replace(/"/g, "'")}"`
-  ]
-    .filter(Boolean)
-    .join(", ");
-}
+export { buildWwwAuthenticateChallenge };

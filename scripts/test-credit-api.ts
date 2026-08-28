@@ -2,8 +2,15 @@
 /**
  * Test Credit API functionality
  *
+ * Grants here are 'adjustment' - an operator crediting an account directly -
+ * NOT 'purchase'. A purchase grant must name the order that funded it
+ * (migration 027 rejects one that does not), and this script has no order to
+ * name; it used to call addCredits with a fabricated order id, which is the
+ * shape #152 exists to make impossible. The real purchase path is the Stripe
+ * webhook, covered by tests/integration/purchaseIdempotency.postgres.test.ts.
+ *
  * Tests the complete credit flow:
- * 1. Add credits (purchase simulation)
+ * 1. Add credits (operator grant)
  * 2. Check balance
  * 3. Deduct credits (letter send simulation)
  * 4. Check transaction history
@@ -11,7 +18,7 @@
  */
 
 import 'dotenv/config';
-import { addCredits, deductCredits, getBalance, getTransactions } from '../src/services/creditService.js';
+import { addCreditsWithOptions, deductCredits, getBalance, getTransactions } from '../src/services/creditService.js';
 import { getUser, findUser } from '../src/services/userService.js';
 import { closePool } from '../src/db/index.js';
 
@@ -28,14 +35,16 @@ async function testCreditFlow() {
       console.log('⚠️  Test user already exists, using existing data\n');
     }
 
-    // Step 1: Add credits (simulating purchase)
-    console.log('1️⃣  Adding 20 credits (purchase simulation)...');
-    const purchase1 = await addCredits({
+    // Step 1: Add credits (operator grant)
+    console.log('1️⃣  Adding 20 credits (operator grant)...');
+    const purchase1 = await addCreditsWithOptions({
       userId: TEST_USER_ID,
       email: TEST_EMAIL,
       credits: 20,
-      orderId: 'order_test_001',
-      description: 'Test purchase: Regular Pack'
+      sourceType: 'adjustment',
+      sourceReferenceId: 'manual_test_001',
+      expirationDays: 730,
+      description: 'Test grant: Regular Pack equivalent'
     });
     console.log(`   ✅ Added 20 credits`);
     console.log(`   📊 New balance: ${purchase1.user.credits} credits\n`);
@@ -59,13 +68,15 @@ async function testCreditFlow() {
     console.log(`   📊 New balance: ${deduction1.user.credits} credits\n`);
 
     // Step 4: Add more credits
-    console.log('4️⃣  Adding 100 more credits (Power Pack)...');
-    const purchase2 = await addCredits({
+    console.log('4️⃣  Adding 100 more credits (Power Pack equivalent)...');
+    const purchase2 = await addCreditsWithOptions({
       userId: TEST_USER_ID,
       email: TEST_EMAIL,
       credits: 100,
-      orderId: 'order_test_002',
-      description: 'Test purchase: Power Pack'
+      sourceType: 'adjustment',
+      sourceReferenceId: 'manual_test_002',
+      expirationDays: 730,
+      description: 'Test grant: Power Pack equivalent'
     });
     console.log(`   ✅ Added 100 credits`);
     console.log(`   📊 New balance: ${purchase2.user.credits} credits\n`);

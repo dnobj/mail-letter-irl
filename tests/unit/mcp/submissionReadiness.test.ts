@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import { getOpenIdConfiguration } from "../../../src/auth/metadata.js";
 import {
   buildWwwAuthenticateChallenge,
@@ -30,22 +31,26 @@ describe("Submission readiness checks", () => {
   });
 
   it("should include OAuth security schemes when auth is required", () => {
-    expect(buildToolSecuritySchemes(true)).toEqual([
+    expect(buildToolSecuritySchemes("send_letter", true)).toEqual([
       {
         type: "oauth2",
-        scopes: ["openid", "email", "profile"]
+        // offline_access is requested here, never enforced: ChatGPT unions
+        // these per-tool lists to build its authorization request rather than
+        // reading scopes_supported (issue #160).
+        scopes: ["mail:send", "offline_access"]
       }
     ]);
   });
 
   it("should expose noauth security schemes when auth is disabled", () => {
-    expect(buildToolSecuritySchemes(false)).toEqual([{ type: "noauth" }]);
+    expect(buildToolSecuritySchemes("send_letter", false)).toEqual([{ type: "noauth" }]);
   });
 
   it("should copy securitySchemes into tool metadata", () => {
     const meta = buildToolMeta(
+      "quote_and_preview_letter",
       {
-        "openai/outputTemplate": "ui://widgets/LetterPreviewCard.html",
+        "openai/outputTemplate": widgetTemplateUri("LetterPreviewCard"),
         "openai/widgetAccessible": true
       },
       true
@@ -53,12 +58,12 @@ describe("Submission readiness checks", () => {
     expect(meta.securitySchemes).toEqual([
       {
         type: "oauth2",
-        scopes: ["openid", "email", "profile"]
+        scopes: ["mail:draft", "offline_access"]
       }
     ]);
     expect(meta["openai/widgetAccessible"]).toBe(true);
     expect(meta.ui).toMatchObject({
-      resourceUri: "ui://widgets/LetterPreviewCard.html",
+      resourceUri: widgetTemplateUri("LetterPreviewCard"),
       widgetAccessible: true
     });
   });
@@ -76,9 +81,12 @@ describe("Submission readiness checks", () => {
     });
   });
 
-  it("should advertise CMID support in OIDC metadata", () => {
-    const metadata = getOpenIdConfiguration("https://api.letterirl.com");
-    expect(metadata.client_id_metadata_document_supported).toBe(true);
+  it("should not synthesize Auth0 CIMD support", () => {
+    const metadata = getOpenIdConfiguration("https://api.letterirl.com") as Record<
+      string,
+      unknown
+    >;
+    expect(metadata).not.toHaveProperty("client_id_metadata_document_supported");
   });
 
   it("should derive public metadata URLs from the forwarded custom domain", () => {
@@ -95,5 +103,17 @@ describe("Submission readiness checks", () => {
     expect(buildWwwAuthenticateChallenge("Missing Authorization header", publicBaseUrl)).toContain(
       'resource_metadata="https://api.letterirl.com/.well-known/oauth-protected-resource"'
     );
+  });
+
+  it("should return a standards-aligned insufficient-scope challenge", () => {
+    const challenge = buildWwwAuthenticateChallenge(
+      "insufficient_scope: missing mail:send",
+      "https://api.letterirl.com"
+    );
+    expect(challenge).toContain('error="insufficient_scope"');
+    expect(challenge).toContain("mail:read");
+    expect(challenge).toContain("mail:draft");
+    expect(challenge).toContain("mail:send");
+    expect(challenge).not.toContain("authorization_uri=");
   });
 });
