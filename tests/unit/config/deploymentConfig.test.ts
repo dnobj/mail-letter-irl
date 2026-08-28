@@ -20,7 +20,7 @@ import {
 const VALID_PROD: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
   LETTER_IRL_DEPLOYMENT_ENVIRONMENT: 'production',
-  DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+  DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
   STRIPE_SECRET_KEY: 'sk_live_unit_fixture',
   STRIPE_WEBHOOK_SECRET: 'whsec_unit_fixture',
   STRIPE_PRICE_STARTER: 'price_starter_unit_fixture',
@@ -47,7 +47,7 @@ const VALID_PROD: NodeJS.ProcessEnv = {
 const VALID_DEV: NodeJS.ProcessEnv = {
   NODE_ENV: 'production', // deployed development runs NODE_ENV=production
   LETTER_IRL_DEPLOYMENT_ENVIRONMENT: 'development',
-  DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+  DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
   STRIPE_SECRET_KEY: 'sk_test_unit_fixture',
   STRIPE_WEBHOOK_SECRET: 'whsec_unit_fixture'
 };
@@ -377,7 +377,7 @@ describe('validateDeploymentConfig outside production', () => {
   it('skips pack and JIT checks entirely in test mode so unit fixtures stay minimal', () => {
     const testMode: NodeJS.ProcessEnv = {
       NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+      DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
       STRIPE_SECRET_KEY: 'sk_test_unit_fixture',
       STRIPE_WEBHOOK_SECRET: 'whsec_unit_fixture',
       JIT_PURCHASE_ENABLED: 'true' // the legacyAdminRoutes fixture does this with no JIT config
@@ -392,7 +392,7 @@ describe('validateDeploymentConfig outside production', () => {
   it('keeps the local admin mode bootable without any Stripe configuration', () => {
     const adminLocal: NodeJS.ProcessEnv = {
       NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+      DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
       ADMIN_ENABLED: 'true'
     };
     expect(validateDeploymentConfig(adminLocal, 'server').errors).toEqual([]);
@@ -404,7 +404,7 @@ describe('validateDeploymentConfig outside production', () => {
     // exactly the live-key-outside-production scenario (review round 1).
     const adminWithLiveKey: NodeJS.ProcessEnv = {
       NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://user:pass@fixture.example/db',
+      DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
       ADMIN_ENABLED: 'true',
       STRIPE_SECRET_KEY: 'sk_live_unit_fixture'
     };
@@ -510,5 +510,70 @@ describe('ENV_VAR_MANIFEST', () => {
 
   it('approves exactly the providers production may run on', () => {
     expect(APPROVED_LIVE_PROVIDERS).toEqual(['postgrid']);
+  });
+});
+
+/**
+ * Debug flags in production (#157).
+ *
+ * Graduated by what each actually exposes, not by the word "debug". DEBUG
+ * un-404s /debug/widgets - unauthenticated, Access-Control-Allow-Origin: *,
+ * disclosing the widget directory, process.cwd() and absolute container paths.
+ * That is a route that should not exist in production, so it errors.
+ * DEBUG_CONTENT and DEBUG_IMAGE only widen log records (counts and image
+ * parameter shapes, no letter content), so they warn.
+ *
+ * Nothing else would report any of them: none appears in ENV_VAR_MANIFEST, so
+ * the cutover preflight cannot see them in either direction.
+ */
+describe('debug flags in production (#157)', () => {
+  const findings = (overrides: Record<string, string | undefined>) =>
+    validateDeploymentConfig(env(overrides), 'server').findings;
+  const rules = (overrides: Record<string, string | undefined>) =>
+    findings(overrides).map(f => f.rule);
+
+  it('is silent when none is set', () => {
+    expect(rules({})).not.toContain('debug.enabled_in_production');
+    expect(rules({})).not.toContain('debug.verbose_logging_in_production');
+  });
+
+  it.each(['true', '1', 'yes', 'on', 'letter-irl:*', '*'])(
+    'ERRORS for DEBUG=%s, because it serves an unauthenticated route',
+    raw => {
+      // The spellings isDebugEnabled accepts. Testing only 'true' would miss
+      // the namespace forms, which is how a DEBUG=letter-irl:* left over from
+      // an investigation would survive a check.
+      const found = findings({ DEBUG: raw }).find(f => f.rule === 'debug.enabled_in_production');
+      expect(found, `DEBUG=${raw} went unreported`).toBeDefined();
+      expect(found?.severity).toBe('error');
+    }
+  );
+
+  it.each(['false', '0', 'off', 'no', ''])('accepts DEBUG=%s', raw => {
+    expect(rules({ DEBUG: raw })).not.toContain('debug.enabled_in_production');
+  });
+
+  it.each(['DEBUG_CONTENT', 'DEBUG_IMAGE'])('WARNS for %s, which only widens logs', name => {
+    const found = findings({ [name]: 'true' }).find(
+      f => f.rule === 'debug.verbose_logging_in_production'
+    );
+    expect(found).toBeDefined();
+    expect(found?.severity).toBe('warning');
+    // A warning must not stop a boot.
+    expect(validateDeploymentConfig(env({ [name]: 'true' }), 'server').errors).toEqual([]);
+  });
+
+  it('leaves development alone', () => {
+    const dev = validateDeploymentConfig(
+      { ...VALID_DEV, DEBUG: 'true', DEBUG_IMAGE: 'true' },
+      'server'
+    );
+    expect(dev.findings.map(f => f.rule)).not.toContain('debug.enabled_in_production');
+  });
+
+  it('covers the maintenance surface as well', () => {
+    expect(
+      validateDeploymentConfig(env({ DEBUG: 'true' }), 'maintenance').findings.map(f => f.rule)
+    ).toContain('debug.enabled_in_production');
   });
 });

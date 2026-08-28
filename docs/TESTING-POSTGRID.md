@@ -11,7 +11,7 @@ This guide explains how to test the PostGrid Print & Mail API integration for Le
 **Current Configuration:**
 - Provider: `postgrid`
 - Mode: `test`
-- API Key: `test_sk_ertXEPkwdcvuubGby49cKC`
+- API Key: `test_sk_REPLACE_WITH_YOUR_POSTGRID_TEST_KEY`
 
 ---
 
@@ -337,7 +337,7 @@ Country: CA
 **Configuration:**
 ```bash
 LETTER_PROVIDER=postgrid
-LETTER_PROVIDER_API_KEY=test_sk_ertXEPkwdcvuubGby49cKC
+LETTER_PROVIDER_API_KEY=test_sk_REPLACE_WITH_YOUR_POSTGRID_TEST_KEY
 LETTER_PROVIDER_CONFIG='{"mode":"test","verbose":true}'
 ```
 
