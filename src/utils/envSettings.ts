@@ -46,3 +46,43 @@ export function enabledUnlessDisabled(
   if (raw === '') return true;
   return AFFIRMATIVE.has(raw);
 }
+
+/**
+ * Values that explicitly turn a flag OFF. The mirror of AFFIRMATIVE, and
+ * deliberately a separate list: 'enabled'/'disabled' pair up, but the two sets
+ * are consulted by functions with opposite failure directions and must be free
+ * to diverge.
+ */
+const NEGATIVE = new Set(['false', '0', 'no', 'off', 'disabled']);
+
+/**
+ * A flag that is ON when unset and ON for anything not explicitly negative -
+ * so only `false`, `0`, `no`, `off`, `disabled` turn it off, and a TYPO LEAVES
+ * IT ON.
+ *
+ * This is the mirror image of enabledUnlessDisabled and is deliberately NOT a
+ * generalisation of it. The two differ in exactly one case - an unreadable
+ * value - and that case is the whole reason both exist. Choose by asking which
+ * direction a typo should fall:
+ *
+ *   enabledUnlessDisabled       typo -> OFF. For a kill switch on an
+ *                               irreversible job, where an operator who
+ *                               believes they have stopped it must actually
+ *                               have stopped it.
+ *
+ *   onUnlessExplicitlyDisabled  typo -> ON. For an ACCESS GATE, where "off"
+ *                               means production is open to everyone.
+ *                               LETTER_IRL_BETA_GATE_ENABLED=fasle must not
+ *                               admit the world.
+ *
+ * Do not fold these two together. They are a few lines apart and opposite in
+ * the only case that matters, and a single "sensible" helper would be wrong
+ * half the time.
+ */
+export function onUnlessExplicitlyDisabled(
+  name: string,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  const raw = (env[name] ?? '').trim().toLowerCase();
+  return !NEGATIVE.has(raw);
+}
