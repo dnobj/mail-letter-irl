@@ -5,6 +5,7 @@ import {
   HANDLED_DRAFT_ERROR_CODES,
   type DraftMailType
 } from '../../../src/tools/draftErrors.js';
+import { SpendLimitError } from '../../../src/services/betaSpendLimits.js';
 
 /**
  * The send surface's redaction guarantee, made exhaustive (#179).
@@ -151,6 +152,41 @@ describe('mail-type wording', () => {
     );
     expect(fromPostcard(blocked, 'd').message).toBe(
       friendlyDraftError(blocked, 'd', 'postcard').message
+    );
+  });
+});
+
+/**
+ * Spend-limit refusals must keep their own wording (#179).
+ *
+ * SpendLimitError carries a .code, so the default-deny tail would otherwise
+ * replace "you have reached your daily limit, try again tomorrow" with the
+ * generic "contact support" string - turning an actionable message into a dead
+ * end. They are branched by TYPE instead: every message on that class is a
+ * fixed server-authored string, the only interpolation being a cap number from
+ * our own configuration.
+ */
+describe('spend-limit wording survives', () => {
+  it.each([
+    'ACCOUNT_DAILY_MAIL_CAP',
+    'GLOBAL_DAILY_MAIL_CEILING',
+    'MAIL_SENDING_DISABLED',
+    'SPEND_LIMIT_UNVERIFIABLE'
+  ])('%s reaches the customer intact', code => {
+    const error = new SpendLimitError(code, 'Please try again tomorrow.');
+    expect(friendlyDraftError(error, 'draft-1', 'letter').message).toBe(
+      'Please try again tomorrow.'
+    );
+  });
+
+  it('is not just the no-code passthrough', () => {
+    // A plain Error carrying the same code IS swallowed - which is what proves
+    // the branch keys on the type, not on the string.
+    const lookalike = Object.assign(new Error('Please try again tomorrow.'), {
+      code: 'ACCOUNT_DAILY_MAIL_CAP'
+    });
+    expect(friendlyDraftError(lookalike, 'draft-1', 'letter').message).toBe(
+      'Unable to send letter. Please contact Letter IRL support.'
     );
   });
 });

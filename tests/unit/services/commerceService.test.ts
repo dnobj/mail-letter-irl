@@ -1,5 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+/**
+ * Today's charge total, for the daily purchase cap (#179). Held on a hoisted
+ * object so the db mock below can answer the cap's aggregate WITHOUT every
+ * test's own mockImplementation having to know about it - two dozen call sites
+ * replace mocks.query wholesale, and the cap FAILS CLOSED, so an unanswered
+ * aggregate would refuse every checkout in this file.
+ */
+const capState = vi.hoisted(() => ({
+  chargedTodayCents: 0,
+  lettersTodayForUser: 0,
+  lettersTodayGlobal: 0
+}));
+
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   transaction: vi.fn(),
@@ -69,7 +82,27 @@ vi.mock('../../../src/services/priceCatalog.js', async importOriginal => {
 });
 
 vi.mock('../../../src/db/index.js', () => ({
-  query: mocks.query,
+  // Intercepted ahead of mocks.query so the spend cap's aggregate is always
+  // answered, whatever a given test does to mocks.query. Everything else falls
+  // through untouched.
+  query: (sql: string, params?: unknown[]) => {
+    if (typeof sql === 'string' && sql.includes('SUM(amount_cents)')) {
+      return Promise.resolve({
+        rows: [{ total: String(capState.chargedTodayCents) }],
+        rowCount: 1
+      });
+    }
+    if (typeof sql === 'string' && sql.includes('COUNT(*) AS count') && sql.includes('FROM letters')) {
+      // Pay & Send is the one path that charges AND mails, so it consults the
+      // mail ceilings here too - before any order row exists.
+      const scoped = sql.includes('user_id = $1');
+      return Promise.resolve({
+        rows: [{ count: String(scoped ? capState.lettersTodayForUser : capState.lettersTodayGlobal) }],
+        rowCount: 1
+      });
+    }
+    return mocks.query(sql, params);
+  },
   transaction: mocks.transaction
 }));
 vi.mock('../../../src/services/creditLedgerService.js', () => ({
@@ -163,6 +196,9 @@ describe('commerceService', () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
+    capState.chargedTodayCents = 0;
+    capState.lettersTodayForUser = 0;
+    capState.lettersTodayGlobal = 0;
     vi.stubEnv('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', '1');
     mocks.transaction.mockImplementation(async callback => callback({ query: mocks.query }));
     mocks.jitEnabled.mockReturnValue(true);

@@ -27,6 +27,7 @@
  */
 
 import { BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
+import { SpendLimitError } from '../services/betaSpendLimits.js';
 
 export type DraftMailType = 'letter' | 'postcard';
 
@@ -61,6 +62,15 @@ export function friendlyDraftError(
   draftId: string,
   mailType: DraftMailType
 ): Error {
+  // Branched by TYPE, not by code. Every SpendLimitError message is a fixed
+  // server-authored string - the only interpolation is a cap number from our
+  // own configuration - so these are safe to forward, and forwarding them is
+  // the point: "you have reached your daily limit, try tomorrow" is actionable
+  // in a way that the generic default-deny string is not.
+  if (error instanceof SpendLimitError) {
+    return new Error(error.message);
+  }
+
   const code = (error as { code?: string })?.code;
   const noun = mailType;
   const other = mailType === 'letter' ? 'postcard' : 'letter';
