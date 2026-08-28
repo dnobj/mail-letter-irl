@@ -18,6 +18,7 @@ import {
   AuthenticatedUser,
   validateAuthorizationHeader
 } from "../auth/tokenValidator.js";
+import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from "../auth/betaAccess.js";
 import { handleCreditApiRequest } from "../api/creditApiHandler.js";
 import { handlePATApiRequest } from "../api/patApiHandler.js";
 import { handleAdminApiRequest } from "../api/adminApiHandler.js";
@@ -966,6 +967,26 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   });
 }
 
+/**
+ * 403 with NO WWW-Authenticate header. The absent challenge is the point: it
+ * distinguishes "authenticated fine, not permitted" from "authenticate
+ * again", and only the latter should send a client back through Auth0.
+ * The body carries BETA_ACCESS_MESSAGE, a fixed server-authored string that
+ * no request data can reach.
+ */
+function writeBetaRefusal(res: http.ServerResponse): void {
+  const body = {
+    jsonrpc: "2.0",
+    error: {
+      code: -32003,
+      message: BETA_ACCESS_MESSAGE
+    },
+    id: null
+  };
+  res.writeHead(403, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+
 async function authenticateRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -978,6 +999,13 @@ async function authenticateRequest(
     try {
       return await validateAuthorizationHeader(req.headers.authorization);
     } catch (error) {
+      // Even here, where authentication is optional, a beta refusal is a
+      // refusal - not a downgrade to anonymous. Returning null would let the
+      // request proceed unauthenticated.
+      if (error instanceof BetaAccessDeniedError) {
+        writeBetaRefusal(res);
+        return null;
+      }
       writeDiagnostic("warn", "auth.optional_validation_failed", {
         errorClass: classifyDiagnosticError(error, "authorization_error")
       });
@@ -988,6 +1016,15 @@ async function authenticateRequest(
   try {
     return await validateAuthorizationHeader(req.headers.authorization);
   } catch (error) {
+    // BEFORE the challenge is built. Every other failure here means "your
+    // credentials are bad, authorize again", and the WWW-Authenticate header
+    // is what tells an MCP client to do that. A refused beta account would
+    // re-authorize successfully, be refused again, and loop forever - and the
+    // raw error message would ride along in error_description.
+    if (error instanceof BetaAccessDeniedError) {
+      writeBetaRefusal(res);
+      return null;
+    }
     const message = error instanceof Error ? error.message : String(error);
     const challenge = buildWwwAuthenticateChallenge(message, publicBaseUrl);
     const body = {
@@ -1012,4 +1049,9 @@ async function authenticateRequest(
   }
 }
 
-export { buildWwwAuthenticateChallenge };
+// Exported for tests, alongside buildWwwAuthenticateChallenge and for the same
+// reason. writeBetaRefusal on its own would only prove the response shape;
+// authenticateRequest is what proves the beta branch is REACHED, before the
+// challenge is built. A branch that works but sits below an earlier return is
+// the failure mode #278 round 14 found in a test just like this one.
+export { buildWwwAuthenticateChallenge, writeBetaRefusal, authenticateRequest };

@@ -15,6 +15,7 @@ import {
   writeDiagnostic
 } from "../utils/diagnosticLog.js";
 import { InsufficientScopeError } from "./oauthChallenge.js";
+import { assertBetaAccess } from "./betaAccess.js";
 
 export interface AuthenticatedUser {
   userId: string;
@@ -93,6 +94,11 @@ async function validatePATToken(token: string): Promise<AuthenticatedUser> {
     });
   }
 
+  // PATs are gated too. Otherwise a token minted while a subject was admitted
+  // keeps working forever, so removing someone from the cohort would revoke
+  // their OAuth access and leave their PAT alive.
+  assertBetaAccess(result.userId!);
+
   return {
     userId: result.userId!,
     claims: { authType: "pat", tokenId: result.tokenId },
@@ -118,6 +124,7 @@ export async function validateJWTToken(
     algorithms: config.algorithms
   };
 
+  let user: AuthenticatedUser;
   try {
     const { payload } = await jwtVerify(
       token,
@@ -134,7 +141,7 @@ export async function validateJWTToken(
       throw new Error("Token is missing a valid subject (sub)");
     }
 
-    const user: AuthenticatedUser = {
+    user = {
       userId,
       claims: payload,
       token,
@@ -142,11 +149,24 @@ export async function validateJWTToken(
       scopes: parseTokenScopes(payload)
     };
     requireScopes(user, requiredScopes);
-    return user;
   } catch (error) {
     writeDiagnostic("warn", "auth.jwt_rejected", {
       errorClass: classifyDiagnosticError(error, "authorization_error")
     });
     throw error;
   }
+
+  // OUTSIDE the try, deliberately. The token is valid and its signature
+  // verified; the account is simply not admitted. Logging that as
+  // "auth.jwt_rejected" would send whoever reads the diagnostics hunting a
+  // signing or audience fault that does not exist.
+  try {
+    assertBetaAccess(user.userId);
+  } catch (error) {
+    writeDiagnostic("warn", "auth.beta_access_denied", {
+      errorClass: classifyDiagnosticError(error, "authorization_error")
+    });
+    throw error;
+  }
+  return user;
 }

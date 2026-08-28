@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
+import { assertBetaAccess } from "./auth/betaAccess.js";
 import { FileAccountStore } from "./store/fileAccountStore.js";
 import {
   // Letter tools - three separate tools for different layouts
@@ -135,6 +136,13 @@ export class LetterIrlServer {
   async execute<Input, Output>(
     request: ServerRequest<Input>
   ): Promise<ServerResponse<Output>> {
+    // The tool layer's own gate. validateAuthorizationHeader covers every HTTP
+    // request, but this path is also reached by the stdio transport and by
+    // LETTER_IRL_REQUIRE_AUTH=false, where no validator runs at all. Local
+    // development authenticates as "mcp-user", which is on no invite list -
+    // hence LETTER_IRL_BETA_GATE_ENABLED=false in every .env*.example.
+    assertBetaAccess(request.userId);
+
     const tool = tools.find((candidate) => candidate.name === request.toolName);
     if (!tool) {
       throw new Error(`Tool ${request.toolName} is not registered.`);
