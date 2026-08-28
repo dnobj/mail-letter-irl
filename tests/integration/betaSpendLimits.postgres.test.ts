@@ -104,11 +104,25 @@ describePostgres('beta spend limits', () => {
     );
   }
 
-  async function seedOrder(userId: string, amountCents: number, createdAtUtc: string): Promise<void> {
+  /**
+   * Migration 021 made product_code and idempotency_key NOT NULL with no
+   * default, and 023's constraint dropped the original 'pending' status. The
+   * first version of this fixture predated both and failed in CI - which is
+   * the reason this suite exists rather than a mocked one.
+   */
+  async function seedOrder(
+    userId: string,
+    amountCents: number,
+    createdAtUtc: string,
+    status = 'checkout_pending'
+  ): Promise<void> {
+    const id = randomUUID();
     await pool.query(
-      `INSERT INTO orders (order_id, user_id, credits, amount_cents, status, created_at)
-       VALUES ($1, $2, 1, $3, 'pending', $4::timestamp)`,
-      [randomUUID(), userId, amountCents, createdAtUtc]
+      `INSERT INTO orders
+         (order_id, user_id, credits, amount_cents, status, created_at,
+          product_code, idempotency_key)
+       VALUES ($1, $2, 1, $3, $4, $5::timestamp, 'credit-pack-4', $6)`,
+      [id, userId, amountCents, status, createdAtUtc, 'seed:' + id]
     );
   }
 
@@ -211,7 +225,12 @@ describePostgres('beta spend limits', () => {
 
   it('sums today\'s charges and refuses the one that would exceed the cap', async () => {
     process.env.LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS = '6000';
-    await seedOrder(USER, 4000, utcDayOffset(0));
+    // Deliberately mixed statuses, totalling 4000 today. An abandoned checkout
+    // is still an intent to charge, and a cap that forgave them would let a
+    // retry loop walk straight past it.
+    await seedOrder(USER, 1500, utcDayOffset(0), 'checkout_pending');
+    await seedOrder(USER, 1500, utcDayOffset(0), 'paid');
+    await seedOrder(USER, 1000, utcDayOffset(0), 'payment_failed');
     await seedOrder(USER, 5000, utcDayOffset(-1)); // yesterday: must not count
     await seedOrder(OTHER, 5000, utcDayOffset(0)); // another account: must not count
 
