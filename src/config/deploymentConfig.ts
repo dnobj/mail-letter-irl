@@ -367,6 +367,25 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   {
+    /**
+     * Not new, and previously listed nowhere - which is the problem. It has
+     * always chosen who reaches /api/admin, and since the beta gate unions it
+     * into the admitted cohort it now grants access to the whole app. A
+     * variable carrying that much authority was invisible to the preflight's
+     * name diff, so nothing could report that production and development
+     * disagree about who the operators are.
+     *
+     * Not secret: a subject identifies an account but authenticates nothing,
+     * and marking it secret would enrol it in the placeholder scan, which
+     * hunts fake credentials.
+     */
+    name: 'LETTER_IRL_ADMIN_USER_IDS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
     // The invite list, as Auth0 subjects. Not secret: a subject identifies an
     // account but authenticates nothing, and marking it secret would put it in
     // the placeholder scan, which looks for fake CREDENTIALS.
