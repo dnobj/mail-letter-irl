@@ -1404,13 +1404,18 @@ describe('commerceService', () => {
     // The property that makes createJitCheckout's early return legitimately
     // DIFFER from prepareJitOrder's reuse branch.
     //
-    // #279 proposed aligning them - extending this return to fire on
-    // stripe_checkout_session_id as well as checkout_url. Doing that was tried
-    // and reverted: asCheckoutResult reports `checkoutUrl: order.checkout_url`
-    // verbatim, so returning early on a row with a session but a NULL url hands
-    // back success: true with nothing actionable and strands the draft for the
-    // rest of its window. Re-creating the session is how such a row OBTAINS a
-    // url. A certain harm is not a fix for a latent one.
+    // #279's first suggestion is to align them - extend that return to fire on
+    // stripe_checkout_session_id as well as checkout_url. Tried and reverted,
+    // because the fall-through it removes is a REPAIR: the retry carries the
+    // SAME idempotency_key, so with unchanged parameters Stripe replays the
+    // original session rather than opening a second, and attachCheckout's
+    // COALESCE backfills the url onto it. Closing the path returns success:
+    // true with checkoutUrl still NULL and leaves the draft blocked until the
+    // checkout window lapses.
+    //
+    // Both outcomes need the same undemonstrated row shape, so this is not
+    // "certain versus latent" - it is that the current code repairs the row and
+    // the aligned guard cannot.
     //
     // Stated as a property rather than as "do not add that condition", so it
     // also catches any other early return that would answer without a url.

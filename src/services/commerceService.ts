@@ -929,20 +929,34 @@ export async function createJitCheckout(
   // The asymmetry with prepareJitOrder's reuse branch is DELIBERATE (#279).
   //
   // That branch accepts `stripe_checkout_session_id || checkout_url`; this one
-  // keys on checkout_url alone, and #279 proposed aligning them. Doing so is
-  // wrong: the two answer different questions. The reuse branch asks "can I
-  // reuse this ORDER row", and a row carrying either is reusable. This asks "do
-  // I already have something the customer can act on", and only a URL is.
+  // keys on checkout_url alone, and #279's first suggestion is to align them.
+  // Doing so was tried and reverted, because the fall-through it removes is a
+  // REPAIR:
   //
-  // asCheckoutResult reports `checkoutUrl: order.checkout_url`, so returning
-  // early on a row with a session but a NULL URL hands back success: true with
-  // nothing to click and strands the draft for the rest of its window - a
-  // certain harm, in place of a latent one #279 records no live trigger for.
-  // Re-creating the session is how such a row OBTAINS a url.
+  //   For a row with a session but a NULL checkout_url, the retry re-enters
+  //   Stripe carrying the SAME idempotency_key. With unchanged parameters
+  //   Stripe replays the original session rather than opening a second one,
+  //   and attachCheckout's `checkout_url = COALESCE(checkout_url, $3)`
+  //   backfills the url onto that same session. The key is what makes the
+  //   repair safe; it cannot mint a duplicate.
   //
-  // The genuine defect #279 found is narrower and still open: the retry reuses
-  // an idempotency_key already spent at the old price, so Stripe can answer
-  // idempotency_error. That needs a fresh key, not a closed door.
+  // Closing this path instead returns success: true with
+  // `checkoutUrl: order.checkout_url` still NULL - createMailCheckout emits it
+  // verbatim and zodSchemas marks it optional, so nothing downstream turns the
+  // absence into an error - and the draft stays blocked while
+  // checkout_expires_at is in the future. Such a row has no local escape
+  // either: the cancel branch and the orphan sweep both require a NULL session
+  // id, so it clears only when Stripe reports the session expired.
+  //
+  // Not "certain harm versus latent harm": both need the same undemonstrated
+  // row shape. The difference is what happens once you are in it - the current
+  // code repairs the row whenever parameters are unchanged, the aligned guard
+  // never does.
+  //
+  // #279's OTHER suggestion - give the reuse branch the price-id comparison its
+  // comment assumes - is sound and still open. The reprice gate can only
+  // compare amount and currency because productSnapshot persists no price id,
+  // so a repoint at the same amount passes it unnoticed.
   if (prepared.order.status !== 'checkout_pending' || prepared.order.checkout_url) {
     return asCheckoutResult(prepared.order, true);
   }
