@@ -13,7 +13,8 @@
  * So a skipped required suite is a build failure, not a quiet pass.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 
 /** Suites that must execute. A skip here means CI is lying about its coverage. */
 const REQUIRED = [
@@ -27,6 +28,8 @@ const REQUIRED = [
   'commerceAlertTransition.postgres.test.ts',
   'contentRetention.postgres.test.ts',
   'purchaseIdempotency.postgres.test.ts',
+  'betaSpendLimits.postgres.test.ts',
+  'jitFulfillmentIdempotency.postgres.test.ts',
 ];
 
 /**
@@ -39,6 +42,38 @@ const OPTIONAL = {
     'Worth doing before touching the migrator: this is the suite that caught a lock ' +
     'which was green against direct PostgreSQL and broken through Neon\'s pooler',
 };
+
+/**
+ * Every *.postgres.test.ts on disk must appear in REQUIRED or OPTIONAL.
+ *
+ * The loops below iterate the two lists, so a suite named in NEITHER is not
+ * checked, not reported, and free to skip in silence - which is precisely the
+ * failure this script exists to prevent, reintroduced one directory over. Two
+ * suites reached main that way (betaSpendLimits, jitFulfillmentIdempotency):
+ * both genuinely ran, but the guard could not have told anyone if they had not,
+ * and its "every required suite executed" line was cited as evidence that they
+ * did.
+ *
+ * Reading the directory rather than the report is deliberate. A suite that
+ * fails to collect at all is absent from the report too, so the report cannot
+ * distinguish "not written" from "not registered".
+ */
+function assertEverySuiteIsAccounted() {
+  const dir = path.resolve('tests/integration');
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    // Nothing to check from here; the report assertions below still apply.
+    return [];
+  }
+  const known = new Set([...REQUIRED, ...Object.keys(OPTIONAL)]);
+  return entries
+    .filter((name) => name.endsWith('.postgres.test.ts'))
+    .filter((name) => !known.has(name));
+}
+
+const unregistered = assertEverySuiteIsAccounted();
 
 const reportPath = process.argv[2];
 if (!reportPath) {
@@ -99,6 +134,14 @@ const failed = Number(report.numFailedTests ?? 0);
 console.log(`\ntotals: ${report.numPassedTests ?? 0} passed, ${report.numPendingTests ?? 0} skipped, ${failed} failed`);
 
 let bad = false;
+
+if (unregistered.length) {
+  console.error(`
+FAIL: PostgreSQL suite(s) in neither REQUIRED nor OPTIONAL: ${unregistered.join(', ')}`);
+  console.error('Add each to REQUIRED, or to OPTIONAL with the reason it may skip.');
+  console.error('Until then this script cannot vouch for them and silently ignores them.');
+  bad = true;
+}
 
 if (missing.length) {
   console.error(`\nFAIL: required suite(s) absent from the report: ${missing.join(', ')}`);
