@@ -1,0 +1,50 @@
+# Railway service configuration, in version control rather than the dashboard.
+#
+# WHY THIS FILE EXISTS (#300).
+#
+# Six places across four documents stated that Railway runs
+# `npm run db:migrate:prod` as a pre-deploy command. It was configured nowhere -
+# not here, not in nixpacks.toml, not in any workflow. Nothing applied
+# migrations at deploy time, and three passages in docs/deployment.md described
+# that non-existent step as fail-closed.
+#
+# The cost was real: production served code expecting migration 019 against a
+# schema stopped at 017, ten behind, found by hand during the 2026-08-28
+# promotion. Nothing was applying them, and the document saying otherwise is
+# why nobody looked.
+#
+# Committing it rather than setting it in the dashboard is the point. A
+# dashboard value is invisible to review, can differ silently between
+# production and development, and is exactly what the docs assumed existed
+# without anyone being able to check. Railway's config-as-code overrides the
+# dashboard, and fields absent from this file keep their dashboard values - so
+# this changes the pre-deploy command and nothing else.
+#
+# WHAT THIS COMMITS US TO.
+#
+# Migrations now run BEFORE the new image serves traffic, with the old image
+# still up. A failure exits non-zero (src/cli/migrate.ts sets process.exitCode
+# on the catch) and Railway halts the deploy, leaving the previous version
+# serving. That is the fail-closed behaviour docs/deployment.md always claimed.
+#
+# The constraint that comes with it: for the window between the migration
+# committing and the new image starting, the PREVIOUS code runs against the NEW
+# schema. Every migration must therefore be safe for the version of the code
+# already deployed - add columns before reading them, and never drop or rename
+# something the running image still touches. Splitting a destructive change
+# across two deploys is the standard way out.
+#
+# Both services in an environment build from this repository, so both run the
+# command. That is safe by construction: src/cli/migrate.ts wraps the whole run
+# in one transaction under pg_advisory_xact_lock with a 60s lock_timeout, and
+# whichever starts second waits and then finds nothing to apply. Until now that
+# machinery guarded a scenario that could not occur, because no deploy ran a
+# migrator. It is proven by tests/integration/migrateConcurrency.postgres.test.ts
+# and migratePooled.postgres.test.ts.
+#
+# Applies to every environment: an un-nested block is the base configuration, so
+# development migrates on deploy too - which is where a bad migration should be
+# discovered.
+
+[deploy]
+preDeployCommand = ["npm run db:migrate:prod"]

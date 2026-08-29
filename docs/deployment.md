@@ -39,6 +39,18 @@ API start: npm start
 Cron start: npm run maintenance
 ```
 
+All five come from files in this repository, not from the Railway dashboard:
+`nixpacks.toml` sets install, build and start; `railway.toml` sets the
+pre-deploy command. Railway's config-as-code overrides dashboard values, and
+fields absent from those files keep theirs.
+
+That split matters. Until 2026-08-29 the pre-deploy line was documented here and
+configured nowhere - no `railway.toml`, nothing in `nixpacks.toml`, nothing in a
+workflow. **No deploy applied migrations**, and this document said one did, which
+is how production came to serve code expecting migration 019 against a schema
+stopped at 017 (#300). Committing the command is what makes this block checkable
+rather than aspirational.
+
 `npm start` runs `node dist/mcp/httpServer.js`. The API process must not start workers or recurring maintenance timers.
 
 The maintenance service uses the same repository and environment variables, runs on `0 * * * *`, and must exit after each run. A cron execution that overlaps the next schedule is an operational failure.
@@ -221,9 +233,32 @@ makes `ADMIN_ENABLED=true` a startup error. Issue #69's ambiguous-image operator
 `JIT_PURCHASE_ENABLED=false` and `IMAGE_TRIAL_ENABLED=false` until a later issue #162 slice ships the
 replacement operator control.
 
+## Migrations must be safe for the PREVIOUS image
+
+The pre-deploy command runs the migration while the **old** image is still
+serving, and only then starts the new one. So between the migration committing
+and the new image accepting traffic, the previous code runs against the new
+schema.
+
+Every migration therefore has to be backward-compatible with the deployed
+version of the code:
+
+- Adding a nullable column, a table, an index or a constraint that current data
+  already satisfies is safe.
+- Dropping or renaming anything the running image still reads is **not**. Split
+  it across two deploys: ship the code that stops using the column, then the
+  migration that removes it.
+- Widening a type is usually safe; narrowing one is not.
+
+This is the price of the deploy failing closed, and it is the same discipline any
+zero-downtime deploy needs. The alternative - migrating after the new image is
+live - trades it for a window where new code meets an old schema, which is the
+worse half of the same problem.
+
 ## Concurrent deploy safety (migration advisory lock)
 
-Railway runs `npm run db:migrate:prod` as a pre-deploy command. When two PRs merge back to back it
+Railway runs `npm run db:migrate:prod` as a pre-deploy command, configured in `railway.toml`.
+When two PRs merge back to back it
 queues two deploys at once, so two migrator processes from **different images** can run against the same
 Neon database simultaneously. That is what happened when PRs #164 and #165 merged together: #164's image
 had 021 and 023 pending, #165's had 021, 022 and 023 pending, and #165's deploy failed after 8 seconds
@@ -355,7 +390,12 @@ See [`tests/integration/README.md`](../tests/integration/README.md) for how to s
    The boot validator enforces the key-mode and provider rules; the review still
    catches URLs and anything outside the validator's reach.
 4. Merge backend `dev` into `master` and website `dev` into `main` through reviewed PRs.
-5. Confirm migrations complete before the new API deployment becomes active.
+5. Confirm migrations completed before the new API deployment became active. The
+   pre-deploy command does this automatically and halts the deploy on failure, so
+   the check is to read the deploy log for the migrator's own output and confirm
+   the expected files were applied - not to run anything by hand. If the ledger
+   and the repository disagree, stop: that means the pre-deploy command is not
+   running, which is the #300 failure returning.
 6. Confirm `/readyz` returns `200` with `"mode":"production","provider":"postgrid"` on the
    new image (`X-Build-Commit` proves which image answered).
 7. Run production smoke tests without creating a real charge or real mail order unless explicitly planned.

@@ -2,8 +2,15 @@
 
 `db/migrations/*.sql` are applied in filename order by the migrator in
 `src/cli/migrate.ts`. Railway runs it as a pre-deploy command
-(`npm run db:migrate:prod`); `npm run db:migrate` runs the same code locally
-through the thin wrapper in `db/migrate.ts`.
+(`npm run db:migrate:prod`), configured in `railway.toml` at the repository
+root; `npm run db:migrate` runs the same code locally through the thin wrapper
+in `db/migrate.ts`.
+
+Because the pre-deploy command runs while the PREVIOUS image is still serving,
+**every migration must be safe for the currently deployed code**. Add before you
+read; never drop or rename something the running image still touches. A
+destructive change takes two deploys: first the code that stops using it, then
+the migration that removes it.
 
 Applied files are recorded in the `migrations` ledger table by filename, so a
 file that has run once is never run again. Migrations are forward-only: there

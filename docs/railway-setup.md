@@ -17,6 +17,15 @@ Production API and website remain warm. Development API and website use Railway 
 
 ## API Settings
 
+**Do not set the build, start or pre-deploy commands in the dashboard.** They are
+committed: `nixpacks.toml` holds build and start, `railway.toml` holds the
+pre-deploy command, and Railway's config-as-code overrides dashboard values. The
+block below records what those files produce so this guide can be checked against
+them; it is not a list of things to type in.
+
+Healthcheck path and region are dashboard settings and do have to be set here.
+
+
 ```text
 Build command: npm run build
 Pre-deploy command: npm run db:migrate:prod
