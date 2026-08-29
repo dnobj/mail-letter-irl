@@ -121,6 +121,38 @@ export async function createMailOrderFromDraftWithClient(
         `Draft ${params.draftId} was already consumed by different funding`
       );
     }
+    // #286: converge the order too, not just report success.
+    //
+    // This branch used to return here, BEFORE the identical UPDATE the normal
+    // path runs further down. Both callers - the Stripe webhook inside
+    // SAVEPOINT jit_fulfillment, and fulfillPaidOrder in the recovery sweep -
+    // then recorded a paid -> fulfillment_pending order event while the row
+    // stayed at 'paid'. The sweep re-selected it on every run and the
+    // stuck-order alarm counted it forever, raising the floor until the alarm
+    // could no longer signal anything new. 'paid' is deliberately absent from
+    // FUNDED_OR_REVERSED_ORDER_STATUSES, so nothing else caught it.
+    //
+    // AND status = 'paid' is load-bearing. Without it a replay against an
+    // order that has since reached 'fulfilled' would walk it BACKWARDS to
+    // fulfillment_pending, turning a noisy bug into lifecycle corruption. Both
+    // callers reach here with the row locked and at 'paid' - the webhook path
+    // sets it 40 lines earlier, fulfillPaidOrder refuses any other status - so
+    // the guard never costs a legitimate convergence, and the unconditional
+    // recordOrderEvent in both callers stays honest.
+    //
+    // The funding-conflict check above has already established that this
+    // letter belongs to this order, so the update cannot touch another.
+    if (funding.type === 'jit_order') {
+      await client.query(
+        `UPDATE orders
+         SET status = 'fulfillment_pending', letter_id = $1,
+             fulfillment_started_at = COALESCE(fulfillment_started_at, NOW()),
+             last_error_code = NULL, last_error = NULL, updated_at = NOW()
+         WHERE order_id = $2 AND status = 'paid'`,
+        [existingLetter.letter_id, funding.orderId]
+      );
+    }
+
     return {
       letter: existingLetter,
       draft,

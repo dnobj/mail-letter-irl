@@ -926,6 +926,23 @@ export async function createJitCheckout(
   );
 
   const prepared = await prepareJitOrder(params);
+  // The asymmetry with prepareJitOrder's reuse branch is DELIBERATE (#279).
+  //
+  // That branch accepts `stripe_checkout_session_id || checkout_url`; this one
+  // keys on checkout_url alone, and #279 proposed aligning them. Doing so is
+  // wrong: the two answer different questions. The reuse branch asks "can I
+  // reuse this ORDER row", and a row carrying either is reusable. This asks "do
+  // I already have something the customer can act on", and only a URL is.
+  //
+  // asCheckoutResult reports `checkoutUrl: order.checkout_url`, so returning
+  // early on a row with a session but a NULL URL hands back success: true with
+  // nothing to click and strands the draft for the rest of its window - a
+  // certain harm, in place of a latent one #279 records no live trigger for.
+  // Re-creating the session is how such a row OBTAINS a url.
+  //
+  // The genuine defect #279 found is narrower and still open: the retry reuses
+  // an idempotency_key already spent at the old price, so Stripe can answer
+  // idempotency_error. That needs a fresh key, not a closed door.
   if (prepared.order.status !== 'checkout_pending' || prepared.order.checkout_url) {
     return asCheckoutResult(prepared.order, true);
   }
@@ -1413,6 +1430,16 @@ async function processCheckoutSessionEvent(
              THEN COALESCE(refund_pending_at, NOW()) ELSE refund_pending_at END,
            last_error_code = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH'
              THEN last_error_code ELSE 'UNMATCHED_MONEY_EVENT_RECOVERED' END,
+           -- The PAIR, third site (#279). Setting the code without the message
+           -- leaves an operator triaging stranded money reading
+           -- UNMATCHED_MONEY_EVENT_RECOVERED beside whatever unrelated text was
+           -- already there. The same omission was hand-fixed twice before, at
+           -- the two sibling sites; a test now asserts the pairing everywhere
+           -- rather than waiting for a fourth round to find the next one.
+           -- Mirrors the CASE above so a PAYMENT_AMOUNT_MISMATCH quarantine
+           -- keeps its own message alongside its own code.
+           last_error = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH'
+             THEN last_error ELSE 'Money arrived for a session this order had not recorded' END,
            updated_at = NOW()
          WHERE order_id = $1`,
         [order.order_id, session.id, intentId, blockedStatus]
