@@ -1358,6 +1358,103 @@ describe('commerceService', () => {
     expect(mocks.createPackSession).not.toHaveBeenCalled();
   });
 
+  it('labels an unconfigured JIT price id configuration_error before any order write (#219)', async () => {
+    // The twin of the pack case above, and the reason #219 can close.
+    //
+    // That issue was filed when createJitCheckout wrote the order row BEFORE
+    // validating price config, leaving junk orders behind for
+    // markCheckoutCreationFailure to annotate. #278's restructuring moved the
+    // guard above the INSERT - but nothing pinned it there, which is how the
+    // ordering drifted in the first place. The pack path has had this test
+    // since #155; the JIT path never did.
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: '', amountCents: 499,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    // Keyed on SQL rather than call order: a positional chain silently
+    // re-targets if a query is ever added ahead of these.
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('sends_blocked_reason')) return { rows: [{ sends_blocked_reason: null }] };
+      if (sql.includes('mail_type FROM letter_drafts')) return { rows: [{ mail_type: 'letter' }] };
+      if (sql.includes('FROM letter_drafts')) {
+        return {
+          rows: [{
+            draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+            required_credits: 2, status: 'pending',
+            expires_at: new Date(Date.now() + 86_400_000)
+          }]
+        };
+      }
+      return { rows: [] };
+    });
+
+    const error = await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(e => e);
+
+    expect(error).toMatchObject({ code: 'JIT_NOT_CONFIGURED' });
+    // The assertion #219 is actually about: nothing was written.
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO orders'),
+      expect.anything()
+    );
+    expect(mocks.createJitSession).not.toHaveBeenCalled();
+  });
+
+  it('does NOT short-circuit a row that has a session id but no url (#279)', async () => {
+    // The property that makes createJitCheckout's early return legitimately
+    // DIFFER from prepareJitOrder's reuse branch.
+    //
+    // #279 proposed aligning them - extending this return to fire on
+    // stripe_checkout_session_id as well as checkout_url. Doing that was tried
+    // and reverted: asCheckoutResult reports `checkoutUrl: order.checkout_url`
+    // verbatim, so returning early on a row with a session but a NULL url hands
+    // back success: true with nothing actionable and strands the draft for the
+    // rest of its window. Re-creating the session is how such a row OBTAINS a
+    // url. A certain harm is not a fix for a latent one.
+    //
+    // Stated as a property rather than as "do not add that condition", so it
+    // also catches any other early return that would answer without a url.
+    mocks.getJitProduct.mockReturnValue({
+      productCode: 'jit-letter', priceId: 'price-jit', amountCents: 499,
+      currency: 'usd', name: 'Pay & Send One Physical Letter',
+      description: 'x', mailType: 'letter'
+    });
+    const sessionWithoutUrl = {
+      ...baseOrder,
+      amount_cents: 499,
+      product_snapshot: { ...baseOrder.product_snapshot },
+      stripe_checkout_session_id: 'cs-existing',
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 90 * 60_000)
+    };
+    mocks.query
+      .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
+      .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+          required_credits: 2, status: 'pending',
+          expires_at: new Date(Date.now() + 6 * 60 * 60_000)
+        }]
+      })
+      .mockResolvedValueOnce({ rows: [sessionWithoutUrl] })
+      .mockResolvedValue({ rows: [sessionWithoutUrl] });
+    mocks.createJitSession.mockResolvedValue({
+      success: true, sessionId: 'cs-new', sessionUrl: 'https://checkout.example/pay',
+      expiresAt: new Date()
+    });
+
+    await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+    // The whole assertion. Add the condition #279 proposed and this reddens,
+    // because the function would answer from the row instead of going to
+    // Stripe - handing back success: true with checkout_url still NULL.
+    expect(
+      mocks.createJitSession,
+      'a row with a session but no url must still reach Stripe: that call is how it obtains one'
+    ).toHaveBeenCalled();
+  });
+
   it('carries the Stripe failure class up when the checkout session cannot be created', async () => {
     // Issue #213: when Stripe rejects the session (e.g. a Price ID that does
     // not exist in this account), the thrown error must carry the resolved
