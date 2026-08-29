@@ -1239,6 +1239,38 @@ async function transitionPaidCheckout(
   eventType: string
 ): Promise<OrderStatus> {
   const intentId = paymentIntentId(session);
+
+  // #288: take the account lock BEFORE the order mutations, not before the grant.
+  //
+  // Two deliveries for DIFFERENT orders of the SAME user deadlocked, and the
+  // cycle was measured rather than reasoned to:
+  //
+  //   T1: UPDATE orders (2nd)  -> FOR KEY SHARE on users   [granted]
+  //   T2: UPDATE orders (2nd)  -> FOR KEY SHARE on users   [granted, multi-holder]
+  //   T1: upsert users         -> FOR NO KEY UPDATE        [granted, compatible]
+  //   T2: upsert users         -> FOR NO KEY UPDATE        [waits on T1]
+  //   T1: lockAccount...       -> FOR UPDATE               [waits on T2's KEY SHARE]
+  //
+  // The KEY SHARE is not taken by findCheckoutOrder - a FOR UPDATE with no OF
+  // list locks only rows of tables in its own FROM. It comes from the SECOND
+  // "UPDATE orders" below: orders.user_id has an FK to users, and the RI check
+  // is skipped when the FK column is unchanged EXCEPT when the row version being
+  // updated was written by this same transaction, which the first UPDATE just
+  // did. And the escalation is not the credits upsert, which takes only
+  // FOR NO KEY UPDATE (no key column in its SET list) and is compatible with
+  // another holder's KEY SHARE. It is this lock, reached via
+  // grantImageEntitlementWithClient.
+  //
+  // Placing it here rather than beside the grant is load-bearing: measured at
+  // 3/40 deadlocks with the lock immediately before the grant, and 0/40 with it
+  // ahead of both UPDATEs.
+  //
+  // It stays AFTER findCheckoutOrder on purpose. Acquisition order remains
+  // orders -> users, matching the refund and dispute paths, which all receive an
+  // already-fetched order and then lock the account. Hoisting this above the
+  // order lock would invert against them and trade one cycle for another.
+  await lockAccountForBalanceChange(client, order.user_id);
+
   await client.query(
     `UPDATE orders
      SET stripe_checkout_session_id = COALESCE(stripe_checkout_session_id, $2),
