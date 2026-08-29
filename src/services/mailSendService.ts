@@ -286,9 +286,20 @@ export async function createMailOrderFromDraftWithClient(
 
     // AFTER the deduction, on purpose: deductCreditsFromLedgerWithClient has
     // already taken users FOR UPDATE, so the per-account count is serialised
-    // for free. Taking that lock earlier to serialise this check would give
-    // users -> orders here while the refund paths go orders -> letters ->
-    // users: opposite order, same objects, a real deadlock.
+    // for free and needs no second lock.
+    //
+    // An earlier revision of this comment justified the placement by claiming
+    // that taking the lock sooner would invert into users -> orders against the
+    // refund paths. That was wrong and is corrected here: this function already
+    // holds orders FOR UPDATE from the active-checkout and funding lookups
+    // above, so any placement after those is still orders -> users. Only
+    // hoisting the account lock above them would invert, and nothing here wants
+    // that.
+    //
+    // The real constraint on lock order was measured in #288 and lives in
+    // transitionPaidCheckout: the account lock must precede that function's
+    // order mutations, because the second UPDATE takes FOR KEY SHARE on users
+    // via the FK re-check and a later FOR UPDATE then escalates against it.
     //
     // inFlight is 0 because the letters row was inserted above, so the count
     // already includes this send. A throw rolls the whole transaction back,

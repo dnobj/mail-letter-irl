@@ -424,33 +424,35 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
     await expectExactlyOneGrant(userId, orderId);
   });
 
-  it('DEADLOCKS on two concurrent purchases by one user, without losing money (#288)', async () => {
-    // Acceptance criterion 3 is "different legitimate purchases remain
-    // independent". They do not, and this test found it on its first run.
+  it('keeps two concurrent purchases by one user INDEPENDENT (#288)', async () => {
+    // Acceptance criterion 3, and for a long time this test asserted its
+    // failure. Two deliveries for different orders of the same user deadlocked,
+    // and the suite accepted either outcome because the cycle was not
+    // understood - so it could not tell a fix from a lucky interleaving.
     //
-    // The two deliveries contend on ONE users row: both call
-    // `INSERT INTO users ... ON CONFLICT (user_id) DO UPDATE` to add credits,
-    // and ON CONFLICT DO UPDATE takes a stronger tuple lock than a plain
-    // UPDATE. The exact acquisition order that closes the cycle is NOT yet
-    // diagnosed - an earlier revision of this comment asserted that
-    // findCheckoutOrder's `SELECT ... FOR UPDATE` takes an implicit FOR KEY
-    // SHARE on the parent users row, which is wrong: a FOR UPDATE with no OF
-    // list locks only rows of tables in its own FROM list, and the referential
-    // triggers that do take FOR KEY SHARE fire on INSERT or on UPDATE OF
-    // user_id, neither of which happens here.
+    // The cycle has since been measured, not reasoned to (#288). It was:
     //
-    // The wrong mechanism is worse than none, because the fix gets designed
-    // from it. #288 carries the correction and the open question.
+    //   T1: UPDATE orders (2nd)  -> FOR KEY SHARE on users   [granted]
+    //   T2: UPDATE orders (2nd)  -> FOR KEY SHARE on users   [granted, multi-holder]
+    //   T1: upsert users         -> FOR NO KEY UPDATE        [granted, compatible]
+    //   T2: upsert users         -> FOR NO KEY UPDATE        [waits on T1]
+    //   T1: lockAccountForBalance-> FOR UPDATE               [waits on T2]
     //
-    // This asserts TODAY'S behaviour deliberately, so #288 has a live detector:
-    // when the locking discipline is fixed, this test reddens and must be
-    // rewritten to expect two successes. Pinning it green with allSettled and
-    // no assertion on the outcomes is what hid it in the first place.
+    // Two earlier explanations were wrong and are recorded so they are not
+    // reintroduced: findCheckoutOrder's SELECT ... FOR UPDATE takes nothing on
+    // users (a FOR UPDATE with no OF list locks only tables in its own FROM),
+    // and ON CONFLICT DO UPDATE does NOT take a stronger tuple lock than a plain
+    // UPDATE - it takes FOR NO KEY UPDATE, which is compatible with a KEY SHARE
+    // holder and therefore cannot close the cycle by itself.
     //
-    // The severity is availability, not correctness, and the assertions below
-    // are what establish that: the victim rolls back whole, the survivor grants
-    // exactly once, and the customer's balance reflects one pack rather than
-    // two or none. Stripe retries the victim, and the retry succeeds.
+    // transitionPaidCheckout now takes the account lock before its order
+    // mutations, so the two deliveries serialise on users and both complete.
+    // Measured: 3/40 deadlocks with the lock beside the grant, 0/40 with it
+    // ahead of the UPDATEs.
+    //
+    // ASSERTED STRICTLY, unlike the version this replaces. Accepting a deadlock
+    // here again would make this test pass whether or not the fix holds, which
+    // is precisely how the defect survived its own coverage.
     const first = await seedPendingPackOrder();
     const second = await seedPendingPackOrder({ userId: first.userId });
 
@@ -463,45 +465,23 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
       )
     ]);
 
-    const failures = results
-      .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-      .map(r => (r.reason as { code?: string } | undefined)?.code ?? 'no-code');
+    // No 40P01, and no other failure either. rejectionSummaries carries the
+    // SQLSTATE into the message so a regression names itself.
+    expectAllFulfilled(results, 2);
 
-    // BOTH outcomes are accepted, and this is not hedging.
-    //
-    // #288's cycle is undiagnosed. Tracing the lock order gives a chain, not a
-    // cycle: both deliveries take distinct orders rows, then the one shared
-    // users row via INSERT ... ON CONFLICT DO UPDATE. Nothing establishes that
-    // an interleaving which serialises cleanly is impossible - so pinning
-    // exactly one 40P01 would be pinning a race, and the day it serialised the
-    // suite would redden with no code change and no defect.
-    //
-    // What IS invariant is the money, and that is asserted below in whichever
-    // world we landed in. A third outcome - some other error, or two failures -
-    // fails here, which is the regression this needs to catch.
-    expect([[], ['40P01']]).toContainEqual(failures);
-    const deadlocked = failures.length === 1;
-    if (!deadlocked) {
-      // #288 has been fixed, or this runner serialised. Either way the pair
-      // must have granted independently, which is what criterion 3 asks for.
-      expect(await purchaseLedgerRows(first.orderId)).toBe(1);
-      expect(await purchaseLedgerRows(second.orderId)).toBe(1);
-      expect(await cachedUserCredits(first.userId)).toBe(PACK_CREDITS * 2);
-      return;
-    }
+    // Both purchases funded, independently. This is what criterion 3 asks for
+    // and what the old behaviour could not deliver.
+    expect(await purchaseLedgerRows(first.orderId)).toBe(1);
+    expect(await purchaseLedgerRows(second.orderId)).toBe(1);
+    expect(await purchaseTransactionRows(first.orderId)).toBe(1);
+    expect(await purchaseTransactionRows(second.orderId)).toBe(1);
 
-    // Exactly one order funded, and the balance matches it. No partial grant
-    // survived the victim's rollback, and nothing was granted twice. Which of
-    // the two won is up to PostgreSQL, so the assertion is on the sum.
-    const ledgerRows =
-      (await purchaseLedgerRows(first.orderId)) + (await purchaseLedgerRows(second.orderId));
-    expect(ledgerRows).toBe(1);
-    const transactionRows =
-      (await purchaseTransactionRows(first.orderId)) +
-      (await purchaseTransactionRows(second.orderId));
-    expect(transactionRows).toBe(1);
-    expect(await cachedUserCredits(first.userId)).toBe(PACK_CREDITS);
-    expect(await totalCreditsRemaining(first.userId)).toBe(PACK_CREDITS);
+    // The cached balance as well as the ledger: addCreditsToLedgerWithClient
+    // increments users.credits BEFORE inserting the ledger row, so a suite that
+    // checked only ledger rows could miss a grant landing in one and not the
+    // other.
+    expect(await cachedUserCredits(first.userId)).toBe(PACK_CREDITS * 2);
+    expect(await totalCreditsRemaining(first.userId)).toBe(PACK_CREDITS * 2);
   });
 
   it('rolls back the cached balance too when the grant transaction fails', async () => {
