@@ -635,10 +635,14 @@
           // Deliberately NOT hidden on retry: a second create_mail_checkout
           // for the same draft comes back DRAFT_CHECKOUT_PENDING, so hiding
           // it would take away the only working way to pay.
-          showCheckoutLink(
-            result.checkoutUrl,
-            `Open checkout (${formatPayAmount(currentEligibility?.payAndSend)})`,
-          );
+          // No price rather than a wrong one: formatPayAmount falls back to
+          // 0.00 on missing data, and a payment link is the last place to
+          // show a made-up figure.
+          const payAndSend = currentEligibility?.payAndSend;
+          const priced = payAndSend?.amountCents
+            ? ` (${formatPayAmount(payAndSend)})`
+            : "";
+          showCheckoutLink(result.checkoutUrl, `Open checkout${priced}`);
 
           // Poll before opening, not after: the customer may well pay via the
           // link above, and this card has to update on that path too.
