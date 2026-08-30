@@ -1,5 +1,5 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { ToolAnnotations, McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -307,6 +307,65 @@ export function buildWidgetResourceMeta(description: string) {
 }
 
 /**
+ * Widgets indexed by name, for resolving a client-supplied template variable.
+ */
+const WIDGET_BY_NAME = new Map(
+  WIDGET_DEFINITIONS.map((widget) => [widget.name, widget] as const)
+);
+
+/**
+ * Read one widget's HTML as an MCP resource payload, or null if `name` is not
+ * a widget we serve.
+ *
+ * SECURITY: `name` reaches this function from a client-supplied URI template
+ * variable (see the version template in registerWidgetResources), so it is
+ * resolved against WIDGET_DEFINITIONS *before* any filesystem access, and the
+ * canonical name from that table - never the caller's string - is what reaches
+ * path.join. Without that lookup this function is a path-traversal sink:
+ * UriTemplate.match does not percent-decode, so a read of
+ * `ui://widgets/..%2F..%2Fsecret.html@v1` arrives here as the literal name
+ * `..%2F..%2Fsecret`. Returning early on an unknown name is what makes the
+ * template safe to register at all.
+ *
+ * Logging here is the #235 diagnostic: it records the URI a client actually
+ * asked for, which distinguishes "the client never requested the template"
+ * from "the client requested a version/name we do not serve". Those two look
+ * identical from the outside and the difference is the whole question. Only
+ * the URI is logged - no tokens, no user identifiers.
+ *
+ * Note on coverage: every URI shape we have ever advertised as an
+ * outputTemplate is either registered exactly or matches the version template,
+ * so any read from a client using our own tool list reaches this function and
+ * is logged. A URI matching neither is rejected inside the SDK's resources/read
+ * handler before our code runs and is NOT logged here - so silence in this log
+ * means "no read arrived", not "no read was attempted".
+ */
+async function readWidgetResource(name: string, uri: string) {
+  const widget = WIDGET_BY_NAME.get(name);
+
+  if (!widget) {
+    console.warn(`🎨 Widget resource requested but not served: ${uri}`);
+    return null;
+  }
+
+  console.log(`🎨 Widget resource requested: ${uri}`);
+  const html = await fs.readFile(
+    path.join(DEFAULT_WIDGET_DIR, `${widget.name}.html`),
+    "utf-8"
+  );
+  console.log(`🎨 Returning widget HTML (${html.length} bytes)`);
+
+  return {
+    contents: [{
+      uri,
+      mimeType: WIDGET_MIME_TYPE,
+      text: html,
+      _meta: buildWidgetResourceMeta(widget.description)
+    }]
+  };
+}
+
+/**
  * Register widget HTML files as MCP resources.
  *
  * Current Apps SDK-style widgets are:
@@ -316,7 +375,7 @@ export function buildWidgetResourceMeta(description: string) {
  *
  * The widget HTML profile signals the client to inject the runtime bridge.
  */
-async function registerWidgetResources(mcpServer: McpServer) {
+export async function registerWidgetResources(mcpServer: McpServer) {
   for (const widget of WIDGET_DEFINITIONS) {
     const filePath = path.join(DEFAULT_WIDGET_DIR, `${widget.name}.html`);
 
@@ -332,8 +391,10 @@ async function registerWidgetResources(mcpServer: McpServer) {
     // transition alias: native mobile clients hold cached tool lists whose
     // outputTemplate still points at the unversioned form, and resources/read
     // is an exact-string lookup - without the alias those clients would get
-    // ResourceNotFound (no widget at all) instead of a stale widget. Remove
-    // the alias once cached tool lists have aged out (issue #235).
+    // ResourceNotFound (no widget at all) instead of a stale widget. The
+    // unversioned form does not match the version template below, so this
+    // alias is still load-bearing. Remove it once cached tool lists have aged
+    // out (issue #235).
     const versionedUri = widgetTemplateUri(widget.name);
     const legacyUri = `ui://widgets/${widget.name}.html`;
     const registrations: Array<[string, string]> = [
@@ -349,23 +410,59 @@ async function registerWidgetResources(mcpServer: McpServer) {
         uri,
         {},  // Empty options per docs
         async () => {
-          console.log(`🎨 Widget resource requested: ${uri}`);
-          const html = await fs.readFile(filePath, "utf-8");
-          console.log(`🎨 Returning widget HTML (${html.length} bytes)`);
-          return {
-            contents: [{
-              uri,
-              mimeType: WIDGET_MIME_TYPE,
-              text: html,
-              _meta: buildWidgetResourceMeta(widget.description)
-            }]
-          };
+          const result = await readWidgetResource(widget.name, uri);
+          // Unreachable: the name comes from WIDGET_DEFINITIONS itself.
+          if (!result) {
+            throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
+          }
+          return result;
         }
       );
 
       console.log(`📦 Registered widget resource: ${uri}`);
     }
   }
+
+  // Serve ANY version of a widget URI, not just the current one.
+  //
+  // WHY: resources/read is an exact-string lookup, and the exact registrations
+  // above cover exactly one version - WIDGET_TEMPLATE_VERSION. A client holding
+  // a tool list cached from before the last bump asks for a URI registered
+  // nowhere, so the read fails inside the SDK before any of our code runs and
+  // the widget renders as "Error loading app - Failed to fetch template". That
+  // is what a beta invitee sees, and pressing Refresh is not something they
+  // will know to do. Observed against deployed development on 2026-08-29.
+  //
+  // A template matches every version at once, so no future bump can strand a
+  // client either. The exact @vCURRENT registration above is deliberately KEPT
+  // rather than replaced: templates are advertised separately from exact
+  // resources, and if the host validates a tool's outputTemplate against the
+  // exact resource list, a template-only registration would break rendering
+  // for everyone. Do not "simplify" the two into one.
+  //
+  // Registered last because the SDK checks exact resources first and then walks
+  // templates in insertion order, so this only ever handles what the exact
+  // registrations did not. `list: undefined` keeps it out of resources/list,
+  // where the exact URIs are the ones clients should discover.
+  mcpServer.registerResource(
+    "widget-any-version",
+    new ResourceTemplate("ui://widgets/{name}.html@v{version}", { list: undefined }),
+    {},
+    async (uri, variables) => {
+      const raw = variables.name;
+      const name = Array.isArray(raw) ? raw[0] : raw;
+      const result = await readWidgetResource(String(name ?? ""), uri.toString());
+      if (!result) {
+        // Same error the SDK raises for an unregistered URI, so an unknown
+        // widget name is indistinguishable to the client from one we never
+        // advertised - it just gets logged on our side now.
+        throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
+      }
+      return result;
+    }
+  );
+
+  console.log(`📦 Registered widget resource template: ui://widgets/{name}.html@v{version}`);
 }
 
 type ToolName = keyof typeof toolInputSchemas;

@@ -75,6 +75,8 @@
       .purchase-actions{display:grid;gap:0}
       .send-button.secondary{color:var(--tx);background:transparent;border:1px solid var(--bd);margin-top:8px}
       .send-button.secondary:hover:not(:disabled){background:var(--sf2);opacity:1}
+      .checkout-link{text-decoration:none}
+      .checkout-link:hover{opacity:.9}
       @keyframes spin{to{transform:rotate(360deg)}}
 
       /* Success/Error states */
@@ -154,6 +156,14 @@
           <button class="send-button secondary" id="buy-pack-button">
             Buy a Letter Pack
           </button>
+          <a
+            class="send-button checkout-link"
+            id="checkout-link"
+            href="#"
+            target="_blank"
+            rel="noopener noreferrer"
+            style="display: none"
+          ></a>
           <div class="note">Checkout opens in your browser. This card updates automatically once payment completes.</div>
         </div>
         <div
@@ -162,7 +172,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">postcard t14</p>
+      <p class="rev">postcard t15</p>
     </div>
 
     <script type="module">
@@ -442,17 +452,7 @@
           paySendButton.style.display = payAndSend?.available ? "flex" : "none";
           paySendButton.disabled = !payAndSend?.available;
           if (payAndSend?.available && payAndSend.amountCents) {
-            // Server-formatted per currency. The fallback matters more than it
-            // looks: a connector that has not re-ingested the tool schema
-            // strips unknown fields, so displayAmount is absent on stale
-            // connections and the fallback IS the display - make it
-            // currency-aware too (#278 round 7).
-            const zeroDecimal = ['bif','clp','djf','gnf','jpy','kmf','krw','mga','pyg','rwf','ugx','vnd','vuv','xaf','xof','xpf'];
-            const threeDecimal = ['bhd','jod','kwd','omr','tnd'];
-            const ccy = String(payAndSend.currency || 'usd').toLowerCase();
-            const decimals = zeroDecimal.includes(ccy) ? 0 : threeDecimal.includes(ccy) ? 3 : 2;
-            const amount = payAndSend.displayAmount || (payAndSend.amountCents / Math.pow(10, decimals)).toFixed(decimals);
-            paySendButtonText.textContent = `Pay & Send (${String(payAndSend.currency || "usd").toUpperCase()} ${amount})`;
+            paySendButtonText.textContent = `Pay & Send (${formatPayAmount(payAndSend)})`;
           }
           buyPackButton.style.display =
             !canSendNow && letterPack?.available ? "flex" : "none";
@@ -570,6 +570,32 @@
         statusPill.textContent = "Checkout open - status may take a moment";
       }
 
+      // Server-formatted per currency. The fallback matters more than it
+      // looks: a connector that has not re-ingested the tool schema strips
+      // unknown fields, so displayAmount is absent on stale connections and
+      // the fallback IS the display - make it currency-aware too (#278
+      // round 7). Shared by the Pay & Send button and the checkout link so
+      // the two can never quote different prices for the same order.
+      function formatPayAmount(payAndSend) {
+        const zeroDecimal = ['bif','clp','djf','gnf','jpy','kmf','krw','mga','pyg','rwf','ugx','vnd','vuv','xaf','xof','xpf'];
+        const threeDecimal = ['bhd','jod','kwd','omr','tnd'];
+        const ccy = String(payAndSend?.currency || 'usd').toLowerCase();
+        const decimals = zeroDecimal.includes(ccy) ? 0 : threeDecimal.includes(ccy) ? 3 : 2;
+        const amount =
+          payAndSend?.displayAmount ||
+          ((payAndSend?.amountCents || 0) / Math.pow(10, decimals)).toFixed(decimals);
+        return `${ccy.toUpperCase()} ${amount}`;
+      }
+
+      // Reveal the checkout link, the customer's route to paying when the
+      // host does not open a tab. See handlePayAndSend for why it exists.
+      function showCheckoutLink(href, label) {
+        const link = document.getElementById("checkout-link");
+        link.href = href;
+        link.textContent = label;
+        link.style.display = "flex";
+      }
+
       async function handlePayAndSend() {
         if (checkoutInProgress || !currentDraftId) return;
         const button = document.getElementById("pay-send-button");
@@ -595,9 +621,38 @@
           idLabel.textContent = "Purchase";
           idValue.textContent = result.orderId;
           button.classList.remove("loading");
-          buttonText.textContent = "Checkout Opened";
-          await window.openai.openExternal({ href: result.checkoutUrl });
+
+          // Show the link BEFORE handing off to the host, and never hide it
+          // again. On 2026-08-29 openExternal resolved without opening
+          // anything: the order sat at checkout_pending, the customer had no
+          // way to reach Stripe, and the draft stayed blocked behind it by
+          // DRAFT_CHECKOUT_PENDING until the window lapsed. Whether that was
+          // the host or a popup blocker was never established, so this link
+          // is deliberately chosen to be correct either way - and a click on
+          // a real anchor is a user gesture in a way a window.open issued
+          // after an awaited callTool is not.
+          //
+          // Deliberately NOT hidden on retry: a second create_mail_checkout
+          // for the same draft comes back DRAFT_CHECKOUT_PENDING, so hiding
+          // it would take away the only working way to pay.
+          showCheckoutLink(
+            result.checkoutUrl,
+            `Open checkout (${formatPayAmount(currentEligibility?.payAndSend)})`,
+          );
+
+          // Poll before opening, not after: the customer may well pay via the
+          // link above, and this card has to update on that path too.
           void pollPurchaseStatus(result.orderId).catch(() => undefined);
+
+          try {
+            await window.openai.openExternal({ href: result.checkoutUrl });
+            buttonText.textContent = "Checkout Opened";
+          } catch {
+            // The host declined to open a tab. Not an error worth showing as
+            // one - the link is visible and polling is already running - so
+            // point at it rather than claiming the checkout failed.
+            buttonText.textContent = "Use the checkout link below";
+          }
         } catch (error) {
           errorMessage.textContent = `Unable to open checkout: ${error.message || "Unknown error"}`;
           errorMessage.style.display = "block";
@@ -611,7 +666,16 @@
       async function handleBuyPack() {
         const purchaseUrl = currentEligibility?.letterPack?.purchaseUrl;
         if (!purchaseUrl) return;
-        await window.openai.openExternal({ href: purchaseUrl });
+        // Same fallback as Pay & Send, lower stakes - a pack purchase is
+        // recoverable from the website - but there is no reason to leave a
+        // button that silently does nothing either. The await was previously
+        // uncaught, so a rejection here became an unhandled rejection.
+        showCheckoutLink(purchaseUrl, "Open Letter Pack checkout");
+        try {
+          await window.openai.openExternal({ href: purchaseUrl });
+        } catch {
+          // Nothing to do: the link is already on screen.
+        }
       }
 
       // Attach click handler
