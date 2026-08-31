@@ -154,7 +154,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t16</p>
+      <p class="rev">letter t17</p>
     </div>
 
     <script type="module">
@@ -175,6 +175,14 @@
       // pill and the ID row. Those rows follow the order only once one exists.
       let trackedOrderId = null;
       let statusCheckInFlight = false;
+      // Set when a Letter Pack checkout is opened. Unlike Pay & Send there is
+      // no order id to follow - a pack is bought on the website, so the only
+      // observable is the balance itself (#306).
+      let packPurchasePending = false;
+      // Letters reported by the most recent balance refresh, or null. render()
+      // prefers this over the tool output's canSendNow, which is stale after a
+      // pack purchase and which the model will not re-run.
+      let refreshedLetters = null;
       let statusTimer = null;
       let pollStartedAt = 0;
       let pollDeadline = 0;
@@ -428,13 +436,35 @@
         document.getElementById("delivery").textContent =
           deliveryText.length > 0 ? deliveryText.join(" - ") : "Standard";
 
+        // A Letter Pack purchase changes the balance, but the model will not
+        // re-run the quote - so a refreshed balance overrides the tool output's
+        // canSendNow. Read HERE rather than painted onto the card by the pack
+        // handler: render() stays the only thing that draws the card and stays
+        // idempotent across arbitrary re-renders. Painting from a handler and
+        // then guarding render() out of the way is what produced the defect
+        // #305 had to fix (#306).
+        //
+        // Letters vs credits: the server decides on credits, this compares
+        // letters. They agree exactly under flat pricing, which is pinned by
+        // tests/unit/tools/letterBalanceEquivalence.test.ts - if that test
+        // reddens, this line is what it is warning about.
+        const effectiveCanSendNow =
+          refreshedLetters !== null
+            ? refreshedLetters >= (lettersRequired ?? 1)
+            : canSendNow;
+
         // Status pill - only while this card still describes a draft.
         if (cardIsShowingDraft()) {
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
-          if (canSendNow) {
+          if (effectiveCanSendNow) {
             statusPill.classList.add("ok");
             statusPill.textContent = "Ready to send";
+          } else if (packPurchasePending) {
+            // Neutral, not an alert: a pack purchase in flight is a normal
+            // waiting state, and the pre-purchase "not enough letters" reads
+            // as a failure once the customer has already paid.
+            statusPill.textContent = "Waiting for your Letter Pack";
           } else {
             statusPill.classList.add("alert");
             statusPill.textContent = reasonCannotSend ?? "Cannot send";
@@ -467,21 +497,29 @@
         const buyPackButton = document.getElementById("buy-pack-button");
 
         if (!sendInProgress && !checkoutInProgress) {
-          sendButton.style.display = canSendNow ? "flex" : "none";
-          sendButton.disabled = !canSendNow;
+          sendButton.style.display = effectiveCanSendNow ? "flex" : "none";
+          sendButton.disabled = !effectiveCanSendNow;
           sendButtonText.textContent = "Send Letter";
 
           const payAndSend = sendEligibility?.payAndSend;
           const letterPack = sendEligibility?.letterPack;
+          // Mirrors the server, which computes
+          //   available = configured && (!prepaidEligible || allowedWithBalance)
+          // with JIT_ALLOW_WITH_PREPAID_BALANCE off by default. In that
+          // non-default config this hides an option the server would offer -
+          // accepted deliberately, because the outcome it rules out is a
+          // customer paying again for a letter they already own.
+          const payAndSendAvailable =
+            Boolean(payAndSend?.available) && !effectiveCanSendNow;
           purchaseActions.style.display =
-            !canSendNow || payAndSend?.available ? "grid" : "none";
-          paySendButton.style.display = payAndSend?.available ? "flex" : "none";
-          paySendButton.disabled = !payAndSend?.available;
-          if (payAndSend?.available && payAndSend.amountCents) {
+            !effectiveCanSendNow || payAndSendAvailable ? "grid" : "none";
+          paySendButton.style.display = payAndSendAvailable ? "flex" : "none";
+          paySendButton.disabled = !payAndSendAvailable;
+          if (payAndSendAvailable && payAndSend.amountCents) {
             paySendButtonText.textContent = `Pay & Send (${formatPayAmount(payAndSend)})`;
           }
           buyPackButton.style.display =
-            !canSendNow && letterPack?.available ? "flex" : "none";
+            !effectiveCanSendNow && letterPack?.available ? "flex" : "none";
         }
       }
 
@@ -603,24 +641,58 @@
       // One refresh, three callers: the Check status button, the visibility
       // handler, and the timer. The in-flight guard is what keeps them from
       // overlapping. Resolves true when the status is terminal.
+      function lettersRequiredForDraft() {
+        return window.openai?.toolOutput?.lettersRequired ?? 1;
+      }
+
+      async function refreshOrderStatus() {
+        const status = toolData(
+          await window.openai.callTool("get_purchase_status", {
+            orderId: trackedOrderId,
+          }),
+        );
+        const finished = applyPurchaseStatus(status);
+        if (finished) stopStatusPolling();
+        return finished;
+      }
+
+      // A Letter Pack grants letters; it does not send anything. So "finished"
+      // here means the letters have arrived and the card can send - at which
+      // point render() has taken over and there is nothing left to wait for.
+      async function refreshLetterBalance() {
+        const balance = toolData(
+          await window.openai.callTool("get_account_balance", {}),
+        );
+        if (typeof balance.lettersRemaining !== "number") return false;
+        refreshedLetters = balance.lettersRemaining;
+        render();
+        const enough = refreshedLetters >= lettersRequiredForDraft();
+        if (enough) stopStatusPolling();
+        return enough;
+      }
+
+      // One refresh, three callers: the Check status button, the visibility
+      // handler, and the timer. The in-flight guard is what keeps them from
+      // overlapping. Resolves true when there is nothing left to wait for.
+      //
+      // A tracked order wins over a pending pack: order state is the more
+      // specific answer, and the pack path has no order id to ask about.
       async function refreshPurchaseStatus() {
-        if (!trackedOrderId || statusCheckInFlight) return false;
+        if (statusCheckInFlight) return false;
+        if (!trackedOrderId && !packPurchasePending) return false;
         statusCheckInFlight = true;
         const button = document.getElementById("check-status-button");
         button.textContent = "Checking...";
         button.disabled = true;
         try {
-          const status = toolData(
-            await window.openai.callTool("get_purchase_status", {
-              orderId: trackedOrderId,
-            }),
-          );
-          const finished = applyPurchaseStatus(status);
-          if (finished) stopStatusPolling();
-          return finished;
+          return trackedOrderId
+            ? await refreshOrderStatus()
+            : await refreshLetterBalance();
         } catch {
-          // A failed check is not worth an alarming message: the order is
-          // unaffected, and the button is still there to try again.
+          // A failed check is not worth an alarming message: the purchase is
+          // unaffected, and the button is still there to try again. This is
+          // also the ordinary case when a pack was bought while signed out of
+          // the website - the letters simply never arrive here.
           return false;
         } finally {
           statusCheckInFlight = false;
@@ -656,7 +728,7 @@
       // traffic from a card left open.
       function scheduleStatusPoll() {
         stopStatusPolling();
-        if (!trackedOrderId || document.hidden) return;
+        if ((!trackedOrderId && !packPurchasePending) || document.hidden) return;
         if (Date.now() >= pollDeadline) return;
         const elapsed = Date.now() - pollStartedAt;
         const delay =
@@ -669,7 +741,10 @@
         }, delay);
       }
 
-      function startStatusPolling() {
+      // pillText is passed only by flows that own the pill. The pack flow
+      // passes nothing, because there cardIsShowingDraft() is still true and
+      // render() is the thing that draws it.
+      function startStatusPolling(pillText) {
         pollStartedAt = Date.now();
         pollDeadline = pollStartedAt + POLL_BUDGET_MS;
         document.getElementById("check-status-button").style.display = "flex";
@@ -677,9 +752,11 @@
         // nothing else to show, and leaving the pre-checkout text - "Not
         // enough letters in your balance" - next to an open checkout reads as
         // a payment that failed.
-        const statusPill = document.getElementById("status-pill");
-        statusPill.classList.remove("ok", "alert");
-        statusPill.textContent = "Checkout open - waiting for payment";
+        if (pillText) {
+          const statusPill = document.getElementById("status-pill");
+          statusPill.classList.remove("ok", "alert");
+          statusPill.textContent = pillText;
+        }
         scheduleStatusPoll();
       }
 
@@ -762,7 +839,7 @@
 
           // Start before opening, not after: the customer may well pay via
           // the link above, and this card has to update on that path too.
-          startStatusPolling();
+          startStatusPolling("Checkout open - waiting for payment");
 
           try {
             await window.openai.openExternal({ href: result.checkoutUrl });
@@ -791,6 +868,13 @@
         // button that silently does nothing either. The await was previously
         // uncaught, so a rejection here became an unhandled rejection.
         showCheckoutLink(purchaseUrl, "Open Letter Pack checkout");
+        // A pack only grants letters - the customer still has to come back and
+        // press Send - so a card that never notices the letters arrived can
+        // leave a paid-for letter unsent indefinitely. Same scheduler as Pay &
+        // Send; only what it asks for differs (#306).
+        packPurchasePending = true;
+        startStatusPolling();
+        render();
         try {
           await window.openai.openExternal({ href: purchaseUrl });
         } catch {
@@ -819,7 +903,7 @@
       // Coming back from the checkout tab is the moment the answer is wanted,
       // and the first moment a hidden iframe is allowed to run again.
       document.addEventListener("visibilitychange", () => {
-        if (!trackedOrderId) return;
+        if (!trackedOrderId && !packPurchasePending) return;
         if (document.hidden) {
           stopStatusPolling();
           return;
