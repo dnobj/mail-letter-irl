@@ -154,7 +154,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t17</p>
+      <p class="rev">letter t18</p>
     </div>
 
     <script type="module">
@@ -635,7 +635,26 @@
         } else {
           statusPill.textContent = "Checkout open - waiting for payment";
         }
-        return TERMINAL_PURCHASE_STATUSES.includes(state);
+        // "Settled" means nothing further will change SOON - not that nothing
+        // will ever change. "processing" counts, and that is the point:
+        //
+        //   processing = paid | fulfillment_pending (commerceService.ts:2358)
+        //   sent       = fulfilled, set when the provider accepts
+        //                (letterJobService.ts:510)
+        //
+        // and that acceptance runs in processDueLetterJobs, whose only caller
+        // is runMaintenance.ts:172 - the HOURLY job. httpServer.ts:943 logs
+        // that background maintenance is disabled in the API process, and
+        // there is no provider webhook. So a timer on a 10-minute budget was
+        // making ~40 calls waiting for a transition an hourly job owns.
+        //
+        // Note the asymmetry if this is ever revisited: the prepaid Send path
+        // dispatches inline (sendLetter.ts:128), so it reaches "sent" in
+        // seconds. Pay & Send enqueues and waits. If Pay & Send ever
+        // dispatches inline too, the only cost of this line is a card that
+        // updates when the user returns rather than on a timer - which is why
+        // this is a comment rather than a pinned test.
+        return state === "processing" || TERMINAL_PURCHASE_STATUSES.includes(state);
       }
 
       // One refresh, three callers: the Check status button, the visibility
@@ -651,12 +670,12 @@
             orderId: trackedOrderId,
           }),
         );
-        const finished = applyPurchaseStatus(status);
-        if (finished) stopStatusPolling();
-        return finished;
+        const settled = applyPurchaseStatus(status);
+        if (settled) stopStatusPolling();
+        return settled;
       }
 
-      // A Letter Pack grants letters; it does not send anything. So "finished"
+      // A Letter Pack grants letters; it does not send anything. So "settled"
       // here means the letters have arrived and the card can send - at which
       // point render() has taken over and there is nothing left to wait for.
       async function refreshLetterBalance() {
@@ -673,17 +692,26 @@
 
       // One refresh, three callers: the Check status button, the visibility
       // handler, and the timer. The in-flight guard is what keeps them from
-      // overlapping. Resolves true when there is nothing left to wait for.
+      // overlapping. Resolves true when nothing further will change soon.
       //
       // A tracked order wins over a pending pack: order state is the more
       // specific answer, and the pack path has no order id to ask about.
-      async function refreshPurchaseStatus() {
+      //
+      // userInitiated gates the button's progress label, and ONLY that. A
+      // label saying the user's click is in flight has no business firing on a
+      // timer: before this, every automatic poll flipped the button to
+      // "Checking..." and back, which reads as a card cycling rather than one
+      // quietly waiting. The in-flight guard is unaffected - it stops the
+      // three callers overlapping, whether or not anything is displayed.
+      async function refreshPurchaseStatus({ userInitiated = false } = {}) {
         if (statusCheckInFlight) return false;
         if (!trackedOrderId && !packPurchasePending) return false;
         statusCheckInFlight = true;
         const button = document.getElementById("check-status-button");
-        button.textContent = "Checking...";
-        button.disabled = true;
+        if (userInitiated) {
+          button.textContent = "Checking...";
+          button.disabled = true;
+        }
         try {
           return trackedOrderId
             ? await refreshOrderStatus()
@@ -696,8 +724,10 @@
           return false;
         } finally {
           statusCheckInFlight = false;
-          button.textContent = CHECK_STATUS_LABEL;
-          button.disabled = false;
+          if (userInitiated) {
+            button.textContent = CHECK_STATUS_LABEL;
+            button.disabled = false;
+          }
         }
       }
 
@@ -735,8 +765,8 @@
           elapsed < POLL_FAST_WINDOW_MS ? POLL_FAST_MS : POLL_SLOW_MS;
         statusTimer = setTimeout(() => {
           statusTimer = null;
-          void refreshPurchaseStatus().then((finished) => {
-            if (!finished) scheduleStatusPoll();
+          void refreshPurchaseStatus().then((settled) => {
+            if (!settled) scheduleStatusPoll();
           });
         }, delay);
       }
@@ -895,8 +925,8 @@
       document
         .getElementById("check-status-button")
         .addEventListener("click", () => {
-          void refreshPurchaseStatus().then((finished) => {
-            if (!finished) scheduleStatusPoll();
+          void refreshPurchaseStatus({ userInitiated: true }).then((settled) => {
+            if (!settled) scheduleStatusPoll();
           });
         });
 
@@ -908,8 +938,8 @@
           stopStatusPolling();
           return;
         }
-        void refreshPurchaseStatus().then((finished) => {
-          if (!finished) scheduleStatusPoll();
+        void refreshPurchaseStatus().then((settled) => {
+          if (!settled) scheduleStatusPoll();
         });
       });
 

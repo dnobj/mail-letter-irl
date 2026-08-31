@@ -47,6 +47,9 @@ interface Harness {
   setStatus: (status: Record<string, unknown>) => void;
   setBalance: (balance: Record<string, unknown>) => void;
   setHidden: (hidden: boolean) => void;
+  /** Hold tool calls open so in-flight UI state can be observed. */
+  holdCalls: () => void;
+  releaseCalls: () => Promise<void>;
   fireGlobals: () => void;
   fireVisibilityChange: () => void;
   pendingTimers: () => ScheduledTimer[];
@@ -99,6 +102,8 @@ function mount(
   // The fixture's draft needs 1 letter, so 0 is "the pack has not landed yet".
   let accountBalance: Record<string, unknown> = { lettersRemaining: 0 };
   let hidden = false;
+  let gate: Promise<void> | null = null;
+  let openGate: (() => void) | null = null;
 
   const dom = new JSDOM(runnable, {
     runScripts: 'dangerously',
@@ -124,6 +129,7 @@ function mount(
         toolOutput: toolOutputFixture(),
         callTool: async (name: string, args: Record<string, unknown>) => {
           calls.push({ name, args });
+          if (gate) await gate;
           if (name === 'create_mail_checkout') {
             return {
               structuredContent: {
@@ -161,6 +167,17 @@ function mount(
     },
     setHidden: value => {
       hidden = value;
+    },
+    holdCalls: () => {
+      gate = new Promise<void>(resolve => {
+        openGate = resolve;
+      });
+    },
+    releaseCalls: async () => {
+      openGate?.();
+      gate = null;
+      openGate = null;
+      await flush();
     },
     fireGlobals: () => {
       dom.window.dispatchEvent(new dom.window.Event('openai:set_globals'));
@@ -246,20 +263,85 @@ describe.each(CARDS)('%s purchase status', card => {
     expect(statusCalls[0].args).toEqual({ orderId: 'ord_test_0001' });
   });
 
-  it('keeps polling on a non-terminal status and stops on a terminal one', async () => {
+  it('keeps polling while the payment is still pending', async () => {
     await checkout(harness);
     expect(harness.pendingTimers().length).toBe(1);
 
-    // processing is not terminal - the mail is still being prepared.
+    harness.setStatus({ purchaseStatus: 'pending_payment' });
+    await harness.runNextTimer();
+
+    expect(harness.pendingTimers().length).toBe(1);
+  });
+
+  it('stops the timer once the payment is confirmed', async () => {
+    // "processing" is paid|fulfillment_pending, and the hop to "sent" is set
+    // when the provider accepts - which runs only in the HOURLY maintenance
+    // job. Polling a 10-minute budget for it made ~40 calls for a transition
+    // that could not arrive. Observed against dev on 2026-08-31.
+    await checkout(harness);
+    harness.setStatus({ purchaseStatus: 'processing' });
+
+    await harness.runNextTimer();
+
+    expect(harness.pendingTimers().length).toBe(0);
+    // Stopping the timer must not stop the display.
+    expect(harness.text('status-pill')).toBe('Paid - preparing mail');
+  });
+
+  it('still refreshes on return after the timer has stopped', async () => {
+    // This is what makes stopping the timer safe: the customer who comes back
+    // an hour later still sees the outcome, without the card having polled
+    // throughout.
+    await checkout(harness);
     harness.setStatus({ purchaseStatus: 'processing' });
     await harness.runNextTimer();
-    expect(harness.text('status-pill')).toBe('Paid - preparing mail');
-    expect(harness.pendingTimers().length).toBe(1);
+    expect(harness.pendingTimers().length).toBe(0);
 
     harness.setStatus({ purchaseStatus: 'sent' });
-    await harness.runNextTimer();
+    harness.fireVisibilityChange();
+    await flush();
+
     expect(harness.text('status-pill')).toBe('Sent!');
     expect(harness.pendingTimers().length).toBe(0);
+  });
+
+  it('stops on a terminal status', async () => {
+    await checkout(harness);
+    harness.setStatus({ purchaseStatus: 'payment_failed', message: 'Payment was not completed.' });
+
+    await harness.runNextTimer();
+
+    expect(harness.text('status-pill')).toBe('Payment was not completed.');
+    expect(harness.pendingTimers().length).toBe(0);
+  });
+
+  it('does not flicker the button on an automatic refresh', async () => {
+    // The reported symptom: the card appeared to cycle between "Checking..."
+    // and "Check status". A label announcing the user's click has no business
+    // firing on a timer.
+    await checkout(harness);
+    harness.holdCalls();
+
+    await harness.runNextTimer();
+
+    expect(harness.text('check-status-button')).toBe('Check status');
+    expect(
+      (harness.document.getElementById('check-status-button') as HTMLButtonElement).disabled
+    ).toBe(false);
+    await harness.releaseCalls();
+  });
+
+  it('does show progress on a refresh the user asked for', async () => {
+    // The other half: suppressing the label everywhere would leave a click
+    // with no feedback at all.
+    await checkout(harness);
+    harness.holdCalls();
+
+    await harness.click('check-status-button');
+    expect(harness.text('check-status-button')).toBe('Checking...');
+
+    await harness.releaseCalls();
+    expect(harness.text('check-status-button')).toBe('Check status');
   });
 
   it('refreshes immediately when the tab becomes visible again', async () => {
