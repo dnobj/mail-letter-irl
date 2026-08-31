@@ -45,6 +45,7 @@ interface Harness {
   timers: ScheduledTimer[];
   calls: Array<{ name: string; args: Record<string, unknown> }>;
   setStatus: (status: Record<string, unknown>) => void;
+  setBalance: (balance: Record<string, unknown>) => void;
   setHidden: (hidden: boolean) => void;
   fireGlobals: () => void;
   fireVisibilityChange: () => void;
@@ -95,6 +96,8 @@ function mount(
   const timers: ScheduledTimer[] = [];
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   let purchaseStatus: Record<string, unknown> = { purchaseStatus: 'pending_payment' };
+  // The fixture's draft needs 1 letter, so 0 is "the pack has not landed yet".
+  let accountBalance: Record<string, unknown> = { lettersRemaining: 0 };
   let hidden = false;
 
   const dom = new JSDOM(runnable, {
@@ -132,6 +135,9 @@ function mount(
           if (name === 'get_purchase_status') {
             return { structuredContent: purchaseStatus };
           }
+          if (name === 'get_account_balance') {
+            return { structuredContent: accountBalance };
+          }
           return { structuredContent: {} };
         },
         openExternal: async () => {
@@ -149,6 +155,9 @@ function mount(
     calls,
     setStatus: status => {
       purchaseStatus = status;
+    },
+    setBalance: balance => {
+      accountBalance = balance;
     },
     setHidden: value => {
       hidden = value;
@@ -310,5 +319,102 @@ describe.each(CARDS)('%s purchase status', card => {
     );
     expect(rejecting.text('pay-send-button-text')).toBe('Use the checkout link below');
     expect(rejecting.pendingTimers().length).toBe(1);
+  });
+});
+
+/**
+ * A Letter Pack grants credits and nothing else: the customer must come back
+ * and press Send. Before this, buying a pack left the card frozen on
+ * "Not enough letters in your balance", so a paid-for letter could sit unsent
+ * indefinitely with no way to learn otherwise except asking ChatGPT (#306).
+ *
+ * The pack is bought on the website, so there is no order id and
+ * get_purchase_status is unusable - the balance is the only observable.
+ */
+describe.each(CARDS)('%s letter pack refresh', card => {
+  let harness: Harness;
+
+  beforeEach(() => {
+    harness = mount(card);
+  });
+
+  async function buyPack(): Promise<void> {
+    await harness.click('buy-pack-button');
+  }
+
+  it('starts watching for the letters after a pack checkout', async () => {
+    expect(harness.visible('check-status-button')).toBe(false);
+    expect(harness.pendingTimers().length).toBe(0);
+
+    await buyPack();
+
+    expect(harness.visible('check-status-button')).toBe(true);
+    expect(harness.pendingTimers().length).toBe(1);
+    expect(harness.text('status-pill')).toBe('Waiting for your Letter Pack');
+  });
+
+  it('makes the card sendable once the letters arrive', async () => {
+    await buyPack();
+    harness.setBalance({ lettersRemaining: 3 });
+
+    await harness.runNextTimer();
+
+    expect(harness.text('status-pill')).toBe('Ready to send');
+    expect(harness.visible('send-button')).toBe(true);
+    // Offering to charge again for a letter the customer now owns is the one
+    // outcome worth ruling out.
+    expect(harness.visible('pay-send-button')).toBe(false);
+    expect(harness.pendingTimers().length).toBe(0);
+  });
+
+  it('survives a re-render that still reports the old balance', async () => {
+    // The tool output is never re-fetched, so it still says canSendNow: false.
+    // render() has to prefer the refreshed balance or the card snaps back.
+    await buyPack();
+    harness.setBalance({ lettersRemaining: 3 });
+    await harness.runNextTimer();
+
+    harness.fireGlobals();
+    await flush();
+
+    expect(harness.text('status-pill')).toBe('Ready to send');
+    expect(harness.visible('send-button')).toBe(true);
+  });
+
+  it('keeps waiting when the letters have not arrived', async () => {
+    // The expected outcome when a pack is bought while signed out of the
+    // website: the letters never reach this account. It must stay checkable
+    // rather than declare failure.
+    await buyPack();
+    harness.setBalance({ lettersRemaining: 0 });
+
+    await harness.runNextTimer();
+
+    expect(harness.visible('send-button')).toBe(false);
+    expect(harness.visible('check-status-button')).toBe(true);
+    expect(harness.pendingTimers().length).toBe(1);
+  });
+
+  it('asks about the balance, never about an order it does not have', async () => {
+    await buyPack();
+    await harness.runNextTimer();
+
+    const names = harness.calls.map(call => call.name);
+    expect(names).toContain('get_account_balance');
+    expect(names).not.toContain('get_purchase_status');
+  });
+
+  it('prefers order status when a checkout is also being tracked', async () => {
+    // Order state is the more specific answer, and the pack path has no order
+    // id to ask about.
+    await harness.click('pay-send-button');
+    await buyPack();
+    const before = harness.calls.length;
+
+    await harness.click('check-status-button');
+
+    const asked = harness.calls.slice(before).map(call => call.name);
+    expect(asked).toContain('get_purchase_status');
+    expect(asked).not.toContain('get_account_balance');
   });
 });
