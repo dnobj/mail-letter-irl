@@ -139,7 +139,14 @@
             rel="noopener noreferrer"
             style="display: none"
           ></a>
-          <div class="note">Checkout opens in your browser. This card updates automatically once payment completes.</div>
+          <button
+            class="send-button secondary"
+            id="check-status-button"
+            style="display: none"
+          >
+            Check status
+          </button>
+          <div class="note">Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.</div>
         </div>
         <div
           id="error-message"
@@ -147,7 +154,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t15</p>
+      <p class="rev">letter t16</p>
     </div>
 
     <script type="module">
@@ -162,6 +169,15 @@
       let currentEligibility = null;
       let sendInProgress = false;
       let checkoutInProgress = false;
+      // Set once create_mail_checkout returns, and never cleared. Deliberately
+      // not checkoutInProgress: that flag is reset when checkout CREATION
+      // fails, and in that case render() should go back to owning the status
+      // pill and the ID row. Those rows follow the order only once one exists.
+      let trackedOrderId = null;
+      let statusCheckInFlight = false;
+      let statusTimer = null;
+      let pollStartedAt = 0;
+      let pollDeadline = 0;
 
       function applyTheme() {
         const theme = window.openai?.theme ?? "light";
@@ -412,15 +428,17 @@
         document.getElementById("delivery").textContent =
           deliveryText.length > 0 ? deliveryText.join(" - ") : "Standard";
 
-        // Status pill
-        const statusPill = document.getElementById("status-pill");
-        statusPill.classList.remove("ok", "alert");
-        if (canSendNow) {
-          statusPill.classList.add("ok");
-          statusPill.textContent = "Ready to send";
-        } else {
-          statusPill.classList.add("alert");
-          statusPill.textContent = reasonCannotSend ?? "Cannot send";
+        // Status pill - only while this card still describes a draft.
+        if (cardIsShowingDraft()) {
+          const statusPill = document.getElementById("status-pill");
+          statusPill.classList.remove("ok", "alert");
+          if (canSendNow) {
+            statusPill.classList.add("ok");
+            statusPill.textContent = "Ready to send";
+          } else {
+            statusPill.classList.add("alert");
+            statusPill.textContent = reasonCannotSend ?? "Cannot send";
+          }
         }
 
         // Note about saved return address
@@ -432,9 +450,11 @@
           noteEl.style.display = "none";
         }
 
-        // Show Draft ID
-        document.getElementById("id-label").textContent = "Draft";
-        document.getElementById("id-value").textContent = draftId || "—";
+        // Show Draft ID - same ownership rule as the status pill above.
+        if (cardIsShowingDraft()) {
+          document.getElementById("id-label").textContent = "Draft";
+          document.getElementById("id-value").textContent = draftId || "—";
+        }
 
         // Update send button state
         const sendButton = document.getElementById("send-button");
@@ -535,42 +555,132 @@
         return result?.structuredContent || result || {};
       }
 
-      async function pollPurchaseStatus(orderId) {
+      // True while this card still describes a draft. Once a send or a
+      // checkout takes over, the status pill and the ID row belong to that
+      // operation and render() must not write over them.
+      //
+      // This is the 2026-08-30 defect: both rows sat outside the guard that
+      // already protected the buttons, so an openai:set_globals after a
+      // successful payment reset a paid order's card to "Not enough letters in
+      // your balance" and the draft id - reading, above a note promising
+      // automatic updates, as though the payment had failed. The prepaid send
+      // path had the same hole, which is why this covers sendInProgress too.
+      function cardIsShowingDraft() {
+        return trackedOrderId === null && !sendInProgress;
+      }
+
+      // Statuses after which nothing further will change, from the served
+      // schema (src/zodSchemas.ts getPurchaseStatusOutputZ). "pending_payment"
+      // and "processing" are the two worth waiting on.
+      const TERMINAL_PURCHASE_STATUSES = [
+        "sent",
+        "payment_failed",
+        "refund_pending",
+        "refunded",
+        "cancelled",
+      ];
+      const CHECK_STATUS_LABEL = "Check status";
+
+      function applyPurchaseStatus(status) {
         const statusPill = document.getElementById("status-pill");
-        for (let attempt = 0; attempt < 24; attempt += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 2500));
-          const statusResult = await window.openai.callTool(
-            "get_purchase_status",
-            { orderId },
-          );
-          const status = toolData(statusResult);
-          if (status.purchaseStatus === "processing") {
-            statusPill.classList.remove("alert");
-            statusPill.classList.add("ok");
-            statusPill.textContent = "Paid - preparing mail";
-            continue;
-          }
-          if (status.purchaseStatus === "sent") {
-            statusPill.classList.remove("alert");
-            statusPill.classList.add("ok");
-            statusPill.textContent = "Sent!";
-            return;
-          }
-          if (
-            [
-              "payment_failed",
-              "refund_pending",
-              "refunded",
-              "cancelled",
-            ].includes(status.purchaseStatus)
-          ) {
-            statusPill.classList.remove("ok");
-            statusPill.classList.add("alert");
-            statusPill.textContent = status.message || status.purchaseStatus;
-            return;
-          }
+        const state = status.purchaseStatus;
+        statusPill.classList.remove("ok", "alert");
+        if (state === "sent") {
+          statusPill.classList.add("ok");
+          statusPill.textContent = "Sent!";
+        } else if (state === "processing") {
+          statusPill.classList.add("ok");
+          statusPill.textContent = "Paid - preparing mail";
+        } else if (TERMINAL_PURCHASE_STATUSES.includes(state)) {
+          statusPill.classList.add("alert");
+          statusPill.textContent = status.message || state;
+        } else {
+          statusPill.textContent = "Checkout open - waiting for payment";
         }
-        statusPill.textContent = "Checkout open - status may take a moment";
+        return TERMINAL_PURCHASE_STATUSES.includes(state);
+      }
+
+      // One refresh, three callers: the Check status button, the visibility
+      // handler, and the timer. The in-flight guard is what keeps them from
+      // overlapping. Resolves true when the status is terminal.
+      async function refreshPurchaseStatus() {
+        if (!trackedOrderId || statusCheckInFlight) return false;
+        statusCheckInFlight = true;
+        const button = document.getElementById("check-status-button");
+        button.textContent = "Checking...";
+        button.disabled = true;
+        try {
+          const status = toolData(
+            await window.openai.callTool("get_purchase_status", {
+              orderId: trackedOrderId,
+            }),
+          );
+          const finished = applyPurchaseStatus(status);
+          if (finished) stopStatusPolling();
+          return finished;
+        } catch {
+          // A failed check is not worth an alarming message: the order is
+          // unaffected, and the button is still there to try again.
+          return false;
+        } finally {
+          statusCheckInFlight = false;
+          button.textContent = CHECK_STATUS_LABEL;
+          button.disabled = false;
+        }
+      }
+
+      // Poll only while the document is visible, and refresh the instant it
+      // becomes visible again.
+      //
+      // The previous loop ran 24 fixed 2.5s attempts and, on 2026-08-30, made
+      // exactly ONE call. Paying means switching to the Stripe tab, and
+      // browsers throttle or suspend timers in a hidden iframe - so a timer is
+      // structurally unable to cover the window it exists for. Coming back to
+      // the tab is both when the answer is wanted and the first moment the
+      // widget is allowed to run, so that is what drives it. The visibility
+      // gate is also what bounds call volume; the interval is secondary.
+      const POLL_FAST_MS = 3000;
+      const POLL_SLOW_MS = 15000;
+      const POLL_FAST_WINDOW_MS = 60000;
+      const POLL_BUDGET_MS = 600000;
+
+      function stopStatusPolling() {
+        if (statusTimer !== null) {
+          clearTimeout(statusTimer);
+          statusTimer = null;
+        }
+      }
+
+      // Always clears before arming, so repeated visibilitychange events
+      // cannot stack timers - a leak here would mean unbounded callTool
+      // traffic from a card left open.
+      function scheduleStatusPoll() {
+        stopStatusPolling();
+        if (!trackedOrderId || document.hidden) return;
+        if (Date.now() >= pollDeadline) return;
+        const elapsed = Date.now() - pollStartedAt;
+        const delay =
+          elapsed < POLL_FAST_WINDOW_MS ? POLL_FAST_MS : POLL_SLOW_MS;
+        statusTimer = setTimeout(() => {
+          statusTimer = null;
+          void refreshPurchaseStatus().then((finished) => {
+            if (!finished) scheduleStatusPoll();
+          });
+        }, delay);
+      }
+
+      function startStatusPolling() {
+        pollStartedAt = Date.now();
+        pollDeadline = pollStartedAt + POLL_BUDGET_MS;
+        document.getElementById("check-status-button").style.display = "flex";
+        // Claim the pill immediately. Until the first poll returns there is
+        // nothing else to show, and leaving the pre-checkout text - "Not
+        // enough letters in your balance" - next to an open checkout reads as
+        // a payment that failed.
+        const statusPill = document.getElementById("status-pill");
+        statusPill.classList.remove("ok", "alert");
+        statusPill.textContent = "Checkout open - waiting for payment";
+        scheduleStatusPoll();
       }
 
       // Server-formatted per currency. The fallback matters more than it
@@ -621,6 +731,9 @@
           if (!result.checkoutUrl) {
             throw new Error(result.message || "Checkout URL was not returned");
           }
+          // Claim the rows BEFORE writing them, so a set_globals landing
+          // between the two cannot reset them to the draft.
+          trackedOrderId = result.orderId;
           idLabel.textContent = "Purchase";
           idValue.textContent = result.orderId;
           button.classList.remove("loading");
@@ -647,9 +760,9 @@
             : "";
           showCheckoutLink(result.checkoutUrl, `Open checkout${priced}`);
 
-          // Poll before opening, not after: the customer may well pay via the
-          // link above, and this card has to update on that path too.
-          void pollPurchaseStatus(result.orderId).catch(() => undefined);
+          // Start before opening, not after: the customer may well pay via
+          // the link above, and this card has to update on that path too.
+          startStatusPolling();
 
           try {
             await window.openai.openExternal({ href: result.checkoutUrl });
@@ -695,6 +808,26 @@
       document
         .getElementById("buy-pack-button")
         .addEventListener("click", handleBuyPack);
+      document
+        .getElementById("check-status-button")
+        .addEventListener("click", () => {
+          void refreshPurchaseStatus().then((finished) => {
+            if (!finished) scheduleStatusPoll();
+          });
+        });
+
+      // Coming back from the checkout tab is the moment the answer is wanted,
+      // and the first moment a hidden iframe is allowed to run again.
+      document.addEventListener("visibilitychange", () => {
+        if (!trackedOrderId) return;
+        if (document.hidden) {
+          stopStatusPolling();
+          return;
+        }
+        void refreshPurchaseStatus().then((finished) => {
+          if (!finished) scheduleStatusPoll();
+        });
+      });
 
       // Initial render (will show loading state)
       render();
