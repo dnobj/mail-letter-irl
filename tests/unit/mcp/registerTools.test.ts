@@ -65,6 +65,7 @@ const sendTools = [
 const otherWriteTools = [
   { name: 'create_mail_checkout', readOnly: false },
   { name: 'create_pack_checkout', readOnly: false },
+  { name: 'redeem_promo_code', readOnly: false },
   { name: 'set_return_address', readOnly: false },
   { name: 'confirm_uploaded_image', readOnly: false },
   { name: 'submit_feature_request', readOnly: false },
@@ -252,11 +253,11 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
   });
 
   describe('Tool Classification Summary', () => {
-    it('should cover all 20 registered tools in annotation checks', () => {
+    it('should cover all 21 registered tools in annotation checks', () => {
       const runtimeToolNames = new LetterIrlServer().listTools().map((tool) => tool.name).sort();
       const checkedToolNames = allTools.map((tool) => tool.name).sort();
 
-      expect(allTools.length).toBe(20);
+      expect(allTools.length).toBe(21);
       expect(checkedToolNames).toEqual(runtimeToolNames);
     });
 
@@ -273,7 +274,7 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === false;
       }).length;
-      expect(writeCount).toBe(14);
+      expect(writeCount).toBe(15);
     });
 
     it('should have 9 open-world tools (call external APIs)', () => {
@@ -289,7 +290,7 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.idempotentHint === true;
       }).length;
-      expect(idempotentCount).toBe(6);
+      expect(idempotentCount).toBe(7);
     });
 
     it('should have 1 destructive tool', () => {

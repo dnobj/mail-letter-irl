@@ -86,6 +86,10 @@ export const createPackCheckoutInputZ = z.object({
   pack: z.enum(["starter", "regular", "power"])
 });
 
+export const redeemPromoCodeInputZ = z.object({
+  code: z.string()
+});
+
 export const getPurchaseStatusInputZ = z.object({
   orderId: z.string()
 });
@@ -285,6 +289,15 @@ export const createMailCheckoutOutputZ = z.object({
   expiresAt: z.string().optional(),
   status: z.string(),
   reused: z.boolean(),
+  message: z.string()
+});
+
+export const redeemPromoCodeOutputZ = z.object({
+  redeemed: z.boolean(),
+  // Letters, not credits: the service reports the ledger unit and this is the
+  // only unit a customer sees (#308).
+  letters: z.number().int().nonnegative().optional(),
+  expiresAt: z.string().optional(),
   message: z.string()
 });
 

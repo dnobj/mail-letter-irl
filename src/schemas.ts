@@ -327,6 +327,28 @@ export const createPackCheckoutOutputSchema: JsonSchema = {
   }
 };
 
+export const redeemPromoCodeInputSchema: JsonSchema = {
+  type: "object",
+  required: ["code"],
+  properties: {
+    code: {
+      type: "string",
+      description: "The promo code to redeem"
+    }
+  }
+};
+
+export const redeemPromoCodeOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["redeemed", "message"],
+  properties: {
+    redeemed: { type: "boolean" },
+    letters: { type: "integer", description: "Letters added to the balance" },
+    expiresAt: { type: "string", description: "When the added letters expire, if they do" },
+    message: { type: "string" }
+  }
+};
+
 export const getPurchaseStatusInputSchema: JsonSchema = {
   type: "object",
   required: ["orderId"],

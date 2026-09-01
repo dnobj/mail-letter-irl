@@ -6,6 +6,7 @@ import {
 import { getBalance, getDetailedBalance } from "../services/creditService.js";
 import { findUser } from "../services/userService.js";
 import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
+import { CREDITS_PER_LETTER } from "../config/products.js";
 
 interface ExpiringLettersInfo {
   letters: number;
@@ -28,7 +29,7 @@ async function handler(
   _input: Record<string, never>,
   context: ToolContext
 ): Promise<GetAccountBalanceOutput> {
-  const standardCost = 2; // Updated to 2 credits per letter (matches pricing)
+  const standardCost = CREDITS_PER_LETTER;
 
   // Get user ID from context
   const userId = context.user.userId || 'default-user';

@@ -14,6 +14,7 @@ import {
   sendLetterInputZ,
   createMailCheckoutInputZ,
   createPackCheckoutInputZ,
+  redeemPromoCodeInputZ,
   getPurchaseStatusInputZ,
   getOrderStatusInputZ,
   getAccountBalanceInputZ,
@@ -32,6 +33,7 @@ import {
   sendLetterOutputZ,
   createMailCheckoutOutputZ,
   createPackCheckoutOutputZ,
+  redeemPromoCodeOutputZ,
   getPurchaseStatusOutputZ,
   getOrderStatusOutputZ,
   getAccountBalanceOutputZ,
@@ -115,6 +117,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'send_letter',           // Draft consumption makes retries safe
     'send_postcard',         // Draft consumption makes retries safe
     'create_mail_checkout',  // Reuses the active checkout for a draft
+    'redeem_promo_code',     // A spent code is refused, so repeats do nothing
     'set_return_address',    // Setting same address twice = no change
     'clear_return_address',  // Clearing twice = no additional effect
     'confirm_uploaded_image' // Repeating the same relay overwrites with the same value
@@ -480,6 +483,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   send_letter: sendLetterInputZ,
   create_mail_checkout: createMailCheckoutInputZ,
   create_pack_checkout: createPackCheckoutInputZ,
+  redeem_promo_code: redeemPromoCodeInputZ,
   get_purchase_status: getPurchaseStatusInputZ,
   // Account and order management tools
   get_order_status: getOrderStatusInputZ,
@@ -509,6 +513,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   send_letter: sendLetterOutputZ,
   create_mail_checkout: createMailCheckoutOutputZ,
   create_pack_checkout: createPackCheckoutOutputZ,
+  redeem_promo_code: redeemPromoCodeOutputZ,
   get_purchase_status: getPurchaseStatusOutputZ,
   // Account and order management tools
   get_order_status: getOrderStatusOutputZ,

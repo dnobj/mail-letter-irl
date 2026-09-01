@@ -35,6 +35,19 @@ import { createHash } from 'node:crypto';
 
 import type { MailType } from '../services/types.js';
 
+/**
+ * Internal credits per customer-facing letter.
+ *
+ * Credits are the ledger unit; letters are the only unit a customer sees. The
+ * conversion was written out separately at each site that needed it, so this
+ * is the shared source rather than letting a new site become a fourth copy.
+ *
+ * The property this ratio underwrites - that comparing letters gives the same
+ * verdict as comparing credits - holds only while pricing is flat, and is
+ * pinned by tests/unit/tools/letterBalanceEquivalence.test.ts.
+ */
+export const CREDITS_PER_LETTER = 2;
+
 export type PackProductId = 'credit-pack-4' | 'credit-pack-10' | 'credit-pack-100';
 export type ProductGroup = 'pack' | 'jit';
 

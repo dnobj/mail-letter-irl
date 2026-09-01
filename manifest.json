@@ -1098,6 +1098,45 @@
       }
     },
     {
+      "name": "redeem_promo_code",
+      "description": "Redeem a promo code to add prepaid letters to the account. Returns redeemed: false with the reason when a code is invalid, expired, or already used - that is an ordinary answer, not an error. Letters must still be sent afterward.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The promo code to redeem"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "redeemed",
+          "message"
+        ],
+        "properties": {
+          "redeemed": {
+            "type": "boolean"
+          },
+          "letters": {
+            "type": "integer",
+            "description": "Letters added to the balance"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "When the added letters expire, if they do"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
       "name": "get_purchase_status",
       "description": "Get the payment, fulfillment, or refund status of an owned Pay & Send or letter-pack purchase. Returns sanitized commerce state only and never exposes payment-card details.",
       "inputSchema": {
