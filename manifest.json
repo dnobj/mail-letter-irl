@@ -124,30 +124,10 @@
           "sendEligibility": {
             "type": "object",
             "required": [
-              "prepaid",
               "payAndSend",
               "letterPack"
             ],
             "properties": {
-              "prepaid": {
-                "type": "object",
-                "required": [
-                  "eligible",
-                  "requiredCredits",
-                  "availableCredits"
-                ],
-                "properties": {
-                  "eligible": {
-                    "type": "boolean"
-                  },
-                  "requiredCredits": {
-                    "type": "integer"
-                  },
-                  "availableCredits": {
-                    "type": "integer"
-                  }
-                }
-              },
               "payAndSend": {
                 "type": "object",
                 "required": [
@@ -419,30 +399,10 @@
           "sendEligibility": {
             "type": "object",
             "required": [
-              "prepaid",
               "payAndSend",
               "letterPack"
             ],
             "properties": {
-              "prepaid": {
-                "type": "object",
-                "required": [
-                  "eligible",
-                  "requiredCredits",
-                  "availableCredits"
-                ],
-                "properties": {
-                  "eligible": {
-                    "type": "boolean"
-                  },
-                  "requiredCredits": {
-                    "type": "integer"
-                  },
-                  "availableCredits": {
-                    "type": "integer"
-                  }
-                }
-              },
               "payAndSend": {
                 "type": "object",
                 "required": [
@@ -714,30 +674,10 @@
           "sendEligibility": {
             "type": "object",
             "required": [
-              "prepaid",
               "payAndSend",
               "letterPack"
             ],
             "properties": {
-              "prepaid": {
-                "type": "object",
-                "required": [
-                  "eligible",
-                  "requiredCredits",
-                  "availableCredits"
-                ],
-                "properties": {
-                  "eligible": {
-                    "type": "boolean"
-                  },
-                  "requiredCredits": {
-                    "type": "integer"
-                  },
-                  "availableCredits": {
-                    "type": "integer"
-                  }
-                }
-              },
               "payAndSend": {
                 "type": "object",
                 "required": [
@@ -1172,10 +1112,11 @@
             "enum": [
               "pending_payment",
               "processing",
-              "sent",
+              "submitted",
               "payment_failed",
               "refund_pending",
               "refunded",
+              "on_hold",
               "cancelled"
             ]
           },
@@ -1572,30 +1513,10 @@
           "sendEligibility": {
             "type": "object",
             "required": [
-              "prepaid",
               "payAndSend",
               "letterPack"
             ],
             "properties": {
-              "prepaid": {
-                "type": "object",
-                "required": [
-                  "eligible",
-                  "requiredCredits",
-                  "availableCredits"
-                ],
-                "properties": {
-                  "eligible": {
-                    "type": "boolean"
-                  },
-                  "requiredCredits": {
-                    "type": "integer"
-                  },
-                  "availableCredits": {
-                    "type": "integer"
-                  }
-                }
-              },
               "payAndSend": {
                 "type": "object",
                 "required": [

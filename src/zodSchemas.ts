@@ -230,11 +230,6 @@ const statusTimelineEntryZ = z.object({
 const trackingSupportZ = z.enum(["none", "estimated_only", "carrier_tracking"]);
 
 export const sendEligibilityZ = z.object({
-  prepaid: z.object({
-    eligible: z.boolean(),
-    requiredCredits: z.number().int(),
-    availableCredits: z.number().int()
-  }),
   payAndSend: z.object({
     available: z.boolean(),
     amountCents: z.number().int().optional(),
@@ -323,10 +318,11 @@ export const getPurchaseStatusOutputZ = z.object({
   purchaseStatus: z.enum([
     "pending_payment",
     "processing",
-    "sent",
+    "submitted",
     "payment_failed",
     "refund_pending",
     "refunded",
+    "on_hold",
     "cancelled"
   ]),
   orderStatus: z.string(),

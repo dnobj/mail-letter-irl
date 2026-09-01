@@ -112,10 +112,22 @@ export interface PurchaseStatusResult {
   purchaseStatus:
     | 'pending_payment'
     | 'processing'
-    | 'sent'
+    // Set when the print provider ACCEPTS the job, which is not the same as
+    // the item being in the mail. It was called 'sent', and the message
+    // beneath it already said "accepted by the print provider" - the prose was
+    // right and the name was wrong. Renamed while pre-launch, because a served
+    // enum value is free to change now and fixed afterwards (#310).
+    //
+    // Note the letters table has its own 'sent' status, unrelated to this one.
+    | 'submitted'
     | 'payment_failed'
     | 'refund_pending'
     | 'refunded'
+    // Chargebacks and operational holds. Previously folded into
+    // 'refund_pending', whose message claims the order could not be fulfilled
+    // and that we are refunding it - wrong in both halves for a dispute the
+    // customer raised against an order we may have delivered perfectly.
+    | 'on_hold'
     | 'cancelled';
   orderStatus: OrderStatus;
   productDescription: string;
@@ -143,11 +155,6 @@ export interface CommerceMaintenanceResult {
 }
 
 export interface SendEligibility {
-  prepaid: {
-    eligible: boolean;
-    requiredCredits: number;
-    availableCredits: number;
-  };
   payAndSend: {
     available: boolean;
     amountCents?: number;
@@ -192,12 +199,16 @@ export function getSendEligibility(
   // prepaid/letterPack literal for the disabled path, so a change to either
   // block had to be edited in two returns or the enabled and disabled quote
   // surfaces diverged (#278 round 8). Only payAndSend is branch-dependent.
+  // prepaid{eligible,requiredCredits,availableCredits} was returned here and
+  // read by nobody - every reference in src/ and widgets/ was a comment. It
+  // was also the only place internal CREDIT units reached a served schema, and
+  // 'eligible' duplicated the sibling canSendNow. Removed rather than renamed:
+  // the customer-facing numbers are lettersRequired and get_account_balance,
+  // both already in letters (#308).
+  //
+  // prepaidEligible itself is still computed above - payAndSend.available
+  // depends on it.
   return {
-    prepaid: {
-      eligible: prepaidEligible,
-      requiredCredits,
-      availableCredits
-    },
     payAndSend: jitEnabled
       ? enabledPayAndSend(mailType, prepaidEligible)
       : disabledPayAndSend(mailType),
@@ -2359,7 +2370,9 @@ export async function processStripeWebhookEvent(
   }
 }
 
-function publicPurchaseStatus(status: OrderStatus): PurchaseStatusResult['purchaseStatus'] {
+// Exported for tests: these two encode the customer-facing vocabulary, and
+// the mapping had a defect that no test could see while they were private.
+export function publicPurchaseStatus(status: OrderStatus): PurchaseStatusResult['purchaseStatus'] {
   switch (status) {
     case 'checkout_pending':
       return 'pending_payment';
@@ -2367,7 +2380,7 @@ function publicPurchaseStatus(status: OrderStatus): PurchaseStatusResult['purcha
     case 'fulfillment_pending':
       return 'processing';
     case 'fulfilled':
-      return 'sent';
+      return 'submitted';
     case 'payment_failed':
       return 'payment_failed';
     case 'refund_pending':
@@ -2376,19 +2389,23 @@ function publicPurchaseStatus(status: OrderStatus): PurchaseStatusResult['purcha
       return 'refunded';
     case 'disputed':
     case 'held':
-      return 'refund_pending';
+      // Deliberately ONE customer-facing status for both. The difference
+      // between a chargeback and an operational hold is ours to act on, not
+      // the customer's, and naming it would leak the same class of internal
+      // detail as users.sends_blocked_reason (#278 round 12).
+      return 'on_hold';
     case 'cancelled':
       return 'cancelled';
   }
 }
 
-function purchaseMessage(status: PurchaseStatusResult['purchaseStatus']): string {
+export function purchaseMessage(status: PurchaseStatusResult['purchaseStatus']): string {
   switch (status) {
     case 'pending_payment':
       return 'Checkout is awaiting payment.';
     case 'processing':
       return 'Payment is confirmed and the mail item is being prepared.';
-    case 'sent':
+    case 'submitted':
       return 'The physical mail item was accepted by the print provider.';
     case 'payment_failed':
       return 'Payment was not completed.';
@@ -2396,6 +2413,8 @@ function purchaseMessage(status: PurchaseStatusResult['purchaseStatus']): string
       return 'The order could not be fulfilled and a refund is being processed.';
     case 'refunded':
       return 'The payment was refunded.';
+    case 'on_hold':
+      return 'This order is on hold. Please contact support.';
     case 'cancelled':
       return 'The checkout was cancelled or expired without sending the draft.';
   }

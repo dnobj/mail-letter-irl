@@ -1860,14 +1860,19 @@ describe('commerceService', () => {
   });
 
   it('reports exact server-configured Pay & Send eligibility only when enabled', () => {
-    expect(getSendEligibility(0, 2, 'letter')).toMatchObject({
-      prepaid: { eligible: false },
+    const eligibility = getSendEligibility(0, 2, 'letter');
+    expect(eligibility).toMatchObject({
       payAndSend: {
         available: true,
         amountCents: 499,
         currency: 'usd'
       }
     });
+    // prepaid{eligible,requiredCredits,availableCredits} is no longer served:
+    // nothing read it, and it was the only place internal CREDIT units reached
+    // a served schema. prepaidEligible is still computed internally - it is
+    // what makes payAndSend.available true here, with a zero balance (#308).
+    expect(eligibility).not.toHaveProperty('prepaid');
     mocks.jitEnabled.mockReturnValue(false);
     expect(getSendEligibility(0, 2, 'letter').payAndSend).toMatchObject({
       available: false,

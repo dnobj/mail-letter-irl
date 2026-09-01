@@ -76,7 +76,8 @@ function toolOutputFixture() {
     deliveryClass: 'USPS First-Class Mail',
     deliveryEstimate: '1-2 weeks',
     sendEligibility: {
-      prepaid: { eligible: false, requiredCredits: 1, availableCredits: 0 },
+      // No prepaid block: the server stopped serving one (#308), and a fixture
+      // richer than the real payload can hide a widget that depends on it.
       payAndSend: {
         available: true,
         amountCents: 499,
@@ -297,11 +298,13 @@ describe.each(CARDS)('%s purchase status', card => {
     await harness.runNextTimer();
     expect(harness.pendingTimers().length).toBe(0);
 
-    harness.setStatus({ purchaseStatus: 'sent' });
+    // Renamed from 'sent': it fires when the print provider ACCEPTS the
+    // job, not when the item is in the mail (#310).
+    harness.setStatus({ purchaseStatus: 'submitted' });
     harness.fireVisibilityChange();
     await flush();
 
-    expect(harness.text('status-pill')).toBe('Sent!');
+    expect(harness.text('status-pill')).toBe('With the printer');
     expect(harness.pendingTimers().length).toBe(0);
   });
 

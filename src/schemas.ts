@@ -127,17 +127,8 @@ export const quoteAndPreviewInputSchema: JsonSchema = {
 
 const sendEligibilitySchema: JsonSchema = {
   type: "object",
-  required: ["prepaid", "payAndSend", "letterPack"],
+  required: ["payAndSend", "letterPack"],
   properties: {
-    prepaid: {
-      type: "object",
-      required: ["eligible", "requiredCredits", "availableCredits"],
-      properties: {
-        eligible: { type: "boolean" },
-        requiredCredits: { type: "integer" },
-        availableCredits: { type: "integer" }
-      }
-    },
     payAndSend: {
       type: "object",
       required: ["available"],
@@ -367,7 +358,7 @@ export const getPurchaseStatusOutputSchema: JsonSchema = {
     orderId: { type: "string" },
     purchaseStatus: {
       type: "string",
-      enum: ["pending_payment", "processing", "sent", "payment_failed", "refund_pending", "refunded", "cancelled"]
+      enum: ["pending_payment", "processing", "submitted", "payment_failed", "refund_pending", "refunded", "on_hold", "cancelled"]
     },
     orderStatus: { type: "string" },
     productDescription: { type: "string" },
