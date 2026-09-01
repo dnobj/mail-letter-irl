@@ -289,6 +289,44 @@ export const createMailCheckoutOutputSchema: JsonSchema = {
   }
 };
 
+export const createPackCheckoutInputSchema: JsonSchema = {
+  type: "object",
+  required: ["pack"],
+  properties: {
+    pack: {
+      type: "string",
+      enum: ["starter", "regular", "power"],
+      description: "Pack size: starter (2 letters), regular (5 letters), power (50 letters)"
+    }
+  }
+};
+
+export const createPackCheckoutOutputSchema: JsonSchema = {
+  type: "object",
+  required: [
+    "orderId",
+    "letters",
+    "amountCents",
+    "currency",
+    "productDescription",
+    "status",
+    "reused",
+    "message"
+  ],
+  properties: {
+    orderId: { type: "string" },
+    checkoutUrl: { type: "string", description: "Stripe-hosted checkout URL" },
+    letters: { type: "integer", description: "Letters this pack adds to the balance" },
+    amountCents: { type: "integer" },
+    currency: { type: "string" },
+    productDescription: { type: "string" },
+    expiresAt: { type: "string" },
+    status: { type: "string" },
+    reused: { type: "boolean" },
+    message: { type: "string" }
+  }
+};
+
 export const getPurchaseStatusInputSchema: JsonSchema = {
   type: "object",
   required: ["orderId"],

@@ -92,8 +92,14 @@ export interface CreatePackCheckoutParams {
   userId: string;
   userEmail: string;
   productId: PackProductId;
-  successUrl: string;
-  cancelUrl: string;
+  // Optional so a caller that cannot know the order id can omit them: the
+  // order is created INSIDE createPackCheckout, so the MCP tool has nothing
+  // to build a return URL from. Omitted, they are derived with the same
+  // checkoutReturnUrls helper the JIT path uses, rather than restating the
+  // /purchase/return contract in a second place. The website's dashboard
+  // keeps passing its own and is unaffected.
+  successUrl?: string;
+  cancelUrl?: string;
 }
 
 export interface CreateJitCheckoutParams {
@@ -367,7 +373,7 @@ function appendQuery(base: string, values: Record<string, string>): string {
     .join('&')}`;
 }
 
-function jitReturnUrls(orderId: string): {
+function checkoutReturnUrls(orderId: string): {
   successUrl: string;
   cancelUrl: string;
 } {
@@ -640,12 +646,13 @@ export async function createPackCheckout(
     ]
   );
 
+  const returnUrls = checkoutReturnUrls(orderId);
   const checkout = await createPackCheckoutSession({
     orderId,
     userEmail: params.userEmail,
     product,
-    successUrl: params.successUrl,
-    cancelUrl: params.cancelUrl,
+    successUrl: params.successUrl ?? returnUrls.successUrl,
+    cancelUrl: params.cancelUrl ?? returnUrls.cancelUrl,
     idempotencyKey
   });
   if (!checkout.success || !checkout.sessionId) {
@@ -969,7 +976,7 @@ export async function createJitCheckout(
   // motivated the splice was a concurrent memo invalidation, and that
   // machinery is gone (#278 round 13).
   const product = getJitProductConfig(mailType);
-  const urls = jitReturnUrls(prepared.order.order_id);
+  const urls = checkoutReturnUrls(prepared.order.order_id);
   const checkout = await createJitCheckoutSession({
     orderId: prepared.order.order_id,
     product,

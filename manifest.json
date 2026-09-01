@@ -1030,6 +1030,74 @@
       }
     },
     {
+      "name": "create_pack_checkout",
+      "description": "Create a Stripe-hosted checkout to buy a pack of prepaid letters. The price and pack sizes come only from server configuration. Payment adds letters to the account balance; it does not send anything, so the customer still chooses and sends afterward. Use create_mail_checkout instead to pay for one specific draft.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "pack"
+        ],
+        "properties": {
+          "pack": {
+            "type": "string",
+            "enum": [
+              "starter",
+              "regular",
+              "power"
+            ],
+            "description": "Pack size: starter (2 letters), regular (5 letters), power (50 letters)"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "orderId",
+          "letters",
+          "amountCents",
+          "currency",
+          "productDescription",
+          "status",
+          "reused",
+          "message"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "checkoutUrl": {
+            "type": "string",
+            "description": "Stripe-hosted checkout URL"
+          },
+          "letters": {
+            "type": "integer",
+            "description": "Letters this pack adds to the balance"
+          },
+          "amountCents": {
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "productDescription": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "reused": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
       "name": "get_purchase_status",
       "description": "Get the payment, fulfillment, or refund status of an owned Pay & Send or letter-pack purchase. Returns sanitized commerce state only and never exposes payment-card details.",
       "inputSchema": {

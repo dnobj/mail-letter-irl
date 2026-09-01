@@ -9,6 +9,7 @@ import {
   quoteAndPreviewLetterWithImageTool,
   sendLetterTool,
   createMailCheckoutTool,
+  createPackCheckoutTool,
   getPurchaseStatusTool,
   // Account and order management tools
   getOrderStatusTool,
@@ -49,6 +50,7 @@ const tools: McpToolDefinition<any, any>[] = [
   quoteAndPreviewLetterWithImageTool,
   sendLetterTool,
   createMailCheckoutTool,
+  createPackCheckoutTool,
   getPurchaseStatusTool,
   // Account and order management tools
   getOrderStatusTool,

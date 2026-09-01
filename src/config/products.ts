@@ -41,6 +41,15 @@ export type ProductGroup = 'pack' | 'jit';
 export interface PackProductDefinition {
   readonly productCode: PackProductId;
   readonly credits: number;
+  /**
+   * What the customer is buying, in the unit they see. Credits are internal
+   * (2 per letter) and productCode is named after them, so without this the
+   * only customer-facing count lives inside the display name. First-class
+   * here so no caller has to divide by two - see
+   * tests/unit/tools/letterBalanceEquivalence.test.ts for why that division
+   * is load-bearing.
+   */
+  readonly letters: number;
   readonly priceEnv: string;
   /**
    * The amount this product is agreed to cost, in minor units of the store
@@ -66,6 +75,7 @@ export const PACK_PRODUCTS: readonly PackProductDefinition[] = [
   {
     productCode: 'credit-pack-4',
     credits: 4,
+    letters: 2,
     priceEnv: 'STRIPE_PRICE_STARTER',
     expectedAmountCents: 500,
     name: 'Starter Pack - 2 Letters',
@@ -74,6 +84,7 @@ export const PACK_PRODUCTS: readonly PackProductDefinition[] = [
   {
     productCode: 'credit-pack-10',
     credits: 10,
+    letters: 5,
     priceEnv: 'STRIPE_PRICE_REGULAR',
     expectedAmountCents: 1000,
     name: 'Regular Pack - 5 Letters',
@@ -82,6 +93,7 @@ export const PACK_PRODUCTS: readonly PackProductDefinition[] = [
   {
     productCode: 'credit-pack-100',
     credits: 100,
+    letters: 50,
     priceEnv: 'STRIPE_PRICE_POWER',
     expectedAmountCents: 9000,
     name: 'Power Pack - 50 Letters',

@@ -13,6 +13,7 @@ import {
   quoteAndPreviewLetterWithImageInputZ,
   sendLetterInputZ,
   createMailCheckoutInputZ,
+  createPackCheckoutInputZ,
   getPurchaseStatusInputZ,
   getOrderStatusInputZ,
   getAccountBalanceInputZ,
@@ -30,6 +31,7 @@ import {
   quoteAndPreviewOutputZ,
   sendLetterOutputZ,
   createMailCheckoutOutputZ,
+  createPackCheckoutOutputZ,
   getPurchaseStatusOutputZ,
   getOrderStatusOutputZ,
   getAccountBalanceOutputZ,
@@ -101,6 +103,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'send_letter',
     'send_postcard',
     'create_mail_checkout',
+    'create_pack_checkout',
     'set_return_address',  // Validates address via PostGrid
     'generate_image_for_mail' // Calls the OpenAI Images API when credits allow
   ];
@@ -476,6 +479,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   quote_and_preview_letter_with_image: quoteAndPreviewLetterWithImageInputZ,
   send_letter: sendLetterInputZ,
   create_mail_checkout: createMailCheckoutInputZ,
+  create_pack_checkout: createPackCheckoutInputZ,
   get_purchase_status: getPurchaseStatusInputZ,
   // Account and order management tools
   get_order_status: getOrderStatusInputZ,
@@ -504,6 +508,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   quote_and_preview_letter_with_image: quoteAndPreviewOutputZ,
   send_letter: sendLetterOutputZ,
   create_mail_checkout: createMailCheckoutOutputZ,
+  create_pack_checkout: createPackCheckoutOutputZ,
   get_purchase_status: getPurchaseStatusOutputZ,
   // Account and order management tools
   get_order_status: getOrderStatusOutputZ,

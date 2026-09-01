@@ -20,6 +20,9 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   confirm_uploaded_image: "mail:draft",
   submit_feature_request: "mail:draft",
   create_mail_checkout: "mail:send",
+  // Spends money, like every other mail:send tool. Reusing the existing scope
+  // keeps the OAuth scope union unchanged, so no user is asked to re-consent.
+  create_pack_checkout: "mail:send",
   send_letter: "mail:send",
   send_postcard: "mail:send"
 };
