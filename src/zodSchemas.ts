@@ -82,6 +82,14 @@ export const createMailCheckoutInputZ = z.object({
   draftId: z.string()
 });
 
+export const createPackCheckoutInputZ = z.object({
+  pack: z.enum(["starter", "regular", "power"])
+});
+
+export const redeemPromoCodeInputZ = z.object({
+  code: z.string()
+});
+
 export const getPurchaseStatusInputZ = z.object({
   orderId: z.string()
 });
@@ -222,11 +230,6 @@ const statusTimelineEntryZ = z.object({
 const trackingSupportZ = z.enum(["none", "estimated_only", "carrier_tracking"]);
 
 export const sendEligibilityZ = z.object({
-  prepaid: z.object({
-    eligible: z.boolean(),
-    requiredCredits: z.number().int(),
-    availableCredits: z.number().int()
-  }),
   payAndSend: z.object({
     available: z.boolean(),
     amountCents: z.number().int().optional(),
@@ -284,15 +287,42 @@ export const createMailCheckoutOutputZ = z.object({
   message: z.string()
 });
 
+export const redeemPromoCodeOutputZ = z.object({
+  redeemed: z.boolean(),
+  // Letters, not credits: the service reports the ledger unit and this is the
+  // only unit a customer sees (#308).
+  letters: z.number().int().nonnegative().optional(),
+  expiresAt: z.string().optional(),
+  message: z.string()
+});
+
+export const createPackCheckoutOutputZ = z.object({
+  orderId: z.string(),
+  checkoutUrl: z.string().url().optional(),
+  // The customer-facing count. Credits stay internal - the catalogue names its
+  // products after them ('credit-pack-4' is two letters), which is exactly the
+  // confusion this field avoids. See
+  // tests/unit/tools/letterBalanceEquivalence.test.ts.
+  letters: z.number().int().positive(),
+  amountCents: z.number().int().positive(),
+  currency: z.string(),
+  productDescription: z.string(),
+  expiresAt: z.string().optional(),
+  status: z.string(),
+  reused: z.boolean(),
+  message: z.string()
+});
+
 export const getPurchaseStatusOutputZ = z.object({
   orderId: z.string(),
   purchaseStatus: z.enum([
     "pending_payment",
     "processing",
-    "sent",
+    "submitted",
     "payment_failed",
     "refund_pending",
     "refunded",
+    "on_hold",
     "cancelled"
   ]),
   orderStatus: z.string(),

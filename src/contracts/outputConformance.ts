@@ -47,6 +47,8 @@ import type {
   sendLetterOutputZ,
   sendPostcardOutputZ,
   createMailCheckoutOutputZ,
+  createPackCheckoutOutputZ,
+  redeemPromoCodeOutputZ,
   getPurchaseStatusOutputZ,
   getOrderStatusOutputZ,
   getAccountBalanceOutputZ,
@@ -66,6 +68,8 @@ import type {
   quoteAndPreviewLetterWithImageTool,
   sendLetterTool,
   createMailCheckoutTool,
+  createPackCheckoutTool,
+  redeemPromoCodeTool,
   getPurchaseStatusTool,
   getOrderStatusTool,
   getAccountBalanceTool,
@@ -180,6 +184,12 @@ export type SendLetterConforms = Conforms<
 >;
 export type CreateMailCheckoutConforms = Conforms<
   BothDirections<z.infer<typeof createMailCheckoutOutputZ>, typeof createMailCheckoutTool>
+>;
+export type CreatePackCheckoutConforms = Conforms<
+  BothDirections<z.infer<typeof createPackCheckoutOutputZ>, typeof createPackCheckoutTool>
+>;
+export type RedeemPromoCodeConforms = Conforms<
+  BothDirections<z.infer<typeof redeemPromoCodeOutputZ>, typeof redeemPromoCodeTool>
 >;
 export type GetPurchaseStatusConforms = Conforms<
   BothDirections<z.infer<typeof getPurchaseStatusOutputZ>, typeof getPurchaseStatusTool>

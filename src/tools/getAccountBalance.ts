@@ -6,6 +6,7 @@ import {
 import { getBalance, getDetailedBalance } from "../services/creditService.js";
 import { findUser } from "../services/userService.js";
 import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
+import { CREDITS_PER_LETTER } from "../config/products.js";
 
 interface ExpiringLettersInfo {
   letters: number;
@@ -28,7 +29,7 @@ async function handler(
   _input: Record<string, never>,
   context: ToolContext
 ): Promise<GetAccountBalanceOutput> {
-  const standardCost = 2; // Updated to 2 credits per letter (matches pricing)
+  const standardCost = CREDITS_PER_LETTER;
 
   // Get user ID from context
   const userId = context.user.userId || 'default-user';
@@ -161,6 +162,12 @@ export const getAccountBalanceTool: McpToolDefinition<
   meta: {
     "openai/toolInvocation/invoking": "Checking letter balance…",
     "openai/toolInvocation/invoked": "Balance updated",
+    // The preview cards call this via window.openai.callTool to notice letters
+    // arriving after a pack purchase (#306). It worked without the
+    // declaration - the flag is metadata the client receives, not a
+    // server-side gate - so the widget was calling an undeclared tool. Stating
+    // the intent rather than relying on it not being enforced.
+    "openai/widgetAccessible": true,
     readOnlyHint: true
   },
   handler

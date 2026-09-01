@@ -179,7 +179,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">postcard t18</p>
+      <p class="rev">postcard t20</p>
     </div>
 
     <script type="module">
@@ -556,10 +556,15 @@
             result?.content?.[0]?.text?.match(/Order ID: ([a-f0-9-]+)/i)?.[1] ||
             null;
 
-          // Update status pill to show sent
+          // Same state, same words as the purchase flow above: a prepaid
+          // send dispatches inline and also stops at provider acceptance, so
+          // two different labels for one state would be the confusion this
+          // rename exists to remove. The button below still says the send
+          // completed, which is feedback for the click rather than a claim
+          // about where the mail is.
           statusPill.classList.remove("ok", "alert");
           statusPill.classList.add("ok");
-          statusPill.textContent = "Sent!";
+          statusPill.textContent = "With the printer";
 
           // Change Draft label to Order and show order ID
           idLabel.textContent = "Order";
@@ -610,10 +615,11 @@
       // schema (src/zodSchemas.ts getPurchaseStatusOutputZ). "pending_payment"
       // and "processing" are the two worth waiting on.
       const TERMINAL_PURCHASE_STATUSES = [
-        "sent",
+        "submitted",
         "payment_failed",
         "refund_pending",
         "refunded",
+        "on_hold",
         "cancelled",
       ];
       const CHECK_STATUS_LABEL = "Check status";
@@ -622,9 +628,13 @@
         const statusPill = document.getElementById("status-pill");
         const state = status.purchaseStatus;
         statusPill.classList.remove("ok", "alert");
-        if (state === "sent") {
+        if (state === "submitted") {
           statusPill.classList.add("ok");
-          statusPill.textContent = "Sent!";
+          // Not "Sent!": this fires when the print provider ACCEPTS the job,
+          // which is not the same as the item being in the mail. The server
+          // message under it has always said "accepted by the print
+          // provider" - the label was the part that overstated (#310).
+          statusPill.textContent = "With the printer";
         } else if (state === "processing") {
           statusPill.classList.add("ok");
           statusPill.textContent = "Paid - preparing mail";
@@ -889,25 +899,65 @@
         }
       }
 
+      // The smallest pack, deliberately. This button exists to unblock THIS
+      // letter, so the least presumptuous spend is the one that does it. A
+      // customer who wants more can ask, and the model calls the same tool
+      // with regular or power.
+      const CARD_PACK_CHOICE = "starter";
+      const BUY_PACK_LABEL = "Buy a Letter Pack";
+
       async function handleBuyPack() {
-        const purchaseUrl = currentEligibility?.letterPack?.purchaseUrl;
-        if (!purchaseUrl) return;
-        // Same fallback as Pay & Send, lower stakes - a pack purchase is
-        // recoverable from the website - but there is no reason to leave a
-        // button that silently does nothing either. The await was previously
-        // uncaught, so a rejection here became an unhandled rejection.
-        showCheckoutLink(purchaseUrl, "Open Letter Pack checkout");
-        // A pack only grants letters - the customer still has to come back and
-        // press Send - so a card that never notices the letters arrived can
-        // leave a paid-for letter unsent indefinitely. Same scheduler as Pay &
-        // Send; only what it asks for differs (#306).
-        packPurchasePending = true;
-        startStatusPolling();
-        render();
+        // A second click would create a second order for letters already
+        // being bought.
+        if (packPurchasePending || checkoutInProgress) return;
+        const button = document.getElementById("buy-pack-button");
+        const errorMessage = document.getElementById("error-message");
+        button.disabled = true;
+        button.textContent = "Preparing checkout...";
+        errorMessage.style.display = "none";
         try {
-          await window.openai.openExternal({ href: purchaseUrl });
-        } catch {
-          // Nothing to do: the link is already on screen.
+          // Previously this opened letterPack.purchaseUrl - a static website
+          // address - while Pay & Send created a Stripe session server-side.
+          // That URL carries no identity, so a customer not signed in on the
+          // website bought letters that never reached the account this card
+          // can see, which is why #306 had to record "no letters yet" as an
+          // expected outcome. A tool call creates the session for the
+          // authenticated user, and that whole class of failure goes away.
+          const result = toolData(
+            await window.openai.callTool("create_pack_checkout", {
+              pack: CARD_PACK_CHOICE,
+            }),
+          );
+          if (!result.checkoutUrl) {
+            throw new Error(result.message || "Checkout URL was not returned");
+          }
+
+          const letters = result.letters;
+          showCheckoutLink(
+            result.checkoutUrl,
+            `Open checkout - ${letters} ${letters === 1 ? "letter" : "letters"} (${formatPayAmount(result)})`,
+          );
+
+          // Deliberately NOT trackedOrderId, even though a pack now has a real
+          // order id. The refresher prefers order status when one is set, and
+          // order status cannot answer the question this card needs - how many
+          // letters are on the balance - so setting it would starve the very
+          // path that makes the card sendable (#306, #307).
+          packPurchasePending = true;
+          startStatusPolling();
+          render();
+
+          try {
+            await window.openai.openExternal({ href: result.checkoutUrl });
+          } catch {
+            // Nothing to do: the link is already on screen.
+          }
+        } catch (error) {
+          errorMessage.textContent = `Unable to start the letter pack checkout: ${error.message || "Unknown error"}`;
+          errorMessage.style.display = "block";
+        } finally {
+          button.disabled = false;
+          button.textContent = BUY_PACK_LABEL;
         }
       }
 

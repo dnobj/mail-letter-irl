@@ -127,17 +127,8 @@ export const quoteAndPreviewInputSchema: JsonSchema = {
 
 const sendEligibilitySchema: JsonSchema = {
   type: "object",
-  required: ["prepaid", "payAndSend", "letterPack"],
+  required: ["payAndSend", "letterPack"],
   properties: {
-    prepaid: {
-      type: "object",
-      required: ["eligible", "requiredCredits", "availableCredits"],
-      properties: {
-        eligible: { type: "boolean" },
-        requiredCredits: { type: "integer" },
-        availableCredits: { type: "integer" }
-      }
-    },
     payAndSend: {
       type: "object",
       required: ["available"],
@@ -289,6 +280,66 @@ export const createMailCheckoutOutputSchema: JsonSchema = {
   }
 };
 
+export const createPackCheckoutInputSchema: JsonSchema = {
+  type: "object",
+  required: ["pack"],
+  properties: {
+    pack: {
+      type: "string",
+      enum: ["starter", "regular", "power"],
+      description: "Pack size: starter (2 letters), regular (5 letters), power (50 letters)"
+    }
+  }
+};
+
+export const createPackCheckoutOutputSchema: JsonSchema = {
+  type: "object",
+  required: [
+    "orderId",
+    "letters",
+    "amountCents",
+    "currency",
+    "productDescription",
+    "status",
+    "reused",
+    "message"
+  ],
+  properties: {
+    orderId: { type: "string" },
+    checkoutUrl: { type: "string", description: "Stripe-hosted checkout URL" },
+    letters: { type: "integer", description: "Letters this pack adds to the balance" },
+    amountCents: { type: "integer" },
+    currency: { type: "string" },
+    productDescription: { type: "string" },
+    expiresAt: { type: "string" },
+    status: { type: "string" },
+    reused: { type: "boolean" },
+    message: { type: "string" }
+  }
+};
+
+export const redeemPromoCodeInputSchema: JsonSchema = {
+  type: "object",
+  required: ["code"],
+  properties: {
+    code: {
+      type: "string",
+      description: "The promo code to redeem"
+    }
+  }
+};
+
+export const redeemPromoCodeOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["redeemed", "message"],
+  properties: {
+    redeemed: { type: "boolean" },
+    letters: { type: "integer", description: "Letters added to the balance" },
+    expiresAt: { type: "string", description: "When the added letters expire, if they do" },
+    message: { type: "string" }
+  }
+};
+
 export const getPurchaseStatusInputSchema: JsonSchema = {
   type: "object",
   required: ["orderId"],
@@ -307,7 +358,7 @@ export const getPurchaseStatusOutputSchema: JsonSchema = {
     orderId: { type: "string" },
     purchaseStatus: {
       type: "string",
-      enum: ["pending_payment", "processing", "sent", "payment_failed", "refund_pending", "refunded", "cancelled"]
+      enum: ["pending_payment", "processing", "submitted", "payment_failed", "refund_pending", "refunded", "on_hold", "cancelled"]
     },
     orderStatus: { type: "string" },
     productDescription: { type: "string" },
