@@ -16,7 +16,7 @@
  * old URI. Bumping is still what forces caches to re-fetch, so keep doing it;
  * the template is a floor, not a replacement.
  */
-export const WIDGET_TEMPLATE_VERSION = 21;
+export const WIDGET_TEMPLATE_VERSION = 22;
 
 export function widgetTemplateUri(name: string): string {
   return `ui://widgets/${name}.html@v${WIDGET_TEMPLATE_VERSION}`;

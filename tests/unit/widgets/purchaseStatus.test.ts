@@ -46,6 +46,8 @@ interface Harness {
   calls: Array<{ name: string; args: Record<string, unknown> }>;
   setStatus: (status: Record<string, unknown>) => void;
   setBalance: (balance: Record<string, unknown>) => void;
+  failPackCheckout: () => void;
+  packCheckoutWithoutUrl: () => void;
   setHidden: (hidden: boolean) => void;
   /** Hold tool calls open so in-flight UI state can be observed. */
   holdCalls: () => void;
@@ -103,6 +105,8 @@ function mount(
   // The fixture's draft needs 1 letter, so 0 is "the pack has not landed yet".
   let accountBalance: Record<string, unknown> = { lettersRemaining: 0 };
   let hidden = false;
+  let packCheckoutFails = false;
+  let packCheckoutOmitsUrl = false;
   let gate: Promise<void> | null = null;
   let openGate: (() => void) | null = null;
 
@@ -145,6 +149,20 @@ function mount(
           if (name === 'get_account_balance') {
             return { structuredContent: accountBalance };
           }
+          if (name === 'create_pack_checkout') {
+            if (packCheckoutFails) throw new Error('pack checkout unavailable');
+            return {
+              structuredContent: {
+                orderId: 'ord_pack_0001',
+                ...(packCheckoutOmitsUrl
+                  ? { message: 'This purchase is already paid or being fulfilled.' }
+                  : { checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_pack' }),
+                letters: 2,
+                amountCents: 500,
+                currency: 'usd'
+              }
+            };
+          }
           return { structuredContent: {} };
         },
         openExternal: async () => {
@@ -165,6 +183,12 @@ function mount(
     },
     setBalance: balance => {
       accountBalance = balance;
+    },
+    failPackCheckout: () => {
+      packCheckoutFails = true;
+    },
+    packCheckoutWithoutUrl: () => {
+      packCheckoutOmitsUrl = true;
     },
     setHidden: value => {
       hidden = value;
@@ -501,5 +525,79 @@ describe.each(CARDS)('%s letter pack refresh', card => {
     const asked = harness.calls.slice(before).map(call => call.name);
     expect(asked).toContain('get_purchase_status');
     expect(asked).not.toContain('get_account_balance');
+  });
+
+  it('creates a checkout session instead of opening a website URL', async () => {
+    // Previously this opened letterPack.purchaseUrl, a static address carrying
+    // no identity - so a customer not signed in on the website bought letters
+    // that never reached this account.
+    await buyPack();
+
+    const packCalls = harness.calls.filter(call => call.name === 'create_pack_checkout');
+    expect(packCalls).toHaveLength(1);
+    expect(packCalls[0].args).toEqual({ pack: 'starter' });
+    expect(harness.document.getElementById('checkout-link')?.getAttribute('href')).toBe(
+      'https://checkout.stripe.com/c/pay/cs_pack'
+    );
+  });
+
+  it('says what the pack costs and how many letters it adds', async () => {
+    await buyPack();
+
+    expect(harness.text('checkout-link')).toBe('Open checkout - 2 letters (USD 5.00)');
+    expect(harness.text('checkout-link')).not.toMatch(/credit/i);
+  });
+
+  it('does not track the pack order, or the balance refresh would starve', async () => {
+    // THE correctness guard for this change. A pack now has a real order id,
+    // and the refresher prefers order status whenever one is tracked - but
+    // order status cannot say how many letters are on the balance, which is
+    // the only thing that makes this card sendable. Tracking it would break
+    // the flow it was meant to improve.
+    await buyPack();
+    harness.setBalance({ lettersRemaining: 3 });
+
+    await harness.runNextTimer();
+
+    const names = harness.calls.map(call => call.name);
+    expect(names).toContain('get_account_balance');
+    expect(names).not.toContain('get_purchase_status');
+    expect(harness.text('status-pill')).toBe('Ready to send');
+  });
+
+  it('reports a failed pack checkout without pretending one is pending', async () => {
+    harness.failPackCheckout();
+
+    await buyPack();
+
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('error-message')).toMatch(/unable to start the letter pack checkout/i);
+    // No session exists, so nothing should be waited on.
+    expect(harness.pendingTimers().length).toBe(0);
+    expect(harness.visible('check-status-button')).toBe(false);
+  });
+
+  it('does not wait on a session it never received', async () => {
+    // A result with no checkoutUrl means no session exists to pay. Arming the
+    // scheduler anyway would leave the card watching for letters that nothing
+    // is going to deliver, and the customer with no way to pay.
+    //
+    // Added because mutating the guard away left every other case green: the
+    // failure test above makes callTool THROW, which never reaches this branch.
+    harness.packCheckoutWithoutUrl();
+
+    await buyPack();
+
+    expect(harness.pendingTimers().length).toBe(0);
+    expect(harness.visible('check-status-button')).toBe(false);
+    expect(harness.visible('error-message')).toBe(true);
+  });
+
+  it('ignores a second click while a pack checkout is already pending', async () => {
+    // A second order would charge for letters already being bought.
+    await buyPack();
+    await buyPack();
+
+    expect(harness.calls.filter(call => call.name === 'create_pack_checkout')).toHaveLength(1);
   });
 });

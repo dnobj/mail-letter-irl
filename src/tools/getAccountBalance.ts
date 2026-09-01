@@ -162,6 +162,12 @@ export const getAccountBalanceTool: McpToolDefinition<
   meta: {
     "openai/toolInvocation/invoking": "Checking letter balance…",
     "openai/toolInvocation/invoked": "Balance updated",
+    // The preview cards call this via window.openai.callTool to notice letters
+    // arriving after a pack purchase (#306). It worked without the
+    // declaration - the flag is metadata the client receives, not a
+    // server-side gate - so the widget was calling an undeclared tool. Stating
+    // the intent rather than relying on it not being enforced.
+    "openai/widgetAccessible": true,
     readOnlyHint: true
   },
   handler
