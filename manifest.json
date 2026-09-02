@@ -1038,6 +1038,68 @@
       }
     },
     {
+      "name": "list_letter_packs",
+      "description": "List the letter packs available to buy, with how many letters each adds and what it costs. Use this to answer questions about pack sizes or pricing, and before create_pack_checkout when the customer has not said which size they want.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "packs",
+          "message"
+        ],
+        "properties": {
+          "packs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "pack",
+                "letters",
+                "amountCents",
+                "currency",
+                "displayAmount",
+                "description"
+              ],
+              "properties": {
+                "pack": {
+                  "type": "string",
+                  "enum": [
+                    "starter",
+                    "regular",
+                    "power"
+                  ]
+                },
+                "letters": {
+                  "type": "integer",
+                  "description": "Letters this pack adds to the balance"
+                },
+                "amountCents": {
+                  "type": "integer"
+                },
+                "currency": {
+                  "type": "string"
+                },
+                "displayAmount": {
+                  "type": "string",
+                  "description": "Server-formatted price for this currency"
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
       "name": "redeem_promo_code",
       "description": "Redeem a promo code to add prepaid letters to the account. Returns redeemed: false with the reason when a code is invalid, expired, or already used - that is an ordinary answer, not an error. Letters must still be sent afterward.",
       "inputSchema": {

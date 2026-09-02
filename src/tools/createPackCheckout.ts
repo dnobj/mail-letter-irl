@@ -1,27 +1,15 @@
 import { carriedDiagnosticClass, isTerminalDiagnosticClass } from '../utils/diagnosticLog.js';
-import { formatAmountForCurrency } from '../config/products.js';
-import { PACK_PRODUCTS, type PackProductId } from '../config/products.js';
+import {
+  PACK_CHOICES,
+  PACK_PRODUCTS,
+  formatAmountForCurrency,
+  type PackChoice,
+  type PackProductId
+} from '../config/products.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { createPackCheckoutInputSchema, createPackCheckoutOutputSchema } from '../schemas.js';
 import { createPackCheckout } from '../services/commerceService.js';
 import { findUser } from '../services/userService.js';
-
-/**
- * Customer-facing pack names, mapped to the internal product codes.
- *
- * The catalogue names its products after CREDITS - 'credit-pack-4' is two
- * letters - and this schema is read by the model, so exposing the raw codes
- * would put the word "credit" into conversation and misstate the quantity by a
- * factor of two. The mapping exists so the model only ever sees the sizes a
- * customer recognises.
- */
-const PACK_CHOICES = {
-  starter: 'credit-pack-4',
-  regular: 'credit-pack-10',
-  power: 'credit-pack-100'
-} as const;
-
-export type PackChoice = keyof typeof PACK_CHOICES;
 
 interface CreatePackCheckoutInput {
   pack: PackChoice;

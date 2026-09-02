@@ -14,6 +14,7 @@ import {
   sendLetterInputZ,
   createMailCheckoutInputZ,
   createPackCheckoutInputZ,
+  listLetterPacksInputZ,
   redeemPromoCodeInputZ,
   getPurchaseStatusInputZ,
   getOrderStatusInputZ,
@@ -33,6 +34,7 @@ import {
   sendLetterOutputZ,
   createMailCheckoutOutputZ,
   createPackCheckoutOutputZ,
+  listLetterPacksOutputZ,
   redeemPromoCodeOutputZ,
   getPurchaseStatusOutputZ,
   getOrderStatusOutputZ,
@@ -93,7 +95,8 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'list_orders',
     'get_order_status',
     'get_purchase_status',
-    'get_return_address'
+    'get_return_address',
+    'list_letter_packs'
   ];
 
   // Tools that call external APIs (PostGrid for validation or mail fulfillment)
@@ -483,6 +486,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   send_letter: sendLetterInputZ,
   create_mail_checkout: createMailCheckoutInputZ,
   create_pack_checkout: createPackCheckoutInputZ,
+  list_letter_packs: listLetterPacksInputZ,
   redeem_promo_code: redeemPromoCodeInputZ,
   get_purchase_status: getPurchaseStatusInputZ,
   // Account and order management tools
@@ -513,6 +517,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   send_letter: sendLetterOutputZ,
   create_mail_checkout: createMailCheckoutOutputZ,
   create_pack_checkout: createPackCheckoutOutputZ,
+  list_letter_packs: listLetterPacksOutputZ,
   redeem_promo_code: redeemPromoCodeOutputZ,
   get_purchase_status: getPurchaseStatusOutputZ,
   // Account and order management tools

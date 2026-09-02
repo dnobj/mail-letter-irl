@@ -82,6 +82,24 @@ export const createMailCheckoutInputZ = z.object({
   draftId: z.string()
 });
 
+export const listLetterPacksInputZ = z.object({});
+
+export const listLetterPacksOutputZ = z.object({
+  packs: z.array(
+    z.object({
+      pack: z.enum(["starter", "regular", "power"]),
+      // Letters, never credits: the catalogue names its products after credits
+      // ('credit-pack-4' is two letters), which is the confusion this avoids.
+      letters: z.number().int().positive(),
+      amountCents: z.number().int().positive(),
+      currency: z.string(),
+      displayAmount: z.string(),
+      description: z.string()
+    })
+  ),
+  message: z.string()
+});
+
 export const createPackCheckoutInputZ = z.object({
   pack: z.enum(["starter", "regular", "power"])
 });

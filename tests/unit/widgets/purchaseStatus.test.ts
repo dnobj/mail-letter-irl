@@ -48,6 +48,10 @@ interface Harness {
   setBalance: (balance: Record<string, unknown>) => void;
   failPackCheckout: () => void;
   packCheckoutWithoutUrl: () => void;
+  failPackList: () => void;
+  emptyPackList: () => void;
+  packOptionLabels: () => string[];
+  clickPackOption: (pack: string) => Promise<void>;
   setHidden: (hidden: boolean) => void;
   /** Hold tool calls open so in-flight UI state can be observed. */
   holdCalls: () => void;
@@ -107,6 +111,8 @@ function mount(
   let hidden = false;
   let packCheckoutFails = false;
   let packCheckoutOmitsUrl = false;
+  let packListFails = false;
+  let packListEmpty = false;
   let gate: Promise<void> | null = null;
   let openGate: (() => void) | null = null;
 
@@ -149,6 +155,21 @@ function mount(
           if (name === 'get_account_balance') {
             return { structuredContent: accountBalance };
           }
+          if (name === 'list_letter_packs') {
+            if (packListFails) throw new Error('pack catalogue unavailable');
+            return {
+              structuredContent: packListEmpty
+                ? { packs: [], message: 'Letter packs are temporarily unavailable.' }
+                : {
+                    packs: [
+                      { pack: 'starter', letters: 2, amountCents: 500, currency: 'usd', displayAmount: '5.00', description: 'Two prepaid physical letters or postcards' },
+                      { pack: 'regular', letters: 5, amountCents: 1000, currency: 'usd', displayAmount: '10.00', description: 'Five prepaid physical letters or postcards' },
+                      { pack: 'power', letters: 50, amountCents: 9000, currency: 'usd', displayAmount: '90.00', description: 'Fifty prepaid physical letters or postcards' }
+                    ],
+                    message: '3 letter packs are available to buy.'
+                  }
+            };
+          }
           if (name === 'create_pack_checkout') {
             if (packCheckoutFails) throw new Error('pack checkout unavailable');
             return {
@@ -189,6 +210,22 @@ function mount(
     },
     packCheckoutWithoutUrl: () => {
       packCheckoutOmitsUrl = true;
+    },
+    failPackList: () => {
+      packListFails = true;
+    },
+    emptyPackList: () => {
+      packListEmpty = true;
+    },
+    packOptionLabels: () =>
+      Array.from(document.querySelectorAll('#pack-options button')).map(
+        el => el.textContent?.trim() ?? ''
+      ),
+    clickPackOption: async (pack: string) => {
+      const el = document.querySelector(`#pack-options button[data-pack="${pack}"]`);
+      if (!el) throw new Error(`no pack option for ${pack}`);
+      el.dispatchEvent(new dom.window.Event('click'));
+      await flush();
     },
     setHidden: value => {
       hidden = value;
@@ -447,8 +484,12 @@ describe.each(CARDS)('%s letter pack refresh', card => {
     harness = mount(card);
   });
 
-  async function buyPack(): Promise<void> {
+  // Buying is now two clicks: list the sizes, then choose one. Only this
+  // helper changes - every assertion below stayed as it was, which is what
+  // shows the machinery after the choice is untouched.
+  async function buyPack(pack = 'starter'): Promise<void> {
     await harness.click('buy-pack-button');
+    await harness.clickPackOption(pack);
   }
 
   it('starts watching for the letters after a pack checkout', async () => {
@@ -516,8 +557,14 @@ describe.each(CARDS)('%s letter pack refresh', card => {
   it('prefers order status when a checkout is also being tracked', async () => {
     // Order state is the more specific answer, and the pack path has no order
     // id to ask about.
-    await harness.click('pay-send-button');
+    //
+    // ORDER MATTERS, and it was wrong here until 2026-09-02: starting a pack
+    // is refused while a checkout is in progress, so doing Pay & Send first
+    // left packPurchasePending false and the test asserted precedence over a
+    // state it had never established. It passed for the wrong reason. A pack
+    // first, then Pay & Send, is the only sequence that sets both.
     await buyPack();
+    await harness.click('pay-send-button');
     const before = harness.calls.length;
 
     await harness.click('check-status-button');
@@ -591,6 +638,85 @@ describe.each(CARDS)('%s letter pack refresh', card => {
     expect(harness.pendingTimers().length).toBe(0);
     expect(harness.visible('check-status-button')).toBe(false);
     expect(harness.visible('error-message')).toBe(true);
+  });
+
+  it('lists the sizes instead of buying one', async () => {
+    // The card used to buy the smallest pack outright, taking the decision
+    // away from the customer.
+    await harness.click('buy-pack-button');
+
+    expect(harness.packOptionLabels()).toEqual([
+      '2 letters - USD 5.00',
+      '5 letters - USD 10.00',
+      '50 letters - USD 90.00'
+    ]);
+    expect(harness.calls.map(call => call.name)).not.toContain('create_pack_checkout');
+    // The trigger stands down while its own choices are showing.
+    expect(harness.visible('buy-pack-button')).toBe(false);
+  });
+
+  it('buys the size that was chosen, not a default', async () => {
+    await harness.click('buy-pack-button');
+    await harness.clickPackOption('power');
+
+    const packCalls = harness.calls.filter(call => call.name === 'create_pack_checkout');
+    expect(packCalls).toHaveLength(1);
+    expect(packCalls[0].args).toEqual({ pack: 'power' });
+  });
+
+  it('hides the choices once one is taken', async () => {
+    await buyPack('regular');
+
+    expect(harness.visible('pack-options')).toBe(false);
+  });
+
+  it('buys nothing when the catalogue cannot be read', async () => {
+    // Deliberately no fallback to the smallest pack: after a click that means
+    // "show me the options", a surprise purchase is the worst outcome.
+    harness.failPackList();
+
+    await harness.click('buy-pack-button');
+
+    expect(harness.calls.map(call => call.name)).not.toContain('create_pack_checkout');
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('error-message')).toMatch(/unable to load letter packs/i);
+    // The control is usable again rather than left dead.
+    expect(harness.visible('buy-pack-button')).toBe(true);
+    expect(
+      (harness.document.getElementById('buy-pack-button') as HTMLButtonElement).disabled
+    ).toBe(false);
+  });
+
+  it('buys nothing when every pack is unpriced', async () => {
+    // An empty list is a real answer from the tool, not an error - the card
+    // still must not invent a purchase from it.
+    harness.emptyPackList();
+
+    await harness.click('buy-pack-button');
+
+    expect(harness.calls.map(call => call.name)).not.toContain('create_pack_checkout');
+    expect(harness.text('error-message')).toMatch(/temporarily unavailable/i);
+    expect(harness.packOptionLabels()).toEqual([]);
+  });
+
+  it('puts the choices back when the chosen checkout fails', async () => {
+    // Otherwise the customer is left on a card with no way to retry.
+    harness.failPackCheckout();
+
+    await harness.click('buy-pack-button');
+    await harness.clickPackOption('starter');
+
+    expect(harness.text('error-message')).toMatch(/unable to start the letter pack checkout/i);
+
+    // Re-render before asserting. The container keeps its old display until
+    // something redraws, so checking it straight after the failure passes even
+    // when the flag was never restored - which is exactly how this test missed
+    // the mutation the first time.
+    harness.fireGlobals();
+    await flush();
+
+    expect(harness.visible('pack-options')).toBe(true);
+    expect(harness.packOptionLabels()).toHaveLength(3);
   });
 
   it('ignores a second click while a pack checkout is already pending', async () => {
