@@ -22,6 +22,9 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   create_mail_checkout: "mail:send",
   // Spends money, like every other mail:send tool. Reusing the existing scope
   // keeps the OAuth scope union unchanged, so no user is asked to re-consent.
+  // Reads the catalogue and nothing else, so it sits with the read tools -
+  // and reusing an existing scope leaves the OAuth scope union unchanged.
+  list_letter_packs: "mail:read",
   create_pack_checkout: "mail:send",
   // Grants spendable balance, so it belongs with the money-moving tools rather
   // than the drafting ones. Reuses an existing scope, leaving the OAuth scope

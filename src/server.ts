@@ -10,6 +10,7 @@ import {
   sendLetterTool,
   createMailCheckoutTool,
   createPackCheckoutTool,
+  listLetterPacksTool,
   redeemPromoCodeTool,
   getPurchaseStatusTool,
   // Account and order management tools
@@ -52,6 +53,7 @@ const tools: McpToolDefinition<any, any>[] = [
   sendLetterTool,
   createMailCheckoutTool,
   createPackCheckoutTool,
+  listLetterPacksTool,
   redeemPromoCodeTool,
   getPurchaseStatusTool,
   // Account and order management tools

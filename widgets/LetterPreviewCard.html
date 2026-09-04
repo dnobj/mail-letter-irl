@@ -131,6 +131,7 @@
           <button class="send-button secondary" id="buy-pack-button">
             Buy a Letter Pack
           </button>
+          <div id="pack-options" style="display: none"></div>
           <a
             class="send-button checkout-link"
             id="checkout-link"
@@ -154,7 +155,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t20</p>
+      <p class="rev">letter t21</p>
     </div>
 
     <script type="module">
@@ -179,6 +180,11 @@
       // no order id to follow - a pack is bought on the website, so the only
       // observable is the balance itself (#306).
       let packPurchasePending = false;
+      // Whether the size choices are showing. render() reads it, so the card
+      // is drawn in one place rather than painted by the click handler and
+      // then guarded against re-render - the shape that produced the #305
+      // defect.
+      let packOptionsOpen = false;
       // Letters reported by the most recent balance refresh, or null. render()
       // prefers this over the tool output's canSendNow, which is stale after a
       // pack purchase and which the model will not re-run.
@@ -518,8 +524,13 @@
           if (payAndSendAvailable && payAndSend.amountCents) {
             paySendButtonText.textContent = `Pay & Send (${formatPayAmount(payAndSend)})`;
           }
+          const packsBuyable = !effectiveCanSendNow && Boolean(letterPack?.available);
           buyPackButton.style.display =
-            !effectiveCanSendNow && letterPack?.available ? "flex" : "none";
+            packsBuyable && !packOptionsOpen ? "flex" : "none";
+          // Closes itself once the letters arrive: effectiveCanSendNow going
+          // true means there is nothing left to buy.
+          document.getElementById("pack-options").style.display =
+            packsBuyable && packOptionsOpen ? "grid" : "none";
         }
       }
 
@@ -900,22 +911,66 @@
         }
       }
 
-      // The smallest pack, deliberately. This button exists to unblock THIS
-      // letter, so the least presumptuous spend is the one that does it. A
-      // customer who wants more can ask, and the model calls the same tool
-      // with regular or power.
-      const CARD_PACK_CHOICE = "starter";
       const BUY_PACK_LABEL = "Buy a Letter Pack";
 
+      // This used to buy the smallest pack outright. It now shows what is on
+      // sale first: the card cannot know the sizes or prices without asking,
+      // and picking for the customer is exactly what this replaces. The cost
+      // of asking lands here, on a click, rather than on every quote.
       async function handleBuyPack() {
-        // A second click would create a second order for letters already
-        // being bought.
-        if (packPurchasePending || checkoutInProgress) return;
+        if (packPurchasePending || checkoutInProgress || packOptionsOpen) return;
         const button = document.getElementById("buy-pack-button");
         const errorMessage = document.getElementById("error-message");
         button.disabled = true;
-        button.textContent = "Preparing checkout...";
+        button.textContent = "Loading packs...";
         errorMessage.style.display = "none";
+        try {
+          const listed = toolData(
+            await window.openai.callTool("list_letter_packs", {}),
+          );
+          const packs = Array.isArray(listed.packs) ? listed.packs : [];
+          if (!packs.length) {
+            throw new Error(listed.message || "No letter packs are available right now.");
+          }
+          renderPackOptions(packs);
+          packOptionsOpen = true;
+          render();
+        } catch (error) {
+          // Deliberately NOT a fallback to buying the smallest pack. After a
+          // click that now means "show me the options", a surprise purchase is
+          // the worst outcome available.
+          errorMessage.textContent = `Unable to load letter packs: ${error.message || "Unknown error"}`;
+          errorMessage.style.display = "block";
+        } finally {
+          button.disabled = false;
+          button.textContent = BUY_PACK_LABEL;
+        }
+      }
+
+      function renderPackOptions(packs) {
+        const container = document.getElementById("pack-options");
+        container.textContent = "";
+        for (const option of packs) {
+          const choice = document.createElement("button");
+          choice.className = "send-button secondary";
+          choice.setAttribute("data-pack", option.pack);
+          const letters = option.letters;
+          choice.textContent =
+            `${letters} ${letters === 1 ? "letter" : "letters"} - ` +
+            `${String(option.currency || "usd").toUpperCase()} ${option.displayAmount}`;
+          choice.addEventListener("click", () => {
+            void startPackCheckout(option.pack);
+          });
+          container.appendChild(choice);
+        }
+      }
+
+      async function startPackCheckout(pack) {
+        if (packPurchasePending || checkoutInProgress) return;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.style.display = "none";
+        // The choice is made; the sizes have no further job.
+        packOptionsOpen = false;
         try {
           // Previously this opened letterPack.purchaseUrl - a static website
           // address - while Pay & Send created a Stripe session server-side.
@@ -925,9 +980,7 @@
           // expected outcome. A tool call creates the session for the
           // authenticated user, and that whole class of failure goes away.
           const result = toolData(
-            await window.openai.callTool("create_pack_checkout", {
-              pack: CARD_PACK_CHOICE,
-            }),
+            await window.openai.callTool("create_pack_checkout", { pack }),
           );
           if (!result.checkoutUrl) {
             throw new Error(result.message || "Checkout URL was not returned");
@@ -956,9 +1009,10 @@
         } catch (error) {
           errorMessage.textContent = `Unable to start the letter pack checkout: ${error.message || "Unknown error"}`;
           errorMessage.style.display = "block";
-        } finally {
-          button.disabled = false;
-          button.textContent = BUY_PACK_LABEL;
+          // Put the sizes back rather than stranding the customer on a card
+          // with no way to retry.
+          packOptionsOpen = true;
+          render();
         }
       }
 

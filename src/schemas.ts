@@ -280,6 +280,35 @@ export const createMailCheckoutOutputSchema: JsonSchema = {
   }
 };
 
+export const listLetterPacksInputSchema: JsonSchema = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  type: "object",
+  properties: {}
+};
+
+export const listLetterPacksOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["packs", "message"],
+  properties: {
+    packs: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["pack", "letters", "amountCents", "currency", "displayAmount", "description"],
+        properties: {
+          pack: { type: "string", enum: ["starter", "regular", "power"] },
+          letters: { type: "integer", description: "Letters this pack adds to the balance" },
+          amountCents: { type: "integer" },
+          currency: { type: "string" },
+          displayAmount: { type: "string", description: "Server-formatted price for this currency" },
+          description: { type: "string" }
+        }
+      }
+    },
+    message: { type: "string" }
+  }
+};
+
 export const createPackCheckoutInputSchema: JsonSchema = {
   type: "object",
   required: ["pack"],

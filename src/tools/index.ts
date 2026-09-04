@@ -5,6 +5,7 @@ export { quoteAndPreviewLetterWithImageTool } from "./quoteAndPreviewLetterWithI
 export { sendLetterTool } from "./sendLetter.js";
 export { createMailCheckoutTool } from "./createMailCheckout.js";
 export { createPackCheckoutTool } from "./createPackCheckout.js";
+export { listLetterPacksTool } from "./listLetterPacks.js";
 export { redeemPromoCodeTool } from "./redeemPromoCode.js";
 export { getPurchaseStatusTool } from "./getPurchaseStatus.js";
 

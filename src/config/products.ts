@@ -48,6 +48,24 @@ import type { MailType } from '../services/types.js';
  */
 export const CREDITS_PER_LETTER = 2;
 
+/**
+ * Customer-facing pack names, mapped to internal product codes.
+ *
+ * The catalogue names its products after CREDITS - 'credit-pack-4' is two
+ * letters - and these names reach the model through tool schemas, so exposing
+ * the raw codes would put the word in conversation and misstate the quantity by
+ * a factor of two. Lives here rather than in a tool because more than one tool
+ * needs it, and two copies of this table is the drift this repository keeps
+ * producing.
+ */
+export const PACK_CHOICES = {
+  starter: 'credit-pack-4',
+  regular: 'credit-pack-10',
+  power: 'credit-pack-100'
+} as const;
+
+export type PackChoice = keyof typeof PACK_CHOICES;
+
 export type PackProductId = 'credit-pack-4' | 'credit-pack-10' | 'credit-pack-100';
 export type ProductGroup = 'pack' | 'jit';
 
