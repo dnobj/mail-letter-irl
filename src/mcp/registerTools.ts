@@ -736,10 +736,15 @@ export function summarizeToolResult(
     case "quote_and_preview_letter_with_image": {
       // Now returns lettersRequired directly (always 1 for standard letter)
       const lettersRequired = result.lettersRequired as number | undefined;
-      const canSend = result.canSendNow ? "can send now" : "cannot send";
       const usedSaved = result.usedSavedReturnAddress as boolean | undefined;
       const layoutType = result.layoutType as string | undefined;
-      let summary = `Preview ready: requires ${lettersRequired ?? 1} ${lettersRequired === 1 ? 'letter' : 'letters'} from balance (${canSend}).`;
+      // Says what the tool DID, not what the account currently is. The old
+      // form carried "(cannot send)", which the model rendered as "your
+      // balance isn't sufficient" - true when written, false minutes later
+      // once a pack landed, and permanent in a transcript beside a card
+      // reading "Ready to send". canSendNow and reasonCannotSend are still in
+      // structuredContent, so the model can still offer to help buy.
+      let summary = `Preview ready: requires ${lettersRequired ?? 1} ${lettersRequired === 1 ? 'letter' : 'letters'}. The card shows whether it can be sent now and the options to proceed.`;
       if (layoutType && layoutType !== 'text_only') {
         summary += ` Layout: ${layoutType.replace('_', ' ')}.`;
       }
@@ -785,9 +790,9 @@ export function summarizeToolResult(
     }
     case "quote_and_preview_postcard": {
       const lettersRequired = result.lettersRequired as number | undefined;
-      const canSend = result.canSendNow ? "can send now" : "cannot send";
       const usedSaved = result.usedSavedReturnAddress as boolean | undefined;
-      let summary = `Postcard preview ready: requires ${lettersRequired ?? 1} ${lettersRequired === 1 ? 'letter' : 'letters'} from balance (${canSend}).`;
+      // Same reasoning as the letter branch: no expiring claim about balance.
+      let summary = `Postcard preview ready: requires ${lettersRequired ?? 1} ${lettersRequired === 1 ? 'letter' : 'letters'}. The card shows whether it can be sent now and the options to proceed.`;
       if (usedSaved) {
         summary += " Using your saved return address.";
       }

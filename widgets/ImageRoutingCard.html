@@ -54,7 +54,7 @@
           <div class="sk" style="height:120px;margin-top:11px;border-radius:10px"></div>
         </div>
 
-        <!-- GENERATED mode: image created in-turn with a Letter IRL credit -->
+        <!-- GENERATED mode: image created in-turn with a Letter IRL generation -->
         <div id="state-generated" class="hidden">
           <h3>Your image is ready</h3>
           <div class="preview-wrap">
@@ -168,8 +168,8 @@
             var remaining = out.generationsRemaining;
             document.getElementById("credit-line").textContent =
               typeof remaining === "number"
-                ? "Used 1 Letter IRL image credit · " + remaining + " remaining"
-                : "Created with a Letter IRL image credit";
+                ? "Used 1 Letter IRL image generation · " + remaining + " remaining"
+                : "Created with a Letter IRL image generation";
           } else {
             var p = nonEmptyString(out.prompt);
             // "handoff" = confirmed desktop, where built-in generation runs in
@@ -184,11 +184,11 @@
               if (handoff) {
                 title.textContent = "ChatGPT will generate this free";
                 explain.textContent =
-                  "No Letter IRL credit needed. Reply \"go ahead\" to generate it - or copy the prompt and send it without @Letter IRL.";
+                  "No Letter IRL generation needed. Reply \"go ahead\" to generate it - or copy the prompt and send it without @Letter IRL.";
               } else {
                 title.textContent = "Generate this with ChatGPT";
                 explain.textContent =
-                  "Letter IRL credits aren't available for this, but ChatGPT's own generator is free: copy the prompt and resend it without @Letter IRL. Then say \"make it a postcard.\"";
+                  "Letter IRL generations aren't available for this, but ChatGPT's own generator is free: copy the prompt and resend it without @Letter IRL. Then say \"make it a postcard.\"";
               }
             } else {
               // No prompt to copy (status no_prompt) - an empty copy field

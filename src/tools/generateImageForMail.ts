@@ -142,7 +142,7 @@ function redirectOutput(
     status: statusCode,
     message: `${reason} ${tail}`,
     suggestedNextStep: handoff
-      ? "IMPORTANT: If built-in image generation is available in this turn, generate the image NOW in this same turn from this prompt - free, no Letter IRL credit - and do not mention routing at all. If it is not available this turn, the card above already explains everything: reply with ONE short sentence only, like \"Just reply 'go ahead' and I'll create it.\" Never restate the card's contents, never explain the routing, never apologize, never ask the user to re-paste the prompt."
+      ? "IMPORTANT: If built-in image generation is available in this turn, generate the image NOW in this same turn from this prompt - free, uses none of your Letter IRL generations - and do not mention routing at all. If it is not available this turn, the card above already explains everything: reply with ONE short sentence only, like \"Just reply 'go ahead' and I'll create it.\" Never restate the card's contents, never explain the routing, never apologize, never ask the user to re-paste the prompt."
       : "The card above already shows the prompt with a Copy button and full instructions. Reply with ONE short sentence only, like \"Copy the prompt above and resend it WITHOUT mentioning Letter IRL - ChatGPT will generate it free.\" Never restate the card's contents and never apologize.",
     ...(prompt ? { redirectStyle: handoff ? ("handoff" as const) : ("resend" as const) } : {})
   };
@@ -299,7 +299,7 @@ async function handler(
       input,
       context,
       "generation_failed",
-      "Letter IRL's in-turn generation hit a snag and no credit was used."
+      "Letter IRL's in-turn generation hit a snag and none of your generations were used."
     );
   }
   if (!reservation.reserved) {
@@ -360,7 +360,7 @@ async function handler(
       mode: "generated",
       prompt,
       status: "generated",
-      message: `Image generated using 1 Letter IRL image credit (${reservation.remaining} remaining). ${suggestedNextStep}`,
+      message: `Image generated using 1 of your Letter IRL image generations (${reservation.remaining} remaining). ${suggestedNextStep}`,
       suggestedNextStep,
       generatedImagePreview: previewBase64,
       generatedImageUrl: imageUrl,
@@ -405,8 +405,8 @@ async function handler(
       context,
       "generation_failed",
       ambiguousProviderOutcome
-        ? "Letter IRL's in-turn generation hit a snag. If a credit was used without an image arriving, maintenance reconciles it automatically."
-        : "Letter IRL's in-turn generation hit a snag and no credit was used."
+        ? "Letter IRL's in-turn generation hit a snag. If a generation was used without an image arriving, maintenance reconciles it automatically."
+        : "Letter IRL's in-turn generation hit a snag and none of your generations were used."
     );
   }
 }
@@ -418,7 +418,7 @@ export const generateImageForMailTool: McpToolDefinition<
   name: "generate_image_for_mail",
   title: "Create or route an image for mail",
   description:
-    "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image credits (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. Without credits it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Never refuse an image request - call this tool and follow its response.",
+    "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image generations remaining (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Never refuse an image request - call this tool and follow its response.",
   readOnly: false,
   inputSchema: {
     type: "object",

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * The hybrid image tool (issue #227; decision record Addendum 3): generates
- * in-turn against the user's Letter IRL image credits, degrades to a
+ * in-turn against the user's Letter IRL image generations, degrades to a
  * copy-the-prompt redirect card otherwise, and never hard-fails the model.
  */
 
@@ -68,7 +68,7 @@ describe("generate_image_for_mail (hybrid)", () => {
     expect(generateImageForMailTool.meta["openai/outputTemplate"]).toBe(
       widgetTemplateUri("ImageRoutingCard")
     );
-    expect(generateImageForMailTool.description).toContain("Letter IRL image credits");
+    expect(generateImageForMailTool.description).toContain("Letter IRL image generations");
     expect(generateImageForMailTool.description).toContain("built-in image generation");
   });
 
@@ -230,8 +230,11 @@ describe("generate_image_for_mail (hybrid)", () => {
       "prov-4"
     );
     expect(limitService.releaseGenerationReservation).not.toHaveBeenCalled();
-    // The honest copy branch: no "no credit was used" claim on ambiguous paths.
-    expect(result.message).not.toContain("no credit was used");
+    // The honest copy branch: no "nothing was used" claim on an ambiguous
+    // path. Matched against the CURRENT wording - checking for the old
+    // "no credit was used" would now pass trivially, since that string exists
+    // nowhere, and the guard would be unable to fail.
+    expect(result.message).not.toContain("none of your generations were used");
   });
 
   it("releases on a post-dispatch DEFINITE provider failure", async () => {
@@ -259,7 +262,7 @@ describe("generate_image_for_mail (hybrid)", () => {
       "provider_definite_failure"
     );
     expect(limitService.markGenerationReservationAmbiguous).not.toHaveBeenCalled();
-    expect(result.message).toContain("no credit was used");
+    expect(result.message).toContain("none of your generations were used");
   });
 
   it("marks ambiguous when the temp store throws after the credit is consumed", async () => {
