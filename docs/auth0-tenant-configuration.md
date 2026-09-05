@@ -8,13 +8,34 @@ This document provides a complete reference of the Auth0 tenant configuration us
 
 Development and production each use a dedicated Auth0 MCP API whose identifier
 is the exact canonical environment `/mcp` URL. ChatGPT is a manually imported,
-strict third-party public CIMD application using authorization code + PKCE S256
-and no token endpoint authentication. Grant only `mail:read`, `mail:draft`, and
-`mail:send`. Keep website/REST applications and Claude/PAT paths separate.
+strict third-party CIMD application using authorization code + PKCE S256 and
+`private_key_jwt` client authentication. Grant only `mail:read`, `mail:draft`,
+and `mail:send`. Keep website/REST applications and Claude/PAT paths separate.
+
+**Corrected 2026-09-05, on first contact with a real import.** This document
+previously specified a *public* client with `token_endpoint_auth_method: none`,
+and stated that `private_key_jwt` was not part of the design. Auth0 cannot
+produce that shape from ChatGPT's document, and the prescription was
+unachievable rather than merely unmet:
+
+- A CIMD document declares **one** `token_endpoint_auth_method`, and Auth0 takes
+  it as given - it does not choose among the client's alternatives. ChatGPT
+  declares `private_key_jwt`; its `token_endpoint_auth_methods_supported`
+  (which does list `none`) is explicitly ignored, and the import dialog says so.
+- The method is not in Auth0's post-import editable set (`description`,
+  `jwt_configuration.alg`, `allowed_origins`, `client_metadata`), and
+  CIMD-derived properties re-sync from the hosted document, so an override would
+  be reverted rather than held.
+- It is the stronger posture regardless: a signed assertion against ChatGPT's
+  two pinned RS256 keys, versus an unauthenticated public client. Our server
+  validates the resulting access token and takes no part in client
+  authentication, so nothing in `src/` depends on which is used.
+- OpenAI's Apps SDK sanctions both ("use `none` for public-client token exchange
+  or `private_key_jwt` when your authorization server requires client
+  authentication"), and the tenant advertises both.
 
 The DCR/static-client sections below document the temporary rollback baseline,
 not the desired configuration. Do not enable them in a normal CIMD rollout.
-`private_key_jwt`/Auth0 Enterprise is not part of this design.
 
 ## Tenants Overview
 
@@ -48,7 +69,7 @@ Use this table to verify each application has the correct settings:
 |-------------|------|-------------------|---------------------|-------------------|
 | **Mail Letter IRL** | SPA | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect`<br>`https://platform.openai.com/apps-manage/oauth` | `https://chat.openai.com`<br>`https://chatgpt.com`<br>`https://platform.openai.com` | N/A |
 | **Letter IRL API** | M2M | None | None | N/A |
-| **ChatGPT public CIMD** | Strict third-party public client | Exact current `https://chatgpt.com/connector/oauth/{callback_id}` from CIMD | N/A | Audited eligible connections |
+| **ChatGPT CIMD** | Strict third-party, `private_key_jwt` (Auth0 maps `app_type: regular_web`; strict is forced, not chosen) | Exact current `https://chatgpt.com/connector/oauth/{callback_id}` from CIMD | N/A | Domain-level connections |
 
 ### Tenant-Level Settings Checklist
 
@@ -87,7 +108,7 @@ either way - a checklist that guesses is worse than one that admits a gap.
 
 This Auth0 tenant is configured to support:
 - **ChatGPT MCP Server** with OAuth 2.1 + PKCE authentication
-- **Manual public CIMD registration** for ChatGPT apps
+- **Manual CIMD registration** for ChatGPT apps
 - **5 Authentication Methods**: Google, Microsoft, Apple, GitHub, Email/Password
 - **Audited eligible connections** for strict third-party CIMD clients
 
@@ -327,14 +348,28 @@ canonical `/mcp` resource.
 ### Required Auth0 CIMD Configuration
 
 1. **Client ID Metadata Document registration**
-   - Import the current OpenAI-hosted HTTPS CIMD URL manually.
-   - Verify public client, authorization code, PKCE S256, and no token endpoint
-     authentication.
+   - Import the current OpenAI-hosted HTTPS CIMD URL manually
+     (Applications -> Create Application -> **Import from URL**).
+   - Verify authorization code, PKCE S256, and that the callback matches the
+     document exactly. The client authentication method is whatever the
+     document declares - currently `private_key_jwt` - and is not a choice.
+   - `third_party_security_mode: strict` is forced on every CIMD client
+     regardless of the tenant's permissive-by-default setting, and cannot be
+     changed afterwards. Strict is satisfied by importing, not by configuring.
+   - **The CIMD URL is connector-specific.** Deleting and recreating the ChatGPT
+     connector mints a new `client.json` URL, and `external_client_id` is
+     immutable - so the import is orphaned and must be redone.
 
 2. **Dedicated MCP resource/API**
    - Identifier: exact canonical environment `/mcp` URL.
    - Permissions: `mail:read`, `mail:draft`, and `mail:send`.
-   - Enable the resource-parameter compatibility profile when Auth0 requires it.
+   - **Enable the Resource Parameter Compatibility Profile** (tenant ->
+     Settings -> Advanced). Auth0 does require it: ChatGPT sends `resource` and
+     no `audience`, and without the profile Auth0 falls back to the tenant
+     Default Audience (`https://letter-irl/api`) and refuses with
+     `Client "tpc_..." is not authorized to access resource server`. The profile
+     is additive - `audience` is still checked first, so every existing flow
+     that sends one is unaffected.
    - **Allow Offline Access: enabled.** Without it Auth0 issues no refresh token
      however the client asks, and the connection dies at access-token expiry with
      a human re-consent as the only recovery (issue #160).
@@ -355,15 +390,69 @@ canonical `/mcp` resource.
    | `mail:read` / `mail:draft` / `mail:send` with descriptions | Added | Read back after reload |
    | CIMD registration (tenant Advanced) | **Enabled** | `client_id_metadata_document_supported: true` in published metadata |
 
+2c. **CIMD client imported** (2026-09-05, this tenant)
+
+   The chicken-and-egg in the previous revision - "the CIMD client cannot be
+   imported until a production ChatGPT connector exists to publish its
+   `client.json`" - was resolved by creating the connector first and letting the
+   sign-in fail. The failure named the URL to import:
+   `invalid_request: Unknown client: https://chatgpt.com/oauth/{id}/client.json`.
+
+   | Item | State | Verified by |
+   |---|---|---|
+   | CIMD client `ChatGPT`, id `tpc_3e5dGr4xSikvNzScZkiVhd` | Imported | Applications list; Registration Type reads **CIMD** |
+   | Third-party mode | **Strict** (forced by CIMD, not configured) | App header badge reads `Third-party`, not `Permissive mode` |
+   | Callback | `https://chatgpt.com/connector/oauth/{id}` | Settings -> Allowed Callback URLs, exact match to the document |
+   | Client authentication | `private_key_jwt`, two pinned RS256 keys | Import preview mapping; see the corrected contract header |
+   | `Letter IRL MCP` user-delegated | **3 / 3** (`mail:read`, `mail:draft`, `mail:send`) | API Access tab |
+   | `Letter IRL MCP` client access (M2M) | 0 / 3, deliberately | ChatGPT acts for a user, never as a machine |
+   | Auth0 Management API | 0 / 273 | API Access tab |
+   | "Always grant all permissions" | **Off** | Consent is the point of a strict third-party client |
+   | Resource Parameter Compatibility Profile | **Enabled** | Settings -> Advanced, read back after reload |
+   | Domain-level connections | Already enabled before this work | `Promote Connection to Domain Level` true on both `Username-Password-Authentication` and `google-oauth2` |
+
+   The end-to-end proof is the error progression on `/authorize`, each step
+   fixing the one named by the last:
+
+   1. `Unknown client: https://chatgpt.com/oauth/{id}/client.json` - no CIMD client.
+   2. `Client "tpc_..." is not authorized to access resource server "https://letter-irl/api"`
+      - client found, but `resource` ignored in favour of the Default Audience.
+   3. `302 Found -> /u/login` - working, with all seven scopes requested.
+
+   **The server side was wrong too, and silently.** Production ran with
+   `LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api` - the legacy API, not the
+   MCP resource - and `LETTER_IRL_OAUTH_SCOPES=openid,email,profile`, so no
+   token could have carried `mail:*` and every one of the 22 tools would have
+   refused with `insufficient_scope` (`src/auth/toolScopes.ts` maps all of them
+   to a product scope). Neither was caught because
+   `LETTER_IRL_OAUTH_CIMD_ENFORCEMENT` was `"false"`, and
+   `assertValidOAuthConfig()` only runs when it is `"true"`
+   (`src/mcp/httpServer.ts:145`) - exactly the failure the comment at
+   `src/config/deploymentConfig.ts:289` predicts, "a misconfigured production
+   boots clean and serves a broken OAuth surface". The preflight passed it
+   because the preflight reads variable names, never values, and the name was
+   present.
+
+   Corrected together on 2026-09-05, because no subset works: audience alone
+   still fails the scope rules, scopes alone still fails the audience rule, and
+   keeping both audiences fails `CIMD mode requires exactly one MCP audience`.
+   Verified by running `validateOAuthConfig` against the real values before
+   touching Railway, then by `/readyz` returning 200 on the boot that ran the
+   assertion for the first time.
+
    Still outstanding in this tenant:
 
-   - **No CIMD client is imported.** The ChatGPT applications present are static
-     clients, two of them in *permissive* third-party mode where the contract at
-     the top of this document specifies strict. The CIMD client cannot be
-     imported until a production ChatGPT connector exists to publish its
-     `client.json`.
-   - Refresh-token rotation and the 30-day/15-day lifetimes in 2a have nothing to
-     apply to yet, being client settings.
+   - Refresh-token rotation and the 30-day/15-day lifetimes in 2a are client
+     settings on the CIMD client and have not been reviewed since the import.
+   - The two legacy **permissive** third-party clients (`ChatGPT` static,
+     `MCP CLI Proxy`) remain, against the strict contract at the top of this
+     document. Both carry user-delegated grants on the Auth0 Management API -
+     which is the `current_user` scope set, not tenant administration, so the
+     exposure is a user's own profile and identities rather than the tenant.
+     Revoking is **not** effective on its own: Auth0 warns the per-app
+     configuration "will not be enforced until you switch the API Policy to
+     'Per-app authorization'", which is a tenant-wide change affecting every
+     application and was deliberately not made in passing.
    - **Dynamic Client Registration: disabled 2026-08-24.** Per the contract above
      it is rollback inventory only, and CIMD now supersedes it. Verified off by
      reading the tenant Advanced setting back after a reload. Note the tenant
