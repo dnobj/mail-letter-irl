@@ -18,6 +18,12 @@ Letter IRL currently exposes **19 tools**:
 - `quote_and_preview_letter_with_image`: Create a free draft preview for a letter with an enclosed image after the signature. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterPreviewCard.html@v<N>`.
 - `send_letter`: Send a letter from a prior draft. Requires `draftId` and `confirm: true`. Idempotent retries with the same draft return the existing order rather than charging twice.
 
+## Buying letters
+
+- `list_letter_packs`: List the packs available to buy, with how many letters each adds and what it costs. Read-only. Packs whose Stripe Price has not resolved are omitted rather than offered, because buying one would fail.
+- `create_pack_checkout`: Create a Stripe-hosted checkout for one pack size (`starter`, `regular`, `power`). Payment adds letters to the balance; it does not send anything, so the customer still chooses and sends afterward.
+- `redeem_promo_code`: Redeem a promo code to add prepaid letters. Returns `redeemed: false` with the reason for an invalid, expired or spent code - an ordinary answer rather than an error.
+
 ## Postcards
 
 - `quote_and_preview_postcard`: Create a free draft preview for a 6x9 physical postcard with a front image and back message. Accepts an attached image or `imageUrl`; sender is optional when a saved return address exists. Creates a draft and uses `ui://widgets/PostcardPreviewCard.html@v<N>`.
@@ -34,7 +40,7 @@ Letter IRL currently exposes **19 tools**:
 
 ## Images
 
-- `generate_image_for_mail`: hybrid image tool for requests addressed to Letter IRL. With Letter IRL image credits (pack/JIT grants plus a one-time starter allowance) it generates in-turn via the OpenAI Images API and returns an imageUrl for previews; without credits, or past the global daily ceiling, it returns a redirect card with a copy-ready prompt for free built-in generation. Never hard-fails. See docs/learnings/generate-image-removal-decision.md Addendum 3.
+- `generate_image_for_mail`: hybrid image tool for requests addressed to Letter IRL. With Letter IRL image generations remaining (pack/JIT grants plus a one-time starter allowance) it generates in-turn via the OpenAI Images API and returns an imageUrl for previews; with none left, or past the global daily ceiling, it returns a redirect card with a copy-ready prompt for free built-in generation. Never hard-fails. See docs/learnings/generate-image-removal-decision.md Addendum 3.
 - `upload_image`: Open the image upload widget as a fallback when direct attachment or `imageUrl` handoff does not work. Uses `ui://widgets/ImageUploadCard.html@v<N>`.
 - `confirm_uploaded_image`: Internal widget relay that confirms an uploaded image and returns the `imageUrl` plus next-step guidance.
 

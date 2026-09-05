@@ -1032,8 +1032,10 @@ export function validateDeploymentConfig(
     //   LETTER_IRL_ALLOWED_ORIGINS unset -> production CORS allowlists
     //     http://localhost:4173 and :8090. Fails open rather than closed.
     //
-    // Neither variable is in the preflight manifest, so nothing else catches
-    // them. Errors rather than warnings: the fallbacks are development
+    // Both variables ARE in the preflight manifest (see :140 and :147), so the
+    // preflight catches a missing one before a deploy - but only when it is
+    // actually run. These rules are the backstop at boot. Errors rather than
+    // warnings: the fallbacks are development
     // conveniences and there is no production configuration in which either
     // being absent is correct.
     if (!env.LETTER_IRL_ALLOWED_HOSTS?.trim()) {
