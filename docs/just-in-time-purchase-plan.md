@@ -2,7 +2,7 @@
 
 **Last Updated:** July 18, 2026
 **Purpose:** Define the product and technical plan for paying for and sending one specific letter or postcard without first buying a letter pack
-**Status:** Implementation-ready plan; tracked by GitHub issue #69
+**Status:** Shipped. Phases 1-4 have landed; Pay & Send is live in both environments. Kept as the design record; tracked by GitHub issue #69
 
 ---
 

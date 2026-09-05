@@ -49,8 +49,19 @@ server-provided alternatives:
 
 - **Pay & Send** calls `create_mail_checkout`, displays the exact physical item
   and amount, and opens Stripe with `window.openai.openExternal`.
-- **Buy a Letter Pack** opens the configured `LETTER_IRL_PACKS_URL`.
+- **Buy a Letter Pack** calls `list_letter_packs`, replaces itself with one
+  button per pack size showing letters and price, and each of those calls
+  `create_pack_checkout` for that size. It no longer opens
+  `LETTER_IRL_PACKS_URL`; that variable remains only as a website fallback.
+  A website URL carries no identity, so a customer not signed in there bought
+  letters that never reached the account the card could see.
 
-After opening checkout, the widget polls `get_purchase_status` for a bounded
-period and shows webhook delay as processing rather than failure. Widget CSP is
+After opening checkout, the widget refreshes `get_purchase_status` **only while
+the document is visible**, and immediately when it becomes visible again.
+Browsers throttle timers in a hidden iframe, and paying means being in another
+tab, so a timer alone could not cover the window it existed for. Refreshing
+stops once payment is confirmed: the remaining hop to provider acceptance is
+owned by the hourly maintenance job, so there is nothing a short poll could
+observe. A **Check status** button covers the rest, and webhook delay shows as
+processing rather than failure. Widget CSP is
 limited to the configured Letter IRL endpoint and Stripe-hosted Checkout.

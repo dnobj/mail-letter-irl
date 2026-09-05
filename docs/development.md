@@ -198,10 +198,22 @@ LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 
-# PostGrid (live mode)
-POSTGRID_API_KEY=live_sk_...
+# Mail provider (live mode)
+# NOTE: the variable is LETTER_PROVIDER_API_KEY. POSTGRID_API_KEY satisfies no
+# validator rule - provider.api_key_required checks LETTER_PROVIDER_API_KEY.
 LETTER_PROVIDER=postgrid
+LETTER_PROVIDER_API_KEY=live_sk_...
+LETTER_PROVIDER_CONFIG={"mode":"live"}
+
+# Required in production or the boot is refused
+LETTER_IRL_DEPLOYMENT_ENVIRONMENT=production
+LETTER_IRL_ALLOWED_HOSTS=<comma-separated public hostnames>
+LETTER_IRL_ALLOWED_ORIGINS=<comma-separated allowed origins>
 ```
+
+This block is illustrative, not exhaustive. `docs/railway-setup.md` carries the
+full production variable list, and **Boot validation rules** in
+`docs/deployment.md` names every rule a missing entry can trip.
 
 **Development (.env):**
 ```bash
