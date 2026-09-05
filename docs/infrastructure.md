@@ -84,7 +84,7 @@ connection, worker, or local browser runtime.
 | --- | --- | --- | --- |
 | API | `npm ci && npm run build` | `npm start` | continuous/warm in prod; Serverless in dev |
 | Maintenance | same backend build | `npm run maintenance` | `0 * * * *` |
-| Database migration | same backend build | `npm run db:migrate:prod` | API pre-deploy command |
+| Database migration | same backend build | `npm run db:migrate:prod` | pre-deploy, both services (`railway.toml`) |
 | Website | `npm ci && npm run build` | `npm start` | continuous/warm in prod; Serverless in dev |
 
 The backend executes compiled JavaScript with Node. The website uses Next.js standalone output and disables Next telemetry during production builds.

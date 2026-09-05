@@ -25,12 +25,16 @@ import {
   normalizeHttpsOrigin,
   getZodOutputShape,
   WIDGET_DEFINITIONS,
-  WIDGET_MIME_TYPE
+  WIDGET_MIME_TYPE,
+  registerWidgetResources
 } from '../../../src/mcp/registerTools.js';
 import type { z } from 'zod';
 import { createHash } from 'crypto';
 import { widgetTemplateUri, WIDGET_TEMPLATE_VERSION } from '../../../src/mcp/widgetUris.js';
 import { LetterIrlServer } from '../../../src/server.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 describe('Widget Resource Registration (US-MCP-07)', () => {
   describe('widget currency fallback tables', () => {
@@ -113,8 +117,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 16,
-        digest: '1999d90a88a2'
+        version: 24,
+        digest: 'c1f86c2f2b6e'
       });
     });
   });
@@ -560,5 +564,114 @@ describe('partitionToolResult channel contract', () => {
       headerImagePreview: 'header-preview-base64',
       inlineImagePreview: 'inline-preview-base64'
     });
+  });
+});
+
+/**
+ * A client holding a tool list cached from before the last
+ * WIDGET_TEMPLATE_VERSION bump asks for a URI that used to be registered and
+ * no longer is. resources/read is an exact-string lookup, so that read failed
+ * inside the SDK before any of our code ran and the widget rendered as
+ * "Error loading app - Failed to fetch template". Observed against deployed
+ * development on 2026-08-29; pressing the connector's Refresh fixed it, which
+ * is not something a beta invitee will know to do.
+ *
+ * These run against a real McpServer over a real transport rather than
+ * against the callbacks directly, because the defect lived in the SDK's
+ * routing - exact resources first, then templates in insertion order - and a
+ * test that calls our callbacks by hand would have passed throughout.
+ */
+describe('widget resources tolerate any template version (#235)', () => {
+  async function connectedClient() {
+    const server = new McpServer({ name: 'widget-test', version: '0.0.0' });
+    await registerWidgetResources(server);
+
+    const client = new Client({ name: 'widget-test-client', version: '0.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport)
+    ]);
+    return client;
+  }
+
+  it('serves a widget requested at an older template version', async () => {
+    const client = await connectedClient();
+    const stale = `ui://widgets/LetterPreviewCard.html@v${WIDGET_TEMPLATE_VERSION - 4}`;
+
+    const result = await client.readResource({ uri: stale });
+
+    expect(result.contents).toHaveLength(1);
+    expect(result.contents[0].mimeType).toBe(WIDGET_MIME_TYPE);
+    expect(String(result.contents[0].text)).toContain('id="pay-send-button"');
+  });
+
+  it('serves a widget requested at a version that does not exist yet', async () => {
+    // A bump is a deploy, and for the window between them a client can hold a
+    // newer tool list than the running server. Same template, same answer.
+    const client = await connectedClient();
+    const future = `ui://widgets/PostcardPreviewCard.html@v${WIDGET_TEMPLATE_VERSION + 1}`;
+
+    const result = await client.readResource({ uri: future });
+
+    expect(result.contents[0].mimeType).toBe(WIDGET_MIME_TYPE);
+  });
+
+  it('still serves the current and legacy URIs', async () => {
+    const client = await connectedClient();
+
+    for (const uri of [
+      widgetTemplateUri('LetterPreviewCard'),
+      'ui://widgets/LetterPreviewCard.html'
+    ]) {
+      const result = await client.readResource({ uri });
+      expect(result.contents[0].uri).toBe(uri);
+      expect(result.contents[0].mimeType).toBe(WIDGET_MIME_TYPE);
+    }
+  });
+
+  it('keeps every current widget URI in resources/list', async () => {
+    // Guards the one way this change could break rendering for EVERYONE: the
+    // template is advertised separately from exact resources, so replacing the
+    // exact @vCURRENT registrations with the template alone would empty this
+    // list. If the host validates a tool's outputTemplate against it, that is
+    // a total outage. Keep both registrations.
+    const client = await connectedClient();
+
+    const { resources } = await client.listResources();
+    const uris = resources.map((resource) => resource.uri);
+
+    for (const { name } of WIDGET_DEFINITIONS) {
+      expect(uris).toContain(widgetTemplateUri(name));
+    }
+  });
+
+  it('refuses a widget name that is not in WIDGET_DEFINITIONS', async () => {
+    // GenerateImageCard is a widget we removed, so this is the real shape of
+    // the request: an old client asking for something we no longer serve.
+    const client = await connectedClient();
+
+    await expect(
+      client.readResource({ uri: 'ui://widgets/GenerateImageCard.html@v9' })
+    ).rejects.toThrow(/not found/i);
+  });
+
+  it('refuses a traversal-shaped name without reading from disk', async () => {
+    // UriTemplate.match does not percent-decode, so this arrives at the read
+    // callback as the literal name `..%2F..%2Fsecret`. The allowlist is what
+    // keeps a client-supplied string out of path.join.
+    //
+    // What this asserts is the error SHAPE, and that is deliberate: if the
+    // WIDGET_BY_NAME lookup were removed, the name would reach fs.readFile and
+    // the rejection would carry ENOENT instead. So this reddens on exactly the
+    // mutation it exists to catch, without mocking the filesystem.
+    const client = await connectedClient();
+
+    const read = client.readResource({
+      uri: 'ui://widgets/..%2F..%2Fsecret.html@v1'
+    });
+
+    await expect(read).rejects.toThrow(/not found/i);
+    await expect(read).rejects.not.toThrow(/ENOENT|no such file/i);
   });
 });

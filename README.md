@@ -36,7 +36,7 @@ This repository contains the Letter IRL build documentation, an MCP server scaff
    ```bash
    npm run mcp:http
    ```
-   Configure `LETTER_IRL_HTTP_HOST`, `LETTER_IRL_HTTP_PORT`, `LETTER_IRL_ALLOWED_HOSTS`, `LETTER_IRL_ALLOWED_ORIGINS`, `LETTER_IRL_DEFAULT_ORIGIN`, `LETTER_IRL_WIDGET_PATH`, and (optionally) `LETTER_IRL_MANIFEST_ROUTE` / `LETTER_IRL_MANIFEST_FILE` as needed. Defaults cover `127.0.0.1`/`localhost` with ports so local calls succeed, and the server automatically protects against missing `Origin` headers. Use `http://<host>:<port>/mcp` as the Apps SDK endpoint, `/widgets/<name>.html` for widget assets, and `/manifest.json` (by default) when ChatGPT asks for the manifest URL.
+   Configure `LETTER_IRL_HTTP_HOST`, `LETTER_IRL_HTTP_PORT`, `LETTER_IRL_ALLOWED_HOSTS`, `LETTER_IRL_ALLOWED_ORIGINS`, `LETTER_IRL_DEFAULT_ORIGIN`, `LETTER_IRL_WIDGET_PATH`, and (optionally) `LETTER_IRL_MANIFEST_ROUTE` as needed. Defaults cover `127.0.0.1`/`localhost` with ports so local calls succeed, and the server automatically protects against missing `Origin` headers. Use `http://<host>:<port>/mcp` as the Apps SDK endpoint, `/widgets/<name>.html` for widget assets, and `/manifest.json` (by default) when ChatGPT asks for the manifest URL.
 6. Generate TypeScript output (optional if bundling):
    ```bash
    npm run build

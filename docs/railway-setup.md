@@ -17,6 +17,15 @@ Production API and website remain warm. Development API and website use Railway 
 
 ## API Settings
 
+**Do not set the build, start or pre-deploy commands in the dashboard.** They are
+committed: `nixpacks.toml` holds build and start, `railway.toml` holds the
+pre-deploy command, and Railway's config-as-code overrides dashboard values. The
+block below records what those files produce so this guide can be checked against
+them; it is not a list of things to type in.
+
+Healthcheck path and region are dashboard settings and do have to be set here.
+
+
 ```text
 Build command: npm run build
 Pre-deploy command: npm run db:migrate:prod
@@ -38,10 +47,22 @@ TEMP_IMAGE_BUCKET_ENDPOINT=<reference to S3 endpoint>
 TEMP_IMAGE_BUCKET_REGION=<reference to S3 region>
 TEMP_IMAGE_BUCKET_ACCESS_KEY_ID=<reference to bucket access key>
 TEMP_IMAGE_BUCKET_SECRET_ACCESS_KEY=<reference to bucket secret>
+LETTER_IRL_ALLOWED_HOSTS=<comma-separated public hostnames>
+LETTER_IRL_ALLOWED_ORIGINS=<comma-separated allowed origins>
 ```
 
-`NODE_ENV=production` is set in **both** environments (Neon SSL and bucket
-enforcement need it), so it cannot identify the environment.
+`LETTER_IRL_ALLOWED_HOSTS` and `LETTER_IRL_ALLOWED_ORIGINS` are **hard
+production refusals** (`http.allowed_hosts_required`,
+`http.allowed_origins_required`). Their fallbacks allowlist localhost, which
+would leave DNS-rebinding protection open, so the validator refuses rather than
+defaulting. Provisioning a production API without them yields a boot failure.
+
+`NODE_ENV=production` is set in **both** environments (bucket enforcement
+needs it), so it cannot identify the environment. It does **not** carry Neon
+TLS: node-postgres merges the parsed connection string *over* the `ssl` option,
+so a URL with `?sslmode=require` decides the posture on its own and one without
+`sslmode` is refused in production whatever `NODE_ENV` says. See
+`src/db/index.ts:32-37` and the `database.tls_*` rules in `docs/deployment.md`.
 `LETTER_IRL_DEPLOYMENT_ENVIRONMENT` is the identity signal the boot validator
 (issue #155) resolves; an unlabeled service resolves to production mode,
 fail-closed, and **refuses to boot regardless of its other variables** — the
@@ -57,6 +78,11 @@ LETTER_PROVIDER_CONFIG={"mode":"live"}
 STRIPE_SECRET_KEY=<sk_live_ in production; sk_test_ in development - never crossed>
 STRIPE_WEBHOOK_SECRET=<whsec_ for that environment's webhook endpoint>
 STRIPE_PRICE_STARTER=<price_ id>
+LETTER_IRL_MAIL_SENDING_ENABLED=<true to allow sending; the kill switch>
+LETTER_IRL_BETA_GATE_ENABLED=<true to restrict access to the invited cohort>
+LETTER_IRL_BETA_DAILY_MAIL_CAP=<global letters per day>
+LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP=<letters per account per day>
+LETTER_IRL_BETA_ACCOUNT_DAILY_SPEND_CAP_CENTS=<spend per account per day>
 STRIPE_PRICE_REGULAR=<price_ id>
 STRIPE_PRICE_POWER=<price_ id>
 STRIPE_CURRENCY=usd

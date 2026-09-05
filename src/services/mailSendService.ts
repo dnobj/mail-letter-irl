@@ -121,6 +121,38 @@ export async function createMailOrderFromDraftWithClient(
         `Draft ${params.draftId} was already consumed by different funding`
       );
     }
+    // #286: converge the order too, not just report success.
+    //
+    // This branch used to return here, BEFORE the identical UPDATE the normal
+    // path runs further down. Both callers - the Stripe webhook inside
+    // SAVEPOINT jit_fulfillment, and fulfillPaidOrder in the recovery sweep -
+    // then recorded a paid -> fulfillment_pending order event while the row
+    // stayed at 'paid'. The sweep re-selected it on every run and the
+    // stuck-order alarm counted it forever, raising the floor until the alarm
+    // could no longer signal anything new. 'paid' is deliberately absent from
+    // FUNDED_OR_REVERSED_ORDER_STATUSES, so nothing else caught it.
+    //
+    // AND status = 'paid' is load-bearing. Without it a replay against an
+    // order that has since reached 'fulfilled' would walk it BACKWARDS to
+    // fulfillment_pending, turning a noisy bug into lifecycle corruption. Both
+    // callers reach here with the row locked and at 'paid' - the webhook path
+    // sets it 40 lines earlier, fulfillPaidOrder refuses any other status - so
+    // the guard never costs a legitimate convergence, and the unconditional
+    // recordOrderEvent in both callers stays honest.
+    //
+    // The funding-conflict check above has already established that this
+    // letter belongs to this order, so the update cannot touch another.
+    if (funding.type === 'jit_order') {
+      await client.query(
+        `UPDATE orders
+         SET status = 'fulfillment_pending', letter_id = $1,
+             fulfillment_started_at = COALESCE(fulfillment_started_at, NOW()),
+             last_error_code = NULL, last_error = NULL, updated_at = NOW()
+         WHERE order_id = $2 AND status = 'paid'`,
+        [existingLetter.letter_id, funding.orderId]
+      );
+    }
+
     return {
       letter: existingLetter,
       draft,
@@ -254,9 +286,20 @@ export async function createMailOrderFromDraftWithClient(
 
     // AFTER the deduction, on purpose: deductCreditsFromLedgerWithClient has
     // already taken users FOR UPDATE, so the per-account count is serialised
-    // for free. Taking that lock earlier to serialise this check would give
-    // users -> orders here while the refund paths go orders -> letters ->
-    // users: opposite order, same objects, a real deadlock.
+    // for free and needs no second lock.
+    //
+    // An earlier revision of this comment justified the placement by claiming
+    // that taking the lock sooner would invert into users -> orders against the
+    // refund paths. That was wrong and is corrected here: this function already
+    // holds orders FOR UPDATE from the active-checkout and funding lookups
+    // above, so any placement after those is still orders -> users. Only
+    // hoisting the account lock above them would invert, and nothing here wants
+    // that.
+    //
+    // The real constraint on lock order was measured in #288 and lives in
+    // transitionPaidCheckout: the account lock must precede that function's
+    // order mutations, because the second UPDATE takes FOR KEY SHARE on users
+    // via the FK re-check and a later FOR UPDATE then escalates against it.
     //
     // inFlight is 0 because the letters row was inserted above, so the count
     // already includes this send. A throw rolls the whole transaction back,

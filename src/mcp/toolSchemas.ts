@@ -72,6 +72,13 @@ export const toolInputSchemas = {
   create_mail_checkout: z.object({
     draftId: z.string()
   }),
+  list_letter_packs: z.object({}),
+  create_pack_checkout: z.object({
+    pack: z.enum(["starter", "regular", "power"])
+  }),
+  redeem_promo_code: z.object({
+    code: z.string()
+  }),
   get_purchase_status: z.object({
     orderId: z.string()
   }),

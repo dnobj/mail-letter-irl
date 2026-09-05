@@ -6,6 +6,7 @@ import {
 import { getBalance, getDetailedBalance } from "../services/creditService.js";
 import { findUser } from "../services/userService.js";
 import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
+import { CREDITS_PER_LETTER } from "../config/products.js";
 
 interface ExpiringLettersInfo {
   letters: number;
@@ -28,7 +29,7 @@ async function handler(
   _input: Record<string, never>,
   context: ToolContext
 ): Promise<GetAccountBalanceOutput> {
-  const standardCost = 2; // Updated to 2 credits per letter (matches pricing)
+  const standardCost = CREDITS_PER_LETTER;
 
   // Get user ID from context
   const userId = context.user.userId || 'default-user';
@@ -110,7 +111,11 @@ async function handler(
   const identityLine = `Account: ${email} (${authProvider})`;
   let balanceLine: string;
   if (lettersRemaining === 0) {
-    balanceLine = "You haven't pre-paid for any letters yet. Visit letterirl.com to purchase a Letter Pack and start sending!";
+    // Points at the conversation, not the website. create_pack_checkout and
+    // list_letter_packs (#311, #312) made "go to letterirl.com" both stale and
+    // - with LETTER_IRL_PACKS_URL unset - a dead end.
+    balanceLine =
+      "No letters on this account yet. You can buy a letter pack here, or pay for a single letter as you send it.";
   } else {
     balanceLine = `Letter Balance: ${lettersRemaining} ${lettersRemaining === 1 ? 'letter' : 'letters'} remaining.`;
   }
@@ -154,13 +159,23 @@ export const getAccountBalanceTool: McpToolDefinition<
   GetAccountBalanceOutput
 > = {
   name: "get_account_balance",
-  description: "Check how many pre-paid letter sends you have remaining. Visit letterirl.com to purchase more.",
+  // A tool description is permanent model context - it is read every turn,
+  // not only when the tool runs - so a stale route here misdirects far more
+  // often than a stale message does.
+  description:
+    "Check how many prepaid letters remain on this account. Letters can be bought without leaving the conversation: list_letter_packs shows the sizes, create_pack_checkout buys one.",
   readOnly: true,
   inputSchema: getAccountBalanceInputSchema,
   outputSchema: getAccountBalanceOutputSchema,
   meta: {
     "openai/toolInvocation/invoking": "Checking letter balance…",
     "openai/toolInvocation/invoked": "Balance updated",
+    // The preview cards call this via window.openai.callTool to notice letters
+    // arriving after a pack purchase (#306). It worked without the
+    // declaration - the flag is metadata the client receives, not a
+    // server-side gate - so the widget was calling an undeclared tool. Stating
+    // the intent rather than relying on it not being enforced.
+    "openai/widgetAccessible": true,
     readOnlyHint: true
   },
   handler

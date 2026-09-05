@@ -124,30 +124,10 @@
           "sendEligibility": {
             "type": "object",
             "required": [
-              "prepaid",
               "payAndSend",
               "letterPack"
             ],
             "properties": {
-              "prepaid": {
-                "type": "object",
-                "required": [
-                  "eligible",
-                  "requiredCredits",
-                  "availableCredits"
-                ],
-                "properties": {
-                  "eligible": {
-                    "type": "boolean"
-                  },
-                  "requiredCredits": {
-                    "type": "integer"
-                  },
-                  "availableCredits": {
-                    "type": "integer"
-                  }
-                }
-              },
               "payAndSend": {
                 "type": "object",
                 "required": [
@@ -419,30 +399,10 @@
           "sendEligibility": {
             "type": "object",
             "required": [
-              "prepaid",
               "payAndSend",
               "letterPack"
             ],
             "properties": {
-              "prepaid": {
-                "type": "object",
-                "required": [
-                  "eligible",
-                  "requiredCredits",
-                  "availableCredits"
-                ],
-                "properties": {
-                  "eligible": {
-                    "type": "boolean"
-                  },
-                  "requiredCredits": {
-                    "type": "integer"
-                  },
-                  "availableCredits": {
-                    "type": "integer"
-                  }
-                }
-              },
               "payAndSend": {
                 "type": "object",
                 "required": [
@@ -714,30 +674,10 @@
           "sendEligibility": {
             "type": "object",
             "required": [
-              "prepaid",
               "payAndSend",
               "letterPack"
             ],
             "properties": {
-              "prepaid": {
-                "type": "object",
-                "required": [
-                  "eligible",
-                  "requiredCredits",
-                  "availableCredits"
-                ],
-                "properties": {
-                  "eligible": {
-                    "type": "boolean"
-                  },
-                  "requiredCredits": {
-                    "type": "integer"
-                  },
-                  "availableCredits": {
-                    "type": "integer"
-                  }
-                }
-              },
               "payAndSend": {
                 "type": "object",
                 "required": [
@@ -1030,6 +970,175 @@
       }
     },
     {
+      "name": "create_pack_checkout",
+      "description": "Create a Stripe-hosted checkout to buy a pack of prepaid letters. The price and pack sizes come only from server configuration. Payment adds letters to the account balance; it does not send anything, so the customer still chooses and sends afterward. Use create_mail_checkout instead to pay for one specific draft.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "pack"
+        ],
+        "properties": {
+          "pack": {
+            "type": "string",
+            "enum": [
+              "starter",
+              "regular",
+              "power"
+            ],
+            "description": "Pack size: starter (2 letters), regular (5 letters), power (50 letters)"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "orderId",
+          "letters",
+          "amountCents",
+          "currency",
+          "productDescription",
+          "status",
+          "reused",
+          "message"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "checkoutUrl": {
+            "type": "string",
+            "description": "Stripe-hosted checkout URL"
+          },
+          "letters": {
+            "type": "integer",
+            "description": "Letters this pack adds to the balance"
+          },
+          "amountCents": {
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "productDescription": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "reused": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_letter_packs",
+      "description": "List the letter packs available to buy, with how many letters each adds and what it costs. Use this to answer questions about pack sizes or pricing, and before create_pack_checkout when the customer has not said which size they want.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "packs",
+          "message"
+        ],
+        "properties": {
+          "packs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "pack",
+                "letters",
+                "amountCents",
+                "currency",
+                "displayAmount",
+                "description"
+              ],
+              "properties": {
+                "pack": {
+                  "type": "string",
+                  "enum": [
+                    "starter",
+                    "regular",
+                    "power"
+                  ]
+                },
+                "letters": {
+                  "type": "integer",
+                  "description": "Letters this pack adds to the balance"
+                },
+                "amountCents": {
+                  "type": "integer"
+                },
+                "currency": {
+                  "type": "string"
+                },
+                "displayAmount": {
+                  "type": "string",
+                  "description": "Server-formatted price for this currency"
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "redeem_promo_code",
+      "description": "Redeem a promo code to add prepaid letters to the account. Returns redeemed: false with the reason when a code is invalid, expired, or already used - that is an ordinary answer, not an error. Letters must still be sent afterward.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The promo code to redeem"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "redeemed",
+          "message"
+        ],
+        "properties": {
+          "redeemed": {
+            "type": "boolean"
+          },
+          "letters": {
+            "type": "integer",
+            "description": "Letters added to the balance"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "When the added letters expire, if they do"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
       "name": "get_purchase_status",
       "description": "Get the payment, fulfillment, or refund status of an owned Pay & Send or letter-pack purchase. Returns sanitized commerce state only and never exposes payment-card details.",
       "inputSchema": {
@@ -1065,10 +1174,11 @@
             "enum": [
               "pending_payment",
               "processing",
-              "sent",
+              "submitted",
               "payment_failed",
               "refund_pending",
               "refunded",
+              "on_hold",
               "cancelled"
             ]
           },
@@ -1190,7 +1300,7 @@
     },
     {
       "name": "get_account_balance",
-      "description": "Check how many pre-paid letter sends you have remaining. Visit letterirl.com to purchase more.",
+      "description": "Check how many prepaid letters remain on this account. Letters can be bought without leaving the conversation: list_letter_packs shows the sizes, create_pack_checkout buys one.",
       "inputSchema": {
         "type": "object",
         "properties": {}
@@ -1465,30 +1575,10 @@
           "sendEligibility": {
             "type": "object",
             "required": [
-              "prepaid",
               "payAndSend",
               "letterPack"
             ],
             "properties": {
-              "prepaid": {
-                "type": "object",
-                "required": [
-                  "eligible",
-                  "requiredCredits",
-                  "availableCredits"
-                ],
-                "properties": {
-                  "eligible": {
-                    "type": "boolean"
-                  },
-                  "requiredCredits": {
-                    "type": "integer"
-                  },
-                  "availableCredits": {
-                    "type": "integer"
-                  }
-                }
-              },
               "payAndSend": {
                 "type": "object",
                 "required": [
@@ -1716,7 +1806,7 @@
     },
     {
       "name": "generate_image_for_mail",
-      "description": "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image credits (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. Without credits it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Never refuse an image request - call this tool and follow its response.",
+      "description": "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image generations remaining (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Never refuse an image request - call this tool and follow its response.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1979,7 +2069,7 @@
     },
     {
       "name": "get_started",
-      "description": "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy pre-paid letter sends on letterirl.com, and example prompts to try next.",
+      "description": "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy prepaid letters without leaving the conversation, and example prompts to try next.",
       "inputSchema": {
         "type": "object",
         "properties": {},

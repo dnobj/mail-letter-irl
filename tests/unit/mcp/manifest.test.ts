@@ -68,7 +68,7 @@ describe("Compatibility manifest", () => {
     const tool = buildManifest().tools.find((t) => t.name === "generate_image_for_mail");
     // Generates only against the user's Letter IRL credits; otherwise routes
     // to built-in generation. Both halves must stay stated.
-    expect(tool?.description).toContain("Letter IRL image credits");
+    expect(tool?.description).toContain("Letter IRL image generations");
     expect(tool?.description).toContain("built-in image generation");
     expect(tool?.description).toContain("Never refuse an image request");
   });

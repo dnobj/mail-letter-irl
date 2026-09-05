@@ -92,8 +92,14 @@ export interface CreatePackCheckoutParams {
   userId: string;
   userEmail: string;
   productId: PackProductId;
-  successUrl: string;
-  cancelUrl: string;
+  // Optional so a caller that cannot know the order id can omit them: the
+  // order is created INSIDE createPackCheckout, so the MCP tool has nothing
+  // to build a return URL from. Omitted, they are derived with the same
+  // checkoutReturnUrls helper the JIT path uses, rather than restating the
+  // /purchase/return contract in a second place. The website's dashboard
+  // keeps passing its own and is unaffected.
+  successUrl?: string;
+  cancelUrl?: string;
 }
 
 export interface CreateJitCheckoutParams {
@@ -106,10 +112,22 @@ export interface PurchaseStatusResult {
   purchaseStatus:
     | 'pending_payment'
     | 'processing'
-    | 'sent'
+    // Set when the print provider ACCEPTS the job, which is not the same as
+    // the item being in the mail. It was called 'sent', and the message
+    // beneath it already said "accepted by the print provider" - the prose was
+    // right and the name was wrong. Renamed while pre-launch, because a served
+    // enum value is free to change now and fixed afterwards (#310).
+    //
+    // Note the letters table has its own 'sent' status, unrelated to this one.
+    | 'submitted'
     | 'payment_failed'
     | 'refund_pending'
     | 'refunded'
+    // Chargebacks and operational holds. Previously folded into
+    // 'refund_pending', whose message claims the order could not be fulfilled
+    // and that we are refunding it - wrong in both halves for a dispute the
+    // customer raised against an order we may have delivered perfectly.
+    | 'on_hold'
     | 'cancelled';
   orderStatus: OrderStatus;
   productDescription: string;
@@ -137,11 +155,6 @@ export interface CommerceMaintenanceResult {
 }
 
 export interface SendEligibility {
-  prepaid: {
-    eligible: boolean;
-    requiredCredits: number;
-    availableCredits: number;
-  };
   payAndSend: {
     available: boolean;
     amountCents?: number;
@@ -186,12 +199,16 @@ export function getSendEligibility(
   // prepaid/letterPack literal for the disabled path, so a change to either
   // block had to be edited in two returns or the enabled and disabled quote
   // surfaces diverged (#278 round 8). Only payAndSend is branch-dependent.
+  // prepaid{eligible,requiredCredits,availableCredits} was returned here and
+  // read by nobody - every reference in src/ and widgets/ was a comment. It
+  // was also the only place internal CREDIT units reached a served schema, and
+  // 'eligible' duplicated the sibling canSendNow. Removed rather than renamed:
+  // the customer-facing numbers are lettersRequired and get_account_balance,
+  // both already in letters (#308).
+  //
+  // prepaidEligible itself is still computed above - payAndSend.available
+  // depends on it.
   return {
-    prepaid: {
-      eligible: prepaidEligible,
-      requiredCredits,
-      availableCredits
-    },
     payAndSend: jitEnabled
       ? enabledPayAndSend(mailType, prepaidEligible)
       : disabledPayAndSend(mailType),
@@ -367,7 +384,7 @@ function appendQuery(base: string, values: Record<string, string>): string {
     .join('&')}`;
 }
 
-function jitReturnUrls(orderId: string): {
+function checkoutReturnUrls(orderId: string): {
   successUrl: string;
   cancelUrl: string;
 } {
@@ -640,12 +657,13 @@ export async function createPackCheckout(
     ]
   );
 
+  const returnUrls = checkoutReturnUrls(orderId);
   const checkout = await createPackCheckoutSession({
     orderId,
     userEmail: params.userEmail,
     product,
-    successUrl: params.successUrl,
-    cancelUrl: params.cancelUrl,
+    successUrl: params.successUrl ?? returnUrls.successUrl,
+    cancelUrl: params.cancelUrl ?? returnUrls.cancelUrl,
     idempotencyKey
   });
   if (!checkout.success || !checkout.sessionId) {
@@ -926,6 +944,37 @@ export async function createJitCheckout(
   );
 
   const prepared = await prepareJitOrder(params);
+  // The asymmetry with prepareJitOrder's reuse branch is DELIBERATE (#279).
+  //
+  // That branch accepts `stripe_checkout_session_id || checkout_url`; this one
+  // keys on checkout_url alone, and #279's first suggestion is to align them.
+  // Doing so was tried and reverted, because the fall-through it removes is a
+  // REPAIR:
+  //
+  //   For a row with a session but a NULL checkout_url, the retry re-enters
+  //   Stripe carrying the SAME idempotency_key. With unchanged parameters
+  //   Stripe replays the original session rather than opening a second one,
+  //   and attachCheckout's `checkout_url = COALESCE(checkout_url, $3)`
+  //   backfills the url onto that same session. The key is what makes the
+  //   repair safe; it cannot mint a duplicate.
+  //
+  // Closing this path instead returns success: true with
+  // `checkoutUrl: order.checkout_url` still NULL - createMailCheckout emits it
+  // verbatim and zodSchemas marks it optional, so nothing downstream turns the
+  // absence into an error - and the draft stays blocked while
+  // checkout_expires_at is in the future. Such a row has no local escape
+  // either: the cancel branch and the orphan sweep both require a NULL session
+  // id, so it clears only when Stripe reports the session expired.
+  //
+  // Not "certain harm versus latent harm": both need the same undemonstrated
+  // row shape. The difference is what happens once you are in it - the current
+  // code repairs the row whenever parameters are unchanged, the aligned guard
+  // never does.
+  //
+  // #279's OTHER suggestion - give the reuse branch the price-id comparison its
+  // comment assumes - is sound and still open. The reprice gate can only
+  // compare amount and currency because productSnapshot persists no price id,
+  // so a repoint at the same amount passes it unnoticed.
   if (prepared.order.status !== 'checkout_pending' || prepared.order.checkout_url) {
     return asCheckoutResult(prepared.order, true);
   }
@@ -938,7 +987,7 @@ export async function createJitCheckout(
   // motivated the splice was a concurrent memo invalidation, and that
   // machinery is gone (#278 round 13).
   const product = getJitProductConfig(mailType);
-  const urls = jitReturnUrls(prepared.order.order_id);
+  const urls = checkoutReturnUrls(prepared.order.order_id);
   const checkout = await createJitCheckoutSession({
     orderId: prepared.order.order_id,
     product,
@@ -1208,6 +1257,38 @@ async function transitionPaidCheckout(
   eventType: string
 ): Promise<OrderStatus> {
   const intentId = paymentIntentId(session);
+
+  // #288: take the account lock BEFORE the order mutations, not before the grant.
+  //
+  // Two deliveries for DIFFERENT orders of the SAME user deadlocked, and the
+  // cycle was measured rather than reasoned to:
+  //
+  //   T1: UPDATE orders (2nd)  -> FOR KEY SHARE on users   [granted]
+  //   T2: UPDATE orders (2nd)  -> FOR KEY SHARE on users   [granted, multi-holder]
+  //   T1: upsert users         -> FOR NO KEY UPDATE        [granted, compatible]
+  //   T2: upsert users         -> FOR NO KEY UPDATE        [waits on T1]
+  //   T1: lockAccount...       -> FOR UPDATE               [waits on T2's KEY SHARE]
+  //
+  // The KEY SHARE is not taken by findCheckoutOrder - a FOR UPDATE with no OF
+  // list locks only rows of tables in its own FROM. It comes from the SECOND
+  // "UPDATE orders" below: orders.user_id has an FK to users, and the RI check
+  // is skipped when the FK column is unchanged EXCEPT when the row version being
+  // updated was written by this same transaction, which the first UPDATE just
+  // did. And the escalation is not the credits upsert, which takes only
+  // FOR NO KEY UPDATE (no key column in its SET list) and is compatible with
+  // another holder's KEY SHARE. It is this lock, reached via
+  // grantImageEntitlementWithClient.
+  //
+  // Placing it here rather than beside the grant is load-bearing: measured at
+  // 3/40 deadlocks with the lock immediately before the grant, and 0/40 with it
+  // ahead of both UPDATEs.
+  //
+  // It stays AFTER findCheckoutOrder on purpose. Acquisition order remains
+  // orders -> users, matching the refund and dispute paths, which all receive an
+  // already-fetched order and then lock the account. Hoisting this above the
+  // order lock would invert against them and trade one cycle for another.
+  await lockAccountForBalanceChange(client, order.user_id);
+
   await client.query(
     `UPDATE orders
      SET stripe_checkout_session_id = COALESCE(stripe_checkout_session_id, $2),
@@ -1413,6 +1494,16 @@ async function processCheckoutSessionEvent(
              THEN COALESCE(refund_pending_at, NOW()) ELSE refund_pending_at END,
            last_error_code = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH'
              THEN last_error_code ELSE 'UNMATCHED_MONEY_EVENT_RECOVERED' END,
+           -- The PAIR, third site (#279). Setting the code without the message
+           -- leaves an operator triaging stranded money reading
+           -- UNMATCHED_MONEY_EVENT_RECOVERED beside whatever unrelated text was
+           -- already there. The same omission was hand-fixed twice before, at
+           -- the two sibling sites; a test now asserts the pairing everywhere
+           -- rather than waiting for a fourth round to find the next one.
+           -- Mirrors the CASE above so a PAYMENT_AMOUNT_MISMATCH quarantine
+           -- keeps its own message alongside its own code.
+           last_error = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH'
+             THEN last_error ELSE 'Money arrived for a session this order had not recorded' END,
            updated_at = NOW()
          WHERE order_id = $1`,
         [order.order_id, session.id, intentId, blockedStatus]
@@ -2279,7 +2370,9 @@ export async function processStripeWebhookEvent(
   }
 }
 
-function publicPurchaseStatus(status: OrderStatus): PurchaseStatusResult['purchaseStatus'] {
+// Exported for tests: these two encode the customer-facing vocabulary, and
+// the mapping had a defect that no test could see while they were private.
+export function publicPurchaseStatus(status: OrderStatus): PurchaseStatusResult['purchaseStatus'] {
   switch (status) {
     case 'checkout_pending':
       return 'pending_payment';
@@ -2287,7 +2380,7 @@ function publicPurchaseStatus(status: OrderStatus): PurchaseStatusResult['purcha
     case 'fulfillment_pending':
       return 'processing';
     case 'fulfilled':
-      return 'sent';
+      return 'submitted';
     case 'payment_failed':
       return 'payment_failed';
     case 'refund_pending':
@@ -2296,19 +2389,23 @@ function publicPurchaseStatus(status: OrderStatus): PurchaseStatusResult['purcha
       return 'refunded';
     case 'disputed':
     case 'held':
-      return 'refund_pending';
+      // Deliberately ONE customer-facing status for both. The difference
+      // between a chargeback and an operational hold is ours to act on, not
+      // the customer's, and naming it would leak the same class of internal
+      // detail as users.sends_blocked_reason (#278 round 12).
+      return 'on_hold';
     case 'cancelled':
       return 'cancelled';
   }
 }
 
-function purchaseMessage(status: PurchaseStatusResult['purchaseStatus']): string {
+export function purchaseMessage(status: PurchaseStatusResult['purchaseStatus']): string {
   switch (status) {
     case 'pending_payment':
       return 'Checkout is awaiting payment.';
     case 'processing':
       return 'Payment is confirmed and the mail item is being prepared.';
-    case 'sent':
+    case 'submitted':
       return 'The physical mail item was accepted by the print provider.';
     case 'payment_failed':
       return 'Payment was not completed.';
@@ -2316,6 +2413,8 @@ function purchaseMessage(status: PurchaseStatusResult['purchaseStatus']): string
       return 'The order could not be fulfilled and a refund is being processed.';
     case 'refunded':
       return 'The payment was refunded.';
+    case 'on_hold':
+      return 'This order is on hold. Please contact support.';
     case 'cancelled':
       return 'The checkout was cancelled or expired without sending the draft.';
   }

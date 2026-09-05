@@ -4,6 +4,9 @@ export { quoteAndPreviewLetterWithHeaderImageTool } from "./quoteAndPreviewLette
 export { quoteAndPreviewLetterWithImageTool } from "./quoteAndPreviewLetterWithImage.js";
 export { sendLetterTool } from "./sendLetter.js";
 export { createMailCheckoutTool } from "./createMailCheckout.js";
+export { createPackCheckoutTool } from "./createPackCheckout.js";
+export { listLetterPacksTool } from "./listLetterPacks.js";
+export { redeemPromoCodeTool } from "./redeemPromoCode.js";
 export { getPurchaseStatusTool } from "./getPurchaseStatus.js";
 
 // Account and order management tools

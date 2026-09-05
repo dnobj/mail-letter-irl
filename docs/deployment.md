@@ -39,6 +39,18 @@ API start: npm start
 Cron start: npm run maintenance
 ```
 
+All five come from files in this repository, not from the Railway dashboard:
+`nixpacks.toml` sets install, build and start; `railway.toml` sets the
+pre-deploy command. Railway's config-as-code overrides dashboard values, and
+fields absent from those files keep theirs.
+
+That split matters. Until 2026-08-29 the pre-deploy line was documented here and
+configured nowhere - no `railway.toml`, nothing in `nixpacks.toml`, nothing in a
+workflow. **No deploy applied migrations**, and this document said one did, which
+is how production came to serve code expecting migration 019 against a schema
+stopped at 017 (#300). Committing the command is what makes this block checkable
+rather than aspirational.
+
 `npm start` runs `node dist/mcp/httpServer.js`. The API process must not start workers or recurring maintenance timers.
 
 The maintenance service uses the same repository and environment variables, runs on `0 * * * *`, and must exit after each run. A cron execution that overlaps the next schedule is an operational failure.
@@ -68,7 +80,9 @@ order they catch problems:
 
    It diffs each service's variable *names* (never values) against
    `ENV_VAR_MANIFEST` in `src/config/deploymentConfig.ts` and exits non-zero on
-   gaps. Run it against `development` after environment changes and against
+   **required** gaps. Entries marked advisory in the manifest are reported as
+   informational and never gate (`scripts/preflight-cutover.ts:150-151`), so a
+   clean exit is not the same as a fully populated environment. Run it against `development` after environment changes and against
    `production` before every promotion. Committed Railway variables do not
    reach a running instance until the service is explicitly **redeployed**
    (Deployments → ⋮ → Redeploy); a variable that looks set in the UI can still
@@ -84,7 +98,8 @@ order they catch problems:
    memory image storage or incomplete bucket credentials, and
    placeholder-shaped credentials. Outside production it refuses live-mode
    keys. A failed validation exits non-zero, so Railway keeps the previous
-   image serving.
+   image serving. Every rule it can raise is listed under **Boot validation
+   rules** below, so a refusal names something you can look up.
 
 3. **After deploying — `/readyz`.** Returns `200` with
    `{"ready":true,"mode":...,"provider":...}` when configuration is valid, the
@@ -138,6 +153,80 @@ Still verified by a human, without printing secret values:
 `WORKER_POLLING_SECONDS` and `WORKER_TRIGGER_ON_SEND` are legacy rollout safeguards. The compiled API ignores them after the transactional-outbox release; remove them after the new maintenance service is verified.
 
 As of July 16, 2026, development has the transactional-outbox release and hourly maintenance service deployed. Production remains on the previous release with `WORKER_POLLING_SECONDS=600` and `WORKER_TRIGGER_ON_SEND=true` until the remaining manual acceptance checks pass.
+
+## Boot validation rules
+
+`validateEnvironment()` in `src/config/deploymentConfig.ts` raises a finding with a stable
+`rule` id. Every id it can raise is listed here, so a refusal names something you can look up
+rather than arriving unexplained. **Errors refuse the boot; warnings are logged and the process
+continues.**
+
+Several rules are severity-dependent on the environment — an error in production, a warning
+elsewhere — because the same misconfiguration is a launch-blocker in one place and a normal
+development state in another.
+
+### Environment identity
+
+| Rule | Severity | Raised when | Fix |
+|---|---|---|---|
+| `env.deployment_environment_required` | error | `NODE_ENV=production` with no `LETTER_IRL_DEPLOYMENT_ENVIRONMENT` | Set it to `production` or `development` |
+| `env.deployment_environment_invalid` | error | `LETTER_IRL_DEPLOYMENT_ENVIRONMENT` is neither `production` nor `development` | Correct the value |
+| `env.node_env_mismatch` | error | `LETTER_IRL_DEPLOYMENT_ENVIRONMENT=production` without `NODE_ENV=production` | Set `NODE_ENV=production` |
+
+### Mail provider
+
+| Rule | Severity | Raised when | Fix |
+|---|---|---|---|
+| `provider.live_provider_required` | error | `LETTER_PROVIDER` is not an approved live provider in production — **the implicit `dummy` default counts**, so leaving it unset fails | Set `LETTER_PROVIDER=postgrid` |
+| `provider.api_key_required` | error | `LETTER_PROVIDER_API_KEY` unset in production | Set it. **`POSTGRID_API_KEY` does not satisfy this** — it is read by nothing this rule checks |
+| `provider.live_mode_required` | error | `LETTER_PROVIDER_CONFIG` lacks `"mode": "live"` in production | Add the mode |
+| `provider.config_json_invalid` | error in production, else warning | `LETTER_PROVIDER_CONFIG` is not valid JSON | Fix the JSON |
+| `provider.test_key_in_production` | error | The provider key carries a `test_` prefix in production | Use the live key |
+| `provider.live_key_outside_production` | error when the deployment can send mail, else warning | A `live_` provider key outside production | Use a test key — a live key here mails real letters |
+| `provider.key_prefix_unrecognized` | warning | The key carries neither `live_` nor `test_` | Verify by hand that it is the key you intend |
+| `provider.dummy_implicit_environment` | warning | The dummy provider is running in an unlabelled environment | Set `LETTER_IRL_DEPLOYMENT_ENVIRONMENT=development` so the silence is deliberate |
+
+### Stripe
+
+| Rule | Severity | Raised when | Fix |
+|---|---|---|---|
+| `stripe.live_key_required` | error | `STRIPE_SECRET_KEY` is not `sk_live_`/`rk_live_` in production | Use the live key |
+| `stripe.live_key_outside_production` | error | A live Stripe key outside production | Use the test key — this one charges real cards |
+| `stripe.webhook_secret_malformed` | error in production, else warning | `STRIPE_WEBHOOK_SECRET` does not begin `whsec_` | Copy it again from the Stripe endpoint |
+| `stripe.pack_price_incomplete` | error in production, else warning | A `STRIPE_PRICE_*` is missing or is not a `price_…` id | Set every pack price id. Amounts come from the Price itself (#275), never from an env var |
+| `stripe.jit_config_incomplete` | error in production, else warning | `JIT_PURCHASE_ENABLED=true` with a missing or malformed `STRIPE_JIT_*_PRICE_ID` | Set the price ids, or turn Pay & Send off |
+| `stripe.currency_unset` | warning | `STRIPE_CURRENCY` is unset | Set it to match the currency the Prices are denominated in |
+
+### HTTP surface
+
+| Rule | Severity | Raised when | Fix |
+|---|---|---|---|
+| `http.allowed_hosts_required` | error | `LETTER_IRL_ALLOWED_HOSTS` unset in production | Set it. The fallback allowlists localhost, which leaves DNS-rebinding protection open |
+| `http.allowed_origins_required` | error | `LETTER_IRL_ALLOWED_ORIGINS` unset in production | Set it. The fallback allowlists localhost origins |
+| `admin.enabled_in_production` | error | `ADMIN_ENABLED=true` in production | Unset it. Admin is a local-only operator surface |
+| `debug.enabled_in_production` | error | `DEBUG` is enabled in production | Unset it. It serves the unauthenticated `/debug/widgets` route and discloses container paths |
+| `debug.verbose_logging_in_production` | warning | `DEBUG_CONTENT` or `DEBUG_IMAGE` in production | Unset it — it widens what reaches the logs |
+| `auth.enforcement_disabled_in_production` | warning | `LETTER_IRL_REQUIRE_AUTH=false` | Re-enable authentication; production is otherwise unauthenticated |
+
+### Database TLS
+
+The connection string decides this, not the `ssl` option: node-postgres merges the parsed
+connection string **over** the explicit option, so a URL carrying `sslmode` wins. See the comment
+at `src/db/index.ts:32-37`. A `?sslmode=require` URL satisfies all three rules.
+
+| Rule | Severity | Raised when | Fix |
+|---|---|---|---|
+| `database.tls_required` | error | The production connection is not encrypted — no `sslmode`, or `sslmode=disable` | Add `?sslmode=require` to `DATABASE_URL` |
+| `database.tls_verification_required` | error | Encrypted but unverified — `sslmode=no-verify`, or `uselibpqcompat=true` with `require`/`prefer` | Use `?sslmode=require` without the compatibility flag; an unverified connection cannot distinguish the real database from an impostor |
+| `database.tls_unknown` | warning | The posture cannot be determined from the connection string | State it explicitly with `?sslmode=require` |
+
+### Storage and credentials
+
+| Rule | Severity | Raised when | Fix |
+|---|---|---|---|
+| `bucket.config_required` | error | `TEMP_IMAGE_STORE=memory` in production | Configure the bucket credentials; memory storage loses images on restart |
+| `bucket.region_defaulted` | warning | No bucket region configured | Set it rather than relying on the `auto` default |
+| `config.placeholder_value` | error | A manifest variable holds a placeholder rather than a credential | Replace it with the real value |
 
 ## Development Release Procedure
 
@@ -221,9 +310,32 @@ makes `ADMIN_ENABLED=true` a startup error. Issue #69's ambiguous-image operator
 `JIT_PURCHASE_ENABLED=false` and `IMAGE_TRIAL_ENABLED=false` until a later issue #162 slice ships the
 replacement operator control.
 
+## Migrations must be safe for the PREVIOUS image
+
+The pre-deploy command runs the migration while the **old** image is still
+serving, and only then starts the new one. So between the migration committing
+and the new image accepting traffic, the previous code runs against the new
+schema.
+
+Every migration therefore has to be backward-compatible with the deployed
+version of the code:
+
+- Adding a nullable column, a table, an index or a constraint that current data
+  already satisfies is safe.
+- Dropping or renaming anything the running image still reads is **not**. Split
+  it across two deploys: ship the code that stops using the column, then the
+  migration that removes it.
+- Widening a type is usually safe; narrowing one is not.
+
+This is the price of the deploy failing closed, and it is the same discipline any
+zero-downtime deploy needs. The alternative - migrating after the new image is
+live - trades it for a window where new code meets an old schema, which is the
+worse half of the same problem.
+
 ## Concurrent deploy safety (migration advisory lock)
 
-Railway runs `npm run db:migrate:prod` as a pre-deploy command. When two PRs merge back to back it
+Railway runs `npm run db:migrate:prod` as a pre-deploy command, configured in `railway.toml`.
+When two PRs merge back to back it
 queues two deploys at once, so two migrator processes from **different images** can run against the same
 Neon database simultaneously. That is what happened when PRs #164 and #165 merged together: #164's image
 had 021 and 023 pending, #165's had 021, 022 and 023 pending, and #165's deploy failed after 8 seconds
@@ -355,7 +467,12 @@ See [`tests/integration/README.md`](../tests/integration/README.md) for how to s
    The boot validator enforces the key-mode and provider rules; the review still
    catches URLs and anything outside the validator's reach.
 4. Merge backend `dev` into `master` and website `dev` into `main` through reviewed PRs.
-5. Confirm migrations complete before the new API deployment becomes active.
+5. Confirm migrations completed before the new API deployment became active. The
+   pre-deploy command does this automatically and halts the deploy on failure, so
+   the check is to read the deploy log for the migrator's own output and confirm
+   the expected files were applied - not to run anything by hand. If the ledger
+   and the repository disagree, stop: that means the pre-deploy command is not
+   running, which is the #300 failure returning.
 6. Confirm `/readyz` returns `200` with `"mode":"production","provider":"postgrid"` on the
    new image (`X-Build-Commit` proves which image answered).
 7. Run production smoke tests without creating a real charge or real mail order unless explicitly planned.
