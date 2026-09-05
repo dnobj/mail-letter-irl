@@ -121,8 +121,11 @@ describe("privacy-safe authentication diagnostics", () => {
     ).toBe("provider_error");
   });
 
-  it("defers account creation without logging the raw subject", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  it("reports a missing account without logging the raw subject", async () => {
+    // Renamed and re-levelled with the fix: nothing retries this, so it was
+    // never a deferral, and warn is the level that let it go unnoticed. The
+    // privacy assertions below are the point of this test and are unchanged.
+    const warn = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const authInfo: AuthenticatedUser = {
       userId: sensitiveValues[0],
       claims: {},
@@ -138,7 +141,7 @@ describe("privacy-safe authentication diagnostics", () => {
     });
 
     const output = capturedText(warn);
-    expect(output).toContain('"event":"auth.account_creation_deferred"');
+    expect(output).toContain('"event":"auth.account_missing_no_verified_email"');
     expect(output).toContain('"reason":"verified_email_unavailable"');
     expect(output).not.toContain(authInfo.userId);
     expect(output).not.toContain(authInfo.token);

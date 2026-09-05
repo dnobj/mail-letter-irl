@@ -16,6 +16,13 @@ const SAFE_ERROR_CODES = new Set([
   "ENOTFOUND",
   "ETIMEDOUT",
   "23505",
+  // foreign_key_violation. Its absence is why the first production account's
+  // failed draft reached the customer as an undifferentiated "database
+  // error": letter_drafts.user_id REFERENCES users(user_id), so a missing
+  // account row fails here and nowhere else. 23505 and 23514 were already
+  // surfaced for exactly this reason; this is the third member of the same
+  // family and the one that names a real, reachable product state.
+  "23503",
   // check_violation. Migration 027 raises this when a purchase credit grant
   // does not name its funding order, or when one is disowned from it. Its
   // sibling 23505 was already here; without this the only signal an operator
@@ -190,7 +197,19 @@ export function writeDiagnostic(
   fields: Record<string, DiagnosticValue> = {}
 ): void {
   const safeEvent = SAFE_CLASS_PATTERN.test(event) ? event : "diagnostic_event";
-  const payload = JSON.stringify({ ...fields, event: safeEvent });
+  // `msg` is not decoration. Railway (and every other JSON log viewer that
+  // follows the pino convention) renders a structured line by its message
+  // field and shows nothing when there is none - so before this, every
+  // diagnostic this system emits was invisible in production while the pino
+  // logger's lines beside them came through fine.
+  //
+  // The cost was concrete: diagnosing the first production account meant
+  // inferring from behaviour what `auth.account_creation_deferred` would
+  // have said outright, because a log search for it returned nothing and
+  // that silence was indistinguishable from the event not firing.
+  //
+  // Written last so a field named `msg` cannot displace the event name.
+  const payload = JSON.stringify({ ...fields, event: safeEvent, msg: safeEvent });
   if (level === "error") {
     console.error(payload);
   } else if (level === "warn") {
