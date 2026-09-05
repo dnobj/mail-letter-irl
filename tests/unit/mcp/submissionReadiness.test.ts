@@ -15,9 +15,17 @@ import {
 } from "../../../src/mcp/registerTools.js";
 
 describe("Submission readiness checks", () => {
-  it("should advertise the current app description with purchase prerequisite", () => {
+  it("should advertise what the app does, without a stale purchase route", () => {
+    // This assertion used to REQUIRE "pre-paid letter sends on letterirl.com".
+    // The description was therefore not unguarded when #311/#312 moved buying
+    // into the conversation and #313 cleaned every tool description - it was
+    // guarded in the wrong direction, pinning the stale sentence in place and
+    // failing the moment it was corrected. A test that demands specific
+    // marketing copy outlives whatever made the copy true; this one asserts
+    // the durable claim and the absence of the route that went stale.
     expect(APP_DIRECTORY_DESCRIPTION).toContain("real physical letters and postcards");
-    expect(APP_DIRECTORY_DESCRIPTION).toContain("pre-paid letter sends on letterirl.com");
+    expect(APP_DIRECTORY_DESCRIPTION).not.toMatch(/letterirl\.com/i);
+    expect(APP_DIRECTORY_DESCRIPTION).not.toMatch(/credit/i);
   });
 
   it("should expose the full widget inventory in the compatibility manifest", () => {

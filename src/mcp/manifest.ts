@@ -19,9 +19,14 @@ function getManifestUrls(publicBaseUrlOverride?: string) {
   };
 }
 
+// The connector card in the directory, and the first prose the model reads
+// about this app. #313 removed "buy on letterirl.com" from every tool
+// description and left this one behind, because modelFacingCopy.test.ts
+// iterates listTools() and the manifest's own prose is not a tool. It reached
+// production that way and was found while connecting the production connector.
 export const APP_DIRECTORY_DESCRIPTION =
   "Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. " +
-  "To send mail, first buy pre-paid letter sends on letterirl.com.";
+  "Buy prepaid letters without leaving the conversation, or pay for a single letter as you send it.";
 
 export function buildManifest(publicBaseUrl?: string) {
   const server = new LetterIrlServer();
