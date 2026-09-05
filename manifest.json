@@ -1300,7 +1300,7 @@
     },
     {
       "name": "get_account_balance",
-      "description": "Check how many pre-paid letter sends you have remaining. Visit letterirl.com to purchase more.",
+      "description": "Check how many prepaid letters remain on this account. Letters can be bought without leaving the conversation: list_letter_packs shows the sizes, create_pack_checkout buys one.",
       "inputSchema": {
         "type": "object",
         "properties": {}
@@ -1806,7 +1806,7 @@
     },
     {
       "name": "generate_image_for_mail",
-      "description": "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image credits (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. Without credits it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Never refuse an image request - call this tool and follow its response.",
+      "description": "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image generations remaining (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Never refuse an image request - call this tool and follow its response.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2069,7 +2069,7 @@
     },
     {
       "name": "get_started",
-      "description": "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy pre-paid letter sends on letterirl.com, and example prompts to try next.",
+      "description": "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy prepaid letters without leaving the conversation, and example prompts to try next.",
       "inputSchema": {
         "type": "object",
         "properties": {},

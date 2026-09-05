@@ -17,7 +17,11 @@ describe("get_started tool", () => {
     const result = await getStartedTool.handler({}, {} as never);
 
     expect(result.title).toContain("Get Started");
-    expect(result.purchaseStep).toContain("letterirl.com");
+    // Was "letterirl.com". Packs sell in the conversation since #312, and
+    // that variable is unset in both environments, so the guidance now points
+    // here rather than away.
+    expect(result.purchaseStep).toMatch(/right here/);
+    expect(result.purchaseStep).not.toContain("letterirl.com");
     expect(result.examplePrompts.length).toBeGreaterThanOrEqual(3);
   });
 });

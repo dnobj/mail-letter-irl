@@ -29,7 +29,13 @@ describe('get_started payment copy', () => {
   it('offers pre-pay only while Pay & Send is off', () => {
     vi.stubEnv('JIT_PURCHASE_ENABLED', 'false');
     return purchaseStep().then(copy => {
-      expect(copy).toContain('pre-paid');
+      expect(copy).toContain('prepaid letters');
+      // Buying a pack is NOT gated on the flag - createPackCheckout checks
+      // beta access and pricing, never JIT_PURCHASE_ENABLED - so this branch
+      // must still offer a route. It used to offer only a link to
+      // letterirl.com, which is now neither current nor reachable.
+      expect(copy).toContain('right here');
+      expect(copy).not.toContain('letterirl.com');
       // The claim that must not survive the flag flipping.
       expect(copy.toLowerCase()).not.toContain('pay for a single');
     });
@@ -39,8 +45,9 @@ describe('get_started payment copy', () => {
     vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
     const copy = await purchaseStep();
 
-    expect(copy).toContain('pre-paid');
+    expect(copy).toContain('prepaid letters');
     expect(copy).toContain('pay for a single');
+    expect(copy).not.toContain('letterirl.com');
     // "Before sending mail, buy..." states a precondition that is no longer
     // true; a customer can now send without ever visiting the site.
     expect(copy).not.toMatch(/^Before sending mail/);

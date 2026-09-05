@@ -17,16 +17,21 @@ const OUTPUT_TEMPLATE = widgetTemplateUri("GetStartedCard");
  * change it and a test can vary it without re-importing.
  */
 function purchaseStep(): string {
+  // Both branches now buy IN the conversation. Only Pay & Send is conditional:
+  // packs are gated on beta access and price configuration, never on
+  // JIT_PURCHASE_ENABLED - so the flag-off branch changed most. It used to
+  // offer nothing but a link to letterirl.com, which is also currently
+  // unreachable with LETTER_IRL_PACKS_URL unset.
   if (isJitPurchaseEnabled()) {
     return (
-      "You can either buy pre-paid letter sends on letterirl.com, or pay for a single " +
+      "You can either buy a pack of prepaid letters right here, or pay for a single " +
       "letter at the moment you send it - no pre-purchase needed. Tell me who the mail " +
       "is for and what you want to say, and I'll walk you through whichever you prefer."
     );
   }
   return (
-    "Before sending mail, buy pre-paid letter sends on letterirl.com. Then tell me who " +
-    "the mail is for and what you want to say."
+    "Before sending mail, buy a pack of prepaid letters - I can show you the sizes and " +
+    "prices right here. Then tell me who the mail is for and what you want to say."
   );
 }
 
@@ -42,7 +47,7 @@ interface GetStartedOutput {
 export const getStartedTool: McpToolDefinition<GetStartedInput, GetStartedOutput> = {
   name: "get_started",
   description:
-    "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy pre-paid letter sends on letterirl.com, and example prompts to try next.",
+    "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy prepaid letters without leaving the conversation, and example prompts to try next.",
   readOnly: true,
   inputSchema: {
     type: "object",

@@ -111,7 +111,11 @@ async function handler(
   const identityLine = `Account: ${email} (${authProvider})`;
   let balanceLine: string;
   if (lettersRemaining === 0) {
-    balanceLine = "You haven't pre-paid for any letters yet. Visit letterirl.com to purchase a Letter Pack and start sending!";
+    // Points at the conversation, not the website. create_pack_checkout and
+    // list_letter_packs (#311, #312) made "go to letterirl.com" both stale and
+    // - with LETTER_IRL_PACKS_URL unset - a dead end.
+    balanceLine =
+      "No letters on this account yet. You can buy a letter pack here, or pay for a single letter as you send it.";
   } else {
     balanceLine = `Letter Balance: ${lettersRemaining} ${lettersRemaining === 1 ? 'letter' : 'letters'} remaining.`;
   }
@@ -155,7 +159,11 @@ export const getAccountBalanceTool: McpToolDefinition<
   GetAccountBalanceOutput
 > = {
   name: "get_account_balance",
-  description: "Check how many pre-paid letter sends you have remaining. Visit letterirl.com to purchase more.",
+  // A tool description is permanent model context - it is read every turn,
+  // not only when the tool runs - so a stale route here misdirects far more
+  // often than a stale message does.
+  description:
+    "Check how many prepaid letters remain on this account. Letters can be bought without leaving the conversation: list_letter_packs shows the sizes, create_pack_checkout buys one.",
   readOnly: true,
   inputSchema: getAccountBalanceInputSchema,
   outputSchema: getAccountBalanceOutputSchema,
