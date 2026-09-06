@@ -106,8 +106,9 @@ for example when a pack was bought by mistake. This is not something the terms
 promise, and no tool in ChatGPT can request it. To ask:
 
 1. Email support@letterirl.com from the email on your Letter IRL account, with
-   the order id shown by `get_purchase_status` (or on your Stripe receipt).
-2. A person reviews it, normally within one business day.
+   the order id. Your assistant can show it to you with the
+   `get_purchase_status` tool, and it is on your Stripe receipt.
+2. A person reviews it. We aim to reply within three business days.
 3. If a refund is issued, it is for whole unused letters at the price you paid
    for that pack (the pack price divided by its letter count, rounded down to
    the cent), those letters come off your balance first, and the money goes
