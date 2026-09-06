@@ -189,7 +189,8 @@ We may update these terms at any time. Your continued use of the Service after c
 
 Questions about these terms? Contact us at:
 
-**Email:** policy-team@letterirl.com
+**Email (questions about these terms):** policy-team@letterirl.com
+**Email (support and refund requests):** support@letterirl.com
 **Website:** https://letterirl.com
 
 ---
