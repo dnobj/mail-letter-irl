@@ -2442,8 +2442,13 @@ export async function getPurchaseStatus(
     productDescription: String(order.product_snapshot?.name || order.product_code),
     amountCents: order.amount_cents,
     currency: order.currency,
-    mailType: order.product_snapshot?.mailType as MailType | undefined,
-    letterId: order.letter_id,
+    // A pack order has no letter, and its snapshot carries no mail type. Both
+    // come back as null, but the served output schema declares them optional,
+    // which admits undefined and not null. Emitting null failed the MCP SDK's
+    // output validation for every letter-pack order; found on the first
+    // production refund test, 2026-09-06.
+    mailType: (order.product_snapshot?.mailType as MailType | undefined) ?? undefined,
+    letterId: order.letter_id ?? undefined,
     checkoutExpiresAt: order.checkout_expires_at
       ? new Date(order.checkout_expires_at).toISOString()
       : undefined,
