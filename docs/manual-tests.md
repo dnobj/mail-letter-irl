@@ -322,35 +322,103 @@ Test Claude Desktop via mcp-remote.
 
 ## Payment Flow
 
-Test Stripe checkout and webhook handling.
+Test Stripe checkout and webhook handling. In production, Stripe and PostGrid
+are **live**: every completed purchase charges a real card and every send mails
+a real letter. Use the smallest pack, refund it afterwards under REFUND-01, and
+never type a card number anywhere except Stripe's own checkout page. Card
+numbers, checkout URLs, and addresses never go into evidence.
 
-### Credit Purchase (US-CREDIT-02)
-- [ ] In ChatGPT, ask to buy credits
-- [ ] Stripe Checkout URL returned
-- [ ] Open URL → Stripe Checkout page loads
-- [ ] Use test card: `4242 4242 4242 4242`
-- [ ] Payment succeeds
-- [ ] Redirected to success page
+**Precondition for every case below: the Stripe webhook endpoint for the
+environment subscribes to every event the handler dispatches on.** Check
+Developers → Webhooks → the endpoint. `processStripeWebhookEvent` acts on
+exactly:
 
-### Webhook Processing (US-EDGE-04)
-- [ ] After payment, check credit balance
-- [ ] Credits added correctly (4, 10, or 100)
-- [ ] Transaction appears in history
-- [ ] Ledger entry has 2-year expiration
+- `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+  `checkout.session.async_payment_failed`, `checkout.session.expired`
+- `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`
+- `charge.dispute.created`, `charge.dispute.closed`
 
-### Webhook Idempotency
-- [ ] Manually replay webhook (Stripe dashboard)
-- [ ] Credits NOT duplicated
-- [ ] Logs show "duplicate detected"
+Anything else is recorded and ignored. A refund event that is not subscribed
+fails silently: the money goes back and the letters stay, and only the
+on-demand admin reconciliation would ever notice.
 
-### Refund Handling (US-CREDIT-06)
-- [ ] Issue refund in Stripe dashboard
-- [ ] Credits deducted from balance
-- [ ] Ledger entry marked revoked
-- [ ] Transaction recorded
+Evidence for every case comes from three places: the ChatGPT transcript, the
+Railway log line `stripe.webhook_received` (its `eventType` field says which
+event arrived; `credits.webhook_failed` means the handler threw), and the
+account balance as `get_account_balance` reports it.
+
+### PAY-01 — Pack purchase (US-CREDIT-02)
+- [ ] In ChatGPT, ask to buy the smallest letter pack (Starter Pack, 2 letters).
+- [ ] `list_letter_packs` runs, then `create_pack_checkout`, and ChatGPT
+      presents the checkout as a clickable link. Known gap: it may say the
+      checkout is "open" without showing a link until asked for one.
+- [ ] Open the link. Stripe Checkout shows the pack name, the price, and the
+      account email already filled in. The prefilled email proves the `users`
+      row exists; a blank email field means it does not (#319).
+- [ ] Pay. Production: a real card, refunded under REFUND-01. Development: a
+      Stripe test card, typed by the owner.
+- [ ] Balance reads 2 letters. Railway shows `stripe.webhook_received` with
+      `checkout.session.completed`. If the balance is right but that line is
+      absent, the card's Check status polled Stripe directly and the webhook
+      endpoint is not delivering: fix the endpoint before REFUND-01, which has
+      no such fallback.
+
+### PAY-02 — Webhook idempotency (US-EDGE-04)
+- [ ] Stripe Dashboard → Developers → Webhooks → the endpoint → the delivered
+      `checkout.session.completed` event → Resend.
+- [ ] Response body is `{ "received": true, "duplicate": true }`.
+- [ ] Balance unchanged; no second purchase lot in the ledger.
+
+### REFUND-01 — Full refund from the Stripe Dashboard (US-CREDIT-06)
+Precondition: PAY-01, then one letter sent from that pack, so the spent and
+unspent halves are both present. Letter IRL has no refund button of its own;
+the refund is issued in Stripe and reaches the service only as a webhook.
+- [ ] Stripe Dashboard → Payments → the pack payment → Refund → full amount.
+- [ ] Railway: `stripe.webhook_received` with `charge.refunded` (and
+      `refund.created` / `refund.updated` if delivered), no
+      `credits.webhook_failed`.
+- [ ] Balance drops by the **unspent** letters only: 1 → 0. The sent letter is
+      untouched and its status still tracks normally.
+- [ ] `get_purchase_status` for the pack order reads `refunded`, message
+      "The payment was refunded."
+- [ ] Database or admin view: the purchase lot is `revoked` with
+      `remaining_amount = 0`; one `refund` ledger row links to it with
+      `remaining_at_revocation` equal to what was left; one `credit_transactions`
+      row of `-<unspent credits>`; `orders.refunded_at` is set;
+      `credits_purchased` dropped by the whole pack.
+- [ ] No `stripe_money_event_unmatched` row in `commerce_operational_alerts`.
+
+### REFUND-02 — Partial refund (policy placeholder)
+The handler deliberately ignores a refund for less than the order amount.
+Until a partial-refund policy exists, this case documents the hazard rather
+than a feature: **the customer keeps both the money and the letters.** Do not
+issue partial pack refunds from the Dashboard outside this test.
+- [ ] Refund less than the full amount of a pack payment.
+- [ ] Balance, purchase lot, and order status are all unchanged.
+- [ ] `commerce_order_events` has a row for the event with metadata
+      `ignored: true, reason: "partial_refund"` and the refunded amount.
+- [ ] Refund the remainder so the payment is fully refunded, then confirm
+      REFUND-01's expectations now hold for that order.
+
+### REFUND-03 — Replay and sibling events
+- [ ] Resend the delivered `charge.refunded` event from the Stripe Dashboard.
+      Response `duplicate: true`; balance unchanged; still exactly one `refund`
+      ledger row.
+- [ ] If Stripe also delivered `refund.updated` for the same refund, that event
+      is processed (it is a different event id) but records `already_refunded`
+      and revokes nothing more.
+
+### REFUND-04 — Refunding a Pay & Send letter
+A single-letter order behaves differently from a pack: the money funded one
+specific piece of mail, so the handler tries to stop that mail first.
+- [ ] Refund a Pay & Send order **before** the printer accepts it: the letter
+      job and the letter both read `cancelled`, and nothing mails.
+- [ ] Refund one **after** acceptance, only with a letter you meant to send
+      anyway, because it is real postage: the refund records, the mail
+      continues, and a critical `refunded_mail_already_dispatched` row appears
+      in `commerce_operational_alerts`.
 
 ---
-
 ## Letter Sending Flow
 
 Test the complete letter journey.

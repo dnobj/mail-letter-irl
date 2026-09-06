@@ -2186,6 +2186,254 @@ describe('commerceService', () => {
     ).toHaveLength(1);
   });
 
+  it('ignores a partial refund: records it, moves nothing, revokes nothing', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-partial' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) {
+        return {
+          rows: [
+            {
+              ...baseOrder,
+              order_type: 'letter_pack',
+              credits: 4,
+              amount_cents: 1999,
+              status: 'fulfilled'
+            }
+          ]
+        };
+      }
+      return { rows: [] };
+    });
+
+    const result = await processStripeWebhookEvent({
+      id: 'evt-partial',
+      type: 'charge.refunded',
+      data: {
+        object: {
+          id: 'ch-1',
+          payment_intent: 'pi-1',
+          amount_refunded: 999
+        }
+      }
+    } as any);
+
+    // The order is reported exactly as it was found...
+    expect(result).toMatchObject({ orderId: 'order-1', status: 'fulfilled' });
+    // ...the only trace is an order event saying the refund was seen and skipped...
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO commerce_order_events'),
+      [
+        'order-1',
+        'charge.refunded',
+        'fulfilled',
+        'fulfilled',
+        expect.stringContaining('"reason":"partial_refund"')
+      ]
+    );
+    // ...and no balance, ledger, entitlement, or order-status write happens.
+    for (const forbidden of [
+      'SET credits = GREATEST',
+      'related_ledger_id',
+      'UPDATE image_entitlements',
+      'UPDATE orders'
+    ]) {
+      expect(mocks.query).not.toHaveBeenCalledWith(
+        expect.stringContaining(forbidden),
+        expect.anything()
+      );
+    }
+  });
+
+  it('parks a pending refund as refund_pending without revoking anything', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-pending' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) {
+        return {
+          rows: [
+            {
+              ...baseOrder,
+              order_type: 'letter_pack',
+              credits: 4,
+              amount_cents: 1999,
+              status: 'fulfilled'
+            }
+          ]
+        };
+      }
+      return { rows: [] };
+    });
+
+    const result = await processStripeWebhookEvent({
+      id: 'evt-pending',
+      type: 'refund.created',
+      data: {
+        object: {
+          id: 're-pending',
+          payment_intent: 'pi-1',
+          charge: 'ch-1',
+          status: 'pending',
+          amount: 1999
+        }
+      }
+    } as any);
+
+    expect(result).toMatchObject({ orderId: 'order-1', status: 'refund_pending' });
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('SET credits = GREATEST'),
+      expect.anything()
+    );
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('related_ledger_id'),
+      expect.anything()
+    );
+    // The refund id is remembered on the order so the later success can be matched.
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE orders'),
+      ['order-1', 'refund_pending', 're-pending']
+    );
+  });
+
+  it('claws back only the unspent remainder of a refunded pack, never the letters already sent', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-remainder' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) {
+        return {
+          rows: [
+            {
+              ...baseOrder,
+              order_type: 'letter_pack',
+              credits: 4,
+              amount_cents: 1999,
+              status: 'fulfilled'
+            }
+          ]
+        };
+      }
+      if (sql.includes('SELECT ledger_id, initial_amount')) {
+        // Four credits bought (two letters); one letter already mailed.
+        return {
+          rows: [
+            {
+              ledger_id: '00000000-0000-0000-0000-000000000002',
+              initial_amount: 4,
+              remaining_amount: 2,
+              source_type: 'purchase'
+            }
+          ]
+        };
+      }
+      if (sql.includes('UPDATE users')) return { rows: [{ credits: 0 }] };
+      return { rows: [] };
+    });
+
+    await expect(
+      processStripeWebhookEvent({
+        id: 'evt-remainder',
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch-1',
+            payment_intent: 'pi-1',
+            amount_refunded: 1999
+          }
+        }
+      } as any)
+    ).resolves.toMatchObject({ status: 'refunded' });
+
+    // The balance loses the 2 unspent credits; lifetime purchases lose the whole pack.
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('SET credits = GREATEST'),
+      [2, 4, 'user-1']
+    );
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO credit_transactions'),
+      ['user-1', -2, 0, 'order-1', expect.stringContaining('Revoked unused credits')]
+    );
+    // What was left is stamped on the audit row, so a later restore knows the figure.
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('related_ledger_id'),
+      expect.arrayContaining([expect.stringContaining('"remaining_at_revocation":2')])
+    );
+    // A Charge event carries no refund id, so none is written.
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE orders'),
+      ['order-1', 'refunded', null]
+    );
+  });
+
+  it('refunds a fully spent pack to a zero balance without booking a negative movement', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-spent' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) {
+        return {
+          rows: [
+            {
+              ...baseOrder,
+              order_type: 'letter_pack',
+              credits: 4,
+              amount_cents: 1999,
+              status: 'fulfilled'
+            }
+          ]
+        };
+      }
+      if (sql.includes('SELECT ledger_id, initial_amount')) {
+        return {
+          rows: [
+            {
+              ledger_id: '00000000-0000-0000-0000-000000000003',
+              initial_amount: 4,
+              remaining_amount: 0,
+              source_type: 'purchase'
+            }
+          ]
+        };
+      }
+      if (sql.includes('UPDATE users')) return { rows: [{ credits: 0 }] };
+      return { rows: [] };
+    });
+
+    await expect(
+      processStripeWebhookEvent({
+        id: 'evt-spent',
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch-1',
+            payment_intent: 'pi-1',
+            amount_refunded: 1999
+          }
+        }
+      } as any)
+    ).resolves.toMatchObject({ status: 'refunded' });
+
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('SET credits = GREATEST'),
+      [0, 4, 'user-1']
+    );
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO credit_transactions'),
+      expect.anything()
+    );
+    // The lot is still revoked and audited, with nothing left to restore.
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("status = 'revoked'"),
+      [['00000000-0000-0000-0000-000000000003']]
+    );
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('related_ledger_id'),
+      expect.arrayContaining([expect.stringContaining('"remaining_at_revocation":0')])
+    );
+  });
+
   it('retrieves an existing pending refund instead of creating another refund', async () => {
     mocks.query.mockResolvedValueOnce({
       rows: [
