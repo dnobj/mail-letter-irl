@@ -89,6 +89,20 @@ STRIPE_CURRENCY=usd
 # Amounts are read from these Prices at startup - do not mirror them here (#275).
 ```
 
+The endpoint behind `STRIPE_WEBHOOK_SECRET` must subscribe to every event
+`processStripeWebhookEvent` dispatches on. An event it is not subscribed to
+does not fail loudly - Stripe never sends it, and the state change it carries
+is simply missed. For a refund that means the customer keeps both the money
+and the letters, because nothing but the webhook revokes them. The list is:
+
+- `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+  `checkout.session.async_payment_failed`, `checkout.session.expired`
+- `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`
+- `charge.dispute.created`, `charge.dispute.closed`
+
+Confirm it in the Stripe Dashboard under Developers, Webhooks, for each
+environment's endpoint, and again after any endpoint is recreated.
+
 `STRIPE_CURRENCY` is load-bearing, not decorative: every Price must be
 denominated in it or the catalog refuses to price that product, which in
 production is a `/readyz` 503 and a refused purchase. It defaults to `usd`, so
