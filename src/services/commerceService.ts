@@ -13,6 +13,7 @@ import {
   kickPriceCatalog
 } from './priceCatalog.js';
 import {
+  CREDITS_PER_LETTER,
   PACK_PRODUCTS,
   formatAmountForCurrency,
   jitProductCode,
@@ -136,6 +137,13 @@ export interface PurchaseStatusResult {
   mailType?: MailType;
   letterId?: string;
   checkoutExpiresAt?: string;
+  // Letter packs only. Absent on Pay & Send orders; never null (#323).
+  letters?: number;
+  lettersRemaining?: number;
+  lettersRefunded?: number;
+  perLetterCents?: number;
+  refundableAmountCents?: number;
+  amountRefundedCents?: number;
   updatedAt: string;
   message: string;
 }
@@ -2523,6 +2531,108 @@ export function purchaseMessage(status: PurchaseStatusResult['purchaseStatus']):
   }
 }
 
+/**
+ * The address refund requests go to. Published in the terms, the pricing page,
+ * the pack purchase message, and the server instructions; keep them in step.
+ */
+export const SUPPORT_EMAIL = 'support@letterirl.com';
+
+/**
+ * What a letter-pack order looks like to its owner: how many letters it held,
+ * how many are still on the account, how many were returned as cash. These
+ * are the numbers an operator needs BEFORE touching a refund in Stripe (#323)
+ * and the numbers a customer sees when they ask about the purchase, so they
+ * come from one place.
+ *
+ * Attribution is the same as the refund path's: the pack's own purchase lot
+ * plus any adjustment lot that carries the order (a failed send returns its
+ * slice as one). Only active, unexpired credits count as remaining; expired
+ * letters are not refundable (terms).
+ */
+interface PackPurchaseFigures {
+  letters: number;
+  lettersRemaining: number;
+  lettersRefunded: number;
+  perLetterCents: number;
+  refundableAmountCents: number;
+  amountRefundedCents: number;
+}
+
+async function readPackPurchaseFigures(order: Order): Promise<PackPurchaseFigures | undefined> {
+  if (order.order_type !== 'letter_pack') return undefined;
+  const credits = order.credits ?? 0;
+  if (credits <= 0 || credits % CREDITS_PER_LETTER !== 0) return undefined;
+  const letters = credits / CREDITS_PER_LETTER;
+  const remaining = await query<{ remaining_credits: number | string | null }>(
+    `SELECT COALESCE(SUM(remaining_amount) FILTER (
+              WHERE status = 'active' AND remaining_amount > 0
+                AND (expires_at IS NULL OR expires_at > NOW())
+            ), 0) AS remaining_credits
+       FROM credit_ledger
+      WHERE user_id = $1 AND source_type IN ('purchase', 'adjustment')
+        AND (source_reference_id = $2 OR source_metadata->>'stripe_session_id' = $3)
+        AND status <> 'revoked'`,
+    [order.user_id, order.order_id, order.stripe_checkout_session_id || null]
+  );
+  const remainingCredits = Number(remaining.rows[0]?.remaining_credits ?? 0);
+  const lettersRemaining = Math.floor(remainingCredits / CREDITS_PER_LETTER);
+  // credits_refunded / amount_refunded_cents arrive with the proportional
+  // refund command; until then a pack is refunded whole or not at all.
+  const creditsRefunded = Number((order as Order & { credits_refunded?: number }).credits_refunded ?? 0);
+  const lettersRefunded = Math.floor(creditsRefunded / CREDITS_PER_LETTER);
+  const amountRefundedCents = Number(
+    (order as Order & { amount_refunded_cents?: number }).amount_refunded_cents ??
+      (order.status === 'refunded' ? order.amount_cents : 0)
+  );
+  const refundable = order.status === 'fulfilled' && creditsRefunded === 0;
+  return {
+    letters,
+    lettersRemaining,
+    lettersRefunded,
+    perLetterCents: Math.floor(order.amount_cents / letters),
+    refundableAmountCents: refundable
+      ? Math.floor((lettersRemaining * order.amount_cents) / letters)
+      : 0,
+    amountRefundedCents
+  };
+}
+
+/**
+ * Pack orders reuse the customer-facing status vocabulary but not every
+ * message under it: "accepted by the print provider" is true of a Pay & Send
+ * order and false of a pack, which never touches a printer. These never say
+ * a refund WILL happen; a person decides that (#323).
+ */
+function packPurchaseMessage(
+  status: PurchaseStatusResult['purchaseStatus'],
+  order: Order,
+  figures: PackPurchaseFigures
+): string {
+  const product = String(order.product_snapshot?.name || order.product_code);
+  const remaining = `${figures.lettersRemaining} of ${figures.letters} letters remaining on the account`;
+  switch (status) {
+    case 'processing':
+      return `Payment is confirmed and the ${product} letters are being added to the account.`;
+    case 'submitted':
+      if (figures.lettersRefunded > 0) {
+        return (
+          `${product}: ${remaining}; ${figures.lettersRefunded} ` +
+          `${figures.lettersRefunded === 1 ? 'letter was' : 'letters were'} refunded ` +
+          `(${formatAmountForCurrency(figures.amountRefundedCents, order.currency)}). ` +
+          'Refunds take 5-10 business days to appear on the card.'
+        );
+      }
+      return (
+        `${product}: ${remaining}. Purchases are final; if something went wrong with this pack, ` +
+        `email ${SUPPORT_EMAIL} from the account's email with order id ${order.order_id} and we will look into it.`
+      );
+    case 'refunded':
+      return `${purchaseMessage(status)} ${product}: ${figures.letters} letters in the pack, ${figures.lettersRemaining} remaining on the account.`;
+    default:
+      return purchaseMessage(status);
+  }
+}
+
 export async function getPurchaseStatus(
   userId: string,
   orderId: string
@@ -2538,6 +2648,7 @@ export async function getPurchaseStatus(
     });
   }
   const purchaseStatus = publicPurchaseStatus(order.status);
+  const pack = await readPackPurchaseFigures(order);
   return {
     orderId: order.order_id,
     purchaseStatus,
@@ -2555,8 +2666,10 @@ export async function getPurchaseStatus(
     checkoutExpiresAt: order.checkout_expires_at
       ? new Date(order.checkout_expires_at).toISOString()
       : undefined,
+    // Letter packs only; every field absent (never null) on Pay & Send orders.
+    ...(pack ?? {}),
     updatedAt: new Date(order.updated_at).toISOString(),
-    message: purchaseMessage(purchaseStatus)
+    message: pack ? packPurchaseMessage(purchaseStatus, order, pack) : purchaseMessage(purchaseStatus)
   };
 }
 

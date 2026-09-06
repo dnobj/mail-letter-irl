@@ -350,6 +350,13 @@ export const getPurchaseStatusOutputZ = z.object({
   mailType: z.enum(["letter", "postcard"]).optional(),
   letterId: z.string().optional(),
   checkoutExpiresAt: z.string().optional(),
+  // Letter packs only. Absent on Pay & Send orders; never null (#323).
+  letters: z.number().int().positive().optional(),
+  lettersRemaining: z.number().int().nonnegative().optional(),
+  lettersRefunded: z.number().int().nonnegative().optional(),
+  perLetterCents: z.number().int().positive().optional(),
+  refundableAmountCents: z.number().int().nonnegative().optional(),
+  amountRefundedCents: z.number().int().nonnegative().optional(),
   updatedAt: z.string(),
   message: z.string()
 });
