@@ -388,18 +388,26 @@ the refund is issued in Stripe and reaches the service only as a webhook.
       `credits_purchased` dropped by the whole pack.
 - [ ] No `stripe_money_event_unmatched` row in `commerce_operational_alerts`.
 
-### REFUND-02 — Partial refund (policy placeholder)
-The handler deliberately ignores a refund for less than the order amount.
-Until a partial-refund policy exists, this case documents the hazard rather
-than a feature: **the customer keeps both the money and the letters.** Do not
-issue partial pack refunds from the Dashboard outside this test.
-- [ ] Refund less than the full amount of a pack payment.
-- [ ] Balance, purchase lot, and order status are all unchanged.
-- [ ] `commerce_order_events` has a row for the event with metadata
-      `ignored: true, reason: "partial_refund"` and the refunded amount.
-- [ ] Refund the remainder so the payment is fully refunded, then confirm
-      REFUND-01's expectations now hold for that order.
-
+### REFUND-02 — Partial refund from the Stripe Dashboard raises an alert
+The house rule forbids partial pack refunds from the Dashboard; this case proves
+the mistake is loud rather than silent. Nothing about the customer's account
+changes: the money left, the letters stayed, and a person has to decide.
+- [ ] Stripe Dashboard → Payments → a fulfilled pack payment → Refund → an
+      amount less than the total.
+- [ ] Balance, purchase lot, and order status are all unchanged; nothing is
+      revoked and no `refund` ledger row appears.
+- [ ] `commerce_operational_alerts` has exactly one open critical
+      `stripe_partial_refund_unmatched` row for the order, naming the Stripe
+      refund id and the amount, even though Stripe delivered `refund.created`,
+      `refund.updated`, and `charge.refunded`; its `details.events` lists all
+      three.
+- [ ] Railway shows `stripe.partial_refund_unmatched` once per event;
+      `commerce_order_events` has a row per event with
+      `unmatchedPartialRefund: true`; the reconciliation report lists the refund
+      as `unmatched_partial_refund`.
+- [ ] Refund the remainder in the Dashboard: REFUND-01's expectations now hold
+      for that order, and the alert can be resolved with a
+      `dashboard_partial_reviewed` code.
 ### REFUND-03 — Replay and sibling events
 - [ ] Resend the delivered `charge.refunded` event from the Stripe Dashboard.
       Response `duplicate: true`; balance unchanged; still exactly one `refund`
@@ -417,6 +425,47 @@ specific piece of mail, so the handler tries to stop that mail first.
       anyway, because it is real postage: the refund records, the mail
       continues, and a critical `refunded_mail_already_dispatched` row appears
       in `commerce_operational_alerts`.
+
+### REFUND-05 — Proportional refund of unspent letters (operator command)
+Precondition: PAY-01 with the Regular Pack (5 letters), then one letter sent,
+so four letters remain. `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED=true` on the
+service the command runs in. Development first, with Stripe in test mode. No
+customer-facing tool can start this; it runs from the admin surface (or, until
+that exists, from a maintainer's session against the development database).
+- [ ] `get_purchase_status` for the pack reads `letters 5, lettersRemaining 4,
+      lettersRefunded 0, perLetterCents 200, refundableAmountCents 800`.
+- [ ] Preview the command for 3 letters: it shows USD 6.00 and a digest.
+      Confirm with that digest, an operator name, a reason code, and a fresh
+      idempotency key.
+- [ ] Balance drops 4 → 1 letter BEFORE the Stripe refund exists; Stripe then
+      shows a partial refund of USD 6.00 on the payment with metadata
+      `orderId`, `packRefundId`, `lettersRefunded: 3`.
+- [ ] Railway: `stripe.webhook_received` with `refund.created` and
+      `charge.refunded`, no `credits.webhook_failed`; no
+      `stripe_partial_refund_unmatched` row; `pack_refund.stripe_event` logged.
+- [ ] `get_purchase_status` reads `submitted` with `lettersRemaining 1,
+      lettersRefunded 3, amountRefundedCents 600`; `commerce_pack_refunds` row
+      is `succeeded` with the Stripe refund id.
+- [ ] Database: the purchase lot is `active` with `remaining_amount = 2`; one
+      `refund` ledger row with `reason: partial_refund`, `letters_refunded: 3`;
+      `credit_transactions` `-6`; `orders.credits_refunded = 6`; one
+      `commerce_operator_audit_events` row with `operation = pack_refund`.
+- [ ] Replay the confirm with the same idempotency key: `replayed: true`, no
+      second refund in Stripe. Send a second command for the same order: refused
+      as already issued.
+- [ ] Send the last letter, then refund the remainder from the Stripe Dashboard
+      (REFUND-06 checks the outcome).
+
+### REFUND-06 — Full Dashboard refund after a proportional refund
+Precondition: REFUND-05 completed (3 of 5 letters refunded, 2 sent).
+- [ ] Stripe Dashboard → the same payment → Refund → full remaining amount
+      (USD 4.00).
+- [ ] Railway: `refund.created` with amount 400 is processed as a FULL refund
+      (not an alert); `charge.refunded` shows `amount_refunded 1000`.
+- [ ] Balance unchanged at 0 (nothing was left); the purchase lot is `revoked`;
+      `orders.status = refunded`, `amount_refunded_cents = 1000`;
+      `credits_purchased` dropped by 4 (10 − 6 already refunded), not by 10.
+- [ ] `get_purchase_status` reads `refunded` with `lettersRefunded 3`.
 
 ---
 ## Letter Sending Flow
@@ -757,7 +806,7 @@ linked PR before enabling Pay & Send.
 - [ ] Leave an asynchronous Checkout session in `complete`/`unpaid`; run maintenance and confirm it remains `checkout_pending` until Stripe reports success, failure, or expiry.
 - [ ] Simulate a terminal failure before provider acceptance. Confirm `refund_pending`, at most one active Stripe refund for the order, retry recovery after a failed refund, and eventual `refunded` status.
 - [ ] Start two refund-maintenance attempts concurrently and confirm only one acquires the lease and contacts Stripe. Then interrupt persistence after Stripe creates the refund; on replay, confirm the existing refund is discovered and finalized without creating another.
-- [ ] Issue a partial sandbox refund and confirm the whole order and all entitlements are not marked refunded/revoked; then complete the full refund and verify terminal state.
+- [ ] Issue a partial sandbox refund and confirm the order and all entitlements are not marked refunded/revoked, and that exactly one critical `stripe_partial_refund_unmatched` alert is opened for the order (#323); then complete the full refund and verify terminal state.
 - [ ] Confirm provider acceptance changes the JIT order to `fulfilled`; failures before acceptance use refund handling and never resubmit an already accepted mail item.
 - [ ] Force PostGrid 429, 500, 502, 503, and 504 responses and confirm each becomes a held/ambiguous outcome with a `mail_provider_outcome_ambiguous` alert, no refund, and no second submission. Repeat with a timeout/connection loss, a truncated response body, and a 2xx body missing `id`/`status`. Confirm the admin retry endpoint rejects every one of them, and that only a non-ambiguous 4xx (400/401/403/404/422) becomes a definite rejection eligible for refund and audited retry.
 - [ ] Confirm an audited retry can restore JIT fulfillment only before refund starts; cross-account/replayed/changed requests fail closed.

@@ -25,7 +25,7 @@ By using Letter IRL, you agree to these terms.
 
 - **Pre-paid Packs:** The Service operates on a pre-paid basis. You purchase "Letter Packs" (or "Letter Balance") which entitle you to send a specific number of physical letters.
 - **Validity Period:** Letter Packs are valid for **24 months** from the date of purchase. Any unused letter balance remaining after 24 months may be forfeited or expired at our discretion.
-- **No Refunds:** All purchases are final. Letter Packs have no monetary value outside of the Service and cannot be exchanged for cash, except where required by law.
+- **No Refunds:** All purchases are final. Letter Packs have no monetary value outside of the Service and cannot be exchanged for cash, except where required by law. We may, at our sole discretion and without obligation, refund the unused portion of a Letter Pack; a discretionary refund is calculated per unused letter at the price paid for that pack, is never given for letters already sent or expired, and does not change this "all purchases are final" rule.
 - **Service Discontinuation:** We reserve the right to modify, suspend, or discontinue the Service at any time. In the event of a permanent shutdown, we will provide reasonable notice (e.g., via email or website) to allow you to use remaining Letter Packs. Unused balances after the shutdown date will be forfeited.
 - We use Stripe to process payments securely
 
@@ -92,24 +92,23 @@ To provide the Service, your letter content must be processed by our servers and
 
 ## Refunds and Disputes
 
-### When We Issue Refunds
+### What happens automatically
 
-- If our system fails to process your letter (letter balance returned automatically)
-- If there's a technical error on our end that prevents delivery
+- If our system fails to process a letter you confirmed, the letter is returned to your Letter Balance. This is not a cash refund.
+- If there is a technical error on our end that prevents a letter from being accepted for mailing, the same applies.
 
-### When We Don't Issue Refunds
+### Discretionary refunds
 
-- For letters successfully submitted to our mailing partner
+- We may, but are not required to, refund the unused portion of a Letter Pack in cash. Requests go to support@letterirl.com with your order id; a person decides.
+- A discretionary refund covers whole unused letters only, at the price paid for that pack, and the letters are removed from your balance before the money is returned.
+
+### When we don't issue refunds
+
+- For letters submitted to our mailing partner
 - For incorrect addresses you provided
 - For content issues that could have been caught in preview
 - For expired unused letter packs
-- **All purchases are final** except where required by law
-
-### Chargebacks
-
-If you dispute a charge with your credit card company instead of contacting us first, we may suspend your account pending resolution.
-
----
+- **All purchases are final** except where required by law; a discretionary refund is a courtesy, not a right
 
 ## Service Limitations
 
@@ -190,7 +189,8 @@ We may update these terms at any time. Your continued use of the Service after c
 
 Questions about these terms? Contact us at:
 
-**Email:** policy-team@letterirl.com
+**Email (questions about these terms):** policy-team@letterirl.com
+**Email (support and refund requests):** support@letterirl.com
 **Website:** https://letterirl.com
 
 ---

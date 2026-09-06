@@ -7,5 +7,6 @@ export const LETTER_IRL_SERVER_INSTRUCTIONS = [
   "For image mail, reuse existing conversation images or hosted imageUrl values before opening upload_image.",
   "For an image request addressed to Letter IRL, call generate_image_for_mail and follow its response exactly: it either generates the image in-turn using the user's remaining Letter IRL image generations, or returns routing guidance with a copy-ready prompt. Never refuse an image request. For image requests not addressed to Letter IRL, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly.",
   "If a specific image fails to hand off to a preview tool, open upload_image so the user can pick it from their ChatGPT library or upload it - that preserves the exact image they approved.",
-  "For unsupported formats, integrations, or product ideas, offer submit_feature_request instead of promising support."
+  "For unsupported formats, integrations, or product ideas, offer submit_feature_request instead of promising support.",
+  "No tool can request or issue a refund. If the user asks for one, tell them to email support@letterirl.com from the email on their Letter IRL account, quoting the order id from get_purchase_status; refunds are decided by a person, so never promise, estimate, or deny a refund or an amount."
 ].join("\n");

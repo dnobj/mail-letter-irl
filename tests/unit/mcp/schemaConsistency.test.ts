@@ -8,8 +8,7 @@ import {
   getPurchaseStatusInputZ,
   sendLetterInputZ,
   quoteAndPreviewInputZ,
-  sendEligibilityZ
-} from "../../../src/zodSchemas.js";
+  sendEligibilityZ, getPurchaseStatusOutputZ } from "../../../src/zodSchemas.js";
 import { toolInputSchemas } from "../../../src/mcp/toolSchemas.js";
 import { buildManifest } from "../../../src/mcp/manifest.js";
 
@@ -119,6 +118,18 @@ describe("Schema Consistency", () => {
  * second surface with nothing comparing them (#278 round 10, four angles).
  */
 describe("published output-schema parity (#278)", () => {
+  it("declares the same get_purchase_status output fields on both served layers", () => {
+    // #323 added the pack figures (letters, lettersRemaining, lettersRefunded,
+    // perLetterCents, refundableAmountCents, amountRefundedCents) to the MCP
+    // layer; a manifest consumer that never saw them would have no way to show
+    // an operator what is left before a refund.
+    const manifestTool = getManifestTool("get_purchase_status");
+    const manifestKeys = Object.keys(
+      (manifestTool?.outputSchema as { properties: Record<string, unknown> }).properties
+    ).sort();
+
+    expect(manifestKeys).toEqual(Object.keys(getPurchaseStatusOutputZ.shape).sort());
+  });
   it("declares the same sendEligibility.payAndSend fields on both served layers", () => {
     const manifestTool = getManifestTool("quote_and_preview_letter");
     const payAndSend = (

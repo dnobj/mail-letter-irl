@@ -526,6 +526,28 @@ Configure development and production independently:
   `IMAGE_RESERVATION_PROVIDER_TIMEOUT_MINUTES` (default 30)
 - `LETTER_IRL_PACKS_URL`
 
+### Proportional pack refunds (#323)
+
+`LETTER_IRL_PACK_REFUND_COMMAND_ENABLED` gates the operator command that
+refunds N unspent letters of a pack (`refundPackLetters` in
+`src/services/packRefundService.ts`). It is off unless the value is exactly
+`true`, in both environments, and the command also refuses unless the
+environment named in the command equals the running deployment's mode, so a
+development invocation can never reach production. Nothing customer-facing
+calls it; requests arrive by email with the order id and a person decides.
+
+The letters leave the account before the Stripe refund is created, under an
+idempotency key stored on the `commerce_pack_refunds` row, and the webhook
+confirms the command by the `packRefundId` in the refund's metadata. The
+hourly maintenance run's pack-refund sweep finishes commands whose Stripe call
+got no answer: it lists the payment's refunds and adopts one by metadata
+before it ever retries a create, because Stripe may prune an idempotency key
+after 24 hours. `PACK_REFUND_RETRY_DELAY_SECONDS` (default 300, minimum 60) is
+how long a row waits before the sweep touches it; `PACK_REFUND_STRIPE_ATTEMPT_LIMIT`
+(default 5) is how many unanswered attempts it tolerates before it compensates
+the customer with a new ledger lot and opens a `pack_refund_failed` alert.
+Neither is in the preflight manifest; both are optional.
+
 Amounts are read from the Stripe Prices themselves - there are no configured
 cent amounts to keep in step (#275). A paid amount or currency mismatch against
 the order row is quarantined as `refund_pending`; it is never fulfilled. Keep Stripe test/live keys, Price IDs, webhook secrets, Railway URLs,

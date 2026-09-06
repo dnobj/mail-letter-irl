@@ -7,6 +7,7 @@ import { cleanupExpiredImages, closeTempImageStore } from '../services/tempImage
 import { runDailyMaintenance } from '../workers/creditExpirationWorker.js';
 import { runStatusSync } from '../workers/statusSyncWorker.js';
 import { runCommerceMaintenance } from '../services/commerceService.js';
+import { reconcilePackRefunds } from '../services/packRefundService.js';
 import { runRetentionPreview, runRetentionSweep } from '../services/retentionService.js';
 import { enabledUnlessDisabled, positiveIntegerSetting } from '../utils/envSettings.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
@@ -174,6 +175,10 @@ export async function runMaintenance(): Promise<void> {
 
   const commerce = await runCommerceMaintenance();
   console.log('[Maintenance] Commerce summary:', commerce);
+  // Proportional refunds whose Stripe call never got an answer, or whose
+  // refund is still pending after 30 days (#323). Lists before it retries.
+  const packRefunds = await reconcilePackRefunds();
+  console.log('[Maintenance] Pack refund sweep summary:', packRefunds);
 
   const imageReservations = await reconcileGenerationReservations();
   console.log('[Maintenance] Image reservation recovery summary:', imageReservations);
