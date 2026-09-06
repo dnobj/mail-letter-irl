@@ -23,6 +23,7 @@
 import { describe, expect, it } from 'vitest';
 import { LetterIrlServer } from '../../../src/server.js';
 import { summarizeToolResult } from '../../../src/mcp/registerTools.js';
+import { buildManifest } from '../../../src/mcp/manifest.js';
 
 const tools = new LetterIrlServer().listTools();
 
@@ -109,5 +110,44 @@ describe('quote summaries', () => {
     expect(summary).toMatch(/header image/i);
     expect(summary).toMatch(/saved return address/i);
     expect(summary).toMatch(/Street was standardized/);
+  });
+});
+
+describe('the manifest prose ChatGPT reads first', () => {
+  // THE GAP THIS CLOSES. The suites above iterate listTools(), so they never
+  // saw the two fields ChatGPT reads FIRST: the connector-card `description`
+  // and the server `instructions`, which are the model's standing context for
+  // every turn. #313 cleaned every tool description and left both behind, and
+  // both shipped to production - the description still sending customers to
+  // letterirl.com to buy what the card now sells, the instructions still
+  // calling image generations "credits". Found by reading the live manifest
+  // while connecting the production connector, which is not a test.
+  const manifest = buildManifest() as {
+    description: string;
+    instructions: string;
+    [key: string]: unknown;
+  };
+
+  it('builds something to check', () => {
+    expect(manifest.description.length).toBeGreaterThan(40);
+    expect(manifest.instructions.length).toBeGreaterThan(200);
+  });
+
+  it.each([
+    ['description', () => manifest.description],
+    ['instructions', () => manifest.instructions]
+  ])('%s does not send the customer away to buy', (_label, get) => {
+    // Scoped to the prose. The manifest legitimately carries letterirl.com in
+    // contactEmail, legalInfoUrl and the server URLs, so a whole-document
+    // check here would fail on the parts that are meant to say it.
+    expect(get()).not.toMatch(/letterirl\.com/i);
+  });
+
+  it('says "credit" nowhere in the whole document', () => {
+    // Credits are the internal ledger unit; customers have letters and image
+    // generations. Unlike the URL, there is no legitimate use of the word
+    // anywhere in the manifest, so this one sweeps everything - tools,
+    // widgets and prose alike - and stays correct as fields are added.
+    expect(JSON.stringify(manifest)).not.toMatch(/credit/i);
   });
 });

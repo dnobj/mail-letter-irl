@@ -30,6 +30,7 @@ const REQUIRED = [
   'purchaseIdempotency.postgres.test.ts',
   'betaSpendLimits.postgres.test.ts',
   'jitFulfillmentIdempotency.postgres.test.ts',
+  'packRefund.postgres.test.ts',
 ];
 
 /**

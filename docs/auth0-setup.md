@@ -6,10 +6,11 @@ This guide documents the complete Auth0 configuration for Letter IRL.
 
 ## Current MCP OAuth architecture
 
-ChatGPT uses a separate manually imported Auth0 **public CIMD application** in
-each environment: authorization code, PKCE S256, and
-`token_endpoint_auth_method: none`. Its client ID is the OpenAI-hosted HTTPS
-CIMD URL. The dedicated Auth0 MCP API identifier exactly equals that
+ChatGPT uses a separate manually imported Auth0 **CIMD application** in each
+environment: authorization code, PKCE S256, and the client authentication
+method the CIMD document declares - currently `private_key_jwt`, verified on the
+production import 2026-09-05. Its client ID is the OpenAI-hosted HTTPS CIMD
+URL. The dedicated Auth0 MCP API identifier exactly equals that
 environment's canonical `/mcp` resource and grants only `mail:read`,
 `mail:draft`, and `mail:send`. The website/REST audience is unchanged.
 
@@ -17,7 +18,9 @@ CIMD and the resource-parameter compatibility profile are owner-managed tenant
 settings. DCR and Letter IRL's static `/oauth/register` shim are not the target
 architecture; they may be enabled only as the documented environment-specific
 rollback. Claude/PAT clients do not share the ChatGPT application. Auth0
-Enterprise and `private_key_jwt` are out of scope.
+Enterprise is out of scope; `private_key_jwt` is not - it is what ChatGPT's CIMD
+document declares, and Auth0 takes the document's declared method as given. See
+the corrected contract header in `docs/auth0-tenant-configuration.md`.
 
 ---
 
