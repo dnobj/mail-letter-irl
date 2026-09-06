@@ -100,6 +100,9 @@ export async function calculateUserTier(userId: string): Promise<TierCalculation
          SELECT 1 FROM credit_ledger ref
          WHERE ref.source_type = 'refund'
            AND ref.related_ledger_id = cl.ledger_id
+           -- A proportional refund returns part of a pack and leaves the
+           -- purchase standing; only a whole-pack reversal is a return (#323).
+           AND COALESCE(ref.source_metadata->>'reason', '') <> 'partial_refund'
        )
      ORDER BY cl.created_at ASC`,
     [userId]

@@ -444,7 +444,7 @@ function asCheckoutResult(order: Order, reused: boolean): CommerceCheckoutResult
   };
 }
 
-async function recordOrderEvent(
+export async function recordOrderEvent(
   client: Pick<pg.PoolClient, 'query'>,
   orderId: string,
   eventType: string,
@@ -1596,18 +1596,62 @@ async function processCheckoutSessionEvent(
  * revocation it is answering - which would let a favourable dispute close undo a
  * legitimate refund and hand the customer both the money and the credits.
  */
-type RevocationCause = 'payment_refunded' | 'payment_disputed';
+export type RevocationCause = 'payment_refunded' | 'payment_disputed' | 'partial_refund';
 
-async function revokePackCredits(
+export interface RevokePackLotsOptions {
+  /** A whole-pack reversal ('all') or the credits of one proportional refund. */
+  credits: number | 'all';
+  cause?: RevocationCause;
+  disputeId?: string;
+  /** The commerce_pack_refunds row a proportional revocation belongs to. */
+  packRefundId?: string;
+}
+
+export interface RevokedPackLot {
+  ledgerId: string;
+  auditLedgerId: string;
+  creditsTaken: number;
+}
+
+/**
+ * Take a pack's credits back from the account.
+ *
+ * 'all' is the whole-pack reversal a refund or dispute performs: every lot
+ * attributable to the order is zeroed and marked revoked, the unspent
+ * remainder comes off the balance, and lifetime purchases drop by what the
+ * pack still represented. A number is a proportional refund (#323): exactly
+ * that many credits are taken FIFO from the pack's live lots, which stay live
+ * purchases (active or depleted, never revoked) so a later full refund or
+ * dispute still finds and audits them.
+ *
+ * Canonical account lock order: users -> credit_ledger -> image_entitlements.
+ * Reversal must take the account lock first so it cannot deadlock against a
+ * concurrent ledger deduction or grant, which lock the user row first.
+ */
+export async function revokePackLots(
   client: Pick<pg.PoolClient, 'query'>,
   order: Order,
-  cause: RevocationCause = 'payment_refunded',
-  disputeId?: string
-): Promise<void> {
-  // Canonical account lock order: users -> credit_ledger -> image_entitlements.
-  // Reversal must take the account lock first so it cannot deadlock against a
-  // concurrent ledger deduction or grant, which lock the user row first.
+  options: RevokePackLotsOptions
+): Promise<{ creditsTaken: number; lots: RevokedPackLot[] }> {
   await lockAccountForBalanceChange(client, order.user_id);
+  if (options.credits === 'all') {
+    const taken = await revokeWholePack(
+      client,
+      order,
+      options.cause === 'partial_refund' ? 'payment_refunded' : options.cause ?? 'payment_refunded',
+      options.disputeId
+    );
+    return { creditsTaken: taken, lots: [] };
+  }
+  return revokePackCreditsProportionally(client, order, options.credits, options.packRefundId);
+}
+
+async function revokeWholePack(
+  client: Pick<pg.PoolClient, 'query'>,
+  order: Order,
+  cause: RevocationCause,
+  disputeId?: string
+): Promise<number> {
   const entries = await client.query<{
     ledger_id: string;
     initial_amount: number;
@@ -1629,7 +1673,7 @@ async function revokePackCredits(
   const remaining = entries.rows.reduce((sum, entry) => sum + entry.remaining_amount, 0);
   // Separate Stripe events can report the same completed refund. No
   // non-revoked purchase rows means this pack grant was already reversed.
-  if (entries.rows.length === 0) return;
+  if (entries.rows.length === 0) return 0;
   await client.query(
     `UPDATE credit_ledger
      SET remaining_amount = 0, status = 'revoked', updated_at = NOW()
@@ -1666,8 +1710,13 @@ async function revokePackCredits(
   // credits_purchased is lifetime spend and must be decremented once per order,
   // not once per revocation. Revoking a compensation lot is a second claw-back
   // of the same order; subtracting again understates the customer's lifetime
-  // total. Only the revocation that takes the original purchase adjusts it.
+  // total. Only the revocation that takes the original purchase adjusts it,
+  // and only by what the pack still represented: credits already returned as
+  // cash by a proportional refund came off lifetime spend when they left (#323).
   const revokedAPurchase = entries.rows.some(entry => entry.source_type === 'purchase');
+  const lifetimeDecrement = revokedAPurchase
+    ? Math.max((order.credits || 0) - (order.credits_refunded || 0), 0)
+    : 0;
   const user = await client.query<{ credits: number }>(
     `UPDATE users
      SET credits = GREATEST(credits - $1, 0),
@@ -1675,7 +1724,7 @@ async function revokePackCredits(
          updated_at = NOW()
      WHERE user_id = $3
      RETURNING credits`,
-    [remaining, revokedAPurchase ? order.credits || 0 : 0, order.user_id]
+    [remaining, lifetimeDecrement, order.user_id]
   );
   if (remaining > 0 && user.rows[0]) {
     await client.query(
@@ -1700,6 +1749,9 @@ async function revokePackCredits(
            SELECT 1 FROM credit_ledger AS refund
            WHERE refund.source_type = 'refund'
              AND refund.related_ledger_id = purchase.ledger_id
+             -- A proportional refund leaves the purchase standing (#323);
+             -- keep in step with tierService.calculateUserTier.
+             AND COALESCE(refund.source_metadata->>'reason', '') <> 'partial_refund'
          )
      ), eligibility AS (
        SELECT COUNT(*) AS purchase_count,
@@ -1713,8 +1765,117 @@ async function revokePackCredits(
      FROM eligibility WHERE users.user_id = $1`,
     [order.user_id]
   );
+  return remaining;
 }
 
+/**
+ * The proportional case: N credits, FIFO in consumption order (expiring lots
+ * first), from the pack's active, unexpired lots. Each touched lot keeps its
+ * status as a live purchase; the audit row per lot carries the command id and
+ * `reason: 'partial_refund'`, which the tier predicate excludes.
+ */
+async function revokePackCreditsProportionally(
+  client: Pick<pg.PoolClient, 'query'>,
+  order: Order,
+  credits: number,
+  packRefundId?: string
+): Promise<{ creditsTaken: number; lots: RevokedPackLot[] }> {
+  if (!Number.isInteger(credits) || credits <= 0) {
+    throw new Error(`revokePackLots: credits must be a positive integer, got ${credits}`);
+  }
+  const lots = await client.query<{ ledger_id: string; remaining_amount: number }>(
+    `SELECT ledger_id, remaining_amount FROM credit_ledger
+     WHERE user_id = $1 AND source_type IN ('purchase', 'adjustment')
+       AND (source_reference_id = $2 OR source_metadata->>'stripe_session_id' = $3)
+       AND status = 'active' AND remaining_amount > 0
+       AND (expires_at IS NULL OR expires_at > NOW())
+     ORDER BY expires_at NULLS LAST, created_at ASC
+     FOR UPDATE`,
+    [order.user_id, order.order_id, order.stripe_checkout_session_id || null]
+  );
+  const available = lots.rows.reduce((sum, lot) => sum + lot.remaining_amount, 0);
+  if (available < credits) {
+    throw new Error(
+      `revokePackLots: ${credits} credits requested but only ${available} are live on ${order.order_id}`
+    );
+  }
+  const letters = credits / CREDITS_PER_LETTER;
+  const taken: RevokedPackLot[] = [];
+  let needed = credits;
+  for (const lot of lots.rows) {
+    if (needed <= 0) break;
+    const take = Math.min(needed, lot.remaining_amount);
+    const after = lot.remaining_amount - take;
+    await client.query(
+      `UPDATE credit_ledger
+       SET remaining_amount = $1,
+           status = CASE WHEN $1 = 0 THEN 'depleted'::credit_ledger_status ELSE status END,
+           updated_at = NOW()
+       WHERE ledger_id = $2`,
+      [after, lot.ledger_id]
+    );
+    const audit = await client.query<{ ledger_id: string }>(
+      `INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, source_metadata, activated_at,
+         expiration_policy, status, description, related_ledger_id
+       ) VALUES ($1, $2, 0, 'refund', $3, $4, NOW(), 'never', 'revoked', $5, $6)
+       RETURNING ledger_id`,
+      [
+        order.user_id,
+        take,
+        order.order_id,
+        JSON.stringify({
+          reason: 'partial_refund',
+          order_id: order.order_id,
+          pack_refund_id: packRefundId ?? null,
+          letters_refunded: letters,
+          credits_taken: take,
+          remaining_before: lot.remaining_amount,
+          remaining_after: after
+        }),
+        `Proportional refund of ${letters} ${letters === 1 ? 'letter' : 'letters'} for ${order.order_id}`,
+        lot.ledger_id
+      ]
+    );
+    taken.push({ ledgerId: lot.ledger_id, auditLedgerId: audit.rows[0].ledger_id, creditsTaken: take });
+    needed -= take;
+  }
+  const before = await client.query<{ credits: number }>(
+    'SELECT credits FROM users WHERE user_id = $1',
+    [order.user_id]
+  );
+  if (before.rows[0] && before.rows[0].credits < credits) {
+    // The cached balance is behind the ledger, which is the truth; the daily
+    // reconcileBalances re-derives it. Floor at zero as the whole-pack path does.
+    writeDiagnostic('error', 'credits.cache_below_ledger', {
+      cachedCredits: before.rows[0].credits,
+      creditsTaken: credits
+    });
+  }
+  const user = await client.query<{ credits: number }>(
+    `UPDATE users
+     SET credits = GREATEST(credits - $1, 0),
+         credits_purchased = GREATEST(credits_purchased - $1, 0),
+         updated_at = NOW()
+     WHERE user_id = $2
+     RETURNING credits`,
+    [credits, order.user_id]
+  );
+  await client.query(
+    `INSERT INTO credit_transactions (
+       user_id, amount, balance_after, type, reference_type, reference_id, description
+     ) VALUES ($1, $2, $3, 'refund', 'order', $4, $5)`,
+    [
+      order.user_id,
+      -credits,
+      user.rows[0]?.credits ?? 0,
+      order.order_id,
+      `Proportional refund of ${letters} ${letters === 1 ? 'letter' : 'letters'} for ${order.order_id}`
+    ]
+  );
+  return { creditsTaken: credits, lots: taken };
+}
 async function stopFundedMailBeforeFinancialReversal(
   client: pg.PoolClient,
   order: Order,
@@ -1809,10 +1970,14 @@ async function recordUnmatchedPartialRefund(
     refundStatus: string | null;
     amountCents: number;
     cumulative: boolean;
+    knownRefundedCents?: number;
+    reason?: 'no_matching_command' | 'command_mismatch' | 'charge_surplus';
   }
 ): Promise<void> {
   const { eventId, eventType, order, stripeRefundId, chargeId, refundStatus, amountCents, cumulative } =
     params;
+  const knownRefundedCents = params.knownRefundedCents ?? 0;
+  const reason = params.reason ?? 'no_matching_command';
   const evidence = {
     eventId,
     eventType,
@@ -1853,9 +2018,9 @@ async function recordUnmatchedPartialRefund(
         eventId,
         order.order_id,
         JSON.stringify({
-          reason: 'no_matching_command',
+          reason,
           orderAmountCents: order.amount_cents,
-          knownRefundedCents: 0,
+          knownRefundedCents,
           stripeRefundId,
           chargeId,
           amountCents,
@@ -1869,9 +2034,310 @@ async function recordUnmatchedPartialRefund(
     unmatchedPartialRefund: true,
     stripeRefundId,
     amountCents,
+    reason,
     alertOpened
   });
-  writeDiagnostic('warn', 'stripe.partial_refund_unmatched', { eventType, alertOpened });
+  writeDiagnostic('warn', 'stripe.partial_refund_unmatched', { eventType, reason, alertOpened });
+}
+export type PackRefundStatus =
+  | 'letters_revoked'
+  | 'stripe_pending'
+  | 'succeeded'
+  | 'failed'
+  | 'compensated';
+
+/** A row of commerce_pack_refunds (migration 029). */
+export interface PackRefundRow {
+  pack_refund_id: string;
+  order_id: string;
+  user_id: string;
+  environment: 'development' | 'production';
+  letters: number;
+  credits: number;
+  amount_cents: number;
+  currency: string;
+  status: PackRefundStatus;
+  stripe_payment_intent_id: string;
+  stripe_refund_id: string | null;
+  stripe_idempotency_key: string;
+  stripe_attempts: number;
+  last_error_code: string | null;
+  failure_reason: string | null;
+  reason_code: string;
+  actor_subject_hash: string;
+  idempotency_key_hash: string;
+  admin_command_id: string | null;
+  compensation_ledger_id: string | null;
+  submitted_at: Date | null;
+  settled_at: Date | null;
+  failed_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export async function lockPackRefund(
+  client: Pick<pg.PoolClient, 'query'>,
+  packRefundId: string
+): Promise<PackRefundRow | undefined> {
+  const result = await client.query<PackRefundRow>(
+    'SELECT * FROM commerce_pack_refunds WHERE pack_refund_id = $1 FOR UPDATE',
+    [packRefundId]
+  );
+  return result.rows[0];
+}
+
+/**
+ * Money the app knows has left this payment or is about to: confirmed on the
+ * order plus every proportional refund still in flight. Read under the order
+ * lock. It is what lets a Charge's cumulative `amount_refunded` be recognised
+ * as confirmation of our own refunds, and a Refund that completes the payment
+ * be recognised as the full refund it is, however the events are ordered.
+ */
+export async function knownRefundedCents(
+  client: Pick<pg.PoolClient, 'query'>,
+  order: Order
+): Promise<number> {
+  const inFlight = await client.query<{ cents: number | string | null }>(
+    `SELECT COALESCE(SUM(amount_cents), 0) AS cents FROM commerce_pack_refunds
+      WHERE order_id = $1 AND status IN ('letters_revoked', 'stripe_pending')`,
+    [order.order_id]
+  );
+  return (order.amount_refunded_cents ?? 0) + Number(inFlight.rows[0]?.cents ?? 0);
+}
+
+export interface StripeRefundOutcome {
+  id: string;
+  status: string | null;
+  failureReason?: string | null;
+}
+
+/**
+ * Apply what Stripe reported for a proportional refund to its command row.
+ * Shared by the command's own finalisation, the webhook, and the sweep, so
+ * whichever of them hears first settles the row and the rest no-op. The
+ * caller holds the order lock; this locks the row.
+ */
+export async function settlePackRefund(
+  client: Pick<pg.PoolClient, 'query'>,
+  row: PackRefundRow,
+  outcome: StripeRefundOutcome,
+  source: string
+): Promise<PackRefundStatus> {
+  const status = outcome.status ?? 'pending';
+  if (status === 'failed' || status === 'canceled') {
+    if (row.status === 'failed' || row.status === 'compensated') return row.status;
+    return compensatePackRefund(client, row, {
+      lastErrorCode: `STRIPE_REFUND_${status.toUpperCase()}`,
+      failureReason: outcome.failureReason ?? status,
+      stripeRefundId: outcome.id
+    });
+  }
+  if (status === 'succeeded') {
+    if (row.status !== 'letters_revoked' && row.status !== 'stripe_pending') {
+      await recordOrderEvent(client, row.order_id, source, null, null, {
+        packRefundId: row.pack_refund_id,
+        ignored: true,
+        reason: row.status === 'succeeded' ? 'already_settled' : 'settled_after_failure'
+      });
+      return row.status;
+    }
+    await client.query(
+      `UPDATE commerce_pack_refunds
+          SET status = 'succeeded', stripe_refund_id = $2,
+              submitted_at = COALESCE(submitted_at, NOW()), settled_at = NOW(), updated_at = NOW()
+        WHERE pack_refund_id = $1`,
+      [row.pack_refund_id, outcome.id]
+    );
+    await client.query(
+      `UPDATE orders SET amount_refunded_cents = amount_refunded_cents + $2, updated_at = NOW()
+        WHERE order_id = $1`,
+      [row.order_id, row.amount_cents]
+    );
+    await recordOrderEvent(client, row.order_id, source, null, null, {
+      packRefundId: row.pack_refund_id,
+      packRefundStatus: 'succeeded',
+      amountCents: row.amount_cents,
+      stripeRefundId: outcome.id
+    });
+    return 'succeeded';
+  }
+  // pending / requires_action: the money has not moved yet.
+  if (row.status !== 'letters_revoked') return row.status;
+  await client.query(
+    `UPDATE commerce_pack_refunds
+        SET status = 'stripe_pending', stripe_refund_id = $2,
+            submitted_at = COALESCE(submitted_at, NOW()), updated_at = NOW()
+      WHERE pack_refund_id = $1`,
+    [row.pack_refund_id, outcome.id]
+  );
+  await recordOrderEvent(client, row.order_id, source, null, null, {
+    packRefundId: row.pack_refund_id,
+    packRefundStatus: 'stripe_pending',
+    stripeRefundId: outcome.id
+  });
+  return 'stripe_pending';
+}
+
+/**
+ * Make the customer whole after a proportional refund that will not pay out:
+ * Stripe refused it, the sweep gave up, or the bank returned it later.
+ *
+ * Compensation is a NEW adjustment lot per revoked slice, carrying the source
+ * lot's expiry, exactly as a favourable dispute is compensated; history is
+ * never edited. It is withheld when the account is under dispute or blocked,
+ * because a dispute revocation already governs the balance and a posted lot
+ * would be revoked or double-restored on a win; the command is left `failed`
+ * with an alert and the operator decides.
+ */
+export async function compensatePackRefund(
+  client: Pick<pg.PoolClient, 'query'>,
+  row: PackRefundRow,
+  params: { lastErrorCode: string; failureReason?: string | null; stripeRefundId?: string | null }
+): Promise<'compensated' | 'failed'> {
+  const orderResult = await client.query<Order>(
+    'SELECT * FROM orders WHERE order_id = $1 FOR UPDATE',
+    [row.order_id]
+  );
+  const order = orderResult.rows[0];
+  const blocked = await client.query<{ sends_blocked_reason: string | null }>(
+    'SELECT sends_blocked_reason FROM users WHERE user_id = $1',
+    [row.user_id]
+  );
+  const failureReason = (params.failureReason ?? params.lastErrorCode).slice(0, 80);
+  const withheld =
+    !order ||
+    order.status === 'disputed' ||
+    order.status === 'held' ||
+    Boolean(blocked.rows[0]?.sends_blocked_reason);
+  if (withheld) {
+    await client.query(
+      `UPDATE commerce_pack_refunds
+          SET status = 'failed', failed_at = NOW(), last_error_code = $2, failure_reason = $3,
+              stripe_refund_id = COALESCE($4, stripe_refund_id), updated_at = NOW()
+        WHERE pack_refund_id = $1`,
+      [row.pack_refund_id, params.lastErrorCode, failureReason, params.stripeRefundId ?? null]
+    );
+    await client.query(
+      `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+       VALUES ($1, 'pack_refund_failed', 'critical', $2)`,
+      [
+        row.order_id,
+        JSON.stringify({
+          packRefundId: row.pack_refund_id,
+          lastErrorCode: params.lastErrorCode,
+          failureReason,
+          creditsRevoked: row.credits,
+          compensationWithheld: 'payment_disputed'
+        })
+      ]
+    );
+    await recordOrderEvent(client, row.order_id, 'pack_refund.failed', null, null, {
+      packRefundId: row.pack_refund_id,
+      lastErrorCode: params.lastErrorCode,
+      compensationWithheld: true
+    });
+    return 'failed';
+  }
+  await lockAccountForBalanceChange(client, row.user_id);
+  const audits = await client.query<{
+    ledger_id: string;
+    initial_amount: number;
+    expires_at: Date | null;
+    expiration_policy: string;
+  }>(
+    `SELECT audit.ledger_id, audit.initial_amount, source.expires_at, source.expiration_policy
+       FROM credit_ledger AS audit
+       JOIN credit_ledger AS source ON source.ledger_id = audit.related_ledger_id
+      WHERE audit.source_type = 'refund'
+        AND audit.source_metadata->>'pack_refund_id' = $1
+      ORDER BY audit.created_at ASC`,
+    [row.pack_refund_id]
+  );
+  let restored = 0;
+  let firstLotId: string | null = null;
+  for (const audit of audits.rows) {
+    const lot = await client.query<{ ledger_id: string }>(
+      `INSERT INTO credit_ledger (
+         user_id, initial_amount, remaining_amount, source_type,
+         source_reference_id, source_metadata, activated_at,
+         expires_at, expiration_policy, status, description, related_ledger_id
+       ) VALUES ($1, $2, $2, 'adjustment', $3, $4, NOW(), $5, $6, 'active', $7, $8)
+       RETURNING ledger_id`,
+      [
+        row.user_id,
+        audit.initial_amount,
+        row.order_id,
+        JSON.stringify({
+          reason: 'partial_refund_failed',
+          order_id: row.order_id,
+          pack_refund_id: row.pack_refund_id,
+          compensates_ledger_id: audit.ledger_id,
+          failure_reason: failureReason
+        }),
+        audit.expires_at,
+        audit.expiration_policy,
+        `Restored after a failed proportional refund of ${row.order_id}`,
+        audit.ledger_id
+      ]
+    );
+    restored += audit.initial_amount;
+    firstLotId ??= lot.rows[0].ledger_id;
+  }
+  if (restored > 0) {
+    await client.query(
+      `UPDATE users
+          SET credits = credits + $1, credits_purchased = credits_purchased + $1, updated_at = NOW()
+        WHERE user_id = $2`,
+      [restored, row.user_id]
+    );
+    await client.query(
+      `UPDATE orders
+          SET credits_refunded = GREATEST(credits_refunded - $2, 0),
+              amount_refunded_cents = CASE WHEN $3 THEN GREATEST(amount_refunded_cents - $4, 0) ELSE amount_refunded_cents END,
+              updated_at = NOW()
+        WHERE order_id = $1`,
+      [row.order_id, restored, row.status === 'succeeded', row.amount_cents]
+    );
+    await client.query(
+      `INSERT INTO credit_transactions (
+         user_id, amount, balance_after, type, reference_type, reference_id, description
+       ) SELECT $1::varchar, $2::int, credits, 'refund', 'order', $3::varchar, $4::text
+           FROM users WHERE user_id = $1::varchar`,
+      [
+        row.user_id,
+        restored,
+        row.order_id,
+        `Restored ${row.letters} ${row.letters === 1 ? 'letter' : 'letters'} after a failed proportional refund of ${row.order_id}`
+      ]
+    );
+  }
+  await client.query(
+    `UPDATE commerce_pack_refunds
+        SET status = 'compensated', failed_at = NOW(), last_error_code = $2, failure_reason = $3,
+            compensation_ledger_id = $4, stripe_refund_id = COALESCE($5, stripe_refund_id), updated_at = NOW()
+      WHERE pack_refund_id = $1`,
+    [row.pack_refund_id, params.lastErrorCode, failureReason, firstLotId, params.stripeRefundId ?? null]
+  );
+  await client.query(
+    `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+     VALUES ($1, 'pack_refund_failed', 'critical', $2)`,
+    [
+      row.order_id,
+      JSON.stringify({
+        packRefundId: row.pack_refund_id,
+        lastErrorCode: params.lastErrorCode,
+        failureReason,
+        creditsRestored: restored
+      })
+    ]
+  );
+  await recordOrderEvent(client, row.order_id, 'pack_refund.compensated', null, null, {
+    packRefundId: row.pack_refund_id,
+    lastErrorCode: params.lastErrorCode,
+    creditsRestored: restored
+  });
+  writeDiagnostic('warn', 'pack_refund.compensated', { lastErrorCode: params.lastErrorCode });
+  return 'compensated';
 }
 async function processRefundEvent(
   eventId: string,
@@ -1930,11 +2396,66 @@ async function processRefundEvent(
     ]);
 
     const isRefund = eventType.startsWith('refund.');
-    const refundStatus = isRefund ? (refundOrCharge as Stripe.Refund).status : 'succeeded';
+    const refundObject = isRefund ? (refundOrCharge as Stripe.Refund) : null;
+    const refundStatus = isRefund ? refundObject!.status : 'succeeded';
     const refundedAmount = isRefund
-      ? (refundOrCharge as Stripe.Refund).amount
+      ? refundObject!.amount
       : (refundOrCharge as Stripe.Charge).amount_refunded;
-    if (refundedAmount < order.amount_cents) {
+    const packRefundId = refundObject?.metadata?.packRefundId || undefined;
+
+    // A proportional refund the app issued names its command in metadata
+    // (#323). The Refund events are authoritative for it; the Charge event's
+    // cumulative figure is confirmation only, handled below.
+    if (packRefundId) {
+      const command = await lockPackRefund(client, packRefundId);
+      const matches =
+        command !== undefined &&
+        command.order_id === order.order_id &&
+        command.stripe_payment_intent_id === intent &&
+        command.amount_cents === refundedAmount;
+      if (!matches) {
+        await recordUnmatchedPartialRefund(client, {
+          eventId,
+          eventType,
+          order,
+          stripeRefundId: refundObject!.id,
+          chargeId: charge ?? null,
+          refundStatus: refundStatus ?? null,
+          amountCents: refundedAmount,
+          cumulative: false,
+          knownRefundedCents: await knownRefundedCents(client, order),
+          reason: 'command_mismatch'
+        });
+        return { duplicate: false, orderId: order.order_id, status: order.status };
+      }
+      const settled = await settlePackRefund(
+        client,
+        command,
+        { id: refundObject!.id, status: refundStatus, failureReason: refundObject!.failure_reason },
+        eventType
+      );
+      writeDiagnostic('info', 'pack_refund.stripe_event', { eventType, packRefundStatus: settled });
+      return { duplicate: false, orderId: order.order_id, status: order.status };
+    }
+
+    // Everything else is measured against what the app already knows has
+    // left, or is about to leave, this payment. A refund that completes the
+    // payment is the full refund whatever it is called; less is a partial.
+    const known = await knownRefundedCents(client, order);
+    const completesThePayment = isRefund
+      ? known + refundedAmount >= order.amount_cents
+      : refundedAmount >= order.amount_cents;
+    if (!completesThePayment) {
+      if (!isRefund && refundedAmount <= known) {
+        // The Charge's cumulative figure is at or under what we issued: a
+        // confirmation of our own refunds, not new money leaving.
+        await recordOrderEvent(client, order.order_id, eventType, order.status, order.status, {
+          chargePartialRefundConfirmed: true,
+          amountRefunded: refundedAmount,
+          knownRefundedCents: known
+        });
+        return { duplicate: false, orderId: order.order_id, status: order.status };
+      }
       // Part of the money left through a refund the app did not issue. The
       // balance is not touched: a person decides, and the alert makes sure one
       // sees it (#323). See recordUnmatchedPartialRefund.
@@ -1942,11 +2463,13 @@ async function processRefundEvent(
         eventId,
         eventType,
         order,
-        stripeRefundId: isRefund ? refundOrCharge.id : null,
+        stripeRefundId: isRefund ? refundObject!.id : null,
         chargeId: charge ?? null,
         refundStatus: refundStatus ?? null,
         amountCents: refundedAmount,
-        cumulative: !isRefund
+        cumulative: !isRefund,
+        knownRefundedCents: known,
+        reason: isRefund ? 'no_matching_command' : 'charge_surplus'
       });
       return { duplicate: false, orderId: order.order_id, status: order.status };
     }
@@ -1960,10 +2483,10 @@ async function processRefundEvent(
     }
     await stopFundedMailBeforeFinancialReversal(client, order, eventId, 'payment_reversed');
     if (nextStatus === 'refunded' && order.order_type === 'letter_pack') {
-      await revokePackCredits(client, order);
+      await revokePackLots(client, order, { credits: 'all' });
     }
     if (nextStatus === 'refunded') {
-      // JIT refunds never call revokePackCredits, so the account lock has to be
+      // JIT refunds never revoke pack lots, so the account lock has to be
       // taken here or entitlements would be write-locked without it.
       await lockAccountForBalanceChange(client, order.user_id);
       await client.query(
@@ -1979,6 +2502,7 @@ async function processRefundEvent(
            stripe_refund_id = COALESCE($3, stripe_refund_id),
            refund_pending_at = CASE WHEN $2::varchar = 'refund_pending' THEN COALESCE(refund_pending_at, NOW()) ELSE refund_pending_at END,
            refunded_at = CASE WHEN $2::varchar = 'refunded' THEN NOW() ELSE refunded_at END,
+           amount_refunded_cents = CASE WHEN $2::varchar = 'refunded' THEN amount_cents ELSE amount_refunded_cents END,
            updated_at = NOW()
        WHERE order_id = $1`,
       [order.order_id, nextStatus, isRefund ? refundOrCharge.id : null]
@@ -2384,7 +2908,7 @@ async function processDisputeEvent(
       const status = String(dispute.status || '');
       if (!NON_LOSS_DISPUTE_STATUSES.has(status)) {
         if (order.order_type === 'letter_pack') {
-          await revokePackCredits(client, order, 'payment_disputed', dispute.id);
+          await revokePackLots(client, order, { credits: 'all', cause: 'payment_disputed', disputeId: dispute.id });
         }
         await blockAccountSends(client, order.user_id, 'payment_disputed');
       } else if (closed && FAVOURABLE_DISPUTE_STATUSES.has(status)) {
@@ -2854,7 +3378,7 @@ export async function requestRefund(
       if (!finalized?.rows[0]) return;
       if (nextStatus === 'refunded') {
         if (order.order_type === 'letter_pack') {
-          await revokePackCredits(client, order);
+          await revokePackLots(client, order, { credits: 'all' });
         }
         await lockAccountForBalanceChange(client, order.user_id);
         await client.query(

@@ -426,6 +426,47 @@ specific piece of mail, so the handler tries to stop that mail first.
       continues, and a critical `refunded_mail_already_dispatched` row appears
       in `commerce_operational_alerts`.
 
+### REFUND-05 — Proportional refund of unspent letters (operator command)
+Precondition: PAY-01 with the Regular Pack (5 letters), then one letter sent,
+so four letters remain. `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED=true` on the
+service the command runs in. Development first, with Stripe in test mode. No
+customer-facing tool can start this; it runs from the admin surface (or, until
+that exists, from a maintainer's session against the development database).
+- [ ] `get_purchase_status` for the pack reads `letters 5, lettersRemaining 4,
+      lettersRefunded 0, perLetterCents 200, refundableAmountCents 800`.
+- [ ] Preview the command for 3 letters: it shows USD 6.00 and a digest.
+      Confirm with that digest, an operator name, a reason code, and a fresh
+      idempotency key.
+- [ ] Balance drops 4 → 1 letter BEFORE the Stripe refund exists; Stripe then
+      shows a partial refund of USD 6.00 on the payment with metadata
+      `orderId`, `packRefundId`, `lettersRefunded: 3`.
+- [ ] Railway: `stripe.webhook_received` with `refund.created` and
+      `charge.refunded`, no `credits.webhook_failed`; no
+      `stripe_partial_refund_unmatched` row; `pack_refund.stripe_event` logged.
+- [ ] `get_purchase_status` reads `submitted` with `lettersRemaining 1,
+      lettersRefunded 3, amountRefundedCents 600`; `commerce_pack_refunds` row
+      is `succeeded` with the Stripe refund id.
+- [ ] Database: the purchase lot is `active` with `remaining_amount = 2`; one
+      `refund` ledger row with `reason: partial_refund`, `letters_refunded: 3`;
+      `credit_transactions` `-6`; `orders.credits_refunded = 6`; one
+      `commerce_operator_audit_events` row with `operation = pack_refund`.
+- [ ] Replay the confirm with the same idempotency key: `replayed: true`, no
+      second refund in Stripe. Send a second command for the same order: refused
+      as already issued.
+- [ ] Send the last letter, then refund the remainder from the Stripe Dashboard
+      (REFUND-06 checks the outcome).
+
+### REFUND-06 — Full Dashboard refund after a proportional refund
+Precondition: REFUND-05 completed (3 of 5 letters refunded, 2 sent).
+- [ ] Stripe Dashboard → the same payment → Refund → full remaining amount
+      (USD 4.00).
+- [ ] Railway: `refund.created` with amount 400 is processed as a FULL refund
+      (not an alert); `charge.refunded` shows `amount_refunded 1000`.
+- [ ] Balance unchanged at 0 (nothing was left); the purchase lot is `revoked`;
+      `orders.status = refunded`, `amount_refunded_cents = 1000`;
+      `credits_purchased` dropped by 4 (10 − 6 already refunded), not by 10.
+- [ ] `get_purchase_status` reads `refunded` with `lettersRefunded 3`.
+
 ---
 ## Letter Sending Flow
 

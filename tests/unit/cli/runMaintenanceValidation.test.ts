@@ -24,6 +24,9 @@ const services = vi.hoisted(() => ({
 vi.mock('../../../src/services/letterJobService.js', () => ({
   processDueLetterJobs: services.processDueLetterJobs
 }));
+vi.mock('../../../src/services/packRefundService.js', () => ({
+  reconcilePackRefunds: async () => ({ retried: 0, adopted: 0, settled: 0, compensated: 0 })
+}));
 vi.mock('../../../src/services/commerceService.js', () => ({
   runCommerceMaintenance: services.runCommerceMaintenance
 }));

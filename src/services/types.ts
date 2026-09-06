@@ -130,6 +130,10 @@ export interface Order {
   refund_pending_at?: Date;
   refunded_at?: Date;
   refund_attempts: number;
+  // Proportional refunds (#323): credits already returned as cash, and the
+  // minor units Stripe has confirmed refunded. Both default to 0.
+  credits_refunded?: number;
+  amount_refunded_cents?: number;
   last_error_code?: string;
   last_error?: string;
   created_at: Date;

@@ -92,22 +92,27 @@ We plan to introduce additional letter types:
 
 ## Refund Policy
 
-### Letters Are Refundable If:
-- ✅ Letter fails to send due to provider error
-- ✅ Invalid address (after verification attempt)
-- ✅ Service outage or system issue on our end
-- ✅ Letter quality issue (misprinting, damage)
+All letter pack purchases are final. Two things are different from a refund and
+happen automatically:
 
-### Letters Are Non-Refundable After:
-- ❌ Letter successfully dispatched to USPS
-- ❌ Address was valid and deliverable
-- ❌ User error in letter content or recipient details
+- **A send that fails on our side** (the print provider rejects the piece, or
+  an outage stops it before it is accepted) returns the letter to your balance.
+  No cash moves; the letter is yours to send again.
+- **A letter already handed to the print provider or USPS** cannot be recalled,
+  so nothing is returned for it.
 
-### Refund Process:
-1. Contact support with order ID
-2. Issue reviewed within 1 business day
-3. Letters restored to account (not cash refund)
-4. Notification sent via email
+Separately, we may at our discretion refund the unused part of a pack in cash,
+for example when a pack was bought by mistake. This is not something the terms
+promise, and no tool in ChatGPT can request it. To ask:
+
+1. Email support@letterirl.com from the email on your Letter IRL account, with
+   the order id shown by `get_purchase_status` (or on your Stripe receipt).
+2. A person reviews it, normally within one business day.
+3. If a refund is issued, it is for whole unused letters at the price you paid
+   for that pack (the pack price divided by its letter count, rounded down to
+   the cent), those letters come off your balance first, and the money goes
+   back to the original card in 5-10 business days. Letters already sent, and
+   letters that have expired, are never refunded.
 
 ---
 

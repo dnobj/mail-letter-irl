@@ -31,6 +31,7 @@ const REQUIRED = [
   'betaSpendLimits.postgres.test.ts',
   'jitFulfillmentIdempotency.postgres.test.ts',
   'packRefund.postgres.test.ts',
+  'packRefundCommand.postgres.test.ts',
 ];
 
 /**

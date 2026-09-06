@@ -286,6 +286,53 @@ export async function createPaymentRefund(
   );
 }
 
+/**
+ * A proportional refund of a letter pack (#323): part of one payment, for an
+ * amount the app computed, carrying the command id so the webhook can confirm
+ * the command rather than infer anything from a dollar figure.
+ *
+ * The idempotency key is the command's, stored on its row, so every retry
+ * sends the identical key AND identical parameters; a changed amount under the
+ * same key is an idempotency_error at Stripe. It is deliberately not derived
+ * from an attempt counter: the JIT lane's attempt scheme exists to create a
+ * NEW refund after a known failed one, and a proportional refund that fails is
+ * compensated, not re-issued.
+ */
+export async function createPartialPaymentRefund(params: {
+  paymentIntentId: string;
+  amountCents: number;
+  orderId: string;
+  packRefundId: string;
+  lettersRefunded: number;
+  idempotencyKey: string;
+}): Promise<Stripe.Refund> {
+  return getStripeClient().refunds.create(
+    {
+      payment_intent: params.paymentIntentId,
+      amount: params.amountCents,
+      reason: 'requested_by_customer',
+      metadata: {
+        orderId: params.orderId,
+        packRefundId: params.packRefundId,
+        lettersRefunded: String(params.lettersRefunded)
+      }
+    },
+    { ...BACKGROUND_REQUEST_OPTIONS, idempotencyKey: params.idempotencyKey }
+  );
+}
+
+/**
+ * Every refund on a payment, newest first. The pack-refund sweep lists BEFORE
+ * it retries a create, because Stripe may prune an idempotency key after 24
+ * hours and a retry past that point would create a second refund.
+ */
+export async function listPaymentRefunds(paymentIntentId: string): Promise<Stripe.Refund[]> {
+  const refunds = await getStripeClient().refunds.list(
+    { payment_intent: paymentIntentId, limit: 100 },
+    BACKGROUND_REQUEST_OPTIONS
+  );
+  return refunds.data;
+}
 export async function retrieveRefund(refundId: string): Promise<Stripe.Refund> {
   return getStripeClient().refunds.retrieve(refundId, undefined, BACKGROUND_REQUEST_OPTIONS);
 }
@@ -305,6 +352,10 @@ export async function findPaymentRefund(
     refunds.data.find(
       refund =>
         refund.metadata?.orderId === orderId &&
+        // A proportional refund carries the command id and is never 'the'
+        // refund of an order: adopting one here would finalise a whole-pack
+        // revocation against a partial payment (#323).
+        !refund.metadata?.packRefundId &&
         !['failed', 'canceled'].includes(refund.status || '')
     ) || null
   );
