@@ -73,6 +73,30 @@ export async function setReturnAddress(
   userId: string,
   address: ReturnAddress
 ): Promise<SetReturnAddressResult> {
+  try {
+    return await validateAndSaveReturnAddress(userId, address);
+  } catch (error) {
+    if (error instanceof ReturnAddressOwnerMissingError) {
+      // An ordinary answer, not a crash: the address was fine, there is just
+      // no account to attach it to. Saying so beats the previous behaviour
+      // (claiming success) and beats a generic database error equally.
+      return {
+        success: false,
+        validationStatus: 'failed',
+        wasAutoCorrected: false,
+        errors: [
+          'Your Letter IRL account is not set up yet, so there was nothing to save the address to. Sign out of the Letter IRL connector and sign in again; if it keeps happening, contact support@letterirl.com.'
+        ]
+      };
+    }
+    throw error;
+  }
+}
+
+async function validateAndSaveReturnAddress(
+  userId: string,
+  address: ReturnAddress
+): Promise<SetReturnAddressResult> {
   // Normalize country code
   const normalizedCountry = normalizeCountryToUS(address.country);
 
@@ -255,8 +279,28 @@ export async function hasReturnAddress(userId: string): Promise<boolean> {
 /**
  * Save return address to database
  */
+/**
+ * Thrown when the UPDATE matched no row, which means the account does not
+ * exist. Distinct from a database fault, so callers can say which it was.
+ */
+export class ReturnAddressOwnerMissingError extends Error {
+  constructor() {
+    super("No account row to attach the return address to");
+    this.name = "ReturnAddressOwnerMissingError";
+  }
+}
+
 async function saveReturnAddress(userId: string, address: ReturnAddress): Promise<void> {
-  await query(
+  // rowCount is the whole point. An UPDATE against a user_id that does not
+  // exist affects zero rows and raises nothing, so without this check the
+  // function returns normally and every caller reports success for a write
+  // that never happened.
+  //
+  // Not hypothetical: on the first production account this reported "Return
+  // address saved successfully" - it reached the logs saying so - and the
+  // very next preview answered "No return address provided". The save was a
+  // no-op because account provisioning had been skipped, and nothing said so.
+  const result = await query(
     `UPDATE users
      SET return_address = $1,
          return_address_validated_at = NOW(),
@@ -264,6 +308,10 @@ async function saveReturnAddress(userId: string, address: ReturnAddress): Promis
      WHERE user_id = $2`,
     [JSON.stringify(address), userId]
   );
+
+  if (result.rowCount === 0) {
+    throw new ReturnAddressOwnerMissingError();
+  }
 }
 
 /**

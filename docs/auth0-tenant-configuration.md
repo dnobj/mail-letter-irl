@@ -324,6 +324,39 @@ canonical `/mcp` resource.
 
 ## Key Settings for ChatGPT MCP
 
+### Required Post Login Action: the email claim
+
+**Without this, no account is ever created.** `prepareAuthenticatedUser`
+provisions the `users` row from a verified email, and Auth0 does not put
+`email` on an access token minted for a custom API. Every write then fails on
+`REFERENCES users(user_id)` in whichever table the customer reaches first.
+
+Add a Post Login Action containing:
+
+```javascript
+exports.onExecutePostLogin = async (event, api) => {
+  if (event.user.email) {
+    api.accessToken.setCustomClaim("https://letterirl.com/email", event.user.email);
+  }
+};
+```
+
+**The namespace is load-bearing.** Auth0 silently drops a non-namespaced custom
+claim that collides with a reserved OIDC name, and `email` is reserved - the
+login succeeds, the claim is absent, and nothing reports it. An Action calling
+`setCustomClaim("email", ...)` is a no-op that looks exactly like a fix; one
+was deployed against production on 2026-09-05 and the next tool call failed the
+same foreign key it had failed before. See
+[Auth0's custom-claims guidance](https://auth0.com/docs/troubleshoot/product-lifecycle/deprecations-and-migrations/custom-claims-migration).
+
+Deploying the Action is not enough on its own - it must also be dragged into
+the **Post Login trigger flow** and applied, or it never runs.
+
+The server reads `LETTER_IRL_OAUTH_EMAIL_CLAIM` (default
+`https://letterirl.com/email`), so the two environments can namespace against
+their own domains. It prefers a standard `email` claim when one is present, and
+still falls back to `/userinfo`.
+
 ### Required Auth0 CIMD Configuration
 
 1. **Client ID Metadata Document registration**

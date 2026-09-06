@@ -30,7 +30,11 @@ describe("authenticated service diagnostics", () => {
 
   it("does not log a subject or address on save, correction, or clear", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
-    vi.mocked(query).mockResolvedValue({ rows: [], rowCount: 0 } as never);
+    // rowCount: 1 - the writes under test are meant to hit a real row. The
+    // previous 0 was incidental (nothing read rowCount), but saveReturnAddress
+    // now treats it as "no such account" and refuses, which is exactly the
+    // silent no-op this suite would otherwise sail past.
+    vi.mocked(query).mockResolvedValue({ rows: [], rowCount: 1 } as never);
     vi.mocked(getLetterProvider).mockReturnValue({
       validateAddress: vi.fn().mockResolvedValue({
         status: "corrected",
