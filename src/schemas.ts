@@ -396,6 +396,12 @@ export const getPurchaseStatusOutputSchema: JsonSchema = {
     mailType: { type: "string", enum: ["letter", "postcard"] },
     letterId: { type: "string" },
     checkoutExpiresAt: { type: "string" },
+    letters: { type: "integer" },
+    lettersRemaining: { type: "integer" },
+    lettersRefunded: { type: "integer" },
+    perLetterCents: { type: "integer" },
+    refundableAmountCents: { type: "integer" },
+    amountRefundedCents: { type: "integer" },
     updatedAt: { type: "string" },
     message: { type: "string" }
   }

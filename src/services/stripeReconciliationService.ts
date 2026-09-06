@@ -44,7 +44,13 @@ interface ReconciliationResult {
 }
 
 interface Discrepancy {
-  type: 'missing_credit' | 'missing_order' | 'missing_stripe' | 'amount_mismatch' | 'unprocessed_refund';
+  type:
+    | 'missing_credit'
+    | 'missing_order'
+    | 'missing_stripe'
+    | 'amount_mismatch'
+    | 'unprocessed_refund'
+    | 'unmatched_partial_refund';
   severity: 'critical' | 'high' | 'medium' | 'low';
   stripeSessionId?: string;
   orderId?: string;
@@ -415,9 +421,10 @@ export async function reconcileStripePayments(
         order_id: string;
         order_type: 'letter_pack' | 'jit_mail';
         status: string;
+        amount_cents: number | null;
         pack_reversal_recorded: boolean;
       }>(
-        `SELECT orders.order_id, orders.order_type, orders.status,
+        `SELECT orders.order_id, orders.order_type, orders.status, orders.amount_cents,
                 CASE WHEN orders.order_type = 'letter_pack' THEN EXISTS (
                   SELECT 1 FROM credit_ledger AS reversal
                   WHERE reversal.source_type = 'refund'
@@ -432,16 +439,36 @@ export async function reconcileStripePayments(
       const matchedRefund = refundCheck.rows[0];
       if (!matchedRefund || matchedRefund.status !== 'refunded' || !matchedRefund.pack_reversal_recorded) {
         unprocessedRefunds++;
-        discrepancies.push({
-          type: 'unprocessed_refund',
-          severity: 'high',
-          stripeSessionId: paymentIntentReference,
-          orderId: matchedRefund?.order_id,
-          fundingType: matchedRefund?.order_type,
-          stripeAmount: refund.amount,
-          message: 'A completed refund has no corresponding durable commerce reversal',
-          suggestedAction: 'Review the funding order, refund state, and any pack-ledger reversal',
-        });
+        // A succeeded refund for less than the order is one the app did not
+        // issue (#323): the customer keeps the letters. The webhook opened a
+        // stripe_partial_refund_unmatched alert; this is the second net.
+        const partial =
+          typeof matchedRefund?.amount_cents === 'number' && refund.amount < matchedRefund.amount_cents;
+        discrepancies.push(
+          partial
+            ? {
+                type: 'unmatched_partial_refund',
+                severity: 'high',
+                stripeSessionId: paymentIntentReference,
+                orderId: matchedRefund?.order_id,
+                fundingType: matchedRefund?.order_type,
+                stripeAmount: refund.amount,
+                ourAmount: matchedRefund?.amount_cents ?? undefined,
+                message: 'A partial refund exists in Stripe that the app did not issue; the customer keeps the letters',
+                suggestedAction:
+                  'Review the stripe_partial_refund_unmatched alert for the order: refund the remainder (which takes the full path) or record the decision',
+              }
+            : {
+                type: 'unprocessed_refund',
+                severity: 'high',
+                stripeSessionId: paymentIntentReference,
+                orderId: matchedRefund?.order_id,
+                fundingType: matchedRefund?.order_type,
+                stripeAmount: refund.amount,
+                message: 'A completed refund has no corresponding durable commerce reversal',
+                suggestedAction: 'Review the funding order, refund state, and any pack-ledger reversal',
+              }
+        );
       }
     }
   }

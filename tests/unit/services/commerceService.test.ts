@@ -2186,7 +2186,7 @@ describe('commerceService', () => {
     ).toHaveLength(1);
   });
 
-  it('ignores a partial refund: records it, moves nothing, revokes nothing', async () => {
+  it('an unmatched partial refund raises a critical alert and moves nothing', async () => {
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO stripe_webhook_events')) {
         return { rows: [{ event_id: 'evt-partial' }] };
@@ -2203,6 +2203,9 @@ describe('commerceService', () => {
             }
           ]
         };
+      }
+      if (sql.includes('INSERT INTO commerce_operational_alerts')) {
+        return { rows: [{ alert_id: 'alert-1' }], rowCount: 1 };
       }
       return { rows: [] };
     });
@@ -2221,7 +2224,12 @@ describe('commerceService', () => {
 
     // The order is reported exactly as it was found...
     expect(result).toMatchObject({ orderId: 'order-1', status: 'fulfilled' });
-    // ...the only trace is an order event saying the refund was seen and skipped...
+    // ...part of the money left through a refund the app did not issue, which
+    // is operator work, so a critical alert is opened for the order...
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("'stripe_partial_refund_unmatched', 'critical'"),
+      ['evt-partial', 'order-1', expect.stringContaining('"amountCents":999')]
+    );
     expect(mocks.query).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO commerce_order_events'),
       [
@@ -2229,7 +2237,7 @@ describe('commerceService', () => {
         'charge.refunded',
         'fulfilled',
         'fulfilled',
-        expect.stringContaining('"reason":"partial_refund"')
+        expect.stringContaining('"unmatchedPartialRefund":true')
       ]
     );
     // ...and no balance, ledger, entitlement, or order-status write happens.
@@ -2246,6 +2254,282 @@ describe('commerceService', () => {
     }
   });
 
+  it('folds the three events of one Dashboard partial refund into a single open alert', async () => {
+    let openAlerts = 0;
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-any' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) {
+        return {
+          rows: [
+            {
+              ...baseOrder,
+              order_type: 'letter_pack',
+              credits: 4,
+              amount_cents: 1999,
+              status: 'fulfilled'
+            }
+          ]
+        };
+      }
+      if (sql.includes('SELECT alert_id') && sql.includes("'stripe_partial_refund_unmatched'")) {
+        return openAlerts > 0 ? { rows: [{ alert_id: 'alert-1' }] } : { rows: [] };
+      }
+      if (sql.includes('INSERT INTO commerce_operational_alerts')) {
+        openAlerts += 1;
+        return { rows: [{ alert_id: 'alert-1' }], rowCount: 1 };
+      }
+      return { rows: [] };
+    });
+
+    const refund = {
+      id: 're-partial',
+      payment_intent: 'pi-1',
+      charge: 'ch-1',
+      status: 'succeeded',
+      amount: 999
+    };
+    await processStripeWebhookEvent({
+      id: 'evt-r1',
+      type: 'refund.created',
+      data: { object: refund }
+    } as any);
+    await processStripeWebhookEvent({
+      id: 'evt-c1',
+      type: 'charge.refunded',
+      data: { object: { id: 'ch-1', payment_intent: 'pi-1', amount_refunded: 999 } }
+    } as any);
+    await processStripeWebhookEvent({
+      id: 'evt-r2',
+      type: 'refund.updated',
+      data: { object: refund }
+    } as any);
+
+    const inserts = mocks.query.mock.calls.filter(([sql]) =>
+      String(sql).includes('INSERT INTO commerce_operational_alerts')
+    );
+    expect(inserts).toHaveLength(1);
+    const folds = mocks.query.mock.calls.filter(([sql]) =>
+      String(sql).includes("jsonb_set(details, '{events}'")
+    );
+    expect(folds).toHaveLength(2);
+    expect(folds[1][1]).toEqual(['alert-1', expect.stringContaining('"eventType":"refund.updated"')]);
+  });
+
+  it('a full Dashboard refund after a proportional refund decrements lifetime purchases by the remainder only', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-remainder-after-partial' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) {
+        return {
+          rows: [
+            {
+              ...baseOrder,
+              order_type: 'letter_pack',
+              credits: 4,
+              amount_cents: 500,
+              status: 'fulfilled',
+              // One letter (2 credits, 250 cents) already returned as cash.
+              credits_refunded: 2,
+              amount_refunded_cents: 250
+            }
+          ]
+        };
+      }
+      if (sql.includes('SELECT ledger_id, initial_amount')) {
+        return {
+          rows: [
+            {
+              ledger_id: '00000000-0000-0000-0000-000000000004',
+              initial_amount: 4,
+              remaining_amount: 2,
+              source_type: 'purchase'
+            }
+          ]
+        };
+      }
+      if (sql.includes('UPDATE users')) return { rows: [{ credits: 0 }] };
+      return { rows: [] };
+    });
+
+    // The Dashboard "refund remaining" arrives as a Refund for the remainder.
+    await expect(
+      processStripeWebhookEvent({
+        id: 'evt-remainder-after-partial',
+        type: 'refund.created',
+        data: {
+          object: {
+            id: 're-remainder',
+            payment_intent: 'pi-1',
+            charge: 'ch-1',
+            status: 'succeeded',
+            amount: 250
+          }
+        }
+      } as any)
+    ).resolves.toMatchObject({ status: 'refunded' });
+
+    // known (250) + this refund (250) completes the payment: the full path
+    // runs, takes what is left, and lifetime spend drops by 4 - 2, not by 4.
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('SET credits = GREATEST'),
+      [2, 2, 'user-1']
+    );
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("amount_refunded_cents = CASE WHEN $2::varchar = 'refunded' THEN amount_cents"),
+      ['order-1', 'refunded', 're-remainder']
+    );
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("'stripe_partial_refund_unmatched'"),
+      expect.anything()
+    );
+  });
+
+  it('a refund.updated carrying the command id settles the command and adds to the confirmed figure', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-command' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) {
+        return {
+          rows: [{ ...baseOrder, order_type: 'letter_pack', credits: 4, amount_cents: 500, status: 'fulfilled' }]
+        };
+      }
+      if (sql.includes('FROM commerce_pack_refunds WHERE pack_refund_id = $1')) {
+        return {
+          rows: [
+            {
+              pack_refund_id: 'pr-1',
+              order_id: 'order-1',
+              user_id: 'user-1',
+              status: 'letters_revoked',
+              letters: 1,
+              credits: 2,
+              amount_cents: 250,
+              stripe_payment_intent_id: 'pi-1',
+              stripe_refund_id: null
+            }
+          ]
+        };
+      }
+      return { rows: [] };
+    });
+
+    await expect(
+      processStripeWebhookEvent({
+        id: 'evt-command',
+        type: 'refund.updated',
+        data: {
+          object: {
+            id: 're-cmd',
+            payment_intent: 'pi-1',
+            charge: 'ch-1',
+            status: 'succeeded',
+            amount: 250,
+            metadata: { orderId: 'order-1', packRefundId: 'pr-1', lettersRefunded: '1' }
+          }
+        }
+      } as any)
+    ).resolves.toMatchObject({ orderId: 'order-1', status: 'fulfilled' });
+
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'succeeded', stripe_refund_id = $2"),
+      ['pr-1', 're-cmd']
+    );
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('SET amount_refunded_cents = amount_refunded_cents + $2'),
+      ['order-1', 250]
+    );
+    // Not an unmatched partial, not a full refund: nothing is revoked here.
+    for (const forbidden of ["'stripe_partial_refund_unmatched'", 'SET credits = GREATEST', 'UPDATE orders\n       SET status']) {
+      expect(mocks.query).not.toHaveBeenCalledWith(expect.stringContaining(forbidden), expect.anything());
+    }
+  });
+
+  it('a refund.updated whose command id names a different order is an alert, not a settlement', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-mismatch' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) {
+        return {
+          rows: [{ ...baseOrder, order_type: 'letter_pack', credits: 4, amount_cents: 500, status: 'fulfilled' }]
+        };
+      }
+      if (sql.includes('FROM commerce_pack_refunds WHERE pack_refund_id = $1')) {
+        return {
+          // Same payment intent and amount: the ORDER is the only thing that differs.
+          rows: [{ pack_refund_id: 'pr-other', order_id: 'order-other', status: 'letters_revoked', amount_cents: 250, stripe_payment_intent_id: 'pi-1' }]
+        };
+      }
+      return { rows: [] };
+    });
+
+    await processStripeWebhookEvent({
+      id: 'evt-mismatch',
+      type: 'refund.updated',
+      data: {
+        object: {
+          id: 're-x',
+          payment_intent: 'pi-1',
+          charge: 'ch-1',
+          status: 'succeeded',
+          amount: 250,
+          metadata: { packRefundId: 'pr-other' }
+        }
+      }
+    } as any);
+
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("'stripe_partial_refund_unmatched', 'critical'"),
+      ['evt-mismatch', 'order-1', expect.stringContaining('"reason":"command_mismatch"')]
+    );
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'succeeded', stripe_refund_id = $2"),
+      expect.anything()
+    );
+  });
+
+  it('a charge.refunded within what the app already issued is a confirmation, not an alert', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-charge-confirm' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) {
+        return {
+          rows: [
+            {
+              ...baseOrder,
+              order_type: 'letter_pack',
+              credits: 4,
+              amount_cents: 500,
+              status: 'fulfilled',
+              amount_refunded_cents: 250
+            }
+          ]
+        };
+      }
+      return { rows: [] };
+    });
+
+    const result = await processStripeWebhookEvent({
+      id: 'evt-charge-confirm',
+      type: 'charge.refunded',
+      data: { object: { id: 'ch-1', payment_intent: 'pi-1', amount_refunded: 250 } }
+    } as any);
+
+    expect(result).toMatchObject({ orderId: 'order-1', status: 'fulfilled' });
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO commerce_order_events'),
+      ['order-1', 'charge.refunded', 'fulfilled', 'fulfilled', expect.stringContaining('"chargePartialRefundConfirmed":true')]
+    );
+    expect(mocks.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("'stripe_partial_refund_unmatched'"),
+      expect.anything()
+    );
+  });
   it('parks a pending refund as refund_pending without revoking anything', async () => {
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO stripe_webhook_events')) {

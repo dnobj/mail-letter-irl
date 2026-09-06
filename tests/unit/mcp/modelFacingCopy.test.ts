@@ -140,7 +140,10 @@ describe('the manifest prose ChatGPT reads first', () => {
     // Scoped to the prose. The manifest legitimately carries letterirl.com in
     // contactEmail, legalInfoUrl and the server URLs, so a whole-document
     // check here would fail on the parts that are meant to say it.
-    expect(get()).not.toMatch(/letterirl\.com/i);
+    // An email address is not a website: refund requests go to
+    // support@letterirl.com by design (#323), so a mailbox at the domain is
+    // allowed here and a URL or bare domain still is not.
+    expect(get()).not.toMatch(/(?<!@)letterirl\.com/i);
   });
 
   it('says "credit" nowhere in the whole document', () => {

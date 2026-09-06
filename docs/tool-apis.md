@@ -86,11 +86,20 @@ after payment.
 
 Input: `{ orderId: string }`.
 
-Returns sanitized, owner-scoped purchase state:
-`pending_payment`, `processing`, `sent`, `payment_failed`, `refund_pending`,
-`refunded`, or `cancelled`. It exposes no card, billing, address, content, or raw
-Stripe data.
+Returns sanitized, owner-scoped purchase state: `pending_payment`, `processing`,
+`submitted`, `payment_failed`, `refund_pending`, `refunded`, `on_hold`, or
+`cancelled`. It exposes no card, billing, address, content, or raw Stripe data.
 
+For a letter-pack order it also returns the pack's figures, absent (never
+null) on Pay & Send orders: `letters` in the pack, `lettersRemaining` still on
+the account (active and unexpired), `lettersRefunded` returned as cash so far,
+`perLetterCents` (the pack price divided by its letter count, rounded down),
+`refundableAmountCents` (what a proportional refund of the remaining letters
+would come to, `0` unless the pack is fulfilled and untouched by an earlier
+proportional refund), and `amountRefundedCents`. These are the numbers an
+operator reads before touching a refund in Stripe (#323). The pack message
+never says a refund will be issued; refund requests go to
+`support@letterirl.com` with the order id, and a person decides.
 Preview tools retain `canSendNow` for compatibility and now also return
 `sendEligibility`, containing prepaid eligibility, Pay & Send availability and
 exact price, and the configured letter-pack destination.

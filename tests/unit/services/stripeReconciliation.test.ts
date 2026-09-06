@@ -330,6 +330,27 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
       });
     });
 
+    it('reports a succeeded partial refund the app did not issue as unmatched_partial_refund', async () => {
+      mockSessionsList.mockResolvedValue({ data: [], has_more: false });
+      mockRefundsList.mockResolvedValue({ data: [{
+        id: 're_partial', status: 'succeeded', payment_intent: 'pi_pack', amount: 200
+      }] });
+      mockQuery
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{
+          order_id: 'order-pack', order_type: 'letter_pack', status: 'fulfilled',
+          amount_cents: 500, pack_reversal_recorded: false
+        }] });
+      const result = await reconcileStripePayments(1);
+      // Still counted as unprocessed - the money moved and no reversal exists -
+      // but named for what it is, so the operator reads the right alert.
+      expect(result.summary.unprocessedRefunds).toBe(1);
+      expect(result.discrepancies).toContainEqual(expect.objectContaining({
+        type: 'unmatched_partial_refund', orderId: 'order-pack', stripeAmount: 200, ourAmount: 500
+      }));
+      expect(result.discrepancies).not.toContainEqual(expect.objectContaining({ type: 'unprocessed_refund' }));
+    });
     it('requires a pack refund ledger reversal linked through the authoritative order', async () => {
       mockSessionsList.mockResolvedValue({ data: [], has_more: false });
       mockRefundsList.mockResolvedValue({ data: [{
