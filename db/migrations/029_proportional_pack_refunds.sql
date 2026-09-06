@@ -100,20 +100,14 @@ CREATE TRIGGER update_commerce_pack_refunds_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
--- The link to the admin foundation's command ledger (022). Guarded: the legacy
--- scenario suites apply this file without 022, and the FK is composite because
--- admin_command_runs is unique on (id, environment).
-DO $$
-BEGIN
-  IF to_regclass('admin_command_runs') IS NOT NULL THEN
-    ALTER TABLE commerce_pack_refunds
-      DROP CONSTRAINT IF EXISTS commerce_pack_refunds_admin_command_fk;
-    ALTER TABLE commerce_pack_refunds
-      ADD CONSTRAINT commerce_pack_refunds_admin_command_fk
-      FOREIGN KEY (admin_command_id, environment)
-      REFERENCES admin_command_runs(id, environment) ON DELETE RESTRICT;
-  END IF;
-END $$;
+-- admin_command_id is a soft link to the admin foundation's command ledger
+-- (022). It is deliberately NOT a foreign key: a guarded FK would exist only
+-- when 022 had already been applied, and the legacy-scenario suites prove
+-- that migration order must not change the resulting schema. The admin
+-- command runner writes both rows in one transaction, which is the integrity
+-- that matters.
+COMMENT ON COLUMN commerce_pack_refunds.admin_command_id IS
+  'Soft link to admin_command_runs.id (022) when the command ran through the admin foundation; not a foreign key so that migration order cannot change the schema.';
 
 -- The operator audit vocabulary from 023, restated with the new operation and
 -- target. Guarded for the same staging reason as above.

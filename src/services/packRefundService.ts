@@ -545,10 +545,12 @@ async function handleStripeFailure(row: PackRefundRow, error: unknown): Promise<
  * the attempt limit are compensated.
  */
 export async function reconcilePackRefunds(
-  stripeRefunds: PackRefundOperations = livePackRefundOperations
+  stripeRefunds: PackRefundOperations = livePackRefundOperations,
+  options: { retryDelaySeconds?: number } = {}
 ): Promise<PackRefundSweepResult> {
   const result: PackRefundSweepResult = { retried: 0, adopted: 0, settled: 0, compensated: 0 };
-  const delaySeconds = positiveIntegerSetting('PACK_REFUND_RETRY_DELAY_SECONDS', 300, 60);
+  const delaySeconds =
+    options.retryDelaySeconds ?? positiveIntegerSetting('PACK_REFUND_RETRY_DELAY_SECONDS', 300, 60);
   const attemptLimit = positiveIntegerSetting('PACK_REFUND_STRIPE_ATTEMPT_LIMIT', 5, 1);
   const due = await query<PackRefundRow>(
     `SELECT * FROM commerce_pack_refunds

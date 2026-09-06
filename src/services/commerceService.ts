@@ -1971,7 +1971,7 @@ async function recordUnmatchedPartialRefund(
     amountCents: number;
     cumulative: boolean;
     knownRefundedCents?: number;
-    reason?: 'no_matching_command' | 'command_mismatch' | 'charge_surplus';
+    reason?: 'no_matching_command' | 'command_mismatch';
   }
 ): Promise<void> {
   const { eventId, eventType, order, stripeRefundId, chargeId, refundStatus, amountCents, cumulative } =
@@ -2469,7 +2469,7 @@ async function processRefundEvent(
         amountCents: refundedAmount,
         cumulative: !isRefund,
         knownRefundedCents: known,
-        reason: isRefund ? 'no_matching_command' : 'charge_surplus'
+        reason: 'no_matching_command'
       });
       return { duplicate: false, orderId: order.order_id, status: order.status };
     }

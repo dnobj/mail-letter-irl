@@ -407,19 +407,16 @@ describePostgres('proportional pack refund command', () => {
     expect((await readUser(userId)).credits).toBe(6);
     expect((await commandRows(orderId))[0]).toMatchObject({ status: 'letters_revoked', stripe_attempts: 1 });
 
-    // Make the row due, then sweep with a seam that lists the refund Stripe
-    // did create: adopted, never created twice.
-    await pool.query(
-      `UPDATE commerce_pack_refunds SET updated_at = NOW() - INTERVAL '1 hour' WHERE pack_refund_id = $1`,
-      [result.packRefundId]
-    );
+    // Sweep with a seam that lists the refund Stripe did create: adopted,
+    // never created twice. The row's updated_at trigger makes backdating
+    // impossible, hence the explicit zero delay.
     const listed = refundFor(flaky.created[0], 'succeeded');
     const sweepSeam = stubStripe({ createStatus: 'succeeded', listed: [listed] });
-    const swept = await packRefund.reconcilePackRefunds(sweepSeam.seam);
+    const swept = await packRefund.reconcilePackRefunds(sweepSeam.seam, { retryDelaySeconds: 0 });
     expect(swept).toMatchObject({ adopted: 1, retried: 0 });
     expect(sweepSeam.created).toHaveLength(0);
     expect((await commandRows(orderId))[0]).toMatchObject({ status: 'succeeded', stripe_refund_id: listed.id });
-    expect((await readOrder(orderId)).amount_refunded_cents).toBe(200);
+    expect((await readOrder(orderId)).amount_refunded_cents).toBe(400);
   }, 60_000);
 
   it('settles once when the webhook hears first, and treats replays and siblings as no-ops', async () => {
@@ -432,12 +429,12 @@ describePostgres('proportional pack refund command', () => {
     const eventId = stripeId('evt');
     await commerce.processStripeWebhookEvent(refundEvent('refund.updated', refund, eventId));
     expect((await commandRows(orderId))[0]).toMatchObject({ status: 'succeeded' });
-    expect((await readOrder(orderId)).amount_refunded_cents).toBe(200);
+    expect((await readOrder(orderId)).amount_refunded_cents).toBe(400);
 
     const replay = await commerce.processStripeWebhookEvent(refundEvent('refund.updated', refund, eventId));
     expect(replay).toEqual({ duplicate: true });
     await commerce.processStripeWebhookEvent(refundEvent('refund.updated', refund));
-    expect((await readOrder(orderId)).amount_refunded_cents).toBe(200);
+    expect((await readOrder(orderId)).amount_refunded_cents).toBe(400);
     expect(await alerts(orderId)).toEqual([]);
   }, 60_000);
 
@@ -468,7 +465,7 @@ describePostgres('proportional pack refund command', () => {
     const { userId, orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
     const stripe = stubStripe({ createStatus: 'succeeded' });
     const result = await packRefund.refundPackLetters(command(orderId, 2), stripe.seam, COMMAND_ENV);
-    expect((await readOrder(orderId)).amount_refunded_cents).toBe(200);
+    expect((await readOrder(orderId)).amount_refunded_cents).toBe(400);
 
     const failed = {
       ...refundFor(stripe.created[0], 'failed', (await commandRows(orderId))[0].stripe_refund_id!),
@@ -487,11 +484,20 @@ describePostgres('proportional pack refund command', () => {
   it('a partially refunded pack still counts as a purchase for the tier', async () => {
     const { userId, orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
     for (let i = 0; i < 2; i += 1) {
+      // Two earlier packs, each a real order with its purchase lot (027
+      // requires a purchase grant to name its order).
+      const earlier = `order_${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, stripe_payment_intent_id,
+           status, order_type, product_code, idempotency_key)
+         VALUES ($1, $2, 10, 1000, 'usd', $3, 'fulfilled', 'letter_pack', 'starter', $4)`,
+        [earlier, userId, stripeId('pi'), `idem_${earlier}`]
+      );
       await pool.query(
         `INSERT INTO credit_ledger (user_id, initial_amount, remaining_amount, source_type, source_reference_id,
-           activated_at, expires_at, expiration_policy, status)
-         VALUES ($1, 10, 10, 'purchase', $2, NOW() - INTERVAL '200 days', NOW() + INTERVAL '500 days', 'days_from_activation', 'active')`,
-        [userId, `order_${randomUUID()}`]
+           source_order_id, activated_at, expires_at, expiration_policy, status)
+         VALUES ($1, 10, 10, 'purchase', $2, $2, NOW() - INTERVAL '200 days', NOW() + INTERVAL '500 days', 'days_from_activation', 'active')`,
+        [userId, earlier]
       );
     }
     await packRefund.refundPackLetters(command(orderId, 1), stubStripe({ createStatus: 'succeeded' }).seam, COMMAND_ENV);
