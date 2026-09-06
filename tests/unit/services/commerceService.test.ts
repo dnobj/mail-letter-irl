@@ -2460,7 +2460,8 @@ describe('commerceService', () => {
       }
       if (sql.includes('FROM commerce_pack_refunds WHERE pack_refund_id = $1')) {
         return {
-          rows: [{ pack_refund_id: 'pr-other', order_id: 'order-other', status: 'letters_revoked', amount_cents: 250, stripe_payment_intent_id: 'pi-other' }]
+          // Same payment intent and amount: the ORDER is the only thing that differs.
+          rows: [{ pack_refund_id: 'pr-other', order_id: 'order-other', status: 'letters_revoked', amount_cents: 250, stripe_payment_intent_id: 'pi-1' }]
         };
       }
       return { rows: [] };
