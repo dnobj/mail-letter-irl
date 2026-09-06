@@ -103,6 +103,10 @@ and the letters, because nothing but the webhook revokes them. The list is:
 Confirm it in the Stripe Dashboard under Developers, Webhooks, for each
 environment's endpoint, and again after any endpoint is recreated.
 
+A refund for less than the order amount that the app did not issue is never
+applied to a balance. It opens a critical `stripe_partial_refund_unmatched`
+alert for an operator instead (#323).
+
 `STRIPE_CURRENCY` is load-bearing, not decorative: every Price must be
 denominated in it or the catalog refuses to price that product, which in
 production is a `/readyz` 503 and a refused purchase. It defaults to `usd`, so

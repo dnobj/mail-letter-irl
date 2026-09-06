@@ -273,41 +273,62 @@ describePostgres('pack refunds issued from the Stripe Dashboard', () => {
     expect((await readOrder(orderId)).status).toBe('refunded');
   }, 60_000);
 
-  it('a partial refund is recorded as ignored and moves nothing', async () => {
+  it('an unmatched partial refund raises one critical alert and moves nothing', async () => {
     const { userId, orderId, paymentIntentId } = await seedPackHolder({ credits: 4 });
+    const refundId = stripeId('re');
 
-    const result = await commerceService.processStripeWebhookEvent(
+    // One Dashboard partial arrives as three events, in no guaranteed order.
+    const first = await commerceService.processStripeWebhookEvent(
       chargeRefundedEvent(paymentIntentId, 999)
     );
+    expect(first).toMatchObject({ duplicate: false, orderId, status: 'fulfilled' });
+    await commerceService.processStripeWebhookEvent(
+      refundEvent('refund.created', paymentIntentId, refundId, 'succeeded', 999)
+    );
+    await commerceService.processStripeWebhookEvent(
+      refundEvent('refund.updated', paymentIntentId, refundId, 'succeeded', 999)
+    );
 
-    // The handler reports the order as it found it.
-    expect(result).toMatchObject({ duplicate: false, orderId, status: 'fulfilled' });
-
+    // Nothing about the customer's account changed: the money left, the
+    // letters stayed, and that is exactly what an operator now has to see.
     expect((await readUser(userId)).credits).toBe(4);
     expect(await purchaseLot(userId)).toEqual({ status: 'active', remaining_amount: 4 });
     expect(await refundAuditRows(userId)).toEqual([]);
     expect(await creditTransactions(userId)).toEqual([]);
-
     const order = await readOrder(orderId);
     expect(order.status).toBe('fulfilled');
     expect(order.refunded_at).toBeNull();
     expect(order.refund_pending_at).toBeNull();
 
-    // The one durable trace: an order event that says the refund was seen and
-    // deliberately not acted on. Delete this and a partial refund vanishes.
-    const events = await orderEvents(orderId);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        event_type: 'charge.refunded',
-        from_status: 'fulfilled',
-        to_status: 'fulfilled',
-        metadata: expect.objectContaining({
-          ignored: true,
-          reason: 'partial_refund',
-          refundedAmount: 999
-        })
-      })
+    // Three events, one decision: a single open critical alert carrying all three.
+    const alerts = await pool.query<{
+      alert_type: string;
+      severity: string;
+      status: string;
+      details: unknown;
+    }>(
+      'SELECT alert_type, severity, status, details FROM commerce_operational_alerts WHERE order_id = $1',
+      [orderId]
     );
+    expect(alerts.rowCount).toBe(1);
+    expect(alerts.rows[0]).toMatchObject({
+      alert_type: 'stripe_partial_refund_unmatched',
+      severity: 'critical',
+      status: 'open'
+    });
+    const details = parseJson(alerts.rows[0].details);
+    expect(details).toMatchObject({
+      reason: 'no_matching_command',
+      amountCents: 999,
+      orderAmountCents: PACK_AMOUNT_CENTS,
+      knownRefundedCents: 0
+    });
+    expect(details.events as unknown[]).toHaveLength(3);
+
+    const events = await orderEvents(orderId);
+    expect(events.filter(event => event.metadata.unmatchedPartialRefund === true)).toHaveLength(3);
+    // The old quiet trace is gone for good.
+    expect(events.some(event => event.metadata.reason === 'partial_refund')).toBe(false);
   }, 60_000);
 
   it('a pending refund parks the order, and only the later success revokes', async () => {

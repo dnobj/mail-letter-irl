@@ -2186,7 +2186,7 @@ describe('commerceService', () => {
     ).toHaveLength(1);
   });
 
-  it('ignores a partial refund: records it, moves nothing, revokes nothing', async () => {
+  it('an unmatched partial refund raises a critical alert and moves nothing', async () => {
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO stripe_webhook_events')) {
         return { rows: [{ event_id: 'evt-partial' }] };
@@ -2203,6 +2203,9 @@ describe('commerceService', () => {
             }
           ]
         };
+      }
+      if (sql.includes('INSERT INTO commerce_operational_alerts')) {
+        return { rows: [{ alert_id: 'alert-1' }], rowCount: 1 };
       }
       return { rows: [] };
     });
@@ -2221,7 +2224,12 @@ describe('commerceService', () => {
 
     // The order is reported exactly as it was found...
     expect(result).toMatchObject({ orderId: 'order-1', status: 'fulfilled' });
-    // ...the only trace is an order event saying the refund was seen and skipped...
+    // ...part of the money left through a refund the app did not issue, which
+    // is operator work, so a critical alert is opened for the order...
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("'stripe_partial_refund_unmatched', 'critical'"),
+      ['evt-partial', 'order-1', expect.stringContaining('"amountCents":999')]
+    );
     expect(mocks.query).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO commerce_order_events'),
       [
@@ -2229,7 +2237,7 @@ describe('commerceService', () => {
         'charge.refunded',
         'fulfilled',
         'fulfilled',
-        expect.stringContaining('"reason":"partial_refund"')
+        expect.stringContaining('"unmatchedPartialRefund":true')
       ]
     );
     // ...and no balance, ledger, entitlement, or order-status write happens.
@@ -2244,6 +2252,69 @@ describe('commerceService', () => {
         expect.anything()
       );
     }
+  });
+
+  it('folds the three events of one Dashboard partial refund into a single open alert', async () => {
+    let openAlerts = 0;
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) {
+        return { rows: [{ event_id: 'evt-any' }] };
+      }
+      if (sql.includes('SELECT * FROM orders')) {
+        return {
+          rows: [
+            {
+              ...baseOrder,
+              order_type: 'letter_pack',
+              credits: 4,
+              amount_cents: 1999,
+              status: 'fulfilled'
+            }
+          ]
+        };
+      }
+      if (sql.includes('SELECT alert_id') && sql.includes("'stripe_partial_refund_unmatched'")) {
+        return openAlerts > 0 ? { rows: [{ alert_id: 'alert-1' }] } : { rows: [] };
+      }
+      if (sql.includes('INSERT INTO commerce_operational_alerts')) {
+        openAlerts += 1;
+        return { rows: [{ alert_id: 'alert-1' }], rowCount: 1 };
+      }
+      return { rows: [] };
+    });
+
+    const refund = {
+      id: 're-partial',
+      payment_intent: 'pi-1',
+      charge: 'ch-1',
+      status: 'succeeded',
+      amount: 999
+    };
+    await processStripeWebhookEvent({
+      id: 'evt-r1',
+      type: 'refund.created',
+      data: { object: refund }
+    } as any);
+    await processStripeWebhookEvent({
+      id: 'evt-c1',
+      type: 'charge.refunded',
+      data: { object: { id: 'ch-1', payment_intent: 'pi-1', amount_refunded: 999 } }
+    } as any);
+    await processStripeWebhookEvent({
+      id: 'evt-r2',
+      type: 'refund.updated',
+      data: { object: refund }
+    } as any);
+
+    const inserts = mocks.query.mock.calls.filter(([sql]) =>
+      String(sql).includes('INSERT INTO commerce_operational_alerts')
+    );
+    expect(inserts).toHaveLength(1);
+    const folds = mocks.query.mock.calls.filter(([sql]) =>
+      String(sql).includes("jsonb_set(details, '{events}'")
+    );
+    expect(folds).toHaveLength(2);
+    expect(folds[1][1]).toEqual(['alert-1', expect.stringContaining('"eventType":"refund.updated"')]);
   });
 
   it('parks a pending refund as refund_pending without revoking anything', async () => {

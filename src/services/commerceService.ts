@@ -1770,6 +1770,101 @@ async function stopFundedMailBeforeFinancialReversal(
   return 'none';
 }
 
+/**
+ * A refund for less than the order amount that the app did not issue.
+ *
+ * Until #323 this was recorded as `ignored: true, reason: 'partial_refund'`
+ * on commerce_order_events and nothing else happened: the money went back to
+ * the card, the letters stayed on the account, and no operator ever saw it.
+ * It is now operator work. Balances are deliberately left alone here, because
+ * the only correct responses are a person's (refund the remainder, which takes
+ * the full path, or record a decision), so the alert is the whole point.
+ *
+ * One Dashboard partial arrives as refund.created, refund.updated AND
+ * charge.refunded, in no guaranteed order. The alert table is unique per
+ * (event, type), which would make that three open alerts for one decision, so
+ * a later event for an order that already has an open partial-refund alert
+ * folds its evidence into that alert instead of opening another.
+ *
+ * `knownRefundedCents` is 0 until the proportional-refund command exists; the
+ * command adds the matching that turns an app-issued partial into a
+ * confirmation rather than an alert.
+ */
+async function recordUnmatchedPartialRefund(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: {
+    eventId: string;
+    eventType: string;
+    order: Order;
+    stripeRefundId: string | null;
+    chargeId: string | null;
+    refundStatus: string | null;
+    amountCents: number;
+    cumulative: boolean;
+  }
+): Promise<void> {
+  const { eventId, eventType, order, stripeRefundId, chargeId, refundStatus, amountCents, cumulative } =
+    params;
+  const evidence = {
+    eventId,
+    eventType,
+    stripeRefundId,
+    chargeId,
+    refundStatus,
+    amountCents,
+    cumulative,
+    receivedAt: new Date().toISOString()
+  };
+  const open = await client.query<{ alert_id: string }>(
+    `SELECT alert_id FROM commerce_operational_alerts
+      WHERE order_id = $1
+        AND alert_type = 'stripe_partial_refund_unmatched'
+        AND status <> 'resolved'
+      ORDER BY created_at ASC
+      LIMIT 1
+      FOR UPDATE`,
+    [order.order_id]
+  );
+  let alertOpened = false;
+  if (open.rows[0]) {
+    await client.query(
+      `UPDATE commerce_operational_alerts
+          SET details = jsonb_set(details, '{events}', COALESCE(details->'events', '[]'::jsonb) || $2::jsonb),
+              updated_at = NOW()
+        WHERE alert_id = $1`,
+      [open.rows[0].alert_id, JSON.stringify([evidence])]
+    );
+  } else {
+    const inserted = await client.query(
+      `INSERT INTO commerce_operational_alerts
+         (source_event_id, order_id, alert_type, severity, details)
+       VALUES ($1, $2, 'stripe_partial_refund_unmatched', 'critical', $3)
+       ON CONFLICT (source_event_id, alert_type) DO NOTHING
+       RETURNING alert_id`,
+      [
+        eventId,
+        order.order_id,
+        JSON.stringify({
+          reason: 'no_matching_command',
+          orderAmountCents: order.amount_cents,
+          knownRefundedCents: 0,
+          stripeRefundId,
+          chargeId,
+          amountCents,
+          events: [evidence]
+        })
+      ]
+    );
+    alertOpened = (inserted.rowCount ?? 0) > 0;
+  }
+  await recordOrderEvent(client, order.order_id, eventType, order.status, order.status, {
+    unmatchedPartialRefund: true,
+    stripeRefundId,
+    amountCents,
+    alertOpened
+  });
+  writeDiagnostic('warn', 'stripe.partial_refund_unmatched', { eventType, alertOpened });
+}
 async function processRefundEvent(
   eventId: string,
   eventType: string,
@@ -1832,10 +1927,18 @@ async function processRefundEvent(
       ? (refundOrCharge as Stripe.Refund).amount
       : (refundOrCharge as Stripe.Charge).amount_refunded;
     if (refundedAmount < order.amount_cents) {
-      await recordOrderEvent(client, order.order_id, eventType, order.status, order.status, {
-        ignored: true,
-        reason: 'partial_refund',
-        refundedAmount
+      // Part of the money left through a refund the app did not issue. The
+      // balance is not touched: a person decides, and the alert makes sure one
+      // sees it (#323). See recordUnmatchedPartialRefund.
+      await recordUnmatchedPartialRefund(client, {
+        eventId,
+        eventType,
+        order,
+        stripeRefundId: isRefund ? refundOrCharge.id : null,
+        chargeId: charge ?? null,
+        refundStatus: refundStatus ?? null,
+        amountCents: refundedAmount,
+        cumulative: !isRefund
       });
       return { duplicate: false, orderId: order.order_id, status: order.status };
     }
