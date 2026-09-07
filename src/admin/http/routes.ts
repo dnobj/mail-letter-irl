@@ -37,6 +37,7 @@ export const NAV_ITEMS = [
   { href: "/jobs", label: "Jobs" },
   { href: "/disputes", label: "Disputes" },
   { href: "/maintenance", label: "Maintenance" },
+  { href: "/stripe", label: "Stripe" },
   { href: "/audit", label: "Audit" },
   { href: "/commands", label: "Commands" },
   { href: "/elevate", label: "Elevate" },

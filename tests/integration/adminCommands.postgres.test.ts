@@ -54,6 +54,7 @@ describePostgres('admin commands through the operator role', () => {
   let config: AdminRuntimeConfig;
   let commands: typeof import('../../src/admin/commands/index.js');
   let runner: typeof import('../../src/admin/commands/runner.js');
+  let stripeCommands: typeof import('../../src/admin/commands/stripe.js');
   let closeServicePool: (() => Promise<void>) | undefined;
 
   const userId = `auth0|${randomUUID()}`;
@@ -98,6 +99,7 @@ describePostgres('admin commands through the operator role', () => {
     process.env.DATABASE_URL = operatorUrl;
     commands = await import('../../src/admin/commands/index.js');
     runner = await import('../../src/admin/commands/runner.js');
+    stripeCommands = await import('../../src/admin/commands/stripe.js');
     closeServicePool = (await import('../../src/db/index.js')).closePool;
 
     config = parseAdminRuntimeConfig({
@@ -330,6 +332,94 @@ describePostgres('admin commands through the operator role', () => {
       code: 'ADMIN_ELEVATION_REQUIRED'
     });
   });
+
+  it('refunds one letter of a pack through the command: letters first, the run id on the refund row, Stripe stubbed', async () => {
+    const packUserId = `auth0|${randomUUID()}`;
+    const orderId = `order_${randomUUID()}`;
+    const paymentIntentId = `pi_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+    const sessionId = `cs_test_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+    await owner.query(
+      `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used) VALUES ($1, $2, 4, 4, 0)`,
+      [packUserId, `pack.${randomUUID().slice(0, 8)}@example.test`]
+    );
+    await owner.query(
+      `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, stripe_payment_intent_id,
+         stripe_checkout_session_id, status, order_type, product_code, idempotency_key, paid_at, fulfilled_at)
+       VALUES ($1, $2, 4, 1999, 'usd', $3, $4, 'fulfilled', 'letter_pack', 'starter', $5, NOW(), NOW())`,
+      [orderId, packUserId, paymentIntentId, sessionId, `idem_${orderId}`]
+    );
+    await owner.query(
+      `INSERT INTO credit_ledger (user_id, initial_amount, remaining_amount, source_type, source_reference_id,
+         source_order_id, source_metadata, activated_at, expires_at, expiration_policy, status)
+       VALUES ($1, 4, 4, 'purchase', $2, $2, $3::jsonb, NOW(), NOW() + INTERVAL '365 days', 'days_from_activation', 'active')`,
+      [packUserId, orderId, JSON.stringify({ stripe_session_id: sessionId })]
+    );
+
+    const created: Array<Record<string, unknown>> = [];
+    const stripe = stripeCommands.createStripeCommands({
+      packRefundOperations: {
+        async createPartialPaymentRefund(params) {
+          created.push(params as unknown as Record<string, unknown>);
+          return {
+            id: `re_${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+            object: 'refund',
+            status: 'succeeded',
+            amount: params.amountCents,
+            payment_intent: params.paymentIntentId,
+            metadata: { orderId: params.orderId, packRefundId: params.packRefundId, lettersRefunded: String(params.lettersRefunded) }
+          } as never;
+        },
+        async listPaymentRefunds() {
+          return [];
+        },
+        async retrieveRefund() {
+          throw new Error('not expected');
+        }
+      },
+      environment: () => ({ LETTER_IRL_DEPLOYMENT_ENVIRONMENT: 'development', LETTER_IRL_PACK_REFUND_COMMAND_ENABLED: 'true' })
+    });
+    const enabledConfig = { ...config, packRefundCommandEnabled: true };
+    const prepared = await withReadOnlyTransaction(reader, (client) =>
+      runner.prepareCommandPreview(stripe.refundLetters, client, 'development', orderId, new Map([['letters', '1'], ['reasonCode', 'customer_request']]))
+    );
+    expect(prepared.preview.summary).toMatchObject({ amountCents: 999, lettersInPack: 2, lettersRemaining: 2 });
+    const fields = new Map(
+      Object.entries({
+        letters: '1',
+        reasonCode: 'customer_request',
+        previewDigest: prepared.previewDigest,
+        expectedVersion: prepared.preview.expectedVersion ?? '',
+        idempotencyKey: prepared.idempotencyKey,
+        reason: 'customer asked for one letter back',
+        phrase: prepared.phrase
+      })
+    );
+
+    const outcome = await runner.runAdminCommand({ ...deps(), config: enabledConfig }, stripe.refundLetters, orderId, fields);
+    expect(outcome).toMatchObject({ status: 'succeeded', result: { status: 'succeeded', amountCents: 999, domainReplayed: false } });
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({ paymentIntentId, amountCents: 999, orderId, lettersRefunded: 1 });
+
+    const refundRow = await owner.query<{ status: string; admin_command_id: string; letters: number; amount_cents: number }>(
+      `SELECT status, admin_command_id, letters, amount_cents FROM commerce_pack_refunds WHERE order_id = $1`,
+      [orderId]
+    );
+    expect(refundRow.rows).toEqual([{ status: 'succeeded', admin_command_id: outcome.commandId, letters: 1, amount_cents: 999 }]);
+    const lot = await owner.query<{ remaining_amount: number }>(`SELECT remaining_amount FROM credit_ledger WHERE source_order_id = $1 AND source_type = 'purchase'`, [orderId]);
+    expect(lot.rows[0].remaining_amount).toBe(2);
+    const user = await owner.query<{ credits: number }>(`SELECT credits FROM users WHERE user_id = $1`, [packUserId]);
+    expect(user.rows[0].credits).toBe(2);
+    const order = await owner.query<{ credits_refunded: number; amount_refunded_cents: number }>(
+      `SELECT credits_refunded, amount_refunded_cents FROM orders WHERE order_id = $1`,
+      [orderId]
+    );
+    expect(order.rows[0]).toEqual({ credits_refunded: 2, amount_refunded_cents: 999 });
+
+    // The flag gates the command at the panel as well as in the service.
+    await expect(
+      runner.runAdminCommand({ ...deps(), config: { ...config, packRefundCommandEnabled: false } }, stripe.refundLetters, orderId, fields)
+    ).rejects.toMatchObject({ code: 'ADMIN_COMMAND_DISABLED' });
+  }, 60_000);
 
   it('lets the operator role perform exactly the granted writes', async () => {
     await expect(operator.query(`DELETE FROM letters WHERE letter_id = $1`, [heldLetterId])).rejects.toMatchObject({ code: '42501' });

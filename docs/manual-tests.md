@@ -430,8 +430,8 @@ specific piece of mail, so the handler tries to stop that mail first.
 Precondition: PAY-01 with the Regular Pack (5 letters), then one letter sent,
 so four letters remain. `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED=true` on the
 service the command runs in. Development first, with Stripe in test mode. No
-customer-facing tool can start this; it runs from the admin surface (or, until
-that exists, from a maintainer's session against the development database).
+customer-facing tool can start this; it runs from the admin panel's order page in
+full mode (`ADMIN-STRIPE-02` walks the panel steps).
 - [ ] `get_purchase_status` for the pack reads `letters 5, lettersRemaining 4,
       lettersRefunded 0, perLetterCents 200, refundableAmountCents 800`.
 - [ ] Preview the command for 3 letters: it shows USD 6.00 and a digest.
@@ -815,8 +815,54 @@ dummy provider produces one).
 **Pass criteria:** A retry needs the exact state, a live elevation and full mode; each refusal is a stable
 code and an audit row.
 
-The Stripe and account command cases (`ADMIN-STRIPE-*`, `ADMIN-ACCT-*`) are added by the slices that
-enable them.
+### ADMIN-STRIPE-01 — Reconciliation in development against test-mode data
+
+**Preconditions:** The development panel has a **restricted** test-mode Stripe key
+(`STRIPE_SECRET_KEY`, permissions: Checkout Sessions read, Refunds read/write, Charges read,
+PaymentIntents read, Disputes read); at least one PAY-01 purchase in the window.
+
+**Steps:**
+
+1. [ ] Open `/stripe`; verify the banner and the page show the key as `test (restricted)`.
+2. [ ] Run reconciliation for 30 days; verify the summary counts match the purchases made, the
+   discrepancy table is empty, and `/audit` shows a `stripe.reconcile` row whose summary carries counts
+   and order ids but no Stripe identifier.
+3. [ ] Inject a discrepancy: in the Neon SQL editor on the development branch, revoke a fulfilled pack's
+   purchase lot (`UPDATE credit_ledger SET status = 'revoked', remaining_amount = 0 WHERE source_order_id =
+   '<order>'`) or delete it. Run reconciliation again; verify the order appears as `missing_credit` with a
+   "Preview repair…" button in full mode (or "full mode only" in read-only).
+4. [ ] Full mode: preview the repair; verify the preview shows what the order says against what the
+   reconciliation says; execute with the phrase; verify `repaired`, the lot is back, and `/audit` shows
+   `order.repair_grant`. Run the preview again and execute; verify `already_granted` and no change.
+5. [ ] Remove the key from the service and redeploy; verify the run button is disabled and a POST answers
+   `403 ADMIN_COMMAND_DISABLED`. Restore the key.
+
+**Pass criteria:** Reconciliation reads Stripe and writes only an audit row; a repair applies once and
+refuses to double-grant.
+
+### ADMIN-STRIPE-02 — Proportional refund of one letter from a two-letter test pack
+
+**Preconditions:** Development, full mode, `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED=true` on the admin
+service; a Starter Pack bought in test mode (PAY-01) with no letters sent.
+
+**Steps:**
+
+1. [ ] Open the order; verify the pack figures show 2 letters, 2 unspent, and the maximum proportional
+   refund equal to the whole price, and that the refund form is present (with the flag unset it shows the
+   disabled note instead).
+2. [ ] Preview a refund of 1 letter with reason code `customer_request`; verify the preview shows the
+   per-letter price, the refund amount floored on the product, the three warnings, and the phrase.
+3. [ ] Execute; verify the outcome shows `succeeded` (or `stripe_pending`), the account balance dropped by
+   one letter, the order shows a `commerce_pack_refunds` row linked to the command id, and the Stripe test
+   Dashboard shows a partial refund with metadata `orderId`, `packRefundId`, `lettersRefunded: 1`.
+4. [ ] Preview a second refund for the same order; verify `409 ADMIN_INVALID_STATE` (one proportional
+   refund per pack).
+5. [ ] Refund the remainder from the Stripe Dashboard; verify REFUND-06's expectations.
+
+**Pass criteria:** Letters leave first, Stripe follows with the app-computed amount, the run and the
+refund row reference each other, and a second command is refused.
+
+The account command cases (`ADMIN-ACCT-*`) are added by the slice that enables them.
 
 ---
 

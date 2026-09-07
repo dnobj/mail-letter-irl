@@ -72,7 +72,7 @@ function toAuditView(row: AuditRow): AuditEventView {
 
 export async function listAuditEvents(
   client: AdminSqlClient,
-  options: { limit: number; cursor?: string; targetId?: string; outcome?: string },
+  options: { limit: number; cursor?: string; targetId?: string; outcome?: string; action?: string },
 ): Promise<Page<AuditEventView>> {
   const cursor = decodeCursor(options.cursor);
   const params: unknown[] = [options.limit + 1];
@@ -80,6 +80,10 @@ export async function listAuditEvents(
   if (options.targetId) {
     params.push(options.targetId);
     clauses.push(`target_id = $${params.length}`);
+  }
+  if (options.action) {
+    params.push(options.action);
+    clauses.push(`action = $${params.length}`);
   }
   if (options.outcome === "denied" || options.outcome === "failed") {
     params.push(options.outcome);

@@ -160,7 +160,8 @@ In the **development** environment, create a service named `letter-irl-admin` fr
 | `PORT` | `8080` (the health listener; set it if Railway does not inject one) |
 | `ADMIN_APP_PORT` | `8790` |
 | `ADMIN_TS_HOSTNAME`, `ADMIN_TS_TAG`, `ADMIN_TS_STATE_DIR` | optional; default to `letter-irl-admin-dev`, `tag:dev-admin`, `/data/tailscale` |
-| `STRIPE_SECRET_KEY` | a **restricted** test-mode key (Checkout Sessions read, Refunds read/write, Charges read, PaymentIntents read, Disputes read); needed from slice 3 |
+| `STRIPE_SECRET_KEY` | a **restricted** test-mode key (Checkout Sessions read, Refunds read/write, Charges read, PaymentIntents read, Disputes read); needed for the Stripe page and the refund and repair commands |
+| `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED` | `true` to enable the proportional-refund command on this service; unset otherwise (the house rule: full refunds of unused packs only) |
 | `LETTER_PROVIDER` and provider keys | as the API service, for the banner and later slices |
 | `TS_AUTHKEY` | the one-off key, first boot only |
 
@@ -215,6 +216,13 @@ Commands available:
 | Acknowledge / resolve alert | `commerce_operational_alerts` | `transitionCommerceAlert` (advisory lock, state machine, hashed audit) |
 | Resolve ambiguous job | `letter_jobs` held on `ambiguous` | `resolveAmbiguousLetterJobAsAdmin` (locks order → letter → job, refuses compensated letters, resolves the alert) |
 | Retry failed job | `letter_jobs` in `failed / definite_failure` | `retryLetterJobAsAdmin` (same outbox row and provider key) |
+| Refund unspent letters | a fulfilled `letter_pack` order | `refundPackLetters` (#323: letters leave first, then Stripe with the stored idempotency key; one per pack). Enabled only when `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED=true` on the admin service; the flag has no effect on the API |
+| Repair a missing pack grant | a fulfilled `letter_pack` order from a reconciliation finding | `repairFulfilledPackGrant` (exact match of order, session, credits and amount; idempotent) |
+
+The **Stripe** page runs the reconciliation (`reconcileStripePayments`) with the service's restricted key
+in either mode; it reads Stripe, writes only a `stripe.reconcile` audit row (counts and order ids, never
+Stripe identifiers), and offers the repair preview for `missing_credit` findings in full mode. Manual
+cases: `ADMIN-STRIPE-01` and `ADMIN-STRIPE-02`.
 
 Manual cases: `ADMIN-CMD-01` to `ADMIN-CMD-03`.
 

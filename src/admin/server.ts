@@ -9,6 +9,7 @@ import { AdminConfigurationError, AdminFoundationError } from "./errors.js";
 import { clientScriptPath, createAdminRequestListener, type RouteHandler } from "./http/app.js";
 import { AdminRouter } from "./http/router.js";
 import { registerCommandRoutes } from "./http/commandRoutes.js";
+import { registerStripeRoutes } from "./http/stripeRoutes.js";
 import { NAV_ITEMS, registerReadRoutes } from "./http/routes.js";
 import { ADMIN_COMMANDS } from "./commands/index.js";
 import { AdminSessionStore, hashSessionId } from "./http/session.js";
@@ -187,7 +188,8 @@ export async function main(): Promise<void> {
   });
   const router = new AdminRouter<RouteHandler>();
   const extensions = registerCommandRoutes(router, ADMIN_COMMANDS);
-  registerReadRoutes(router, clientScript, extensions);
+  const stripeExtensions = registerStripeRoutes(router);
+  registerReadRoutes(router, clientScript, { ...extensions, ...stripeExtensions });
   const listener = createAdminRequestListener({
     config,
     pools,

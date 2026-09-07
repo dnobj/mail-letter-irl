@@ -282,6 +282,60 @@ export async function readOrderDetail(
   };
 }
 
+/** The little an order command's preview needs to bind its digest to. */
+export interface OrderVersion {
+  orderId: string;
+  userId: string;
+  orderType: string;
+  status: string;
+  credits: number | null;
+  amountCents: number;
+  amountKnown: boolean;
+  currency: string;
+  stripeCheckoutSessionId: string | null;
+  stripePaymentIntentId: string | null;
+  updatedAt: Date;
+}
+
+export async function readOrderVersion(
+  client: AdminSqlClient,
+  orderId: string,
+): Promise<OrderVersion | null> {
+  const result = await client.query<{
+    order_id: string;
+    user_id: string;
+    order_type: string;
+    status: string;
+    credits: number | null;
+    amount_cents: number;
+    amount_known: boolean;
+    currency: string;
+    stripe_checkout_session_id: string | null;
+    stripe_payment_intent_id: string | null;
+    updated_at: Date;
+  }>(
+    `SELECT order_id, user_id, order_type, status, credits, amount_cents, amount_known, currency,
+            stripe_checkout_session_id, stripe_payment_intent_id, updated_at
+     FROM orders WHERE order_id = $1`,
+    [orderId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    orderId: row.order_id,
+    userId: row.user_id,
+    orderType: row.order_type,
+    status: row.status,
+    credits: row.credits,
+    amountCents: row.amount_cents,
+    amountKnown: row.amount_known,
+    currency: row.currency,
+    stripeCheckoutSessionId: row.stripe_checkout_session_id,
+    stripePaymentIntentId: row.stripe_payment_intent_id,
+    updatedAt: row.updated_at,
+  };
+}
+
 function serializeMetadata(value: unknown): string {
   try {
     const text = JSON.stringify(value ?? {});
