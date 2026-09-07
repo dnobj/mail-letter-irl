@@ -173,34 +173,111 @@ export const ADMIN_OPERATOR_FULL_SELECT_TABLES = [
 ] as const;
 
 /**
- * Exactly the writes the enabled commands perform, per table. Anything not
- * listed fails at PostgreSQL with `permission denied`, which is the last line
- * of defence behind the route-level mode gate.
+ * Exactly the writes the enabled commands perform, per table and, where the
+ * statements are known, per column. Anything not listed fails at PostgreSQL
+ * with `permission denied`, which is the last line of defence behind the
+ * route-level mode gate.
+ *
+ * The column lists were derived by following every command's `execute` into
+ * the domain service it calls and collecting the SET and INSERT lists it
+ * reaches. `tests/integration/adminCommands.postgres.test.ts` runs the real
+ * commands against these grants, so a missing column fails there rather than
+ * in production. A table-level entry means the statement shape needs it: the
+ * admin queues, the ledger inserts and the audit tables are written whole.
+ *
+ * PostgreSQL has no column form of DELETE, so `delete` stays a table grant.
  */
+export interface AdminOperatorTableWrites {
+  insert?: readonly string[] | "table";
+  update?: readonly string[] | "table";
+  delete?: true;
+}
+
 export const ADMIN_OPERATOR_WRITE_GRANTS: Readonly<
-  Record<string, readonly ("INSERT" | "UPDATE" | "DELETE")[]>
+  Record<string, AdminOperatorTableWrites>
 > = {
-  // INSERT because the ledger grant (addCreditsToLedgerWithClient) upserts
-  // the account row; PostgreSQL needs INSERT for ON CONFLICT DO UPDATE even
-  // when the row exists.
-  users: ["INSERT", "UPDATE"],
-  orders: ["UPDATE"],
-  credit_ledger: ["INSERT", "UPDATE"],
-  credit_transactions: ["INSERT"],
-  credit_consumption: ["INSERT"],
-  letters: ["UPDATE"],
-  letter_jobs: ["UPDATE"],
-  letter_status_history: ["INSERT"],
-  commerce_operational_alerts: ["INSERT", "UPDATE"],
-  commerce_operator_audit_events: ["INSERT"],
-  commerce_order_events: ["INSERT"],
-  commerce_pack_refunds: ["INSERT", "UPDATE"],
-  stripe_webhook_events: ["UPDATE"],
-  image_entitlements: ["INSERT", "UPDATE"],
-  image_generation_reservations: ["UPDATE"],
-  promo_campaigns: ["INSERT", "UPDATE", "DELETE"],
-  provider_routing: ["UPDATE"],
-  admin_operations: ["INSERT"],
+  users: {
+    // INSERT because the ledger grant upserts the account row, and PostgreSQL
+    // needs INSERT for ON CONFLICT DO UPDATE even when the row exists. `email`
+    // and `credits_used` appear only in that INSERT list and never in a SET
+    // list, so the operator cannot rewrite either on an account that exists.
+    insert: ["user_id", "email", "credits", "credits_purchased", "credits_used"],
+    update: [
+      "credits",
+      "credits_purchased",
+      "image_generations_used",
+      "sends_blocked_at",
+      "sends_blocked_reason",
+      "tier_override",
+      "updated_at",
+    ],
+  },
+  orders: {
+    update: [
+      "amount_refunded_cents",
+      "completed_at",
+      "credits_refunded",
+      "fulfilled_at",
+      "held_at",
+      "hold_previous_status",
+      "hold_reason",
+      "last_error",
+      "last_error_code",
+      "refund_pending_at",
+      "status",
+      "updated_at",
+    ],
+  },
+  letters: {
+    // Never content, recipient, preview_html or redacted_at: the retention
+    // sweep owns those and no command touches them.
+    update: [
+      "provider",
+      "provider_raw_status",
+      "sent_at",
+      "status",
+      "status_updated_at",
+      "tracking_id",
+      "updated_at",
+    ],
+  },
+  letter_jobs: {
+    update: [
+      "attempts",
+      "completed_at",
+      "error_message",
+      "held_at",
+      "hold_reason",
+      "last_error",
+      "locked_at",
+      "max_attempts",
+      "next_attempt_at",
+      "operator_resolution",
+      "provider_order_id",
+      "provider_outcome",
+      "resolved_at",
+      "scheduled_at",
+      "status",
+      "updated_at",
+    ],
+  },
+  credit_ledger: { insert: "table", update: "table" },
+  credit_transactions: { insert: "table" },
+  credit_consumption: { insert: "table" },
+  letter_status_history: { insert: "table" },
+  commerce_operational_alerts: { insert: "table", update: "table" },
+  commerce_operator_audit_events: { insert: "table" },
+  commerce_order_events: { insert: "table" },
+  commerce_pack_refunds: { insert: "table", update: "table" },
+  image_entitlements: { insert: "table", update: "table" },
+  image_generation_reservations: { update: "table" },
+  promo_campaigns: { insert: "table", update: "table", delete: true },
+  provider_routing: { update: "table" },
+  admin_operations: { insert: "table" },
+  // stripe_webhook_events held a table-level UPDATE until the security review.
+  // Every write to it happens inside Stripe webhook processing, which the
+  // panel never enters; the panel only reads it, through the reader role. Dead
+  // grant surface, so it is gone rather than narrowed.
 };
 
 function invalidProvisioningConfiguration(
@@ -361,13 +438,18 @@ export function buildAdminGrantStatements(
   );
 
   // One statement per privilege so each grant is reviewable on its own line.
-  for (const [name, privileges] of Object.entries(
-    ADMIN_OPERATOR_WRITE_GRANTS,
-  )) {
-    for (const privilege of privileges) {
+  for (const [name, writes] of Object.entries(ADMIN_OPERATOR_WRITE_GRANTS)) {
+    for (const privilege of ["INSERT", "UPDATE"] as const) {
+      const columns = privilege === "INSERT" ? writes.insert : writes.update;
+      if (!columns) continue;
+      const scope = columns === "table" ? "" : ` (${quoteColumns(columns)})`;
       statements.push(
-        `GRANT ${privilege} ON TABLE ${table(name)} TO ${operatorRole}`,
+        `GRANT ${privilege}${scope} ON TABLE ${table(name)} TO ${operatorRole}`,
       );
+    }
+    if (writes.delete) {
+      // PostgreSQL has no column form of DELETE.
+      statements.push(`GRANT DELETE ON TABLE ${table(name)} TO ${operatorRole}`);
     }
   }
   // SERIAL columns (credit_transactions, letter_status_history) need the
@@ -375,6 +457,12 @@ export function buildAdminGrantStatements(
   statements.push(
     `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ${schemaIdentifier} TO ${operatorRole}`,
     `REVOKE UPDATE, DELETE, TRUNCATE ON TABLE ${table("admin_audit_events")} FROM ${roles}`,
+    // The revoke above takes EXECUTE from the two roles, but PostgreSQL grants
+    // it to PUBLIC by default and both roles inherit that. No SECURITY DEFINER
+    // function exists today, so nothing is reachable; this is here so the first
+    // one added later is not silently callable by the reader (A-24).
+    `REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA ${schemaIdentifier} FROM PUBLIC`,
+    `ALTER DEFAULT PRIVILEGES IN SCHEMA ${schemaIdentifier} REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC`,
   );
   return statements;
 }

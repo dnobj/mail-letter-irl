@@ -259,14 +259,28 @@ export function parseAdminRuntimeConfig(
   }
 
   const stripeKey = env.STRIPE_SECRET_KEY ?? "";
-  const stripeKeyMode: AdminRuntimeConfig["stripeKeyMode"] = !stripeKey
-    ? "absent"
-    : /^(sk|rk)_live_/.test(stripeKey)
-      ? "live"
-      : "test";
-  const stripeKeyRestricted = stripeKey.startsWith("rk_");
-  if (stripeKey && !/^(sk|rk)_(live|test)_/.test(stripeKey)) {
+  // Shape first: anything that is not a recognised key is rejected outright,
+  // rather than being classified as a test key because it merely lacks the
+  // live prefix.
+  const wellFormedStripeKey = /^(sk|rk)_(live|test)_/.test(stripeKey);
+  if (stripeKey && !wellFormedStripeKey) {
     problems.push("STRIPE_SECRET_KEY does not look like a Stripe secret key");
+  }
+  const stripeKeyMode: AdminRuntimeConfig["stripeKeyMode"] =
+    !stripeKey || !wellFormedStripeKey
+      ? "absent"
+      : /^(sk|rk)_live_/.test(stripeKey)
+        ? "live"
+        : "test";
+  const stripeKeyRestricted = stripeKey.startsWith("rk_");
+  // The panel reads Stripe and issues refunds. A full secret key would let a
+  // defect here do anything the Stripe account can, so the guide has always
+  // said to use a restricted key; now the service refuses to boot without one
+  // rather than trusting the runbook (issue #162 security review, A-14).
+  if (stripeKey && wellFormedStripeKey && !stripeKeyRestricted) {
+    problems.push(
+      "STRIPE_SECRET_KEY on the admin service must be a restricted key (rk_), not a full secret key",
+    );
   }
   if (environment === "production" && stripeKeyMode === "test") {
     problems.push("STRIPE_SECRET_KEY must be a live key in production");

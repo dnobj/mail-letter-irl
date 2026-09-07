@@ -233,7 +233,7 @@ from the repository deploys at once with nothing configured:
 | `PORT` | `8080` (the health listener; set it if Railway does not inject one) |
 | `ADMIN_APP_PORT` | `8790` |
 | `ADMIN_TS_HOSTNAME`, `ADMIN_TS_TAG`, `ADMIN_TS_STATE_DIR` | optional; default to `letter-irl-admin-dev`, `tag:dev-admin`, `/data/tailscale` |
-| `STRIPE_SECRET_KEY` | a **restricted** test-mode key (Checkout Sessions read, Refunds read/write, Charges read, PaymentIntents read, Disputes read); needed for the Stripe page and the refund and repair commands |
+| `STRIPE_SECRET_KEY` | a **restricted** test-mode key (Checkout Sessions read, Refunds read/write, Charges read, PaymentIntents read, Disputes read); needed for the Stripe page and the refund and repair commands. The service refuses to boot on a full `sk_` key, so this is enforced rather than advised |
 | `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED` | `true` to enable the proportional-refund command on this service; unset otherwise (the house rule: full refunds of unused packs only) |
 | `LETTER_PROVIDER` and provider keys | as the API service, for the banner and later slices |
 | `TS_AUTHKEY` | the one-off key, first boot only |
