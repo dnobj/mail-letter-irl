@@ -643,9 +643,17 @@ phone's client is below the posture minimum and Railway offers no shell into the
    with no warning.)
 3. [ ] From the phone on the tailnet, open the same URL; verify it answers. Turn Tailscale off on the phone;
    verify the URL no longer resolves or connects.
-4. [ ] From another service in the development environment (a Railway shell on the API service), run
-   `curl -si http://letter-irl-admin.railway.internal:$PORT/healthz`; verify the body is exactly `ok` and
-   `curl -si http://letter-irl-admin.railway.internal:8790/` is refused (connection refused, not a page).
+4. [ ] **The app port must be refused from the tailnet.** The boot log prints
+   `admin.tailnet_addresses`; from a device the policy allows, and for each address it names, verify
+   that `curl -sv --max-time 5 http://<address>:8790/` and `https://<address>:8790/` both fail to
+   connect, while `https://letter-irl-admin-dev.<tailnet>.ts.net/` answers. This is the step that
+   proves the policy carries the weight the trust model gives it: userspace networking forwards an
+   inbound tunnel connection to the same port on localhost, so a peer allowed to reach 8790 would
+   meet the application listener with headers of its own choosing. Re-run after any policy edit.
+   Then, from another service in the development environment (a Railway shell on the API service),
+   run `curl -si http://letter-irl-admin.railway.internal:$PORT/healthz`; verify the body is exactly
+   `ok` and `curl -si http://letter-irl-admin.railway.internal:8790/` is refused (connection refused,
+   not a page).
 5. [x] From the internet, verify the service has no `*.up.railway.app` domain and that
    `https://letter-irl-admin-dev.<tailnet>.ts.net/healthz` does not resolve off the tailnet. (Railway lists
    no service or custom domain; public resolvers return no address for the name; `/healthz` through Serve

@@ -136,6 +136,13 @@ export async function main(): Promise<void> {
     });
     identity = await supervisor.start();
     state.tailscale = true;
+    // The addresses ADMIN-INFRA-01 probes: the app port must be refused on
+    // each of them from an allowed device, which is what proves the tailnet
+    // policy is doing the job the panel's trust model gives it.
+    writeDiagnostic("info", "admin.tailnet_addresses", {
+      addresses: identity.tailscaleIps.join(","),
+      node: identity.dnsName,
+    });
     if (config.tailscale.authKey) {
       console.warn("[admin] TS_AUTHKEY is still set; delete the variable now that the node is registered.");
     }

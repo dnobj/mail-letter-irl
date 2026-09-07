@@ -105,9 +105,16 @@ export class AdminSessionStore {
   }
 
   /**
-   * Look a session up and re-check its binding. Any mismatch destroys the
-   * session: a cookie presented from another login, another peer address or
-   * another node is treated as theft, not as a new device.
+   * Look a session up and re-check its binding. A mismatch destroys the
+   * session: a cookie presented from another login or another peer address is
+   * treated as theft, not as a new device.
+   *
+   * The node is stored on the session but not compared here, and this comment
+   * used to claim it was. It cannot be: the node name comes from a whois of
+   * the peer address, which runs only when a session is created, so comparing
+   * it per request would mean a whois per request. Little is lost, because the
+   * node is derived from the peer address that is compared - a cookie arriving
+   * from another device brings another address with it.
    */
   resolve(
     id: string | undefined,
