@@ -10,7 +10,7 @@ function commandRow(overrides: Record<string, unknown> = {}) {
   return {
     id: randomUUID(),
     idempotencyKey: "command-key-1",
-    actorSid: "S-1-5-21-1000",
+    actorId: "owner@example.com",
     environment: "development",
     action: "balance.adjust",
     targetType: "user",
@@ -31,7 +31,7 @@ function commandRow(overrides: Record<string, unknown> = {}) {
 function commandInput(row: ReturnType<typeof commandRow>) {
   return {
     idempotencyKey: row.idempotencyKey,
-    actorSid: row.actorSid,
+    actorId: row.actorId,
     environment: row.environment as "development",
     action: row.action,
     targetType: row.targetType,
@@ -52,7 +52,7 @@ describe("AdminAuditWriter", () => {
     const receipt = await writer.appendEvent(
       { query } as unknown as AdminSqlClient,
       {
-        actor: { sid: "S-1-5-21-1000", name: "operator" },
+        actor: { id: "owner@example.com", name: "operator" },
         environment: "development",
         mode: "read-only",
         sessionIdHash: "b".repeat(64),
@@ -79,7 +79,7 @@ describe("AdminAuditWriter", () => {
 
     await expect(
       writer.appendEvent({ query } as unknown as AdminSqlClient, {
-        actor: { sid: "S-1-5-21-1000", name: "operator" },
+        actor: { id: "owner@example.com", name: "operator" },
         environment: "development",
         mode: "read-only",
         sessionIdHash: "b".repeat(64),

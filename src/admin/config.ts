@@ -33,13 +33,14 @@ export const AdminEnvironmentConfigSchema = z
         operatorRole: DatabaseRoleSchema,
       })
       .strict(),
-    allowedOperatorSids: z.array(WindowsSidSchema).min(1).max(20),
+    allowedOperatorSids: z.array(WindowsSidSchema).min(1).max(20).optional(),
     credentials: z
       .object({
         readerSecretName: z.string().trim().min(1).max(255),
         operatorSecretName: z.string().trim().min(1).max(255),
       })
-      .strict(),
+      .strict()
+      .optional(),
     integrations: z
       .object({
         stripeMode: z.enum(["test", "live"]),
@@ -54,13 +55,15 @@ export const AdminEnvironmentConfigSchema = z
         absoluteTtlMinutes: z.number().int().min(5).max(60),
         elevationTtlMinutes: z.number().int().min(1).max(10),
       })
-      .strict(),
+      .strict()
+      .optional(),
     network: z
       .object({
         portMin: z.number().int().min(49152).max(65535),
         portMax: z.number().int().min(49152).max(65535),
       })
-      .strict(),
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((config, context) => {
@@ -103,8 +106,9 @@ export const AdminEnvironmentConfigSchema = z
       });
     }
     if (
+      config.credentials &&
       config.credentials.readerSecretName ===
-      config.credentials.operatorSecretName
+        config.credentials.operatorSecretName
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -113,14 +117,17 @@ export const AdminEnvironmentConfigSchema = z
           "Reader and operator credentials must use different secret names",
       });
     }
-    if (config.network.portMin > config.network.portMax) {
+    if (config.network && config.network.portMin > config.network.portMax) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["network"],
         message: "Port minimum cannot exceed port maximum",
       });
     }
-    if (config.session.idleTtlMinutes >= config.session.absoluteTtlMinutes) {
+    if (
+      config.session &&
+      config.session.idleTtlMinutes >= config.session.absoluteTtlMinutes
+    ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["session"],
@@ -274,6 +281,7 @@ export function validateAdminLaunchPolicy(
   }
   if (
     launch.port !== undefined &&
+    config.network &&
     (launch.port < config.network.portMin ||
       launch.port > config.network.portMax)
   ) {

@@ -28,7 +28,7 @@ describe("shared admin contracts", () => {
 
   it("enforces bounded audit JSON and outcome/error consistency", () => {
     const base = {
-      actor: { sid: "S-1-5-21-1000", name: "operator" },
+      actor: { id: "owner@example.com", name: "operator" },
       environment: "development",
       mode: "read-only",
       sessionIdHash: "a".repeat(64),

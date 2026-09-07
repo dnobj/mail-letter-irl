@@ -92,6 +92,24 @@ describeWithDatabase("admin foundation database migration", () => {
     await client.query("INSERT INTO migrations (name) VALUES ($1)", [
       ADMIN_MIGRATION_SEQUENCE[1],
     ]);
+
+    // Everything after 022, in order. The grant statements name commerce
+    // tables that only exist from 023 onwards, and production applies the
+    // whole sequence before the admin service ever connects.
+    const laterMigrations = (await readdir(migrationsDirectory))
+      .filter((filename) => {
+        const sequence = Number(filename.slice(0, 3));
+        return filename.endsWith(".sql") && sequence >= 23;
+      })
+      .sort();
+    for (const filename of laterMigrations) {
+      await client.query(
+        await readFile(join(migrationsDirectory, filename), "utf8"),
+      );
+      await client.query("INSERT INTO migrations (name) VALUES ($1)", [
+        filename,
+      ]);
+    }
   }, 60_000);
 
   afterAll(async () => {
