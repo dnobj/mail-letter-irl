@@ -27,10 +27,19 @@ and accounts with sends blocked; maintenance health; and the audit and command h
 The panel never renders letter content, recipients, return addresses, draft bodies or images, token
 hashes or quarantined content. That is enforced below the application: the reader role it connects as
 has column-level `SELECT` on `users`, `letters`, `letter_drafts`, `personal_access_tokens`,
-`feature_requests` and `redacted_content_quarantine` that omits those columns
-(`src/admin/provisioning.ts`), and `tests/integration/adminReadModels.postgres.test.ts` proves a
-`SELECT content FROM letters` fails as that role. An email address is masked until an operator reveals it
-with a reason, which writes a `pii.reveal` audit event.
+`feature_requests`, `redacted_content_quarantine`, `credit_transactions` and `credit_ledger` that
+omits those columns (`src/admin/provisioning.ts`), and
+`tests/integration/adminReadModels.postgres.test.ts` proves a `SELECT content FROM letters` fails as
+that role. An email address is masked until an operator reveals it with a reason, which writes a
+`pii.reveal` audit event.
+
+The two ledger `description` columns are on that list because a derived string can carry personal
+data as surely as a source column: the send path wrote `Letter to <recipient name>` there until
+migration `030`, and an operator balance adjustment wrote the operator's reason, which the customer
+can read back through the credits API. Both now write a fixed label, the reader cannot select either
+column, and the operator's reason lives only in `admin_audit_events`. When you add a column to a
+table on the column-granted list, it is not granted until someone names it, which is the intended
+direction of failure.
 
 ## How a request is authenticated
 

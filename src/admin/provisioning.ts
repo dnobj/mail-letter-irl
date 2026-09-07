@@ -15,7 +15,7 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * exist yet fails the whole transaction.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "029_proportional_pack_refunds.sql";
+  "030_ledger_description_minimisation.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";
@@ -40,8 +40,6 @@ export interface AdminProvisioningRole {
  * content, a postal address, or a credential.
  */
 export const ADMIN_READER_TABLES = [
-  "credit_transactions",
-  "credit_ledger",
   "credit_consumption",
   "promo_campaigns",
   "promo_redemptions",
@@ -69,8 +67,10 @@ export const ADMIN_READER_TABLES = [
  * Tables the reader may read only column by column. The omitted columns are
  * the ones a privileged page must never be able to select: letter content and
  * recipients, draft bodies and images, return addresses, token hashes, the
- * quarantined content itself, and a customer's contact email on a feature
- * request.
+ * quarantined content itself, a customer's contact email on a feature
+ * request, and the two free-text ledger descriptions, which have carried a
+ * recipient's name and an operator's reason (issue #162 security review,
+ * A-01 and A-13).
  */
 export const ADMIN_READER_COLUMN_GRANTS: Readonly<
   Record<string, readonly string[]>
@@ -157,6 +157,39 @@ export const ADMIN_READER_COLUMN_GRANTS: Readonly<
     "source_id",
     "quarantined_at",
     "purge_after",
+  ],
+  // Every column except `description`. Both ledger tables were whole-table
+  // readable until the security review: the send path wrote the recipient's
+  // name into the transaction description, and an operator adjustment wrote
+  // the operator's reason into both. Adding a column to either table no
+  // longer grants it by accident, which is the point of the column list.
+  credit_transactions: [
+    "transaction_id",
+    "user_id",
+    "amount",
+    "balance_after",
+    "type",
+    "reference_type",
+    "reference_id",
+    "created_at",
+  ],
+  credit_ledger: [
+    "ledger_id",
+    "user_id",
+    "initial_amount",
+    "remaining_amount",
+    "source_type",
+    "source_reference_id",
+    "source_order_id",
+    "source_metadata",
+    "activated_at",
+    "expires_at",
+    "expiration_policy",
+    "expiration_days",
+    "status",
+    "related_ledger_id",
+    "created_at",
+    "updated_at",
   ],
 };
 

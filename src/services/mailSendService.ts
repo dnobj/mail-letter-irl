@@ -280,7 +280,11 @@ export async function createMailOrderFromDraftWithClient(
       userId: params.userId,
       credits: requiredCredits,
       letterId,
-      description: `${params.mailType === 'postcard' ? 'Postcard' : 'Letter'} to ${String(draft.recipient.name || 'recipient')}`
+      // The mail type, never the recipient. This string is readable by the
+      // customer's own transaction history, and the recipient is third-party
+      // data that belongs only on letters.recipient, which the admin panel's
+      // reader role cannot select (issue #162 security review, A-01).
+      description: `Sent ${params.mailType === 'postcard' ? 'postcard' : 'letter'} (${requiredCredits} credits)`
     });
     creditsRemaining = deduction.user.credits;
 

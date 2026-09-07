@@ -116,7 +116,7 @@ ${table(
     html`${yesNo(lot.spendable)}`,
     when(lot.activatedAt),
     when(lot.expiresAt),
-    html`${lot.sourceReason ?? lot.description ?? "—"}`,
+    html`${lot.sourceReason ?? "—"}`,
   ]),
 )}
 
@@ -186,14 +186,13 @@ ${table(
 <h2>Recent credit transactions</h2>
 ${table(
   "Transactions",
-  ["When", "Type", "Amount", "Balance after", "Reference", "Description"],
+  ["When", "Type", "Amount", "Balance after", "Reference"],
   input.detail.transactions.map((transaction) => [
     when(transaction.createdAt),
     html`${transaction.type}`,
     html`${transaction.amount}`,
     html`${transaction.balanceAfter}`,
     html`${transaction.referenceType ?? ""} <span class="mono">${transaction.referenceId ?? ""}</span>`,
-    html`${transaction.description ?? ""}`,
   ]),
 )}`;
 }

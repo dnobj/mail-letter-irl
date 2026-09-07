@@ -320,11 +320,15 @@ export async function adjustCreditsWithClient(
     throw new Error('Cannot adjust credits: ledger has fewer spendable credits than the balance');
   }
 
+  // RETURNING names its columns rather than *: the admin operator role has no
+  // SELECT on credit_transactions.description, and PostgreSQL requires SELECT
+  // on every column a RETURNING clause names (issue #162 security review).
   const txResult = await client.query<CreditTransaction>(
     `INSERT INTO credit_transactions (
       user_id, amount, balance_after, type, reference_type, reference_id, description
     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-    RETURNING *`,
+    RETURNING transaction_id, user_id, amount, balance_after, type,
+              reference_type, reference_id, created_at`,
     [userId, amount, user.credits, 'adjustment', 'manual', null, reason]
   );
   const txn = txResult.rows[0];

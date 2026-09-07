@@ -75,7 +75,7 @@ ${table(
     html`${yesNo(lot.spendable)}`,
     when(lot.activatedAt),
     when(lot.expiresAt),
-    html`${lot.sourceReason ?? lot.description ?? "—"}`,
+    html`${lot.sourceReason ?? "—"}`,
   ]),
 )}
 

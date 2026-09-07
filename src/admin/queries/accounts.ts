@@ -38,7 +38,6 @@ export interface LedgerLotView {
   activatedAt: Date;
   expiresAt: Date | null;
   expirationPolicy: string | null;
-  description: string | null;
   relatedLedgerId: string | null;
   createdAt: Date;
   /** Active, unexpired and holding credits: the lots consumption would touch. */
@@ -120,7 +119,6 @@ export interface TransactionView {
   type: string;
   referenceType: string | null;
   referenceId: string | null;
-  description: string | null;
   createdAt: Date;
 }
 
@@ -193,7 +191,7 @@ function toAccountSummary(row: AccountRow, ledgerAvailable: number): AccountSumm
 export const LOT_COLUMNS = `
   ledger_id, initial_amount, remaining_amount, source_type::text AS source_type,
   source_reference_id, source_order_id, source_metadata->>'reason' AS source_reason,
-  status::text AS status, activated_at, expires_at, expiration_policy, description,
+  status::text AS status, activated_at, expires_at, expiration_policy,
   related_ledger_id, created_at,
   (status = 'active' AND remaining_amount > 0 AND (expires_at IS NULL OR expires_at > NOW())) AS spendable
 `;
@@ -210,7 +208,6 @@ export interface LotRow {
   activated_at: Date;
   expires_at: Date | null;
   expiration_policy: string | null;
-  description: string | null;
   related_ledger_id: string | null;
   created_at: Date;
   spendable: boolean;
@@ -229,7 +226,6 @@ export function toLotView(row: LotRow): LedgerLotView {
     activatedAt: row.activated_at,
     expiresAt: row.expires_at,
     expirationPolicy: row.expiration_policy,
-    description: row.description,
     relatedLedgerId: row.related_ledger_id,
     createdAt: row.created_at,
     spendable: row.spendable,
@@ -439,10 +435,11 @@ export async function readAccountDetail(
     type: string;
     reference_type: string | null;
     reference_id: string | null;
-    description: string | null;
     created_at: Date;
   }>(
-    `SELECT transaction_id, amount, balance_after, type, reference_type, reference_id, description, created_at
+    // No description: the reader role has no SELECT on it, and it is the
+    // column that carried recipient names (issue #162 security review).
+    `SELECT transaction_id, amount, balance_after, type, reference_type, reference_id, created_at
      FROM credit_transactions WHERE user_id = $1 ORDER BY created_at DESC, transaction_id DESC LIMIT 50`,
     [userId],
   );
@@ -481,7 +478,6 @@ export async function readAccountDetail(
       type: t.type,
       referenceType: t.reference_type,
       referenceId: t.reference_id,
-      description: t.description,
       createdAt: t.created_at,
     })),
     openDisputes: Number(disputes.rows[0]?.count ?? 0),

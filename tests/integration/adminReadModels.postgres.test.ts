@@ -139,7 +139,7 @@ describePostgres('admin read models through the reader role', () => {
     }
     const deduction = await owner.query<{ transaction_id: number }>(
       `INSERT INTO credit_transactions (user_id, amount, balance_after, type, reference_type, reference_id, description)
-       VALUES ($1, -2, 2, 'deduction', 'letter', $2, 'Letter sent') RETURNING transaction_id`,
+       VALUES ($1, -2, 2, 'deduction', 'letter', $2, 'Letter to Wilhelmina Ashgrove') RETURNING transaction_id`,
       [userId, sentLetterId]
     );
     await owner.query(
@@ -198,8 +198,15 @@ describePostgres('admin read models through the reader role', () => {
       'SELECT return_address FROM users LIMIT 1',
       'SELECT token_hash FROM personal_access_tokens LIMIT 1',
       'SELECT body_text FROM letter_drafts LIMIT 1',
+      // The two free-text ledger descriptions: the send path wrote the
+      // recipient's name here, and an operator adjustment wrote the operator's
+      // reason (issue #162 security review, A-01 and A-13).
+      'SELECT description FROM credit_transactions LIMIT 1',
+      'SELECT description FROM credit_ledger LIMIT 1',
       'SELECT * FROM letters LIMIT 1',
       'SELECT * FROM users LIMIT 1',
+      'SELECT * FROM credit_transactions LIMIT 1',
+      'SELECT * FROM credit_ledger LIMIT 1',
       `UPDATE users SET credits = 0 WHERE user_id = '${userId}'`,
       `UPDATE commerce_operational_alerts SET status = 'resolved'`,
       `INSERT INTO credit_ledger (user_id, initial_amount, remaining_amount, source_type) VALUES ('${userId}', 1, 1, 'adjustment')`,
@@ -209,6 +216,12 @@ describePostgres('admin read models through the reader role', () => {
     }
     await expect(reader.query('SELECT letter_id, status, tracking_id FROM letters LIMIT 1')).resolves.toBeTruthy();
     await expect(reader.query('SELECT user_id, email, credits FROM users LIMIT 1')).resolves.toBeTruthy();
+    await expect(
+      reader.query('SELECT transaction_id, amount, balance_after, type FROM credit_transactions LIMIT 1')
+    ).resolves.toBeTruthy();
+    await expect(
+      reader.query('SELECT ledger_id, initial_amount, remaining_amount, status FROM credit_ledger LIMIT 1')
+    ).resolves.toBeTruthy();
     // The reader records its own audit rows, and can never rewrite them.
     const audit = await reader.query<{ id: string }>(
       `INSERT INTO admin_audit_events (actor_sid, actor_name, environment, mode, session_id_hash, correlation_id,
@@ -256,6 +269,12 @@ describePostgres('admin read models through the reader role', () => {
     expect(held).toMatchObject({ jobId: heldJobId, jobStatus: 'held', jobHoldReason: 'provider_timeout', hasTrackingId: false });
     expect(JSON.stringify(detail)).not.toContain('private words');
     expect(JSON.stringify(detail)).not.toContain('Private');
+    // The seeded transaction description carries a recipient's name in the
+    // shape the send path used to write. The account detail must not carry it:
+    // this is the case whose absence let A-01 through, because the earlier
+    // assertions only covered columns that hold content directly.
+    expect(JSON.stringify(detail)).not.toContain('Wilhelmina');
+    expect(JSON.stringify(detail)).not.toContain('Ashgrove');
     expect(await withReadOnlyTransaction(reader, (client) => revealAccountEmail(client, userId))).toBe(email);
     expect(await withReadOnlyTransaction(reader, (client) => readAccountDetail(client, 'auth0|nobody'))).toBeNull();
   });
