@@ -33,6 +33,8 @@ describe("admin grant statements", () => {
       "personal_access_tokens",
       "feature_requests",
       "redacted_content_quarantine",
+      "credit_transactions",
+      "credit_ledger",
     ]) {
       expect(ADMIN_READER_TABLES).not.toContain(restricted);
       expect(ADMIN_READER_COLUMN_GRANTS).toHaveProperty(restricted);
@@ -66,6 +68,25 @@ describe("admin grant statements", () => {
       ADMIN_READER_COLUMN_GRANTS.redacted_content_quarantine,
     ).not.toContain("content");
     expect(sql).toContain("GRANT SELECT (letter_id, user_id, credits_cost");
+  });
+
+  it("omits the free-text ledger descriptions, which carried recipient names and operator reasons", () => {
+    expect(ADMIN_READER_COLUMN_GRANTS.credit_transactions).not.toContain(
+      "description",
+    );
+    expect(ADMIN_READER_COLUMN_GRANTS.credit_ledger).not.toContain(
+      "description",
+    );
+    // The columns the panel does read are still granted, so this is a narrow
+    // grant rather than a table the reader lost entirely.
+    expect(ADMIN_READER_COLUMN_GRANTS.credit_transactions).toContain("amount");
+    expect(ADMIN_READER_COLUMN_GRANTS.credit_ledger).toContain(
+      "remaining_amount",
+    );
+    // Both roles share the grant statement, so the operator loses the column
+    // too; the credit paths it reaches name their RETURNING columns for that
+    // reason.
+    expect(sql).not.toMatch(/GRANT SELECT \([^)]*description[^)]*\) ON TABLE "public"\.credit_/);
   });
 
   it("gives the operator whole rows only where domain services select them, plus explicit writes", () => {

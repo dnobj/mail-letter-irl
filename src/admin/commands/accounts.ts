@@ -176,7 +176,11 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
           execution.client as never,
           userId,
           signed,
-          `Operator adjustment: ${execution.reason}`,
+          // A fixed string, not the operator's reason: this becomes the
+          // ledger description, which the customer can read back through
+          // GET /api/credits/transactions. The reason belongs to the audit
+          // trail alone (issue #162 security review, A-13).
+          "Operator adjustment",
         );
         return { creditsAfter: result.user.credits, transactionId: result.transaction.transaction_id };
       } catch (error) {

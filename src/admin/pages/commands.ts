@@ -43,7 +43,7 @@ ${
   <input type="hidden" name="expectedVersion" value="${input.preview.expectedVersion ?? ""}">
   <input type="hidden" name="idempotencyKey" value="${input.idempotencyKey}">
   ${join(input.hiddenFields.map(([name, value]) => html`<input type="hidden" name="${name}" value="${value}">`))}
-  <label for="reason">Reason (recorded in the audit log)</label>
+  <label for="reason">Reason (recorded in the audit log, never shown to the customer)</label>
   <input type="text" id="reason" name="reason" minlength="8" maxlength="500" required autocomplete="off">
   <label for="phrase">Type <code>${input.phrase}</code> to confirm</label>
   <input type="text" id="phrase" name="phrase" data-confirm-phrase="${input.phrase}" autocomplete="off" spellcheck="false" required>

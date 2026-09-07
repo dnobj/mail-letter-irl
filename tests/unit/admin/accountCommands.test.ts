@@ -126,7 +126,7 @@ describe("account commands", () => {
     });
   });
 
-  it("adjusts in letters, refuses removing more than the ledger holds, and prefixes the reason", async () => {
+  it("adjusts in letters, refuses removing more than the ledger holds, and keeps the operator's reason out of the ledger", async () => {
     const { calls, commands } = harness();
     expect(commands.adjustBalance.parseInput(new Map([["letters", "2"], ["direction", "add"]]))).toEqual({ letters: 2, direction: "add" });
     expect(() => commands.adjustBalance.parseInput(new Map([["letters", "0"], ["direction", "add"]]))).toThrowError(expect.objectContaining({ code: "ADMIN_INVALID_REQUEST" }));
@@ -141,7 +141,11 @@ describe("account commands", () => {
 
     const result = await commands.adjustBalance.execute(execution({}), "auth0|u1", { letters: 2, direction: "remove" }, preview);
     expect(result).toEqual({ creditsAfter: 0, transactionId: 7 });
-    expect(calls.adjust).toEqual([["auth0|u1", -4, "Operator adjustment: support ticket 42"]]);
+    // A fixed description, not the operator's reason: this string becomes the
+    // ledger description the customer reads back through the credits API, and
+    // the reason belongs to the audit trail alone (A-13).
+    expect(calls.adjust).toEqual([["auth0|u1", -4, "Operator adjustment"]]);
+    expect(JSON.stringify(calls.adjust)).not.toContain("support ticket 42");
     expect(commands.adjustBalance.verb({ letters: 1, direction: "add" })).toBe("ADD-LETTERS");
   });
 
