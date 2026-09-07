@@ -22,12 +22,13 @@ export type LiftSendBlockOutcome = 'lifted' | 'not_blocked' | 'dispute_standing'
 
 /** Disputes that still justify a block: everything not in the non-loss set. */
 export async function countStandingDisputes(client: Client, userId: string): Promise<number> {
-  const result = await client.query<{ count: string }>(
+  const result = await client.query(
     `SELECT COUNT(*)::text AS count FROM stripe_disputes
      WHERE user_id = $1 AND NOT (status = ANY($2::text[]))`,
     [userId, [...NON_LOSS_DISPUTE_STATUSES]]
   );
-  return Number(result.rows[0]?.count ?? 0);
+  const row = result.rows[0] as { count: string } | undefined;
+  return Number(row?.count ?? 0);
 }
 
 /**
@@ -36,12 +37,13 @@ export async function countStandingDisputes(client: Client, userId: string): Pro
  * dispute that would itself justify a block still stands.
  */
 export async function liftSendBlock(client: Client, userId: string): Promise<LiftSendBlockOutcome> {
-  const user = await client.query<{ sends_blocked_at: Date | null }>(
+  const user = await client.query(
     'SELECT sends_blocked_at FROM users WHERE user_id = $1 FOR UPDATE',
     [userId]
   );
-  if (!user.rows[0]) throw new Error('not_found');
-  if (!user.rows[0].sends_blocked_at) return 'not_blocked';
+  const row = user.rows[0] as { sends_blocked_at: Date | null } | undefined;
+  if (!row) throw new Error('not_found');
+  if (!row.sends_blocked_at) return 'not_blocked';
   if ((await countStandingDisputes(client, userId)) > 0) return 'dispute_standing';
   await client.query(
     `UPDATE users SET sends_blocked_at = NULL, sends_blocked_reason = NULL, updated_at = NOW()
@@ -63,11 +65,11 @@ export async function releaseAmountMismatchQuarantine(
   orderId: string,
   reason: string
 ): Promise<ReleaseQuarantineOutcome> {
-  const order = await client.query<{ status: string; last_error_code: string | null }>(
+  const order = await client.query(
     'SELECT status, last_error_code FROM orders WHERE order_id = $1 FOR UPDATE',
     [orderId]
   );
-  const row = order.rows[0];
+  const row = order.rows[0] as { status: string; last_error_code: string | null } | undefined;
   if (!row) throw new Error('not_found');
   if (row.last_error_code !== 'PAYMENT_AMOUNT_MISMATCH') return 'not_quarantined';
   await client.query(
