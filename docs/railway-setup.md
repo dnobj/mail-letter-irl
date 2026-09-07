@@ -21,7 +21,9 @@ Production API and website remain warm. Development API and website use Railway 
 committed: `nixpacks.toml` holds build and start, `railway.toml` holds the
 pre-deploy command, and Railway's config-as-code overrides dashboard values. The
 block below records what those files produce so this guide can be checked against
-them; it is not a list of things to type in.
+them; it is not a list of things to type in. Railway stops reading these files on
+2026-12-01 (config-as-code is deprecated); see the deadline note in
+[deployment.md](deployment.md).
 
 Healthcheck path and region are dashboard settings and do have to be set here.
 

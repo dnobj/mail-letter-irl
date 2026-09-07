@@ -1,9 +1,11 @@
 # Letter IRL Admin Panel
 
-**Last updated:** September 6, 2026
+**Last updated:** September 7, 2026
 
 The admin panel is a separate Railway service in each environment, built from this repository with
-`Dockerfile.admin` and `railway.admin.toml`. It has no public domain and no inbound port: the container
+`Dockerfile.admin`, which the service selects through its `RAILWAY_DOCKERFILE_PATH` variable (Railway has
+deprecated config-as-code files, so the service's settings live in the dashboard and are listed below). It
+has no public domain and no inbound port: the container
 runs `tailscaled` in userspace-networking mode next to the Node process and publishes the panel to the
 owner's tailnet with Tailscale Serve, so the only path to it is a WireGuard tunnel from an approved
 device on that tailnet, at `https://letter-irl-admin-<dev|prod>.<tailnet>.ts.net`.
@@ -59,18 +61,45 @@ at PostgreSQL as well as at the route.
 
 ### 1. Database roles
 
-In the Neon SQL editor on the **development** branch, as the owner role, create the two login roles.
-Console-created roles get `neon_superuser`, so these must be created with SQL. Choose the passwords in a
-password manager; they are never committed, printed or pasted into chat.
+In the Neon SQL editor on the **development** branch (the editor runs as the owner role), create the two
+login roles **without passwords**. Console-created roles get `neon_superuser`, so the roles must come from
+SQL; but the editor keeps every statement in the project's query history and names it with an AI service,
+so no statement that sets a final password may ever run there.
 
 ```sql
-CREATE ROLE letter_irl_admin_reader_development LOGIN PASSWORD '<reader password>';
-CREATE ROLE letter_irl_admin_operator_development LOGIN PASSWORD '<operator password>';
+CREATE ROLE letter_irl_admin_reader_development LOGIN;
+CREATE ROLE letter_irl_admin_operator_development LOGIN;
+```
+
+Neon refuses **Reset password** on a role that has no password yet ("cannot update password for role
+without password"), so give each role a throwaway password first and let the console replace it:
+
+```sql
+ALTER ROLE letter_irl_admin_reader_development WITH PASSWORD '<throwaway>';
+ALTER ROLE letter_irl_admin_operator_development WITH PASSWORD '<throwaway>';
+```
+
+Then, on the branch's **Roles** page, use **Role actions → Reset password** on each role and copy the
+generated password straight into the password manager. The throwaway values stop working the moment each
+reset succeeds, which is why they may sit in the history. Verify as the owner: both rows must show
+`rolcanlogin` true, every other flag false and no memberships.
+
+```sql
+SELECT r.rolname, r.rolcanlogin, r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolbypassrls,
+       COALESCE(string_agg(g.rolname, ','), '') AS member_of
+FROM pg_roles r
+LEFT JOIN pg_auth_members m ON m.member = r.oid
+LEFT JOIN pg_roles g ON g.oid = m.roleid
+WHERE r.rolname LIKE 'letter_irl_admin_%'
+GROUP BY 1, 2, 3, 4, 5, 6
+ORDER BY 1;
 ```
 
 Then grant, from a workstation, with the owner connection string in the transient
 `LETTER_IRL_ADMIN_PROVISIONING_DATABASE_URL` variable and a non-secret config file such as
-`%LOCALAPPDATA%/LetterIRL/admin/development.json`:
+`%LOCALAPPDATA%\LetterIRL\admin\development.json`. Its `hostname` must be exactly the host of that
+connection string (pooled or direct, either works) and `name` the database name; the script refuses a
+mismatch:
 
 ```json
 {
@@ -89,67 +118,110 @@ Then grant, from a workstation, with the owner connection string in the transien
 }
 ```
 
-```bash
-npm run admin:provision-access -- --environment development --config "%LOCALAPPDATA%/LetterIRL/admin/development.json" --apply
+In PowerShell, reading the string with `Read-Host` keeps it out of the command history:
+
+```powershell
+$env:LETTER_IRL_ADMIN_PROVISIONING_DATABASE_URL = Read-Host "Owner connection string"
+npx tsx scripts/provisionAdminDatabaseAccess.ts --environment development --config "$env:LOCALAPPDATA\LetterIRL\admin\development.json" --apply
+Remove-Item Env:LETTER_IRL_ADMIN_PROVISIONING_DATABASE_URL
 ```
 
+Run the script directly rather than through `npm run admin:provision-access -- ...` in PowerShell: the
+npm shim there drops the `--`, npm swallows the flags as its own options, and the script stops with
+`ADMIN_INVALID_CONFIGURATION`. From Bash the npm form works.
+
 The script inserts the environment marker if absent, refuses a database that has not reached migration
-029, verifies TLS, and applies the grants idempotently. Re-run it after any migration that adds a table
-the panel reads.
+029, verifies TLS, applies the grants in one transaction and prints one line on success. Re-run it after
+any migration that adds a table the panel reads. A read-only check that the grants landed, as the owner:
+`has_column_privilege('letter_irl_admin_reader_development', 'public.letters', 'content', 'SELECT')` is
+false, `has_table_privilege('letter_irl_admin_operator_development', 'public.users', 'DELETE')` is false,
+and `admin_environment_marker` holds one `development` row.
 
 ### 2. Tailscale console
 
-- DNS page: enable MagicDNS and HTTPS certificates (this publishes the node names to Certificate
+The owner's tailnet is shared with other devices, so the policy below keeps member-owned devices exactly
+as they were and carves the admin nodes out by tag. On a tailnet dedicated to the panel, drop the first
+grant.
+
+- DNS page: MagicDNS and HTTPS certificates on (this publishes the node names to Certificate
   Transparency; they carry no secret).
-- Access controls: add the tags, posture, grants and tests below to the policy file. No rule may name
-  `tag:dev-admin` or `tag:prod-admin` as a source, and the initial catch-all rule must be replaced by
-  explicit grants before the node joins.
-- Settings: set key expiry to 30 days; enable Tailnet Lock (two non-Android signing nodes, disablement
-  secrets kept offline) or, if that is not possible, device approval. The two are mutually exclusive.
-- Keys: generate a one-off auth key: reusable **off**, ephemeral **off**, pre-approved **on**, tag
-  `tag:dev-admin`, expiry 1 day. With Tailnet Lock, pre-sign it (`tailscale lock sign <key>`).
+- Access controls: replace the whole policy with the file below. The catch-all becomes `autogroup:member`
+  to `autogroup:member` (plus `autogroup:internet` for exit nodes): tagged devices are not members, so the
+  admin nodes are reachable only through the explicit grants and can never initiate a connection. No rule
+  may name `tag:dev-admin` or `tag:prod-admin` as a source. Use **Preview changes** before saving; it
+  must list no existing device losing access. The tests run on every save.
+- Device management: turn on **Manually approve new devices**. Tailnet Lock is the stronger alternative
+  (two non-Android signing nodes, disablement secrets kept offline), but the two are mutually exclusive.
+  Key expiry is tailnet-wide, so shortening it to 30 days makes every member device re-authenticate
+  monthly; leave it unless the whole tailnet should. Tagged nodes have key expiry disabled, so the admin
+  node itself never re-authenticates.
+- Keys: generate a one-off auth key right before creating the Railway service: reusable **off**,
+  ephemeral **off**, pre-approved **on**, tag `tag:dev-admin`, expiry 1 day. With Tailnet Lock, pre-sign
+  it (`tailscale lock sign <key>`).
 
 ```jsonc
 {
   "tagOwners": {
+    "tag:dev-admin":  ["autogroup:admin"],
     "tag:prod-admin": ["autogroup:admin"],
-    "tag:dev-admin":  ["autogroup:admin"]
   },
+
   "postures": {
     "posture:operatorDevice": [
       "node:os IN ['windows', 'android']",
-      "node:tsVersion >= '1.100.0'"
-    ]
+      "node:tsVersion >= '1.100.0'",
+    ],
   },
+
   "grants": [
-    { "src": ["<owner login>"], "dst": ["tag:prod-admin"], "ip": ["tcp:443"], "srcPosture": ["posture:operatorDevice"] },
-    { "src": ["<owner login>"], "dst": ["tag:dev-admin"],  "ip": ["tcp:443"], "srcPosture": ["posture:operatorDevice"] }
+    {"src": ["autogroup:member"], "dst": ["autogroup:member", "autogroup:internet"], "ip": ["*"]},
+    {"src": ["<owner login>"], "dst": ["tag:dev-admin"],  "ip": ["tcp:443"], "srcPosture": ["posture:operatorDevice"]},
+    {"src": ["<owner login>"], "dst": ["tag:prod-admin"], "ip": ["tcp:443"], "srcPosture": ["posture:operatorDevice"]},
   ],
+
+  // Keep whatever "ssh" and "nodeAttrs" sections the tailnet already had; both name
+  // autogroup:member, which never includes the tagged admin nodes.
+
   "tests": [
-    { "src": "<owner login>", "accept": ["tag:prod-admin:443", "tag:dev-admin:443"], "deny": ["tag:prod-admin:8790", "tag:prod-admin:22"] },
-    { "src": "tag:dev-admin",  "deny": ["tag:prod-admin:443"] },
-    { "src": "tag:prod-admin", "deny": ["tag:dev-admin:443"] }
-  ]
+    {"src": "<owner login>", "srcPostureAttrs": {"node:os": "windows", "node:tsVersion": "1.102.3"}, "accept": ["tag:dev-admin:443", "tag:prod-admin:443"], "deny": ["tag:dev-admin:8790", "tag:dev-admin:22", "tag:prod-admin:8790"]},
+    {"src": "<owner login>", "srcPostureAttrs": {"node:os": "linux", "node:tsVersion": "1.102.3"}, "deny": ["tag:dev-admin:443", "tag:prod-admin:443"]},
+    {"src": "<owner login>", "srcPostureAttrs": {"node:os": "android", "node:tsVersion": "1.98.8"}, "deny": ["tag:dev-admin:443"]},
+    {"src": "tag:dev-admin",  "deny": ["tag:prod-admin:443"]},
+    {"src": "tag:prod-admin", "deny": ["tag:dev-admin:443"]},
+  ],
 }
 ```
 
 The owner login is the value the policy uses for the identity provider: `user@example.com` for email
 identities, `username@github` for GitHub, `username@passkey` for Tailscale passkeys. The same value goes
-in `ADMIN_OPERATOR_LOGINS`.
+in `ADMIN_OPERATOR_LOGINS`. The posture needs client 1.100 or newer on the phone as well as the laptop.
+Because every device on a single-user tailnet presents the same login, the policy, not the allowlist, is
+what keeps other Windows devices out; pin the grants to the laptop's and phone's tailnet IPs instead of
+the login if that matters.
 
 ### 3. Railway service
 
-In the **development** environment, create a service named `letter-irl-admin` from this repository on the
-`dev` branch, then:
+Railway has deprecated config-as-code files, and services created after 2026-08-28 cannot opt in, so the
+settings are entered in the dashboard. Create the service in this order, because a service created straight
+from the repository deploys at once with nothing configured:
 
-- Settings: set the config-as-code file path to `railway.admin.toml`; generate **no** domain; keep
-  Serverless **off** (a sleeping node never wakes for tailnet traffic); add a volume mounted at `/data`
-  (the smallest size is ample).
-- Variables, per the table below. `TS_AUTHKEY` is set for the first boot only and deleted once the machine
-  appears in the Tailscale console.
+1. In the **development** environment, **+ New → Empty Service**; rename it `letter-irl-admin`.
+2. Settings → Deploy: **Healthcheck Path** `/healthz` (the 300 s timeout is fine); **Restart Policy** on
+   failure with 10 retries (the default); **Serverless** off (a sleeping node never wakes for tailnet
+   traffic). Settings → Networking: generate **no** domain.
+3. Variables, in the Raw Editor, per the table below. `RAILWAY_DOCKERFILE_PATH` selects the image;
+   `TS_AUTHKEY` is set for the first boot only and deleted once the machine appears in the Tailscale
+   console.
+4. **+ New → Volume**, attached to `letter-irl-admin`, mount path `/data` (the smallest size is ample).
+   Type the service name into the picker rather than clicking a row, and read the staged-change details
+   before applying: the picker has attached a volume to the wrong service.
+5. Settings → Source: **Connect Repo** `dnobj/mail-letter-irl`, branch `dev`. Settings → Build: Builder
+   **Dockerfile** (it then reports the path as set via `RAILWAY_DOCKERFILE_PATH`). Apply the staged
+   changes; that starts the first build.
 
 | Variable | Value |
 | --- | --- |
+| `RAILWAY_DOCKERFILE_PATH` | `Dockerfile.admin` |
 | `LETTER_IRL_DEPLOYMENT_ENVIRONMENT` | `development` |
 | `NODE_ENV` | `production` (as every deployed service) |
 | `ADMIN_MODE` | `read-only` |
@@ -170,14 +242,17 @@ The service must **not** receive the API's owner `DATABASE_URL`.
 
 ### 4. First boot
 
-Read the deploy log. The supervisor prints `[tailscale] backend=...` lines while the node registers, then
-`[tailscale] ready name=letter-irl-admin-dev.<tailnet>.ts.net tags=tag:dev-admin`, then
-`admin.listening`. The healthcheck passes once the node is Running, Serve is configured and the database
-identity checks passed. Then:
+Read the deploy log. The healthcheck answers 503 (Railway retries for five minutes) until the supervisor
+prints `[tailscale] backend=Running tags=tag:dev-admin name=letter-irl-admin-dev.<tailnet>.ts.net.`, then
+`[tailscale] ready name=... tags=tag:dev-admin ips=2`, then `admin.listening`; the first boot reached that
+about a minute after the image build. Serve requests the certificate by ACME `dns-01` straight after
+(`cert(...): registered ACME account`), so the first browser open may wait a minute for TLS. Then:
 
-1. In the Tailscale console, confirm the machine `letter-irl-admin-dev` shows `tag:dev-admin` and no
-   "Locked out" badge.
-2. Delete `TS_AUTHKEY` from the service variables (the log warns while it is still set).
+1. In the Tailscale console, confirm the machine `letter-irl-admin-dev` shows `tag:dev-admin`, "Expiry
+   disabled", and no "Locked out" or approval badge.
+2. Delete `TS_AUTHKEY` from the service variables; the log prints `[admin] TS_AUTHKEY is still set; delete
+   the variable now that the node is registered.` while it is. The deletion redeploys the service, and the
+   node rejoins from the volume with the same address; no second machine appears.
 3. Open the URL from the laptop. The banner shows `development`, `read-only`, the marker, the reader role,
    the Stripe key mode, the mail provider, the node name and tag, and the build commit.
 4. Run `ADMIN-INFRA-01` and `ADMIN-READ-01` to `ADMIN-READ-06` in [manual-tests.md](manual-tests.md).
