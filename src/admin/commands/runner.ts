@@ -100,6 +100,8 @@ export interface CommandRunnerDeps {
   sessionIdHash: string;
   correlationId: string;
   now: () => number;
+  /** Test seam for the race wait; real callers leave it unset. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export function expectedPhrase(
@@ -217,10 +219,19 @@ export async function runAdminCommand<I>(
   }
 
   // Re-derive the digest from the current row; a stale preview is refused
-  // before anything is written.
-  const prepared = await withReadOnlyPreview(deps.reader, (client) =>
-    prepareCommandPreview(definition, client, deps.config.environment, targetId, fields, fields.get("idempotencyKey")),
-  );
+  // before anything is written. One exception: when the preview fails because
+  // a concurrent submission of the SAME confirmation already applied the
+  // command, the recorded outcome is the right answer, not a refusal.
+  let prepared: PreparedPreview<I>;
+  try {
+    prepared = await withReadOnlyPreview(deps.reader, (client) =>
+      prepareCommandPreview(definition, client, deps.config.environment, targetId, fields, fields.get("idempotencyKey")),
+    );
+  } catch (error) {
+    const raced = await replayAfterRace(deps, definition, fields, error);
+    if (raced) return raced;
+    throw error;
+  }
   let confirmation;
   try {
     confirmation = validateAdminCommandConfirmation(
@@ -394,6 +405,46 @@ export async function runAdminCommand<I>(
   });
   if (failure) throw failure;
   return outcome;
+}
+
+const RACE_WAIT_ATTEMPTS = 8;
+const RACE_WAIT_MS = 250;
+
+/**
+ * A preview refusal while a run for the same key exists (or completes within
+ * a moment) is the twin of a concurrent submission: return its outcome. Any
+ * other refusal, or a run with a different identity, is not ours to answer.
+ */
+async function replayAfterRace<I>(
+  deps: CommandRunnerDeps,
+  definition: CommandDefinition<I>,
+  fields: ReadonlyMap<string, string>,
+  error: unknown,
+): Promise<CommandOutcome | null> {
+  if (
+    !(error instanceof AdminFoundationError) ||
+    !["ADMIN_INVALID_STATE", "ADMIN_NOT_FOUND", "ADMIN_STALE_PREVIEW"].includes(error.code) ||
+    !deps.operator
+  ) {
+    return null;
+  }
+  const key = fields.get("idempotencyKey") ?? "";
+  if (!key) return null;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 0; attempt < RACE_WAIT_ATTEMPTS; attempt += 1) {
+    const existing = await deps.audit.findCommandRun(deps.operator, deps.config.environment, key);
+    if (!existing) return null;
+    if (
+      existing.actorId !== deps.actor.id ||
+      existing.action !== definition.action ||
+      existing.previewDigest !== (fields.get("previewDigest") ?? "")
+    ) {
+      throw new AdminFoundationError("ADMIN_IDEMPOTENCY_CONFLICT");
+    }
+    if (existing.status !== "pending" && existing.status !== "running") return priorOutcome(existing);
+    await sleep(RACE_WAIT_MS);
+  }
+  return null;
 }
 
 function priorOutcome(

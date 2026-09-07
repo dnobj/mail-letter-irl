@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 import { AdminAuditWriter } from "../../../src/admin/auditService.js";
+import { AdminFoundationError } from "../../../src/admin/errors.js";
 import {
   expectedPhrase,
   prepareCommandPreview,
@@ -125,7 +126,10 @@ interface EchoInput {
   amount: number;
 }
 
-function echoCommand(state: { version: string; executions: Array<{ key: string; reason: string; client: boolean }>; fail?: string }, transactional = false): CommandDefinition<EchoInput> {
+function echoCommand(
+  state: { version: string; executions: Array<{ key: string; reason: string; client: boolean }>; fail?: string; previewRefusal?: string },
+  transactional = false,
+): CommandDefinition<EchoInput> {
   return {
     name: "echo.adjust",
     title: "Echo",
@@ -139,6 +143,7 @@ function echoCommand(state: { version: string; executions: Array<{ key: string; 
       return { amount };
     },
     async preview(_client, targetId, input) {
+      if (state.previewRefusal) throw new AdminFoundationError(state.previewRefusal as never);
       return {
         targetId,
         summary: { amount: input.amount, before: 10 },
@@ -280,6 +285,32 @@ describe("admin command runner", () => {
     const other = new Map([...fields, ["previewDigest", "e".repeat(64)]]);
     await expect(runAdminCommand(runner, command, "fixture-1", other)).rejects.toMatchObject({ code: "ADMIN_IDEMPOTENCY_CONFLICT" });
     expect(state.executions).toHaveLength(1);
+  });
+
+  it("answers a preview refusal caused by a concurrent twin with the twin's recorded outcome, and only then", async () => {
+    const database = fakeDatabase();
+    const state = { version: "v1", executions: [] as Array<{ key: string; reason: string; client: boolean }>, previewRefusal: "" };
+    const command = echoCommand(state);
+    const runner = { ...deps(database), sleep: async () => {} };
+    const fields = await confirmationFields(command, runner);
+
+    // No twin yet: the refusal stands.
+    state.previewRefusal = "ADMIN_INVALID_STATE";
+    await expect(runAdminCommand(runner, command, "fixture-1", fields)).rejects.toMatchObject({ code: "ADMIN_INVALID_STATE" });
+
+    state.previewRefusal = "";
+    const first = await runAdminCommand(runner, command, "fixture-1", fields);
+    // The twin changed the target; this submission's preview now refuses, and
+    // the recorded outcome is returned instead.
+    state.previewRefusal = "ADMIN_INVALID_STATE";
+    const twin = await runAdminCommand(runner, command, "fixture-1", fields);
+    expect(twin).toMatchObject({ commandId: first.commandId, replayed: true, status: "succeeded" });
+    expect(state.executions).toHaveLength(1);
+
+    // A different confirmation reusing the key is still a conflict.
+    await expect(
+      runAdminCommand(runner, command, "fixture-1", new Map([...fields, ["previewDigest", "f".repeat(64)]])),
+    ).rejects.toMatchObject({ code: "ADMIN_IDEMPOTENCY_CONFLICT" });
   });
 
   it("records a failed domain call with the mapped code and rethrows it", async () => {

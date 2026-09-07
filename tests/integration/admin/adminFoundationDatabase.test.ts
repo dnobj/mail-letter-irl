@@ -417,9 +417,20 @@ describeWithDatabase("admin foundation database migration", () => {
     await client.query("RESET ROLE");
 
     await client.query(`SET ROLE "${config.database.operatorRole}"`);
+    // The operator may insert an account row (the ledger grant upserts it)
+    // but never delete one, and never touches letters or the audit history.
+    await expect(
+      client.query("DELETE FROM users WHERE user_id = 'admin-foundation-fixture'"),
+    ).rejects.toMatchObject({ code: "42501" });
     await expect(
       client.query(
-        "INSERT INTO users (user_id, email) VALUES ('operator-write', 'operator-write@example.test')",
+        "INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost) VALUES ('op-letter', 'admin-foundation-fixture', '{}'::jsonb, '{}'::jsonb, 2)",
+      ),
+    ).rejects.toMatchObject({ code: "42501" });
+    await expect(
+      client.query(
+        "UPDATE admin_audit_events SET actor_name = 'rewrite' WHERE id = $1",
+        [readerAudit.rows[0].id],
       ),
     ).rejects.toMatchObject({ code: "42501" });
     await expect(

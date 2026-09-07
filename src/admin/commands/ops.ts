@@ -131,9 +131,11 @@ export function createOpsCommands(overrides: Partial<OpsCommandSeams> = {}) {
       if (execution.environment === "production" && input.provider === "dummy") {
         throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
       }
+      // The version travelled through a JS Date (millisecond precision); the
+      // column keeps microseconds, so compare at the precision the preview had.
       const result = await execution.client.query(
         `UPDATE provider_routing SET provider = $1, enabled = $2, updated_by = $3, updated_at = NOW()
-         WHERE mail_type = $4 AND updated_at = $5::timestamptz RETURNING mail_type`,
+         WHERE mail_type = $4 AND date_trunc('milliseconds', updated_at) = $5::timestamptz RETURNING mail_type`,
         [input.provider, input.enabled, execution.actorId, mailType, preview.expectedVersion],
       );
       if (result.rowCount === 0) throw new AdminFoundationError("ADMIN_STALE_PREVIEW");
