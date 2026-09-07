@@ -1,5 +1,7 @@
-# Letter IRL admin panel image. Selected only by railway.admin.toml; the API
-# and maintenance services keep building with nixpacks.toml.
+# Letter IRL admin panel image. Selected by the admin service's
+# RAILWAY_DOCKERFILE_PATH variable (Railway no longer reads config-as-code
+# files for new services); the API and maintenance services keep building
+# with nixpacks.toml.
 #
 # Three stages: compile the TypeScript, borrow the Tailscale binaries from the
 # official image pinned by tag AND digest, and assemble a runtime that holds

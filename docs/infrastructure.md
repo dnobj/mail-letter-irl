@@ -90,7 +90,7 @@ return 404 for every legacy `/admin*` and `/api/admin*` path. See
 | Maintenance | same backend build | `npm run maintenance` | `0 * * * *` |
 | Database migration | same backend build | `npm run db:migrate:prod` | pre-deploy, both services (`railway.toml`) |
 | Website | `npm ci && npm run build` | `npm start` | continuous/warm in prod; Serverless in dev |
-| Admin panel | `Dockerfile.admin` via `railway.admin.toml` (no pre-deploy migration) | `node dist/admin/server.js` | continuous; never Serverless; no public domain; volume at `/data` |
+| Admin panel | `Dockerfile.admin`, selected by the service's `RAILWAY_DOCKERFILE_PATH` variable; settings in the dashboard, no pre-deploy migration | `node dist/admin/server.js` | continuous; never Serverless; no public domain; volume at `/data` |
 
 The backend executes compiled JavaScript with Node. The website uses Next.js standalone output and disables Next telemetry during production builds.
 

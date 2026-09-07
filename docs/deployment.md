@@ -44,6 +44,14 @@ All five come from files in this repository, not from the Railway dashboard:
 pre-deploy command. Railway's config-as-code overrides dashboard values, and
 fields absent from those files keep theirs.
 
+**Deadline.** Railway has deprecated config-as-code: existing `railway.toml`
+files stop being read on **2026-12-01**, and services created after 2026-08-28
+cannot use one at all (which is why the admin panel is configured in the
+dashboard, see [admin-panel-guide.md](admin-panel-guide.md)). Before that date
+the pre-deploy command must move to Railway's Infrastructure as Code
+(`.railway/railway.ts`, applied with the Railway CLI) or into the dashboard, and
+this document and [railway-setup.md](railway-setup.md) must change with it.
+
 That split matters. Until 2026-08-29 the pre-deploy line was documented here and
 configured nowhere - no `railway.toml`, nothing in `nixpacks.toml`, nothing in a
 workflow. **No deploy applied migrations**, and this document said one did, which
