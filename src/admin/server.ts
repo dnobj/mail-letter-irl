@@ -188,6 +188,11 @@ export async function main(): Promise<void> {
       letterProvider: config.letterProvider,
       databaseRole: readerIdentity.roleName,
       marker: readerIdentity.marker,
+      // 0 means the entrypoint could not hand the volume to the unprivileged
+      // user and stayed root, which it also warns about in the deploy log.
+      // Recording it here puts the answer in the audit trail rather than in a
+      // log line nobody re-reads.
+      uid: process.getuid ? process.getuid() : -1,
     },
     outcome: "succeeded",
   });

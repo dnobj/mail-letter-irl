@@ -263,7 +263,10 @@ The service must **not** receive the API's owner `DATABASE_URL`.
 
 ### 4. First boot
 
-Read the deploy log. On every boot the supervisor first prints `[tailscale] backend=NoState tags=- name=-`
+Read the deploy log. It opens with `[entrypoint] dropping to node; state directory /data/tailscale is
+writable`, which is the container handing the mounted volume to the unprivileged user and stepping down
+before Node starts. If it says `WARNING: could not hand … to node` instead, the service is up but running
+as root: see the runbook. On every boot the supervisor then prints `[tailscale] backend=NoState tags=- name=-`
 while `tailscaled` reads the state file and logs in; that line is not a failure. The healthcheck answers 503
 (Railway retries for five minutes) until the supervisor
 prints `[tailscale] backend=Running tags=tag:dev-admin name=letter-irl-admin-dev.<tailnet>.ts.net.`, then
@@ -378,6 +381,7 @@ login standing in for the Serve proxy. Local-dev mode is refused on Railway, und
 | Reach the panel from the phone | Install Tailscale, sign in with the same identity, approve or sign the phone from the laptop, open the URL. Keep the TOTP authenticator on a different device from the one browsing when writes are intended. |
 | Certificate problems | Serve requests and renews the certificate itself. Confirm HTTPS is enabled on the DNS page and the node name is unchanged, then redeploy. |
 | Block everyone instantly | Remove the grant line from the policy, or delete the machine from the Machines page, or set `ADMIN_MODE=read-only` and redeploy. |
+| The container is running as root | The deploy log says `[entrypoint] WARNING: could not hand … to node`, and the newest `admin.boot` row in `/audit` carries `uid: 0`. The entrypoint stays up as root rather than refusing, because a volume-backed service that will not boot is an outage. Read the two lines above the warning to see which step failed, fix the volume's ownership, and redeploy; a healthy boot logs `[entrypoint] dropping to node` and records `uid: 1000`. |
 | Rollback | Redeploy the previous image; the node identity persists on the volume. Audit tables are never dropped. |
 
 ## Audit
