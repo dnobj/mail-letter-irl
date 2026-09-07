@@ -46,9 +46,8 @@ export function renderPromoForm(): SafeHtml {
   <label for="endsAt">End date (optional, UTC)</label>
   <input type="date" id="endsAt" name="endsAt">
   <label><input type="checkbox" name="requiresNewUser" value="on"> New accounts only</label>
-  <div><button type="submit" data-copy-target="code">Preview…</button></div>
-</form>
-<script-free-note hidden></script-free-note>`;
+  <div><button type="submit">Preview…</button></div>
+</form>`;
 }
 
 export function renderPromoDetail(input: {
