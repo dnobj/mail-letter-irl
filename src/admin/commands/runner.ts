@@ -10,6 +10,7 @@ import { AdminFoundationError, type AdminErrorCode } from "../errors.js";
 import { requireElevation } from "../http/elevation.js";
 import type { AdminSession } from "../http/session.js";
 import type { AdminRuntimeConfig } from "../runtimeConfig.js";
+import { classifyDiagnosticError, writeDiagnostic } from "../../utils/diagnosticLog.js";
 import { createAdminPreviewDigest, normalizeAdminCommandInput, validateAdminCommandConfirmation } from "./foundation.js";
 
 /**
@@ -164,7 +165,20 @@ export function mapDomainError(error: unknown): AdminFoundationError {
     PACK_REFUND_WOULD_BE_FULL: "ADMIN_INVALID_STATE",
     PACK_REFUND_PREVIEW_STALE: "ADMIN_STALE_PREVIEW",
   };
-  return new AdminFoundationError(mapped[code] ?? "ADMIN_INTERNAL_ERROR");
+  const adminCode = mapped[code];
+  if (!adminCode) {
+    // The page shows a stable code and a correlation id; the deploy log gets
+    // the class (and PostgreSQL's SQLSTATE when there is one), never the text.
+    const sqlState =
+      error && typeof error === "object" && "code" in error && typeof (error as { code: unknown }).code === "string"
+        ? (error as { code: string }).code
+        : undefined;
+    writeDiagnostic("error", "admin.domain_error", {
+      errorClass: classifyDiagnosticError(error, "unknown_error"),
+      sqlState: sqlState && /^[0-9A-Z]{5}$/.test(sqlState) ? sqlState : "none",
+    });
+  }
+  return new AdminFoundationError(adminCode ?? "ADMIN_INTERNAL_ERROR");
 }
 
 export async function runAdminCommand<I>(

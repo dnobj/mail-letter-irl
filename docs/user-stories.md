@@ -952,8 +952,8 @@ There is a mobile workaround - ask me about it if you want to try.
 **So that** only authorized users can perform them
 
 **Acceptance Criteria:**
-- [ ] Admin routes disabled on production (ADMIN_ENABLED=false)
-- [ ] Local admin restricted to localhost (ADMIN_LOCAL_ONLY=true)
+- [ ] Public admin routes answer 404 in every environment (ADMIN_ENABLED=true fails startup)
+- [ ] The admin panel is reachable only over the owner's tailnet, never from the internet
 - [ ] Admin role verified from JWT
 - [ ] Non-admin user → 403 Forbidden
 

@@ -6,12 +6,10 @@ export function isLegacyPublicAdminPath(pathname: string): boolean {
     pathname.startsWith("/admin/") ||
     pathname === "/admin.html" ||
     pathname === "/admin-panel.html" ||
-    // Must be exactly as wide as the legacy dispatcher predicate in
-    // httpServer.ts and adminApiHandler.ts, which both use
-    // startsWith('/api/admin'). A narrower guard here would let a path such as
-    // /api/adminfoo reach the admin-tier rate limiter and the admin request
-    // boundary, leaking a distinguishable response and a public rate-limit
-    // bucket even though no admin function is reachable.
+    // Exactly as wide as the deleted legacy dispatcher's startsWith('/api/admin')
+    // predicate, kept so that no /api/admin* path can ever reach another handler
+    // or a distinguishable response. The replacement operator surface is the
+    // tailnet-only admin service (docs/admin-panel-guide.md), never this server.
     pathname.startsWith("/api/admin")
   );
 }

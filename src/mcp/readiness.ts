@@ -139,9 +139,6 @@ export async function getReadiness(
   // documented post-deploy check (#278 review round 2). Outside production the
   // truth still reaches the body as `degraded` and the detail still reaches
   // the log; it just is not a failure.
-  // No adminMode term here, unlike validateStripe: ADMIN_ENABLED=true in
-  // production is itself a config ERROR (admin.enabled_in_production), so such
-  // a deploy is already 503 on `config` and a second gate would be dead code.
   const pricesEnforced = validation.mode === 'production';
   // Threaded env: every other check in this report reads the caller's env,
   // and a verdict stitched from two environments describes neither (#278 r5).

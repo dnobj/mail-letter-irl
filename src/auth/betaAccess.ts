@@ -16,8 +16,8 @@ import {
  * NOTHING HERE READS ITS ENVIRONMENT AT MODULE LOAD. Every function resolves
  * process.env on the call, so a test can vary the cohort without re-importing
  * and a reader cannot mistake a stale module-level constant for live
- * configuration. src/api/middleware/adminAuth.ts does capture its list at load
- * time; do not copy that here.
+ * configuration. The deleted legacy admin middleware captured its list at load
+ * time; do not copy that shape here.
  *
  * The two boolean flags in this file use DIFFERENT helpers on purpose. See the
  * table in src/utils/envSettings.ts: the access gate must stay up when its
@@ -68,8 +68,8 @@ export const BETA_CAP_DEFAULTS = {
 } as const;
 
 /**
- * Split a comma-separated id list. Matches the shape adminAuth.ts already
- * uses, including the format Auth0 subjects arrive in: auth0|123,auth0|456.
+ * Split a comma-separated id list in the format Auth0 subjects arrive in:
+ * auth0|123,auth0|456.
  * Subjects contain '|' but never ',', so comma is a safe separator.
  */
 function parseIdList(raw: string | undefined): string[] {

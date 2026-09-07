@@ -610,9 +610,9 @@ database URL in `.env`.
    existing public behavior remains successful and contains no admin route advertisement.
 6. [ ] Confirm no new local admin browser server or UI is expected in this slice and no production access,
    provider call, charge, mail order, Railway mutation, or role provisioning was performed.
-7. [ ] Confirm `JIT_PURCHASE_ENABLED` and `IMAGE_TRIAL_ENABLED` are still `false`, because issue #69's
-   `/api/admin/image-generation/*` operator recovery routes are intentionally among the paths this slice
-   404s and no replacement operator control exists yet.
+7. [ ] Confirm `JIT_PURCHASE_ENABLED` and `IMAGE_TRIAL_ENABLED` match the environment's intent: issue #69's
+   operator recovery no longer lives behind the denied `/api/admin/image-generation/*` routes but in the
+   tailnet admin panel (`ADMIN-ACCT-04`).
 8. [ ] Attach status/header evidence for every route, the migration ordering evidence, browser console
    observations, and the tested commit to the PR. Redact origins only if required; never attach secrets.
 
@@ -923,6 +923,56 @@ audit.
 
 **Pass criteria:** Promo status follows the documented machine with version checks; image recovery is
 reachable and audited.
+
+### ADMIN-OPS-01 — Retention report and quarantine listing
+
+**Steps:**
+
+1. [ ] Open `/retention`; verify the counts (redacted letters and drafts, quarantine rows, purge due) and
+   the report of what the next enforcing run would touch, matching `npm run maintenance` in report mode.
+2. [ ] Verify the quarantine table shows source table, row id and dates only: no content anywhere on the
+   page, and no restore control.
+
+**Pass criteria:** Report mode only, metadata only.
+
+### ADMIN-OPS-02 — Tier override
+
+**Steps:**
+
+1. [ ] On an account, preview setting the override to `trusted`; execute; verify the account shows
+   `standard (override: trusted)` and `/audit` shows `account.set_tier`.
+2. [ ] Preview the same override again; verify `409 ADMIN_INVALID_STATE`. Clear the override; verify the
+   daily tier calculation applies again.
+
+**Pass criteria:** The override is explicit, audited, and idempotent.
+
+### ADMIN-OPS-03 — Provider routing and status sync
+
+**Preconditions:** Development (the dummy provider is refused in production routing).
+
+**Steps:**
+
+1. [ ] Open `/routing`; verify the four mail types, the environment default provider and the registered
+   providers. Preview routing `postcard` to `dummy`; execute; verify the row shows `dummy`, your login as
+   "by", and `/audit` shows `routing.update`. Route it back to `postgrid`.
+2. [ ] Preview a provider that is not registered (edit the query string); verify `400 ADMIN_INVALID_REQUEST`.
+3. [ ] Preview a status sync dry run over 7 days; execute; verify the outcome lists checked, updated and
+   error counts and the first changes, and that no letter status changed. Repeat in apply mode on a
+   development letter with a known provider status; verify the status and history rows update.
+
+**Pass criteria:** Routing changes are validated against the runtime registry and versioned; the sync is
+explicit about dry run versus apply.
+
+### ADMIN-LEGACY-01 — Public denial unchanged after the legacy removal
+
+**Steps:**
+
+1. [ ] Repeat `ADMIN-FOUNDATION-022` steps 1 to 5 against the deployed development API; verify every
+   legacy `/admin*` and `/api/admin*` path is still a no-store `404` and the public routes are unaffected.
+2. [ ] Verify the repository no longer contains `admin-panel.html`, `src/api/adminApiHandler.ts` or
+   `scripts/run-reconciliation.ts`, and that `ADMIN_ENABLED=true` still fails the public server's boot.
+
+**Pass criteria:** Nothing public changed; the only operator surface is the tailnet panel.
 
 ---
 

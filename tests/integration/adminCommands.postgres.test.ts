@@ -554,6 +554,11 @@ describePostgres('admin commands through the operator role', () => {
     expect(await runner.runAdminCommand(deps(), grant.command, userId, grant.fields)).toMatchObject({ commandId: outcome.commandId, replayed: true });
     expect((await owner.query(`SELECT 1 FROM image_entitlements WHERE user_id = $1`, [userId])).rowCount).toBe(1);
 
+    // An ambiguous reservation has already consumed its generation: the
+    // entitlement and the account counter both show it, and the release
+    // path gives it back.
+    await owner.query(`UPDATE image_entitlements SET consumed_quantity = 1 WHERE entitlement_id = $1`, [entitlement.rows[0].entitlement_id]);
+    await owner.query(`UPDATE users SET image_generations_used = 1 WHERE user_id = $1`, [userId]);
     const reservation = await owner.query<{ reservation_id: string }>(
       `INSERT INTO image_generation_reservations (entitlement_id, user_id, status, dispatch_started_at, resolution_reason, provider_request_id)
        VALUES ($1, $2, 'ambiguous', NOW() - INTERVAL '1 hour', 'ambiguous_after_dispatch', 'req_1') RETURNING reservation_id`,
@@ -566,10 +571,38 @@ describePostgres('admin commands through the operator role', () => {
     expect(resolved).toMatchObject({ status: 'succeeded', result: { resultingStatus: 'released' } });
     const row = await owner.query<{ status: string }>(`SELECT status FROM image_generation_reservations WHERE reservation_id = $1`, [reservationId]);
     expect(row.rows[0].status).toBe('released');
+    const counters = await owner.query<{ consumed_quantity: number; image_generations_used: number }>(
+      `SELECT e.consumed_quantity, u.image_generations_used FROM image_entitlements e JOIN users u ON u.user_id = e.user_id
+       WHERE e.entitlement_id = $1`,
+      [entitlement.rows[0].entitlement_id]
+    );
+    expect(counters.rows[0]).toEqual({ consumed_quantity: 0, image_generations_used: 0 });
     expect(await operatorAuditRows(reservationId)).toBe(1);
     await expect(confirmation('image.resolve', reservationId, { decision: 'release', resolution: 'provider_confirmed_failed' })).rejects.toMatchObject({
       code: 'ADMIN_INVALID_STATE'
     });
+  }, 60_000);
+
+  it('sets and clears a tier override, and changes provider routing against the registry and the row version', async () => {
+    const set = await confirmation('account.set_tier', userId, { tier: 'trusted' });
+    expect(await runner.runAdminCommand(deps(), set.command, userId, set.fields)).toMatchObject({ status: 'succeeded', result: { tierOverride: 'trusted' } });
+    expect((await owner.query<{ tier_override: string | null }>(`SELECT tier_override::text AS tier_override FROM users WHERE user_id = $1`, [userId])).rows[0].tier_override).toBe('trusted');
+    await expect(confirmation('account.set_tier', userId, { tier: 'trusted' })).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
+    const clear = await confirmation('account.set_tier', userId, { tier: 'clear' });
+    expect(await runner.runAdminCommand(deps(), clear.command, userId, clear.fields)).toMatchObject({ status: 'succeeded', result: { tierOverride: null } });
+
+    // Migration 015 seeds every mail type on postgrid; the registry lists dummy.
+    const route = await confirmation('routing.update', 'postcard', { provider: 'dummy', enabled: 'on' });
+    expect(route.fields.get('phrase')).toBe('CONFIRM postcard');
+    await owner.query(`UPDATE provider_routing SET updated_at = NOW() + INTERVAL '1 second' WHERE mail_type = 'postcard'`);
+    await expect(runner.runAdminCommand(deps(), route.command, 'postcard', route.fields)).rejects.toMatchObject({ code: 'ADMIN_STALE_PREVIEW' });
+    const fresh = await confirmation('routing.update', 'postcard', { provider: 'dummy', enabled: 'on' });
+    expect(await runner.runAdminCommand(deps(), fresh.command, 'postcard', fresh.fields)).toMatchObject({ status: 'succeeded', result: { provider: 'dummy', enabled: true } });
+    const row = await owner.query<{ provider: string; enabled: boolean; updated_by: string }>(
+      `SELECT provider, enabled, updated_by FROM provider_routing WHERE mail_type = 'postcard'`
+    );
+    expect(row.rows[0]).toEqual({ provider: 'dummy', enabled: true, updated_by: OWNER });
+    await expect(confirmation('routing.update', 'postcard', { provider: 'lob', enabled: 'on' })).rejects.toMatchObject({ code: 'ADMIN_INVALID_REQUEST' });
   }, 60_000);
 
   it('lets the operator role perform exactly the granted writes', async () => {

@@ -180,7 +180,10 @@ export const ADMIN_OPERATOR_FULL_SELECT_TABLES = [
 export const ADMIN_OPERATOR_WRITE_GRANTS: Readonly<
   Record<string, readonly ("INSERT" | "UPDATE" | "DELETE")[]>
 > = {
-  users: ["UPDATE"],
+  // INSERT because the ledger grant (addCreditsToLedgerWithClient) upserts
+  // the account row; PostgreSQL needs INSERT for ON CONFLICT DO UPDATE even
+  // when the row exists.
+  users: ["INSERT", "UPDATE"],
   orders: ["UPDATE"],
   credit_ledger: ["INSERT", "UPDATE"],
   credit_transactions: ["INSERT"],

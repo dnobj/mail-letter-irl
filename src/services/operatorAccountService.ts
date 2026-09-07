@@ -2,7 +2,7 @@ import type pg from 'pg';
 
 import { NON_LOSS_DISPUTE_STATUSES } from './commerceService.js';
 import { grantImageEntitlementWithClient } from './imageGenerationLimitService.js';
-import type { ImageEntitlement } from './types.js';
+import { USER_TIERS, type ImageEntitlement, type UserTier } from './types.js';
 
 /**
  * Operator decisions on accounts and orders that had no tooling: lifting a
@@ -82,6 +82,20 @@ export async function releaseAmountMismatchQuarantine(
     [orderId, row.status, JSON.stringify({ reason: reason.slice(0, 500), clearedCode: 'PAYMENT_AMOUNT_MISMATCH' })]
   );
   return 'released';
+}
+
+/**
+ * Set or clear the manual tier override. The daily calculation skips
+ * accounts with an override (tierService.updateAllUserTiers), so a set
+ * override stands until an operator clears it.
+ */
+export async function setTierOverride(client: Client, userId: string, tier: UserTier | null): Promise<void> {
+  if (tier !== null && !USER_TIERS.includes(tier)) throw new Error('invalid_request');
+  const result = await client.query(
+    `UPDATE users SET tier_override = $2, updated_at = NOW() WHERE user_id = $1 RETURNING user_id`,
+    [userId, tier]
+  );
+  if (result.rows.length === 0) throw new Error('not_found');
 }
 
 const OPERATOR_GRANT_DAYS = 365;

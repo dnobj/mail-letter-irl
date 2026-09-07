@@ -219,8 +219,7 @@ describe('validateDeploymentConfig in production', () => {
     ['changeme placeholder', { STRIPE_SECRET_KEY: 'changeme' }, 'config.placeholder_value'],
     ['placeholder literal', { LETTER_PROVIDER_API_KEY: 'placeholder' }, 'config.placeholder_value'],
     ['xxx placeholder', { TEMP_IMAGE_BUCKET_SECRET_ACCESS_KEY: 'xxx' }, 'config.placeholder_value'],
-    ['test-prefixed address-verification key', { POSTGRID_ADDRESS_VERIFICATION_API_KEY: 'test_sk_unit_fixture' }, 'provider.test_key_in_production'],
-    ['ADMIN_ENABLED in production', { ADMIN_ENABLED: 'true' }, 'admin.enabled_in_production']
+    ['test-prefixed address-verification key', { POSTGRID_ADDRESS_VERIFICATION_API_KEY: 'test_sk_unit_fixture' }, 'provider.test_key_in_production']
   ])('%s is an error', (_description, overrides, expectedRule) => {
     expect(ruleIds(env(overrides), 'error')).toContain(expectedRule);
   });
@@ -389,27 +388,6 @@ describe('validateDeploymentConfig outside production', () => {
     expect(validation.findings.map(f => f.rule)).not.toContain('stripe.pack_price_incomplete');
   });
 
-  it('keeps the local admin mode bootable without any Stripe configuration', () => {
-    const adminLocal: NodeJS.ProcessEnv = {
-      NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
-      ADMIN_ENABLED: 'true'
-    };
-    expect(validateDeploymentConfig(adminLocal, 'server').errors).toEqual([]);
-  });
-
-  it('still rejects a live Stripe key in local admin mode', () => {
-    // Admin mode exempts presence and pack/JIT completeness, never the
-    // key-location rules: a pasted sk_live_ key in local admin tooling is
-    // exactly the live-key-outside-production scenario (review round 1).
-    const adminWithLiveKey: NodeJS.ProcessEnv = {
-      NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://user:pass@fixture.example/db?sslmode=require',
-      ADMIN_ENABLED: 'true',
-      STRIPE_SECRET_KEY: 'sk_live_unit_fixture'
-    };
-    expect(ruleIds(adminWithLiveKey, 'error')).toContain('stripe.live_key_outside_production');
-  });
 });
 
 describe('validation surfaces', () => {

@@ -77,73 +77,16 @@ describe("legacy public admin route denial", () => {
       source.indexOf('url.pathname === "/healthz"'),
     );
 
-    // Every legacy admin surface must exist and must sit behind the guard. A
-    // missing marker is a failure, not a skip: silently tolerating -1 is how
-    // this assertion previously passed against a CORS preflight block that had
-    // already been deleted upstream.
-    const markersBehindGuard = [
-      "url.pathname.startsWith('/api/admin')",
-      "handleAdminApiRequest(req, res",
-      'url.pathname === "/admin-panel.html"',
-    ];
-    for (const marker of markersBehindGuard) {
-      const markerIndex = source.indexOf(marker);
-      expect(markerIndex, `missing dispatcher marker: ${marker}`).toBeGreaterThan(
-        -1,
-      );
-      expect(markerIndex).toBeGreaterThan(guardIndex);
-    }
+    // The legacy dispatch and the panel file serving are gone from this
+    // process; the guard is the only thing that still knows the paths.
+    expect(source).not.toContain("handleAdminApiRequest");
+    expect(source).not.toContain("admin-panel.html");
+    expect(source).not.toContain("startsWith('/api/admin')");
   });
 
-  it("keeps the guard predicate exactly as wide as the legacy dispatcher", async () => {
-    const httpServerSource = await readFile("src/mcp/httpServer.ts", "utf8");
-    const handlerSource = await readFile("src/api/adminApiHandler.ts", "utf8");
+  it("keeps the guard exactly as wide as the deleted dispatcher's /api/admin prefix", async () => {
     const guardSource = await readFile("src/mcp/legacyAdminRoutes.ts", "utf8");
-
-    // Both legacy dispatch sites match on the bare prefix. A substring check
-    // alone only catches a NARROWED dispatcher, so it is paired with the
-    // literal sweep below, which catches a widened one.
-    expect(httpServerSource).toContain("url.pathname.startsWith('/api/admin')");
-    expect(handlerSource).toContain("pathname.startsWith('/api/admin')");
     expect(guardSource).toContain('pathname.startsWith("/api/admin")');
-
-    // Every admin-ish path literal either dispatch site mentions must be inside
-    // the guard's surface. Appending a clause such as
-    // `|| url.pathname.startsWith('/api/adm')` introduces a literal that is a
-    // strict prefix of /api/admin, which the guard does not deny, and this
-    // fails rather than passing on the still-present original substring.
-    const adminishLiterals = (source: string): string[] => [
-      ...new Set(
-        [...source.matchAll(/['"`](\/api\/adm[^'"`]*)['"`]/g)].map(
-          (match) => match[1],
-        ),
-      ),
-    ];
-
-    const dispatcherLiterals = [
-      ...new Set([
-        ...adminishLiterals(httpServerSource),
-        ...adminishLiterals(handlerSource),
-      ]),
-    ].sort();
-
-    // Non-vacuity: the sweep must actually find the dispatch literals.
-    expect(dispatcherLiterals).toContain("/api/admin");
-    expect(dispatcherLiterals.length).toBeGreaterThan(1);
-
-    for (const literal of dispatcherLiterals) {
-      expect(
-        literal.startsWith("/api/admin"),
-        `dispatch literal ${literal} is wider than the guard surface /api/admin`,
-      ).toBe(true);
-      expect(
-        isLegacyPublicAdminPath(literal),
-        `dispatch literal ${literal} is not denied by the guard`,
-      ).toBe(true);
-    }
-
-    // Representative paths the bare-prefix dispatcher accepts, including the
-    // ones that previously bypassed the narrower guard.
     for (const pathname of [
       "/api/admin",
       "/api/admin/",
@@ -173,31 +116,7 @@ describe("legacy public admin route denial", () => {
     expect(validationIndex).toBeLessThan(deploymentValidationIndex);
   });
 
-  it("classifies coupled feature flags", async () => {
-    const { findCoupledFeatureFlagWarnings, ADMIN_COUPLED_FEATURE_FLAGS } =
-      await import("../../../src/admin/config.js");
-
-    expect([...ADMIN_COUPLED_FEATURE_FLAGS]).toEqual([
-      "JIT_PURCHASE_ENABLED",
-      "IMAGE_TRIAL_ENABLED",
-    ]);
-
-    expect(findCoupledFeatureFlagWarnings({})).toEqual([]);
-    expect(
-      findCoupledFeatureFlagWarnings({
-        JIT_PURCHASE_ENABLED: "false",
-        IMAGE_TRIAL_ENABLED: "false",
-      }),
-    ).toEqual([]);
-    expect(
-      findCoupledFeatureFlagWarnings({
-        JIT_PURCHASE_ENABLED: "true",
-        IMAGE_TRIAL_ENABLED: "true",
-      }),
-    ).toEqual(["JIT_PURCHASE_ENABLED", "IMAGE_TRIAL_ENABLED"]);
-  });
-
-  describe("boot validation with coupled feature flags enabled", () => {
+  describe("boot validation", () => {
     const OWNED_KEYS = [
       "JIT_PURCHASE_ENABLED",
       "IMAGE_TRIAL_ENABLED",
@@ -241,45 +160,9 @@ describe("legacy public admin route denial", () => {
       return module.validateEnvironment;
     }
 
-    it("emits the coupling warning and does not throw", async () => {
-      process.env.JIT_PURCHASE_ENABLED = "true";
-      process.env.IMAGE_TRIAL_ENABLED = "true";
-
-      const validateEnvironment = await loadBootValidation();
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      // The real boot path, not the pure detector. If the coupling check is
-      // ever rewritten as a throw, this fails.
-      expect(() => validateEnvironment()).not.toThrow();
-
-      const messages = warn.mock.calls.map((call) => String(call[0]));
-      expect(messages).toHaveLength(2);
-      expect(messages[0]).toContain("JIT_PURCHASE_ENABLED=true");
-      expect(messages[1]).toContain("IMAGE_TRIAL_ENABLED=true");
-      for (const message of messages) {
-        expect(message).toContain("operator recovery is unreachable");
-        expect(message).toContain(
-          "docs/deployment.md#operator-recovery-interaction",
-        );
-      }
-      warn.mockRestore();
-    });
-
-    it("stays silent when the coupled flags are disabled", async () => {
-      process.env.JIT_PURCHASE_ENABLED = "false";
-      process.env.IMAGE_TRIAL_ENABLED = "false";
-
-      const validateEnvironment = await loadBootValidation();
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      expect(() => validateEnvironment()).not.toThrow();
-      expect(warn).not.toHaveBeenCalled();
-      warn.mockRestore();
-    });
-
-    it("still refuses ADMIN_ENABLED=true, proving this is the real boot path", async () => {
-      // Negative control. Without it, `not.toThrow()` above could be green
-      // because the imported function is not the one that guards startup.
+    it("still refuses ADMIN_ENABLED=true through the real boot path", async () => {
+      // A stale variable from the legacy panel must never come back as a
+      // silent no-op: the public server refuses to start.
       process.env.ADMIN_ENABLED = "true";
 
       const validateEnvironment = await loadBootValidation();
@@ -298,7 +181,11 @@ describe("legacy public admin route denial", () => {
       expect(deployment).toContain(flag);
       expect(manual).toContain(flag);
     }
-    expect(deployment).toContain("/api/admin/image-generation/*");
+    // The recovery that used to sit behind the denied routes is documented as
+    // living in the tailnet admin panel, and the dead route is no longer
+    // presented as a procedure.
+    expect(deployment).toContain("admin-panel-guide.md");
+    expect(deployment).not.toContain("POST /api/admin/jobs/{jobId}/retry");
     expect(manual).toContain("/api/admin/image-generation/*");
   });
 

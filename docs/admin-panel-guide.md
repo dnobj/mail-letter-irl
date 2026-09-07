@@ -8,8 +8,9 @@ runs `tailscaled` in userspace-networking mode next to the Node process and publ
 owner's tailnet with Tailscale Serve, so the only path to it is a WireGuard tunnel from an approved
 device on that tailnet, at `https://letter-irl-admin-<dev|prod>.<tailnet>.ts.net`.
 
-It replaces the legacy `admin-panel.html` page and `/api/admin/*` routes, which stay disabled everywhere
-(`src/mcp/legacyAdminRoutes.ts`). Issue [#162](https://github.com/dnobj/mail-letter-irl/issues/162) tracks
+It replaces the legacy `admin-panel.html` page and `/api/admin/*` routes, which have been deleted; the
+public server still answers every `/admin*` and `/api/admin*` path with a no-store 404
+(`src/mcp/legacyAdminRoutes.ts`) and refuses to start with `ADMIN_ENABLED=true`. Issue [#162](https://github.com/dnobj/mail-letter-irl/issues/162) tracks
 the rebuild.
 
 ## What it shows and never shows
@@ -224,6 +225,14 @@ Commands available:
 | Release amount-mismatch quarantine | an order carrying `PAYMENT_AMOUNT_MISMATCH` | clears the code and records `operator.quarantine_released`; the hourly sweep then acts |
 | Create / change status / delete promo | `promo_campaigns` | client-taking promo service functions with a validated status machine and an `updated_at` version; delete refused once redeemed |
 | Resolve ambiguous image reservation | `image_generation_reservations` in `ambiguous` | `resolveAmbiguousGenerationReservation` (issue #69's operator recovery, now reachable) |
+| Set / clear tier override | an account | `setTierOverride` (the daily calculation skips overridden accounts; the API's tier cache lasts five minutes) |
+| Change provider routing | `provider_routing` by mail type | validated against the runtime provider registry, versioned on `updated_at`; production never accepts `dummy` |
+| Provider status sync | letters of the last N days | `syncLetterStatuses` (dry run by default; apply updates statuses and history) |
+
+Read-only pages beyond the P0 set: **Retention** (report mode counts and the quarantine's metadata; no
+restore until `retentionService`'s restore defects are fixed), **Routing** (the routing table, the
+registry, stuck letters), **Support** (token counts, feature requests without contact emails). Manual
+cases: `ADMIN-OPS-01` to `ADMIN-OPS-03` and `ADMIN-LEGACY-01`.
 
 The **Stripe** page runs the reconciliation (`reconcileStripePayments`) with the service's restricted key
 in either mode; it reads Stripe, writes only a `stripe.reconcile` audit row (counts and order ids, never

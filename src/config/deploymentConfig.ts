@@ -52,7 +52,7 @@ export interface EnvVarRequirement {
   /** Alternative names that satisfy the requirement (bucket alias chains). */
   aliases?: readonly string[];
   requiredIn: 'always' | 'production' | 'development';
-  condition?: 'unless-admin' | 'when-jit-enabled' | 'when-static-dcr';
+  condition?: 'when-jit-enabled' | 'when-static-dcr';
   /**
    * Listed so the cutover preflight can DIFF it, but absence is not a failure:
    * the code has a working default. `checkedBy` alone was not enough - it only
@@ -115,14 +115,12 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
   {
     name: 'STRIPE_SECRET_KEY',
     requiredIn: 'always',
-    condition: 'unless-admin',
     secret: true,
     services: ['api', 'maintenance']
   },
   {
     name: 'STRIPE_WEBHOOK_SECRET',
     requiredIn: 'always',
-    condition: 'unless-admin',
     secret: true,
     services: ['api']
   },
@@ -204,7 +202,6 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
   {
     name: 'STRIPE_CURRENCY',
     requiredIn: 'production',
-    condition: 'unless-admin',
     advisory: true,
     secret: false,
     services: ['api', 'maintenance'],
@@ -631,7 +628,6 @@ function validateStripe(
   findings: ConfigFinding[]
 ): void {
   const production = mode === 'production';
-  const adminMode = env.ADMIN_ENABLED === 'true';
 
   const secretKey = env.STRIPE_SECRET_KEY;
   if (secretKey) {
@@ -665,7 +661,7 @@ function validateStripe(
   // Packs are always sellable, so their config is checked whenever this is a
   // deployed environment. Test mode skips it: unit fixtures configure only
   // what they exercise.
-  if (mode !== 'test' && !adminMode) {
+  if (mode !== 'test') {
     for (const price of PACK_PRICE_ENV_VARS) {
       const problems: string[] = [];
       // TRIMMED, exactly like the catalog that will resolve it: #275 made
@@ -954,11 +950,10 @@ export function validateDeploymentConfig(
 ): DeploymentValidation {
   const { mode, findings } = resolveDeploymentMode(env);
   const production = mode === 'production';
-  const adminMode = env.ADMIN_ENABLED === 'true';
 
   // Generic presence pass over manifest entries that no dedicated rule owns.
   // Semantics preserved from the original httpServer loops: DATABASE_URL in
-  // every mode; Stripe presence in every mode unless local admin mode.
+  // every mode; Stripe presence in every mode.
   // The surface maps to the manifest's services field, so the validator and
   // the preflight parity script demand the same set per service - review
   // round 1 found them disagreeing about STRIPE_WEBHOOK_SECRET on the
@@ -981,7 +976,6 @@ export function validateDeploymentConfig(
     // Symmetric to the line above. Without it a development-only entry would
     // be demanded in production, which is the opposite of what it means.
     if (entry.requiredIn === 'development' && production) continue;
-    if (entry.condition === 'unless-admin' && adminMode) continue;
     if (entry.condition === 'when-jit-enabled' && env.JIT_PURCHASE_ENABLED !== 'true') continue;
     if (
       entry.condition === 'when-static-dcr' &&
@@ -996,16 +990,6 @@ export function validateDeploymentConfig(
         message: `${entry.name} is required`
       });
     }
-  }
-
-  if (production && adminMode) {
-    // The server has its own throwing guard for this; repeating it here covers
-    // the maintenance surface, which has no such guard.
-    findings.push({
-      severity: 'error',
-      rule: 'admin.enabled_in_production',
-      message: 'ADMIN_ENABLED=true is not allowed in production'
-    });
   }
 
   validateProvider(env, mode, findings);

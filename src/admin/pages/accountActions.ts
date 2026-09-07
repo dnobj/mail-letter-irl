@@ -30,6 +30,16 @@ ${
   <input type="number" id="adjust-letters" name="letters" min="1" max="500" step="1" required>
   <div><button type="submit">Preview adjustment…</button></div>
 </form>
+<form method="get" action="/commands/account.set_tier/preview" class="stack">
+  <input type="hidden" name="target" value="${userId}">
+  <label for="tier-override">Tier override (calculated: ${input.detail.account.tier}; override now: ${input.detail.account.tierOverride ?? "none"})</label>
+  <select id="tier-override" name="tier">
+    <option value="clear">clear the override</option>
+    <option value="standard">standard</option>
+    <option value="trusted">trusted</option>
+  </select>
+  <div><button type="submit">Preview tier change…</button></div>
+</form>
 <form method="get" action="/commands/account.grant_images/preview" class="stack">
   <input type="hidden" name="target" value="${userId}">
   <label for="grant-quantity">Grant image generations (compensation, valid one year)</label>

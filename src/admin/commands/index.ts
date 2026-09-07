@@ -2,6 +2,7 @@ import { createAccountCommands } from "./accounts.js";
 import { alertTransitionCommand } from "./alerts.js";
 import { createImageCommands } from "./images.js";
 import { jobResolveCommand, jobRetryCommand } from "./jobs.js";
+import { createOpsCommands } from "./ops.js";
 import { createPromoCommands } from "./promos.js";
 import type { CommandDefinition } from "./runner.js";
 import { createStripeCommands } from "./stripe.js";
@@ -10,6 +11,7 @@ const stripe = createStripeCommands();
 const accounts = createAccountCommands();
 const promos = createPromoCommands();
 const images = createImageCommands();
+const ops = createOpsCommands();
 
 /** Every command the panel can run, keyed by route name. */
 export const ADMIN_COMMANDS: ReadonlyArray<CommandDefinition<any>> = [
@@ -26,6 +28,9 @@ export const ADMIN_COMMANDS: ReadonlyArray<CommandDefinition<any>> = [
   promos.transition,
   promos.remove,
   images.resolve,
+  ops.setTier,
+  ops.routing,
+  ops.statusSync,
 ];
 
 export function findAdminCommand(name: string): CommandDefinition<any> | undefined {
