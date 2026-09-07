@@ -1,0 +1,23 @@
+# Ignore file for Dockerfile.admin ONLY. BuildKit reads <Dockerfile name>.dockerignore
+# before .dockerignore, and a ROOT .dockerignore also applies to the API and
+# maintenance builds, which need db/ (pre-deploy migrations) and widgets/ at runtime:
+# the first dev deploy after the panel merge failed its migration for exactly
+# that reason. Keep this file named after the Dockerfile.
+# Nothing below is needed to compile the admin service, and .env files must
+# never reach an image layer.
+.git
+node_modules
+dist
+coverage
+tests
+docs
+widgets
+snapshots
+scripts
+db
+.github
+*.html
+*.html.backup
+*.md
+.env
+.env.*
