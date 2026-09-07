@@ -556,7 +556,8 @@ npm run dev  # Logs to stdout
 ## Security Notes
 
 - Never commit `.env` files
-- Legacy public admin routes are forced off in every environment; `ADMIN_ENABLED=true` fails startup
+- Legacy public admin routes are forced off in every environment; `ADMIN_ENABLED=true` fails startup.
+  The operator panel is a separate tailnet-only service (`docs/admin-panel-guide.md`)
 - All MCP tools require authentication
 - Stripe webhooks verified via signature
 - PostGrid API key is test mode in development

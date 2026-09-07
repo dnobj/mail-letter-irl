@@ -1,3 +1,9 @@
+> **Superseded (September 2026).** The panel was built as a tailnet-only Railway service instead of
+> the local-only application this plan selected; see [admin-panel-guide.md](admin-panel-guide.md). The
+> slice-1 foundation (migration 022, the audit writer, command runs, preview digests) shipped as planned
+> and is reused; the loopback server, vault-held credentials and Playwright suite were not built. Kept
+> as the decision record and the audit that motivated the rebuild.
+
 # Admin Interface Modernization Plan
 
 **Status:** Approved implementation plan as of July 19, 2026

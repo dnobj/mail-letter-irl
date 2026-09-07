@@ -7,6 +7,8 @@
  * - Track redemptions
  */
 
+import type pg from 'pg';
+
 import { transaction, query } from '../db/index.js';
 import {
   PromoCampaign,
@@ -499,4 +501,105 @@ export async function deleteCampaign(campaignId: string): Promise<{ success: boo
   console.log('🗑️ Deleted promo campaign');
 
   return { success: true };
+}
+
+// ============================================================================
+// Operator (admin panel) variants: the caller's client, so the change commits
+// with the command run and audit rows; a validated status machine; and an
+// updated_at version so a stale preview cannot apply (issue #162).
+// ============================================================================
+
+export const PROMO_STATUS_TRANSITIONS: Record<PromoCampaignStatus, PromoCampaignStatus[]> = {
+  draft: ['active', 'ended'],
+  active: ['paused', 'ended'],
+  paused: ['active', 'ended'],
+  ended: [],
+  expired: [],
+};
+
+export async function createCampaignWithClient(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: CreatePromoCampaignParams
+): Promise<PromoCampaign> {
+  const {
+    code,
+    name,
+    description,
+    creditsAmount,
+    expirationPolicy = 'days_from_activation',
+    expirationDays = 90,
+    fixedExpirationDate,
+    maxTotalRedemptions,
+    maxPerUser = 1,
+    startsAt = new Date(),
+    endsAt,
+    requiresNewUser = false,
+    createdBy,
+  } = params;
+  const result = await client.query<PromoCampaign>(
+    `INSERT INTO promo_campaigns (
+      code, name, description, credits_amount, expiration_policy,
+      expiration_days, fixed_expiration_date, max_total_redemptions,
+      max_per_user, starts_at, ends_at, requires_new_user, status, created_by
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'draft', $13)
+    RETURNING *`,
+    [
+      code.toUpperCase().trim(),
+      name,
+      description || null,
+      creditsAmount,
+      expirationPolicy,
+      expirationDays,
+      fixedExpirationDate || null,
+      maxTotalRedemptions || null,
+      maxPerUser,
+      startsAt,
+      endsAt || null,
+      requiresNewUser,
+      createdBy || null,
+    ]
+  );
+  return result.rows[0];
+}
+
+/**
+ * Throws Error('not_found' | 'invalid_state' | 'stale').
+ */
+export async function transitionCampaignStatusWithClient(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: { campaignId: string; status: PromoCampaignStatus; expectedUpdatedAt: string }
+): Promise<PromoCampaign> {
+  const current = await client.query<PromoCampaign>(
+    'SELECT * FROM promo_campaigns WHERE campaign_id = $1 FOR UPDATE',
+    [params.campaignId]
+  );
+  const campaign = current.rows[0];
+  if (!campaign) throw new Error('not_found');
+  if (new Date(campaign.updated_at).toISOString() !== params.expectedUpdatedAt) throw new Error('stale');
+  if (!PROMO_STATUS_TRANSITIONS[campaign.status].includes(params.status)) throw new Error('invalid_state');
+  const result = await client.query<PromoCampaign>(
+    `UPDATE promo_campaigns SET status = $1, updated_at = NOW() WHERE campaign_id = $2 RETURNING *`,
+    [params.status, params.campaignId]
+  );
+  return result.rows[0];
+}
+
+/**
+ * Throws Error('not_found' | 'invalid_state'): a campaign with redemptions is
+ * ended, never deleted, so its ledger rows keep their campaign.
+ */
+export async function deleteCampaignWithClient(
+  client: Pick<pg.PoolClient, 'query'>,
+  campaignId: string
+): Promise<void> {
+  const current = await client.query<{ current_redemptions: number; redeemed: string }>(
+    `SELECT c.current_redemptions,
+            (SELECT COUNT(*) FROM promo_redemptions r WHERE r.campaign_id = c.campaign_id)::text AS redeemed
+     FROM promo_campaigns c WHERE c.campaign_id = $1 FOR UPDATE`,
+    [campaignId]
+  );
+  const row = current.rows[0];
+  if (!row) throw new Error('not_found');
+  if (row.current_redemptions > 0 || Number(row.redeemed) > 0) throw new Error('invalid_state');
+  await client.query('DELETE FROM promo_campaigns WHERE campaign_id = $1', [campaignId]);
 }

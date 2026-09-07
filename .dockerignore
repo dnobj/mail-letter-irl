@@ -1,0 +1,18 @@
+# Build context for Dockerfile.admin. Nothing here is needed to compile the
+# admin service, and .env files must never reach an image layer.
+.git
+node_modules
+dist
+coverage
+tests
+docs
+widgets
+snapshots
+scripts
+db
+.github
+*.html
+*.html.backup
+*.md
+.env
+.env.*

@@ -21,8 +21,6 @@ import {
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from "../auth/betaAccess.js";
 import { handleCreditApiRequest } from "../api/creditApiHandler.js";
 import { handlePATApiRequest } from "../api/patApiHandler.js";
-import { handleAdminApiRequest } from "../api/adminApiHandler.js";
-import { isAdminEnabled } from "../api/middleware/adminAuth.js";
 import { handleLetterApiRequest } from "../api/letterApiHandler.js";
 import { handleReturnAddressApiRequest } from "../api/returnAddressApiHandler.js";
 import { handleTempImageRequest } from "../api/tempImageHandler.js";
@@ -52,10 +50,7 @@ import {
   writeDiagnostic
 } from "../utils/diagnosticLog.js";
 import { buildWwwAuthenticateChallenge } from "../auth/oauthChallenge.js";
-import {
-  findCoupledFeatureFlagWarnings,
-  validatePublicServerAdminConfiguration
-} from "../admin/config.js";
+import { validatePublicServerAdminConfiguration } from "../admin/config.js";
 import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
 import { getReadiness } from "./readiness.js";
 import { kickPriceCatalog } from "../services/priceCatalog.js";
@@ -108,15 +103,6 @@ export const BUILD_BRANCH = process.env.RAILWAY_GIT_BRANCH ?? "unknown";
 
 export function validateEnvironment() {
   validatePublicServerAdminConfiguration(process.env);
-
-  // Warn, never throw. The operator recovery routes these flags depend on are
-  // denied by the legacy admin guard, but failing startup on a flag combination
-  // would boot-loop a running deployment.
-  for (const flag of findCoupledFeatureFlagWarnings(process.env)) {
-    console.warn(
-      `[admin] ${flag}=true while public /api/admin* routes are denied; issue #69 operator recovery is unreachable. See docs/deployment.md#operator-recovery-interaction`
-    );
-  }
 
   // Fail closed on invalid deployment configuration (issue #155). Throws with
   // every problem named at once; the entrypoint's catch turns that into a
@@ -573,47 +559,6 @@ export async function startHttpServer() {
       return;
     }
 
-    // Serve admin panel (requires ADMIN_ENABLED=true, localhost only)
-    if (url.pathname === "/admin" || url.pathname === "/admin.html" || url.pathname === "/admin-panel.html") {
-      // Check if admin is enabled (disabled by default)
-      if (!isAdminEnabled()) {
-        res.statusCode = 404;
-        res.end("Not found");
-        return;
-      }
-
-      // Restrict to localhost only - block ngrok and other proxies
-      const remoteAddress = req.socket.remoteAddress;
-      const isLocalhost = remoteAddress === '127.0.0.1' ||
-                          remoteAddress === '::1' ||
-                          remoteAddress === '::ffff:127.0.0.1';
-
-      // Also block if coming through ngrok or other proxies
-      const isProxied = req.headers['x-forwarded-for'] ||
-                        req.headers['x-real-ip'] ||
-                        req.headers['ngrok-agent-ips'];
-
-      if (!isLocalhost || isProxied) {
-        res.statusCode = 404;
-        res.end("Not found");
-        return;
-      }
-
-      const fs = await import("fs/promises");
-      const path = await import("path");
-      const filePath = path.join(process.cwd(), "admin-panel.html");
-      try {
-        const content = await fs.readFile(filePath, "utf-8");
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "text/html");
-        res.end(content);
-      } catch (err: any) {
-        res.statusCode = 404;
-        res.end("Admin panel not found");
-      }
-      return;
-    }
-
     // Server-controlled Stripe return page. It intentionally shows no order
     // details; authenticated status is available only through get_purchase_status.
     if (url.pathname === '/purchase/return' && req.method === 'GET') {
@@ -787,17 +732,6 @@ export async function startHttpServer() {
     if (url.pathname.startsWith('/api/temp-image/')) {
       const tempImageHandled = await handleTempImageRequest(req, res, url.pathname);
       if (tempImageHandled) return;
-    }
-
-    // Admin API routes (check first - more specific path)
-    if (url.pathname.startsWith('/api/admin')) {
-      if (await rateLimitMiddlewareWithTier(req, res, 'admin')) {
-        return; // Rate limited
-      }
-    }
-    const adminApiHandled = await handleAdminApiRequest(req, res, url.pathname);
-    if (adminApiHandled) {
-      return;
     }
 
     // Credit API routes

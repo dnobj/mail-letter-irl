@@ -12,6 +12,7 @@ import { AdminFoundationError } from "../src/admin/errors.js";
 import {
   ADMIN_FOUNDATION_MIGRATION,
   ADMIN_JIT_PREDECESSOR_MIGRATION,
+  ADMIN_LATEST_REQUIRED_MIGRATION,
   ADMIN_PROVISIONING_DATABASE_URL_ENV,
   buildAdminGrantStatements,
   parseAdminProvisioningArguments,
@@ -60,9 +61,11 @@ export async function provisionAdminDatabaseAccess(
   const pool = new Pool({
     connectionString,
     max: 1,
+    // Verified TLS for any remote host. The old `rejectUnauthorized: false`
+    // was the one connection in the repository that skipped verification.
     ssl: usesLocalPostgres(connectionString)
       ? undefined
-      : { rejectUnauthorized: false },
+      : { rejectUnauthorized: true },
     connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 5_000,
     allowExitOnIdle: true,
@@ -93,14 +96,27 @@ export async function provisionAdminDatabaseAccess(
         FROM migrations
         WHERE name = ANY($1::text[])
       `,
-      [[ADMIN_JIT_PREDECESSOR_MIGRATION, ADMIN_FOUNDATION_MIGRATION]],
+      [
+        [
+          ADMIN_JIT_PREDECESSOR_MIGRATION,
+          ADMIN_FOUNDATION_MIGRATION,
+          ADMIN_LATEST_REQUIRED_MIGRATION,
+        ],
+      ],
     );
     const appliedMigrations = new Set(migrations.rows.map((row) => row.name));
-    if (
-      !appliedMigrations.has(ADMIN_JIT_PREDECESSOR_MIGRATION) ||
-      !appliedMigrations.has(ADMIN_FOUNDATION_MIGRATION)
-    ) {
-      throw new AdminFoundationError("ADMIN_INVALID_CONFIGURATION");
+    for (const required of [
+      ADMIN_JIT_PREDECESSOR_MIGRATION,
+      ADMIN_FOUNDATION_MIGRATION,
+      ADMIN_LATEST_REQUIRED_MIGRATION,
+    ]) {
+      if (!appliedMigrations.has(required)) {
+        // The grants below name tables that only exist once every migration
+        // through the latest one has run. Say which one is missing; the
+        // name is not a secret.
+        console.error(`Migration ${required} is not recorded; deploy the API first.`);
+        throw new AdminFoundationError("ADMIN_INVALID_CONFIGURATION");
+      }
     }
 
     const markerResult = await client.query<MarkerRow>(

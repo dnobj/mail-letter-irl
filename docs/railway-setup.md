@@ -140,8 +140,9 @@ an explicit service **Redeploy** to reach the running instance (issue #213).
 
 Use Railway variable references to the bucket service. Do not copy bucket credentials into Git, screenshots, logs, or documentation. The application also accepts Railway's standard `BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` names.
 
-Leave `ADMIN_ENABLED` unset or `false`. A `true` value fails API startup; there is no Railway admin web
-service and no public admin route in either environment.
+Leave `ADMIN_ENABLED` unset. A `true` value fails API startup, and there is no public admin route in
+either environment. The admin panel is its own Railway service with no public domain, reachable only over
+the owner's tailnet; its setup is in [admin-panel-guide.md](admin-panel-guide.md).
 
 ## Maintenance Settings
 
