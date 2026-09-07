@@ -302,11 +302,19 @@ describe("legacy public admin route denial", () => {
     expect(manual).toContain("/api/admin/image-generation/*");
   });
 
-  it("removes legacy launch commands while retaining explicit grant provisioning", async () => {
+  it("keeps the legacy launch command gone and points the admin scripts at the tailnet panel", async () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 
+    // The legacy dashboard (port 8788, ADMIN_ENABLED) has no launcher. The
+    // replacement scripts start dist/admin/server.js, which never reads
+    // ADMIN_ENABLED and never binds a public interface for its routes.
     expect(packageJson.scripts.admin).toBeUndefined();
-    expect(packageJson.scripts["admin:dev"]).toBeUndefined();
+    expect(packageJson.scripts["admin:start"]).toBe("node dist/admin/server.js");
+    expect(packageJson.scripts["admin:dev"]).toContain("node dist/admin/server.js");
+    for (const script of Object.values(packageJson.scripts as Record<string, string>)) {
+      expect(script).not.toContain("ADMIN_ENABLED");
+      expect(script).not.toContain("8788");
+    }
     expect(packageJson.scripts["admin:provision-access"]).toBe(
       "tsx scripts/provisionAdminDatabaseAccess.ts",
     );

@@ -575,8 +575,9 @@ Test promotional code redemption.
 
 ## Admin Operator Interface
 
-The legacy public page and API are disabled while the hardened local operator application is delivered in
-issue #162 slices. Do not set `ADMIN_ENABLED=true`, open `admin-panel.html` directly, or place an admin
+The legacy public page and API stay disabled (`ADMIN_ENABLED=true` fails the public server's boot). The
+replacement is the tailnet-only admin panel described in [admin-panel-guide.md](admin-panel-guide.md);
+its cases follow `ADMIN-FOUNDATION-022`. Never open `admin-panel.html` directly or place an admin
 database URL in `.env`.
 
 ### ADMIN-FOUNDATION-022 — Slice 1 public denial and regression case
@@ -619,8 +620,142 @@ database URL in `.env`.
 root, manifest, and OAuth metadata regressions remain healthy. Any non-404 legacy response is a release
 blocker.
 
-The authenticated session, read models, UI, and command cases will be added by later slices before their
-corresponding functionality is enabled.
+### ADMIN-INFRA-01 — Tailnet ingress spike (development)
+
+**Status:** Awaiting execution by the owner; this checklist does not claim a result.
+
+**Preconditions:**
+
+- The development `letter-irl-admin` service exists with a `/data` volume, no domain, Serverless off, and
+  the variables in [admin-panel-guide.md](admin-panel-guide.md); `TS_AUTHKEY` was consumed and deleted.
+- The tailnet policy carries the `tag:dev-admin` grant, posture and tests; HTTPS and MagicDNS are on.
+- The laptop and the phone run Tailscale signed in as the allowlisted login.
+
+**Steps:**
+
+1. [ ] Read the deploy log; verify `[tailscale] ready name=letter-irl-admin-dev.<tailnet>.ts.net tags=tag:dev-admin`
+   and `admin.listening`, and that the Railway healthcheck passed with no domain.
+2. [ ] Open `https://letter-irl-admin-dev.<tailnet>.ts.net/` from the laptop; verify a valid certificate
+   and the overview page.
+3. [ ] From the phone on the tailnet, open the same URL; verify it answers. Turn Tailscale off on the phone;
+   verify the URL no longer resolves or connects.
+4. [ ] From another service in the development environment (a Railway shell on the API service), run
+   `curl -si http://letter-irl-admin.railway.internal:$PORT/healthz`; verify the body is exactly `ok` and
+   `curl -si http://letter-irl-admin.railway.internal:8790/` is refused (connection refused, not a page).
+5. [ ] From the internet, verify the service has no `*.up.railway.app` domain and that
+   `https://letter-irl-admin-dev.<tailnet>.ts.net/healthz` does not resolve off the tailnet.
+6. [ ] Redeploy the service; verify the machine keeps its name (no `-1` suffix) and the URL still answers.
+7. [ ] Attach the log lines, the console screenshot of the machine (tag and no "Locked out" badge), and
+   the curl outputs. Never attach a key or a connection string.
+
+**Pass criteria:** The `.ts.net` URL answers only from an allowed device; the private network reaches only
+`/healthz`; port 8790 is refused; a redeploy is the same node. Any answer from the internet is a release
+blocker.
+
+### ADMIN-READ-01 — Banner and identity
+
+**Preconditions:** `ADMIN-INFRA-01` passed; the development panel runs in `read-only` mode.
+
+**Steps:**
+
+1. [ ] Open the overview; verify the banner shows `development`, `mode: read-only`, `marker: development`,
+   `db role: letter_irl_admin_reader_development`, `stripe: test`, the mail provider, the node name with
+   `tag:dev-admin`, the build commit, and `operator: <your login> from <your device name>`.
+2. [ ] Reload; verify the session cookie is reused (one `admin.session_start` row per session in
+   `/audit`, not one per request).
+3. [ ] Verify the response headers carry `Content-Security-Policy` with a nonce, `Cache-Control: no-store`
+   and `X-Correlation-Id`.
+
+**Pass criteria:** The banner states what the machine checked, and one session produces one audit row.
+
+### ADMIN-READ-02 — Account and pack figures
+
+**Preconditions:** A development account that bought a pack in test mode and mailed one letter (PAY-01).
+
+**Steps:**
+
+1. [ ] Look the account up by exact email; verify the email is masked on the account page.
+2. [ ] Verify the ledger lots show initial and remaining credits, and the letters table shows metadata
+   only: no content, no recipient, no address anywhere on the page.
+3. [ ] Open the pack order; verify "unspent letters" and "maximum proportional refund" match
+   letters remaining × amount ÷ letters in pack, floored.
+4. [ ] Reveal the email with a reason; verify it appears once, and `/audit` shows a `pii.reveal` row with
+   that reason. Submit a reason shorter than 8 characters; verify a 400 and a denied `pii.reveal` row.
+
+**Pass criteria:** Figures agree with the ledger; content and addresses are absent; the reveal is audited.
+
+### ADMIN-READ-03 — A Dashboard refund is visible
+
+**Preconditions:** REFUND-01 was run in development.
+
+**Steps:**
+
+1. [ ] Open the refunded order; verify the lots show `revoked`, `amount refunded` equals the pack amount,
+   the webhook events list the three refund events, and no alert is open for the order.
+2. [ ] Run REFUND-02 (a partial Dashboard refund); verify `/alerts` shows the critical
+   `stripe_partial_refund_unmatched` alert linked to the order, and the order page lists it.
+
+**Pass criteria:** The panel shows what the webhook did, without a log search.
+
+### ADMIN-READ-04 — Denials
+
+**Steps:**
+
+1. [ ] Temporarily remove your login from `ADMIN_OPERATOR_LOGINS` and redeploy; verify the URL answers
+   `403 forbidden` with a constant body and `/audit` (after restoring the variable) shows the denied row
+   with your login. Restore the variable.
+2. [ ] From another service on the private network, request `http://letter-irl-admin.railway.internal:8790/`;
+   verify connection refused (the app listener is loopback only).
+3. [ ] Leave a tab idle for 16 minutes; verify the next request starts a new session (a new
+   `admin.session_start` row) rather than failing.
+4. [ ] Submit the reveal form with the CSRF field removed (browser devtools); verify `403 forbidden` and a
+   denied row with `ADMIN_CSRF_REJECTED`.
+
+**Pass criteria:** Every denial is a constant body plus an audit row; nothing on the private network
+reaches an application route.
+
+### ADMIN-READ-05 — Keyboard-only navigation and 200 % zoom
+
+**Steps:**
+
+1. [ ] Navigate the overview, lookup, account and order pages with Tab, Shift+Tab and Enter only; verify
+   every control is reachable, focus is visible, and the reveal form submits from the keyboard.
+2. [ ] At 200 % zoom and at a 320 px wide window, verify no horizontal page scroll: wide tables scroll
+   inside their own container.
+3. [ ] Verify status is conveyed by text as well as by colour in every badge.
+
+**Pass criteria:** No mouse needed; no page-level horizontal scroll at 320 px.
+
+### ADMIN-READ-06 — The same pages from the phone
+
+**Steps:**
+
+1. [ ] Repeat ADMIN-READ-01 and ADMIN-READ-02 steps 1 to 3 from the phone browser over Tailscale.
+2. [ ] Verify the banner shows the phone's device name as the node.
+
+**Pass criteria:** Identical data; the node name identifies the device.
+
+### ADMIN-PROD-RO-01 — Production read-only gate
+
+**Status:** Requires the owner's separate production read-only approval before any step.
+
+**Preconditions:** Production roles created by SQL; grants applied with `--confirm-production-access`;
+the production node registered with `tag:prod-admin`; `ADMIN_MODE=read-only`; the restricted Stripe key
+absent or live.
+
+**Steps:**
+
+1. [ ] Verify the banner shows `production`, `read-only`, `marker: production`,
+   `letter_irl_admin_reader_production`, `stripe: live` and `tag:prod-admin`.
+2. [ ] Open the refunded Starter Pack order from the launch weekend; verify 2 letters, 0 remaining,
+   500 cents refunded, lots revoked.
+3. [ ] Verify `/audit` shows the boot event and this session, and that no command route exists in full mode
+   terms (every POST other than reveal and logout answers 403 `ADMIN_READ_ONLY_MODE`).
+
+**Pass criteria:** Production is visible and untouchable.
+
+The command cases (`ADMIN-CMD-*`, `ADMIN-STRIPE-*`, `ADMIN-ACCT-*`) are added by the slices that enable
+them.
 
 ---
 

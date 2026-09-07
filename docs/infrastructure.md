@@ -28,6 +28,7 @@ Railway project ID: `b31314d8-fd09-4582-9c0d-52a36f879228`
 - API service: `letter-irl-api`
 - Website service: `mail-letter-irl-website`
 - Maintenance service: `letter-irl-maintenance`
+- Admin panel service: `letter-irl-admin` (tailnet-only; development first)
 - Private temporary-image bucket: `letter-irl-images`
 
 Neon project ID: `summer-band-85969681`. Both Railway environments must use the Neon pooled hostname for their own database branch. Production and development data must never share a connection string.
@@ -73,10 +74,13 @@ Generated images are stored in a private Railway bucket for 15 minutes. Producti
 - Neon computes remain at `0.25-0.5 CU` with five-minute scale-to-zero enabled.
 - There is no separate pg-boss pool and no two-second polling connection.
 
-The admin operator interface is not a Railway web service. Public API/MCP processes return 404 for every
-legacy `/admin*` and `/api/admin*` path. Migration 022 adds only the environment/audit/command/operation
-database foundation after issue #69's migration 021; it provisions no production role, credential,
-connection, worker, or local browser runtime.
+The admin panel is a separate Railway service, `letter-irl-admin`, per environment (development first;
+production only after the owner's read-only gate). It has no public domain: the container runs
+`tailscaled` in userspace mode and publishes the panel to the owner's tailnet with Tailscale Serve, and
+the application listens on loopback only. It connects as the environment's `letter_irl_admin_reader_<env>`
+role (and, in full mode, the operator role), never as the API's owner role. Public API/MCP processes still
+return 404 for every legacy `/admin*` and `/api/admin*` path. See
+[admin-panel-guide.md](admin-panel-guide.md).
 
 ## Runtime Commands
 
@@ -86,6 +90,7 @@ connection, worker, or local browser runtime.
 | Maintenance | same backend build | `npm run maintenance` | `0 * * * *` |
 | Database migration | same backend build | `npm run db:migrate:prod` | pre-deploy, both services (`railway.toml`) |
 | Website | `npm ci && npm run build` | `npm start` | continuous/warm in prod; Serverless in dev |
+| Admin panel | `Dockerfile.admin` via `railway.admin.toml` (no pre-deploy migration) | `node dist/admin/server.js` | continuous; never Serverless; no public domain; volume at `/data` |
 
 The backend executes compiled JavaScript with Node. The website uses Next.js standalone output and disables Next telemetry during production builds.
 

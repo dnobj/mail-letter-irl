@@ -438,9 +438,10 @@ rows.
 
 ### admin_command_runs
 
-Durable command state keyed uniquely by `(environment, idempotency_key)`. The table stores the actor SID,
-preview digest, expected version, timestamps, correlation ID, bounded sanitized result, and stable error
-code. Status and timing constraints reject inconsistent outcomes.
+Durable command state keyed uniquely by `(environment, idempotency_key)`. The table stores the actor
+(the `actor_sid` column now holds the operator's tailnet login; the column name is historical), preview
+digest, expected version, timestamps, correlation ID, bounded sanitized result, and stable error code.
+Status and timing constraints reject inconsistent outcomes.
 
 ### admin_operations
 
@@ -451,9 +452,24 @@ claim/retry behavior; a partial index covers claimable pending rows.
 ### Admin grants and provisioning
 
 Migration 022 revokes `PUBLIC` privileges but creates no role or credential. The explicit provisioning
-script requires pre-existing, environment-specific reader/operator login roles, verifies migrations 021
-and 022 plus the database marker, rejects privileged roles, and reapplies a narrow grant set. Production
-provisioning and the first production connection remain separate owner-approved operations.
+script (`npm run admin:provision-access`) requires pre-existing, environment-specific reader/operator
+login roles, verifies migrations 021, 022 and the latest migration the grants depend on (029) plus the
+database marker, rejects privileged roles, and reapplies the grant set in `src/admin/provisioning.ts`:
+
+- **Reader** (`letter_irl_admin_reader_<env>`): `SELECT` on the commerce, ledger, outbox, alert, audit
+  and admin tables, and **column-level** `SELECT` on `users` (no `return_address`), `letters` (no
+  `content`, `recipient`, `preview_html`), `letter_drafts` (no bodies, addresses, validations or
+  images), `personal_access_tokens` (no `token_hash`), `feature_requests` (no `contact_email`) and
+  `redacted_content_quarantine` (no `content`); `INSERT` on `admin_audit_events` only.
+- **Operator** (`letter_irl_admin_operator_<env>`): the reader's reads plus whole-row `SELECT` on
+  `users`, `letters` and `letter_drafts` (the domain services select whole rows), `INSERT`/`UPDATE`
+  on exactly the tables the enabled commands write, `INSERT` and a column-limited `UPDATE` on the
+  command and operation tables, and sequence usage. `DELETE` exists only on `promo_campaigns`.
+- Both: `UPDATE`, `DELETE` and `TRUNCATE` on `admin_audit_events` are revoked; the trigger refuses
+  them regardless.
+
+Production provisioning and the first production connection remain separate owner-approved operations
+([admin-panel-guide.md](admin-panel-guide.md)).
 
 ---
 
