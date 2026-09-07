@@ -8,7 +8,9 @@ import { closeAdminPools, createAdminPools, verifyDatabaseIdentity, type AdminPo
 import { AdminConfigurationError, AdminFoundationError } from "./errors.js";
 import { clientScriptPath, createAdminRequestListener, type RouteHandler } from "./http/app.js";
 import { AdminRouter } from "./http/router.js";
+import { registerCommandRoutes } from "./http/commandRoutes.js";
 import { NAV_ITEMS, registerReadRoutes } from "./http/routes.js";
+import { ADMIN_COMMANDS } from "./commands/index.js";
 import { AdminSessionStore, hashSessionId } from "./http/session.js";
 import { parseAdminRuntimeConfig, type AdminRuntimeConfig } from "./runtimeConfig.js";
 import { createTailscaleCli, createWhoisClient, spawnTailscaled, type WhoisClient } from "./tailscale/cli.js";
@@ -183,7 +185,9 @@ export async function main(): Promise<void> {
     idleTtlMs: config.session.idleTtlMs,
     absoluteTtlMs: config.session.absoluteTtlMs,
   });
-  const router = registerReadRoutes(new AdminRouter<RouteHandler>(), clientScript);
+  const router = new AdminRouter<RouteHandler>();
+  const extensions = registerCommandRoutes(router, ADMIN_COMMANDS);
+  registerReadRoutes(router, clientScript, extensions);
   const listener = createAdminRequestListener({
     config,
     pools,

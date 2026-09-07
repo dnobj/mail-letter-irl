@@ -310,6 +310,11 @@ makes `ADMIN_ENABLED=true` a startup error. Issue #69's ambiguous-image operator
 `JIT_PURCHASE_ENABLED=false` and `IMAGE_TRIAL_ENABLED=false` until a later issue #162 slice ships the
 replacement operator control.
 
+The replacement is the tailnet-only admin panel ([admin-panel-guide.md](admin-panel-guide.md)). Its
+command slice provides held-job resolution and failed-job retry in full mode; the ambiguous
+image-reservation control follows in a later slice, so the `IMAGE_TRIAL_ENABLED` caution still stands
+until then.
+
 ## Migrations must be safe for the PREVIOUS image
 
 The pre-deploy command runs the migration while the **old** image is still

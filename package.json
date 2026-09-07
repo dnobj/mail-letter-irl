@@ -28,6 +28,7 @@
     "admin:provision-access": "tsx scripts/provisionAdminDatabaseAccess.ts",
     "admin:start": "node dist/admin/server.js",
     "admin:dev": "npm run build && dotenv -e .env.admin.local -- node dist/admin/server.js",
+    "admin:totp-enrol": "tsx scripts/adminTotpEnrol.ts",
     "test": "vitest",
     "test:run": "vitest run",
     "test:unit": "vitest run tests/unit",

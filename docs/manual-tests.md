@@ -754,8 +754,69 @@ absent or live.
 
 **Pass criteria:** Production is visible and untouchable.
 
-The command cases (`ADMIN-CMD-*`, `ADMIN-STRIPE-*`, `ADMIN-ACCT-*`) are added by the slices that enable
-them.
+### ADMIN-CMD-01 — Acknowledge and resolve an alert with elevation, preview, typed confirmation and replay
+
+**Preconditions:** The development panel runs in full mode (`ADMIN_MODE=full`, `DATABASE_URL` on the
+operator role, `ADMIN_TOTP_SECRET` from `npm run admin:totp-enrol -- development`, the authenticator
+enrolled on a different device); an open alert exists (REFUND-02 raises one).
+
+**Steps:**
+
+1. [ ] Open the alert and preview "acknowledge" without elevating; verify the page says elevation is
+   needed and the execute button is disabled.
+2. [ ] Open `/elevate`, enter a code; verify the banner shows "elevated until", a new session cookie was
+   issued, and `/audit` shows `admin.elevate`.
+3. [ ] Preview "acknowledge" again; type the phrase shown (`CONFIRM <alert id>` in development); execute.
+   Verify the outcome page says succeeded, the alert shows `acknowledged`, `/commands` lists the run, and
+   `/audit` shows `alert.transition` with your reason and the command id.
+4. [ ] Go back and submit the same form again; verify the outcome page says the confirmation was already
+   processed and `/audit` gained no second `alert.transition` row.
+5. [ ] Open two "resolve" previews for the same alert in two tabs with different resolution codes;
+   execute the first; execute the second; verify the second answers `409 ADMIN_STALE_PREVIEW` and the alert
+   keeps the first code.
+6. [ ] Enter a wrong code on `/elevate` five times; verify elevation locks, the page says so, and `/audit`
+   shows five `admin.elevation_denied` rows.
+
+**Pass criteria:** Nothing executes without elevation, a matching phrase and a fresh preview; a replay
+returns the first outcome; every step is in the audit log.
+
+### ADMIN-CMD-02 — Resolve an ambiguous job with provider evidence
+
+**Preconditions:** Full mode as above; a job held on an ambiguous provider outcome (the stub evidence
+flow in [deployment.md](deployment.md#ambiguous-image-reservation-operator-procedure) describes how the
+dummy provider produces one).
+
+**Steps:**
+
+1. [ ] Open the job; verify the resolution form appears only while the job is `held / ambiguous`.
+2. [ ] Choose `accepted`, the provider consulted and its reference; preview; verify the preview shows the
+   letter, account, current state and that the reference is described as hashed.
+3. [ ] Execute with the phrase; verify the letter is `accepted`, the job `completed`, the
+   `mail_provider_outcome_ambiguous` alert for the job is resolved, and `/audit` shows `job.resolve`.
+4. [ ] Repeat with `rejected` on another held job; verify the letter fails and, for a prepaid letter, the
+   credits return through the failed-send path (account page shows an adjustment lot).
+
+**Pass criteria:** The job leaves the held state only with evidence, and the outcome matches the decision.
+
+### ADMIN-CMD-03 — Retry a definite failure, and the refusals
+
+**Preconditions:** Full mode; a job in `failed / definite_failure` with a failed letter.
+
+**Steps:**
+
+1. [ ] Preview the retry; give a reason of at least 8 characters; execute. Verify the job is `pending` and
+   the letter `queued`, and that the next maintenance run dispatches it.
+2. [ ] Preview a retry of the same job again; verify `409 ADMIN_INVALID_STATE` (it is no longer failed).
+3. [ ] Drop the elevation on `/elevate` (or wait for it to expire) and execute a prepared preview; verify
+   `403 ADMIN_ELEVATION_REQUIRED` and that nothing changed.
+4. [ ] Set `ADMIN_MODE=read-only` and redeploy; verify previews still render but every execute answers
+   `403 ADMIN_READ_ONLY_MODE` before the handler runs.
+
+**Pass criteria:** A retry needs the exact state, a live elevation and full mode; each refusal is a stable
+code and an audit row.
+
+The Stripe and account command cases (`ADMIN-STRIPE-*`, `ADMIN-ACCT-*`) are added by the slices that
+enable them.
 
 ---
 

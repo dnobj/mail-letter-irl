@@ -148,12 +148,15 @@ describeWithDatabase("admin foundation database migration", () => {
   }
 
   it("applies 022 after the distinct JIT migration 021 and preserves old application reads", async () => {
+    // 021 must be recorded before 022. The suite now applies every later
+    // migration too, so the proof is the relative order, not "the last two".
     const applied = await client.query<{ name: string }>(
-      "SELECT name FROM migrations ORDER BY id DESC LIMIT 2",
+      "SELECT name FROM migrations WHERE name = ANY($1::text[]) ORDER BY id",
+      [[...ADMIN_MIGRATION_SEQUENCE]],
     );
-    expect(applied.rows.map((row) => row.name).reverse()).toEqual(
-      ADMIN_MIGRATION_SEQUENCE,
-    );
+    expect(applied.rows.map((row) => row.name)).toEqual([
+      ...ADMIN_MIGRATION_SEQUENCE,
+    ]);
 
     await client.query(
       `

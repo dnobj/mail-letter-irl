@@ -39,6 +39,7 @@ export const NAV_ITEMS = [
   { href: "/maintenance", label: "Maintenance" },
   { href: "/audit", label: "Audit" },
   { href: "/commands", label: "Commands" },
+  { href: "/elevate", label: "Elevate" },
 ];
 
 export function registerReadRoutes(

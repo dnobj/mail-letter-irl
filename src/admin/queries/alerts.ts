@@ -83,23 +83,27 @@ export async function listAlerts(
   options: { filter: AlertFilter; limit: number; cursor?: string },
 ): Promise<Page<AlertView>> {
   const cursor = decodeCursor(options.cursor);
-  const statusClause =
-    options.filter === "active"
-      ? `status IN ('open', 'acknowledged')`
-      : options.filter === "all"
-        ? "TRUE"
-        : `status = $3`;
-  const params: unknown[] = [options.limit + 1, cursor?.at ?? null];
-  if (options.filter !== "active" && options.filter !== "all") {
+  // Parameters are pushed exactly when they are referenced: a bound but
+  // unreferenced parameter is a PostgreSQL error, not a no-op.
+  const params: unknown[] = [options.limit + 1];
+  const clauses: string[] = [];
+  if (options.filter === "active") {
+    clauses.push(`status IN ('open', 'acknowledged')`);
+  } else if (options.filter !== "all") {
     params.push(options.filter);
+    clauses.push(`status = $${params.length}`);
+  } else {
+    clauses.push("TRUE");
   }
-  const cursorClause = cursor
-    ? `AND (created_at, alert_id::text) < ($2::timestamptz, $${params.length + 1})`
-    : "";
-  if (cursor) params.push(cursor.id);
+  if (cursor) {
+    params.push(cursor.at, cursor.id);
+    clauses.push(
+      `(created_at, alert_id::text) < ($${params.length - 1}::timestamptz, $${params.length})`,
+    );
+  }
   const result = await client.query<AlertRow>(
     `SELECT ${ALERT_COLUMNS} FROM commerce_operational_alerts
-     WHERE ${statusClause} ${cursorClause}
+     WHERE ${clauses.join(" AND ")}
      ORDER BY created_at DESC, alert_id DESC
      LIMIT $1`,
     params,

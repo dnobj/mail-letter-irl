@@ -183,6 +183,41 @@ identity checks passed. Then:
 If Serve cannot be reached from the tailnet on Railway, stop: the fallback is Cloudflare Access with a
 tunnel, which changes only `src/admin/http/tailscaleAuth.ts` and the ingress.
 
+## Full mode and commands
+
+Commands exist only in full mode. To enable it in development:
+
+1. Generate the elevation secret and enrol the authenticator:
+
+   ```bash
+   npm run admin:totp-enrol -- development
+   ```
+
+   Set the printed base32 value as `ADMIN_TOTP_SECRET` on the service and add the account to an
+   authenticator app on a device other than the one you browse from, then clear the terminal. The secret
+   is never written to disk and never printed anywhere else.
+2. Switch `DATABASE_URL` to the operator role (`letter_irl_admin_operator_development`), set
+   `ADMIN_MODE=full`, redeploy. The boot audit event records the mode.
+
+Every command follows the same path: **preview** (what will happen, bound to the target's current
+state) → **elevation** (a six-digit code on `/elevate`; valid 60 minutes in development, 10 in
+production; five failures in fifteen minutes lock the session; success rotates the session id) →
+**typed confirmation** (`CONFIRM <id>` in development, `PRODUCTION <VERB> <id>` in production) plus a
+reason → an `admin_command_runs` row keyed by the preview's idempotency key → the domain service, which
+receives `admin:<run id>` as its own idempotency key → an `admin_audit_events` row with the before and
+after summaries. Submitting the same confirmation twice returns the first outcome; a target that changed
+since the preview is refused as stale; every refusal is a stable code and an audit row.
+
+Commands available:
+
+| Command | Target | What it calls |
+| --- | --- | --- |
+| Acknowledge / resolve alert | `commerce_operational_alerts` | `transitionCommerceAlert` (advisory lock, state machine, hashed audit) |
+| Resolve ambiguous job | `letter_jobs` held on `ambiguous` | `resolveAmbiguousLetterJobAsAdmin` (locks order → letter → job, refuses compensated letters, resolves the alert) |
+| Retry failed job | `letter_jobs` in `failed / definite_failure` | `retryLetterJobAsAdmin` (same outbox row and provider key) |
+
+Manual cases: `ADMIN-CMD-01` to `ADMIN-CMD-03`.
+
 ## Production gates
 
 Production is provisioned only after three separate owner approvals, each recorded in the incident log:
