@@ -6,6 +6,7 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
 import { AdminAuditWriter } from '../../src/admin/auditService.js';
 import { parseAdminEnvironmentConfig } from '../../src/admin/config.js';
 import { withReadOnlyTransaction } from '../../src/admin/db.js';
+import { ElevationGuard } from '../../src/admin/http/elevation.js';
 import { AdminSessionStore, hashSessionId, type AdminSession } from '../../src/admin/http/session.js';
 import { buildAdminGrantStatements } from '../../src/admin/provisioning.js';
 import { parseAdminRuntimeConfig, type AdminRuntimeConfig } from '../../src/admin/runtimeConfig.js';
@@ -176,6 +177,7 @@ describePostgres('admin commands through the operator role', () => {
       audit: new AdminAuditWriter(),
       actor: { id: OWNER, name: 'Owner', node: 'laptop.tail1234.ts.net' },
       session,
+      elevation: new ElevationGuard(),
       sessionIdHash: hashSessionId(session.id),
       correlationId: randomUUID(),
       now: () => Date.now()

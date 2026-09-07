@@ -7,7 +7,7 @@ import type { AdminJsonObject } from "../contracts.js";
 import type { AdminSqlClient } from "../database.js";
 import { withTransaction } from "../db.js";
 import { AdminFoundationError, type AdminErrorCode } from "../errors.js";
-import { requireElevation } from "../http/elevation.js";
+import { requireElevation, type ElevationGuard } from "../http/elevation.js";
 import type { AdminSession } from "../http/session.js";
 import type { AdminRuntimeConfig } from "../runtimeConfig.js";
 import { classifyDiagnosticError, writeDiagnostic } from "../../utils/diagnosticLog.js";
@@ -97,6 +97,8 @@ export interface CommandRunnerDeps {
   audit: AdminAuditWriter;
   actor: { id: string; name: string; node: string };
   session: AdminSession;
+  /** Holds the elevation lock, which is keyed by login rather than session. */
+  elevation: ElevationGuard;
   sessionIdHash: string;
   correlationId: string;
   now: () => number;
@@ -196,7 +198,7 @@ export async function runAdminCommand<I>(
   if (definition.enabled && !definition.enabled(deps.config)) {
     throw new AdminFoundationError("ADMIN_COMMAND_DISABLED");
   }
-  requireElevation(deps.session, now);
+  requireElevation(deps.session, deps.elevation, now);
 
   // A confirmation that already ran returns its first outcome, before the
   // preview is re-derived: the target has legitimately changed by then (the

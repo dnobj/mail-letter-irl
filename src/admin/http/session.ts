@@ -24,12 +24,13 @@ export interface AdminSession extends SessionBinding {
   id: string;
   createdAt: number;
   lastSeenAt: number;
+  /**
+   * Elevation is a property of this browser, so it stays here. The failure
+   * history, the lock and the last accepted TOTP counter do not: a session is
+   * cheap to replace, so anything the second factor relies on lives in
+   * ElevationGuard instead (see elevation.ts).
+   */
   elevatedUntil: number | null;
-  /** Timestamps of recent elevation failures, pruned to the window. */
-  elevationFailures: number[];
-  elevationLockedUntil: number | null;
-  /** The last TOTP counter accepted, so a code cannot be replayed. */
-  lastTotpCounter: number | null;
   /** One message shown on the next page render, then cleared. */
   flash: { tone: "ok" | "warn" | "bad"; text: string } | null;
 }
@@ -89,9 +90,6 @@ export class AdminSessionStore {
       createdAt: now,
       lastSeenAt: now,
       elevatedUntil: null,
-      elevationFailures: [],
-      elevationLockedUntil: null,
-      lastTotpCounter: null,
       flash: null,
       ...binding,
     };

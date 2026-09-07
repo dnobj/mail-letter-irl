@@ -289,7 +289,8 @@ Commands exist only in full mode. To enable it in development:
 
 Every command follows the same path: **preview** (what will happen, bound to the target's current
 state) → **elevation** (a six-digit code on `/elevate`; valid 60 minutes in development, 10 in
-production; five failures in fifteen minutes lock the session; success rotates the session id) →
+production; five failures in fifteen minutes lock elevation for that operator, on every session
+they hold, until the window passes; success rotates the session id) →
 **typed confirmation** (`CONFIRM <id>` in development, `PRODUCTION <VERB> <id>` in production) plus a
 reason → an `admin_command_runs` row keyed by the preview's idempotency key → the domain service, which
 receives `admin:<run id>` as its own idempotency key → an `admin_audit_events` row with the before and

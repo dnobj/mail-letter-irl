@@ -15,6 +15,7 @@ import { registerStripeRoutes } from "./http/stripeRoutes.js";
 import { join } from "./ui/html.js";
 import { NAV_ITEMS, registerReadRoutes } from "./http/routes.js";
 import { ADMIN_COMMANDS } from "./commands/index.js";
+import { ElevationGuard } from "./http/elevation.js";
 import { AdminSessionStore, hashSessionId } from "./http/session.js";
 import { parseAdminRuntimeConfig, type AdminRuntimeConfig } from "./runtimeConfig.js";
 import { createTailscaleCli, createWhoisClient, spawnTailscaled, type WhoisClient } from "./tailscale/cli.js";
@@ -189,6 +190,10 @@ export async function main(): Promise<void> {
     idleTtlMs: config.session.idleTtlMs,
     absoluteTtlMs: config.session.absoluteTtlMs,
   });
+  // One guard for the process, beside the session store and with the same
+  // lifetime: the elevation lock and the accepted TOTP counter have to outlive
+  // any session for either to mean anything.
+  const elevation = new ElevationGuard();
   const router = new AdminRouter<RouteHandler>();
   const extensions = registerCommandRoutes(router, ADMIN_COMMANDS);
   const stripeExtensions = registerStripeRoutes(router);
@@ -207,6 +212,7 @@ export async function main(): Promise<void> {
     config,
     pools,
     sessions,
+    elevation,
     whois,
     audit,
     router,

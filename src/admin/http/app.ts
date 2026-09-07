@@ -15,6 +15,7 @@ import { html, type SafeHtml } from "../ui/html.js";
 import { renderPage, type BannerModel, type FlashMessage, type NavItem } from "../ui/layout.js";
 import { readRequestBody, RequestBodyTooLargeError } from "../../utils/requestBody.js";
 import { classifyDiagnosticError, writeDiagnostic } from "../../utils/diagnosticLog.js";
+import type { ElevationGuard } from "./elevation.js";
 import type { AdminRouter } from "./router.js";
 import {
   FORM_BODY_LIMIT_BYTES,
@@ -63,6 +64,8 @@ export interface RequestContext {
   pools: AdminPools;
   audit: AdminAuditWriter;
   sessions: AdminSessionStore;
+  /** Elevation state that outlives a session: failures, lock, TOTP counter. */
+  elevation: ElevationGuard;
   /** Run a read model inside a READ ONLY transaction on the reader pool. */
   read<T>(callback: (client: AdminSqlClient) => Promise<T>): Promise<T>;
   /** The operator pool, or a refusal in read-only mode. */
@@ -86,6 +89,7 @@ export interface AdminAppOptions {
   config: AdminRuntimeConfig;
   pools: AdminPools;
   sessions: AdminSessionStore;
+  elevation: ElevationGuard;
   whois: WhoisClient;
   audit: AdminAuditWriter;
   router: AdminRouter<RouteHandler>;
@@ -111,6 +115,10 @@ export function createAdminRequestListener(
 ): (request: IncomingMessage, response: ServerResponse) => void {
   const now = options.now ?? (() => Date.now());
   const requestLimiter = new SlidingWindowLimiter(240, 60_000, now);
+  // A human types one six-digit code at a time, so the elevation route gets a
+  // limit of its own well below the general one. Keyed on the login, like the
+  // lock it protects, so dropping the session cookie does not reset it.
+  const elevationLimiter = new SlidingWindowLimiter(10, 60_000, now);
   const denialLimiter = new SlidingWindowLimiter(30, 60_000, now);
   const denialAuditLimiter = new SlidingWindowLimiter(60, 60_000, now);
   const allowedLogins = new Set(options.config.operatorLogins);
@@ -292,6 +300,24 @@ export function createAdminRequestListener(
         constant(403);
         return;
       }
+      if (
+        (matched.route.name === "elevate" || matched.route.name === "elevate.drop") &&
+        !elevationLimiter.allow(actor.id)
+      ) {
+        await safeAudit(options, {
+          actor,
+          sessionIdHash: hashSessionId(session.id),
+          correlationId,
+          action: "admin.request_denied",
+          targetType: "route",
+          targetId: matched.route.name,
+          inputSummary: { reason: "elevation_rate_limited" },
+          outcome: "denied",
+          errorCode: "ADMIN_RATE_LIMITED",
+        });
+        constant(429);
+        return;
+      }
       if (matched.route.write && options.config.mode !== "full") {
         await safeAudit(options, {
           actor,
@@ -339,6 +365,7 @@ export function createAdminRequestListener(
       pools: options.pools,
       audit: options.audit,
       sessions: options.sessions,
+      elevation: options.elevation,
       read: (callback) => withReadOnlyTransaction(options.pools.reader, callback),
       requireOperatorPool: () => {
         if (!options.pools.operator) throw new AdminFoundationError("ADMIN_READ_ONLY_MODE");

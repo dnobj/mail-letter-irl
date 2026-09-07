@@ -28,6 +28,10 @@ function safeReturn(value: string | null | undefined): string {
   return value;
 }
 
+function lockedUntilDate(lockedUntil: number | null): Date | null {
+  return lockedUntil === null ? null : new Date(lockedUntil);
+}
+
 function backHrefFor(command: CommandDefinition<any>, targetId: string): string {
   switch (command.targetType) {
     case "commerce_alert":
@@ -82,10 +86,7 @@ export function registerCommandRoutes(
         csrfToken: context.csrfToken,
         returnTo: safeReturn(context.url.searchParams.get("return")),
         elevatedUntil: isElevated(context.session, now) ? new Date(context.session.elevatedUntil as number) : null,
-        lockedUntil:
-          context.session.elevationLockedUntil && context.session.elevationLockedUntil > now
-            ? new Date(context.session.elevationLockedUntil)
-            : null,
+        lockedUntil: lockedUntilDate(context.elevation.lockedUntil(context.session.login, now)),
         message: null,
         ttlMinutes: Math.round(context.config.session.elevationTtlMs / 60_000),
         mode: context.config.mode,
@@ -99,6 +100,7 @@ export function registerCommandRoutes(
     if (!context.config.totpSecret) throw new AdminFoundationError("ADMIN_COMMAND_DISABLED");
     const attempt = attemptElevation(
       context.session,
+      context.elevation,
       context.config.totpSecret,
       context.form?.get("code") ?? "",
       {
@@ -129,7 +131,14 @@ export function registerCommandRoutes(
     await context.appendAudit({
       action: "admin.elevation_denied",
       targetType: "session",
-      inputSummary: { reason: attempt.reason, failuresLeft: attempt.failuresLeft },
+      inputSummary: {
+        reason: attempt.reason,
+        failuresLeft: attempt.failuresLeft,
+        // The lock is the condition worth seeing in /audit on its own: it
+        // means an operator's codes have failed repeatedly, and it now holds
+        // across every session that login opens.
+        locked: attempt.lockedUntil !== null,
+      },
       outcome: "denied",
       errorCode: attempt.reason === "locked" ? "ADMIN_ELEVATION_LOCKED" : "ADMIN_FORBIDDEN",
     });
@@ -142,7 +151,7 @@ export function registerCommandRoutes(
         lockedUntil: attempt.lockedUntil ? new Date(attempt.lockedUntil) : null,
         message:
           attempt.reason === "locked"
-            ? "Too many failed codes; elevation is locked for this session."
+            ? "Too many failed codes; elevation is locked for this operator until the window passes."
             : attempt.reason === "replayed"
               ? "That code was already used; wait for the next one."
               : `The code was not accepted (${attempt.failuresLeft} attempts left before lockout).`,
@@ -201,6 +210,7 @@ export function registerCommandRoutes(
         audit: context.audit,
         actor: context.actor,
         session: context.session,
+        elevation: context.elevation,
         sessionIdHash: hashSessionId(context.session.id),
         correlationId: context.correlationId,
         now: () => Date.now(),
