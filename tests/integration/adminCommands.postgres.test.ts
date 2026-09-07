@@ -620,7 +620,9 @@ describePostgres('admin commands through the operator role', () => {
       await expect(operator.query(forbidden, [userId]), forbidden).rejects.toMatchObject({ code: '42501' });
     }
     await expect(
-      operator.query(`UPDATE letters SET content = 'rewritten' WHERE letter_id = $1`, [heldLetterId])
+      // content is JSONB, so the literal has to parse before the privilege
+      // check is what refuses this.
+      operator.query(`UPDATE letters SET content = '{"body":"rewritten"}'::jsonb WHERE letter_id = $1`, [heldLetterId])
     ).rejects.toMatchObject({ code: '42501' });
     await expect(
       operator.query(`UPDATE stripe_webhook_events SET processing_status = 'processed'`)
