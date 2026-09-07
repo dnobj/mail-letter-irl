@@ -1,2 +1,5 @@
 manifest.json text eol=lf
 widgets/*.html text eol=lf
+# A CRLF here makes the kernel read the shebang as "/bin/sh\r" and the
+# container fails to start with a misleading "no such file" error.
+*.sh text eol=lf
