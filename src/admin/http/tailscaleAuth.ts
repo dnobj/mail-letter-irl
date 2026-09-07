@@ -121,6 +121,16 @@ export async function authenticateAdminRequest(
       return denied("ADMIN_UNAUTHENTICATED", "login_header_missing");
     }
     login = parsedLogin.data;
+    // Serve terminates TLS and sets this. A connection that reached the
+    // loopback listener some other way - userspace networking forwards an
+    // inbound tunnel connection to the same port on localhost, so a peer the
+    // tailnet policy lets reach the app port arrives here directly - has to
+    // reproduce the whole header set rather than just the login. It raises the
+    // bar; the policy rule that denies the app port is still what closes the
+    // door, which is why ADMIN-INFRA-01 now proves it.
+    if ((request.header("x-forwarded-proto") ?? "").trim().toLowerCase() !== "https") {
+      return denied("ADMIN_UNAUTHENTICATED", "forwarded_proto_missing");
+    }
     const forwardedHost = normalizeHost(request.header("x-forwarded-host"));
     if (!options.expectedHost || forwardedHost !== options.expectedHost) {
       return denied("ADMIN_UNAUTHENTICATED", "host_mismatch", login);
@@ -134,6 +144,9 @@ export async function authenticateAdminRequest(
     const whois = options.whois;
     nodeFromWhois = async () => {
       const result = await whois.whois(peer);
+      // null: the peer is unknown or tagged. A different login: the header
+      // disagrees with what the daemon says about that address. The caller
+      // tells the two apart from the throw, so the audit row can too.
       if (!result || result.login !== login) return null;
       return result.nodeName;
     };
@@ -161,13 +174,18 @@ export async function authenticateAdminRequest(
   let node = "local-dev";
   if (nodeFromWhois) {
     let resolved: string | null;
+    let failed = false;
     try {
       resolved = await nodeFromWhois();
     } catch {
       resolved = null;
+      failed = true;
     }
     if (!resolved) {
-      return denied("ADMIN_UNAUTHENTICATED", "whois_disagrees", login);
+      // A daemon that cannot answer and a peer that does not match are
+      // different operational problems: one is the node, one is the caller.
+      // They shared an audit reason until the security review.
+      return denied("ADMIN_UNAUTHENTICATED", failed ? "whois_failed" : "whois_disagrees", login);
     }
     node = resolved;
   }

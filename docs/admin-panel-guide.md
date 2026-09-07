@@ -37,16 +37,28 @@ with a reason, which writes a `pii.reveal` audit event.
 Every request to an application route must pass all of these, on every request, with no exception for a
 session cookie:
 
-1. It arrived on the loopback listener (`127.0.0.1:ADMIN_APP_PORT`). Nothing but the local Serve proxy
-   can reach it; the health listener on `[::]:PORT` serves `/healthz` and nothing else.
+1. It arrived on the loopback listener (`127.0.0.1:ADMIN_APP_PORT`); the health listener on
+   `[::]:PORT` serves `/healthz` and nothing else. **Loopback is necessary, not sufficient: see the
+   note below.**
 2. It carries no `Tailscale-Funnel-Request` header, and Funnel is never granted in the policy.
 3. It carries `Tailscale-User-Login`, which Serve sets from its own whois of the peer and strips from
    inbound requests.
-4. `X-Forwarded-Host` equals the node's own MagicDNS name (DNS-rebinding defence).
-5. The login is listed in `ADMIN_OPERATOR_LOGINS`, compared exactly.
-6. For a new session, `tailscale whois` of the peer address agrees with the header; tagged peers are
+4. `X-Forwarded-Proto` is `https`, which Serve sets when it terminates TLS.
+5. `X-Forwarded-Host` equals the node's own MagicDNS name (DNS-rebinding defence).
+6. The login is listed in `ADMIN_OPERATOR_LOGINS`, compared exactly.
+7. For a new session, `tailscale whois` of the peer address agrees with the header; tagged peers are
    refused. The session (cookie `__Host-lirl_admin`, in memory, 15-minute idle and 8-hour absolute expiry)
-   is bound to the login and peer address; any mismatch destroys it.
+   is bound to the login and peer address; any mismatch destroys it. The node name is recorded on the
+   session but not re-compared, because it is derived from the peer address that is.
+
+**The policy rule denying the app port is a security control, not hygiene.** In userspace-networking
+mode `tailscaled` forwards an inbound tunnel connection to the same port on localhost, so a tailnet
+peer that the policy allowed to reach `tag:<env>-admin:8790` would arrive on the loopback listener
+directly, without Serve, free to choose its own `Tailscale-User-Login` and `X-Forwarded-*` headers.
+The checks above raise what such a caller has to reproduce, and the whois cross-check runs against an
+address the caller supplied, so it does not close the hole by itself. What closes it is the grant
+allowing only `tcp:443` on the admin tag, and the `tests` block that refuses a policy save reopening
+the app port. Both are load-bearing; re-run `ADMIN-INFRA-01` step 4 after any policy edit.
 
 State-changing requests additionally need `Sec-Fetch-Site` of `same-origin` or `none`, an `Origin` equal
 to the panel's origin, and the per-session CSRF token in the form. Responses carry a strict nonce-based

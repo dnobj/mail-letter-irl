@@ -82,6 +82,7 @@ const identity = {
   "tailscale-user-name": "Owner",
   "x-forwarded-host": HOST,
   "x-forwarded-for": "100.64.0.5",
+  "x-forwarded-proto": "https",
 };
 
 describe("admin request pipeline", () => {

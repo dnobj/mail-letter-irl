@@ -98,7 +98,7 @@ describe("tailnet request authentication", () => {
     });
   });
 
-  it("refuses when whois disagrees with the header, fails, or names a tagged peer", async () => {
+  it("tells a whois that disagrees or names a tagged peer apart from one that fails", async () => {
     const disagree = harness({ login: "other@example.com", nodeName: "x.ts.net" });
     expect(await authenticateAdminRequest(view(goodHeaders), disagree.options)).toMatchObject({
       ok: false,
@@ -109,12 +109,32 @@ describe("tailnet request authentication", () => {
       ok: false,
       reason: "whois_disagrees",
     });
+    // A daemon that cannot answer is a different operational problem from a
+    // peer that does not match, and the audit row should not conflate them.
     const failing = harness();
     (failing.whois.whois as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("socket"));
     expect(await authenticateAdminRequest(view(goodHeaders), failing.options)).toMatchObject({
       ok: false,
-      reason: "whois_disagrees",
+      reason: "whois_failed",
     });
+  });
+
+  it("refuses a request that does not carry the proxy's forwarded-proto header", async () => {
+    // Serve terminates TLS and sets this. Userspace networking forwards an
+    // inbound tunnel connection to the same port on localhost, so a peer the
+    // policy lets reach the app port arrives on the loopback listener able to
+    // choose its own headers; requiring the whole set the proxy sends raises
+    // what such a caller has to reproduce.
+    const { options } = harness();
+    const { "x-forwarded-proto": _proto, ...withoutProto } = goodHeaders;
+    expect(await authenticateAdminRequest(view(withoutProto), options)).toMatchObject({
+      ok: false,
+      code: "ADMIN_UNAUTHENTICATED",
+      reason: "forwarded_proto_missing",
+    });
+    expect(
+      await authenticateAdminRequest(view({ ...goodHeaders, "x-forwarded-proto": "http" }), options),
+    ).toMatchObject({ ok: false, reason: "forwarded_proto_missing" });
   });
 
   it("re-evaluates a cookie from another peer as a new session after destroying the old one", async () => {
