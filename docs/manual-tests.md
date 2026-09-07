@@ -622,7 +622,9 @@ blocker.
 
 ### ADMIN-INFRA-01 — Tailnet ingress spike (development)
 
-**Status:** Awaiting execution by the owner; this checklist does not claim a result.
+**Status:** Executed 2026-09-07 from the owner's laptop (curl over the tailnet plus the owner's Chrome):
+steps 1, 2, 5, 6 and 7 passed; step 3 (phone) and step 4 (private network) were not run, because the
+phone's client is below the posture minimum and Railway offers no shell into the API service.
 
 **Preconditions:**
 
@@ -633,20 +635,26 @@ blocker.
 
 **Steps:**
 
-1. [ ] Read the deploy log; verify `[tailscale] ready name=letter-irl-admin-dev.<tailnet>.ts.net tags=tag:dev-admin`
-   and `admin.listening`, and that the Railway healthcheck passed with no domain.
-2. [ ] Open `https://letter-irl-admin-dev.<tailnet>.ts.net/` from the laptop; verify a valid certificate
-   and the overview page.
+1. [x] Read the deploy log; verify `[tailscale] ready name=letter-irl-admin-dev.<tailnet>.ts.net tags=tag:dev-admin`
+   and `admin.listening`, and that the Railway healthcheck passed with no domain. (Seen on the first boot
+   and again on the redeploy without `TS_AUTHKEY`; the healthcheck answered 503 twice, then 200.)
+2. [x] Open `https://letter-irl-admin-dev.<tailnet>.ts.net/` from the laptop; verify a valid certificate
+   and the overview page. (curl with certificate verification returned 200; Chrome rendered the overview
+   with no warning.)
 3. [ ] From the phone on the tailnet, open the same URL; verify it answers. Turn Tailscale off on the phone;
    verify the URL no longer resolves or connects.
 4. [ ] From another service in the development environment (a Railway shell on the API service), run
    `curl -si http://letter-irl-admin.railway.internal:$PORT/healthz`; verify the body is exactly `ok` and
    `curl -si http://letter-irl-admin.railway.internal:8790/` is refused (connection refused, not a page).
-5. [ ] From the internet, verify the service has no `*.up.railway.app` domain and that
-   `https://letter-irl-admin-dev.<tailnet>.ts.net/healthz` does not resolve off the tailnet.
-6. [ ] Redeploy the service; verify the machine keeps its name (no `-1` suffix) and the URL still answers.
-7. [ ] Attach the log lines, the console screenshot of the machine (tag and no "Locked out" badge), and
-   the curl outputs. Never attach a key or a connection string.
+5. [x] From the internet, verify the service has no `*.up.railway.app` domain and that
+   `https://letter-irl-admin-dev.<tailnet>.ts.net/healthz` does not resolve off the tailnet. (Railway lists
+   no service or custom domain; public resolvers return no address for the name; `/healthz` through Serve
+   answers 404, so even a tailnet peer reaches the health listener only on the private port.)
+6. [x] Redeploy the service; verify the machine keeps its name (no `-1` suffix) and the URL still answers.
+   (One machine, same address, after the redeploy without `TS_AUTHKEY`.)
+7. [x] Attach the log lines, the console screenshot of the machine (tag and no "Locked out" badge), and
+   the curl outputs. Never attach a key or a connection string. (Recorded in the setup session and in
+   the first-boot section of the guide.)
 
 **Pass criteria:** The `.ts.net` URL answers only from an allowed device; the private network reaches only
 `/healthz`; port 8790 is refused; a redeploy is the same node. Any answer from the internet is a release
@@ -654,37 +662,51 @@ blocker.
 
 ### ADMIN-READ-01 — Banner and identity
 
+**Status:** Passed 2026-09-07 (curl over the tailnet from the laptop; build 5172e00).
+
 **Preconditions:** `ADMIN-INFRA-01` passed; the development panel runs in `read-only` mode.
 
 **Steps:**
 
-1. [ ] Open the overview; verify the banner shows `development`, `mode: read-only`, `marker: development`,
-   `db role: letter_irl_admin_reader_development`, `stripe: test`, the mail provider, the node name with
-   `tag:dev-admin`, the build commit, and `operator: <your login> from <your device name>`.
-2. [ ] Reload; verify the session cookie is reused (one `admin.session_start` row per session in
-   `/audit`, not one per request).
-3. [ ] Verify the response headers carry `Content-Security-Policy` with a nonce, `Cache-Control: no-store`
-   and `X-Correlation-Id`.
+1. [x] Open the overview; verify the banner shows `development`, `mode: read-only`, `marker: development`,
+   `db role: letter_irl_admin_reader_development`, `stripe: test` (or `absent` while no key is set), the
+   mail provider (`unset` until `LETTER_PROVIDER` is given), the node name with `tag:dev-admin`, the build
+   commit, and `operator: <your login> from <your device name>`.
+2. [x] Reload; verify the session cookie is reused (one `admin.session_start` row per session in
+   `/audit`, not one per request). (Three requests on one cookie jar left the row count unchanged.)
+3. [x] Verify the response headers carry `Content-Security-Policy` with a nonce, `Cache-Control: no-store`
+   and `X-Correlation-Id`. (Also `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`.)
 
 **Pass criteria:** The banner states what the machine checked, and one session produces one audit row.
 
 ### ADMIN-READ-02 — Account and pack figures
 
+**Status:** Passed 2026-09-07 against the owner's own development account (looked up by exact subject;
+the lookup-by-email variant of step 1 is still open).
+
 **Preconditions:** A development account that bought a pack in test mode and mailed one letter (PAY-01).
 
 **Steps:**
 
-1. [ ] Look the account up by exact email; verify the email is masked on the account page.
-2. [ ] Verify the ledger lots show initial and remaining credits, and the letters table shows metadata
-   only: no content, no recipient, no address anywhere on the page.
-3. [ ] Open the pack order; verify "unspent letters" and "maximum proportional refund" match
-   letters remaining × amount ÷ letters in pack, floored.
-4. [ ] Reveal the email with a reason; verify it appears once, and `/audit` shows a `pii.reveal` row with
+1. [x] Look the account up by exact email; verify the email is masked on the account page. (Looked up by
+   exact Auth0 subject: one match, plus the recent-accounts table with masked emails. Before the reveal
+   the only full email address in the page source was the operator's own in the banner.)
+2. [x] Verify the ledger lots show initial and remaining credits, and the letters table shows metadata
+   only: no content, no recipient, no address anywhere on the page. (The letters table is captioned
+   "metadata only; content and recipients are never shown here".)
+3. [x] Open the pack order; verify "unspent letters" and "maximum proportional refund" match
+   letters remaining × amount ÷ letters in pack, floored. (50 in pack, 24 unspent, 26 sent, 0 refunded,
+   1.80 USD per letter, 43.20 USD maximum: 24 × 90.00 ÷ 50.)
+4. [x] Reveal the email with a reason; verify it appears once, and `/audit` shows a `pii.reveal` row with
    that reason. Submit a reason shorter than 8 characters; verify a 400 and a denied `pii.reveal` row.
+   (200 with exactly one more email address in the page than before; `short` answered
+   `400 ADMIN_INVALID_REQUEST`; `/audit` shows one allowed and one denied `pii.reveal` row.)
 
 **Pass criteria:** Figures agree with the ledger; content and addresses are absent; the reveal is audited.
 
 ### ADMIN-READ-03 — A Dashboard refund is visible
+
+**Status:** Not run on 2026-09-07: the development database held no refunded order at the time.
 
 **Preconditions:** REFUND-01 was run in development.
 
@@ -699,6 +721,8 @@ blocker.
 
 ### ADMIN-READ-04 — Denials
 
+**Status:** Step 4 passed 2026-09-07 (curl); steps 1 to 3 not run.
+
 **Steps:**
 
 1. [ ] Temporarily remove your login from `ADMIN_OPERATOR_LOGINS` and redeploy; verify the URL answers
@@ -708,13 +732,20 @@ blocker.
    verify connection refused (the app listener is loopback only).
 3. [ ] Leave a tab idle for 16 minutes; verify the next request starts a new session (a new
    `admin.session_start` row) rather than failing.
-4. [ ] Submit the reveal form with the CSRF field removed (browser devtools); verify `403 forbidden` and a
-   denied row with `ADMIN_CSRF_REJECTED`.
+4. [x] Submit the reveal form with the CSRF field removed (browser devtools); verify `403 forbidden` and a
+   denied row with `ADMIN_CSRF_REJECTED`. (A POST with same-origin headers but no token, and a POST with
+   no `Origin` at all, both answered `403` with the body `forbidden`; `/audit` shows `admin.request_denied`
+   for route `account.reveal` with `ADMIN_CSRF_REJECTED`.)
 
 **Pass criteria:** Every denial is a constant body plus an audit row; nothing on the private network
 reaches an application route.
 
 ### ADMIN-READ-05 — Keyboard-only navigation and 200 % zoom
+
+**Status:** Partly run 2026-09-07 in the owner's Chrome: focus is visible on the navigation links and every
+badge carries text; the full keyboard traversal and the 320 px rendering are still open (Chrome refused a
+320 px window; every table on the overview, account and jobs pages sits in a `.scroll` container with
+`overflow-x: auto`, which is the structural half of step 2).
 
 **Steps:**
 
@@ -722,7 +753,8 @@ reaches an application route.
    every control is reachable, focus is visible, and the reveal form submits from the keyboard.
 2. [ ] At 200 % zoom and at a 320 px wide window, verify no horizontal page scroll: wide tables scroll
    inside their own container.
-3. [ ] Verify status is conveyed by text as well as by colour in every badge.
+3. [x] Verify status is conveyed by text as well as by colour in every badge. (`failed` and
+   `definite_failure` badges on the overview and jobs pages.)
 
 **Pass criteria:** No mouse needed; no page-level horizontal scroll at 320 px.
 
