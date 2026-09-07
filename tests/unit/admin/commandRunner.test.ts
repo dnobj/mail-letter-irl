@@ -12,6 +12,7 @@ import {
   type CommandRunnerDeps,
 } from "../../../src/admin/commands/runner.js";
 import type { AdminJsonObject } from "../../../src/admin/contracts.js";
+import { ElevationGuard } from "../../../src/admin/http/elevation.js";
 import { AdminSessionStore, hashSessionId } from "../../../src/admin/http/session.js";
 import { parseAdminRuntimeConfig } from "../../../src/admin/runtimeConfig.js";
 import { validDevelopmentEnv } from "./runtimeConfig.test.js";
@@ -181,6 +182,7 @@ function deps(database: ReturnType<typeof fakeDatabase>, options: { mode?: "full
     audit: new AdminAuditWriter(),
     actor: { id: "owner@example.com", name: "Owner", node: "laptop" },
     session,
+    elevation: new ElevationGuard(),
     sessionIdHash: hashSessionId(session.id),
     correlationId: randomUUID(),
     now: () => now,

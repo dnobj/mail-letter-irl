@@ -9,6 +9,7 @@ import { clientScriptPath, createAdminRequestListener, type RouteHandler } from 
 import { AdminRouter } from "../../../src/admin/http/router.js";
 import { NAV_ITEMS, registerReadRoutes } from "../../../src/admin/http/routes.js";
 import { createCsrfToken } from "../../../src/admin/http/security.js";
+import { ElevationGuard } from "../../../src/admin/http/elevation.js";
 import { AdminSessionStore, SESSION_COOKIE_NAME } from "../../../src/admin/http/session.js";
 import { parseAdminRuntimeConfig } from "../../../src/admin/runtimeConfig.js";
 import { validDevelopmentEnv } from "./runtimeConfig.test.js";
@@ -96,6 +97,12 @@ describe("admin request pipeline", () => {
   router.add("POST", "/writes/echo", async (context) => context.render("Echo", { value: "<p>echo</p>" } as never), {
     name: "writes.echo",
   });
+  // A stand-in for the real elevation route: the limiter is keyed on the route
+  // name, so this exercises the wiring without the command machinery.
+  router.add("POST", "/elevate", async (context) => context.render("Elevate", { value: "<p>elevate</p>" } as never), {
+    name: "elevate",
+    write: true,
+  });
   let server: http.Server;
   let port = 0;
 
@@ -104,6 +111,7 @@ describe("admin request pipeline", () => {
       config,
       pools,
       sessions,
+      elevation: new ElevationGuard(),
       whois: { whois: async () => ({ login: "owner@example.com", displayName: "Owner", nodeName: "laptop.tail1234.ts.net" }) },
       audit: new AdminAuditWriter(),
       router,
@@ -249,5 +257,52 @@ describe("admin request pipeline", () => {
     expect(reply.body).toContain("ADMIN_READ_ONLY_MODE");
     expect(reply.body).not.toContain("echo");
     expect(audits.at(-1)).toMatchObject({ errorCode: "ADMIN_READ_ONLY_MODE", outcome: "denied" });
+  });
+
+  it("rate limits the elevation route per login, whether or not the session cookie is presented", async () => {
+    // The lock that bounds code guessing is keyed by login; so is this, and
+    // for the same reason. A caller that drops its cookie gets a new session
+    // on every request, so a limiter keyed on the session would never bite.
+    const first = await send(port, "GET", "/", identity);
+    const sessionId = String(first.headers["set-cookie"]).split(";")[0].split("=")[1];
+    const token = createCsrfToken(config.sessionSecret, sessionId);
+    const headers = {
+      ...identity,
+      cookie: `${SESSION_COOKIE_NAME}=${sessionId}`,
+      "content-type": "application/x-www-form-urlencoded",
+      "sec-fetch-site": "same-origin",
+      origin: `https://${HOST}`,
+    };
+
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const reply = await send(port, "POST", "/elevate", headers, `_csrf=${token}`);
+      statuses.push(reply.status);
+    }
+    // Ten get through to the read-only refusal; the rest are limited. The
+    // limiter deliberately sits ahead of that refusal so the same budget
+    // applies in full mode, where the handler would verify a code.
+    expect(statuses.slice(0, 10).every((status) => status === 403)).toBe(true);
+    expect(statuses.slice(10)).toEqual([429, 429]);
+    expect(audits.at(-1)).toMatchObject({
+      errorCode: "ADMIN_RATE_LIMITED",
+      outcome: "denied",
+      targetId: "elevate",
+    });
+
+    // Starting a fresh session does not restore the budget. A POST with no
+    // cookie at all is refused earlier, by the CSRF check, because the token
+    // is bound to a session id the caller cannot predict; the way to get a
+    // clean session is a GET, which mints both. That is the shape of the
+    // attack this limiter and the per-login lock exist to bound, so it is the
+    // shape the test uses.
+    const second = await send(port, "GET", "/", identity);
+    const freshId = String(second.headers["set-cookie"]).split(";")[0].split("=")[1];
+    expect(freshId).not.toBe(sessionId);
+    const onFreshSession = await send(port, "POST", "/elevate", {
+      ...headers,
+      cookie: `${SESSION_COOKIE_NAME}=${freshId}`,
+    }, `_csrf=${createCsrfToken(config.sessionSecret, freshId)}`);
+    expect(onFreshSession.status).toBe(429);
   });
 });
