@@ -111,10 +111,10 @@ export function registerStripeRoutes(
   }, { name: "stripe.reconcile", write: false });
 
   return {
-    orderActions: (context, orderId, refundable) =>
+    orderActions: (context, detail) =>
       orderActionPanel({
-        orderId,
-        refundable,
+        orderId: detail.order.orderId,
+        refundable: detail.pack?.refundable ?? false,
         commandEnabled: context.config.packRefundCommandEnabled,
         mode: context.config.mode,
       }),

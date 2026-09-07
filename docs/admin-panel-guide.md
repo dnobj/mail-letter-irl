@@ -218,11 +218,21 @@ Commands available:
 | Retry failed job | `letter_jobs` in `failed / definite_failure` | `retryLetterJobAsAdmin` (same outbox row and provider key) |
 | Refund unspent letters | a fulfilled `letter_pack` order | `refundPackLetters` (#323: letters leave first, then Stripe with the stored idempotency key; one per pack). Enabled only when `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED=true` on the admin service; the flag has no effect on the API |
 | Repair a missing pack grant | a fulfilled `letter_pack` order from a reconciliation finding | `repairFulfilledPackGrant` (exact match of order, session, credits and amount; idempotent) |
+| Lift send block | a blocked account | `liftSendBlock` (refused while any dispute that justifies a block stands) |
+| Adjust letter balance | an account | `adjustCreditsWithClient` (letters in the UI, credits in the ledger; removal FIFO; atomic with the run and audit rows) |
+| Grant image generations | an account | `grantOperatorImageEntitlement` (one grant per command id, one-year expiry) |
+| Release amount-mismatch quarantine | an order carrying `PAYMENT_AMOUNT_MISMATCH` | clears the code and records `operator.quarantine_released`; the hourly sweep then acts |
+| Create / change status / delete promo | `promo_campaigns` | client-taking promo service functions with a validated status machine and an `updated_at` version; delete refused once redeemed |
+| Resolve ambiguous image reservation | `image_generation_reservations` in `ambiguous` | `resolveAmbiguousGenerationReservation` (issue #69's operator recovery, now reachable) |
 
 The **Stripe** page runs the reconciliation (`reconcileStripePayments`) with the service's restricted key
 in either mode; it reads Stripe, writes only a `stripe.reconcile` audit row (counts and order ids, never
 Stripe identifiers), and offers the repair preview for `missing_credit` findings in full mode. Manual
-cases: `ADMIN-STRIPE-01` and `ADMIN-STRIPE-02`.
+cases: `ADMIN-STRIPE-01` and `ADMIN-STRIPE-02`; the account, promo and image cases are `ADMIN-ACCT-01` to
+`ADMIN-ACCT-04`.
+
+Accounts without an email address (issue #319) cannot be listed until `users.email` becomes nullable or a
+provisioning-failure record exists; the panel shows only rows that exist.
 
 Manual cases: `ADMIN-CMD-01` to `ADMIN-CMD-03`.
 

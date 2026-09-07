@@ -13,6 +13,8 @@ import { lookupIdentifier, normalizeLookupTerm } from "../queries/lookup.js";
 import { readMaintenanceHealth } from "../queries/maintenance.js";
 import { readOrderDetail } from "../queries/orders.js";
 import { boundedLimit } from "../queries/paging.js";
+import type { AccountDetail } from "../queries/accounts.js";
+import type { OrderDetail } from "../queries/orders.js";
 import type { SafeHtml } from "../ui/html.js";
 import { EMPTY_ACTIONS, notFound, textResponse, type RequestContext, type RouteHandler } from "./app.js";
 import { AdminRouter } from "./router.js";
@@ -27,7 +29,8 @@ export interface RouteExtensions {
   /** Per-target action panels supplied by the command slices. */
   alertActions?: (context: RequestContext, alertId: string, status: string) => SafeHtml;
   jobActions?: (context: RequestContext, jobId: string, status: string, providerOutcome: string) => SafeHtml;
-  orderActions?: (context: RequestContext, orderId: string, refundable: boolean) => SafeHtml;
+  orderActions?: (context: RequestContext, detail: OrderDetail) => SafeHtml | Promise<SafeHtml>;
+  accountActions?: (context: RequestContext, detail: AccountDetail) => SafeHtml | Promise<SafeHtml>;
 }
 
 export const NAV_ITEMS = [
@@ -36,6 +39,8 @@ export const NAV_ITEMS = [
   { href: "/alerts", label: "Alerts" },
   { href: "/jobs", label: "Jobs" },
   { href: "/disputes", label: "Disputes" },
+  { href: "/promos", label: "Promos" },
+  { href: "/images", label: "Images" },
   { href: "/maintenance", label: "Maintenance" },
   { href: "/stripe", label: "Stripe" },
   { href: "/audit", label: "Audit" },
@@ -73,9 +78,10 @@ export function registerReadRoutes(
   router.add("GET", "/accounts/:userId", async (context) => {
     const detail = await context.read((client) => readAccountDetail(client, context.params.userId));
     if (!detail) notFound();
+    const actions = extensions.accountActions ? await extensions.accountActions(context, detail) : EMPTY_ACTIONS;
     return context.render(
       `Account ${detail.account.userId}`,
-      renderAccount({ detail, revealedEmail: null, csrfToken: context.csrfToken }),
+      renderAccount({ detail, revealedEmail: null, csrfToken: context.csrfToken, actions }),
     );
   }, { name: "account" });
 
@@ -109,18 +115,17 @@ export function registerReadRoutes(
       inputSummary: { field: "email" },
       outcome: "succeeded",
     });
+    const actions = extensions.accountActions ? await extensions.accountActions(context, data.detail) : EMPTY_ACTIONS;
     return context.render(
       `Account ${userId}`,
-      renderAccount({ detail: data.detail, revealedEmail: data.email, csrfToken: context.csrfToken }),
+      renderAccount({ detail: data.detail, revealedEmail: data.email, csrfToken: context.csrfToken, actions }),
     );
   }, { name: "account.reveal", write: false });
 
   router.add("GET", "/orders/:orderId", async (context) => {
     const detail = await context.read((client) => readOrderDetail(client, context.params.orderId));
     if (!detail) notFound();
-    const actions = extensions.orderActions
-      ? extensions.orderActions(context, detail.order.orderId, detail.pack?.refundable ?? false)
-      : EMPTY_ACTIONS;
+    const actions = extensions.orderActions ? await extensions.orderActions(context, detail) : EMPTY_ACTIONS;
     return context.render(`Order ${detail.order.orderId}`, renderOrder({ detail, actions }));
   }, { name: "order" });
 

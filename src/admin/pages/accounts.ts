@@ -56,6 +56,7 @@ export function renderAccount(input: {
   detail: AccountDetail;
   revealedEmail: string | null;
   csrfToken: string | null;
+  actions?: SafeHtml;
 }): SafeHtml {
   const { account } = input.detail;
   return html`<h1>Account <span class="mono">${account.userId}</span> ${copyButton(account.userId)}</h1>
@@ -97,6 +98,8 @@ ${
   <div><button type="submit">Reveal email</button></div>
 </form>`
 }
+
+${input.actions ?? ""}
 
 <h2>Ledger lots</h2>
 ${table(

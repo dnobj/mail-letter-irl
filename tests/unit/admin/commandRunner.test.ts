@@ -262,6 +262,26 @@ describe("admin command runner", () => {
     expect(state.executions).toHaveLength(1);
   });
 
+  it("replays a completed command even after the target changed, and rejects a different confirmation reusing the key", async () => {
+    const database = fakeDatabase();
+    const state = { version: "v1", executions: [] as Array<{ key: string; reason: string; client: boolean }> };
+    const command = echoCommand(state);
+    const runner = deps(database);
+    const fields = await confirmationFields(command, runner);
+    const first = await runAdminCommand(runner, command, "fixture-1", fields);
+
+    // The command itself changed the target; a resubmitted form must still
+    // land on the recorded outcome rather than a stale-preview refusal.
+    state.version = "v2";
+    const replay = await runAdminCommand(runner, command, "fixture-1", fields);
+    expect(replay).toMatchObject({ commandId: first.commandId, status: "succeeded", replayed: true });
+    expect(state.executions).toHaveLength(1);
+
+    const other = new Map([...fields, ["previewDigest", "e".repeat(64)]]);
+    await expect(runAdminCommand(runner, command, "fixture-1", other)).rejects.toMatchObject({ code: "ADMIN_IDEMPOTENCY_CONFLICT" });
+    expect(state.executions).toHaveLength(1);
+  });
+
   it("records a failed domain call with the mapped code and rethrows it", async () => {
     const database = fakeDatabase();
     const state = { version: "v1", executions: [], fail: "invalid_state" };

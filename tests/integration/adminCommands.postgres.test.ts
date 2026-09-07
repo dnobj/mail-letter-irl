@@ -421,6 +421,157 @@ describePostgres('admin commands through the operator role', () => {
     ).rejects.toMatchObject({ code: 'ADMIN_COMMAND_DISABLED' });
   }, 60_000);
 
+  it('adjusts a balance in letters inside one transaction, and refuses to remove what the ledger does not hold', async () => {
+    const { command, fields } = await confirmation('account.adjust_balance', userId, { letters: '1', direction: 'add' });
+    const outcome = await runner.runAdminCommand(deps(), command, userId, fields);
+    expect(outcome).toMatchObject({ status: 'succeeded', result: { creditsAfter: 6 } });
+    const lot = await owner.query<{ source_type: string; remaining_amount: number; expires_at: Date | null }>(
+      `SELECT source_type::text AS source_type, remaining_amount, expires_at FROM credit_ledger WHERE user_id = $1`,
+      [userId]
+    );
+    expect(lot.rows).toEqual([{ source_type: 'adjustment', remaining_amount: 2, expires_at: null }]);
+    const audit = await owner.query<{ outcome: string; after_summary_json: Record<string, unknown> }>(
+      `SELECT outcome, after_summary_json FROM admin_audit_events WHERE command_id = $1`,
+      [outcome.commandId]
+    );
+    expect(audit.rows[0]).toMatchObject({ outcome: 'succeeded', after_summary_json: { creditsAfter: 6 } });
+
+    // The cache says 6 but the ledger holds 2 spendable credits: removing two
+    // letters is refused at preview time, so nothing is written.
+    await expect(confirmation('account.adjust_balance', userId, { letters: '2', direction: 'remove' })).rejects.toMatchObject({
+      code: 'ADMIN_INVALID_STATE'
+    });
+    const removal = await confirmation('account.adjust_balance', userId, { letters: '1', direction: 'remove' });
+    const removed = await runner.runAdminCommand(deps(), removal.command, userId, removal.fields);
+    expect(removed).toMatchObject({ status: 'succeeded', result: { creditsAfter: 4 } });
+    const depleted = await owner.query<{ remaining_amount: number; status: string }>(
+      `SELECT remaining_amount, status::text AS status FROM credit_ledger WHERE user_id = $1`,
+      [userId]
+    );
+    expect(depleted.rows[0]).toEqual({ remaining_amount: 0, status: 'depleted' });
+  }, 60_000);
+
+  it('lifts a send block only once no dispute stands, rolling back the refusal entirely', async () => {
+    const blockedUserId = `auth0|${randomUUID()}`;
+    const disputeId = `dp_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+    await owner.query(
+      `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used, sends_blocked_at, sends_blocked_reason)
+       VALUES ($1, $2, 0, 2, 2, NOW(), 'payment_disputed')`,
+      [blockedUserId, `blocked.${randomUUID().slice(0, 8)}@example.test`]
+    );
+    await owner.query(
+      `INSERT INTO stripe_disputes (dispute_id, charge_id, payment_intent_id, user_id, amount_cents, currency, status)
+       VALUES ($1, 'ch_x', 'pi_x', $2, 999, 'usd', 'needs_response')`,
+      [disputeId, blockedUserId]
+    );
+    const refused = await confirmation('account.unblock_sends', blockedUserId, {});
+    expect(refused.fields.get('phrase')).toBe(`CONFIRM ${blockedUserId}`);
+    await expect(runner.runAdminCommand(deps(), refused.command, blockedUserId, refused.fields)).rejects.toMatchObject({
+      code: 'ADMIN_INVALID_STATE'
+    });
+    const runs = await owner.query(`SELECT 1 FROM admin_command_runs WHERE idempotency_key = $1`, [refused.fields.get('idempotencyKey')]);
+    expect(runs.rowCount).toBe(0);
+    expect((await owner.query<{ sends_blocked_at: Date | null }>(`SELECT sends_blocked_at FROM users WHERE user_id = $1`, [blockedUserId])).rows[0].sends_blocked_at).not.toBeNull();
+
+    await owner.query(`UPDATE stripe_disputes SET status = 'won', resolved_at = NOW() WHERE dispute_id = $1`, [disputeId]);
+    const allowed = await confirmation('account.unblock_sends', blockedUserId, {});
+    const outcome = await runner.runAdminCommand(deps(), allowed.command, blockedUserId, allowed.fields);
+    expect(outcome).toMatchObject({ status: 'succeeded', result: { outcome: 'lifted' } });
+    const user = await owner.query<{ sends_blocked_at: Date | null; sends_blocked_reason: string | null }>(
+      `SELECT sends_blocked_at, sends_blocked_reason FROM users WHERE user_id = $1`,
+      [blockedUserId]
+    );
+    expect(user.rows[0]).toEqual({ sends_blocked_at: null, sends_blocked_reason: null });
+  }, 60_000);
+
+  it('releases an amount-mismatch quarantine and records the order event', async () => {
+    const orderId = `order_${randomUUID()}`;
+    await owner.query(
+      `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, stripe_payment_intent_id, status, order_type,
+         product_code, idempotency_key, last_error_code, last_error, refund_pending_at)
+       VALUES ($1, $2, 4, 1999, 'usd', $3, 'refund_pending', 'letter_pack', 'starter', $4, 'PAYMENT_AMOUNT_MISMATCH', 'paid 1499', NOW())`,
+      [orderId, userId, `pi_${randomUUID().replace(/-/g, '').slice(0, 20)}`, `idem_${orderId}`]
+    );
+    const { command, fields } = await confirmation('order.release_quarantine', orderId, {});
+    const outcome = await runner.runAdminCommand(deps(), command, orderId, fields);
+    expect(outcome).toMatchObject({ status: 'succeeded', result: { outcome: 'released' } });
+    const order = await owner.query<{ last_error_code: string | null; last_error: string | null }>(
+      `SELECT last_error_code, last_error FROM orders WHERE order_id = $1`,
+      [orderId]
+    );
+    expect(order.rows[0]).toEqual({ last_error_code: null, last_error: null });
+    const events = await owner.query<{ event_type: string; metadata: Record<string, unknown> }>(
+      `SELECT event_type, metadata FROM commerce_order_events WHERE order_id = $1`,
+      [orderId]
+    );
+    expect(events.rows).toEqual([{ event_type: 'operator.quarantine_released', metadata: { reason: 'integration test reason', clearedCode: 'PAYMENT_AMOUNT_MISMATCH' } }]);
+    await expect(confirmation('order.release_quarantine', orderId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
+  }, 60_000);
+
+  it('creates, activates, version-checks and refuses to delete a redeemed promo campaign', async () => {
+    const code = `ADMIN${randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+    const created = await confirmation('promo.create', code, { code, name: 'Admin test', creditsAmount: '2', expirationDays: '30', maxPerUser: '1' });
+    const outcome = await runner.runAdminCommand(deps(), created.command, code, created.fields);
+    expect(outcome).toMatchObject({ status: 'succeeded', result: { code, status: 'draft' } });
+    const campaignId = String(outcome.result.campaignId);
+
+    const activate = await confirmation('promo.transition', campaignId, { status: 'active' });
+    // The campaign changes between preview and confirm: refused as stale.
+    await owner.query(`UPDATE promo_campaigns SET updated_at = NOW() + INTERVAL '1 second' WHERE campaign_id = $1`, [campaignId]);
+    await expect(runner.runAdminCommand(deps(), activate.command, campaignId, activate.fields)).rejects.toMatchObject({ code: 'ADMIN_STALE_PREVIEW' });
+    const fresh = await confirmation('promo.transition', campaignId, { status: 'active' });
+    expect(await runner.runAdminCommand(deps(), fresh.command, campaignId, fresh.fields)).toMatchObject({ status: 'succeeded', result: { status: 'active' } });
+    await expect(confirmation('promo.transition', campaignId, { status: 'active' })).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
+
+    // A redemption makes deletion impossible; ending stays possible.
+    const ledger = await owner.query<{ ledger_id: string }>(
+      `INSERT INTO credit_ledger (user_id, initial_amount, remaining_amount, source_type, source_reference_id, status)
+       VALUES ($1, 2, 2, 'promo', $2, 'active') RETURNING ledger_id`,
+      [userId, campaignId]
+    );
+    await owner.query(
+      `INSERT INTO promo_redemptions (campaign_id, user_id, ledger_id) VALUES ($1, $2, $3)`,
+      [campaignId, userId, ledger.rows[0].ledger_id]
+    );
+    await owner.query(`UPDATE promo_campaigns SET current_redemptions = 1 WHERE campaign_id = $1`, [campaignId]);
+    await expect(confirmation('promo.delete', campaignId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
+    const ended = await confirmation('promo.transition', campaignId, { status: 'ended' });
+    expect(await runner.runAdminCommand(deps(), ended.command, campaignId, ended.fields)).toMatchObject({ status: 'succeeded', result: { status: 'ended' } });
+  }, 60_000);
+
+  it('grants compensation images once per command and resolves an ambiguous reservation', async () => {
+    const grant = await confirmation('account.grant_images', userId, { quantity: '2' });
+    const outcome = await runner.runAdminCommand(deps(), grant.command, userId, grant.fields);
+    expect(outcome).toMatchObject({ status: 'succeeded', result: { granted: true } });
+    const entitlement = await owner.query<{ entitlement_id: string; source_type: string; source_reference_id: string; quantity: number }>(
+      `SELECT entitlement_id, source_type, source_reference_id, quantity FROM image_entitlements WHERE user_id = $1`,
+      [userId]
+    );
+    expect(entitlement.rows).toEqual([
+      { entitlement_id: expect.any(String), source_type: 'operator_grant', source_reference_id: `admin:${outcome.commandId}`, quantity: 2 }
+    ]);
+    // A replay returns the first outcome and grants nothing more.
+    expect(await runner.runAdminCommand(deps(), grant.command, userId, grant.fields)).toMatchObject({ commandId: outcome.commandId, replayed: true });
+    expect((await owner.query(`SELECT 1 FROM image_entitlements WHERE user_id = $1`, [userId])).rowCount).toBe(1);
+
+    const reservation = await owner.query<{ reservation_id: string }>(
+      `INSERT INTO image_generation_reservations (entitlement_id, user_id, status, dispatch_started_at, resolution_reason, provider_request_id)
+       VALUES ($1, $2, 'ambiguous', NOW() - INTERVAL '1 hour', 'ambiguous_after_dispatch', 'req_1') RETURNING reservation_id`,
+      [entitlement.rows[0].entitlement_id, userId]
+    );
+    const reservationId = reservation.rows[0].reservation_id;
+    const resolve = await confirmation('image.resolve', reservationId, { decision: 'release', resolution: 'provider_confirmed_failed' });
+    expect(resolve.fields.get('phrase')).toBe(`CONFIRM ${reservationId}`);
+    const resolved = await runner.runAdminCommand(deps(), resolve.command, reservationId, resolve.fields);
+    expect(resolved).toMatchObject({ status: 'succeeded', result: { resultingStatus: 'released' } });
+    const row = await owner.query<{ status: string }>(`SELECT status FROM image_generation_reservations WHERE reservation_id = $1`, [reservationId]);
+    expect(row.rows[0].status).toBe('released');
+    expect(await operatorAuditRows(reservationId)).toBe(1);
+    await expect(confirmation('image.resolve', reservationId, { decision: 'release', resolution: 'provider_confirmed_failed' })).rejects.toMatchObject({
+      code: 'ADMIN_INVALID_STATE'
+    });
+  }, 60_000);
+
   it('lets the operator role perform exactly the granted writes', async () => {
     await expect(operator.query(`DELETE FROM letters WHERE letter_id = $1`, [heldLetterId])).rejects.toMatchObject({ code: '42501' });
     await expect(operator.query(`UPDATE admin_audit_events SET reason = 'x'`)).rejects.toMatchObject({ code: '42501' });

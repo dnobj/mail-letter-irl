@@ -190,6 +190,24 @@ export class AdminAuditWriter {
     return { commandRun, replayed: true };
   }
 
+  /** The run bound to a key in this environment, if any; never inserts. */
+  async findCommandRun(
+    client: AdminSqlClient,
+    environment: string,
+    idempotencyKey: string,
+  ): Promise<AdminCommandRun | null> {
+    const existing = await runAdminQuery(
+      client,
+      `
+        SELECT ${COMMAND_RUN_RETURNING}
+        FROM admin_command_runs
+        WHERE environment = $1 AND idempotency_key = $2
+      `,
+      [environment, idempotencyKey],
+    );
+    return existing.rows[0] ? AdminCommandRunSchema.parse(existing.rows[0]) : null;
+  }
+
   async markCommandRunning(
     client: AdminSqlClient,
     commandId: string,

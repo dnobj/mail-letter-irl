@@ -294,6 +294,7 @@ export interface OrderVersion {
   currency: string;
   stripeCheckoutSessionId: string | null;
   stripePaymentIntentId: string | null;
+  lastErrorCode: string | null;
   updatedAt: Date;
 }
 
@@ -312,10 +313,11 @@ export async function readOrderVersion(
     currency: string;
     stripe_checkout_session_id: string | null;
     stripe_payment_intent_id: string | null;
+    last_error_code: string | null;
     updated_at: Date;
   }>(
     `SELECT order_id, user_id, order_type, status, credits, amount_cents, amount_known, currency,
-            stripe_checkout_session_id, stripe_payment_intent_id, updated_at
+            stripe_checkout_session_id, stripe_payment_intent_id, last_error_code, updated_at
      FROM orders WHERE order_id = $1`,
     [orderId],
   );
@@ -332,6 +334,7 @@ export async function readOrderVersion(
     currency: row.currency,
     stripeCheckoutSessionId: row.stripe_checkout_session_id,
     stripePaymentIntentId: row.stripe_payment_intent_id,
+    lastErrorCode: row.last_error_code,
     updatedAt: row.updated_at,
   };
 }

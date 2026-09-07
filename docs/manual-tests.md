@@ -862,7 +862,67 @@ service; a Starter Pack bought in test mode (PAY-01) with no letters sent.
 **Pass criteria:** Letters leave first, Stripe follows with the app-computed amount, the run and the
 refund row reference each other, and a second command is refused.
 
-The account command cases (`ADMIN-ACCT-*`) are added by the slice that enables them.
+### ADMIN-ACCT-01 — Lift a send block
+
+**Preconditions:** Development, full mode; an account blocked by a dispute (the dispute webhook flow in
+REFUND-04's dispute variant, or a row inserted on the development branch).
+
+**Steps:**
+
+1. [ ] Open the account; verify the red "sends blocked" banner and the "Preview lifting the send block"
+   button. Preview; verify the standing-dispute count and the warning when one stands.
+2. [ ] Execute while the dispute is still open; verify `409 ADMIN_INVALID_STATE`, the block remains, and
+   `/commands` shows no run for the attempt.
+3. [ ] Close the dispute in our favour (test Dashboard, or set its status to `won`), preview again,
+   execute with the phrase; verify sends are unblocked and `/audit` shows `account.unblock_sends`.
+
+**Pass criteria:** The block lifts only when no dispute justifies it; a refusal writes nothing.
+
+### ADMIN-ACCT-02 — Adjust a letter balance and grant image generations
+
+**Steps:**
+
+1. [ ] On an account, preview adding 1 letter; verify the preview shows balance before and after in
+   letters and credits; execute; verify a never-expiring `adjustment` lot of 2 credits and
+   `/audit` shows `account.adjust_balance` with the reason.
+2. [ ] Preview removing more letters than the ledger holds; verify `409 ADMIN_INVALID_STATE`.
+3. [ ] Preview removing 1 letter; execute; verify the soonest-expiring lot lost 2 credits and the
+   transaction row reads `Operator adjustment: <reason>`.
+4. [ ] Preview granting 2 image generations; execute; verify the `operator_grant` entitlement referencing
+   the command id, and that resubmitting the same confirmation grants nothing more.
+
+**Pass criteria:** Balance changes are letters in the UI, credits in the ledger, and atomic with their
+audit.
+
+### ADMIN-ACCT-03 — Release an amount-mismatch quarantine
+
+**Preconditions:** An order in `refund_pending` with `last_error_code = PAYMENT_AMOUNT_MISMATCH`
+(adopt a legacy session with a different amount on the development branch, or insert the row).
+
+**Steps:**
+
+1. [ ] Open the order; verify the quarantine panel and the warning in the preview.
+2. [ ] Execute; verify the code is cleared, the order event `operator.quarantine_released` carries the
+   reason, and the next `npm run maintenance` (or hourly run) refunds the order.
+
+**Pass criteria:** Release is a deliberate operator decision, recorded, and the sweep then acts.
+
+### ADMIN-ACCT-04 — Promo campaigns and ambiguous image reservations
+
+**Steps:**
+
+1. [ ] `/promos/new`: preview and create a draft campaign; verify it appears as `draft`.
+2. [ ] Preview `active`; before confirming, change the campaign on another tab (or in SQL); execute;
+   verify `409 ADMIN_STALE_PREVIEW`. Preview again and execute; verify `active`.
+3. [ ] Redeem the code with a test account (`redeem_promo_code`); verify the campaign page lists the
+   redemption with a masked email and that "delete" is no longer offered. End the campaign.
+4. [ ] `/images`: with an ambiguous reservation (the stub evidence flow in
+   [deployment.md](deployment.md#ambiguous-image-reservation-operator-procedure)), preview "release as
+   compensation" and execute; verify the reservation is `released`, the quota is back, and `/audit` shows
+   `image.resolve` alongside the domain's `image_reservation_resolve` row.
+
+**Pass criteria:** Promo status follows the documented machine with version checks; image recovery is
+reachable and audited.
 
 ---
 

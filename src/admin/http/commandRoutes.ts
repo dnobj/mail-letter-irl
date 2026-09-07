@@ -38,6 +38,10 @@ function backHrefFor(command: CommandDefinition<any>, targetId: string): string 
       return `/orders/${encodeURIComponent(targetId)}`;
     case "user":
       return `/accounts/${encodeURIComponent(targetId)}`;
+    case "promo_campaign":
+      return /^[0-9a-f-]{36}$/i.test(targetId) ? `/promos/${encodeURIComponent(targetId)}` : "/promos";
+    case "image_reservation":
+      return "/images";
     default:
       return "/";
   }

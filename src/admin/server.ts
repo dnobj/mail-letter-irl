@@ -8,8 +8,10 @@ import { closeAdminPools, createAdminPools, verifyDatabaseIdentity, type AdminPo
 import { AdminConfigurationError, AdminFoundationError } from "./errors.js";
 import { clientScriptPath, createAdminRequestListener, type RouteHandler } from "./http/app.js";
 import { AdminRouter } from "./http/router.js";
+import { registerAccountRoutes } from "./http/accountRoutes.js";
 import { registerCommandRoutes } from "./http/commandRoutes.js";
 import { registerStripeRoutes } from "./http/stripeRoutes.js";
+import { join } from "./ui/html.js";
 import { NAV_ITEMS, registerReadRoutes } from "./http/routes.js";
 import { ADMIN_COMMANDS } from "./commands/index.js";
 import { AdminSessionStore, hashSessionId } from "./http/session.js";
@@ -189,7 +191,16 @@ export async function main(): Promise<void> {
   const router = new AdminRouter<RouteHandler>();
   const extensions = registerCommandRoutes(router, ADMIN_COMMANDS);
   const stripeExtensions = registerStripeRoutes(router);
-  registerReadRoutes(router, clientScript, { ...extensions, ...stripeExtensions });
+  const accountExtensions = registerAccountRoutes(router);
+  registerReadRoutes(router, clientScript, {
+    ...extensions,
+    accountActions: accountExtensions.accountActions,
+    orderActions: async (context, detail) =>
+      join([
+        await accountExtensions.orderActions!(context, detail),
+        await stripeExtensions.orderActions!(context, detail),
+      ]),
+  });
   const listener = createAdminRequestListener({
     config,
     pools,

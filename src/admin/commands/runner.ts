@@ -182,6 +182,26 @@ export async function runAdminCommand<I>(
   }
   requireElevation(deps.session, now);
 
+  // A confirmation that already ran returns its first outcome, before the
+  // preview is re-derived: the target has legitimately changed by then (the
+  // command changed it), so re-previewing would refuse a valid replay. The
+  // presented digest must match the stored one, so a different confirmation
+  // that reuses the key is a conflict, not a replay.
+  const presentedKey = fields.get("idempotencyKey") ?? "";
+  if (presentedKey) {
+    const existing = await deps.audit.findCommandRun(deps.operator, deps.config.environment, presentedKey);
+    if (existing && existing.status !== "pending" && existing.status !== "running") {
+      if (
+        existing.actorId !== deps.actor.id ||
+        existing.action !== definition.action ||
+        existing.previewDigest !== (fields.get("previewDigest") ?? "")
+      ) {
+        throw new AdminFoundationError("ADMIN_IDEMPOTENCY_CONFLICT");
+      }
+      return priorOutcome(existing);
+    }
+  }
+
   // Re-derive the digest from the current row; a stale preview is refused
   // before anything is written.
   const prepared = await withReadOnlyPreview(deps.reader, (client) =>
