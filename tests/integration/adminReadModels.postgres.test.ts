@@ -6,7 +6,7 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
 import { AdminAuditWriter } from '../../src/admin/auditService.js';
 import { parseAdminEnvironmentConfig } from '../../src/admin/config.js';
 import { verifyDatabaseIdentity, withReadOnlyTransaction } from '../../src/admin/db.js';
-import { buildAdminGrantStatements } from '../../src/admin/provisioning.js';
+import { ADMIN_LATEST_REQUIRED_MIGRATION, buildAdminGrantStatements } from '../../src/admin/provisioning.js';
 import { readAccountDetail, revealAccountEmail } from '../../src/admin/queries/accounts.js';
 import { countAlerts, listAlerts, listUnmatchedWebhookEvents } from '../../src/admin/queries/alerts.js';
 import { listAuditEvents } from '../../src/admin/queries/audit.js';
@@ -329,7 +329,10 @@ describePostgres('admin read models through the reader role', () => {
   it('reports maintenance health from the reader role', async () => {
     const health = await withReadOnlyTransaction(reader, (client) => readMaintenanceHealth(client));
     expect(health.marker).toBe('development');
-    expect(health.latestMigration).toBe('029_proportional_pack_refunds.sql');
+    // Not a literal: provisioningGrants.test.ts already proves this constant is
+    // the newest migration on disk, so naming it here leaves one place to edit
+    // when a migration lands rather than two that drift.
+    expect(health.latestMigration).toBe(ADMIN_LATEST_REQUIRED_MIGRATION);
     expect(health.outbox.held).toBe(1);
     expect(health.alerts).toEqual({ open: 1, acknowledged: 0, critical: 1 });
     expect(health.unmatchedWebhookEvents).toBe(1);
