@@ -83,7 +83,12 @@ function fakeDaemon() {
 function supervisor(
   cli: TailscaleCli,
   daemon: DaemonHandle,
-  options: { authKey?: string; log?: string[]; readyTimeoutMs?: number } = {},
+  options: {
+    authKey?: string;
+    log?: string[];
+    readyTimeoutMs?: number;
+    noStateGraceMs?: number;
+  } = {},
 ) {
   const log = options.log ?? [];
   return new TailscaleSupervisor({
@@ -99,6 +104,7 @@ function supervisor(
     log: (line) => log.push(line),
     readyTimeoutMs: options.readyTimeoutMs ?? 5_000,
     pollIntervalMs: 1,
+    noStateGraceMs: options.noStateGraceMs,
   });
 }
 
@@ -151,6 +157,64 @@ describe("Tailscale supervisor", () => {
     expect(calls.some((args) => args[0] === "up")).toBe(false);
     expect(daemon.killed).toBe("SIGTERM");
     expect(sut.isHealthy()).toBe(false);
+  });
+
+  it("waits through NoState while a persisted profile loads, without a key and without issuing up", async () => {
+    // What a redeploy looks like: tailscaled reports NoState for a moment while
+    // it reads the state file from the volume and completes its login, then
+    // Starting, then Running. That must not be mistaken for a missing key.
+    const { cli, calls } = scriptedCli([
+      statusJson("NoState", { Tags: [], DNSName: "" }),
+      statusJson("NoState", { Tags: [], DNSName: "" }),
+      statusJson("Starting"),
+      statusJson("Running"),
+      statusJson("Running"),
+    ]);
+    const daemon = fakeDaemon();
+    const log: string[] = [];
+    const sut = supervisor(cli, daemon.handle, { log });
+
+    const identity = await sut.start();
+
+    expect(identity.dnsName).toBe("letter-irl-admin-dev.tail1234.ts.net");
+    expect(calls.some((args) => args[0] === "up")).toBe(false);
+    expect(daemon.killed).toBeNull();
+    expect(
+      log.some((line) => line.includes("backend=NoState tags=- name=-")),
+    ).toBe(true);
+  });
+
+  it("treats a NoState that outlives the grace window as a missing profile", async () => {
+    const { cli, calls } = scriptedCli([
+      statusJson("NoState", { Tags: [], DNSName: "" }),
+    ]);
+    const daemon = fakeDaemon();
+    const sut = supervisor(cli, daemon.handle, { noStateGraceMs: 0 });
+
+    await expect(sut.start()).rejects.toMatchObject({
+      code: "ADMIN_TAILSCALE_NEEDS_LOGIN",
+    });
+    expect(calls.some((args) => args[0] === "up")).toBe(false);
+    expect(daemon.killed).toBe("SIGTERM");
+  });
+
+  it("uses the one-off key once NoState has outlived the grace window on a first boot", async () => {
+    const { cli, calls } = scriptedCli([
+      statusJson("NoState", { Tags: [], DNSName: "" }),
+      statusJson("Starting"),
+      statusJson("Running"),
+      statusJson("Running"),
+    ]);
+    const sut = supervisor(cli, fakeDaemon().handle, {
+      authKey: AUTH_KEY,
+      noStateGraceMs: 0,
+    });
+
+    await sut.start();
+
+    const up = calls.find((args) => args[0] === "up");
+    expect(up).toBeDefined();
+    expect(up!.some((arg) => arg === `--auth-key=${AUTH_KEY}`)).toBe(true);
   });
 
   it("re-asserts settings without a key when the node is merely Stopped", async () => {

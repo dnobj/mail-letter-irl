@@ -242,7 +242,9 @@ The service must **not** receive the API's owner `DATABASE_URL`.
 
 ### 4. First boot
 
-Read the deploy log. The healthcheck answers 503 (Railway retries for five minutes) until the supervisor
+Read the deploy log. On every boot the supervisor first prints `[tailscale] backend=NoState tags=- name=-`
+while `tailscaled` reads the state file and logs in; that line is not a failure. The healthcheck answers 503
+(Railway retries for five minutes) until the supervisor
 prints `[tailscale] backend=Running tags=tag:dev-admin name=letter-irl-admin-dev.<tailnet>.ts.net.`, then
 `[tailscale] ready name=... tags=tag:dev-admin ips=2`, then `admin.listening`; the first boot reached that
 about a minute after the image build. Serve requests the certificate by ACME `dns-01` straight after

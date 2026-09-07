@@ -68,6 +68,14 @@ export interface TailscaleSupervisorOptions {
   log?: (line: string) => void;
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
+  /**
+   * How long a NoState report may last before it is read as "no profile to
+   * load". tailscaled reports NoState on every boot while it reads the state
+   * file from the volume and completes its login, so a node that rejoins after
+   * a redeploy passes through it; only a NoState that outlives this window
+   * means the node has never been registered.
+   */
+  noStateGraceMs?: number;
 }
 
 export type SupervisorState =
@@ -79,6 +87,7 @@ export type SupervisorState =
 
 const DEFAULT_READY_TIMEOUT_MS = 180_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
+const DEFAULT_NO_STATE_GRACE_MS = 30_000;
 
 /**
  * The admin service must never have a public domain. Railway sets these when
@@ -167,7 +176,7 @@ export class TailscaleSupervisor {
   private readonly options: Required<
     Pick<
       TailscaleSupervisorOptions,
-      "sleep" | "log" | "readyTimeoutMs" | "pollIntervalMs"
+      "sleep" | "log" | "readyTimeoutMs" | "pollIntervalMs" | "noStateGraceMs"
     >
   > &
     TailscaleSupervisorOptions;
@@ -186,6 +195,7 @@ export class TailscaleSupervisor {
       readyTimeoutMs: DEFAULT_READY_TIMEOUT_MS,
       pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
       ...options,
+      noStateGraceMs: options.noStateGraceMs ?? DEFAULT_NO_STATE_GRACE_MS,
     };
   }
 
@@ -255,6 +265,7 @@ export class TailscaleSupervisor {
     this.log(`daemon spawned pid=${daemon.pid ?? "unknown"}`);
 
     const deadline = Date.now() + this.options.readyTimeoutMs;
+    const noStateDeadline = Date.now() + this.options.noStateGraceMs;
     let summary: TailscaleStatusSummary | null = null;
     let upIssued = false;
     let lastLogged = "";
@@ -279,6 +290,17 @@ export class TailscaleSupervisor {
       }
       if (summary.backendState === "NeedsMachineAuth") {
         // Device approval or Tailnet Lock signing pending: wait for the owner.
+        await this.options.sleep(this.options.pollIntervalMs);
+        continue;
+      }
+      if (
+        summary.backendState === "NoState" &&
+        !upIssued &&
+        Date.now() < noStateDeadline
+      ) {
+        // Transitional: the daemon is still loading the persisted profile and
+        // logging in. Deciding "needs a key" here is what made a redeploy fail
+        // with ADMIN_TAILSCALE_NEEDS_LOGIN while the volume held a valid node.
         await this.options.sleep(this.options.pollIntervalMs);
         continue;
       }
