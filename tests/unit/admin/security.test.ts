@@ -9,6 +9,8 @@ import {
   parseFormBody,
   verifyCsrfToken,
 } from "../../../src/admin/http/security.js";
+import { html } from "../../../src/admin/ui/html.js";
+import { REFERRER_POLICY, renderPage } from "../../../src/admin/ui/layout.js";
 
 function request(headers: Record<string, string>, method = "POST") {
   return { method, header: (name: string) => headers[name.toLowerCase()] };
@@ -62,13 +64,47 @@ describe("admin browser-boundary checks", () => {
   it("sets a referrer policy that leaves the Origin header intact on our own form posts", () => {
     // Per Fetch, a non-CORS request whose method is not GET or HEAD has its
     // Origin serialised as `null` under "no-referrer". The panel used to send
-    // that header, so every form post arrived with Origin: null and was
-    // refused by the boundary check above: two correct controls that were
-    // mutually exclusive, and no automated test caught it because the request
-    // fixtures set Origin themselves rather than letting a browser compute it.
+    // that, so every form post arrived with Origin: null and was refused by
+    // the boundary check above: two correct controls that were mutually
+    // exclusive, and no automated test caught it because the request fixtures
+    // set Origin themselves rather than letting a browser compute it.
     const policy = buildSecurityHeaders(createNonce())["Referrer-Policy"];
     expect(policy).not.toBe("no-referrer");
     expect(["same-origin", "strict-origin", "strict-origin-when-cross-origin"]).toContain(policy);
+  });
+
+  it("declares the same referrer policy in the header and the document meta tag", () => {
+    // A meta tag overrides the header for the document, so when the two
+    // disagree the tag wins silently. Changing only the header left every form
+    // post still sending Origin: null and the panel still refusing every write.
+    const policy = buildSecurityHeaders(createNonce())["Referrer-Policy"];
+    expect(policy).toBe(REFERRER_POLICY);
+    const page = renderPage({
+      title: "Elevate",
+      nonce: "NONCE123",
+      banner: {
+        environment: "development",
+        mode: "full",
+        marker: "development",
+        databaseRole: "letter_irl_admin_reader_development",
+        stripeKeyMode: "absent",
+        stripeKeyRestricted: false,
+        letterProvider: "dummy",
+        buildCommit: "abcdef1234567890",
+        nodeName: "letter-irl-admin-dev.tail1234.ts.net",
+        tag: "tag:dev-admin",
+      },
+      nav: [{ href: "/", label: "Overview" }],
+      currentPath: "/",
+      actor: { id: "owner@example.com", name: "Owner", node: "laptop.tail1234.ts.net" },
+      csrfToken: "c".repeat(64),
+      scriptPath: "/assets/client-abc.js",
+      flash: null,
+      elevatedUntil: null,
+      body: html`<p>body</p>`,
+    });
+    expect(page).toContain(`<meta name="referrer" content="${policy}">`);
+    expect(page).not.toContain('content="no-referrer"');
   });
 
   it("binds the CSRF token to the session and the secret", () => {
