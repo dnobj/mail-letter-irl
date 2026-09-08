@@ -15,7 +15,7 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * exist yet fails the whole transaction.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "030_ledger_description_minimisation.sql";
+  "031_provider_error_minimisation.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

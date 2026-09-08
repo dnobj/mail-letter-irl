@@ -41,6 +41,11 @@ column, and the operator's reason lives only in `admin_audit_events`. When you a
 table on the column-granted list, it is not granted until someone names it, which is the intended
 direction of failure.
 
+The three provider-error columns operators read (`letter_jobs.last_error`, `orders.last_error` and the
+`provider.terminal_failure` order event) hold an error class and HTTP status only, `provider_rejected
+http_400`, never the provider's message: PostGrid's validation messages name the field and value that
+failed, which can be a fragment of a recipient's address (migration 031).
+
 ## How a request is authenticated
 
 Every request to an application route must pass all of these, on every request, with no exception for a

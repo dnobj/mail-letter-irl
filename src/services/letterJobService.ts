@@ -24,6 +24,7 @@ import {
   returnConsumedCreditsForLetter
 } from './creditLedgerService.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import { summarizeProviderRejection } from './providerFailureSummary.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const STALE_LOCK_MINUTES = 15;
@@ -589,6 +590,12 @@ async function failOrRescheduleJob(
   random: () => number
 ): Promise<boolean> {
   const error = result.error || 'Provider returned an unsuccessful result';
+  // What the three columns below receive. The raw message stays out of the
+  // database: a provider validation message can name the field and value that
+  // failed, which for a rejected letter is a fragment of the recipient's
+  // address (audit A-08). The ambiguous and exception paths store a class only;
+  // this keeps the status code as the operational signal.
+  const storedError = summarizeProviderRejection(result);
   // Fail safe: only an explicit `definite_rejection` may compensate a paid send.
   // A provider that reports no classification has not proved that the piece was
   // refused, and an unnecessary hold is recoverable while refunding physically
@@ -633,7 +640,7 @@ async function failOrRescheduleJob(
            provider_outcome = CASE WHEN $1::varchar = 'failed' THEN 'definite_failure' ELSE provider_outcome END,
            last_error = $3, error_message = $3, updated_at = NOW()
        WHERE job_id = $4 AND status = 'processing' AND provider_outcome = 'dispatching'`,
-      [terminal ? 'failed' : 'pending', nextAttemptAt, error, job.job_id]
+      [terminal ? 'failed' : 'pending', nextAttemptAt, storedError, job.job_id]
     );
     // Nothing below may run on a job this result no longer owns - not the
     // letter transition, not the order's move to refund_pending, and above all
@@ -658,14 +665,14 @@ async function failOrRescheduleJob(
          WHERE order_id = $1 AND order_type = 'jit_mail'
            AND status = 'fulfillment_pending'
          RETURNING order_id`,
-        [fundingOrderId, error]
+        [fundingOrderId, storedError]
       );
       if (refundOrder.rows[0]) {
         await client.query(
           `INSERT INTO commerce_order_events (
              order_id, event_type, from_status, to_status, metadata
            ) VALUES ($1, 'provider.terminal_failure', 'fulfillment_pending', 'refund_pending', $2)`,
-          [refundOrder.rows[0].order_id, JSON.stringify({ error })]
+          [refundOrder.rows[0].order_id, JSON.stringify({ errorClass: storedError })]
         );
       }
     }
