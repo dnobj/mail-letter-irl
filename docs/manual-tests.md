@@ -796,6 +796,18 @@ absent or live.
 
 ### ADMIN-CMD-01 — Acknowledge and resolve an alert with elevation, preview, typed confirmation and replay
 
+**Status:** Executed 2026-09-08 in the owner's Chrome, driven by the browser extension, with the
+balance adjustment on the owner's own development account standing in for the alert, because no alert
+was open. Step 1 passed (the preview named elevation and Execute was disabled). Step 2 passed (banner
+"elevated until", `admin.elevate` audited). Step 3 passed (`CONFIRM <account id>`; the run listed on
+`/commands`, `account.adjust_balance` audited with the reason and command id, and the ledger lot reads
+`adjustment` with no reason text anywhere on the account page). Step 4 passed (the same confirmation
+answered "already processed", no second audit row). Step 5 passed (two previews of the same change;
+the second answered `409 ADMIN_STALE_PREVIEW`). Step 6 not run: five wrong codes would lock the owner
+out for fifteen minutes. Also seen: a wrong phrase answered `400 ADMIN_INVALID_REQUEST` and was audited
+as denied, and a five-character reason was accepted, because the eight-character minimum lived only in
+the form until the pull request that carries this record.
+
 **Preconditions:** The development panel runs in full mode (`ADMIN_MODE=full`, `DATABASE_URL` on the
 operator role, `ADMIN_TOTP_SECRET` from `npm run admin:totp-enrol -- development`, the authenticator
 enrolled on a different device); an open alert exists (REFUND-02 raises one).
@@ -822,6 +834,8 @@ returns the first outcome; every step is in the audit log.
 
 ### ADMIN-CMD-02 — Resolve an ambiguous job with provider evidence
 
+**Status:** Not run 2026-09-08: no job was held on an ambiguous outcome.
+
 **Preconditions:** Full mode as above; a job held on an ambiguous provider outcome (the stub evidence
 flow in [deployment.md](deployment.md#ambiguous-image-reservation-operator-procedure) describes how the
 dummy provider produces one).
@@ -839,6 +853,11 @@ dummy provider produces one).
 **Pass criteria:** The job leaves the held state only with evidence, and the outcome matches the decision.
 
 ### ADMIN-CMD-03 — Retry a definite failure, and the refusals
+
+**Status:** Step 3 passed 2026-09-08 (elevation dropped on `/elevate`; a prepared preview answered
+`403 ADMIN_ELEVATION_REQUIRED`, the balance was unchanged, and both events were audited). Steps 1 and
+2 deliberately not run: a retried job is dispatched to whatever provider development routes to, an
+outside effect the owner should trigger knowingly. Step 4 not run.
 
 **Preconditions:** Full mode; a job in `failed / definite_failure` with a failed letter.
 

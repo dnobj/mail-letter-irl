@@ -95,6 +95,21 @@ describe("shared admin contracts", () => {
     );
   });
 
+  it("holds the reason to the form's bounds on the server too", () => {
+    const previewDigest = "b".repeat(64);
+    const attempt = (reason: string) =>
+      validateAdminCommandConfirmation(
+        { previewDigest, reason, idempotencyKey: "test-command-2", expectedVersion: "7" },
+        { previewDigest, expectedVersion: "7" },
+      );
+    // A five-character reason reached the audit log on 2026-09-08 because
+    // minlength=8 lived only in the browser form.
+    expect(() => attempt("short")).toThrow();
+    expect(() => attempt("   seven  ")).toThrow();
+    expect(attempt("eight ch").reason).toBe("eight ch");
+    expect(() => attempt("x".repeat(501))).toThrow();
+  });
+
   it("maps unexpected failures to stable public errors without raw details", () => {
     const envelope = toAdminErrorEnvelope(
       new Error("password=secret SQL syntax failure"),

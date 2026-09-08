@@ -69,6 +69,14 @@ address the caller supplied, so it does not close the hole by itself. What close
 allowing only `tcp:443` on the admin tag, and the `tests` block that refuses a policy save reopening
 the app port. Both are load-bearing; re-run `ADMIN-INFRA-01` step 4 after any policy edit.
 
+**The tunnel MTU is lowered on purpose.** The daemon starts with `TS_DEBUG_MTU=1200`
+(`DEFAULT_TAILSCALE_MTU` in `src/admin/tailscale/cli.ts`; a service variable of the same name overrides
+it). The direct path between an operator's laptop and the Railway container drops tunnel packets from
+about 1260 bytes, below Tailscale's 1280 default, and only in the operator-to-panel direction. Small
+requests get through and full-size ones hang, so curl works while a browser whose TLS handshake spans two
+segments times out on every page. Lowering the daemon's MTU makes it advertise a smaller segment size to
+every client, which fixes all devices at once; lowering a laptop's adapter MTU fixes one.
+
 State-changing requests additionally need `Sec-Fetch-Site` of `same-origin` or `none`, an `Origin` equal
 to the panel's origin, and the per-session CSRF token in the form. Responses carry a strict nonce-based
 Content Security Policy, `Cache-Control: no-store` and a correlation id. Denials, failures, session starts
@@ -378,6 +386,7 @@ login standing in for the Serve proxy. Local-dev mode is refused on Railway, und
 | Re-register the node (volume replaced, tag changed, suspected key compromise) | Delete the old machine in the console; mint a new one-off, tagged, pre-approved (pre-signed with Tailnet Lock) key with 1-day expiry; set `TS_AUTHKEY`; redeploy; confirm the name and tag; delete the variable. No standing key exists to rotate. |
 | Revoke a device (lost or stolen laptop or phone) | Delete the device on the Machines page (immediate); if it was a Tailnet Lock signing node, remove and rotate it from another signing node and re-issue disablement secrets; restart the admin service, which drops every session; if the identity provider account may be compromised, rotate its credential and passkeys and review the console audit log. |
 | Panel unreachable | Read the deploy log. `NeedsLogin` on first boot: the one-off key expired, mint again. "Locked out": sign the node. Device approval pending: approve. Volume detached: re-register. `ADMIN_TAILSCALE_TAG_MISMATCH` or `ADMIN_TAILSCALE_NAME_MISMATCH`: the node carries the wrong tag or name; fix the key's tag or the hostname variable. `ADMIN_PUBLIC_DOMAIN_PRESENT`: a domain was generated; remove it. Serverless enabled: disable it. |
+| Pages hang in a browser while curl answers | Packet size, not DNS. Compare a plain request with one carrying a 1600-byte header: `curl -H "X-Pad: $(printf 'a%.0s' $(seq 1 1600))" <panel url>`. If only the padded one hangs, the path's MTU has dropped below the daemon's: confirm the deploy log shows `envknob: TS_DEBUG_MTU="1200"`, and if it does, set a lower `TS_DEBUG_MTU` on the service. Measured 2026-09-08: 1248 passed, 1260 did not. |
 | Reach the panel from the phone | Install Tailscale, sign in with the same identity, approve or sign the phone from the laptop, open the URL. Keep the TOTP authenticator on a different device from the one browsing when writes are intended. |
 | Certificate problems | Serve requests and renews the certificate itself. Confirm HTTPS is enabled on the DNS page and the node name is unchanged, then redeploy. |
 | Block everyone instantly | Remove the grant line from the policy, or delete the machine from the Machines page, or set `ADMIN_MODE=read-only` and redeploy. |
