@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import type { AdminErrorCode } from "../errors.js";
+import { REFERRER_POLICY } from "../ui/layout.js";
 
 /**
  * Browser-boundary hardening for the panel: response headers with a per-
@@ -45,7 +46,7 @@ export function buildSecurityHeaders(nonce: string): Record<string, string> {
     // checkStateChangingRequest below. "same-origin" still sends no referrer
     // to any other origin, which is the privacy goal, while letting the
     // browser put a real Origin on our own posts.
-    "Referrer-Policy": "same-origin",
+    "Referrer-Policy": REFERRER_POLICY,
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Permissions-Policy":
