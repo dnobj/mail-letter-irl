@@ -229,7 +229,11 @@ export const AdminCommandCompletionSchema = z
 export const AdminCommandConfirmationSchema = z
   .object({
     previewDigest: DigestSchema,
-    reason: z.string().trim().min(1).max(1000),
+    // The same bounds as the form field (minlength=8, maxlength=500). Until
+    // this matched, the minimum lived only in the browser: a scripted
+    // submission recorded a five-character reason during the 2026-09-08
+    // command tests.
+    reason: z.string().trim().min(8).max(500),
     idempotencyKey: IdentifierSchema,
     expectedVersion: IdentifierSchema.optional(),
   })
