@@ -38,6 +38,12 @@ RUN apt-get update \
 COPY --from=tailscale /usr/local/bin/tailscaled /usr/local/bin/tailscale /usr/local/bin/
 WORKDIR /app
 ENV NODE_ENV=production
+# HOME still pointed at /root after the step-down, so tailscaled could not
+# write its local log buffer and logged a permission error on every boot
+# ("filch failed: open /root/.cache/Tailscale/...: permission denied"). It
+# carried on without it, but an unwritable HOME is a trap for anything else
+# that looks there, and a recurring error hides the next real one.
+ENV HOME=/home/node
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/package.json ./package.json
@@ -47,6 +53,6 @@ RUN chmod 0755 /usr/local/bin/docker-entrypoint.admin.sh
 # certificate under it, so a redeploy is the same node. The mount masks this
 # directory's ownership at runtime, which is why the entrypoint prepares it
 # again after the mount rather than trusting a build-time chown.
-RUN mkdir -p /data/tailscale && chown -R node:node /data
+RUN mkdir -p /data/tailscale /home/node/.cache && chown -R node:node /data /home/node
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.admin.sh"]
 CMD ["node", "dist/admin/server.js"]
