@@ -60,7 +60,7 @@ describePostgres('migration 031 takes provider text out of the error columns', (
     await owner.query(
       `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
          idempotency_key, paid_at, last_error_code, last_error)
-       VALUES ($1, $2, 1, 599, 'usd', 'refund_pending', 'jit_mail', 'jit_letter', $3, NOW(),
+       VALUES ($1, $2, NULL, 599, 'usd', 'refund_pending', 'jit_mail', 'jit_letter', $3, NOW(),
          'PROVIDER_SUBMISSION_FAILED', $4)`,
       [orderId, userId, `idem_${orderId}`, LEAKED]
     );
