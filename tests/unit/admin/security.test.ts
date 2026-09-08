@@ -23,25 +23,52 @@ describe("admin browser-boundary checks", () => {
       origin: "https://letter-irl-admin-dev.tail1234.ts.net",
       "content-type": "application/x-www-form-urlencoded",
     };
-    expect(checkStateChangingRequest(request(good), ORIGINS)).toBeNull();
-    expect(checkStateChangingRequest(request({ ...good, "sec-fetch-site": "none" }), ORIGINS)).toBeNull();
-    expect(
-      checkStateChangingRequest(request({ ...good, "sec-fetch-site": "cross-site" }), ORIGINS),
-    ).toBe("ADMIN_CSRF_REJECTED");
-    expect(
-      checkStateChangingRequest(request({ ...good, "sec-fetch-site": "same-site" }), ORIGINS),
-    ).toBe("ADMIN_CSRF_REJECTED");
+    const refusal = (headers: Record<string, string>, method = "POST") =>
+      checkStateChangingRequest(request(headers, method), ORIGINS);
+    expect(refusal(good)).toBeNull();
+    expect(refusal({ ...good, "sec-fetch-site": "none" })).toBeNull();
+    expect(refusal({ ...good, "sec-fetch-site": "cross-site" })).toMatchObject({
+      code: "ADMIN_CSRF_REJECTED",
+      detail: "sec_fetch_site_missing_or_cross_site",
+    });
+    expect(refusal({ ...good, "sec-fetch-site": "same-site" })).toMatchObject({
+      code: "ADMIN_CSRF_REJECTED",
+    });
     const { "sec-fetch-site": _omitted, ...withoutSite } = good;
-    expect(checkStateChangingRequest(request(withoutSite), ORIGINS)).toBe("ADMIN_CSRF_REJECTED");
-    expect(
-      checkStateChangingRequest(request({ ...good, origin: "https://evil.example" }), ORIGINS),
-    ).toBe("ADMIN_CSRF_REJECTED");
+    expect(refusal(withoutSite)).toMatchObject({
+      detail: "sec_fetch_site_missing_or_cross_site",
+    });
+    expect(refusal({ ...good, origin: "https://evil.example" })).toMatchObject({
+      code: "ADMIN_CSRF_REJECTED",
+      detail: "origin_mismatch",
+    });
     const { origin: _origin, ...withoutOrigin } = good;
-    expect(checkStateChangingRequest(request(withoutOrigin), ORIGINS)).toBe("ADMIN_CSRF_REJECTED");
-    expect(
-      checkStateChangingRequest(request({ ...good, "content-type": "application/json" }), ORIGINS),
-    ).toBe("ADMIN_INVALID_REQUEST");
-    expect(checkStateChangingRequest(request(good, "PUT"), ORIGINS)).toBe("ADMIN_METHOD_NOT_ALLOWED");
+    expect(refusal(withoutOrigin)).toMatchObject({ detail: "origin_missing_or_null" });
+    // Chrome sends a literal "null" Origin on a form post when the response
+    // that carried the form set Referrer-Policy: no-referrer. It is reported
+    // apart from a mismatch because the cause is our own headers, not the
+    // caller.
+    expect(refusal({ ...good, origin: "null" })).toMatchObject({
+      code: "ADMIN_CSRF_REJECTED",
+      detail: "origin_missing_or_null",
+    });
+    expect(refusal({ ...good, "content-type": "application/json" })).toMatchObject({
+      code: "ADMIN_INVALID_REQUEST",
+      detail: "content_type_not_form",
+    });
+    expect(refusal(good, "PUT")).toMatchObject({ code: "ADMIN_METHOD_NOT_ALLOWED" });
+  });
+
+  it("sets a referrer policy that leaves the Origin header intact on our own form posts", () => {
+    // Per Fetch, a non-CORS request whose method is not GET or HEAD has its
+    // Origin serialised as `null` under "no-referrer". The panel used to send
+    // that header, so every form post arrived with Origin: null and was
+    // refused by the boundary check above: two correct controls that were
+    // mutually exclusive, and no automated test caught it because the request
+    // fixtures set Origin themselves rather than letting a browser compute it.
+    const policy = buildSecurityHeaders(createNonce())["Referrer-Policy"];
+    expect(policy).not.toBe("no-referrer");
+    expect(["same-origin", "strict-origin", "strict-origin-when-cross-origin"]).toContain(policy);
   });
 
   it("binds the CSRF token to the session and the secret", () => {
@@ -63,7 +90,7 @@ describe("admin browser-boundary checks", () => {
     expect(headers["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
     expect(headers["Content-Security-Policy"]).not.toContain("unsafe-inline");
     expect(headers["Cache-Control"]).toBe("no-store");
-    expect(headers["Referrer-Policy"]).toBe("no-referrer");
+    expect(headers["Referrer-Policy"]).toBe("same-origin");
     expect(headers["X-Content-Type-Options"]).toBe("nosniff");
   });
 

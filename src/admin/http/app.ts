@@ -270,11 +270,11 @@ export function createAdminRequestListener(
           action: "admin.request_denied",
           targetType: "route",
           targetId: matched.route.name,
-          inputSummary: { reason: "browser_boundary" },
+          inputSummary: { reason: "browser_boundary", detail: boundary.detail },
           outcome: "denied",
-          errorCode: boundary,
+          errorCode: boundary.code,
         });
-        constant(boundary === "ADMIN_METHOD_NOT_ALLOWED" ? 405 : 403);
+        constant(boundary.code === "ADMIN_METHOD_NOT_ALLOWED" ? 405 : 403);
         return;
       }
       let body: string;
