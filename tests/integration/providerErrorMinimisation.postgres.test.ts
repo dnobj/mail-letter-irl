@@ -57,12 +57,19 @@ describePostgres('migration 031 takes provider text out of the error columns', (
       `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used) VALUES ($1, $2, 0, 2, 2)`,
       [userId, `${randomUUID()}@example.test`]
     );
+    // A jit_mail order must point at a draft and carry no credits
+    // (valid_order_draft, valid_order_credits).
+    const draft = await owner.query<{ draft_id: string }>(
+      `INSERT INTO letter_drafts (user_id, sender, recipient, body_text, sign_off, required_credits, expires_at)
+       VALUES ($1, '{}', '{}', 'private words', 'Regards', 2, NOW() + INTERVAL '1 day') RETURNING draft_id`,
+      [userId]
+    );
     await owner.query(
-      `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
-         idempotency_key, paid_at, last_error_code, last_error)
-       VALUES ($1, $2, NULL, 599, 'usd', 'refund_pending', 'jit_mail', 'jit_letter', $3, NOW(),
-         'PROVIDER_SUBMISSION_FAILED', $4)`,
-      [orderId, userId, `idem_${orderId}`, LEAKED]
+      `INSERT INTO orders (order_id, user_id, order_type, draft_id, product_code, product_snapshot, credits,
+         amount_cents, currency, status, idempotency_key, paid_at, last_error_code, last_error)
+       VALUES ($1, $2, 'jit_mail', $3, 'jit-letter', '{}', NULL, 599, 'usd', 'refund_pending', $4, NOW(),
+         'PROVIDER_SUBMISSION_FAILED', $5)`,
+      [orderId, userId, draft.rows[0].draft_id, `idem_${orderId}`, LEAKED]
     );
     for (const letterId of [rejectedLetterId, internalLetterId]) {
       await owner.query(
