@@ -34,6 +34,23 @@ const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 100,         // 100 total per minute (protects against distributed attacks)
   },
+  // Backstops for the routes that had only per-identifier limits (audit A-05).
+  // A per-identifier limit bounds one client; these bound everyone at once, so
+  // many addresses cannot burn JWKS verification or bcrypt compares at line
+  // rate. Each is twenty times the per-identifier limit: far above any traffic
+  // this service has seen, so a hit is an incident rather than a busy day.
+  'mcp': {
+    windowMs: 60 * 1000,
+    maxRequests: 1200,
+  },
+  'api': {
+    windowMs: 60 * 1000,
+    maxRequests: 2000,
+  },
+  'checkout': {
+    windowMs: 60 * 1000,
+    maxRequests: 200,
+  },
 };
 
 // Cleanup interval to prevent memory leaks (run every 5 minutes)
@@ -79,19 +96,26 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
 };
 
 /**
- * Get client identifier from request
- * Uses X-Forwarded-For for proxied requests, falls back to socket address
+ * The identifier a per-address rate limit keys on.
+ *
+ * The LAST X-Forwarded-For hop, never the first. The first hop is whatever
+ * the client wrote; the last is what the edge in front of this service
+ * appended when it forwarded the request. Verified against Railway's edge on
+ * 2026-09-08: a client-supplied value did not reach the first position (the
+ * edge sets the header itself), so on that edge first and last are the same
+ * address today. Taking the last hop keeps the limit honest whether an edge
+ * appends to the header or replaces it, which is one less thing the edge's
+ * behaviour has to be trusted for (audit A-05). Falls back to the socket
+ * address when no header is present, which is the direct-connection case.
  */
 export function getClientIdentifier(req: IncomingMessage): string {
-  // Check for forwarded IP (from reverse proxy)
   const forwardedFor = req.headers['x-forwarded-for'];
   if (forwardedFor) {
-    const ips = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
-    // Take the first IP (original client)
-    return ips.split(',')[0].trim();
+    // Several header lines arrive as an array; the last line was added last.
+    const raw = Array.isArray(forwardedFor) ? forwardedFor[forwardedFor.length - 1] : forwardedFor;
+    const hops = raw.split(',').map((hop) => hop.trim()).filter((hop) => hop.length > 0);
+    if (hops.length > 0) return hops[hops.length - 1];
   }
-
-  // Fall back to direct connection IP
   return req.socket.remoteAddress || 'unknown';
 }
 
@@ -354,6 +378,28 @@ export async function rateLimitMiddlewareWithTier(
       error: 'Too Many Requests',
       message: `Rate limit exceeded. Please wait ${Math.ceil(result.resetMs / 1000)} seconds before retrying.`,
       retryAfter: Math.ceil(result.resetMs / 1000),
+      tier: result.tier,
+    }));
+    return true;
+  }
+
+  // The per-identifier limit above bounds one client. Routes with a global
+  // entry also refuse at that ceiling whatever the mix of identifiers.
+  const globalResult = checkGlobalRateLimit(endpointType);
+  if (!globalResult.allowed) {
+    console.warn(`⚠️ Rate limit hit (global): ${endpointType} - system-wide limit reached`);
+    incrementBlockedCount(endpointType, 'global');
+    res.setHeader('X-RateLimit-Limit', globalResult.limit);
+    res.setHeader('X-RateLimit-Remaining', 0);
+    res.setHeader('X-RateLimit-Reset', Math.ceil(globalResult.resetMs / 1000));
+    res.setHeader('X-RateLimit-Scope', 'global');
+    res.statusCode = 429;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Retry-After', Math.ceil(globalResult.resetMs / 1000));
+    res.end(JSON.stringify({
+      error: 'Too Many Requests',
+      message: `Rate limit exceeded. Please wait ${Math.ceil(globalResult.resetMs / 1000)} seconds before retrying.`,
+      retryAfter: Math.ceil(globalResult.resetMs / 1000),
       tier: result.tier,
     }));
     return true;
