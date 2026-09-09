@@ -114,10 +114,10 @@ describe("REST bearer authentication", () => {
     expect(outcome).toMatchObject({ ok: false, reason: "not_configured" });
   });
 
-  it("still honours the access_token cookie the letter handler accepted", async () => {
+  it("ignores an access_token cookie: a cookie is not a credential (audit A-11)", async () => {
     const outcome = await authenticateRestRequest(
       request({ cookie: `theme=dark; access_token=${await mint(mcpAudience)}` })
     );
-    expect(outcome.ok).toBe(true);
+    expect(outcome).toMatchObject({ ok: false, reason: "no_credentials" });
   });
 });

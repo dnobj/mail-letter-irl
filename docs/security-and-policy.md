@@ -16,6 +16,7 @@
 - Log body text and address blocks for moderation and audit purposes.
 - Introduce an internal `holdForReview` flag on new orders (default true during the prototype) to allow manual vetting.
 - Enforce rate limits, e.g., no more than three queued letters per user per hour, to mitigate spam and harassment risk.
+- The public API authenticates with a Bearer token only. No cookie is read as a credential: the `access_token` cookie fallback was removed (audit A-11) because it was a latent CSRF vector and nothing set the cookie. CORS reflects only allowlisted origins; every other origin, including `Origin: null` from a `file://` page or sandboxed frame, receives the fallback origin and never a wildcard.
 - Per-address rate limits key on the **last** `X-Forwarded-For` hop, the one the edge appended, never the first, which a client can write. Verified against Railway's edge on 2026-09-08: a client-supplied value did not reach the first position (the edge sets the header itself), so the last hop is correct whether an edge appends or replaces. Routes that had only per-identifier limits also have a global backstop (`mcp` 1200/min, `api` 2000/min, `checkout` 200/min, beside the existing 100/min on public promo validation), so many addresses cannot burn JWKS verification or bcrypt compares at line rate.
 
 ## Auditability and Retention

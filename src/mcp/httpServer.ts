@@ -55,6 +55,7 @@ import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
 import { getReadiness } from "./readiness.js";
 import { kickPriceCatalog } from "../services/priceCatalog.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
+import { resolveCorsOriginFor } from "./corsOrigin.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -264,19 +265,10 @@ export async function startHttpServer() {
   const allowedHosts = getAllowedHosts();
   const allowedOrigins = getAllowedOrigins();
 
-  const resolveCorsOrigin = (incoming?: string | string[]) => {
-    if (Array.isArray(incoming)) {
-      incoming = incoming[0];
-    }
-    if (!incoming) {
-      return FALLBACK_ORIGIN;
-    }
-    // Allow "null" origin for file:// protocol (admin panel opened as local file)
-    if (incoming === "null") {
-      return "*";
-    }
-    return allowedOrigins.includes(incoming) ? incoming : FALLBACK_ORIGIN;
-  };
+  // Allowlist or fallback, never a wildcard: see corsOrigin.ts for the
+  // "null" origin case this used to special-case.
+  const resolveCorsOrigin = (incoming?: string | string[]) =>
+    resolveCorsOriginFor(incoming, allowedOrigins, FALLBACK_ORIGIN);
 
   const respondToCorsPreflight = (
     res: http.ServerResponse,

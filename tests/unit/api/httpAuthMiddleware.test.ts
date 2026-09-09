@@ -123,12 +123,13 @@ describe("HTTP auth middleware (checkout route)", () => {
     expect(state.statusCode).toBe(503);
   });
 
-  it("still reads the access_token cookie", async () => {
-    const { res } = response();
+  it("ignores an access_token cookie: a cookie is not a credential (audit A-11)", async () => {
+    const { res, state } = response();
     const user = await authenticateHttpRequest(
       request({ cookie: `access_token=${await mint(mcpAudience)}` }),
       res
     );
-    expect(user?.userId).toBe("auth0|user-1");
+    expect(user).toBeNull();
+    expect(state.statusCode).toBe(401);
   });
 });
