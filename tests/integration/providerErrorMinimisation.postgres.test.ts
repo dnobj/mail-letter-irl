@@ -82,16 +82,16 @@ describePostgres('migration 031 takes provider text out of the error columns', (
     // in both job columns; the same text went onto the order and its event.
     await owner.query(
       `INSERT INTO letter_jobs (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
-         provider_outcome, last_error, error_message)
-       VALUES ($1, $2, 'failed', 3, 3, NOW(), $1, 'definite_failure', $3, $3)`,
+         next_attempt_at, completed_at, provider_outcome, last_error, error_message)
+       VALUES ($1, $2, 'failed', 3, 3, NOW(), $1, NOW(), NOW(), 'definite_failure', $3, $3)`,
       [rejectedJobId, rejectedLetterId, LEAKED]
     );
     // A control row: an internal error message is not provider text and must
     // be left exactly as it was.
     await owner.query(
       `INSERT INTO letter_jobs (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
-         provider_outcome, last_error, error_message)
-       VALUES ($1, $2, 'failed', 3, 3, NOW(), $1, 'definite_failure', $3, $3)`,
+         next_attempt_at, completed_at, provider_outcome, last_error, error_message)
+       VALUES ($1, $2, 'failed', 3, 3, NOW(), $1, NOW(), NOW(), 'definite_failure', $3, $3)`,
       [internalJobId, internalLetterId, INTERNAL]
     );
     await owner.query(
