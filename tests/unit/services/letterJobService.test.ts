@@ -380,7 +380,7 @@ describe('mail outbox retries', () => {
     // canonical order -> letter -> job sequence, never a re-derived letter_id.
     expect(clientQuery).toHaveBeenCalledWith(
       expect.stringContaining('WHERE order_id = $1'),
-      ['order-1', 'HTTP 400 invalid address']
+      ['order-1', 'provider_rejected http_400']
     );
     expect(clientQuery).not.toHaveBeenCalledWith(
       expect.stringContaining("SET status = 'refund_pending'"),
@@ -389,6 +389,17 @@ describe('mail outbox retries', () => {
     expect(clientQuery).toHaveBeenCalledWith(
       expect.stringContaining("'provider.terminal_failure'"),
       expect.arrayContaining(['order-1'])
+    );
+    // Audit A-08: the provider's message text reaches no column. Only the
+    // class and status do, on the job, the order and the order event.
+    for (const [, params] of clientQuery.mock.calls) {
+      for (const value of params ?? []) {
+        expect(String(value)).not.toContain('invalid address');
+      }
+    }
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining("'provider.terminal_failure'"),
+      ['order-1', JSON.stringify({ errorClass: 'provider_rejected http_400' })]
     );
   });
 
