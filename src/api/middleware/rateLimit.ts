@@ -96,27 +96,57 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
 };
 
 /**
- * The identifier a per-address rate limit keys on.
- *
- * The LAST X-Forwarded-For hop, never the first. The first hop is whatever
- * the client wrote; the last is what the edge in front of this service
- * appended when it forwarded the request. Verified against Railway's edge on
- * 2026-09-08: a client-supplied value did not reach the first position (the
- * edge sets the header itself), so on that edge first and last are the same
- * address today. Taking the last hop keeps the limit honest whether an edge
- * appends to the header or replaces it, which is one less thing the edge's
- * behaviour has to be trusted for (audit A-05). Falls back to the socket
- * address when no header is present, which is the direct-connection case.
+ * How many proxies between the client and this process append their own
+ * address to X-Forwarded-For. Measured on Railway, 2026-09-08: the edge sets
+ * the client's address itself (a client-supplied value never reached the
+ * first position), then one internal hop appends one of two addresses of its
+ * own. So the header arrives as "<client>, <internal>", and the client is the
+ * hop before the last. Override with TRUSTED_PROXY_HOPS if the topology
+ * changes; 0 means the last hop is the client.
  */
+const TRUSTED_PROXY_HOPS = (() => {
+  const raw = process.env.TRUSTED_PROXY_HOPS;
+  const parsed = raw === undefined ? NaN : Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 1;
+})();
+
+/**
+ * The hops of X-Forwarded-For in order, oldest first. Several header lines
+ * are one list; blanks are dropped.
+ */
+export function forwardedForHops(header: string | string[] | undefined): string[] {
+  if (!header) return [];
+  const lines = Array.isArray(header) ? header : [header];
+  return lines
+    .flatMap((line) => line.split(','))
+    .map((hop) => hop.trim())
+    .filter((hop) => hop.length > 0);
+}
+
+/**
+ * The client's address given the hops and the number of trusted proxies that
+ * appended theirs: the hop just before the trusted ones. With fewer hops than
+ * expected (a direct connection, a local proxy) the first hop is the client.
+ *
+ * Neither end of the list is right on its own. The first hop is whatever the
+ * client wrote when the edge appends rather than replaces; the last hop is the
+ * proxy's own address when an internal hop appends, which is what a "last hop"
+ * version of this function keyed on for an hour in development on 2026-09-08,
+ * sharing every client's budget across two proxy addresses. The review's
+ * concern (audit A-05) was the first; the measurement above rules out both.
+ */
+export function clientAddressFromHops(hops: readonly string[], trustedProxyHops: number): string | null {
+  if (hops.length === 0) return null;
+  const index = hops.length - 1 - trustedProxyHops;
+  return hops[Math.max(0, index)];
+}
+
 export function getClientIdentifier(req: IncomingMessage): string {
-  const forwardedFor = req.headers['x-forwarded-for'];
-  if (forwardedFor) {
-    // Several header lines arrive as an array; the last line was added last.
-    const raw = Array.isArray(forwardedFor) ? forwardedFor[forwardedFor.length - 1] : forwardedFor;
-    const hops = raw.split(',').map((hop) => hop.trim()).filter((hop) => hop.length > 0);
-    if (hops.length > 0) return hops[hops.length - 1];
-  }
-  return req.socket.remoteAddress || 'unknown';
+  return (
+    clientAddressFromHops(forwardedForHops(req.headers['x-forwarded-for']), TRUSTED_PROXY_HOPS) ??
+    req.socket.remoteAddress ??
+    'unknown'
+  );
 }
 
 /**
