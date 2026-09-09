@@ -683,7 +683,9 @@ blocker.
 2. [x] Reload; verify the session cookie is reused (one `admin.session_start` row per session in
    `/audit`, not one per request). (Three requests on one cookie jar left the row count unchanged.)
 3. [x] Verify the response headers carry `Content-Security-Policy` with a nonce, `Cache-Control: no-store`
-   and `X-Correlation-Id`. (Also `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`.)
+   and `X-Correlation-Id`. (Also `X-Frame-Options: DENY` and `Referrer-Policy`, which was `no-referrer` when
+   this ran and is `same-origin` since 2026-09-08: `no-referrer` made browsers send `Origin: null` on form
+   posts, which the boundary check refuses, so no write was possible from a browser.)
 
 **Pass criteria:** The banner states what the machine checked, and one session produces one audit row.
 
