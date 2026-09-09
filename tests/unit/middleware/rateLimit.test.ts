@@ -21,6 +21,8 @@ import {
   rateLimitMiddlewareWithGlobal,
   getBlockedRequestCounts,
   clearRateLimitState,
+  clientAddressFromHops,
+  forwardedForHops,
   getClientIdentifier,
   rateLimitMiddlewareWithTier,
   RATE_LIMITS,
@@ -353,25 +355,40 @@ describe('client identifier and global backstops (audit A-05)', () => {
     return { headers, socket: { remoteAddress } } as unknown as IncomingMessage;
   }
 
-  it('keys on the last X-Forwarded-For hop, the one the edge appended', () => {
-    expect(getClientIdentifier(requestWith({ 'x-forwarded-for': '203.0.113.9, 198.51.100.7' }))).toBe('198.51.100.7');
-    expect(getClientIdentifier(requestWith({ 'x-forwarded-for': ' 198.51.100.7 ' }))).toBe('198.51.100.7');
-    expect(
-      getClientIdentifier(requestWith({ 'x-forwarded-for': ['1.1.1.1', '203.0.113.9, 198.51.100.7'] }))
-    ).toBe('198.51.100.7');
+  it('parses the hops oldest first, across several header lines, dropping blanks', () => {
+    expect(forwardedForHops('203.0.113.9, 198.51.100.7')).toEqual(['203.0.113.9', '198.51.100.7']);
+    expect(forwardedForHops(['203.0.113.9', ' 198.51.100.7 ,, 10.0.0.9'])).toEqual(['203.0.113.9', '198.51.100.7', '10.0.0.9']);
+    expect(forwardedForHops(' , ')).toEqual([]);
+    expect(forwardedForHops(undefined)).toEqual([]);
+  });
+
+  it('takes the hop before the trusted proxies, and the first hop when there are fewer', () => {
+    // Railway, measured 2026-09-08: "<client>, <internal hop>" with one trusted hop.
+    expect(clientAddressFromHops(['198.51.100.7', '10.0.0.9'], 1)).toBe('198.51.100.7');
+    // An edge that appends instead of replacing: the client's own value is
+    // first, the real address next, the internal hop last.
+    expect(clientAddressFromHops(['1.2.3.4', '198.51.100.7', '10.0.0.9'], 1)).toBe('198.51.100.7');
+    // A direct connection or a local proxy: fewer hops than trusted, first wins.
+    expect(clientAddressFromHops(['198.51.100.7'], 1)).toBe('198.51.100.7');
+    // No trusted hop configured: the last hop is the client.
+    expect(clientAddressFromHops(['198.51.100.7', '10.0.0.9'], 0)).toBe('10.0.0.9');
+    expect(clientAddressFromHops([], 1)).toBeNull();
+  });
+
+  it('falls back to the socket address without a usable header', () => {
     expect(getClientIdentifier(requestWith({ 'x-forwarded-for': ' , ' }))).toBe('10.0.0.1');
     expect(getClientIdentifier(requestWith({}))).toBe('10.0.0.1');
   });
 
   it('does not let a client-supplied prefix open a fresh budget', () => {
-    // Verified against Railway's edge on 2026-09-08: a spoofed value never
-    // reached the first position. This keeps that true whether an edge
-    // appends to the header or replaces it.
+    // The measured shape is "<client>, <internal>"; a client that also sends
+    // its own value on an appending edge would produce "<spoof>, <client>,
+    // <internal>". Either way the budget is the client's.
     for (let i = 0; i < 10; i += 1) {
-      const req = requestWith({ 'x-forwarded-for': `${i}.${i}.${i}.${i}, 198.51.100.7` });
+      const req = requestWith({ 'x-forwarded-for': `${i}.${i}.${i}.${i}, 198.51.100.7, 10.0.0.9` });
       expect(checkRateLimit(req, 'promo_public').allowed).toBe(true);
     }
-    const eleventh = requestWith({ 'x-forwarded-for': '9.9.9.9, 198.51.100.7' });
+    const eleventh = requestWith({ 'x-forwarded-for': '198.51.100.7, 10.0.0.9' });
     expect(checkRateLimit(eleventh, 'promo_public').allowed).toBe(false);
   });
 
