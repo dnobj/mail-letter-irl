@@ -13,6 +13,8 @@ import { ElevationGuard } from "../../../src/admin/http/elevation.js";
 import { AdminSessionStore, SESSION_COOKIE_NAME } from "../../../src/admin/http/session.js";
 import { parseAdminRuntimeConfig } from "../../../src/admin/runtimeConfig.js";
 import { validDevelopmentEnv } from "./runtimeConfig.test.js";
+import { DenialAuditBudget } from "../../../src/admin/http/denialAuditBudget.js";
+import { AdminFoundationError } from "../../../src/admin/errors.js";
 
 /**
  * The request pipeline end to end over a real socket: identity checks,
@@ -305,5 +307,147 @@ describe("admin request pipeline", () => {
       cookie: `${SESSION_COOKIE_NAME}=${freshId}`,
     }, `_csrf=${createCsrfToken(config.sessionSecret, freshId)}`);
     expect(onFreshSession.status).toBe(429);
+  });
+});
+
+describe("admin audit completeness", () => {
+  // Audit A-15: denials beyond the per-minute budget are aggregated rather
+  // than dropped, a rate-limited authenticated request is a denial like any
+  // other, and every failure of a write route is audited whatever its status.
+  // Full mode, so write routes reach their handlers.
+  const audits: Array<Record<string, unknown>> = [];
+  const config = parseAdminRuntimeConfig({
+    ...validDevelopmentEnv,
+    ADMIN_MODE: "full",
+    ADMIN_TOTP_SECRET: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
+    // Full mode requires the primary connection to be the operator role.
+    DATABASE_URL: String(validDevelopmentEnv.DATABASE_URL).replace(
+      "letter_irl_admin_reader_development",
+      "letter_irl_admin_operator_development",
+    ),
+  });
+  const reader = scriptedPool(audits);
+  const pools = { reader, operator: null } as unknown as AdminPools;
+  const sessions = new AdminSessionStore({ idleTtlMs: 600_000, absoluteTtlMs: 6_000_000 });
+  const clientScript = { body: "(() => {})();", path: "" };
+  clientScript.path = clientScriptPath(clientScript.body);
+  const router = registerReadRoutes(new AdminRouter<RouteHandler>(), clientScript);
+  router.add(
+    "POST",
+    "/writes/invalid",
+    async () => {
+      throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
+    },
+    { name: "writes.invalid", write: true },
+  );
+  let clock = Date.parse("2026-09-08T12:00:00Z");
+  const now = () => clock;
+  const denialBudget = new DenialAuditBudget({ limit: 3, windowMs: 60_000, now });
+  let server: http.Server;
+  let port = 0;
+
+  beforeAll(async () => {
+    const listener = createAdminRequestListener({
+      config,
+      pools,
+      sessions,
+      elevation: new ElevationGuard(),
+      whois: { whois: async () => ({ login: "owner@example.com", displayName: "Owner", nodeName: "laptop.tail1234.ts.net" }) },
+      audit: new AdminAuditWriter(),
+      router,
+      nodeName: HOST,
+      banner: {
+        environment: "development",
+        mode: "full",
+        marker: "development",
+        databaseRole: "letter_irl_admin_reader_development",
+        stripeKeyMode: "test",
+        stripeKeyRestricted: true,
+        letterProvider: "dummy",
+        buildCommit: "abc",
+        tag: "tag:dev-admin",
+      },
+      nav: NAV_ITEMS,
+      clientScript,
+      now,
+      denialBudget,
+    });
+    server = http.createServer(listener);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    port = (server.address() as AddressInfo).port;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  function summaryOf(row: Record<string, unknown>): Record<string, unknown> {
+    return typeof row.input === "string" ? JSON.parse(row.input) : (row.input as Record<string, unknown>);
+  }
+
+  it("counts denials beyond the per-minute budget into one aggregate row instead of dropping them", async () => {
+    for (let i = 0; i < 5; i += 1) {
+      const reply = await send(port, "GET", "/", { ...identity, "tailscale-user-login": `stranger${i}@example.com` });
+      expect(reply.status).toBe(403);
+    }
+    expect(audits.filter((row) => row.action === "admin.request_denied")).toHaveLength(3);
+    expect(audits.some((row) => row.action === "admin.request_denied_burst")).toBe(false);
+
+    clock += 60_001;
+    const later = await send(port, "GET", "/", { ...identity, "tailscale-user-login": "stranger9@example.com" });
+    expect(later.status).toBe(403);
+    const burst = audits.find((row) => row.action === "admin.request_denied_burst");
+    expect(burst).toMatchObject({ actor: "aggregate@admin-panel", outcome: "denied", errorCode: "ADMIN_DENIAL_BURST" });
+    expect(summaryOf(burst!)).toMatchObject({
+      limit: 3,
+      written: 3,
+      suppressed: 2,
+      distinctActors: 2,
+      byCode: { ADMIN_FORBIDDEN: 2 },
+      windowStartedAt: "2026-09-08T12:00:00.000Z",
+    });
+    // The new window writes individually again.
+    expect(audits.filter((row) => row.action === "admin.request_denied")).toHaveLength(4);
+  });
+
+  it("audits a rate-limited authenticated request", async () => {
+    clock += 60_001;
+    let last: Reply | undefined;
+    for (let i = 0; i < 241; i += 1) last = await send(port, "GET", "/", identity);
+    expect(last?.status).toBe(429);
+    expect(last?.body).toBe("too many requests");
+    expect(audits.at(-1)).toMatchObject({
+      action: "admin.request_denied",
+      actor: "owner@example.com",
+      errorCode: "ADMIN_RATE_LIMITED",
+      outcome: "denied",
+    });
+  });
+
+  it("audits a write-route failure whatever its status", async () => {
+    clock += 60_001;
+    const first = await send(port, "GET", "/", identity);
+    const sessionId = String(first.headers["set-cookie"]).split(";")[0].split("=")[1];
+    const token = createCsrfToken(config.sessionSecret, sessionId);
+    const reply = await send(
+      port,
+      "POST",
+      "/writes/invalid",
+      {
+        ...identity,
+        cookie: `${SESSION_COOKIE_NAME}=${sessionId}`,
+        "content-type": "application/x-www-form-urlencoded",
+        "sec-fetch-site": "same-origin",
+        origin: `https://${HOST}`,
+      },
+      `_csrf=${token}`,
+    );
+    expect(reply.status).toBe(400);
+    expect(audits.at(-1)).toMatchObject({
+      action: "admin.request_failed",
+      targetId: "writes.invalid",
+      outcome: "failed",
+      errorCode: "ADMIN_INVALID_REQUEST",
+    });
   });
 });
