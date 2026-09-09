@@ -779,9 +779,16 @@ export async function startHttpServer() {
       // Cached once: the registry is static for the process lifetime.
       cachedToolNames ??= new Set(letterServer.listTools().map((tool) => tool.name));
 
-      if (!req.headers.origin) {
-        req.headers.origin = FALLBACK_ORIGIN;
-      }
+      // No Origin header means a non-browser client, which is what every MCP
+      // backend is. The transport's DNS-rebinding check only validates an Origin
+      // that is present, so the right thing to do with an absent one is leave
+      // it absent. Until 2026-09-09 this handler wrote FALLBACK_ORIGIN into the
+      // request instead, a leftover from the first prototype; with no
+      // LETTER_IRL_DEFAULT_ORIGIN configured that was http://0.0.0.0:8788, never
+      // on the allowlist, so every request from ChatGPT's backend that carried
+      // no Origin, including the tool-list refresh a fresh link depends on, was
+      // refused with 403 "Invalid Origin header". Tool calls happened to carry
+      // an Origin and passed, which is how it stayed hidden.
 
       const authInfo = await authenticateRequest(req, res, getPublicBaseUrl(req));
       if (authInfo === null) {
