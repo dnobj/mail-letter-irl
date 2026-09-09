@@ -20,7 +20,6 @@
 
 import http from 'node:http';
 import { AuthenticatedUser } from '../../services/types.js';
-import { parseCookies } from '../../utils/cookies.js';
 import { validateJWTToken } from '../../auth/tokenValidator.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../auth/betaAccess.js';
 
@@ -32,7 +31,9 @@ function respond(res: http.ServerResponse | undefined, statusCode: number, body:
 }
 
 /**
- * Authenticate HTTP request - works with both Bearer tokens and cookies
+ * Authenticate HTTP request from its Bearer token. Cookies are not credentials
+ * here: the access_token cookie fallback was removed (audit A-11) because it
+ * was a latent CSRF vector and nothing set the cookie.
  * For use with plain Node.js http.IncomingMessage
  *
  * @param req - HTTP incoming message
@@ -49,12 +50,6 @@ export async function authenticateHttpRequest(
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.substring(7);
-  }
-
-  // If no bearer token, try to get from cookie
-  if (!token) {
-    const cookies = parseCookies(req.headers.cookie);
-    token = cookies.access_token || null;
   }
 
   if (!token) {
