@@ -21,6 +21,7 @@ import { parseAdminRuntimeConfig, type AdminRuntimeConfig } from "./runtimeConfi
 import { createTailscaleCli, createWhoisClient, spawnTailscaled, type WhoisClient } from "./tailscale/cli.js";
 import { TailscaleSupervisor, refuseIfPublicDomain, type TailscaleNodeIdentity } from "./tailscale/daemon.js";
 import { classifyDiagnosticError, writeDiagnostic } from "../utils/diagnosticLog.js";
+import { DenialAuditBudget } from "./http/denialAuditBudget.js";
 
 /**
  * The admin service entrypoint. Boot order:
@@ -168,6 +169,9 @@ export async function main(): Promise<void> {
   state.database = true;
 
   const audit = new AdminAuditWriter();
+  // Owned here rather than inside the listener so the shutdown path can flush
+  // the pending burst row before the pools close.
+  const denialBudget = new DenialAuditBudget({ limit: 60, windowMs: 60_000 });
   const bootCorrelation = randomUUID();
   await audit.appendEvent(pools.reader, {
     actor: { id: "system@letter-irl-admin", name: "admin service" },
@@ -227,6 +231,7 @@ export async function main(): Promise<void> {
     elevation,
     whois,
     audit,
+    denialBudget,
     router,
     nodeName: identity?.dnsName ?? null,
     banner: {
@@ -263,6 +268,7 @@ export async function main(): Promise<void> {
     app.close();
     health.close();
     sessions.destroyAll();
+    await denialBudget.flush();
     await closeAdminPools(pools);
     await supervisor?.stop();
     process.exit(0);

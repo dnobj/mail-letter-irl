@@ -37,6 +37,7 @@ import {
   type AdminSession,
 } from "./session.js";
 import { authenticateAdminRequest, type AuthenticatedActor } from "./tailscaleAuth.js";
+import { DenialAuditBudget, denialBurstEvent } from "./denialAuditBudget.js";
 
 /**
  * The request pipeline: correlation id, authentication, session, browser-
@@ -99,6 +100,8 @@ export interface AdminAppOptions {
   nav: NavItem[];
   clientScript: { path: string; body: string };
   now?: () => number;
+  /** Shared with the server so the pending burst row is flushed at shutdown. */
+  denialBudget?: DenialAuditBudget;
 }
 
 const ANONYMOUS_ACTOR = { id: "anonymous@unauthenticated", name: "anonymous" };
@@ -120,7 +123,11 @@ export function createAdminRequestListener(
   // lock it protects, so dropping the session cookie does not reset it.
   const elevationLimiter = new SlidingWindowLimiter(10, 60_000, now);
   const denialLimiter = new SlidingWindowLimiter(30, 60_000, now);
-  const denialAuditLimiter = new SlidingWindowLimiter(60, 60_000, now);
+  // Sixty individual denial rows a minute for the process; beyond that the
+  // denials are counted and written as one admin.request_denied_burst row per
+  // window instead of being dropped (audit A-15).
+  const denialBudget = options.denialBudget ?? new DenialAuditBudget({ limit: 60, windowMs: 60_000, now });
+  denialBudget.setSink((summary) => safeAudit(options, denialBurstEvent(summary)));
   const allowedLogins = new Set(options.config.operatorLogins);
   const expectedOrigins = options.nodeName
     ? [`https://${options.nodeName}`]
@@ -197,7 +204,14 @@ export function createAdminRequestListener(
 
     if (!auth.ok) {
       const key = `${peer ?? "?"}:${auth.presentedLogin ?? "-"}`;
-      if (denialLimiter.allow(key) && denialAuditLimiter.allow("denials")) {
+      const deniedActor = auth.presentedLogin ?? ANONYMOUS_ACTOR.id;
+      // Two caps on individual rows, one per peer and login and one for the
+      // process. Neither silences a denial: what is not written on its own is
+      // counted into the window's burst row.
+      const individually = denialLimiter.allow(key)
+        ? await denialBudget.admit(deniedActor, auth.code)
+        : (await denialBudget.suppress(deniedActor, auth.code), false);
+      if (individually) {
         await safeAudit(options, {
           actor: auth.presentedLogin
             ? { id: auth.presentedLogin, name: "denied" }
@@ -232,6 +246,21 @@ export function createAdminRequestListener(
       });
     }
     if (!requestLimiter.allow(actor.id)) {
+      // A denial like any other, under the same budget, so a flood cannot
+      // make the audit table the amplifier.
+      if (await denialBudget.admit(actor.id, "ADMIN_RATE_LIMITED")) {
+        await safeAudit(options, {
+          actor,
+          sessionIdHash: hashSessionId(session.id),
+          correlationId,
+          action: "admin.request_denied",
+          targetType: "route",
+          targetId: url.pathname.slice(0, 255),
+          inputSummary: { reason: "rate_limited" },
+          outcome: "denied",
+          errorCode: "ADMIN_RATE_LIMITED",
+        });
+      }
       constant(429);
       return;
     }
@@ -419,7 +448,10 @@ export function createAdminRequestListener(
         code,
         errorClass: classifyDiagnosticError(error, "unknown_error"),
       });
-      if (status >= 500 || status === 403 || status === 409) {
+      // Every failure of a write route is audited whatever its status: a 400
+      // during a command preview or execution is an attempt an operator made,
+      // and a fumbling or probing operator should leave a trace (A-15).
+      if (matched.route.write || status >= 500 || status === 403 || status === 409) {
         await safeAudit(options, {
           actor,
           sessionIdHash: hashSessionId(session.id),

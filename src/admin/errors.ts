@@ -15,6 +15,9 @@ export const ADMIN_ERROR_HTTP_STATUS = {
   ADMIN_INVALID_STATE: 409,
   ADMIN_PAYLOAD_TOO_LARGE: 413,
   ADMIN_RATE_LIMITED: 429,
+  // Never thrown: the code on the one admin.request_denied_burst audit row a
+  // minute carries when denials exceed the individual-row budget (A-15).
+  ADMIN_DENIAL_BURST: 429,
   ADMIN_INVALID_CONFIGURATION: 500,
   ADMIN_LEGACY_ROUTES_DISABLED: 500,
   ADMIN_AUDIT_WRITE_FAILED: 500,
@@ -57,6 +60,7 @@ const ADMIN_PUBLIC_MESSAGES: Record<AdminErrorCode, string> = {
   ADMIN_INVALID_STATE: "The target is not in a state that permits this action.",
   ADMIN_PAYLOAD_TOO_LARGE: "The request body exceeds the configured limit.",
   ADMIN_RATE_LIMITED: "Too many requests; slow down.",
+  ADMIN_DENIAL_BURST: "Denials exceeded the per-minute audit budget; the burst row carries the counts.",
   ADMIN_INVALID_CONFIGURATION: "The admin configuration is invalid.",
   ADMIN_LEGACY_ROUTES_DISABLED: "Legacy public admin routes are disabled.",
   ADMIN_AUDIT_WRITE_FAILED: "The admin audit event could not be recorded.",
