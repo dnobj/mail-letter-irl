@@ -92,6 +92,24 @@ describeWithDatabase("admin foundation database migration", () => {
     await client.query("INSERT INTO migrations (name) VALUES ($1)", [
       ADMIN_MIGRATION_SEQUENCE[1],
     ]);
+
+    // Everything after 022, in order. The grant statements name commerce
+    // tables that only exist from 023 onwards, and production applies the
+    // whole sequence before the admin service ever connects.
+    const laterMigrations = (await readdir(migrationsDirectory))
+      .filter((filename) => {
+        const sequence = Number(filename.slice(0, 3));
+        return filename.endsWith(".sql") && sequence >= 23;
+      })
+      .sort();
+    for (const filename of laterMigrations) {
+      await client.query(
+        await readFile(join(migrationsDirectory, filename), "utf8"),
+      );
+      await client.query("INSERT INTO migrations (name) VALUES ($1)", [
+        filename,
+      ]);
+    }
   }, 60_000);
 
   afterAll(async () => {
@@ -130,12 +148,15 @@ describeWithDatabase("admin foundation database migration", () => {
   }
 
   it("applies 022 after the distinct JIT migration 021 and preserves old application reads", async () => {
+    // 021 must be recorded before 022. The suite now applies every later
+    // migration too, so the proof is the relative order, not "the last two".
     const applied = await client.query<{ name: string }>(
-      "SELECT name FROM migrations ORDER BY id DESC LIMIT 2",
+      "SELECT name FROM migrations WHERE name = ANY($1::text[]) ORDER BY id",
+      [[...ADMIN_MIGRATION_SEQUENCE]],
     );
-    expect(applied.rows.map((row) => row.name).reverse()).toEqual(
-      ADMIN_MIGRATION_SEQUENCE,
-    );
+    expect(applied.rows.map((row) => row.name)).toEqual([
+      ...ADMIN_MIGRATION_SEQUENCE,
+    ]);
 
     await client.query(
       `
@@ -396,9 +417,20 @@ describeWithDatabase("admin foundation database migration", () => {
     await client.query("RESET ROLE");
 
     await client.query(`SET ROLE "${config.database.operatorRole}"`);
+    // The operator may insert an account row (the ledger grant upserts it)
+    // but never delete one, and never touches letters or the audit history.
+    await expect(
+      client.query("DELETE FROM users WHERE user_id = 'admin-foundation-fixture'"),
+    ).rejects.toMatchObject({ code: "42501" });
     await expect(
       client.query(
-        "INSERT INTO users (user_id, email) VALUES ('operator-write', 'operator-write@example.test')",
+        "INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost) VALUES ('op-letter', 'admin-foundation-fixture', '{}'::jsonb, '{}'::jsonb, 2)",
+      ),
+    ).rejects.toMatchObject({ code: "42501" });
+    await expect(
+      client.query(
+        "UPDATE admin_audit_events SET actor_name = 'rewrite' WHERE id = $1",
+        [readerAudit.rows[0].id],
       ),
     ).rejects.toMatchObject({ code: "42501" });
     await expect(

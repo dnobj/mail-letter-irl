@@ -1,9 +1,10 @@
 # Database Schema
 
-**Last Updated:** July 19, 2026
+**Last Updated:** September 8, 2026
 **Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
-This document describes the Letter IRL database schema as deployed in production (Neon PostgreSQL).
+This document describes the Letter IRL database schema as defined by `db/migrations` at the head of `dev` (Neon
+PostgreSQL). Production is promoted separately and can lag `dev` by several migrations.
 
 ---
 
@@ -17,10 +18,13 @@ migration 021 as its immediate predecessor.
 | Users | `users` |
 | Credits | `credit_ledger`, `credit_transactions`, `credit_consumption` |
 | Letters | `letters`, `letter_drafts`, `letter_jobs`, `letter_status_history` |
-| Payments | `orders`, `stripe_disputes` |
+| Payments | `orders`, `stripe_disputes`, `stripe_webhook_events`, `commerce_order_events`, `commerce_pack_refunds` |
 | Promos | `promo_campaigns`, `promo_redemptions` |
 | Feedback | `feature_requests` |
 | System | `migrations`, `personal_access_tokens` |
+| Operations | `commerce_operational_alerts`, `commerce_operator_audit_events`, `maintenance_tasks`, `provider_routing` |
+| Images | `image_entitlements`, `image_generation_reservations`, `recent_uploads` |
+| Retention | `redacted_content_quarantine` |
 | Admin foundation | `admin_environment_marker`, `admin_audit_events`, `admin_command_runs`, `admin_operations` |
 
 ---
@@ -69,7 +73,7 @@ Serialized credit entries with expiration tracking. Source of truth for balances
 | expiration_policy | VARCHAR(50) | YES | - | fixed_date, days_from_activation, never |
 | expiration_days | INTEGER | YES | - | Days until expiration |
 | status | credit_ledger_status | NO | 'active' | active, depleted, expired, revoked |
-| description | TEXT | YES | - | Human-readable description |
+| description | TEXT | YES | - | Derived, data-free label (`Sent letter (2 credits)`, `Operator adjustment`); never a recipient name or an operator's reason since migration 030; not selectable by the admin reader role |
 | related_ledger_id | UUID | YES | - | Links refunds to original |
 | created_at | TIMESTAMPTZ | NO | NOW() | Entry creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
@@ -100,7 +104,7 @@ Complete audit trail of all credit changes.
 | type | VARCHAR(50) | NO | - | purchase, deduction, refund, adjustment |
 | reference_type | VARCHAR(50) | YES | - | order, letter, manual |
 | reference_id | VARCHAR(255) | YES | - | Related order_id, letter_id |
-| description | TEXT | YES | - | Human-readable description |
+| description | TEXT | YES | - | Derived, data-free label (`Sent letter (2 credits)`, `Operator adjustment`); never a recipient name or an operator's reason since migration 030; not selectable by the admin reader role |
 | created_at | TIMESTAMPTZ | NO | NOW() | Transaction timestamp |
 
 **Indexes:**
@@ -221,7 +225,7 @@ Background job tracking for letter processing.
 | scheduled_at | TIMESTAMPTZ | NO | - | When job should run |
 | started_at | TIMESTAMPTZ | YES | - | When processing started |
 | completed_at | TIMESTAMPTZ | YES | - | When finished |
-| error_message | TEXT | YES | - | Last error |
+| error_message | TEXT | YES | - | Legacy twin of `last_error`; an error class and provider status only, never provider message text (migration 031) |
 | metadata | JSONB | YES | - | Job-specific data |
 | created_at | TIMESTAMPTZ | NO | NOW() | Job creation |
 
@@ -231,6 +235,14 @@ Background job tracking for letter processing.
 - `idx_letter_jobs_letter_id` on letter_id
 
 ---
+
+Migrations 020 and 023 turned this table into the transactional outbox. Added since the columns above:
+`idempotency_key` and `next_attempt_at` (both required), `locked_at`, `provider_order_id`,
+`provider_outcome` (`not_dispatched`, `dispatching`, `accepted`, `definite_failure`, `ambiguous`),
+`provider_dispatch_started_at`, `held_at`, `hold_reason`, `operator_resolution`, `resolved_at`,
+`completed_at`, `last_error` and `updated_at`. `status` gained `held`, and a constraint ties each status
+to the provider outcomes it may carry. `last_error` and `error_message` hold an error class and provider
+status only, `provider_rejected http_400`, never provider message text (migration 031).
 
 ### orders
 
@@ -255,6 +267,16 @@ Purchase orders from Stripe.
 - `idx_orders_stripe_payment_intent_id` on stripe_payment_intent_id
 
 ---
+
+Migration 021 made this the commerce order table. Added since the columns above: `order_type`
+(`letter_pack` or `jit_mail`), `draft_id` (required for `jit_mail`), `product_code`, `product_snapshot`,
+`letter_id`, `stripe_checkout_session_id`, `idempotency_key`, `paid_at`, `fulfilled_at`,
+`refund_pending_at`, `refund_attempts`, `last_error_code` and `last_error`, and later `amount_known`,
+`hold_previous_status`, `held_at`, `credits_refunded` and `amount_refunded_cents`. `status` follows the
+commerce lifecycle (`checkout_pending`, `paid`, `fulfillment_pending`, `fulfilled`, `payment_failed`,
+`refund_pending`, `refunded`, `disputed`, `held`, `cancelled`); `credits` is required for a pack and must
+be `NULL` for `jit_mail`. `last_error` holds an error class and status only for provider failures
+(migration 031).
 
 ### stripe_disputes
 
@@ -419,6 +441,84 @@ User-submitted feature requests for product feedback.
 
 ---
 
+### stripe_webhook_events
+
+One row per Stripe event the API has seen (`event_id` is Stripe's id, so a redelivered event is a
+no-op), with the event type, the Stripe object it concerned and the order it was matched to, if any.
+The commerce webhook handler claims the row inside the same transaction as the order change it makes,
+which is what makes duplicate deliveries harmless. An event that matches no order is operator work
+and surfaces on the panel's alert page as an unmatched money event.
+
+### commerce_order_events
+
+Append-only history of an order's status transitions: the event type, the status it left and entered,
+and a bounded JSONB `metadata`. A `provider.terminal_failure` event's metadata carries `errorClass`
+(`provider_rejected http_400`) and the job id, never the provider's message text (migration 031).
+
+### commerce_operational_alerts
+
+The operator alert queue: dispute created or closed, ambiguous mail-provider outcome, refunded mail
+already dispatched, unmatched money event. Each alert has a severity and a three-state lifecycle
+(`open`, `acknowledged`, `resolved`) whose timestamps and resolution code the constraints keep
+consistent, and the acknowledging or resolving actor is stored as a hash. One alert per source event
+and type. The panel's acknowledge and resolve commands are the only writers besides the sweeps that
+raise them.
+
+### commerce_operator_audit_events
+
+The older operator audit table from the commerce recovery work: hashed idempotency key, actor and
+target, a reason code, before and after state, provider evidence and an outcome, retained two years.
+The admin panel writes `admin_audit_events` instead; this table is kept for the four operations it
+recorded.
+
+### commerce_pack_refunds
+
+One row per proportional refund of a letter pack (#323): the letters, credits and amount being
+returned, the Stripe payment intent and the idempotency key the refund is submitted under, attempts,
+and a status machine (`letters_revoked`, `stripe_pending`, `succeeded`, `failed`, `compensated`) whose
+constraints tie each state to the timestamps and references it requires. Letters leave the ledger first
+and the Stripe call follows, so a Stripe failure leaves a `failed` row an operator can compensate. The
+actor and the idempotency key are stored as hashes; `admin_command_id` links the run that caused it.
+
+### image_entitlements
+
+Grants of image generations to an account: the source that granted them (a purchase, a promo, or an
+operator command, with its reference and order), the quantity, how many are consumed, a status
+(`active`, `depleted`, `expired`, `revoked`) and an optional expiry. One entitlement per source
+reference, so a replayed grant is a no-op.
+
+### image_generation_reservations
+
+One row per generation attempt against an entitlement, `reserved` while the provider call is in
+flight and then `consumed` or `released`. A reservation whose outcome is unknown stays `reserved`; the
+panel's image recovery page lists those and the resolve command settles them with evidence.
+
+### recent_uploads
+
+The most recent uploaded image per user (one row per `user_id`), kept so a widget that lost its
+in-memory state can recover the image it was about to send. The URL is a capability URL and is
+treated as one.
+
+### maintenance_tasks
+
+One row per scheduled maintenance task (`task_name` is the key) with its last start, completion,
+lock, status and error. The panel's maintenance page shows whether a task has an error, never the
+text. The maintenance runner claims a task by its `locked_at` so two instances cannot run it at once.
+
+### provider_routing
+
+Which mail provider serves each mail type (`text_only_letter`, `header_image_letter`,
+`inline_image_letter`, `postcard`) and whether it is enabled, versioned by `updated_at`. The panel's
+routing command validates a change against the runtime provider registry; production never accepts
+`dummy`.
+
+### redacted_content_quarantine
+
+Where the content-retention sweep (migration 026) puts what it clears from `letters` and
+`letter_drafts`: every cleared column keyed by name in `content`, so a restore is a mechanical
+write-back, with a `purge_after` deadline. One live row per source row. The admin reader role has
+column-level `SELECT` on this table that omits `content`.
+
 ### admin_environment_marker
 
 Singleton database identity used to fail closed when a development/production selection does not match
@@ -438,9 +538,10 @@ rows.
 
 ### admin_command_runs
 
-Durable command state keyed uniquely by `(environment, idempotency_key)`. The table stores the actor SID,
-preview digest, expected version, timestamps, correlation ID, bounded sanitized result, and stable error
-code. Status and timing constraints reject inconsistent outcomes.
+Durable command state keyed uniquely by `(environment, idempotency_key)`. The table stores the actor
+(the `actor_sid` column now holds the operator's tailnet login; the column name is historical), preview
+digest, expected version, timestamps, correlation ID, bounded sanitized result, and stable error code.
+Status and timing constraints reject inconsistent outcomes.
 
 ### admin_operations
 
@@ -451,9 +552,27 @@ claim/retry behavior; a partial index covers claimable pending rows.
 ### Admin grants and provisioning
 
 Migration 022 revokes `PUBLIC` privileges but creates no role or credential. The explicit provisioning
-script requires pre-existing, environment-specific reader/operator login roles, verifies migrations 021
-and 022 plus the database marker, rejects privileged roles, and reapplies a narrow grant set. Production
-provisioning and the first production connection remain separate owner-approved operations.
+script (`npm run admin:provision-access`) requires pre-existing, environment-specific reader/operator
+login roles, verifies migrations 021, 022 and the latest migration the grants depend on (031) plus the
+database marker, rejects privileged roles, and reapplies the grant set in `src/admin/provisioning.ts`:
+
+- **Reader** (`letter_irl_admin_reader_<env>`): `SELECT` on the commerce, ledger, outbox, alert, audit
+  and admin tables, and **column-level** `SELECT` on `users` (no `return_address`), `letters` (no
+  `content`, `recipient`, `preview_html`), `letter_drafts` (no bodies, addresses, validations or
+  images), `personal_access_tokens` (no `token_hash`), `feature_requests` (no `contact_email`),
+  `redacted_content_quarantine` (no `content`), and `credit_transactions` and `credit_ledger` (no
+  `description`); `INSERT` on `admin_audit_events` only; no `EXECUTE` on functions, including the
+  `PUBLIC` default.
+- **Operator** (`letter_irl_admin_operator_<env>`): the reader's reads plus whole-row `SELECT` on
+  `users`, `letters` and `letter_drafts` (the domain services select whole rows), **column-scoped**
+  `INSERT`/`UPDATE` on exactly the columns the enabled commands write (so an operator can adjust
+  `users.credits` but not `users.email` or `letters.content`), `INSERT` and a column-limited `UPDATE`
+  on the command and operation tables, and sequence usage. `DELETE` exists only on `promo_campaigns`.
+- Both: `UPDATE`, `DELETE` and `TRUNCATE` on `admin_audit_events` are revoked; the trigger refuses
+  them regardless.
+
+Production provisioning and the first production connection remain separate owner-approved operations
+([admin-panel-guide.md](admin-panel-guide.md)).
 
 ---
 
@@ -483,6 +602,15 @@ provisioning and the first production connection remain separate owner-approved 
 | 20 | 020_transactional_outbox.sql | Durable mail outbox and maintenance state |
 | 21 | 021_jit_commerce_foundation.sql | JIT commerce foundation owned by issue #69 |
 | 22 | 022_admin_audit.sql | Environment marker, append-only audit, command runs, operations, and grants foundation |
+| 23 | 023_jit_recovery_state_machines.sql | Held and ambiguous states for jobs, letters and orders; operational alerts; operator audit events |
+| 24 | 024_dispute_send_block.sql | Account send-block for disputed payments (#150) |
+| 25 | 025_image_generation_ceiling_index.sql | Index for the global daily image-generation ceiling |
+| 26 | 026_content_retention.sql | Content retention: redaction sweep and the quarantine table (#153) |
+| 27 | 027_purchase_grant_attribution.sql | Every purchase credit grant names the order that funded it |
+| 28 | 028_partial_refund_alerts.sql | An unmatched partial refund raises an operator alert |
+| 29 | 029_proportional_pack_refunds.sql | Proportional refunds of letter packs (#323) |
+| 30 | 030_ledger_description_minimisation.sql | Recipient names and operator reasons rewritten out of the two ledger description columns (#162) |
+| 31 | 031_provider_error_minimisation.sql | Provider message text rewritten out of the job, order and order-event error columns (#162) |
 
 ---
 
@@ -528,6 +656,17 @@ provisioning and the first production connection remain separate owner-approved 
 ```
 
 ---
+
+### commerce_order_events.metadata
+
+Bounded JSONB. For `provider.terminal_failure`:
+
+```json
+{ "errorClass": "provider_rejected http_400", "jobId": "…" }
+```
+
+Since migration 031 the provider's message text is not stored; the class and HTTP status are the
+operational signal.
 
 ## Triggers
 

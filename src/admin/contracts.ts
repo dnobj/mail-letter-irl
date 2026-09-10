@@ -63,10 +63,25 @@ export function boundedAdminJsonObjectSchema(maxBytes: number) {
 
 const IdentifierSchema = z.string().trim().min(1).max(255);
 const ActionSchema = z.string().trim().min(1).max(100);
-const SidSchema = z
+/**
+ * The operator identity as the tailnet policy names it: an email identity,
+ * "username@github", or "username@passkey". The same shape names the service
+ * itself ("system@letter-irl-admin") for boot events and an unauthenticated
+ * caller ("anonymous@unauthenticated") for denials.
+ */
+export const OperatorLoginSchema = z
   .string()
-  .regex(/^S-\d(?:-\d+)+$/)
-  .max(255);
+  .trim()
+  .min(3)
+  .max(255)
+  .regex(/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$/);
+/** A tailnet node name as whois reports it (an FQDN, trailing dot allowed). */
+export const NodeNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .regex(/^[A-Za-z0-9.-]+$/);
 const DigestSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const ErrorCodeSchema = z.string().regex(/^[A-Z][A-Z0-9_]{0,99}$/);
 
@@ -89,10 +104,13 @@ export function adminSuccessEnvelopeSchema<T extends z.ZodTypeAny>(data: T) {
 
 export const AdminActorSchema = z
   .object({
-    sid: SidSchema,
+    id: OperatorLoginSchema,
     name: z.string().trim().min(1).max(255),
+    node: NodeNameSchema.optional(),
   })
   .strict();
+
+export type AdminActor = z.output<typeof AdminActorSchema>;
 
 export const AdminPageRequestSchema = z
   .object({
@@ -147,7 +165,7 @@ export const AdminAuditEventInputSchema = z
 export const AdminCommandRunInputSchema = z
   .object({
     idempotencyKey: IdentifierSchema,
-    actorSid: SidSchema,
+    actorId: OperatorLoginSchema,
     environment: AdminEnvironmentSchema,
     action: ActionSchema,
     targetType: ActionSchema,
@@ -162,7 +180,7 @@ export const AdminCommandRunSchema = z
   .object({
     id: z.string().uuid(),
     idempotencyKey: IdentifierSchema,
-    actorSid: SidSchema,
+    actorId: OperatorLoginSchema,
     environment: AdminEnvironmentSchema,
     action: ActionSchema,
     targetType: ActionSchema,
@@ -211,7 +229,11 @@ export const AdminCommandCompletionSchema = z
 export const AdminCommandConfirmationSchema = z
   .object({
     previewDigest: DigestSchema,
-    reason: z.string().trim().min(1).max(1000),
+    // The same bounds as the form field (minlength=8, maxlength=500). Until
+    // this matched, the minimum lived only in the browser: a scripted
+    // submission recorded a five-character reason during the 2026-09-08
+    // command tests.
+    reason: z.string().trim().min(8).max(500),
     idempotencyKey: IdentifierSchema,
     expectedVersion: IdentifierSchema.optional(),
   })

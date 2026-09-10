@@ -92,5 +92,5 @@ Check `docs/learnings/` for debugging notes and integration quirks:
 npm run dev          # Development with watch
 npm run start        # Production mode
 npm run db:migrate   # Run migrations
-npm run admin        # Local admin dashboard (port 8788)
+npm run admin:dev    # Admin panel against .env.admin.local (docs/admin-panel-guide.md)
 ```

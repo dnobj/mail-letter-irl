@@ -19,7 +19,7 @@ interface AuditReceiptRow {
 const COMMAND_RUN_RETURNING = `
   id,
   idempotency_key AS "idempotencyKey",
-  actor_sid AS "actorSid",
+  actor_sid AS "actorId",
   environment,
   action,
   target_type AS "targetType",
@@ -53,7 +53,7 @@ function commandIdentityMatches(
   requested: ReturnType<typeof AdminCommandRunInputSchema.parse>,
 ): boolean {
   return (
-    existing.actorSid === requested.actorSid &&
+    existing.actorId === requested.actorId &&
     existing.action === requested.action &&
     existing.targetType === requested.targetType &&
     existing.targetId === (requested.targetId ?? null) &&
@@ -100,7 +100,7 @@ export class AdminAuditWriter {
           RETURNING id, occurred_at AS "occurredAt"
         `,
       [
-        event.actor.sid,
+        event.actor.id,
         event.actor.name,
         event.environment,
         event.mode,
@@ -110,7 +110,11 @@ export class AdminAuditWriter {
         event.targetType,
         event.targetId ?? null,
         event.reason ?? null,
-        JSON.stringify(event.inputSummary),
+        JSON.stringify(
+          event.actor.node
+            ? { ...event.inputSummary, actorNode: event.actor.node }
+            : event.inputSummary,
+        ),
         JSON.stringify(event.beforeSummary),
         JSON.stringify(event.afterSummary),
         event.outcome,
@@ -148,7 +152,7 @@ export class AdminAuditWriter {
       `,
       [
         command.idempotencyKey,
-        command.actorSid,
+        command.actorId,
         command.environment,
         command.action,
         command.targetType,
@@ -184,6 +188,24 @@ export class AdminAuditWriter {
       throw new AdminFoundationError("ADMIN_IDEMPOTENCY_CONFLICT");
     }
     return { commandRun, replayed: true };
+  }
+
+  /** The run bound to a key in this environment, if any; never inserts. */
+  async findCommandRun(
+    client: AdminSqlClient,
+    environment: string,
+    idempotencyKey: string,
+  ): Promise<AdminCommandRun | null> {
+    const existing = await runAdminQuery(
+      client,
+      `
+        SELECT ${COMMAND_RUN_RETURNING}
+        FROM admin_command_runs
+        WHERE environment = $1 AND idempotency_key = $2
+      `,
+      [environment, idempotencyKey],
+    );
+    return existing.rows[0] ? AdminCommandRunSchema.parse(existing.rows[0]) : null;
   }
 
   async markCommandRunning(

@@ -44,6 +44,14 @@ All five come from files in this repository, not from the Railway dashboard:
 pre-deploy command. Railway's config-as-code overrides dashboard values, and
 fields absent from those files keep theirs.
 
+**Deadline.** Railway has deprecated config-as-code: existing `railway.toml`
+files stop being read on **2026-12-01**, and services created after 2026-08-28
+cannot use one at all (which is why the admin panel is configured in the
+dashboard, see [admin-panel-guide.md](admin-panel-guide.md)). Before that date
+the pre-deploy command must move to Railway's Infrastructure as Code
+(`.railway/railway.ts`, applied with the Railway CLI) or into the dashboard, and
+this document and [railway-setup.md](railway-setup.md) must change with it.
+
 That split matters. Until 2026-08-29 the pre-deploy line was documented here and
 configured nowhere - no `railway.toml`, nothing in `nixpacks.toml`, nothing in a
 workflow. **No deploy applied migrations**, and this document said one did, which
@@ -144,11 +152,9 @@ Still verified by a human, without printing secret values:
   URLs match the environment.
 - `LETTER_IRL_OAUTH_CIMD_ENFORCEMENT=true` only after all exact CIMD values are
   present in that environment.
-- `ADMIN_ENABLED` is unset or `false` in cloud environments; `true` is a startup error and cannot
-  enable legacy public routes. While this is in force the issue #69 ambiguous-image operator
-  recovery routes under `/api/admin/image-generation/*` are unreachable, so `JIT_PURCHASE_ENABLED`
-  and `IMAGE_TRIAL_ENABLED` must stay `false` until a later issue #162 slice ships the replacement
-  operator control.
+- `ADMIN_ENABLED` is unset in cloud environments; `true` is a startup error. Operator work runs in
+  the tailnet-only admin service ([admin-panel-guide.md](admin-panel-guide.md)), which is where the
+  issue #69 image-reservation recovery and the outbox recovery now live.
 
 `WORKER_POLLING_SECONDS` and `WORKER_TRIGGER_ON_SEND` are legacy rollout safeguards. The compiled API ignores them after the transactional-outbox release; remove them after the new maintenance service is verified.
 
@@ -203,7 +209,6 @@ development state in another.
 |---|---|---|---|
 | `http.allowed_hosts_required` | error | `LETTER_IRL_ALLOWED_HOSTS` unset in production | Set it. The fallback allowlists localhost, which leaves DNS-rebinding protection open |
 | `http.allowed_origins_required` | error | `LETTER_IRL_ALLOWED_ORIGINS` unset in production | Set it. The fallback allowlists localhost origins |
-| `admin.enabled_in_production` | error | `ADMIN_ENABLED=true` in production | Unset it. Admin is a local-only operator surface |
 | `debug.enabled_in_production` | error | `DEBUG` is enabled in production | Unset it. It serves the unauthenticated `/debug/widgets` route and discloses container paths |
 | `debug.verbose_logging_in_production` | warning | `DEBUG_CONTENT` or `DEBUG_IMAGE` in production | Unset it — it widens what reaches the logs |
 | `auth.enforcement_disabled_in_production` | warning | `LETTER_IRL_REQUIRE_AUTH=false` | Re-enable authentication; production is otherwise unauthenticated |
@@ -304,11 +309,11 @@ development database would be left without the admin foundation. Do not attempt 
 
 ### Operator recovery interaction
 
-Migration 022's branch also forces every public `/admin*` and `/api/admin*` request to a no-store 404 and
-makes `ADMIN_ENABLED=true` a startup error. Issue #69's ambiguous-image operator recovery routes under
-`/api/admin/image-generation/*` are therefore unreachable in deployed environments once both land. Keep
-`JIT_PURCHASE_ENABLED=false` and `IMAGE_TRIAL_ENABLED=false` until a later issue #162 slice ships the
-replacement operator control.
+Migration 022's branch forces every public `/admin*` and `/api/admin*` request to a no-store 404 and
+makes `ADMIN_ENABLED=true` a startup error. The operator recovery that used to live behind those routes
+(issue #69's ambiguous image reservations, held and failed outbox jobs) is provided by the tailnet-only
+admin panel in full mode ([admin-panel-guide.md](admin-panel-guide.md)); `JIT_PURCHASE_ENABLED` and
+`IMAGE_TRIAL_ENABLED` no longer depend on a public admin route.
 
 ## Migrations must be safe for the PREVIOUS image
 
@@ -554,109 +559,45 @@ the order row is quarantined as `refund_pending`; it is never fulfilled. Keep St
 Neon databases, and PostGrid environments separated as described in
 `docs/infrastructure.md`.
 
-## Ambiguous image-reservation operator procedure
+## Operator recovery through the admin panel
 
-> **Currently unreachable in deployed environments.** The issue #162 admin
-> foundation forces every public `/admin*` and `/api/admin*` request to a no-store
-> 404 and makes `ADMIN_ENABLED=true` a startup error, so the routes below cannot
-> be served once both changes are on `dev`. Keep `JIT_PURCHASE_ENABLED=false` and
-> `IMAGE_TRIAL_ENABLED=false` until a later issue #162 slice ships the replacement
-> operator control. See
-> [Operator recovery interaction](#operator-recovery-interaction). This procedure
-> is retained as the authoritative decision and evidence contract for that
-> replacement.
+Every operator decision below runs in the admin panel ([admin-panel-guide.md](admin-panel-guide.md)) in
+full mode, as a preview, a second-factor elevation, a typed confirmation and an audited command. The
+decision rules are the evidence contract; the panel only changes where they are applied.
 
-Keep `JIT_PURCHASE_ENABLED=false` and `IMAGE_TRIAL_ENABLED=false` while validating
-this recovery path. The routes below use the existing `/api/admin` authentication
-and authorization boundary; never expose them through a public or user token.
-This change does not enable cloud admin access. If `ADMIN_ENABLED` remains false,
-the route correctly returns not found and JIT/image-funded generation must remain
-disabled until the owner approves an environment-specific authenticated operator
-control (including the eventual issue #162 admin integration).
+**Ambiguous image reservations** (`/images`). Reconcile the reservation's provider request with the
+provider's own evidence first. Choose *consume* only with `provider_confirmed_succeeded`; choose *release*
+only with `provider_confirmed_failed`, or with `customer_compensation` after an explicit fairness
+decision. Never release an unknown outcome merely because it is old. The command locks the reservation,
+refuses anything but `ambiguous`, and writes one `commerce_operator_audit_events` row; a replayed
+confirmation returns the first outcome. Provider references are shown on the page as present or absent
+and are hashed in the audit.
 
-1. With an authenticated admin token, request
-   `GET /api/admin/image-generation/ambiguous?limit=50`. Record the reservation,
-   bound account, provider request reference, and timestamps in the restricted
-   incident record. These identifiers are intentionally returned to the operator
-   but must never be pasted into application logs.
-2. Reconcile the provider request reference with authoritative provider evidence.
-   Choose `consume` only with `provider_confirmed_succeeded`. Choose `release`
-   only with `provider_confirmed_failed`, or with `customer_compensation` after an
-   explicit owner-approved fairness decision. Never release an unknown outcome
-   merely because it is old.
-3. Submit
-   `POST /api/admin/image-generation/ambiguous/{reservationId}/resolve` with a
-   JSON body containing the exact `userId`, a unique operator-controlled
-   `idempotencyKey`, the `decision`, and the matching `resolution` classification.
-   The server derives the actor from the authenticated identity; an actor in the
-   request body is ignored.
-4. Require HTTP 200 and verify `resultingStatus` plus `replayed`. Retry only with
-   the exact same body and idempotency key; an exact retry returns
-   `replayed: true`, while a reused key with changed inputs returns a conflict.
-   A mismatched account returns not found and cannot mutate another user's row.
-5. Verify exactly one matching `commerce_operator_audit_events` row and the
-   corresponding reservation/entitlement counters. Confirm application logs
-   contain only the stable decision/status classifications and no reservation,
-   account, provider, address, or image identifiers.
+**Operational alerts** (`/alerts`). Acknowledge to record review without closing the work; resolve only
+when the payment or provider evidence is conclusive, with a stable non-PII resolution code. The alert
+transition and its audit row commit in one transaction; Stripe dispute-close events still auto-resolve the
+matching dispute alert.
 
-All temporary admin requests must originate from the exact
-`ADMIN_ALLOWED_ORIGIN`, target its exact Host on loopback without forwarding
-headers, include `X-Letter-IRL-Admin: local-operator`, and use an authenticated
-allow-listed bearer identity. Mutations additionally require
-`Content-Type: application/json` and the `X-CSRF-Token` matching the local
-operator bootstrap secret. The server emits no admin CORS or preflight grant.
+**Ambiguous mail** (`/jobs`, a job `held / ambiguous`). Reconcile the job against the provider using
+its reference, then resolve with one conclusive pair:
 
-## Commerce operational-alert procedure
+- *accepted* with the provider tracking reference: records acceptance and completes eligible Pay & Send
+  fulfilment without another provider call;
+- *retry* with no reference: proves the ambiguous request was rejected, clears the hold and queues the
+  same job with the same provider idempotency key (eligible Pay & Send funding returns from `held` to
+  `fulfillment_pending` in the same transaction);
+- *rejected* with no reference: makes the job terminal and moves an eligible Pay & Send order to refund
+  recovery.
 
-Use the same hardened local admin boundary for financial/provider recovery.
-`GET /api/admin/alerts` includes unresolved `commerce_operational_alerts` in the
-`commerce_operations` group. Treat the returned order and job references as
-restricted operator evidence; do not paste them into application logs.
+Never resolve while evidence is inconclusive. The command never submits mail; refund-resolved or accepted
+ambiguous work cannot be retried, and the explicit *retry* outcome is the only way to resume a held
+dispatch. Order, letter, job, matching alert and audit are locked and committed together.
 
-To record review without closing the work, send
-`PATCH /api/admin/commerce-alerts/{alertId}` with JSON `status` set to
-`acknowledged` and a new operator-controlled `idempotencyKey`. Resolve only after
-the provider/payment evidence is conclusive: send `status: resolved`, a stable
-non-PII `resolutionCode`, and a new key. The authenticated bearer identity—not a
-request-body actor—provides attribution. An exact retry returns `replayed: true`;
-reusing a key with a different actor, alert, state, or resolution fails closed.
-The alert transition and privacy-minimized append-only audit record commit in
-one transaction. Stripe dispute-close events automatically resolve only the
-matching dispute-created alert and persist a safe provider-status resolution
-code in that same webhook transaction.
-
-For `mail_provider_outcome_ambiguous`, first reconcile the job against the
-provider using its restricted operator evidence. Then send
-`POST /api/admin/jobs/{jobId}/resolve-ambiguous` with the exact bound `userId`, a
-new `idempotencyKey`, the known `providerName`, and one conclusive pair:
-
-- `accepted` / `provider_confirmed_accepted`, including the provider tracking
-  reference; this records acceptance and completes eligible JIT fulfillment
-  without another provider call.
-- `retry` / `provider_confirmed_rejected_retry`, with no tracking reference;
-  this proves the ambiguous request was rejected, clears the hold, and queues
-  the same job with the same provider idempotency key. Eligible JIT funding
-  returns from `held` to `fulfillment_pending` in the same transaction.
-- `rejected` / `provider_confirmed_rejected_refund`, with no tracking
-  reference; this makes the job terminal and exhausted, and moves an eligible
-  JIT order to refund recovery.
-
-Never use this endpoint while evidence is inconclusive. It never submits mail,
-and refund-resolved or accepted ambiguous work cannot be sent through the admin
-retry endpoint. The explicit retry outcome is the only way to resume a held
-provider dispatch, and it is bounded to one audited recovery decision.
-The order, letter, job, matching operational alert, and append-only audit are
-locked and committed together; provider references are stored where required
-for fulfillment but only hashed in the operator audit and never logged.
-
-An authoritative provider rejection or terminal failure before dispatch may be
-retried only with `POST /api/admin/jobs/{jobId}/retry`, including the exact
-bound `userId`, a non-PII reason, and a new idempotency key. For JIT mail this
-atomically restores `refund_pending` to `fulfillment_pending` only while no
-refund attempt has started and no Stripe refund ID exists. It then queues the
-same outbox job with the same provider idempotency key. Refund/dispute state,
-ambiguous outcomes, accepted mail, resolved ambiguity, and cross-account input
-all fail closed.
+**Definite failures** (`/jobs`, a job `failed / definite_failure`). Retry with a non-PII reason. For
+Pay & Send mail this atomically restores `refund_pending` to `fulfillment_pending` only while no refund
+attempt has started and no Stripe refund id exists, then queues the same outbox job with the same
+provider idempotency key. Refund and dispute state, ambiguous outcomes, accepted mail, resolved ambiguity
+and cross-account input all fail closed.
 
 Provider submission outcomes are classified on one axis only: whether the
 provider authoritatively refused the piece. A non-ambiguous 4xx comes from
@@ -667,8 +608,8 @@ proxy, or gateway can answer 500/502/503/504 after the origin already accepted
 and queued the piece), 408/409/425/429, transport loss and timeouts, an
 unreadable response body, and any 2xx that lacks a usable provider id/status.
 Ambiguous mail is never refunded and never automatically or manually
-re-dispatched: `POST /api/admin/jobs/{jobId}/retry` rejects it, and only
-`resolve-ambiguous` with conclusive provider evidence can finish it. Each
+re-dispatched: the panel's retry refuses it, and only a resolution with
+conclusive provider evidence can finish it. Each
 ambiguous outcome raises a durable `mail_provider_outcome_ambiguous` alert.
 
 `stripe_money_event_unmatched` covers two different situations, and they have

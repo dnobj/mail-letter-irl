@@ -21,8 +21,6 @@ import {
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from "../auth/betaAccess.js";
 import { handleCreditApiRequest } from "../api/creditApiHandler.js";
 import { handlePATApiRequest } from "../api/patApiHandler.js";
-import { handleAdminApiRequest } from "../api/adminApiHandler.js";
-import { isAdminEnabled } from "../api/middleware/adminAuth.js";
 import { handleLetterApiRequest } from "../api/letterApiHandler.js";
 import { handleReturnAddressApiRequest } from "../api/returnAddressApiHandler.js";
 import { handleTempImageRequest } from "../api/tempImageHandler.js";
@@ -52,14 +50,12 @@ import {
   writeDiagnostic
 } from "../utils/diagnosticLog.js";
 import { buildWwwAuthenticateChallenge } from "../auth/oauthChallenge.js";
-import {
-  findCoupledFeatureFlagWarnings,
-  validatePublicServerAdminConfiguration
-} from "../admin/config.js";
+import { validatePublicServerAdminConfiguration } from "../admin/config.js";
 import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
 import { getReadiness } from "./readiness.js";
 import { kickPriceCatalog } from "../services/priceCatalog.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
+import { resolveCorsOriginFor } from "./corsOrigin.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -108,15 +104,6 @@ export const BUILD_BRANCH = process.env.RAILWAY_GIT_BRANCH ?? "unknown";
 
 export function validateEnvironment() {
   validatePublicServerAdminConfiguration(process.env);
-
-  // Warn, never throw. The operator recovery routes these flags depend on are
-  // denied by the legacy admin guard, but failing startup on a flag combination
-  // would boot-loop a running deployment.
-  for (const flag of findCoupledFeatureFlagWarnings(process.env)) {
-    console.warn(
-      `[admin] ${flag}=true while public /api/admin* routes are denied; issue #69 operator recovery is unreachable. See docs/deployment.md#operator-recovery-interaction`
-    );
-  }
 
   // Fail closed on invalid deployment configuration (issue #155). Throws with
   // every problem named at once; the entrypoint's catch turns that into a
@@ -278,19 +265,10 @@ export async function startHttpServer() {
   const allowedHosts = getAllowedHosts();
   const allowedOrigins = getAllowedOrigins();
 
-  const resolveCorsOrigin = (incoming?: string | string[]) => {
-    if (Array.isArray(incoming)) {
-      incoming = incoming[0];
-    }
-    if (!incoming) {
-      return FALLBACK_ORIGIN;
-    }
-    // Allow "null" origin for file:// protocol (admin panel opened as local file)
-    if (incoming === "null") {
-      return "*";
-    }
-    return allowedOrigins.includes(incoming) ? incoming : FALLBACK_ORIGIN;
-  };
+  // Allowlist or fallback, never a wildcard: see corsOrigin.ts for the
+  // "null" origin case this used to special-case.
+  const resolveCorsOrigin = (incoming?: string | string[]) =>
+    resolveCorsOriginFor(incoming, allowedOrigins, FALLBACK_ORIGIN);
 
   const respondToCorsPreflight = (
     res: http.ServerResponse,
@@ -573,47 +551,6 @@ export async function startHttpServer() {
       return;
     }
 
-    // Serve admin panel (requires ADMIN_ENABLED=true, localhost only)
-    if (url.pathname === "/admin" || url.pathname === "/admin.html" || url.pathname === "/admin-panel.html") {
-      // Check if admin is enabled (disabled by default)
-      if (!isAdminEnabled()) {
-        res.statusCode = 404;
-        res.end("Not found");
-        return;
-      }
-
-      // Restrict to localhost only - block ngrok and other proxies
-      const remoteAddress = req.socket.remoteAddress;
-      const isLocalhost = remoteAddress === '127.0.0.1' ||
-                          remoteAddress === '::1' ||
-                          remoteAddress === '::ffff:127.0.0.1';
-
-      // Also block if coming through ngrok or other proxies
-      const isProxied = req.headers['x-forwarded-for'] ||
-                        req.headers['x-real-ip'] ||
-                        req.headers['ngrok-agent-ips'];
-
-      if (!isLocalhost || isProxied) {
-        res.statusCode = 404;
-        res.end("Not found");
-        return;
-      }
-
-      const fs = await import("fs/promises");
-      const path = await import("path");
-      const filePath = path.join(process.cwd(), "admin-panel.html");
-      try {
-        const content = await fs.readFile(filePath, "utf-8");
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "text/html");
-        res.end(content);
-      } catch (err: any) {
-        res.statusCode = 404;
-        res.end("Admin panel not found");
-      }
-      return;
-    }
-
     // Server-controlled Stripe return page. It intentionally shows no order
     // details; authenticated status is available only through get_purchase_status.
     if (url.pathname === '/purchase/return' && req.method === 'GET') {
@@ -789,17 +726,6 @@ export async function startHttpServer() {
       if (tempImageHandled) return;
     }
 
-    // Admin API routes (check first - more specific path)
-    if (url.pathname.startsWith('/api/admin')) {
-      if (await rateLimitMiddlewareWithTier(req, res, 'admin')) {
-        return; // Rate limited
-      }
-    }
-    const adminApiHandled = await handleAdminApiRequest(req, res, url.pathname);
-    if (adminApiHandled) {
-      return;
-    }
-
     // Credit API routes
     if (url.pathname.startsWith('/api/credits')) {
       if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
@@ -853,9 +779,16 @@ export async function startHttpServer() {
       // Cached once: the registry is static for the process lifetime.
       cachedToolNames ??= new Set(letterServer.listTools().map((tool) => tool.name));
 
-      if (!req.headers.origin) {
-        req.headers.origin = FALLBACK_ORIGIN;
-      }
+      // No Origin header means a non-browser client, which is what every MCP
+      // backend is. The transport's DNS-rebinding check only validates an Origin
+      // that is present, so the right thing to do with an absent one is leave
+      // it absent. Until 2026-09-09 this handler wrote FALLBACK_ORIGIN into the
+      // request instead, a leftover from the first prototype; with no
+      // LETTER_IRL_DEFAULT_ORIGIN configured that was http://0.0.0.0:8788, never
+      // on the allowlist, so every request from ChatGPT's backend that carried
+      // no Origin, including the tool-list refresh a fresh link depends on, was
+      // refused with 403 "Invalid Origin header". Tool calls happened to carry
+      // an Origin and passed, which is how it stayed hidden.
 
       const authInfo = await authenticateRequest(req, res, getPublicBaseUrl(req));
       if (authInfo === null) {

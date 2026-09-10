@@ -220,13 +220,21 @@ export async function addCreditsToLedgerWithClient(
   );
   const user = userResult.rows[0];
 
+  // RETURNING names its columns rather than *, here and on the transaction
+  // insert below: the admin operator role has no SELECT on the description
+  // columns, and PostgreSQL requires SELECT on every column a RETURNING clause
+  // names. This path is reached by the operator's balance adjustment (issue
+  // #162 security review).
   const ledgerResult = await client.query<CreditLedgerEntry>(
     `INSERT INTO credit_ledger (
        user_id, initial_amount, remaining_amount, source_type,
        source_reference_id, source_order_id, source_metadata, activated_at,
        expires_at, expiration_policy, expiration_days, status, description
      ) VALUES ($1, $2, $2, $3, $4, $10, $5, NOW(), $6, $7, $8, 'active', $9)
-     RETURNING *`,
+     RETURNING ledger_id, user_id, initial_amount, remaining_amount, source_type,
+               source_reference_id, source_order_id, source_metadata, activated_at,
+               expires_at, expiration_policy, expiration_days, status,
+               related_ledger_id, created_at, updated_at`,
     [
       userId,
       credits,
@@ -246,7 +254,8 @@ export async function addCreditsToLedgerWithClient(
     `INSERT INTO credit_transactions (
        user_id, amount, balance_after, type, reference_type, reference_id, description
      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING *`,
+     RETURNING transaction_id, user_id, amount, balance_after, type,
+               reference_type, reference_id, created_at`,
     [
       userId,
       credits,

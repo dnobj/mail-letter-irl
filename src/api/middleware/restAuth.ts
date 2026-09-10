@@ -88,19 +88,10 @@ function extractToken(req: IncomingMessage): string | null {
     const token = header.substring(7).trim();
     if (token) return token;
   }
-  // The letter and return-address handlers also accepted an access_token cookie.
-  // Kept for parity; the website's proxy sends a header, so this is a fallback.
-  const cookies = req.headers.cookie;
-  if (cookies) {
-    const found = cookies
-      .split(';')
-      .map(c => c.trim())
-      .find(c => c.startsWith('access_token='));
-    if (found) {
-      const token = found.substring('access_token='.length).trim();
-      if (token) return token;
-    }
-  }
+  // Bearer only. An access_token cookie used to be accepted here as a fallback
+  // (audit A-11). Nothing sets that cookie, and reading it would have made
+  // every cross-site form post to these routes carry credentials with no
+  // CSRF check the day something did. A cookie is not a credential here.
   return null;
 }
 

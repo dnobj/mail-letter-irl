@@ -430,8 +430,8 @@ specific piece of mail, so the handler tries to stop that mail first.
 Precondition: PAY-01 with the Regular Pack (5 letters), then one letter sent,
 so four letters remain. `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED=true` on the
 service the command runs in. Development first, with Stripe in test mode. No
-customer-facing tool can start this; it runs from the admin surface (or, until
-that exists, from a maintainer's session against the development database).
+customer-facing tool can start this; it runs from the admin panel's order page in
+full mode (`ADMIN-STRIPE-02` walks the panel steps).
 - [ ] `get_purchase_status` for the pack reads `letters 5, lettersRemaining 4,
       lettersRefunded 0, perLetterCents 200, refundableAmountCents 800`.
 - [ ] Preview the command for 3 letters: it shows USD 6.00 and a digest.
@@ -575,8 +575,9 @@ Test promotional code redemption.
 
 ## Admin Operator Interface
 
-The legacy public page and API are disabled while the hardened local operator application is delivered in
-issue #162 slices. Do not set `ADMIN_ENABLED=true`, open `admin-panel.html` directly, or place an admin
+The legacy public page and API stay disabled (`ADMIN_ENABLED=true` fails the public server's boot). The
+replacement is the tailnet-only admin panel described in [admin-panel-guide.md](admin-panel-guide.md);
+its cases follow `ADMIN-FOUNDATION-022`. Never open `admin-panel.html` directly or place an admin
 database URL in `.env`.
 
 ### ADMIN-FOUNDATION-022 — Slice 1 public denial and regression case
@@ -609,9 +610,9 @@ database URL in `.env`.
    existing public behavior remains successful and contains no admin route advertisement.
 6. [ ] Confirm no new local admin browser server or UI is expected in this slice and no production access,
    provider call, charge, mail order, Railway mutation, or role provisioning was performed.
-7. [ ] Confirm `JIT_PURCHASE_ENABLED` and `IMAGE_TRIAL_ENABLED` are still `false`, because issue #69's
-   `/api/admin/image-generation/*` operator recovery routes are intentionally among the paths this slice
-   404s and no replacement operator control exists yet.
+7. [ ] Confirm `JIT_PURCHASE_ENABLED` and `IMAGE_TRIAL_ENABLED` match the environment's intent: issue #69's
+   operator recovery no longer lives behind the denied `/api/admin/image-generation/*` routes but in the
+   tailnet admin panel (`ADMIN-ACCT-04`).
 8. [ ] Attach status/header evidence for every route, the migration ordering evidence, browser console
    observations, and the tested commit to the PR. Redact origins only if required; never attach secrets.
 
@@ -619,8 +620,420 @@ database URL in `.env`.
 root, manifest, and OAuth metadata regressions remain healthy. Any non-404 legacy response is a release
 blocker.
 
-The authenticated session, read models, UI, and command cases will be added by later slices before their
-corresponding functionality is enabled.
+### ADMIN-INFRA-01 — Tailnet ingress spike (development)
+
+**Status:** Executed 2026-09-07 from the owner's laptop (curl over the tailnet plus the owner's Chrome):
+steps 1, 2, 5, 6 and 7 passed; step 3 (phone) and step 4 (private network) were not run, because the
+phone's client is below the posture minimum and Railway offers no shell into the API service.
+
+**Preconditions:**
+
+- The development `letter-irl-admin` service exists with a `/data` volume, no domain, Serverless off, and
+  the variables in [admin-panel-guide.md](admin-panel-guide.md); `TS_AUTHKEY` was consumed and deleted.
+- The tailnet policy carries the `tag:dev-admin` grant, posture and tests; HTTPS and MagicDNS are on.
+- The laptop and the phone run Tailscale signed in as the allowlisted login.
+
+**Steps:**
+
+1. [x] Read the deploy log; verify `[tailscale] ready name=letter-irl-admin-dev.<tailnet>.ts.net tags=tag:dev-admin`
+   and `admin.listening`, and that the Railway healthcheck passed with no domain. (Seen on the first boot
+   and again on the redeploy without `TS_AUTHKEY`; the healthcheck answered 503 twice, then 200.)
+2. [x] Open `https://letter-irl-admin-dev.<tailnet>.ts.net/` from the laptop; verify a valid certificate
+   and the overview page. (curl with certificate verification returned 200; Chrome rendered the overview
+   with no warning.)
+3. [ ] From the phone on the tailnet, open the same URL; verify it answers. Turn Tailscale off on the phone;
+   verify the URL no longer resolves or connects.
+4. [ ] **The app port must be refused from the tailnet.** The boot log prints
+   `admin.tailnet_addresses`; from a device the policy allows, and for each address it names, verify
+   that `curl -sv --max-time 5 http://<address>:8790/` and `https://<address>:8790/` both fail to
+   connect, while `https://letter-irl-admin-dev.<tailnet>.ts.net/` answers. This is the step that
+   proves the policy carries the weight the trust model gives it: userspace networking forwards an
+   inbound tunnel connection to the same port on localhost, so a peer allowed to reach 8790 would
+   meet the application listener with headers of its own choosing. Re-run after any policy edit.
+   Then, from another service in the development environment (a Railway shell on the API service),
+   run `curl -si http://letter-irl-admin.railway.internal:$PORT/healthz`; verify the body is exactly
+   `ok` and `curl -si http://letter-irl-admin.railway.internal:8790/` is refused (connection refused,
+   not a page).
+5. [x] From the internet, verify the service has no `*.up.railway.app` domain and that
+   `https://letter-irl-admin-dev.<tailnet>.ts.net/healthz` does not resolve off the tailnet. (Railway lists
+   no service or custom domain; public resolvers return no address for the name; `/healthz` through Serve
+   answers 404, so even a tailnet peer reaches the health listener only on the private port.)
+6. [x] Redeploy the service; verify the machine keeps its name (no `-1` suffix) and the URL still answers.
+   (One machine, same address, after the redeploy without `TS_AUTHKEY`.)
+7. [x] Attach the log lines, the console screenshot of the machine (tag and no "Locked out" badge), and
+   the curl outputs. Never attach a key or a connection string. (Recorded in the setup session and in
+   the first-boot section of the guide.)
+
+**Pass criteria:** The `.ts.net` URL answers only from an allowed device; the private network reaches only
+`/healthz`; port 8790 is refused; a redeploy is the same node. Any answer from the internet is a release
+blocker.
+
+### ADMIN-READ-01 — Banner and identity
+
+**Status:** Passed 2026-09-07 (curl over the tailnet from the laptop; build 5172e00).
+
+**Preconditions:** `ADMIN-INFRA-01` passed; the development panel runs in `read-only` mode.
+
+**Steps:**
+
+1. [x] Open the overview; verify the banner shows `development`, `mode: read-only`, `marker: development`,
+   `db role: letter_irl_admin_reader_development`, `stripe: test` (or `absent` while no key is set), the
+   mail provider (`unset` until `LETTER_PROVIDER` is given), the node name with `tag:dev-admin`, the build
+   commit, and `operator: <your login> from <your device name>`.
+2. [x] Reload; verify the session cookie is reused (one `admin.session_start` row per session in
+   `/audit`, not one per request). (Three requests on one cookie jar left the row count unchanged.)
+3. [x] Verify the response headers carry `Content-Security-Policy` with a nonce, `Cache-Control: no-store`
+   and `X-Correlation-Id`. (Also `X-Frame-Options: DENY` and `Referrer-Policy`, which was `no-referrer` when
+   this ran and is `same-origin` since 2026-09-08: `no-referrer` made browsers send `Origin: null` on form
+   posts, which the boundary check refuses, so no write was possible from a browser.)
+
+**Pass criteria:** The banner states what the machine checked, and one session produces one audit row.
+
+### ADMIN-READ-02 — Account and pack figures
+
+**Status:** Passed 2026-09-07 against the owner's own development account (looked up by exact subject;
+the lookup-by-email variant of step 1 is still open).
+
+**Preconditions:** A development account that bought a pack in test mode and mailed one letter (PAY-01).
+
+**Steps:**
+
+1. [x] Look the account up by exact email; verify the email is masked on the account page. (Looked up by
+   exact Auth0 subject: one match, plus the recent-accounts table with masked emails. Before the reveal
+   the only full email address in the page source was the operator's own in the banner.)
+2. [x] Verify the ledger lots show initial and remaining credits, and the letters table shows metadata
+   only: no content, no recipient, no address anywhere on the page. (The letters table is captioned
+   "metadata only; content and recipients are never shown here".)
+3. [x] Open the pack order; verify "unspent letters" and "maximum proportional refund" match
+   letters remaining × amount ÷ letters in pack, floored. (50 in pack, 24 unspent, 26 sent, 0 refunded,
+   1.80 USD per letter, 43.20 USD maximum: 24 × 90.00 ÷ 50.)
+4. [x] Reveal the email with a reason; verify it appears once, and `/audit` shows a `pii.reveal` row with
+   that reason. Submit a reason shorter than 8 characters; verify a 400 and a denied `pii.reveal` row.
+   (200 with exactly one more email address in the page than before; `short` answered
+   `400 ADMIN_INVALID_REQUEST`; `/audit` shows one allowed and one denied `pii.reveal` row.)
+
+**Pass criteria:** Figures agree with the ledger; content and addresses are absent; the reveal is audited.
+
+### ADMIN-READ-03 — A Dashboard refund is visible
+
+**Status:** Not run on 2026-09-07: the development database held no refunded order at the time.
+
+**Preconditions:** REFUND-01 was run in development.
+
+**Steps:**
+
+1. [ ] Open the refunded order; verify the lots show `revoked`, `amount refunded` equals the pack amount,
+   the webhook events list the three refund events, and no alert is open for the order.
+2. [ ] Run REFUND-02 (a partial Dashboard refund); verify `/alerts` shows the critical
+   `stripe_partial_refund_unmatched` alert linked to the order, and the order page lists it.
+
+**Pass criteria:** The panel shows what the webhook did, without a log search.
+
+### ADMIN-READ-04 — Denials
+
+**Status:** Step 4 passed 2026-09-07 (curl); steps 1 to 3 not run.
+
+**Steps:**
+
+1. [ ] Temporarily remove your login from `ADMIN_OPERATOR_LOGINS` and redeploy; verify the URL answers
+   `403 forbidden` with a constant body and `/audit` (after restoring the variable) shows the denied row
+   with your login. Restore the variable.
+2. [ ] From another service on the private network, request `http://letter-irl-admin.railway.internal:8790/`;
+   verify connection refused (the app listener is loopback only).
+3. [ ] Leave a tab idle for 16 minutes; verify the next request starts a new session (a new
+   `admin.session_start` row) rather than failing.
+4. [x] Submit the reveal form with the CSRF field removed (browser devtools); verify `403 forbidden` and a
+   denied row with `ADMIN_CSRF_REJECTED`. (A POST with same-origin headers but no token, and a POST with
+   no `Origin` at all, both answered `403` with the body `forbidden`; `/audit` shows `admin.request_denied`
+   for route `account.reveal` with `ADMIN_CSRF_REJECTED`.)
+
+**Pass criteria:** Every denial is a constant body plus an audit row; nothing on the private network
+reaches an application route.
+
+### ADMIN-READ-05 — Keyboard-only navigation and 200 % zoom
+
+**Status:** Partly run 2026-09-07 in the owner's Chrome: focus is visible on the navigation links and every
+badge carries text; the full keyboard traversal and the 320 px rendering are still open (Chrome refused a
+320 px window; every table on the overview, account and jobs pages sits in a `.scroll` container with
+`overflow-x: auto`, which is the structural half of step 2).
+
+**Steps:**
+
+1. [ ] Navigate the overview, lookup, account and order pages with Tab, Shift+Tab and Enter only; verify
+   every control is reachable, focus is visible, and the reveal form submits from the keyboard.
+2. [ ] At 200 % zoom and at a 320 px wide window, verify no horizontal page scroll: wide tables scroll
+   inside their own container.
+3. [x] Verify status is conveyed by text as well as by colour in every badge. (`failed` and
+   `definite_failure` badges on the overview and jobs pages.)
+
+**Pass criteria:** No mouse needed; no page-level horizontal scroll at 320 px.
+
+### ADMIN-READ-06 — The same pages from the phone
+
+**Steps:**
+
+1. [ ] Repeat ADMIN-READ-01 and ADMIN-READ-02 steps 1 to 3 from the phone browser over Tailscale.
+2. [ ] Verify the banner shows the phone's device name as the node.
+
+**Pass criteria:** Identical data; the node name identifies the device.
+
+### ADMIN-PROD-RO-01 — Production read-only gate
+
+**Status:** Requires the owner's separate production read-only approval before any step.
+
+**Preconditions:** Production roles created by SQL; grants applied with `--confirm-production-access`;
+the production node registered with `tag:prod-admin`; `ADMIN_MODE=read-only`; the restricted Stripe key
+absent or live.
+
+**Steps:**
+
+1. [ ] Verify the banner shows `production`, `read-only`, `marker: production`,
+   `letter_irl_admin_reader_production`, `stripe: live` and `tag:prod-admin`.
+2. [ ] Open the refunded Starter Pack order from the launch weekend; verify 2 letters, 0 remaining,
+   500 cents refunded, lots revoked.
+3. [ ] Verify `/audit` shows the boot event and this session, and that no command route exists in full mode
+   terms (every POST other than reveal and logout answers 403 `ADMIN_READ_ONLY_MODE`).
+
+**Pass criteria:** Production is visible and untouchable.
+
+### ADMIN-CMD-01 — Acknowledge and resolve an alert with elevation, preview, typed confirmation and replay
+
+**Status:** Executed 2026-09-08 in the owner's Chrome, driven by the browser extension, with the
+balance adjustment on the owner's own development account standing in for the alert, because no alert
+was open. Step 1 passed (the preview named elevation and Execute was disabled). Step 2 passed (banner
+"elevated until", `admin.elevate` audited). Step 3 passed (`CONFIRM <account id>`; the run listed on
+`/commands`, `account.adjust_balance` audited with the reason and command id, and the ledger lot reads
+`adjustment` with no reason text anywhere on the account page). Step 4 passed (the same confirmation
+answered "already processed", no second audit row). Step 5 passed (two previews of the same change;
+the second answered `409 ADMIN_STALE_PREVIEW`). Step 6 not run: five wrong codes would lock the owner
+out for fifteen minutes. Also seen: a wrong phrase answered `400 ADMIN_INVALID_REQUEST` and was audited
+as denied, and a five-character reason was accepted, because the eight-character minimum lived only in
+the form until the pull request that carries this record.
+
+**Preconditions:** The development panel runs in full mode (`ADMIN_MODE=full`, `DATABASE_URL` on the
+operator role, `ADMIN_TOTP_SECRET` from `npm run admin:totp-enrol -- development`, the authenticator
+enrolled on a different device); an open alert exists (REFUND-02 raises one).
+
+**Steps:**
+
+1. [ ] Open the alert and preview "acknowledge" without elevating; verify the page says elevation is
+   needed and the execute button is disabled.
+2. [ ] Open `/elevate`, enter a code; verify the banner shows "elevated until", a new session cookie was
+   issued, and `/audit` shows `admin.elevate`.
+3. [ ] Preview "acknowledge" again; type the phrase shown (`CONFIRM <alert id>` in development); execute.
+   Verify the outcome page says succeeded, the alert shows `acknowledged`, `/commands` lists the run, and
+   `/audit` shows `alert.transition` with your reason and the command id.
+4. [ ] Go back and submit the same form again; verify the outcome page says the confirmation was already
+   processed and `/audit` gained no second `alert.transition` row.
+5. [ ] Open two "resolve" previews for the same alert in two tabs with different resolution codes;
+   execute the first; execute the second; verify the second answers `409 ADMIN_STALE_PREVIEW` and the alert
+   keeps the first code.
+6. [ ] Enter a wrong code on `/elevate` five times; verify elevation locks, the page says so, and `/audit`
+   shows five `admin.elevation_denied` rows.
+
+**Pass criteria:** Nothing executes without elevation, a matching phrase and a fresh preview; a replay
+returns the first outcome; every step is in the audit log.
+
+### ADMIN-CMD-02 — Resolve an ambiguous job with provider evidence
+
+**Status:** Not run 2026-09-08: no job was held on an ambiguous outcome.
+
+**Preconditions:** Full mode as above; a job held on an ambiguous provider outcome (the stub evidence
+flow in [deployment.md](deployment.md#ambiguous-image-reservation-operator-procedure) describes how the
+dummy provider produces one).
+
+**Steps:**
+
+1. [ ] Open the job; verify the resolution form appears only while the job is `held / ambiguous`.
+2. [ ] Choose `accepted`, the provider consulted and its reference; preview; verify the preview shows the
+   letter, account, current state and that the reference is described as hashed.
+3. [ ] Execute with the phrase; verify the letter is `accepted`, the job `completed`, the
+   `mail_provider_outcome_ambiguous` alert for the job is resolved, and `/audit` shows `job.resolve`.
+4. [ ] Repeat with `rejected` on another held job; verify the letter fails and, for a prepaid letter, the
+   credits return through the failed-send path (account page shows an adjustment lot).
+
+**Pass criteria:** The job leaves the held state only with evidence, and the outcome matches the decision.
+
+### ADMIN-CMD-03 — Retry a definite failure, and the refusals
+
+**Status:** Step 3 passed 2026-09-08 (elevation dropped on `/elevate`; a prepared preview answered
+`403 ADMIN_ELEVATION_REQUIRED`, the balance was unchanged, and both events were audited). Steps 1 and
+2 deliberately not run: a retried job is dispatched to whatever provider development routes to, an
+outside effect the owner should trigger knowingly. Step 4 not run.
+
+**Preconditions:** Full mode; a job in `failed / definite_failure` with a failed letter.
+
+**Steps:**
+
+1. [ ] Preview the retry; give a reason of at least 8 characters; execute. Verify the job is `pending` and
+   the letter `queued`, and that the next maintenance run dispatches it.
+2. [ ] Preview a retry of the same job again; verify `409 ADMIN_INVALID_STATE` (it is no longer failed).
+3. [ ] Drop the elevation on `/elevate` (or wait for it to expire) and execute a prepared preview; verify
+   `403 ADMIN_ELEVATION_REQUIRED` and that nothing changed.
+4. [ ] Set `ADMIN_MODE=read-only` and redeploy; verify previews still render but every execute answers
+   `403 ADMIN_READ_ONLY_MODE` before the handler runs.
+
+**Pass criteria:** A retry needs the exact state, a live elevation and full mode; each refusal is a stable
+code and an audit row.
+
+### ADMIN-STRIPE-01 — Reconciliation in development against test-mode data
+
+**Preconditions:** The development panel has a **restricted** test-mode Stripe key
+(`STRIPE_SECRET_KEY`, permissions: Checkout Sessions read, Refunds read/write, Charges read,
+PaymentIntents read, Disputes read); at least one PAY-01 purchase in the window.
+
+**Steps:**
+
+1. [ ] Open `/stripe`; verify the banner and the page show the key as `test (restricted)`.
+2. [ ] Run reconciliation for 30 days; verify the summary counts match the purchases made, the
+   discrepancy table is empty, and `/audit` shows a `stripe.reconcile` row whose summary carries counts
+   and order ids but no Stripe identifier.
+3. [ ] Inject a discrepancy: in the Neon SQL editor on the development branch, revoke a fulfilled pack's
+   purchase lot (`UPDATE credit_ledger SET status = 'revoked', remaining_amount = 0 WHERE source_order_id =
+   '<order>'`) or delete it. Run reconciliation again; verify the order appears as `missing_credit` with a
+   "Preview repair…" button in full mode (or "full mode only" in read-only).
+4. [ ] Full mode: preview the repair; verify the preview shows what the order says against what the
+   reconciliation says; execute with the phrase; verify `repaired`, the lot is back, and `/audit` shows
+   `order.repair_grant`. Run the preview again and execute; verify `already_granted` and no change.
+5. [ ] Remove the key from the service and redeploy; verify the run button is disabled and a POST answers
+   `403 ADMIN_COMMAND_DISABLED`. Restore the key.
+
+**Pass criteria:** Reconciliation reads Stripe and writes only an audit row; a repair applies once and
+refuses to double-grant.
+
+### ADMIN-STRIPE-02 — Proportional refund of one letter from a two-letter test pack
+
+**Preconditions:** Development, full mode, `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED=true` on the admin
+service; a Starter Pack bought in test mode (PAY-01) with no letters sent.
+
+**Steps:**
+
+1. [ ] Open the order; verify the pack figures show 2 letters, 2 unspent, and the maximum proportional
+   refund equal to the whole price, and that the refund form is present (with the flag unset it shows the
+   disabled note instead).
+2. [ ] Preview a refund of 1 letter with reason code `customer_request`; verify the preview shows the
+   per-letter price, the refund amount floored on the product, the three warnings, and the phrase.
+3. [ ] Execute; verify the outcome shows `succeeded` (or `stripe_pending`), the account balance dropped by
+   one letter, the order shows a `commerce_pack_refunds` row linked to the command id, and the Stripe test
+   Dashboard shows a partial refund with metadata `orderId`, `packRefundId`, `lettersRefunded: 1`.
+4. [ ] Preview a second refund for the same order; verify `409 ADMIN_INVALID_STATE` (one proportional
+   refund per pack).
+5. [ ] Refund the remainder from the Stripe Dashboard; verify REFUND-06's expectations.
+
+**Pass criteria:** Letters leave first, Stripe follows with the app-computed amount, the run and the
+refund row reference each other, and a second command is refused.
+
+### ADMIN-ACCT-01 — Lift a send block
+
+**Preconditions:** Development, full mode; an account blocked by a dispute (the dispute webhook flow in
+REFUND-04's dispute variant, or a row inserted on the development branch).
+
+**Steps:**
+
+1. [ ] Open the account; verify the red "sends blocked" banner and the "Preview lifting the send block"
+   button. Preview; verify the standing-dispute count and the warning when one stands.
+2. [ ] Execute while the dispute is still open; verify `409 ADMIN_INVALID_STATE`, the block remains, and
+   `/commands` shows no run for the attempt.
+3. [ ] Close the dispute in our favour (test Dashboard, or set its status to `won`), preview again,
+   execute with the phrase; verify sends are unblocked and `/audit` shows `account.unblock_sends`.
+
+**Pass criteria:** The block lifts only when no dispute justifies it; a refusal writes nothing.
+
+### ADMIN-ACCT-02 — Adjust a letter balance and grant image generations
+
+**Steps:**
+
+1. [ ] On an account, preview adding 1 letter; verify the preview shows balance before and after in
+   letters and credits; execute; verify a never-expiring `adjustment` lot of 2 credits and
+   `/audit` shows `account.adjust_balance` with the reason.
+2. [ ] Preview removing more letters than the ledger holds; verify `409 ADMIN_INVALID_STATE`.
+3. [ ] Preview removing 1 letter; execute; verify the soonest-expiring lot lost 2 credits and the
+   transaction row reads `Operator adjustment: <reason>`.
+4. [ ] Preview granting 2 image generations; execute; verify the `operator_grant` entitlement referencing
+   the command id, and that resubmitting the same confirmation grants nothing more.
+
+**Pass criteria:** Balance changes are letters in the UI, credits in the ledger, and atomic with their
+audit.
+
+### ADMIN-ACCT-03 — Release an amount-mismatch quarantine
+
+**Preconditions:** An order in `refund_pending` with `last_error_code = PAYMENT_AMOUNT_MISMATCH`
+(adopt a legacy session with a different amount on the development branch, or insert the row).
+
+**Steps:**
+
+1. [ ] Open the order; verify the quarantine panel and the warning in the preview.
+2. [ ] Execute; verify the code is cleared, the order event `operator.quarantine_released` carries the
+   reason, and the next `npm run maintenance` (or hourly run) refunds the order.
+
+**Pass criteria:** Release is a deliberate operator decision, recorded, and the sweep then acts.
+
+### ADMIN-ACCT-04 — Promo campaigns and ambiguous image reservations
+
+**Steps:**
+
+1. [ ] `/promos/new`: preview and create a draft campaign; verify it appears as `draft`.
+2. [ ] Preview `active`; before confirming, change the campaign on another tab (or in SQL); execute;
+   verify `409 ADMIN_STALE_PREVIEW`. Preview again and execute; verify `active`.
+3. [ ] Redeem the code with a test account (`redeem_promo_code`); verify the campaign page lists the
+   redemption with a masked email and that "delete" is no longer offered. End the campaign.
+4. [ ] `/images`: with an ambiguous reservation (the stub evidence flow in
+   [deployment.md](deployment.md#ambiguous-image-reservation-operator-procedure)), preview "release as
+   compensation" and execute; verify the reservation is `released`, the quota is back, and `/audit` shows
+   `image.resolve` alongside the domain's `image_reservation_resolve` row.
+
+**Pass criteria:** Promo status follows the documented machine with version checks; image recovery is
+reachable and audited.
+
+### ADMIN-OPS-01 — Retention report and quarantine listing
+
+**Steps:**
+
+1. [ ] Open `/retention`; verify the counts (redacted letters and drafts, quarantine rows, purge due) and
+   the report of what the next enforcing run would touch, matching `npm run maintenance` in report mode.
+2. [ ] Verify the quarantine table shows source table, row id and dates only: no content anywhere on the
+   page, and no restore control.
+
+**Pass criteria:** Report mode only, metadata only.
+
+### ADMIN-OPS-02 — Tier override
+
+**Steps:**
+
+1. [ ] On an account, preview setting the override to `trusted`; execute; verify the account shows
+   `standard (override: trusted)` and `/audit` shows `account.set_tier`.
+2. [ ] Preview the same override again; verify `409 ADMIN_INVALID_STATE`. Clear the override; verify the
+   daily tier calculation applies again.
+
+**Pass criteria:** The override is explicit, audited, and idempotent.
+
+### ADMIN-OPS-03 — Provider routing and status sync
+
+**Preconditions:** Development (the dummy provider is refused in production routing).
+
+**Steps:**
+
+1. [ ] Open `/routing`; verify the four mail types, the environment default provider and the registered
+   providers. Preview routing `postcard` to `dummy`; execute; verify the row shows `dummy`, your login as
+   "by", and `/audit` shows `routing.update`. Route it back to `postgrid`.
+2. [ ] Preview a provider that is not registered (edit the query string); verify `400 ADMIN_INVALID_REQUEST`.
+3. [ ] Preview a status sync dry run over 7 days; execute; verify the outcome lists checked, updated and
+   error counts and the first changes, and that no letter status changed. Repeat in apply mode on a
+   development letter with a known provider status; verify the status and history rows update.
+
+**Pass criteria:** Routing changes are validated against the runtime registry and versioned; the sync is
+explicit about dry run versus apply.
+
+### ADMIN-LEGACY-01 — Public denial unchanged after the legacy removal
+
+**Steps:**
+
+1. [ ] Repeat `ADMIN-FOUNDATION-022` steps 1 to 5 against the deployed development API; verify every
+   legacy `/admin*` and `/api/admin*` path is still a no-store `404` and the public routes are unaffected.
+2. [ ] Verify the repository no longer contains `admin-panel.html`, `src/api/adminApiHandler.ts` or
+   `scripts/run-reconciliation.ts`, and that `ADMIN_ENABLED=true` still fails the public server's boot.
+
+**Pass criteria:** Nothing public changed; the only operator surface is the tailnet panel.
 
 ---
 

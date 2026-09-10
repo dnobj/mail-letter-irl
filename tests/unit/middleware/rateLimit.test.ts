@@ -21,6 +21,10 @@ import {
   rateLimitMiddlewareWithGlobal,
   getBlockedRequestCounts,
   clearRateLimitState,
+  clientAddressFromHops,
+  forwardedForHops,
+  getClientIdentifier,
+  rateLimitMiddlewareWithTier,
   RATE_LIMITS,
 } from '../../../src/api/middleware/rateLimit.js';
 
@@ -163,7 +167,8 @@ describe('rateLimit middleware', () => {
     });
 
     it('should return allowed=true with limit=0 for endpoints without global config', () => {
-      const result = checkGlobalRateLimit('api');
+      // 'api' gained a global backstop in the A-05 fix; send_letter still has none.
+      const result = checkGlobalRateLimit('send_letter');
       expect(result.allowed).toBe(true);
       expect(result.limit).toBe(0);
     });
@@ -335,5 +340,78 @@ describe('rateLimit middleware', () => {
 
       expect(blocked).toBe(false);
     });
+  });
+});
+
+describe('client identifier and global backstops (audit A-05)', () => {
+  beforeEach(() => {
+    clearRateLimitState();
+  });
+  afterEach(() => {
+    clearRateLimitState();
+  });
+
+  function requestWith(headers: Record<string, string | string[]>, remoteAddress = '10.0.0.1'): IncomingMessage {
+    return { headers, socket: { remoteAddress } } as unknown as IncomingMessage;
+  }
+
+  it('parses the hops oldest first, across several header lines, dropping blanks', () => {
+    expect(forwardedForHops('203.0.113.9, 198.51.100.7')).toEqual(['203.0.113.9', '198.51.100.7']);
+    expect(forwardedForHops(['203.0.113.9', ' 198.51.100.7 ,, 10.0.0.9'])).toEqual(['203.0.113.9', '198.51.100.7', '10.0.0.9']);
+    expect(forwardedForHops(' , ')).toEqual([]);
+    expect(forwardedForHops(undefined)).toEqual([]);
+  });
+
+  it('takes the hop before the trusted proxies, and the first hop when there are fewer', () => {
+    // Railway, measured 2026-09-08: "<client>, <internal hop>" with one trusted hop.
+    expect(clientAddressFromHops(['198.51.100.7', '10.0.0.9'], 1)).toBe('198.51.100.7');
+    // An edge that appends instead of replacing: the client's own value is
+    // first, the real address next, the internal hop last.
+    expect(clientAddressFromHops(['1.2.3.4', '198.51.100.7', '10.0.0.9'], 1)).toBe('198.51.100.7');
+    // A direct connection or a local proxy: fewer hops than trusted, first wins.
+    expect(clientAddressFromHops(['198.51.100.7'], 1)).toBe('198.51.100.7');
+    // No trusted hop configured: the last hop is the client.
+    expect(clientAddressFromHops(['198.51.100.7', '10.0.0.9'], 0)).toBe('10.0.0.9');
+    expect(clientAddressFromHops([], 1)).toBeNull();
+  });
+
+  it('falls back to the socket address without a usable header', () => {
+    expect(getClientIdentifier(requestWith({ 'x-forwarded-for': ' , ' }))).toBe('10.0.0.1');
+    expect(getClientIdentifier(requestWith({}))).toBe('10.0.0.1');
+  });
+
+  it('does not let a client-supplied prefix open a fresh budget', () => {
+    // The measured shape is "<client>, <internal>"; a client that also sends
+    // its own value on an appending edge would produce "<spoof>, <client>,
+    // <internal>". Either way the budget is the client's.
+    for (let i = 0; i < 10; i += 1) {
+      const req = requestWith({ 'x-forwarded-for': `${i}.${i}.${i}.${i}, 198.51.100.7, 10.0.0.9` });
+      expect(checkRateLimit(req, 'promo_public').allowed).toBe(true);
+    }
+    const eleventh = requestWith({ 'x-forwarded-for': '198.51.100.7, 10.0.0.9' });
+    expect(checkRateLimit(eleventh, 'promo_public').allowed).toBe(false);
+  });
+
+  it('configures a global backstop for the routes that had none', () => {
+    for (const type of ['mcp', 'api', 'checkout']) {
+      expect(checkGlobalRateLimit(type).limit).toBeGreaterThan(0);
+    }
+  });
+
+  it('refuses at the global ceiling through the tier-aware middleware, whatever the mix of identifiers', async () => {
+    const ceiling = checkGlobalRateLimit('checkout').limit; // this call itself takes one slot
+    let blocked = 0;
+    let res = createMockResponse();
+    for (let i = 0; i < ceiling; i += 1) {
+      // A different identifier every time keeps each per-identifier budget at one,
+      // so only the global ceiling can refuse.
+      res = createMockResponse();
+      const req = requestWith({ 'x-forwarded-for': `198.51.${Math.floor(i / 250)}.${i % 250}` });
+      if (await rateLimitMiddlewareWithTier(req, res, 'checkout')) blocked += 1;
+    }
+    expect(blocked).toBe(1);
+    expect(res._statusCode).toBe(429);
+    expect(res._headers['x-ratelimit-scope']).toBe('global');
+    expect(JSON.parse(res._body)).toMatchObject({ error: 'Too Many Requests' });
   });
 });

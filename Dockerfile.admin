@@ -1,0 +1,58 @@
+# Letter IRL admin panel image. Selected by the admin service's
+# RAILWAY_DOCKERFILE_PATH variable (Railway no longer reads config-as-code
+# files for new services); the API and maintenance services keep building
+# with nixpacks.toml.
+#
+# Three stages: compile the TypeScript, borrow the Tailscale binaries from the
+# official image pinned by tag AND digest, and assemble a runtime that holds
+# nothing but the compiled output, production dependencies, certificates and
+# the two Tailscale binaries. The node process is PID 1 and supervises
+# tailscaled itself (src/admin/tailscale/daemon.ts).
+#
+# The runtime stage runs as the base image's unprivileged `node` user. Only the
+# entrypoint runs as root, and only long enough to hand the mounted volume over
+# before it execs into Node (docker-entrypoint.admin.sh).
+
+FROM node:22-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.json ./
+# npm ci installs exactly the lockfile and fails if package.json disagrees.
+RUN npm ci
+COPY src ./src
+RUN npm run build && npm prune --omit=dev
+
+# Upgrades are deliberate pull requests: bump the tag and the digest together.
+# The image places both binaries in /usr/local/bin (upstream Dockerfile).
+FROM tailscale/tailscale:v1.102.3@sha256:8c42c4574ab066384fcb72f69e086a2ff1dd3652eb6f56856cee34bcf0d2f680 AS tailscale
+
+FROM node:22-bookworm-slim
+# setpriv drops privileges by exec rather than fork, so Node stays PID 1 and
+# still receives SIGTERM. util-linux is Essential in Debian, so the line below
+# asserts rather than installs: a missing binary fails the BUILD, which leaves
+# the running container alone, instead of failing at boot, which on a
+# volume-backed service is an outage.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && command -v setpriv > /dev/null
+COPY --from=tailscale /usr/local/bin/tailscaled /usr/local/bin/tailscale /usr/local/bin/
+WORKDIR /app
+ENV NODE_ENV=production
+# HOME still pointed at /root after the step-down, so tailscaled could not
+# write its local log buffer and logged a permission error on every boot
+# ("filch failed: open /root/.cache/Tailscale/...: permission denied"). It
+# carried on without it, but an unwritable HOME is a trap for anything else
+# that looks there, and a recurring error hides the next real one.
+ENV HOME=/home/node
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/package.json ./package.json
+COPY docker-entrypoint.admin.sh /usr/local/bin/docker-entrypoint.admin.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.admin.sh
+# The Railway volume mounts here; the daemon keeps its identity and the Serve
+# certificate under it, so a redeploy is the same node. The mount masks this
+# directory's ownership at runtime, which is why the entrypoint prepares it
+# again after the mount rather than trusting a build-time chown.
+RUN mkdir -p /data/tailscale /home/node/.cache && chown -R node:node /data /home/node
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.admin.sh"]
+CMD ["node", "dist/admin/server.js"]

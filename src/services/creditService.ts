@@ -15,6 +15,8 @@
  * cache for quick balance checks.
  */
 
+import type pg from 'pg';
+
 import { transaction, query } from '../db/index.js';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import {
@@ -32,6 +34,7 @@ import {
 } from './types.js';
 import {
   addCreditsToLedger,
+  addCreditsToLedgerWithClient,
   deductCreditsFromLedger,
   refundCreditsToLedger,
   getDetailedBalance as getLedgerDetailedBalance,
@@ -239,111 +242,101 @@ export async function adjustCredits(
   amount: number,
   reason: string
 ): Promise<CreditOperationResult> {
-  if (amount === 0) {
-    throw new Error('Adjustment amount cannot be zero');
+  return transaction((client) => adjustCreditsWithClient(client, userId, amount, reason));
+}
+
+/**
+ * The same adjustment on the caller's client, so an operator command can
+ * commit it together with its run row and audit row (issue #162).
+ */
+export async function adjustCreditsWithClient(
+  client: Pick<pg.PoolClient, 'query'>,
+  userId: string,
+  amount: number,
+  reason: string
+): Promise<CreditOperationResult> {
+  if (!Number.isInteger(amount) || amount === 0) {
+    throw new Error('Adjustment amount must be a non-zero integer');
   }
 
   if (amount > 0) {
-    // Positive adjustment: add credits via ledger
-    const result = await addCreditsToLedger({
+    // Positive adjustment: a never-expiring adjustment lot.
+    const result = await addCreditsToLedgerWithClient(client, {
       userId,
       credits: amount,
       sourceType: 'adjustment',
       description: reason,
-      // Adjustments don't expire by default
       expirationPolicy: 'never',
     });
-
-    return {
-      user: result.user,
-      transaction: result.transaction,
-    };
-  } else {
-    // Negative adjustment: deduct credits
-    // Note: This uses the legacy method since we're removing credits
-    // and don't have a specific letter to reference
-    return await transaction(async (client) => {
-      // Update balance
-      const userResult = await client.query<User>(
-        `UPDATE users
-         SET credits = credits + $1,
-             updated_at = NOW()
-         WHERE user_id = $2
-         RETURNING *`,
-        [amount, userId]
-      );
-
-      if (userResult.rows.length === 0) {
-        throw new Error('User not found');
-      }
-
-      const user = userResult.rows[0];
-
-      // Ensure balance doesn't go negative
-      if (user.credits < 0) {
-        throw new Error(`Cannot adjust credits: would result in negative balance`);
-      }
-
-      // For negative adjustments, we need to update the ledger entries too
-      // Consume from ledger in FIFO order
-      let remainingToDeduct = Math.abs(amount);
-
-      const ledgerResult = await client.query<{ ledger_id: string; remaining_amount: number }>(
-        `SELECT ledger_id, remaining_amount FROM credit_ledger
-         WHERE user_id = $1
-           AND status = 'active'
-           AND remaining_amount > 0
-           AND (expires_at IS NULL OR expires_at > NOW())
-         ORDER BY expires_at NULLS LAST, created_at ASC
-         FOR UPDATE`,
-        [userId]
-      );
-
-      for (const entry of ledgerResult.rows) {
-        if (remainingToDeduct <= 0) break;
-
-        const amountToTake = Math.min(remainingToDeduct, entry.remaining_amount);
-        const newRemaining = entry.remaining_amount - amountToTake;
-
-        await client.query(
-          `UPDATE credit_ledger
-           SET remaining_amount = $1,
-               status = CASE WHEN $1 = 0 THEN 'depleted'::credit_ledger_status ELSE status END,
-               updated_at = NOW()
-           WHERE ledger_id = $2`,
-          [newRemaining, entry.ledger_id]
-        );
-
-        remainingToDeduct -= amountToTake;
-      }
-
-      // Record transaction
-      const txResult = await client.query<CreditTransaction>(
-        `INSERT INTO credit_transactions (
-          user_id, amount, balance_after, type, reference_type, reference_id, description
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING *`,
-        [
-          userId,
-          amount,
-          user.credits,
-          'adjustment',
-          'manual',
-          null,
-          reason
-        ]
-      );
-
-      const txn = txResult.rows[0];
-
-      writeDiagnostic('info', 'credits.adjusted', {
-        amount,
-        newBalance: user.credits
-      });
-
-      return { user, transaction: txn };
-    });
+    return { user: result.user, transaction: result.transaction };
   }
+
+  // Negative adjustment: the cache first (it carries the CHECK that refuses a
+  // negative balance), then the ledger in FIFO order.
+  const userResult = await client.query<User>(
+    `UPDATE users
+     SET credits = credits + $1,
+         updated_at = NOW()
+     WHERE user_id = $2
+     RETURNING *`,
+    [amount, userId]
+  );
+  if (userResult.rows.length === 0) {
+    throw new Error('User not found');
+  }
+  const user = userResult.rows[0];
+  if (user.credits < 0) {
+    throw new Error('Cannot adjust credits: would result in negative balance');
+  }
+
+  let remainingToDeduct = Math.abs(amount);
+  const ledgerResult = await client.query<{ ledger_id: string; remaining_amount: number }>(
+    `SELECT ledger_id, remaining_amount FROM credit_ledger
+     WHERE user_id = $1
+       AND status = 'active'
+       AND remaining_amount > 0
+       AND (expires_at IS NULL OR expires_at > NOW())
+     ORDER BY expires_at NULLS LAST, created_at ASC
+     FOR UPDATE`,
+    [userId]
+  );
+  for (const entry of ledgerResult.rows) {
+    if (remainingToDeduct <= 0) break;
+    const amountToTake = Math.min(remainingToDeduct, entry.remaining_amount);
+    const newRemaining = entry.remaining_amount - amountToTake;
+    await client.query(
+      `UPDATE credit_ledger
+       SET remaining_amount = $1,
+           status = CASE WHEN $1 = 0 THEN 'depleted'::credit_ledger_status ELSE status END,
+           updated_at = NOW()
+       WHERE ledger_id = $2`,
+      [newRemaining, entry.ledger_id]
+    );
+    remainingToDeduct -= amountToTake;
+  }
+  if (remainingToDeduct > 0) {
+    // The cache said yes but the ledger could not cover it: refuse rather
+    // than leave the two disagreeing (the transaction rolls back).
+    throw new Error('Cannot adjust credits: ledger has fewer spendable credits than the balance');
+  }
+
+  // RETURNING names its columns rather than *: the admin operator role has no
+  // SELECT on credit_transactions.description, and PostgreSQL requires SELECT
+  // on every column a RETURNING clause names (issue #162 security review).
+  const txResult = await client.query<CreditTransaction>(
+    `INSERT INTO credit_transactions (
+      user_id, amount, balance_after, type, reference_type, reference_id, description
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    RETURNING transaction_id, user_id, amount, balance_after, type,
+              reference_type, reference_id, created_at`,
+    [userId, amount, user.credits, 'adjustment', 'manual', null, reason]
+  );
+  const txn = txResult.rows[0];
+  writeDiagnostic('info', 'credits.adjusted', {
+    amount,
+    newBalance: user.credits
+  });
+  return { user, transaction: txn };
 }
 
 // Re-export ledger functions for direct access when needed

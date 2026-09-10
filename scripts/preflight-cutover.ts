@@ -25,8 +25,6 @@
  * - 'development' entries are the mirror of 'production' ones: demanded only in
  *   the development environment, never in production. The environment-isolation
  *   issuer allowlists are one per environment and must not be swapped.
- * - 'unless-admin' conditions are ignored: deployed Railway services are
- *   never local admin mode, so their Stripe variables are always required.
  * - LETTER_IRL_DEPLOYMENT_ENVIRONMENT is required in BOTH deployed
  *   environments: deployed development runs NODE_ENV=production, so without
  *   the identity label the validator resolves it to production mode and the
@@ -109,7 +107,6 @@ export function diffManifest(
       if (entry.condition === 'when-jit-enabled' && !jitFlagSet) continue;
       if (entry.condition === 'when-static-dcr' && !staticDcrFlagSet) continue;
     }
-    // 'unless-admin' is ignored: deployed services are never local admin mode.
 
     const satisfied = [entry.name, ...(entry.aliases ?? [])].some(name => present.has(name));
     if (!satisfied) {

@@ -28,7 +28,7 @@ describe("shared admin contracts", () => {
 
   it("enforces bounded audit JSON and outcome/error consistency", () => {
     const base = {
-      actor: { sid: "S-1-5-21-1000", name: "operator" },
+      actor: { id: "owner@example.com", name: "operator" },
       environment: "development",
       mode: "read-only",
       sessionIdHash: "a".repeat(64),
@@ -93,6 +93,21 @@ describe("shared admin contracts", () => {
         code: "ADMIN_IDEMPOTENCY_CONFLICT",
       }),
     );
+  });
+
+  it("holds the reason to the form's bounds on the server too", () => {
+    const previewDigest = "b".repeat(64);
+    const attempt = (reason: string) =>
+      validateAdminCommandConfirmation(
+        { previewDigest, reason, idempotencyKey: "test-command-2", expectedVersion: "7" },
+        { previewDigest, expectedVersion: "7" },
+      );
+    // A five-character reason reached the audit log on 2026-09-08 because
+    // minlength=8 lived only in the browser form.
+    expect(() => attempt("short")).toThrow();
+    expect(() => attempt("   seven  ")).toThrow();
+    expect(attempt("eight ch").reason).toBe("eight ch");
+    expect(() => attempt("x".repeat(501))).toThrow();
   });
 
   it("maps unexpected failures to stable public errors without raw details", () => {

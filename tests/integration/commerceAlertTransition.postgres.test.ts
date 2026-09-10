@@ -40,7 +40,7 @@ describePostgres('commerce alert transitions', () => {
   let adminPool: pg.Pool;
   let pool: pg.Pool;
   let schema: string;
-  let admin: typeof import('../../src/api/adminApiHandler.js');
+  let admin: typeof import('../../src/services/commerceAlertService.js');
   let closeServicePool: (() => Promise<void>) | undefined;
 
   beforeAll(async () => {
@@ -53,7 +53,7 @@ describePostgres('commerce alert transitions', () => {
     pool = new Pool({ connectionString: scoped, max: 8 });
 
     process.env.DATABASE_URL = scoped;
-    admin = await import('../../src/api/adminApiHandler.js');
+    admin = await import('../../src/services/commerceAlertService.js');
     closeServicePool = (await import('../../src/db/index.js')).closePool;
   }, 180_000);
 

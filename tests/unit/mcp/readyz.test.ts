@@ -370,22 +370,6 @@ describe('/readyz prices check (#275 stage A)', () => {
     expect(report.body).not.toContain('credit-pack-4');
   });
 
-  it('leaves admin-mode production to the config check, not the prices one', async () => {
-    // validateStripe skips its price rules under ADMIN_ENABLED, so the gate
-    // here looked like it needed an admin term too. It does not:
-    // admin.enabled_in_production is itself a config ERROR, so such a deploy
-    // is already unready on `config` and an admin term in the prices gate
-    // would be unreachable. Pinned so nobody re-adds the dead condition.
-    priceCatalog.unpriced = [
-      { productCode: 'credit-pack-4', rule: 'price.id_not_configured', diagnosticClass: 'configuration_error' }
-    ];
-
-    const report = await getReadiness({ ...READY_PROD, ADMIN_ENABLED: 'true' });
-
-    expect(report.statusCode).toBe(503);
-    expect(JSON.parse(report.body).failing).toContain('config');
-  });
-
   it('holds an UNREADY verdict briefly, so a warming instance stops lying fast', async () => {
     // The few hundred ms between the port binding and a subsystem warming up.
     // Caching that verdict for the full 5s pinned a healthy instance at 503

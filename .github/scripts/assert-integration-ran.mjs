@@ -32,6 +32,9 @@ const REQUIRED = [
   'jitFulfillmentIdempotency.postgres.test.ts',
   'packRefund.postgres.test.ts',
   'packRefundCommand.postgres.test.ts',
+  'adminReadModels.postgres.test.ts',
+  'adminCommands.postgres.test.ts',
+  'providerErrorMinimisation.postgres.test.ts',
 ];
 
 /**

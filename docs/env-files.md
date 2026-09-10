@@ -28,75 +28,13 @@ Main configuration file used by Railway deployment. Contains:
 
 ---
 
-### Local admin configuration
+### Admin panel configuration
 
 `.env.admin` and `.env.admin.dev` are unsupported. Public admin routes are forced off, and
-`ADMIN_ENABLED=true` fails public-server startup. Never store a production database URL or an admin role
-credential in a workstation `.env` file.
-
-The approved local operator runtime will read non-secret JSON from
-`%LOCALAPPDATA%/LetterIRL/admin/<environment>.json` and retrieve credentials from an approved vault. Slice
-1 provides strict parsing and a grant-provisioning command, but no local browser server or UI.
-
----
-
-### `.env.dev` - Development Server
-
-Full development configuration for running the complete server locally.
-
-```bash
-npm run dev:env
-```
-
-**Key settings:**
-- Neon dev branch database
-- Auth0 dev tenant (separate from production)
-- Stripe test mode keys (`sk_test_...`)
-- Dummy letter provider (no real mail sent)
-- Workers enabled
-- Optional `DEBUG=true` to enable extra diagnostics (defaults to false when unset)
-
-**Use case:** Local development with full functionality.
-
-`.env.dev` is a local-development file, not the source of truth for deployed
-development credentials. It may still contain template or stale values. For
-operations against the deployed development environment (including database
-migrations), use the `letter-irl-api` variables from Railway's `development`
-environment. Verify the Railway environment, pooled Neon hostname, and current
-migration ledger before making changes. If `.env.dev` fails validation, never
-fall back to `.env` or any production credential, and never persist a retrieved
-Railway secret into the repository.
-
----
-
-### `.env.local` - Local Overrides
-
-Lightweight file for quick local testing with minimal config.
-
-```bash
-npm run dev:local
-```
-
-**Use case:** Quick iteration without full dev setup.
-
----
-
-### `.env.test` - Test Database
-
-Configuration for running automated tests.
-
-```bash
-npm test
-npm run test:run
-```
-
-**Key settings:**
-- Test database URL
-- Mocked external services
-
-**Use case:** Vitest unit and integration tests.
-
----
+`ADMIN_ENABLED=true` fails public-server startup. The admin panel is a separate tailnet-only Railway
+service configured by its own variables ([admin-panel-guide.md](admin-panel-guide.md)); for local
+development copy `.env.admin.example` to `.env.admin.local` (git-ignored) and run `npm run admin:dev`.
+Never store a production database URL or an admin role credential in a workstation `.env` file.
 
 ## Example Files
 

@@ -2523,7 +2523,7 @@ async function processRefundEvent(
  * Anything not listed here is treated as a loss and revokes, which is the
  * correct default for an unrecognised or future status.
  */
-const NON_LOSS_DISPUTE_STATUSES = new Set([
+export const NON_LOSS_DISPUTE_STATUSES = new Set([
   'won',
   'prevented',
   'warning_needs_response',
