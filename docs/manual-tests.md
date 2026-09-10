@@ -779,7 +779,10 @@ badge carries text; the full keyboard traversal and the 320 px rendering are sti
 
 ### ADMIN-PROD-RO-01 — Production read-only gate
 
-**Status:** Requires the owner's separate production read-only approval before any step.
+**Status:** Executed 2026-09-10 on the owner's read-only approval, from the owner's laptop over the
+tailnet (curl with certificate verification plus the embedded browser). All three steps passed, with
+two readings recorded below. The production service is `letter-irl-admin-prod` (Railway service names are
+unique per project and development holds `letter-irl-admin`); the node is `letter-irl-admin-prod`.
 
 **Preconditions:** Production roles created by SQL; grants applied with `--confirm-production-access`;
 the production node registered with `tag:prod-admin`; `ADMIN_MODE=read-only`; the restricted Stripe key
@@ -787,12 +790,20 @@ absent or live.
 
 **Steps:**
 
-1. [ ] Verify the banner shows `production`, `read-only`, `marker: production`,
-   `letter_irl_admin_reader_production`, `stripe: live` and `tag:prod-admin`.
-2. [ ] Open the refunded Starter Pack order from the launch weekend; verify 2 letters, 0 remaining,
-   500 cents refunded, lots revoked.
-3. [ ] Verify `/audit` shows the boot event and this session, and that no command route exists in full mode
-   terms (every POST other than reveal and logout answers 403 `ADMIN_READ_ONLY_MODE`).
+1. [x] Verify the banner shows `production`, `read-only`, `marker: production`,
+   `letter_irl_admin_reader_production`, `stripe: live` and `tag:prod-admin`. (Seen, with `stripe: absent`:
+   the restricted live key is a full-mode item and was not set at this gate. Build `801b40c`.)
+2. [x] Open the refunded Starter Pack order from the launch weekend; verify 2 letters, 0 remaining,
+   500 cents refunded, lots revoked. (Status `refunded`, both ledger lots `revoked` with 0 remaining and not
+   spendable, 5.00 USD paid. The order's refunded-amount field reads 0.00 USD because that column arrived
+   with migration 029 and the refund was issued from the Dashboard before it existed; the status and the
+   revoked lots are the record of the refund.)
+3. [x] Verify `/audit` shows the boot event and this session, and that no command route exists in full mode
+   terms (every POST other than reveal and logout answers 403 `ADMIN_READ_ONLY_MODE`). (`admin.boot` and
+   the sessions listed; a POST to `/elevate` carrying the session cookie and its CSRF token answered 403
+   with the read-only page and audited `admin.request_denied` with `ADMIN_READ_ONLY_MODE`. A POST without
+   a session is refused earlier as `ADMIN_CSRF_REJECTED`, also audited. The app port 8790 is unreachable
+   from the tailnet, as in ADMIN-INFRA-01 step 4.)
 
 **Pass criteria:** Production is visible and untouchable.
 

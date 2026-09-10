@@ -258,6 +258,15 @@ from the repository deploys at once with nothing configured:
    **Dockerfile** (it then reports the path as set via `RAILWAY_DOCKERFILE_PATH`). Apply the staged
    changes; that starts the first build.
 
+The production service follows the same order in the **production** environment with branch `master`, and
+is named `letter-irl-admin-prod`: Railway service names are unique across the project, so the plain name
+belongs to development. The node name and tag do not depend on the service name; the code derives
+`letter-irl-admin-prod` and `tag:prod-admin` from `LETTER_IRL_DEPLOYMENT_ENVIRONMENT=production`. Two
+things seen on 2026-09-10: variables typed into the Raw Editor stay staged until the "Apply changes" banner
+is deployed, and the API reports them only after that; and a wrong reader password fails the boot with
+`ADMIN_INTERNAL_ERROR` carrying PostgreSQL class `28P01` in the log attributes, which reads as a password
+problem, not a Tailscale one.
+
 | Variable | Value |
 | --- | --- |
 | `RAILWAY_DOCKERFILE_PATH` | `Dockerfile.admin` |
@@ -371,7 +380,9 @@ Production is provisioned only after three separate owner approvals, each record
 
 1. **Read-only connection**: production roles created by SQL, grants applied with
    `--confirm-production-access`, the production node registered with `tag:prod-admin`, `ADMIN_MODE`
-   `read-only`; then `ADMIN-PROD-RO-01`.
+   `read-only`; then `ADMIN-PROD-RO-01`. **Done 2026-09-10** on the owner's approval: service
+   `letter-irl-admin-prod`, node `letter-irl-admin-prod` with `tag:prod-admin`, one-off key consumed and
+   deleted, `ADMIN-PROD-RO-01` passed (see [manual-tests.md](manual-tests.md)).
 2. **Full mode**: a restricted live Stripe key created, the production node signed or approved and its
    tag verified, `ADMIN_TOTP_SECRET` enrolled, `DATABASE_URL` switched to the operator role.
 3. **First command**: reversible (an alert acknowledgement), never a refund.
