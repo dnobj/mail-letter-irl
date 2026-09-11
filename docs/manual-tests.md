@@ -807,6 +807,40 @@ absent or live.
 
 **Pass criteria:** Production is visible and untouchable.
 
+### ADMIN-PROD-FULL-01 — Production full-mode gate and first command
+
+**Status:** Executed 2026-09-11 on the owner's separate full-mode and first-command approvals, from the
+owner's own browser over the tailnet (the writes need the owner's authenticator code and a browser
+session; the audit rows were read back with curl). Passed, with one configuration gap found and closed
+between the two runs of step 4.
+
+**Preconditions:** `ADMIN-PROD-RO-01` passed; a restricted **live** Stripe key created for this service
+(Charges and Refunds write, Payment Intents read, Payment Disputes read, Checkout Sessions read);
+`ADMIN_TOTP_SECRET` enrolled with `npx tsx scripts/adminTotpEnrol.ts production`; `DATABASE_URL` switched
+to `letter_irl_admin_operator_production` and `ADMIN_MODE=full` in the same variable edit; the provider
+variables wired as references to the API service.
+
+**Steps:**
+
+1. [x] Verify the banner shows `production`, `full`, `stripe: live`, `mail: postgrid` and `tag:prod-admin`,
+   and that `/audit` carries the boot event. (Seen on build `801b40c`. The banner names the reader role,
+   which pages read through; the operator role is what the boot validated.)
+2. [x] Run the Stripe reconciliation from `/stripe` (no elevation needed). (Last 30 days: 1 Stripe payment,
+   1 grant, matched, no discrepancies; `stripe.reconcile` audited with counts and no Stripe identifiers.)
+3. [x] Elevate on `/elevate` with the authenticator; verify the banner shows the elevation and `/audit`
+   records `admin.elevate`. (Both seen; the window is 10 minutes in production, and a redeploy drops
+   every session.)
+4. [x] Execute the provider status sync as a dry run from
+   `/commands/mail.status_sync/preview?target=letters&days=30&dryRun=on` with a reason and the phrase
+   `PRODUCTION SYNC-DRY-RUN letters`; verify a `succeeded` run row and a `mail.status_sync` audit row.
+   (First run: succeeded, `checked: 1, errors: 1`, the error being `Letter not found` for the one live
+   letter, because the service had no `LETTER_PROVIDER*` variables and used the dummy provider. After
+   wiring the three provider variables as references to the API service and redeploying: succeeded,
+   `checked: 1, updated: 0, errors: 0` against PostGrid.)
+
+**Pass criteria:** Every write goes through elevation, preview and typed confirmation, is recorded as a
+run and an audit row, and the panel's provider commands talk to the real provider.
+
 ### ADMIN-CMD-01 — Acknowledge and resolve an alert with elevation, preview, typed confirmation and replay
 
 **Status:** Executed 2026-09-08 in the owner's Chrome, driven by the browser extension, with the
