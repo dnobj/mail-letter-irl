@@ -418,6 +418,30 @@ the preview cards already buy packs.
       widget-initiated result, so afterwards it could not name the order id without a new checkout;
       and `list_orders` covers mail orders only, so a pack order id cannot be recovered in the chat.)
 
+### PAY-04 — Checkout card shows the purchase outcome (issue #322)
+
+**Status:** Not executed. Development only.
+
+Background: PAY-03 left the card showing "Open secure checkout" after the payment, for a session
+Stripe would refuse, and the model could not name the order afterwards because it never sees a
+widget-initiated result. The card now polls `get_purchase_status` while a checkout is open and
+replaces the link with the outcome.
+
+- [ ] With the (DEV) connector refreshed to a widget version of 27 or later, buy the Starter Pack in a
+      fresh chat (the PAY-03 path, dropped first call and all). Confirm the populated card shows the
+      order id under the link and a **Check status** button.
+- [ ] Pay with a Stripe test card, typed by the owner, in the tab the link opened. Return to the
+      ChatGPT tab. Within a few seconds the card should read "Paid. 2 letters added to your account."
+      with the link and the note gone, the unused count from this pack, and no Check status button.
+      Record whether the switch happened on return without a click (the visibility refresh) or needed
+      **Check status** (timers throttled in the hidden iframe).
+- [ ] Ask ChatGPT for the balance; it should agree with the card.
+- [ ] Optional expiry path: create a checkout and, from the Stripe test dashboard, expire the session.
+      The card should read "This checkout expired before it was paid. Nothing was charged." with
+      **Create a new checkout**; clicking it creates a replacement without a permission prompt and the
+      card polls the new order.
+- [ ] Record the readings on #322.
+
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
 - [ ] Stripe Dashboard → Developers → Webhooks → the endpoint → the delivered
       `checkout.session.completed` event → Resend.

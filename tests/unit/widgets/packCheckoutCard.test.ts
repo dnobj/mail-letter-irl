@@ -1,18 +1,26 @@
 /**
- * Behaviour tests for PackCheckoutCard's empty-render recovery (issue #322).
+ * Behaviour tests for PackCheckoutCard (issue #322).
  *
- * The defect they cover: ChatGPT drops the first consequential tool call after
- * "Allow once", renders this card's template with no tool result, and the
- * skeleton sits there indefinitely while the model tells the customer to use
- * "the checkout shown above" (observed in production on 2026-09-11 and in
- * development on 2026-09-12; no request reached the API either time). The
- * card now waits, then offers to create the checkout itself through the
- * bridge, the way the preview cards already buy packs.
+ * Two defects they cover:
+ *
+ * 1. Empty render. ChatGPT drops the first consequential tool call after
+ *    "Allow once", renders this card's template with no tool result, and the
+ *    skeleton sits there indefinitely while the model tells the customer to
+ *    use "the checkout shown above" (production 2026-09-11, development
+ *    2026-09-12; no request reached the API either time). The card waits,
+ *    then offers to create the checkout itself through the bridge, the way
+ *    the preview cards already buy packs. Proven in development by PAY-03.
+ *
+ * 2. Stale link. After payment the card still showed "Open secure checkout"
+ *    for a session Stripe would refuse, and the model never sees a
+ *    widget-initiated result, so nothing else could say the letters had
+ *    landed. The card now polls get_purchase_status, in the preview cards'
+ *    visibility-gated shape, and replaces the link with the outcome.
  *
  * Same honest limits as purchaseStatus.test.ts: jsdom runs the same source
- * but is not ChatGPT. Whether the bridge is live inside a card the host drew
- * without a result, and whether a widget-initiated write call shows its own
- * consent prompt, can only be learned against deployed development.
+ * but is not ChatGPT. Timer throttling in a hidden iframe does not reproduce
+ * here; these tests guard the logic and the deployed development connector
+ * guards the behaviour.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -43,6 +51,9 @@ interface Harness {
   pendingTimers: () => ScheduledTimer[];
   runNextTimer: () => Promise<void>;
   deliver: (output: Record<string, unknown> | null) => void;
+  setStatus: (status: Record<string, unknown>) => void;
+  setHidden: (hidden: boolean) => void;
+  fireVisibilityChange: () => void;
   click: (id: string) => Promise<void>;
   clickPackOption: (pack: string) => Promise<void>;
   packOptionLabels: () => string[];
@@ -82,6 +93,8 @@ function mount(options: MountOptions = {}): Harness {
   const opened: string[] = [];
   let toolOutput: Record<string, unknown> | null =
     options.toolOutput === undefined ? null : options.toolOutput;
+  let purchaseStatus: Record<string, unknown> = { purchaseStatus: 'pending_payment' };
+  let hidden = false;
 
   const bridge: Record<string, unknown> = {
     theme: 'light',
@@ -135,6 +148,9 @@ function mount(options: MountOptions = {}): Harness {
               })
         };
       }
+      if (name === 'get_purchase_status') {
+        return { structuredContent: { orderId: args.orderId, ...purchaseStatus } };
+      }
       return { structuredContent: {} };
     };
   }
@@ -142,6 +158,7 @@ function mount(options: MountOptions = {}): Harness {
   const dom = new JSDOM(html, {
     runScripts: 'dangerously',
     beforeParse(window) {
+      Object.defineProperty(window.document, 'hidden', { get: () => hidden });
       // Timers are captured rather than run, so the wait is observable and
       // nothing depends on wall-clock time.
       (window as unknown as Record<string, unknown>).setTimeout = (fn: () => void, delay: number) => {
@@ -184,6 +201,15 @@ function mount(options: MountOptions = {}): Harness {
       toolOutput = output;
       dom.window.dispatchEvent(new dom.window.Event('openai:set_globals'));
     },
+    setStatus: status => {
+      purchaseStatus = status;
+    },
+    setHidden: value => {
+      hidden = value;
+    },
+    fireVisibilityChange: () => {
+      document.dispatchEvent(new dom.window.Event('visibilitychange'));
+    },
     click: async id => {
       element(id).dispatchEvent(new dom.window.Event('click'));
       await flush();
@@ -203,6 +229,8 @@ function mount(options: MountOptions = {}): Harness {
   };
 }
 
+const statusCalls = (card: Harness) => card.calls.filter(call => call.name === 'get_purchase_status');
+
 describe('PackCheckoutCard with a tool result', () => {
   it('renders the checkout straight away and never arms the empty-state wait', () => {
     const card = mount({ toolOutput: pendingCheckout() });
@@ -211,7 +239,9 @@ describe('PackCheckoutCard with a tool result', () => {
     expect(card.visible('state-loading')).toBe(false);
     expect(card.visible('state-empty')).toBe(false);
     expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_host');
-    expect(card.pendingTimers()).toEqual([]);
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    // The only timer is the status poll; no 5 s empty-state wait exists.
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
   });
 
   it('swaps the skeleton for the checkout when the result arrives in time, so the retry never appears', () => {
@@ -228,7 +258,7 @@ describe('PackCheckoutCard with a tool result', () => {
     expect(card.visible('state-ready')).toBe(true);
     expect(card.visible('state-empty')).toBe(false);
     expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_host');
-    expect(card.pendingTimers()).toEqual([]);
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
   });
 });
 
@@ -263,6 +293,7 @@ describe('PackCheckoutCard rendered without a tool result', () => {
     expect(card.text('letters')).toBe('2');
     expect(card.text('price')).toBe('5.00');
     expect(card.text('message')).toBe('Pay USD 5.00 to add 2 letters to your account.');
+    expect(card.text('order-line')).toBe('Order ord_retry_0001');
     // The one convenience open, with the retry's own URL.
     expect(card.opened).toEqual(['https://checkout.stripe.com/c/pay/cs_retry_starter']);
   });
@@ -391,7 +422,7 @@ describe('PackCheckoutCard rendered without a tool result', () => {
     const second = card.click('retry-button');
     await Promise.all([first, second]);
 
-    expect(card.calls).toHaveLength(1);
+    expect(card.calls.filter(call => call.name === 'create_pack_checkout')).toHaveLength(1);
   });
 
   it('explains how to recover when the bridge cannot call tools', async () => {
@@ -403,5 +434,156 @@ describe('PackCheckoutCard rendered without a tool result', () => {
     expect(card.visible('state-empty')).toBe(true);
     expect(card.text('empty-message')).toMatch(/ask for the checkout again/i);
     expect(card.visible('retry-button')).toBe(false);
+  });
+});
+
+describe('PackCheckoutCard purchase status', () => {
+  it('polls the purchase status while the checkout is open and keeps the link while payment is pending', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+
+    expect(card.visible('check-status-button')).toBe(true);
+    await card.runNextTimer();
+
+    expect(statusCalls(card)).toEqual([{ name: 'get_purchase_status', args: { orderId: 'ord_host_0001' } }]);
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+  });
+
+  it('shows the paid state and stops polling once the letters are on the account', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({ purchaseStatus: 'submitted', letters: 2, lettersRemaining: 2 });
+
+    await card.runNextTimer();
+
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.text('done')).toMatch(/2 of 2 from this pack are still unused/);
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.visible('note')).toBe(false);
+    expect(card.visible('check-status-button')).toBe(false);
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    expect(card.pendingTimers()).toEqual([]);
+  });
+
+  it('reports a confirmed payment that is still being credited, and keeps polling', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({ purchaseStatus: 'processing', letters: 2 });
+
+    await card.runNextTimer();
+
+    expect(card.text('message')).toBe('Payment confirmed. Adding 2 letters to your account...');
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.visible('check-status-button')).toBe(true);
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+  });
+
+  it('keeps the paid state when the host re-delivers the pending checkout', async () => {
+    // openai:set_globals only ever knows the checkout. Re-rendering from it
+    // put the payment link back over a paid purchase in the preview cards
+    // on 2026-08-30; the same guard applies here.
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({ purchaseStatus: 'submitted', letters: 2, lettersRemaining: 2 });
+    await card.runNextTimer();
+
+    card.deliver(pendingCheckout());
+
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.pendingTimers()).toEqual([]);
+  });
+
+  it('offers a new checkout when the session expired, and polls the replacement', async () => {
+    const card = mount({ toolOutput: pendingCheckout(), toolInput: { pack: 'starter' } });
+    card.setStatus({ purchaseStatus: 'cancelled' });
+    await card.runNextTimer();
+
+    expect(card.text('message')).toBe('This checkout expired before it was paid. Nothing was charged.');
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.visible('new-checkout-button')).toBe(true);
+    expect(card.pendingTimers()).toEqual([]);
+
+    card.setStatus({ purchaseStatus: 'pending_payment' });
+    await card.click('new-checkout-button');
+
+    expect(card.calls.at(-1)).toEqual({ name: 'create_pack_checkout', args: { pack: 'starter' } });
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_retry_starter');
+    expect(card.visible('new-checkout-button')).toBe(false);
+    expect(card.text('order-line')).toBe('Order ord_retry_0001');
+
+    await card.runNextTimer();
+    expect(statusCalls(card).at(-1)).toEqual({ name: 'get_purchase_status', args: { orderId: 'ord_retry_0001' } });
+  });
+
+  it('says how to recover from a failed payment when no pack is known', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({ purchaseStatus: 'payment_failed' });
+
+    await card.runNextTimer();
+
+    expect(card.text('message')).toBe('The payment did not go through. Nothing was charged.');
+    expect(card.visible('new-checkout-button')).toBe(false);
+    expect(card.visible('err')).toBe(true);
+    expect(card.text('err')).toMatch(/ask for a new checkout/i);
+  });
+
+  it('shows the server message for refund and hold states', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({
+      purchaseStatus: 'refunded',
+      message: 'This purchase was refunded. Refunds take 5-10 business days to appear on the card.'
+    });
+
+    await card.runNextTimer();
+
+    expect(card.text('message')).toMatch(/refunded/i);
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.visible('done')).toBe(false);
+    expect(card.pendingTimers()).toEqual([]);
+  });
+
+  it('stops polling while the tab is hidden and refreshes the moment it returns', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    expect(card.pendingTimers()).toHaveLength(1);
+
+    card.setHidden(true);
+    card.fireVisibilityChange();
+    expect(card.pendingTimers()).toEqual([]);
+    expect(statusCalls(card)).toEqual([]);
+
+    card.setHidden(false);
+    card.fireVisibilityChange();
+    await flush();
+
+    expect(statusCalls(card)).toHaveLength(1);
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+  });
+
+  it('lets the customer check on demand', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+
+    await card.click('check-status-button');
+
+    expect(statusCalls(card)).toHaveLength(1);
+    expect(card.text('check-status-button')).toBe('Check status');
+    expect(card.disabled('check-status-button')).toBe(false);
+  });
+
+  it('starts polling the checkout it created itself', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+    await card.runNextTimer();
+    await card.click('retry-button');
+
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+    await card.runNextTimer();
+
+    expect(statusCalls(card)).toEqual([{ name: 'get_purchase_status', args: { orderId: 'ord_retry_0001' } }]);
+  });
+
+  it('does not poll without a bridge to call through', () => {
+    const card = mount({ toolOutput: pendingCheckout(), withoutCallTool: true });
+
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.visible('check-status-button')).toBe(false);
+    expect(card.pendingTimers()).toEqual([]);
   });
 });
