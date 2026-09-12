@@ -348,20 +348,33 @@ event arrived; `credits.webhook_failed` means the handler threw), and the
 account balance as `get_account_balance` reports it.
 
 ### PAY-01 — Pack purchase (US-CREDIT-02)
-- [ ] In ChatGPT, ask to buy the smallest letter pack (Starter Pack, 2 letters).
-- [ ] `list_letter_packs` runs, then `create_pack_checkout`, and ChatGPT
+
+**Status:** Executed in production on 2026-09-11 with the owner's own card, refunded under REFUND-01
+the same night. Passed on the payment path; the link step failed twice before it passed, and that
+failure is recorded on #322.
+
+- [x] In ChatGPT, ask to buy the smallest letter pack (Starter Pack, 2 letters).
+- [x] `list_letter_packs` runs, then `create_pack_checkout`, and ChatGPT
       presents the checkout as a clickable link. Known gap: it may say the
-      checkout is "open" without showing a link until asked for one.
-- [ ] Open the link. Stripe Checkout shows the pack name, the price, and the
+      checkout is "open" without showing a link until asked for one. (Worse
+      than the gap says: on the first two attempts the model claimed success
+      after the permission prompt without calling the tool at all, once with a
+      fabricated 26,000-character URL, and the production log shows no
+      request. After "you did not call the tool, call it now" the call ran, but
+      the reply claimed a card that this tool does not render. The genuine URL
+      was reachable only in the developer-mode "Called tool" response panel.
+      Live Stripe Checkout URLs now use the `/g/pay/` path.)
+- [x] Open the link. Stripe Checkout shows the pack name, the price, and the
       account email already filled in. The prefilled email proves the `users`
       row exists; a blank email field means it does not (#319).
-- [ ] Pay. Production: a real card, refunded under REFUND-01. Development: a
+- [x] Pay. Production: a real card, refunded under REFUND-01. Development: a
       Stripe test card, typed by the owner.
-- [ ] Balance reads 2 letters. Railway shows `stripe.webhook_received` with
+- [x] Balance reads 2 letters. Railway shows `stripe.webhook_received` with
       `checkout.session.completed`. If the balance is right but that line is
       absent, the card's Check status polled Stripe directly and the webhook
       endpoint is not delivering: fix the endpoint before REFUND-01, which has
-      no such fallback.
+      no such fallback. (Webhook received 23:19Z; order `checkout_pending` →
+      `paid` → `fulfilled`; purchase lot 4 credits active; balance 2 letters.)
 
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
 - [ ] Stripe Dashboard → Developers → Webhooks → the endpoint → the delivered
@@ -370,23 +383,38 @@ account balance as `get_account_balance` reports it.
 - [ ] Balance unchanged; no second purchase lot in the ledger.
 
 ### REFUND-01 — Full refund from the Stripe Dashboard (US-CREDIT-06)
+
+**Status:** Executed in production on 2026-09-12 after PAY-01. Passed. The precondition letter went
+to the owner's own return address as recipient: preview validated both addresses live at PostGrid,
+`send_letter` deducted the ledger, routed to PostGrid, the provider accepted, the transaction
+committed; lot 4 initial / 2 remaining, balance 1 letter, letter accepted, job completed.
+
 Precondition: PAY-01, then one letter sent from that pack, so the spent and
 unspent halves are both present. Letter IRL has no refund button of its own;
 the refund is issued in Stripe and reaches the service only as a webhook.
-- [ ] Stripe Dashboard → Payments → the pack payment → Refund → full amount.
-- [ ] Railway: `stripe.webhook_received` with `charge.refunded` (and
+- [x] Stripe Dashboard → Payments → the pack payment → Refund → full amount.
+- [x] Railway: `stripe.webhook_received` with `charge.refunded` (and
       `refund.created` / `refund.updated` if delivered), no
-      `credits.webhook_failed`.
-- [ ] Balance drops by the **unspent** letters only: 1 → 0. The sent letter is
-      untouched and its status still tracks normally.
-- [ ] `get_purchase_status` for the pack order reads `refunded`, message
-      "The payment was refunded."
-- [ ] Database or admin view: the purchase lot is `revoked` with
+      `credits.webhook_failed`. (`refund.created` and `charge.refunded` at
+      02:31Z, no failure line.)
+- [x] Balance drops by the **unspent** letters only: 1 → 0. The sent letter is
+      untouched and its status still tracks normally. (Balance 0 through
+      ChatGPT; the letter still `accepted`.)
+- [x] `get_purchase_status` for the pack order reads `refunded`, message
+      "The payment was refunded." (Also 0 remaining, 500 cents refunded. The
+      model's prose stopped mid-sentence on that turn while the tool panel
+      held the complete result; an earlier turn answered "connector lookup is
+      timing out" with no request reaching the API, and a retry worked.)
+- [x] Database or admin view: the purchase lot is `revoked` with
       `remaining_amount = 0`; one `refund` ledger row links to it with
       `remaining_at_revocation` equal to what was left; one `credit_transactions`
       row of `-<unspent credits>`; `orders.refunded_at` is set;
-      `credits_purchased` dropped by the whole pack.
-- [ ] No `stripe_money_event_unmatched` row in `commerce_operational_alerts`.
+      `credits_purchased` dropped by the whole pack. (Admin panel: order
+      `refunded`, refunded amount 5.00 USD, purchase lot revoked 4/0, refund lot
+      recorded with reason `payment_refunded`; the panel's "letters already
+      refunded" line shows the pro-rata 2.50 USD for the one unspent letter.)
+- [x] No `stripe_money_event_unmatched` row in `commerce_operational_alerts`.
+      (Alerts: nothing to show; unmatched events: none.)
 
 ### REFUND-02 — Partial refund from the Stripe Dashboard raises an alert
 The house rule forbids partial pack refunds from the Dashboard; this case proves
