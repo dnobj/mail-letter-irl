@@ -378,8 +378,9 @@ failure is recorded on #322.
 
 ### PAY-03 — Checkout card recovery after a dropped call (issue #322)
 
-**Status:** Not executed. Development only. The card reached `dev` in PR #359; the empty-state
-retry followed in the next PR.
+**Status:** Executed 2026-09-12 in development through the embedded browser; the owner paid with a
+Stripe test card. Passed: the dropped call reproduced on the first attempt and the card recovered
+without a second permission prompt.
 
 Background: on 2026-09-11 (production) and 2026-09-12 (development) ChatGPT dropped the first
 `create_pack_checkout` after "Allow once": no request reached the API, the model said to use "the
@@ -387,21 +388,35 @@ checkout shown above", and the card template rendered as grey placeholder bars. 
 five seconds for a result and then offers to create the checkout itself through the bridge, the way
 the preview cards already buy packs.
 
-- [ ] With the (DEV) connector refreshed to a widget version of 26 or later, start a fresh chat and
-      ask to buy the Starter Pack. Click **Allow once**.
-- [ ] If the card fills in with the price and the link within a moment, the call went through and
-      the retry never appears. Record that and stop; the dropped call did not reproduce.
-- [ ] If the card shows grey bars, wait five seconds. It should read "No checkout was created yet.
+- [x] With the (DEV) connector refreshed to a widget version of 26 or later, start a fresh chat and
+      ask to buy the Starter Pack. Click **Allow once**. (Connector refreshed after PR #360 deployed:
+      22 tools, every widget at v26. Allow once clicked at 16:43Z.)
+- [x] If the card fills in with the price and the link within a moment, the call went through and
+      the retry never appears. Record that and stop; the dropped call did not reproduce. (Did not
+      apply: the call was dropped again. The dev log shows exactly one request at 16:42:55Z, a
+      `resources/read` of `PackCheckoutCard.html@v26`, and no `tools/call`. The model still wrote
+      that the checkout "has been created".)
+- [x] If the card shows grey bars, wait five seconds. It should read "No checkout was created yet.
       Nothing has been charged." with **Create my checkout** (or **Choose a pack** when the host
-      passed no pack in `toolInput`).
-- [ ] Click it. Record whether ChatGPT shows another permission prompt for the widget-initiated
+      passed no pack in `toolInput`). (Seen after five seconds, with **Create my checkout**, so the
+      host had passed the pack.)
+- [x] Click it. Record whether ChatGPT shows another permission prompt for the widget-initiated
       call, and whether the card then fills in with the link. The Railway dev log shows the
-      `create_pack_checkout` request only for this second attempt.
-- [ ] Open the link and pay with a Stripe test card, typed by the owner. Balance reads 2 letters;
-      `stripe.webhook_received` with `checkout.session.completed` appears in the dev log.
-- [ ] Record on #322 whether the bridge was live inside a card the host drew without a result. If
+      `create_pack_checkout` request only for this second attempt. (No prompt at all.
+      `tools/call create_pack_checkout` logged at 16:44:06Z, invocation succeeded, and the card
+      filled in with the pack, the price and the link. The card's one convenience `openExternal` was
+      blocked by the embedded browser because the click was automated; the anchor remained.)
+- [x] Open the link and pay with a Stripe test card, typed by the owner. Balance reads 2 letters;
+      `stripe.webhook_received` with `checkout.session.completed` appears in the dev log. (Webhook
+      at 16:47:47Z. Order a5984b30: `letter_pack / credit-pack-4`, `fulfilled`, 5.00 USD, events
+      `checkout.session.created` → `checkout.session.completed` → `fulfilled`; purchase lot of 4
+      credits active for 730 days. Balance via ChatGPT: 6 letters, three active lots, so +2.)
+- [x] Record on #322 whether the bridge was live inside a card the host drew without a result. If
       the button did nothing, the card's text-only fallback ("Ask for the checkout again") is the
-      expected state and the issue stays open.
+      expected state and the issue stays open. (Recorded: the bridge is live, and a call started
+      from the card shows no permission prompt. Two gaps found on the way: the model never sees a
+      widget-initiated result, so afterwards it could not name the order id without a new checkout;
+      and `list_orders` covers mail orders only, so a pack order id cannot be recovered in the chat.)
 
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
 - [ ] Stripe Dashboard → Developers → Webhooks → the endpoint → the delivered
