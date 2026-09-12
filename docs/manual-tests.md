@@ -420,27 +420,39 @@ the preview cards already buy packs.
 
 ### PAY-04 — Checkout card shows the purchase outcome (issue #322)
 
-**Status:** Not executed. Development only.
+**Status:** Executed 2026-09-12 in development through the embedded browser; the owner paid with a
+Stripe test card. Passed: the card switched to the paid state two seconds after the webhook, with no
+click and before the owner had returned to the tab.
 
 Background: PAY-03 left the card showing "Open secure checkout" after the payment, for a session
 Stripe would refuse, and the model could not name the order afterwards because it never sees a
 widget-initiated result. The card now polls `get_purchase_status` while a checkout is open and
 replaces the link with the outcome.
 
-- [ ] With the (DEV) connector refreshed to a widget version of 27 or later, buy the Starter Pack in a
+- [x] With the (DEV) connector refreshed to a widget version of 27 or later, buy the Starter Pack in a
       fresh chat (the PAY-03 path, dropped first call and all). Confirm the populated card shows the
-      order id under the link and a **Check status** button.
-- [ ] Pay with a Stripe test card, typed by the owner, in the tab the link opened. Return to the
+      order id under the link and a **Check status** button. (Connector refreshed after PR #362
+      deployed; the panel only shows the new version after it is reopened. The first Allow once was
+      dropped for the fourth time in four attempts: one template read at 17:26:52Z, no tool call.
+      **Create my checkout** produced `tools/call create_pack_checkout` at 17:27:12Z with no prompt,
+      and the card showed the link, **Check status** and the order line for b87d767f.)
+- [x] Pay with a Stripe test card, typed by the owner, in the tab the link opened. Return to the
       ChatGPT tab. Within a few seconds the card should read "Paid. 2 letters added to your account."
       with the link and the note gone, the unused count from this pack, and no Check status button.
       Record whether the switch happened on return without a click (the visibility refresh) or needed
-      **Check status** (timers throttled in the hidden iframe).
-- [ ] Ask ChatGPT for the balance; it should agree with the card.
+      **Check status** (timers throttled in the hidden iframe). (Polls reached the dev API at 17:27:15,
+      :19, :24, :28, :33 and :39Z; the webhook `checkout.session.completed` arrived at 17:27:41Z; the
+      poll at 17:27:43Z returned `submitted` and polling stopped. So the timers kept running while the
+      Stripe tab was open in the embedded browser, and the card read "Paid. 2 letters added to your
+      account. 2 of 2 from this pack are still unused." with the order line and no link or button when
+      the owner returned. Order b87d767f: `letter_pack / credit-pack-4`, `fulfilled`, 5.00 USD;
+      purchase lot of 4 credits active for 730 days.)
+- [x] Ask ChatGPT for the balance; it should agree with the card. (8 prepaid letters, up from 6.)
 - [ ] Optional expiry path: create a checkout and, from the Stripe test dashboard, expire the session.
       The card should read "This checkout expired before it was paid. Nothing was charged." with
       **Create a new checkout**; clicking it creates a replacement without a permission prompt and the
-      card polls the new order.
-- [ ] Record the readings on #322.
+      card polls the new order. (Not run; covered by the jsdom tests and the local harness only.)
+- [x] Record the readings on #322.
 
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
 - [ ] Stripe Dashboard → Developers → Webhooks → the endpoint → the delivered
