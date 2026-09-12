@@ -376,6 +376,33 @@ failure is recorded on #322.
       no such fallback. (Webhook received 23:19Z; order `checkout_pending` →
       `paid` → `fulfilled`; purchase lot 4 credits active; balance 2 letters.)
 
+### PAY-03 — Checkout card recovery after a dropped call (issue #322)
+
+**Status:** Not executed. Development only. The card reached `dev` in PR #359; the empty-state
+retry followed in the next PR.
+
+Background: on 2026-09-11 (production) and 2026-09-12 (development) ChatGPT dropped the first
+`create_pack_checkout` after "Allow once": no request reached the API, the model said to use "the
+checkout shown above", and the card template rendered as grey placeholder bars. The card now waits
+five seconds for a result and then offers to create the checkout itself through the bridge, the way
+the preview cards already buy packs.
+
+- [ ] With the (DEV) connector refreshed to a widget version of 26 or later, start a fresh chat and
+      ask to buy the Starter Pack. Click **Allow once**.
+- [ ] If the card fills in with the price and the link within a moment, the call went through and
+      the retry never appears. Record that and stop; the dropped call did not reproduce.
+- [ ] If the card shows grey bars, wait five seconds. It should read "No checkout was created yet.
+      Nothing has been charged." with **Create my checkout** (or **Choose a pack** when the host
+      passed no pack in `toolInput`).
+- [ ] Click it. Record whether ChatGPT shows another permission prompt for the widget-initiated
+      call, and whether the card then fills in with the link. The Railway dev log shows the
+      `create_pack_checkout` request only for this second attempt.
+- [ ] Open the link and pay with a Stripe test card, typed by the owner. Balance reads 2 letters;
+      `stripe.webhook_received` with `checkout.session.completed` appears in the dev log.
+- [ ] Record on #322 whether the bridge was live inside a card the host drew without a result. If
+      the button did nothing, the card's text-only fallback ("Ask for the checkout again") is the
+      expected state and the issue stays open.
+
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
 - [ ] Stripe Dashboard → Developers → Webhooks → the endpoint → the delivered
       `checkout.session.completed` event → Resend.
