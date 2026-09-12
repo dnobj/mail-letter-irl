@@ -28,6 +28,13 @@
          rendered when a checkout URL exists and never hidden afterwards. */
       .checkout-link{display:flex;align-items:center;justify-content:center;margin-top:14px;padding:10px 14px;border-radius:10px;background:var(--btn);color:var(--btntx);font-size:13px;font-weight:600;text-decoration:none}
       .checkout-link:hover{opacity:.9}
+      .btn{display:flex;align-items:center;justify-content:center;width:100%;margin-top:14px;padding:10px 14px;border:0;border-radius:10px;background:var(--btn);color:var(--btntx);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+      .btn:hover{opacity:.9}
+      .btn:disabled{opacity:.6;cursor:default}
+      .opts{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+      .opt{padding:9px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2);color:var(--tx);font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-align:left}
+      .opt:hover{border-color:var(--btn)}
+      .opt:disabled{opacity:.6;cursor:default}
       .note{font-size:11.5px;line-height:1.5;color:var(--mut);margin:8px 0 0}
       .done{border-radius:8px;font-size:12.5px;line-height:1.5;padding:9px 11px;margin-top:12px;background:var(--okbg);color:var(--ok)}
       .err{border-radius:8px;font-size:12.5px;line-height:1.5;padding:9px 11px;margin-top:12px;background:var(--erbg);color:var(--er)}
@@ -41,12 +48,21 @@
     <div class="w">
       <div class="hd"><span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 21"><path fill="none" stroke="var(--li-blue,#2563eb)" stroke-width="3" stroke-linejoin="round" d="M11.3 2.4c5.2 0 9.4 3.3 9.4 7.4 0 4.1-4.2 7.4-9.4 7.4-.8 0-1.6-.1-2.4-.2l-5.7 2.6 1.8-4.1C3 14.2 1.9 12 1.9 9.8c0-4.1 4.2-7.4 9.4-7.4Z"></path><g transform="rotate(-8 24 8.6)"><rect x="16.5" y="3" width="14.6" height="10" rx="1.6" fill="var(--li-orange,#f97316)"></rect><path fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" d="m18 4.7 5.8 4 5.8-4"></path></g></svg></span><b>Letter IRL</b><span class="ctx">Letter pack</span></div>
       <div class="bd">
-        <!-- Skeleton until toolOutput arrives -->
+        <!-- Skeleton until toolOutput arrives, or until EMPTY_AFTER_MS says it never will -->
         <div id="state-loading">
           <div class="sk" style="height:20px;width:60%"></div>
           <div class="sk" style="height:12px;margin-top:10px"></div>
           <div class="sk" style="height:12px;width:80%;margin-top:6px"></div>
           <div class="sk" style="height:38px;margin-top:16px;border-radius:10px"></div>
+        </div>
+        <!-- Rendered with no tool result: the host drew this template but the
+             call behind it never reached the server (issue #322). -->
+        <div id="state-empty" class="hidden">
+          <h1 class="title">Letter pack</h1>
+          <p class="ov" id="empty-message"></p>
+          <button type="button" class="btn hidden" id="retry-button">Create my checkout</button>
+          <div class="opts hidden" id="pack-options"></div>
+          <div class="err hidden" id="retry-error"></div>
         </div>
         <div id="state-ready" class="hidden">
           <h1 class="title" id="title">Letter pack</h1>
@@ -67,7 +83,7 @@
           <div class="err hidden" id="err"></div>
         </div>
       </div>
-      <p class="rev">pack t1</p>
+      <p class="rev">pack t2</p>
     </div>
 
     <script>
@@ -96,19 +112,205 @@
         return `This checkout stays open for about ${Math.round(minutes / 60)} hours.`;
       }
 
+      // Mirrors the pack enum in the tool's input schema. Anything else in
+      // toolInput is treated as "unknown" and the customer chooses.
+      const PACK_CHOICES = ["starter", "regular", "power"];
+
+      // How long the skeleton may wait for a result before this card decides
+      // the call behind it was never made. Under a real call the result follows
+      // the render within a moment (toolOutput is null at load, then
+      // openai:set_globals delivers it). On 2026-09-11 and 2026-09-12 ChatGPT
+      // dropped the first create_pack_checkout after "Allow once", drew this
+      // template with no result, and the skeleton sat there indefinitely while
+      // the model told the customer to use "the checkout shown above"
+      // (issue #322). After this wait the card offers to create the checkout
+      // itself, through the same bridge call the preview cards already use.
+      const EMPTY_AFTER_MS = 5000;
+
       let opened = false;
+      let emptyTimer = null;
+      let emptyShown = false;
+      let retryBusy = false;
+      // A checkout this card created itself. Once set it wins over anything
+      // the host delivers afterwards: the customer may already be paying on
+      // that link, and a late host result would swap it for another order.
+      let retryResult = null;
+
+      function toolData(result) {
+        return result?.structuredContent || result || {};
+      }
+
+      function hostState() {
+        const output = window.openai?.toolOutput ?? {};
+        const responseMeta = window.openai?.toolResponseMetadata ?? {};
+        return { ...responseMeta, ...output };
+      }
+
+      function hasData(state) {
+        return Boolean(state && (state.orderId || state.productDescription || state.message));
+      }
+
+      function show(id, visible) {
+        document.getElementById(id).classList.toggle("hidden", !visible);
+      }
+
+      function requestedPack() {
+        const pack = window.openai?.toolInput?.pack;
+        return PACK_CHOICES.includes(pack) ? pack : null;
+      }
+
+      function armEmptyTimer() {
+        if (emptyTimer !== null || emptyShown) return;
+        emptyTimer = setTimeout(() => {
+          emptyTimer = null;
+          if (retryResult || hasData(hostState())) return;
+          emptyShown = true;
+          prepareEmptyState();
+          render();
+        }, EMPTY_AFTER_MS);
+      }
+
+      function cancelEmptyTimer() {
+        if (emptyTimer === null) return;
+        clearTimeout(emptyTimer);
+        emptyTimer = null;
+      }
+
+      function prepareEmptyState() {
+        const message = document.getElementById("empty-message");
+        const button = document.getElementById("retry-button");
+        if (typeof window.openai?.callTool !== "function") {
+          // No bridge to call through: say what happened and how to recover,
+          // which still beats grey placeholder bars.
+          message.textContent =
+            "No checkout was created yet. Ask for the checkout again and it will appear here.";
+          button.classList.add("hidden");
+          return;
+        }
+        message.textContent = "No checkout was created yet. Nothing has been charged.";
+        button.textContent = requestedPack() ? "Create my checkout" : "Choose a pack";
+        button.classList.remove("hidden");
+      }
+
+      function showRetryError(text) {
+        const error = document.getElementById("retry-error");
+        error.textContent = text;
+        error.classList.remove("hidden");
+      }
+
+      async function onRetryClick() {
+        if (retryBusy) return;
+        const pack = requestedPack();
+        if (pack) {
+          await createCheckout(pack);
+        } else {
+          await loadPackOptions();
+        }
+      }
+
+      async function loadPackOptions() {
+        const button = document.getElementById("retry-button");
+        retryBusy = true;
+        button.disabled = true;
+        button.textContent = "Loading packs...";
+        document.getElementById("retry-error").classList.add("hidden");
+        try {
+          const listed = toolData(await window.openai.callTool("list_letter_packs", {}));
+          const packs = Array.isArray(listed.packs) ? listed.packs : [];
+          if (!packs.length) {
+            throw new Error(listed.message || "No letter packs are available right now.");
+          }
+          renderPackOptions(packs);
+          button.classList.add("hidden");
+        } catch (error) {
+          // Not a fallback to the smallest pack: after a click that means
+          // "show me the options", a surprise purchase is the worst outcome.
+          showRetryError(`Unable to load letter packs: ${error?.message || "Unknown error"}`);
+          button.textContent = "Choose a pack";
+        } finally {
+          retryBusy = false;
+          button.disabled = false;
+        }
+      }
+
+      function renderPackOptions(packs) {
+        const container = document.getElementById("pack-options");
+        container.textContent = "";
+        for (const option of packs) {
+          if (!PACK_CHOICES.includes(option.pack)) continue;
+          const choice = document.createElement("button");
+          choice.type = "button";
+          choice.className = "opt";
+          choice.setAttribute("data-pack", option.pack);
+          const letters = Number(option.letters) || 0;
+          // Server-formatted price when present; the local table only stands
+          // in for a stale connector that predates displayAmount.
+          const price = option.displayAmount
+            ? `${String(option.currency || "usd").toUpperCase()} ${option.displayAmount}`
+            : formatAmount(option.amountCents, option.currency);
+          choice.textContent = `${letters} ${letters === 1 ? "letter" : "letters"} · ${price}`;
+          choice.addEventListener("click", () => {
+            void createCheckout(option.pack);
+          });
+          container.appendChild(choice);
+        }
+        container.classList.remove("hidden");
+      }
+
+      async function createCheckout(pack) {
+        if (retryBusy) return;
+        const button = document.getElementById("retry-button");
+        const options = Array.from(document.querySelectorAll("#pack-options button"));
+        const label = button.textContent;
+        retryBusy = true;
+        button.disabled = true;
+        button.textContent = "Creating checkout...";
+        options.forEach(option => { option.disabled = true; });
+        document.getElementById("retry-error").classList.add("hidden");
+        try {
+          const result = toolData(await window.openai.callTool("create_pack_checkout", { pack }));
+          if (!hasData(result)) {
+            throw new Error(result.message || "The checkout was not returned.");
+          }
+          retryResult = result;
+          render();
+        } catch (error) {
+          // The button stays: the customer can try again, and the message the
+          // tool returns is already written for them.
+          showRetryError(`Unable to create the checkout: ${error?.message || "Unknown error"}`);
+          button.textContent = label;
+        } finally {
+          retryBusy = false;
+          button.disabled = false;
+          options.forEach(option => { option.disabled = false; });
+        }
+      }
 
       function render() {
         applyTheme();
         const output = window.openai?.toolOutput ?? {};
         const responseMeta = window.openai?.toolResponseMetadata ?? {};
-        const state = { ...responseMeta, ...output };
+        // The merge stays a declaration here, not in hostState(): the data
+        // contract test follows the toolOutput alias through spreads to learn
+        // which fields this card reads, and checks them against the schema.
+        const state = retryResult || { ...responseMeta, ...output };
 
-        const hasData = Boolean(state.orderId || state.productDescription || state.message);
-        document.getElementById("state-loading").classList.toggle("hidden", hasData);
-        document.getElementById("state-ready").classList.toggle("hidden", !hasData);
-        if (!hasData) return;
+        if (!hasData(state)) {
+          show("state-ready", false);
+          show("state-loading", !emptyShown);
+          show("state-empty", emptyShown);
+          armEmptyTimer();
+          return;
+        }
 
+        cancelEmptyTimer();
+        show("state-loading", false);
+        show("state-empty", false);
+        show("state-ready", true);
+        renderReady(state);
+      }
+
+      function renderReady(state) {
         document.getElementById("title").textContent = state.productDescription || "Letter pack";
         const letters = Number(state.letters) || 0;
         document.getElementById("letters").textContent = letters ? String(letters) : "—";
@@ -156,6 +358,9 @@
         }
       }
 
+      document.getElementById("retry-button").addEventListener("click", () => {
+        void onRetryClick();
+      });
       window.addEventListener("openai:set_globals", render);
       render();
     </script>

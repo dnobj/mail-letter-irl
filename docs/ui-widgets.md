@@ -10,6 +10,7 @@ Letter IRL registers four OpenAI Apps SDK widgets as MCP resources with `ui://` 
 - `PostcardPreviewCard`: Shows postcard front and back previews from `_meta.previewFrontHtml` and `_meta.previewBackHtml`, then can call `send_postcard` only after explicit user confirmation.
 - `ImageUploadCard`: Opens a file picker fallback for image handoff problems, uploads a photo, and calls `confirm_uploaded_image` with the resulting `imageUrl`. When the host exposes `window.openai.selectFiles` (plan/region-gated), it also offers a "Choose from Library" button that picks a file already in the user's ChatGPT Library and reuses the same confirm/follow-up handoff without re-uploading; because pick-time download URLs are temporary, a fresh URL is re-resolved via `getFileDownloadUrl` when the user confirms.
 - `GetStartedCard`: Presents onboarding guidance, purchase prerequisite messaging, and example prompts for new users.
+- `PackCheckoutCard`: Shows a letter pack checkout with the pack, the price and the Stripe link as a real anchor. Rendered without a tool result (ChatGPT has dropped the first consequential call after "Allow once", issue #322), it waits five seconds and then offers to create the checkout itself through `callTool`, using the pack from `toolInput` when present and otherwise listing the packs via `list_letter_packs`.
 
 ## Runtime Bridge Notes
 
