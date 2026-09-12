@@ -971,7 +971,7 @@
     },
     {
       "name": "create_pack_checkout",
-      "description": "Create a Stripe-hosted checkout to buy a pack of prepaid letters. The price and pack sizes come only from server configuration. Payment adds letters to the account balance; it does not send anything, so the customer still chooses and sends afterward. Use create_mail_checkout instead to pay for one specific draft.",
+      "description": "Create a Stripe-hosted checkout to buy a pack of prepaid letters. The result carries a checkoutUrl that the customer must be shown as a link to click; nothing opens automatically and no card is guaranteed to render, so present the link. The price and pack sizes come only from server configuration. Payment adds letters to the account balance; it does not send anything, so the customer still chooses and sends afterward. Use create_mail_checkout instead to pay for one specific draft.",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -996,6 +996,7 @@
           "letters",
           "amountCents",
           "currency",
+          "displayAmount",
           "productDescription",
           "status",
           "reused",
@@ -1007,7 +1008,7 @@
           },
           "checkoutUrl": {
             "type": "string",
-            "description": "Stripe-hosted checkout URL"
+            "description": "Stripe-hosted checkout URL. Present it to the customer as a link to click; nothing opens on its own."
           },
           "letters": {
             "type": "integer",
@@ -1018,6 +1019,10 @@
           },
           "currency": {
             "type": "string"
+          },
+          "displayAmount": {
+            "type": "string",
+            "description": "Amount formatted for the currency, e.g. 5.00"
           },
           "productDescription": {
             "type": "string"
@@ -2223,7 +2228,8 @@
       "PostcardPreviewCard",
       "ImageUploadCard",
       "GetStartedCard",
-      "ImageRoutingCard"
+      "ImageRoutingCard",
+      "PackCheckoutCard"
     ]
   },
   "servers": [

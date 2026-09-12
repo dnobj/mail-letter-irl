@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Letter IRL Pack Checkout</title>
+    <style>
+      /* Letter IRL design system (widget-design-package, Aug 2026): system-ui
+         chrome, Georgia only inside paper artifacts, paper stays cream in
+         both themes. Shell copied from GetStartedCard so the two cards match. */
+      :root{--sf:#fff;--sf2:#fafafa;--bd:#e4e4e7;--bd2:#f0f0f2;--tx:#111113;--tb:#3f3f46;--mut:#71717a;--faint:#a1a1aa;--ok:#15803d;--okbg:#ecfdf3;--er:#b91c1c;--erbg:#fef2f2;--btn:#2563eb;--btntx:#fff}
+      .dark{--sf:#2a2a2e;--sf2:#232327;--bd:#3a3a40;--bd2:#323238;--tx:#f4f4f5;--tb:#d4d4d8;--mut:#a1a1aa;--faint:#71717a;--ok:#4ade80;--okbg:#143622;--er:#f87171;--erbg:#3b1d1d;--btn:#3b82f6;--btntx:#fff;--li-blue:#6f98f2}
+      *{box-sizing:border-box}
+      body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+      .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;color:var(--tb);overflow:hidden}
+      .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
+      .logo{width:17px;height:11px;flex:none;display:block}
+      .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
+      .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
+      .bd{padding:14px}
+      .title{margin:0;font-family:Georgia,"Times New Roman",serif;font-size:18px;font-weight:600;color:var(--tx);letter-spacing:-.01em}
+      .ov{font-size:13px;line-height:1.55;color:var(--tb);margin:7px 0 0}
+      .facts{display:flex;gap:14px;margin:12px 0 0;padding:0;list-style:none}
+      .facts li{font-size:12.5px;line-height:1.5;color:var(--tb)}
+      .facts b{display:block;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+      /* The anchor is the payment path. A real anchor is a user gesture in a
+         way a window.open issued after a tool call is not, so it is always
+         rendered when a checkout URL exists and never hidden afterwards. */
+      .checkout-link{display:flex;align-items:center;justify-content:center;margin-top:14px;padding:10px 14px;border-radius:10px;background:var(--btn);color:var(--btntx);font-size:13px;font-weight:600;text-decoration:none}
+      .checkout-link:hover{opacity:.9}
+      .note{font-size:11.5px;line-height:1.5;color:var(--mut);margin:8px 0 0}
+      .done{border-radius:8px;font-size:12.5px;line-height:1.5;padding:9px 11px;margin-top:12px;background:var(--okbg);color:var(--ok)}
+      .err{border-radius:8px;font-size:12.5px;line-height:1.5;padding:9px 11px;margin-top:12px;background:var(--erbg);color:var(--er)}
+      .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
+      .sk{background:linear-gradient(90deg,var(--bd2) 25%,var(--bd) 50%,var(--bd2) 75%);background-size:200% 100%;animation:sh 1.4s infinite;border-radius:6px}
+      @keyframes sh{to{background-position:-200% 0}}
+      .hidden{display:none !important}
+    </style>
+  </head>
+  <body>
+    <div class="w">
+      <div class="hd"><span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 21"><path fill="none" stroke="var(--li-blue,#2563eb)" stroke-width="3" stroke-linejoin="round" d="M11.3 2.4c5.2 0 9.4 3.3 9.4 7.4 0 4.1-4.2 7.4-9.4 7.4-.8 0-1.6-.1-2.4-.2l-5.7 2.6 1.8-4.1C3 14.2 1.9 12 1.9 9.8c0-4.1 4.2-7.4 9.4-7.4Z"></path><g transform="rotate(-8 24 8.6)"><rect x="16.5" y="3" width="14.6" height="10" rx="1.6" fill="var(--li-orange,#f97316)"></rect><path fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" d="m18 4.7 5.8 4 5.8-4"></path></g></svg></span><b>Letter IRL</b><span class="ctx">Letter pack</span></div>
+      <div class="bd">
+        <!-- Skeleton until toolOutput arrives -->
+        <div id="state-loading">
+          <div class="sk" style="height:20px;width:60%"></div>
+          <div class="sk" style="height:12px;margin-top:10px"></div>
+          <div class="sk" style="height:12px;width:80%;margin-top:6px"></div>
+          <div class="sk" style="height:38px;margin-top:16px;border-radius:10px"></div>
+        </div>
+        <div id="state-ready" class="hidden">
+          <h1 class="title" id="title">Letter pack</h1>
+          <p class="ov" id="message"></p>
+          <ul class="facts">
+            <li><b>Letters</b><span id="letters"></span></li>
+            <li><b>Price</b><span id="price"></span></li>
+          </ul>
+          <a
+            class="checkout-link hidden"
+            id="checkout-link"
+            href="#"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Open secure checkout</a>
+          <p class="note hidden" id="note"></p>
+          <div class="done hidden" id="done"></div>
+          <div class="err hidden" id="err"></div>
+        </div>
+      </div>
+      <p class="rev">pack t1</p>
+    </div>
+
+    <script>
+      function applyTheme() {
+        const theme = window.openai?.theme ?? "light";
+        document.documentElement.classList.toggle("dark", theme === "dark");
+      }
+
+      // Hand-copied from products.ts (no import mechanism exists into
+      // standalone widget HTML); tests/unit/mcp/widgetResources.test.ts
+      // compares the copies so they cannot drift.
+      function formatAmount(amountCents, currency) {
+        const zeroDecimal = ['bif','clp','djf','gnf','jpy','kmf','krw','mga','pyg','rwf','ugx','vnd','vuv','xaf','xof','xpf'];
+        const threeDecimal = ['bhd','jod','kwd','omr','tnd'];
+        const ccy = String(currency || 'usd').toLowerCase();
+        const decimals = zeroDecimal.includes(ccy) ? 0 : threeDecimal.includes(ccy) ? 3 : 2;
+        return `${ccy.toUpperCase()} ${((amountCents || 0) / Math.pow(10, decimals)).toFixed(decimals)}`;
+      }
+
+      function formatExpiry(iso) {
+        const at = Date.parse(iso || "");
+        if (Number.isNaN(at)) return "";
+        const minutes = Math.round((at - Date.now()) / 60000);
+        if (minutes <= 0) return "This checkout has expired; ask for a new one.";
+        if (minutes < 120) return `This checkout stays open for about ${minutes} minutes.`;
+        return `This checkout stays open for about ${Math.round(minutes / 60)} hours.`;
+      }
+
+      let opened = false;
+
+      function render() {
+        applyTheme();
+        const output = window.openai?.toolOutput ?? {};
+        const responseMeta = window.openai?.toolResponseMetadata ?? {};
+        const state = { ...responseMeta, ...output };
+
+        const hasData = Boolean(state.orderId || state.productDescription || state.message);
+        document.getElementById("state-loading").classList.toggle("hidden", hasData);
+        document.getElementById("state-ready").classList.toggle("hidden", !hasData);
+        if (!hasData) return;
+
+        document.getElementById("title").textContent = state.productDescription || "Letter pack";
+        const letters = Number(state.letters) || 0;
+        document.getElementById("letters").textContent = letters ? String(letters) : "—";
+        document.getElementById("price").textContent =
+          state.displayAmount || (state.amountCents ? formatAmount(state.amountCents, state.currency) : "—");
+
+        const link = document.getElementById("checkout-link");
+        const note = document.getElementById("note");
+        const done = document.getElementById("done");
+        const pending = Boolean(state.checkoutUrl) && state.status === "checkout_pending";
+
+        // The tool's message field is written for the model (it says to show
+        // the customer the link). The customer reads this card, so the
+        // pending line is composed from the figures instead.
+        document.getElementById("message").textContent = pending
+          ? `Pay ${formatAmount(state.amountCents, state.currency)} to add ${letters} ${letters === 1 ? "letter" : "letters"} to your account.`
+          : state.message || "";
+
+        if (pending) {
+          // The link is the payment path and is never hidden once shown: on
+          // 2026-08-29 openExternal resolved without opening anything, and on
+          // 2026-09-11 the text-only path left the customer with no link at all
+          // (issue #322). The anchor is correct either way.
+          link.href = state.checkoutUrl;
+          link.textContent = `Open secure checkout — ${formatAmount(state.amountCents, state.currency)}`;
+          link.classList.remove("hidden");
+          const expiry = formatExpiry(state.expiresAt);
+          note.textContent = `Stripe handles the payment. Nothing is sent until you choose what to mail. ${expiry}`.trim();
+          note.classList.remove("hidden");
+          done.classList.add("hidden");
+          if (!opened && window.openai?.openExternal) {
+            // Ask the host to open the checkout once, as a convenience. The
+            // anchor above is what the customer relies on if the host declines.
+            opened = true;
+            Promise.resolve()
+              .then(() => window.openai.openExternal({ href: state.checkoutUrl }))
+              .catch(() => {});
+          }
+        } else {
+          link.classList.add("hidden");
+          note.classList.add("hidden");
+          done.textContent = state.message ||
+            "This purchase is already paid or being fulfilled. Ask for its purchase status instead of opening another checkout.";
+          done.classList.remove("hidden");
+        }
+      }
+
+      window.addEventListener("openai:set_globals", render);
+      render();
+    </script>
+  </body>
+</html>
