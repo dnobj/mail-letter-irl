@@ -152,6 +152,7 @@ export const WIDGET_DEFINITIONS = [
   { name: "ImageUploadCard", description: "File picker widget for uploading photos to use in letters or postcards" },
   { name: "GetStartedCard", description: "Getting-started guide for new users with setup steps and example prompts" },
   { name: "ImageRoutingCard", description: "Shows a generated image with its credit line, or image-routing guidance with a copy-ready prompt" },
+  { name: "PackCheckoutCard", description: "Shows a letter pack checkout with the pack, the price and the link that opens Stripe" },
 ];
 
 

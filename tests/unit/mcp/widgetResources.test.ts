@@ -82,8 +82,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
     );
 
-    it('should have 5 widgets defined', () => {
-      expect(WIDGET_DEFINITIONS.length).toBe(5);
+    it('should have 6 widgets defined', () => {
+      expect(WIDGET_DEFINITIONS.length).toBe(6);
     });
 
     it('does not define the removed GenerateImageCard widget', () => {
@@ -117,8 +117,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 24,
-        digest: 'c1f86c2f2b6e'
+        version: 25,
+        digest: '41e1b488c1ef'
       });
     });
   });
@@ -166,6 +166,12 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 
     it('quote_and_preview_letter references the LetterPreviewCard widget', () => {
       expect(templates.get('quote_and_preview_letter')).toBe(widgetTemplateUri('LetterPreviewCard'));
+    });
+
+    it('create_pack_checkout references the PackCheckoutCard widget (issue #322)', () => {
+      // Without a card the text-prompt path had no anchor: the model relayed
+      // the checkout URL in prose, or claimed a card that did not exist.
+      expect(templates.get('create_pack_checkout')).toBe(widgetTemplateUri('PackCheckoutCard'));
     });
 
     it.each([
@@ -486,13 +492,14 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 
 describe('registerWidgetResources implementation', () => {
   it('should register all widget resources', () => {
-    expect(WIDGET_DEFINITIONS.length).toBe(5);
+    expect(WIDGET_DEFINITIONS.length).toBe(6);
     expect(WIDGET_DEFINITIONS.map((widget) => widget.name)).toEqual([
       'LetterPreviewCard',
       'PostcardPreviewCard',
       'ImageUploadCard',
       'GetStartedCard',
-      'ImageRoutingCard'
+      'ImageRoutingCard',
+      'PackCheckoutCard'
     ]);
   });
 

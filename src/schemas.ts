@@ -328,6 +328,7 @@ export const createPackCheckoutOutputSchema: JsonSchema = {
     "letters",
     "amountCents",
     "currency",
+    "displayAmount",
     "productDescription",
     "status",
     "reused",
@@ -335,10 +336,15 @@ export const createPackCheckoutOutputSchema: JsonSchema = {
   ],
   properties: {
     orderId: { type: "string" },
-    checkoutUrl: { type: "string", description: "Stripe-hosted checkout URL" },
+    checkoutUrl: {
+      type: "string",
+      description:
+        "Stripe-hosted checkout URL. Present it to the customer as a link to click; nothing opens on its own."
+    },
     letters: { type: "integer", description: "Letters this pack adds to the balance" },
     amountCents: { type: "integer" },
     currency: { type: "string" },
+    displayAmount: { type: "string", description: "Amount formatted for the currency, e.g. 5.00" },
     productDescription: { type: "string" },
     expiresAt: { type: "string" },
     status: { type: "string" },

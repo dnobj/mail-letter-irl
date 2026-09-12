@@ -54,6 +54,18 @@ describe('tool descriptions and invocation messages', () => {
     const tool = tools.find(candidate => candidate.name === name)!;
     expect(tool.description).not.toMatch(/letterirl\.com/i);
   });
+
+  it('create_pack_checkout tells the model to present the checkout link (issue #322)', () => {
+    // The model has described this checkout as "open" or "shown above" with
+    // no link in front of the customer. The description is permanent model
+    // context, so the instruction to present the URL lives here, and the
+    // card carries the anchor for the times the model still does not.
+    const tool = tools.find(candidate => candidate.name === 'create_pack_checkout')!;
+    expect(tool.description).toMatch(/checkoutUrl/);
+    expect(tool.description).toMatch(/shown as a link/i);
+    expect(tool.description).toMatch(/nothing opens automatically/i);
+    expect(tool.meta?.['openai/outputTemplate']).toMatch(/PackCheckoutCard/);
+  });
 });
 
 describe('quote summaries', () => {
