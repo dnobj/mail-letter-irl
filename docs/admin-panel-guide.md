@@ -258,6 +258,15 @@ from the repository deploys at once with nothing configured:
    **Dockerfile** (it then reports the path as set via `RAILWAY_DOCKERFILE_PATH`). Apply the staged
    changes; that starts the first build.
 
+The production service follows the same order in the **production** environment with branch `master`, and
+is named `letter-irl-admin-prod`: Railway service names are unique across the project, so the plain name
+belongs to development. The node name and tag do not depend on the service name; the code derives
+`letter-irl-admin-prod` and `tag:prod-admin` from `LETTER_IRL_DEPLOYMENT_ENVIRONMENT=production`. Two
+things seen on 2026-09-10: variables typed into the Raw Editor stay staged until the "Apply changes" banner
+is deployed, and the API reports them only after that; and a wrong reader password fails the boot with
+`ADMIN_INTERNAL_ERROR` carrying PostgreSQL class `28P01` in the log attributes, which reads as a password
+problem, not a Tailscale one.
+
 | Variable | Value |
 | --- | --- |
 | `RAILWAY_DOCKERFILE_PATH` | `Dockerfile.admin` |
@@ -274,7 +283,7 @@ from the repository deploys at once with nothing configured:
 | `ADMIN_TS_HOSTNAME`, `ADMIN_TS_TAG`, `ADMIN_TS_STATE_DIR` | optional; default to `letter-irl-admin-dev`, `tag:dev-admin`, `/data/tailscale` |
 | `STRIPE_SECRET_KEY` | a **restricted** test-mode key (Checkout Sessions read, Refunds read/write, Charges read, PaymentIntents read, Disputes read); needed for the Stripe page and the refund and repair commands. The service refuses to boot on a full `sk_` key, so this is enforced rather than advised |
 | `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED` | `true` to enable the proportional-refund command on this service; unset otherwise (the house rule: full refunds of unused packs only) |
-| `LETTER_PROVIDER` and provider keys | as the API service, for the banner and later slices |
+| `LETTER_PROVIDER`, `LETTER_PROVIDER_API_KEY`, `LETTER_PROVIDER_CONFIG` | **required for any command that talks to the mail provider** (status sync, retry, ambiguous-job resolution): without them the process falls back to the dummy provider even in production, the banner reads `mail: unset`, and a status sync answers `Letter not found` for real letters. Wire them as Railway references to the API service, `${{letter-irl-api.LETTER_PROVIDER}}` and so on, never as pasted values; the banner then reads `mail: postgrid` |
 | `TS_AUTHKEY` | the one-off key, first boot only |
 
 The service must **not** receive the API's owner `DATABASE_URL`.
@@ -371,10 +380,24 @@ Production is provisioned only after three separate owner approvals, each record
 
 1. **Read-only connection**: production roles created by SQL, grants applied with
    `--confirm-production-access`, the production node registered with `tag:prod-admin`, `ADMIN_MODE`
-   `read-only`; then `ADMIN-PROD-RO-01`.
+   `read-only`; then `ADMIN-PROD-RO-01`. **Done 2026-09-10** on the owner's approval: service
+   `letter-irl-admin-prod`, node `letter-irl-admin-prod` with `tag:prod-admin`, one-off key consumed and
+   deleted, `ADMIN-PROD-RO-01` passed (see [manual-tests.md](manual-tests.md)).
 2. **Full mode**: a restricted live Stripe key created, the production node signed or approved and its
-   tag verified, `ADMIN_TOTP_SECRET` enrolled, `DATABASE_URL` switched to the operator role.
-3. **First command**: reversible (an alert acknowledgement), never a refund.
+   tag verified, `ADMIN_TOTP_SECRET` enrolled, `DATABASE_URL` switched to the operator role. **Done
+   2026-09-11** on the owner's approval. The mode and the operator connection string must change in the
+   same variable edit: the first attempt kept the reader's username with the operator's password, and the
+   boot refused it with `DATABASE_URL must connect as letter_irl_admin_operator_production in full mode`,
+   which on a volume-backed service is an outage until the next apply. The banner keeps showing the reader
+   role in full mode because pages read through it; the operator connection is validated at boot for
+   commands.
+3. **First command**: reversible (an alert acknowledgement), never a refund. **Done 2026-09-11** with a
+   provider status sync as a dry run, because production had no open alert: elevation, preview, the
+   phrase `PRODUCTION SYNC-DRY-RUN letters`, run row and audit row all as designed, preceded by a Stripe
+   reconciliation with the live restricted key. The first run reported `Letter not found` for the one live
+   letter because the service had no provider variables (see the table above); with the references in
+   place the re-run checked it against PostGrid with no errors. `ADMIN-PROD-FULL-01` in
+   [manual-tests.md](manual-tests.md) records both runs.
 
 ## Local development
 

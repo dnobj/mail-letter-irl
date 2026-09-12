@@ -70,6 +70,21 @@ describe('create_pack_checkout', () => {
     expect(result.letters).toBe(letters);
   });
 
+  it('tells the model to present the checkout link, and quotes the server-formatted price', async () => {
+    // Issue #322: in production the model twice described a checkout as
+    // "ready" or "shown above" with no link, once with a fabricated URL. The
+    // message is the field it reads most reliably, so the instruction lives
+    // there as well as in the description; displayAmount keeps the card and
+    // the prose quoting one figure.
+    const result = await createPackCheckoutTool.handler({ pack: 'regular' } as never, context);
+
+    expect(result.checkoutUrl).toBe('https://checkout.stripe.com/c/pay/cs_test');
+    expect(result.displayAmount).toBe('10.00');
+    expect(result.message).toMatch(/checkoutUrl as a link/i);
+    expect(result.message).toMatch(/not opened/i);
+    expect(result.message).toMatch(/USD 10\.00/);
+  });
+
   it('reports the letter counts the catalogue defines, not a local copy', async () => {
     // Guards the pairing above against the catalogue changing underneath it.
     const expected = Object.fromEntries(

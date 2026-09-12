@@ -316,7 +316,13 @@ export const redeemPromoCodeOutputZ = z.object({
 
 export const createPackCheckoutOutputZ = z.object({
   orderId: z.string(),
-  checkoutUrl: z.string().url().optional(),
+  checkoutUrl: z
+    .string()
+    .url()
+    .optional()
+    .describe(
+      "Stripe-hosted checkout URL. Present it to the customer as a link to click; nothing opens on its own (#322)."
+    ),
   // The customer-facing count. Credits stay internal - the catalogue names its
   // products after them ('credit-pack-4' is two letters), which is exactly the
   // confusion this field avoids. See
@@ -324,6 +330,9 @@ export const createPackCheckoutOutputZ = z.object({
   letters: z.number().int().positive(),
   amountCents: z.number().int().positive(),
   currency: z.string(),
+  // Server-formatted per currency, so the card and the model quote the same
+  // figure and neither recomputes decimals.
+  displayAmount: z.string(),
   productDescription: z.string(),
   expiresAt: z.string().optional(),
   status: z.string(),

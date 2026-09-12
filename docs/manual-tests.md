@@ -348,20 +348,111 @@ event arrived; `credits.webhook_failed` means the handler threw), and the
 account balance as `get_account_balance` reports it.
 
 ### PAY-01 — Pack purchase (US-CREDIT-02)
-- [ ] In ChatGPT, ask to buy the smallest letter pack (Starter Pack, 2 letters).
-- [ ] `list_letter_packs` runs, then `create_pack_checkout`, and ChatGPT
+
+**Status:** Executed in production on 2026-09-11 with the owner's own card, refunded under REFUND-01
+the same night. Passed on the payment path; the link step failed twice before it passed, and that
+failure is recorded on #322.
+
+- [x] In ChatGPT, ask to buy the smallest letter pack (Starter Pack, 2 letters).
+- [x] `list_letter_packs` runs, then `create_pack_checkout`, and ChatGPT
       presents the checkout as a clickable link. Known gap: it may say the
-      checkout is "open" without showing a link until asked for one.
-- [ ] Open the link. Stripe Checkout shows the pack name, the price, and the
+      checkout is "open" without showing a link until asked for one. (Worse
+      than the gap says: on the first two attempts the model claimed success
+      after the permission prompt without calling the tool at all, once with a
+      fabricated 26,000-character URL, and the production log shows no
+      request. After "you did not call the tool, call it now" the call ran, but
+      the reply claimed a card that this tool does not render. The genuine URL
+      was reachable only in the developer-mode "Called tool" response panel.
+      Live Stripe Checkout URLs now use the `/g/pay/` path.)
+- [x] Open the link. Stripe Checkout shows the pack name, the price, and the
       account email already filled in. The prefilled email proves the `users`
       row exists; a blank email field means it does not (#319).
-- [ ] Pay. Production: a real card, refunded under REFUND-01. Development: a
+- [x] Pay. Production: a real card, refunded under REFUND-01. Development: a
       Stripe test card, typed by the owner.
-- [ ] Balance reads 2 letters. Railway shows `stripe.webhook_received` with
+- [x] Balance reads 2 letters. Railway shows `stripe.webhook_received` with
       `checkout.session.completed`. If the balance is right but that line is
       absent, the card's Check status polled Stripe directly and the webhook
       endpoint is not delivering: fix the endpoint before REFUND-01, which has
-      no such fallback.
+      no such fallback. (Webhook received 23:19Z; order `checkout_pending` →
+      `paid` → `fulfilled`; purchase lot 4 credits active; balance 2 letters.)
+
+### PAY-03 — Checkout card recovery after a dropped call (issue #322)
+
+**Status:** Executed 2026-09-12 in development through the embedded browser; the owner paid with a
+Stripe test card. Passed: the dropped call reproduced on the first attempt and the card recovered
+without a second permission prompt.
+
+Background: on 2026-09-11 (production) and 2026-09-12 (development) ChatGPT dropped the first
+`create_pack_checkout` after "Allow once": no request reached the API, the model said to use "the
+checkout shown above", and the card template rendered as grey placeholder bars. The card now waits
+five seconds for a result and then offers to create the checkout itself through the bridge, the way
+the preview cards already buy packs.
+
+- [x] With the (DEV) connector refreshed to a widget version of 26 or later, start a fresh chat and
+      ask to buy the Starter Pack. Click **Allow once**. (Connector refreshed after PR #360 deployed:
+      22 tools, every widget at v26. Allow once clicked at 16:43Z.)
+- [x] If the card fills in with the price and the link within a moment, the call went through and
+      the retry never appears. Record that and stop; the dropped call did not reproduce. (Did not
+      apply: the call was dropped again. The dev log shows exactly one request at 16:42:55Z, a
+      `resources/read` of `PackCheckoutCard.html@v26`, and no `tools/call`. The model still wrote
+      that the checkout "has been created".)
+- [x] If the card shows grey bars, wait five seconds. It should read "No checkout was created yet.
+      Nothing has been charged." with **Create my checkout** (or **Choose a pack** when the host
+      passed no pack in `toolInput`). (Seen after five seconds, with **Create my checkout**, so the
+      host had passed the pack.)
+- [x] Click it. Record whether ChatGPT shows another permission prompt for the widget-initiated
+      call, and whether the card then fills in with the link. The Railway dev log shows the
+      `create_pack_checkout` request only for this second attempt. (No prompt at all.
+      `tools/call create_pack_checkout` logged at 16:44:06Z, invocation succeeded, and the card
+      filled in with the pack, the price and the link. The card's one convenience `openExternal` was
+      blocked by the embedded browser because the click was automated; the anchor remained.)
+- [x] Open the link and pay with a Stripe test card, typed by the owner. Balance reads 2 letters;
+      `stripe.webhook_received` with `checkout.session.completed` appears in the dev log. (Webhook
+      at 16:47:47Z. Order a5984b30: `letter_pack / credit-pack-4`, `fulfilled`, 5.00 USD, events
+      `checkout.session.created` → `checkout.session.completed` → `fulfilled`; purchase lot of 4
+      credits active for 730 days. Balance via ChatGPT: 6 letters, three active lots, so +2.)
+- [x] Record on #322 whether the bridge was live inside a card the host drew without a result. If
+      the button did nothing, the card's text-only fallback ("Ask for the checkout again") is the
+      expected state and the issue stays open. (Recorded: the bridge is live, and a call started
+      from the card shows no permission prompt. Two gaps found on the way: the model never sees a
+      widget-initiated result, so afterwards it could not name the order id without a new checkout;
+      and `list_orders` covers mail orders only, so a pack order id cannot be recovered in the chat.)
+
+### PAY-04 — Checkout card shows the purchase outcome (issue #322)
+
+**Status:** Executed 2026-09-12 in development through the embedded browser; the owner paid with a
+Stripe test card. Passed: the card switched to the paid state two seconds after the webhook, with no
+click and before the owner had returned to the tab.
+
+Background: PAY-03 left the card showing "Open secure checkout" after the payment, for a session
+Stripe would refuse, and the model could not name the order afterwards because it never sees a
+widget-initiated result. The card now polls `get_purchase_status` while a checkout is open and
+replaces the link with the outcome.
+
+- [x] With the (DEV) connector refreshed to a widget version of 27 or later, buy the Starter Pack in a
+      fresh chat (the PAY-03 path, dropped first call and all). Confirm the populated card shows the
+      order id under the link and a **Check status** button. (Connector refreshed after PR #362
+      deployed; the panel only shows the new version after it is reopened. The first Allow once was
+      dropped for the fourth time in four attempts: one template read at 17:26:52Z, no tool call.
+      **Create my checkout** produced `tools/call create_pack_checkout` at 17:27:12Z with no prompt,
+      and the card showed the link, **Check status** and the order line for b87d767f.)
+- [x] Pay with a Stripe test card, typed by the owner, in the tab the link opened. Return to the
+      ChatGPT tab. Within a few seconds the card should read "Paid. 2 letters added to your account."
+      with the link and the note gone, the unused count from this pack, and no Check status button.
+      Record whether the switch happened on return without a click (the visibility refresh) or needed
+      **Check status** (timers throttled in the hidden iframe). (Polls reached the dev API at 17:27:15,
+      :19, :24, :28, :33 and :39Z; the webhook `checkout.session.completed` arrived at 17:27:41Z; the
+      poll at 17:27:43Z returned `submitted` and polling stopped. So the timers kept running while the
+      Stripe tab was open in the embedded browser, and the card read "Paid. 2 letters added to your
+      account. 2 of 2 from this pack are still unused." with the order line and no link or button when
+      the owner returned. Order b87d767f: `letter_pack / credit-pack-4`, `fulfilled`, 5.00 USD;
+      purchase lot of 4 credits active for 730 days.)
+- [x] Ask ChatGPT for the balance; it should agree with the card. (8 prepaid letters, up from 6.)
+- [ ] Optional expiry path: create a checkout and, from the Stripe test dashboard, expire the session.
+      The card should read "This checkout expired before it was paid. Nothing was charged." with
+      **Create a new checkout**; clicking it creates a replacement without a permission prompt and the
+      card polls the new order. (Not run; covered by the jsdom tests and the local harness only.)
+- [x] Record the readings on #322.
 
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
 - [ ] Stripe Dashboard → Developers → Webhooks → the endpoint → the delivered
@@ -370,23 +461,38 @@ account balance as `get_account_balance` reports it.
 - [ ] Balance unchanged; no second purchase lot in the ledger.
 
 ### REFUND-01 — Full refund from the Stripe Dashboard (US-CREDIT-06)
+
+**Status:** Executed in production on 2026-09-12 after PAY-01. Passed. The precondition letter went
+to the owner's own return address as recipient: preview validated both addresses live at PostGrid,
+`send_letter` deducted the ledger, routed to PostGrid, the provider accepted, the transaction
+committed; lot 4 initial / 2 remaining, balance 1 letter, letter accepted, job completed.
+
 Precondition: PAY-01, then one letter sent from that pack, so the spent and
 unspent halves are both present. Letter IRL has no refund button of its own;
 the refund is issued in Stripe and reaches the service only as a webhook.
-- [ ] Stripe Dashboard → Payments → the pack payment → Refund → full amount.
-- [ ] Railway: `stripe.webhook_received` with `charge.refunded` (and
+- [x] Stripe Dashboard → Payments → the pack payment → Refund → full amount.
+- [x] Railway: `stripe.webhook_received` with `charge.refunded` (and
       `refund.created` / `refund.updated` if delivered), no
-      `credits.webhook_failed`.
-- [ ] Balance drops by the **unspent** letters only: 1 → 0. The sent letter is
-      untouched and its status still tracks normally.
-- [ ] `get_purchase_status` for the pack order reads `refunded`, message
-      "The payment was refunded."
-- [ ] Database or admin view: the purchase lot is `revoked` with
+      `credits.webhook_failed`. (`refund.created` and `charge.refunded` at
+      02:31Z, no failure line.)
+- [x] Balance drops by the **unspent** letters only: 1 → 0. The sent letter is
+      untouched and its status still tracks normally. (Balance 0 through
+      ChatGPT; the letter still `accepted`.)
+- [x] `get_purchase_status` for the pack order reads `refunded`, message
+      "The payment was refunded." (Also 0 remaining, 500 cents refunded. The
+      model's prose stopped mid-sentence on that turn while the tool panel
+      held the complete result; an earlier turn answered "connector lookup is
+      timing out" with no request reaching the API, and a retry worked.)
+- [x] Database or admin view: the purchase lot is `revoked` with
       `remaining_amount = 0`; one `refund` ledger row links to it with
       `remaining_at_revocation` equal to what was left; one `credit_transactions`
       row of `-<unspent credits>`; `orders.refunded_at` is set;
-      `credits_purchased` dropped by the whole pack.
-- [ ] No `stripe_money_event_unmatched` row in `commerce_operational_alerts`.
+      `credits_purchased` dropped by the whole pack. (Admin panel: order
+      `refunded`, refunded amount 5.00 USD, purchase lot revoked 4/0, refund lot
+      recorded with reason `payment_refunded`; the panel's "letters already
+      refunded" line shows the pro-rata 2.50 USD for the one unspent letter.)
+- [x] No `stripe_money_event_unmatched` row in `commerce_operational_alerts`.
+      (Alerts: nothing to show; unmatched events: none.)
 
 ### REFUND-02 — Partial refund from the Stripe Dashboard raises an alert
 The house rule forbids partial pack refunds from the Dashboard; this case proves
@@ -779,7 +885,10 @@ badge carries text; the full keyboard traversal and the 320 px rendering are sti
 
 ### ADMIN-PROD-RO-01 — Production read-only gate
 
-**Status:** Requires the owner's separate production read-only approval before any step.
+**Status:** Executed 2026-09-10 on the owner's read-only approval, from the owner's laptop over the
+tailnet (curl with certificate verification plus the embedded browser). All three steps passed, with
+two readings recorded below. The production service is `letter-irl-admin-prod` (Railway service names are
+unique per project and development holds `letter-irl-admin`); the node is `letter-irl-admin-prod`.
 
 **Preconditions:** Production roles created by SQL; grants applied with `--confirm-production-access`;
 the production node registered with `tag:prod-admin`; `ADMIN_MODE=read-only`; the restricted Stripe key
@@ -787,14 +896,56 @@ absent or live.
 
 **Steps:**
 
-1. [ ] Verify the banner shows `production`, `read-only`, `marker: production`,
-   `letter_irl_admin_reader_production`, `stripe: live` and `tag:prod-admin`.
-2. [ ] Open the refunded Starter Pack order from the launch weekend; verify 2 letters, 0 remaining,
-   500 cents refunded, lots revoked.
-3. [ ] Verify `/audit` shows the boot event and this session, and that no command route exists in full mode
-   terms (every POST other than reveal and logout answers 403 `ADMIN_READ_ONLY_MODE`).
+1. [x] Verify the banner shows `production`, `read-only`, `marker: production`,
+   `letter_irl_admin_reader_production`, `stripe: live` and `tag:prod-admin`. (Seen, with `stripe: absent`:
+   the restricted live key is a full-mode item and was not set at this gate. Build `801b40c`.)
+2. [x] Open the refunded Starter Pack order from the launch weekend; verify 2 letters, 0 remaining,
+   500 cents refunded, lots revoked. (Status `refunded`, both ledger lots `revoked` with 0 remaining and not
+   spendable, 5.00 USD paid. The order's refunded-amount field reads 0.00 USD because that column arrived
+   with migration 029 and the refund was issued from the Dashboard before it existed; the status and the
+   revoked lots are the record of the refund.)
+3. [x] Verify `/audit` shows the boot event and this session, and that no command route exists in full mode
+   terms (every POST other than reveal and logout answers 403 `ADMIN_READ_ONLY_MODE`). (`admin.boot` and
+   the sessions listed; a POST to `/elevate` carrying the session cookie and its CSRF token answered 403
+   with the read-only page and audited `admin.request_denied` with `ADMIN_READ_ONLY_MODE`. A POST without
+   a session is refused earlier as `ADMIN_CSRF_REJECTED`, also audited. The app port 8790 is unreachable
+   from the tailnet, as in ADMIN-INFRA-01 step 4.)
 
 **Pass criteria:** Production is visible and untouchable.
+
+### ADMIN-PROD-FULL-01 — Production full-mode gate and first command
+
+**Status:** Executed 2026-09-11 on the owner's separate full-mode and first-command approvals, from the
+owner's own browser over the tailnet (the writes need the owner's authenticator code and a browser
+session; the audit rows were read back with curl). Passed, with one configuration gap found and closed
+between the two runs of step 4.
+
+**Preconditions:** `ADMIN-PROD-RO-01` passed; a restricted **live** Stripe key created for this service
+(Charges and Refunds write, Payment Intents read, Payment Disputes read, Checkout Sessions read);
+`ADMIN_TOTP_SECRET` enrolled with `npx tsx scripts/adminTotpEnrol.ts production`; `DATABASE_URL` switched
+to `letter_irl_admin_operator_production` and `ADMIN_MODE=full` in the same variable edit; the provider
+variables wired as references to the API service.
+
+**Steps:**
+
+1. [x] Verify the banner shows `production`, `full`, `stripe: live`, `mail: postgrid` and `tag:prod-admin`,
+   and that `/audit` carries the boot event. (Seen on build `801b40c`. The banner names the reader role,
+   which pages read through; the operator role is what the boot validated.)
+2. [x] Run the Stripe reconciliation from `/stripe` (no elevation needed). (Last 30 days: 1 Stripe payment,
+   1 grant, matched, no discrepancies; `stripe.reconcile` audited with counts and no Stripe identifiers.)
+3. [x] Elevate on `/elevate` with the authenticator; verify the banner shows the elevation and `/audit`
+   records `admin.elevate`. (Both seen; the window is 10 minutes in production, and a redeploy drops
+   every session.)
+4. [x] Execute the provider status sync as a dry run from
+   `/commands/mail.status_sync/preview?target=letters&days=30&dryRun=on` with a reason and the phrase
+   `PRODUCTION SYNC-DRY-RUN letters`; verify a `succeeded` run row and a `mail.status_sync` audit row.
+   (First run: succeeded, `checked: 1, errors: 1`, the error being `Letter not found` for the one live
+   letter, because the service had no `LETTER_PROVIDER*` variables and used the dummy provider. After
+   wiring the three provider variables as references to the API service and redeploying: succeeded,
+   `checked: 1, updated: 0, errors: 0` against PostGrid.)
+
+**Pass criteria:** Every write goes through elevation, preview and typed confirmation, is recorded as a
+run and an audit row, and the panel's provider commands talk to the real provider.
 
 ### ADMIN-CMD-01 — Acknowledge and resolve an alert with elevation, preview, typed confirmation and replay
 

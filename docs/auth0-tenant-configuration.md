@@ -1,6 +1,6 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** July 23, 2026
+**Last Updated:** September 10, 2026
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
 
@@ -389,9 +389,20 @@ still falls back to `/userinfo`.
    - `third_party_security_mode: strict` is forced on every CIMD client
      regardless of the tenant's permissive-by-default setting, and cannot be
      changed afterwards. Strict is satisfied by importing, not by configuring.
-   - **The CIMD URL is connector-specific.** Deleting and recreating the ChatGPT
-     connector mints a new `client.json` URL, and `external_client_id` is
-     immutable - so the import is orphaned and must be redone.
+   - **The import survives connector recreation.** An earlier revision said that
+     deleting and recreating the ChatGPT connector mints a new `client.json`
+     URL and orphans the import. Observed three times (development twice on
+     2026-09-09, production on 2026-09-10): for the same developer account and
+     MCP URL, ChatGPT reuses the callback id, the `client.json` URL is
+     therefore the same, and Auth0 sends the login page for the previously
+     imported client with no new import. The development id recorded in issue
+     #160 on 2026-07-18 is still the one in use. The import is required once
+     per callback id, not once per connector: a sign-in that fails with
+     `invalid_request: Unknown client: https://chatgpt.com/oauth/{id}/client.json`
+     is the signal that a genuinely new id appeared, and the Import-from-URL
+     step above is the fix. Conversely, a `client.json` URL that has not been
+     imported into a tenant is refused outright (HTTP 400 from `/authorize`),
+     so the import cannot be skipped.
 
 2. **Dedicated MCP resource/API**
    - Identifier: exact canonical environment `/mcp` URL.
@@ -431,11 +442,17 @@ still falls back to `/userinfo`.
    sign-in fail. The failure named the URL to import:
    `invalid_request: Unknown client: https://chatgpt.com/oauth/{id}/client.json`.
 
+   On 2026-09-10 the production connector was deleted and recreated after the
+   promotion that carried #353. The recreated connector received the same
+   callback id, so this import was still the client Auth0 resolved, the owner
+   signed in without any tenant change, and the connector's Refresh returned
+   every tool. Nothing in this table needed to be redone.
+
    | Item | State | Verified by |
    |---|---|---|
    | CIMD client `ChatGPT`, id `tpc_3e5dGr4xSikvNzScZkiVhd` | Imported | Applications list; Registration Type reads **CIMD** |
    | Third-party mode | **Strict** (forced by CIMD, not configured) | App header badge reads `Third-party`, not `Permissive mode` |
-   | Callback | `https://chatgpt.com/connector/oauth/{id}` | Settings -> Allowed Callback URLs, exact match to the document |
+   | Callback | `https://chatgpt.com/connector/oauth/{id}`; the same id was reused when the connector was deleted and recreated on 2026-09-10 | Settings -> Allowed Callback URLs, exact match to the document; login page served for this client on the recreated connector's first link |
    | Client authentication | `private_key_jwt`, two pinned RS256 keys | Import preview mapping; see the corrected contract header |
    | `Letter IRL MCP` user-delegated | **3 / 3** (`mail:read`, `mail:draft`, `mail:send`) | API Access tab |
    | `Letter IRL MCP` client access (M2M) | 0 / 3, deliberately | ChatGPT acts for a user, never as a machine |

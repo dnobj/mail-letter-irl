@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Letter IRL Pack Checkout</title>
+    <style>
+      /* Letter IRL design system (widget-design-package, Aug 2026): system-ui
+         chrome, Georgia only inside paper artifacts, paper stays cream in
+         both themes. Shell copied from GetStartedCard so the two cards match. */
+      :root{--sf:#fff;--sf2:#fafafa;--bd:#e4e4e7;--bd2:#f0f0f2;--tx:#111113;--tb:#3f3f46;--mut:#71717a;--faint:#a1a1aa;--ok:#15803d;--okbg:#ecfdf3;--er:#b91c1c;--erbg:#fef2f2;--btn:#2563eb;--btntx:#fff}
+      .dark{--sf:#2a2a2e;--sf2:#232327;--bd:#3a3a40;--bd2:#323238;--tx:#f4f4f5;--tb:#d4d4d8;--mut:#a1a1aa;--faint:#71717a;--ok:#4ade80;--okbg:#143622;--er:#f87171;--erbg:#3b1d1d;--btn:#3b82f6;--btntx:#fff;--li-blue:#6f98f2}
+      *{box-sizing:border-box}
+      body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+      .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;color:var(--tb);overflow:hidden}
+      .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
+      .logo{width:17px;height:11px;flex:none;display:block}
+      .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
+      .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
+      .bd{padding:14px}
+      .title{margin:0;font-family:Georgia,"Times New Roman",serif;font-size:18px;font-weight:600;color:var(--tx);letter-spacing:-.01em}
+      .ov{font-size:13px;line-height:1.55;color:var(--tb);margin:7px 0 0}
+      .facts{display:flex;gap:14px;margin:12px 0 0;padding:0;list-style:none}
+      .facts li{font-size:12.5px;line-height:1.5;color:var(--tb)}
+      .facts b{display:block;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+      /* The anchor is the payment path. A real anchor is a user gesture in a
+         way a window.open issued after a tool call is not, so it is always
+         rendered when a checkout URL exists and stays until the purchase
+         status says the session is no longer payable. */
+      .checkout-link{display:flex;align-items:center;justify-content:center;margin-top:14px;padding:10px 14px;border-radius:10px;background:var(--btn);color:var(--btntx);font-size:13px;font-weight:600;text-decoration:none}
+      .checkout-link:hover{opacity:.9}
+      .btn{display:flex;align-items:center;justify-content:center;width:100%;margin-top:14px;padding:10px 14px;border:0;border-radius:10px;background:var(--btn);color:var(--btntx);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+      .btn:hover{opacity:.9}
+      .btn:disabled{opacity:.6;cursor:default}
+      .btn2{display:flex;align-items:center;justify-content:center;width:100%;margin-top:8px;padding:8px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2);color:var(--tx);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+      .btn2:hover{border-color:var(--btn)}
+      .btn2:disabled{opacity:.6;cursor:default}
+      .opts{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+      .opt{padding:9px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2);color:var(--tx);font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-align:left}
+      .opt:hover{border-color:var(--btn)}
+      .opt:disabled{opacity:.6;cursor:default}
+      .note{font-size:11.5px;line-height:1.5;color:var(--mut);margin:8px 0 0}
+      .done{border-radius:8px;font-size:12.5px;line-height:1.5;padding:9px 11px;margin-top:12px;background:var(--okbg);color:var(--ok)}
+      .err{border-radius:8px;font-size:12.5px;line-height:1.5;padding:9px 11px;margin-top:12px;background:var(--erbg);color:var(--er)}
+      .oid{font-size:11px;line-height:1.5;color:var(--mut);margin:10px 0 0;word-break:break-all}
+      .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
+      .sk{background:linear-gradient(90deg,var(--bd2) 25%,var(--bd) 50%,var(--bd2) 75%);background-size:200% 100%;animation:sh 1.4s infinite;border-radius:6px}
+      @keyframes sh{to{background-position:-200% 0}}
+      .hidden{display:none !important}
+    </style>
+  </head>
+  <body>
+    <div class="w">
+      <div class="hd"><span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 21"><path fill="none" stroke="var(--li-blue,#2563eb)" stroke-width="3" stroke-linejoin="round" d="M11.3 2.4c5.2 0 9.4 3.3 9.4 7.4 0 4.1-4.2 7.4-9.4 7.4-.8 0-1.6-.1-2.4-.2l-5.7 2.6 1.8-4.1C3 14.2 1.9 12 1.9 9.8c0-4.1 4.2-7.4 9.4-7.4Z"></path><g transform="rotate(-8 24 8.6)"><rect x="16.5" y="3" width="14.6" height="10" rx="1.6" fill="var(--li-orange,#f97316)"></rect><path fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" d="m18 4.7 5.8 4 5.8-4"></path></g></svg></span><b>Letter IRL</b><span class="ctx">Letter pack</span></div>
+      <div class="bd">
+        <!-- Skeleton until toolOutput arrives, or until EMPTY_AFTER_MS says it never will -->
+        <div id="state-loading">
+          <div class="sk" style="height:20px;width:60%"></div>
+          <div class="sk" style="height:12px;margin-top:10px"></div>
+          <div class="sk" style="height:12px;width:80%;margin-top:6px"></div>
+          <div class="sk" style="height:38px;margin-top:16px;border-radius:10px"></div>
+        </div>
+        <!-- Rendered with no tool result: the host drew this template but the
+             call behind it never reached the server (issue #322). -->
+        <div id="state-empty" class="hidden">
+          <h1 class="title">Letter pack</h1>
+          <p class="ov" id="empty-message"></p>
+          <button type="button" class="btn hidden" id="retry-button">Create my checkout</button>
+          <div class="opts hidden" id="pack-options"></div>
+          <div class="err hidden" id="retry-error"></div>
+        </div>
+        <div id="state-ready" class="hidden">
+          <h1 class="title" id="title">Letter pack</h1>
+          <p class="ov" id="message"></p>
+          <ul class="facts">
+            <li><b>Letters</b><span id="letters"></span></li>
+            <li><b>Price</b><span id="price"></span></li>
+          </ul>
+          <a
+            class="checkout-link hidden"
+            id="checkout-link"
+            href="#"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Open secure checkout</a>
+          <p class="note hidden" id="note"></p>
+          <button type="button" class="btn2 hidden" id="check-status-button">Check status</button>
+          <div class="done hidden" id="done"></div>
+          <div class="err hidden" id="err"></div>
+          <button type="button" class="btn hidden" id="new-checkout-button">Create a new checkout</button>
+          <p class="oid hidden" id="order-line"></p>
+        </div>
+      </div>
+      <p class="rev">pack t3</p>
+    </div>
+
+    <script>
+      function applyTheme() {
+        const theme = window.openai?.theme ?? "light";
+        document.documentElement.classList.toggle("dark", theme === "dark");
+      }
+
+      // Hand-copied from products.ts (no import mechanism exists into
+      // standalone widget HTML); tests/unit/mcp/widgetResources.test.ts
+      // compares the copies so they cannot drift.
+      function formatAmount(amountCents, currency) {
+        const zeroDecimal = ['bif','clp','djf','gnf','jpy','kmf','krw','mga','pyg','rwf','ugx','vnd','vuv','xaf','xof','xpf'];
+        const threeDecimal = ['bhd','jod','kwd','omr','tnd'];
+        const ccy = String(currency || 'usd').toLowerCase();
+        const decimals = zeroDecimal.includes(ccy) ? 0 : threeDecimal.includes(ccy) ? 3 : 2;
+        return `${ccy.toUpperCase()} ${((amountCents || 0) / Math.pow(10, decimals)).toFixed(decimals)}`;
+      }
+
+      function formatExpiry(iso) {
+        const at = Date.parse(iso || "");
+        if (Number.isNaN(at)) return "";
+        const minutes = Math.round((at - Date.now()) / 60000);
+        if (minutes <= 0) return "This checkout has expired; ask for a new one.";
+        if (minutes < 120) return `This checkout stays open for about ${minutes} minutes.`;
+        return `This checkout stays open for about ${Math.round(minutes / 60)} hours.`;
+      }
+
+      function plural(count, noun) {
+        return `${count} ${count === 1 ? noun : `${noun}s`}`;
+      }
+
+      // Mirrors the pack enum in the tool's input schema. Anything else in
+      // toolInput is treated as "unknown" and the customer chooses.
+      const PACK_CHOICES = ["starter", "regular", "power"];
+
+      // How long the skeleton may wait for a result before this card decides
+      // the call behind it was never made. Under a real call the result follows
+      // the render within a moment (toolOutput is null at load, then
+      // openai:set_globals delivers it). On 2026-09-11 and 2026-09-12 ChatGPT
+      // dropped the first create_pack_checkout after "Allow once", drew this
+      // template with no result, and the skeleton sat there indefinitely while
+      // the model told the customer to use "the checkout shown above"
+      // (issue #322). After this wait the card offers to create the checkout
+      // itself, through the same bridge call the preview cards already use.
+      const EMPTY_AFTER_MS = 5000;
+
+      // Purchase-status polling, copied in shape from LetterPreviewCard: poll
+      // only while the document is visible, refresh the instant it becomes
+      // visible again, fast for the first minute, then slowly, for at most ten
+      // minutes; a "Check status" button covers anything later. Paying means
+      // switching to the Stripe tab, and browsers throttle timers in a hidden
+      // iframe, so coming back to the tab is what drives the refresh.
+      const POLL_FAST_MS = 3000;
+      const POLL_SLOW_MS = 15000;
+      const POLL_FAST_WINDOW_MS = 60000;
+      const POLL_BUDGET_MS = 600000;
+      const CHECK_STATUS_LABEL = "Check status";
+
+      let opened = false;
+      let emptyTimer = null;
+      let emptyShown = false;
+      let retryBusy = false;
+      // A checkout this card created itself. Once set it wins over anything
+      // the host delivers afterwards: the customer may already be paying on
+      // that link, and a late host result would swap it for another order.
+      let retryResult = null;
+
+      let trackedOrderId = null;
+      let pollingActive = false;
+      let statusTimer = null;
+      let pollStartedAt = 0;
+      let pollDeadline = 0;
+      let statusCheckInFlight = false;
+      // The last purchase status that moved the card past "pay here". Kept so
+      // a later openai:set_globals re-render (which only knows the pending
+      // checkout) cannot put the payment link back over a paid purchase.
+      let statusView = null;
+      let currentLetters = 0;
+
+      function el(id) {
+        return document.getElementById(id);
+      }
+
+      function show(id, visible) {
+        el(id).classList.toggle("hidden", !visible);
+      }
+
+      function toolData(result) {
+        return result?.structuredContent || result || {};
+      }
+
+      function canCallTools() {
+        return typeof window.openai?.callTool === "function";
+      }
+
+      function hostState() {
+        const output = window.openai?.toolOutput ?? {};
+        const responseMeta = window.openai?.toolResponseMetadata ?? {};
+        return { ...responseMeta, ...output };
+      }
+
+      function hasData(state) {
+        return Boolean(state && (state.orderId || state.productDescription || state.message));
+      }
+
+      function requestedPack() {
+        const pack = window.openai?.toolInput?.pack;
+        return PACK_CHOICES.includes(pack) ? pack : null;
+      }
+
+      // ---- Empty render: the dropped call ---------------------------------
+
+      function armEmptyTimer() {
+        if (emptyTimer !== null || emptyShown) return;
+        emptyTimer = setTimeout(() => {
+          emptyTimer = null;
+          if (retryResult || hasData(hostState())) return;
+          emptyShown = true;
+          prepareEmptyState();
+          render();
+        }, EMPTY_AFTER_MS);
+      }
+
+      function cancelEmptyTimer() {
+        if (emptyTimer === null) return;
+        clearTimeout(emptyTimer);
+        emptyTimer = null;
+      }
+
+      function prepareEmptyState() {
+        const message = el("empty-message");
+        const button = el("retry-button");
+        if (!canCallTools()) {
+          // No bridge to call through: say what happened and how to recover,
+          // which still beats grey placeholder bars.
+          message.textContent =
+            "No checkout was created yet. Ask for the checkout again and it will appear here.";
+          button.classList.add("hidden");
+          return;
+        }
+        message.textContent = "No checkout was created yet. Nothing has been charged.";
+        button.textContent = requestedPack() ? "Create my checkout" : "Choose a pack";
+        button.classList.remove("hidden");
+      }
+
+      function showRetryError(text) {
+        const error = el("retry-error");
+        error.textContent = text;
+        error.classList.remove("hidden");
+      }
+
+      async function onRetryClick() {
+        if (retryBusy) return;
+        const pack = requestedPack();
+        if (pack) {
+          await createCheckout(pack);
+        } else {
+          await loadPackOptions();
+        }
+      }
+
+      async function loadPackOptions() {
+        const button = el("retry-button");
+        retryBusy = true;
+        button.disabled = true;
+        button.textContent = "Loading packs...";
+        el("retry-error").classList.add("hidden");
+        try {
+          const listed = toolData(await window.openai.callTool("list_letter_packs", {}));
+          const packs = Array.isArray(listed.packs) ? listed.packs : [];
+          if (!packs.length) {
+            throw new Error(listed.message || "No letter packs are available right now.");
+          }
+          renderPackOptions(packs);
+          button.classList.add("hidden");
+        } catch (error) {
+          // Not a fallback to the smallest pack: after a click that means
+          // "show me the options", a surprise purchase is the worst outcome.
+          showRetryError(`Unable to load letter packs: ${error?.message || "Unknown error"}`);
+          button.textContent = "Choose a pack";
+        } finally {
+          retryBusy = false;
+          button.disabled = false;
+        }
+      }
+
+      function renderPackOptions(packs) {
+        const container = el("pack-options");
+        container.textContent = "";
+        for (const option of packs) {
+          if (!PACK_CHOICES.includes(option.pack)) continue;
+          const choice = document.createElement("button");
+          choice.type = "button";
+          choice.className = "opt";
+          choice.setAttribute("data-pack", option.pack);
+          const letters = Number(option.letters) || 0;
+          // Server-formatted price when present; the local table only stands
+          // in for a stale connector that predates displayAmount.
+          const price = option.displayAmount
+            ? `${String(option.currency || "usd").toUpperCase()} ${option.displayAmount}`
+            : formatAmount(option.amountCents, option.currency);
+          choice.textContent = `${plural(letters, "letter")} · ${price}`;
+          choice.addEventListener("click", () => {
+            void createCheckout(option.pack);
+          });
+          container.appendChild(choice);
+        }
+        container.classList.remove("hidden");
+      }
+
+      async function requestCheckout(pack) {
+        const result = toolData(await window.openai.callTool("create_pack_checkout", { pack }));
+        if (!hasData(result)) {
+          throw new Error(result.message || "The checkout was not returned.");
+        }
+        return result;
+      }
+
+      async function createCheckout(pack) {
+        if (retryBusy) return;
+        const button = el("retry-button");
+        const options = Array.from(document.querySelectorAll("#pack-options button"));
+        const label = button.textContent;
+        retryBusy = true;
+        button.disabled = true;
+        button.textContent = "Creating checkout...";
+        options.forEach(option => { option.disabled = true; });
+        el("retry-error").classList.add("hidden");
+        try {
+          retryResult = await requestCheckout(pack);
+          render();
+        } catch (error) {
+          // The button stays: the customer can try again, and the message the
+          // tool returns is already written for them.
+          showRetryError(`Unable to create the checkout: ${error?.message || "Unknown error"}`);
+          button.textContent = label;
+        } finally {
+          retryBusy = false;
+          button.disabled = false;
+          options.forEach(option => { option.disabled = false; });
+        }
+      }
+
+      // A checkout that expired or failed is replaced, not reopened: Stripe
+      // will not take a payment on such a session either way.
+      async function createAnotherCheckout() {
+        const pack = requestedPack();
+        if (retryBusy || !pack) return;
+        const button = el("new-checkout-button");
+        retryBusy = true;
+        button.disabled = true;
+        button.textContent = "Creating checkout...";
+        el("err").classList.add("hidden");
+        try {
+          const result = await requestCheckout(pack);
+          statusView = null;
+          pollingActive = false;
+          stopStatusPolling();
+          trackedOrderId = null;
+          retryResult = result;
+          render();
+        } catch (error) {
+          el("err").textContent = `Unable to create the checkout: ${error?.message || "Unknown error"}`;
+          el("err").classList.remove("hidden");
+        } finally {
+          retryBusy = false;
+          button.disabled = false;
+          button.textContent = "Create a new checkout";
+        }
+      }
+
+      // ---- Purchase status ------------------------------------------------
+
+      function stopStatusPolling() {
+        if (statusTimer !== null) {
+          clearTimeout(statusTimer);
+          statusTimer = null;
+        }
+      }
+
+      // Always clears before arming, so repeated visibilitychange events
+      // cannot stack timers - a leak here would mean unbounded callTool
+      // traffic from a card left open.
+      function scheduleStatusPoll() {
+        stopStatusPolling();
+        if (!pollingActive || !trackedOrderId || document.hidden) return;
+        if (Date.now() >= pollDeadline) return;
+        const elapsed = Date.now() - pollStartedAt;
+        const delay = elapsed < POLL_FAST_WINDOW_MS ? POLL_FAST_MS : POLL_SLOW_MS;
+        statusTimer = setTimeout(() => {
+          statusTimer = null;
+          void refreshPurchaseStatus().then(settled => {
+            if (!settled) scheduleStatusPoll();
+          });
+        }, delay);
+      }
+
+      function startStatusPolling(orderId) {
+        if (!canCallTools() || !orderId || trackedOrderId === orderId) return;
+        trackedOrderId = orderId;
+        statusView = null;
+        pollingActive = true;
+        pollStartedAt = Date.now();
+        pollDeadline = pollStartedAt + POLL_BUDGET_MS;
+        show("check-status-button", true);
+        scheduleStatusPoll();
+      }
+
+      // Resolves true when the purchase reached a state with nothing left to
+      // poll for.
+      async function refreshPurchaseStatus({ userInitiated = false } = {}) {
+        if (statusCheckInFlight || !trackedOrderId) return false;
+        statusCheckInFlight = true;
+        const button = el("check-status-button");
+        if (userInitiated) {
+          button.disabled = true;
+          button.textContent = "Checking...";
+        }
+        const orderId = trackedOrderId;
+        try {
+          const result = toolData(
+            await window.openai.callTool("get_purchase_status", { orderId })
+          );
+          // A reply for an order this card no longer tracks is stale.
+          if (trackedOrderId !== orderId) return true;
+          if (result.orderId && result.orderId !== orderId) return false;
+          return applyStatus(result);
+        } catch {
+          // A failed check is not worth an alarming message: the purchase is
+          // unaffected, and the button is still there to try again.
+          return false;
+        } finally {
+          statusCheckInFlight = false;
+          if (userInitiated) {
+            button.disabled = false;
+            button.textContent = CHECK_STATUS_LABEL;
+          }
+        }
+      }
+
+      function applyStatus(result) {
+        const status = result?.purchaseStatus;
+        if (!status) return false;
+        if (status === "pending_payment") {
+          statusView = null;
+          return false;
+        }
+        statusView = result;
+        const terminal = status !== "processing";
+        if (terminal) {
+          pollingActive = false;
+          stopStatusPolling();
+        }
+        renderStatusView();
+        return terminal;
+      }
+
+      function renderStatusView() {
+        const view = statusView;
+        if (!view) return;
+        const letters = Number(view.letters) || currentLetters;
+        const message = el("message");
+        const done = el("done");
+        const error = el("err");
+        const again = el("new-checkout-button");
+        el("checkout-link").classList.add("hidden");
+        el("note").classList.add("hidden");
+        error.classList.add("hidden");
+        again.classList.add("hidden");
+        switch (view.purchaseStatus) {
+          case "processing":
+            message.textContent = `Payment confirmed. Adding ${plural(letters, "letter")} to your account...`;
+            done.classList.add("hidden");
+            show("check-status-button", true);
+            break;
+          case "submitted":
+            message.textContent = `Paid. ${plural(letters, "letter")} added to your account.`;
+            done.textContent =
+              typeof view.lettersRemaining === "number"
+                ? `${view.lettersRemaining} of ${letters} from this pack ${view.lettersRemaining === 1 ? "is" : "are"} still unused. Nothing is sent until you choose what to mail.`
+                : "Nothing is sent until you choose what to mail.";
+            done.classList.remove("hidden");
+            show("check-status-button", false);
+            break;
+          case "cancelled":
+          case "payment_failed":
+            message.textContent =
+              view.purchaseStatus === "cancelled"
+                ? "This checkout expired before it was paid. Nothing was charged."
+                : "The payment did not go through. Nothing was charged.";
+            done.classList.add("hidden");
+            show("check-status-button", false);
+            if (canCallTools() && requestedPack()) {
+              again.classList.remove("hidden");
+            } else {
+              error.textContent = "Ask for a new checkout and it will appear here.";
+              error.classList.remove("hidden");
+            }
+            break;
+          default:
+            // refund_pending, refunded, on_hold: the server's message is
+            // written for the customer and says what is being done.
+            message.textContent = view.message || "";
+            done.classList.add("hidden");
+            show("check-status-button", false);
+        }
+        el("order-line").textContent = `Order ${view.orderId || trackedOrderId}`;
+        show("order-line", true);
+      }
+
+      // ---- Render -----------------------------------------------------------
+
+      function render() {
+        applyTheme();
+        const output = window.openai?.toolOutput ?? {};
+        const responseMeta = window.openai?.toolResponseMetadata ?? {};
+        // The merge stays a declaration here, not in hostState(): the data
+        // contract test follows the toolOutput alias through spreads to learn
+        // which fields this card reads, and checks them against the schema.
+        const state = retryResult || { ...responseMeta, ...output };
+
+        if (!hasData(state)) {
+          show("state-ready", false);
+          show("state-loading", !emptyShown);
+          show("state-empty", emptyShown);
+          armEmptyTimer();
+          return;
+        }
+
+        cancelEmptyTimer();
+        show("state-loading", false);
+        show("state-empty", false);
+        show("state-ready", true);
+        renderReady(state);
+      }
+
+      function renderReady(state) {
+        el("title").textContent = state.productDescription || "Letter pack";
+        // Only a status view offers a replacement checkout; a fresh checkout
+        // render (host-delivered or created here) starts without the offer.
+        show("new-checkout-button", false);
+        const letters = Number(state.letters) || 0;
+        currentLetters = letters;
+        el("letters").textContent = letters ? String(letters) : "—";
+        el("price").textContent =
+          state.displayAmount || (state.amountCents ? formatAmount(state.amountCents, state.currency) : "—");
+        if (state.orderId) {
+          el("order-line").textContent = `Order ${state.orderId}`;
+          show("order-line", true);
+        }
+
+        const link = el("checkout-link");
+        const note = el("note");
+        const done = el("done");
+        const pending = Boolean(state.checkoutUrl) && state.status === "checkout_pending";
+
+        // The tool's message field is written for the model (it says to show
+        // the customer the link). The customer reads this card, so the
+        // pending line is composed from the figures instead.
+        el("message").textContent = pending
+          ? `Pay ${formatAmount(state.amountCents, state.currency)} to add ${plural(letters, "letter")} to your account.`
+          : state.message || "";
+
+        if (pending) {
+          // The link is the payment path and stays until the purchase status
+          // says otherwise: on 2026-08-29 openExternal resolved without
+          // opening anything, and on 2026-09-11 the text-only path left the
+          // customer with no link at all (issue #322). The anchor is correct
+          // either way.
+          link.href = state.checkoutUrl;
+          link.textContent = `Open secure checkout — ${formatAmount(state.amountCents, state.currency)}`;
+          link.classList.remove("hidden");
+          const expiry = formatExpiry(state.expiresAt);
+          note.textContent = `Stripe handles the payment. Nothing is sent until you choose what to mail. ${expiry}`.trim();
+          note.classList.remove("hidden");
+          done.classList.add("hidden");
+          if (!opened && window.openai?.openExternal) {
+            // Ask the host to open the checkout once, as a convenience. The
+            // anchor above is what the customer relies on if the host declines.
+            opened = true;
+            Promise.resolve()
+              .then(() => window.openai.openExternal({ href: state.checkoutUrl }))
+              .catch(() => {});
+          }
+          startStatusPolling(state.orderId);
+        } else {
+          link.classList.add("hidden");
+          note.classList.add("hidden");
+          done.textContent = state.message ||
+            "This purchase is already paid or being fulfilled. Ask for its purchase status instead of opening another checkout.";
+          done.classList.remove("hidden");
+        }
+
+        // A re-render only knows the checkout; the purchase may have moved on.
+        if (statusView) renderStatusView();
+      }
+
+      el("retry-button").addEventListener("click", () => {
+        void onRetryClick();
+      });
+      el("new-checkout-button").addEventListener("click", () => {
+        void createAnotherCheckout();
+      });
+      el("check-status-button").addEventListener("click", () => {
+        void refreshPurchaseStatus({ userInitiated: true }).then(settled => {
+          if (!settled) scheduleStatusPoll();
+        });
+      });
+      // Coming back from the checkout tab is the moment the answer is wanted,
+      // and the first moment a hidden iframe is allowed to run again.
+      document.addEventListener("visibilitychange", () => {
+        if (!pollingActive) return;
+        if (document.hidden) {
+          stopStatusPolling();
+          return;
+        }
+        void refreshPurchaseStatus().then(settled => {
+          if (!settled) scheduleStatusPoll();
+        });
+      });
+      window.addEventListener("openai:set_globals", render);
+      render();
+    </script>
+  </body>
+</html>

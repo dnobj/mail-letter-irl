@@ -7,6 +7,7 @@ import {
   type PackProductId
 } from '../config/products.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
+import { widgetTemplateUri } from '../mcp/widgetUris.js';
 import { createPackCheckoutInputSchema, createPackCheckoutOutputSchema } from '../schemas.js';
 import { createPackCheckout } from '../services/commerceService.js';
 import { findUser } from '../services/userService.js';
@@ -21,12 +22,24 @@ interface CreatePackCheckoutOutput {
   letters: number;
   amountCents: number;
   currency: string;
+  /** Server-formatted price, e.g. "5.00", so the card never recomputes it. */
+  displayAmount: string;
   productDescription: string;
   expiresAt?: string;
   status: string;
   reused: boolean;
   message: string;
 }
+
+/**
+ * The card that renders this tool's result (issue #322). Until 2026-09-12 the
+ * tool had no output template: called from a widget button the customer got a
+ * link, but called from a text prompt nothing rendered and the model was left
+ * to relay a 500-character Stripe URL in prose. In production it twice
+ * described a checkout as "ready" or "shown above" with no link at all, once
+ * with a fabricated URL. The card carries the real anchor.
+ */
+const OUTPUT_TEMPLATE = widgetTemplateUri("PackCheckoutCard");
 
 /**
  * Customer-safe text for a failed pack checkout.
@@ -110,18 +123,24 @@ async function handler(
       productId
     });
     const pending = result.status === 'checkout_pending';
+    const displayAmount = formatAmountForCurrency(result.amountCents, result.currency);
+    const letterWord = definition.letters === 1 ? 'letter' : 'letters';
     return {
       orderId: result.orderId,
       checkoutUrl: pending ? result.checkoutUrl : undefined,
       letters: definition.letters,
       amountCents: result.amountCents,
       currency: result.currency,
+      displayAmount,
       productDescription: result.productDescription,
       expiresAt: result.expiresAt,
       status: result.status,
       reused: result.reused,
+      // The message names the link on purpose: the model reads this field
+      // more reliably than the schema, and #322 showed it will otherwise say
+      // the checkout is "open" or "shown above" when nothing was (#322).
       message: pending
-        ? `Pay ${result.currency.toUpperCase()} ${formatAmountForCurrency(result.amountCents, result.currency)} to add ${definition.letters} ${definition.letters === 1 ? 'letter' : 'letters'} to this account. The letters are added automatically once payment completes; you then choose what to send.`
+        ? `Checkout created, not opened: show the customer the checkoutUrl as a link to click. Paying ${result.currency.toUpperCase()} ${displayAmount} there adds ${definition.letters} ${letterWord} to this account automatically; nothing is sent until they choose what to mail.`
         : 'This purchase is already paid or being fulfilled. Check its purchase status instead of opening another checkout.'
     };
   } catch (error) {
@@ -135,11 +154,12 @@ export const createPackCheckoutTool: McpToolDefinition<
 > = {
   name: 'create_pack_checkout',
   description:
-    'Create a Stripe-hosted checkout to buy a pack of prepaid letters. The price and pack sizes come only from server configuration. Payment adds letters to the account balance; it does not send anything, so the customer still chooses and sends afterward. Use create_mail_checkout instead to pay for one specific draft.',
+    'Create a Stripe-hosted checkout to buy a pack of prepaid letters. The result carries a checkoutUrl that the customer must be shown as a link to click; nothing opens automatically and no card is guaranteed to render, so present the link. The price and pack sizes come only from server configuration. Payment adds letters to the account balance; it does not send anything, so the customer still chooses and sends afterward. Use create_mail_checkout instead to pay for one specific draft.',
   readOnly: false,
   inputSchema: createPackCheckoutInputSchema,
   outputSchema: createPackCheckoutOutputSchema,
   meta: {
+    'openai/outputTemplate': OUTPUT_TEMPLATE,
     'openai/toolInvocation/invoking': 'Preparing letter pack checkout...',
     'openai/toolInvocation/invoked': 'Letter pack checkout ready',
     'openai/widgetAccessible': true,
