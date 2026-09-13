@@ -9,7 +9,7 @@ import {
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { widgetTemplateUri } from '../mcp/widgetUris.js';
 import { createPackCheckoutInputSchema, createPackCheckoutOutputSchema } from '../schemas.js';
-import { createPackCheckout } from '../services/commerceService.js';
+import { createPackCheckout, purchaseStartUrl } from '../services/commerceService.js';
 import { findUser } from '../services/userService.js';
 
 interface CreatePackCheckoutInput {
@@ -19,6 +19,12 @@ interface CreatePackCheckoutInput {
 interface CreatePackCheckoutOutput {
   orderId: string;
   checkoutUrl?: string;
+  /**
+   * The same checkout, entered through our own start page so the way back
+   * into the conversation can be recorded (#372). For the card's button;
+   * the model presents checkoutUrl.
+   */
+  checkoutStartUrl?: string;
   letters: number;
   amountCents: number;
   currency: string;
@@ -128,6 +134,8 @@ async function handler(
     return {
       orderId: result.orderId,
       checkoutUrl: pending ? result.checkoutUrl : undefined,
+      checkoutStartUrl:
+        pending && result.checkoutUrl ? purchaseStartUrl(result.checkoutUrl) : undefined,
       letters: definition.letters,
       amountCents: result.amountCents,
       currency: result.currency,

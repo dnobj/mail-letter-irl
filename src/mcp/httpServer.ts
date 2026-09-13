@@ -31,7 +31,7 @@ import {
 import { validatePromoCodePublic } from "../services/promoService.js";
 import { closePool } from "../db/index.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
-import { renderPurchaseReturnPage } from "./purchaseReturnPage.js";
+import { decidePurchaseStart, readReturnCookie, renderPurchaseReturnPage } from "./purchaseReturnPage.js";
 import {
   readRequestBody,
   MCP_BODY_LIMIT_BYTES,
@@ -552,6 +552,30 @@ export async function startHttpServer() {
       return;
     }
 
+    // Checkout start page (#372): the card opens this through openExternal so
+    // ChatGPT can append the way back into the conversation; the page keeps it
+    // in a same-site cookie and forwards to Stripe. Stateless; only Stripe's
+    // hosted checkout is an accepted destination and only ChatGPT origins an
+    // accepted return, so it is not an open redirect.
+    if (url.pathname === '/purchase/start' && req.method === 'GET') {
+      const decision = decidePurchaseStart({
+        to: url.searchParams.get('to'),
+        redirectUrl: url.searchParams.get('redirectUrl')
+      });
+      res.setHeader('Cache-Control', 'no-store');
+      if (decision.status === 400) {
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end(decision.body);
+        return;
+      }
+      if (decision.cookie) res.setHeader('Set-Cookie', decision.cookie);
+      res.statusCode = 302;
+      res.setHeader('Location', decision.location);
+      res.end();
+      return;
+    }
+
     // Server-controlled Stripe return page. It intentionally shows no order
     // details; authenticated status is available only through get_purchase_status.
     // The page's one job is the way back into ChatGPT (src/mcp/purchaseReturnPage.ts).
@@ -564,7 +588,8 @@ export async function startHttpServer() {
       res.end(
         renderPurchaseReturnPage({
           cancelled,
-          userAgent: Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader
+          userAgent: Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader,
+          conversationUrl: readReturnCookie(req.headers.cookie)
         })
       );
       return;

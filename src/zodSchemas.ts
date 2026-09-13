@@ -323,6 +323,13 @@ export const createPackCheckoutOutputZ = z.object({
     .describe(
       "Stripe-hosted checkout URL. Present it to the customer as a link to click; nothing opens on its own (#322)."
     ),
+  // The card's button target: our own start page, which forwards to the same
+  // checkout after recording the way back into the conversation (#372).
+  checkoutStartUrl: z
+    .string()
+    .url()
+    .optional()
+    .describe("Same checkout via Letter IRL's start page; used by the card. Present checkoutUrl to the customer."),
   // The customer-facing count. Credits stay internal - the catalogue names its
   // products after them ('credit-pack-4' is two letters), which is exactly the
   // confusion this field avoids. See

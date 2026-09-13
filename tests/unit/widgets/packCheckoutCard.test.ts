@@ -40,6 +40,7 @@ interface MountOptions {
   toolOutput?: Record<string, unknown> | null;
   toolInput?: Record<string, unknown>;
   withoutCallTool?: boolean;
+  withoutOpenExternal?: boolean;
   packCheckoutFails?: boolean;
   packCheckoutOmitsUrl?: boolean;
   packListEmpty?: boolean;
@@ -102,11 +103,13 @@ function mount(options: MountOptions = {}): Harness {
       return toolOutput;
     },
     toolResponseMetadata: null,
-    toolInput: options.toolInput ?? {},
-    openExternal: async ({ href }: { href: string }) => {
-      opened.push(href);
-    }
+    toolInput: options.toolInput ?? {}
   };
+  if (!options.withoutOpenExternal) {
+    bridge.openExternal = async ({ href }: { href: string }) => {
+      opened.push(href);
+    };
+  }
   if (!options.withoutCallTool) {
     bridge.callTool = async (name: string, args: Record<string, unknown>) => {
       calls.push({ name, args });
@@ -259,6 +262,56 @@ describe('PackCheckoutCard with a tool result', () => {
     expect(card.visible('state-empty')).toBe(false);
     expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_host');
     expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+  });
+});
+
+describe('PackCheckoutCard and the way back into the conversation (#372)', () => {
+  const START_URL = 'https://api.example.test/purchase/start?to=' + encodeURIComponent('https://checkout.stripe.com/c/pay/cs_host');
+
+  it('points the button and the convenience open at the start page when the result carries one', async () => {
+    // The start page forwards to the same Stripe checkout after keeping the
+    // return link ChatGPT appends; an older result without it still links
+    // straight to Stripe.
+    const card = mount({ toolOutput: pendingCheckout({ checkoutStartUrl: START_URL }) });
+    // The convenience open is a microtask after render.
+    await flush();
+
+    expect(card.href('checkout-link')).toBe(START_URL);
+    expect(card.opened).toEqual([START_URL]);
+    expect(card.visible('fallback')).toBe(false);
+  });
+
+  it('routes a tap through the host and offers a plain link if nothing opened', async () => {
+    // Only an openExternal call gets the redirectUrl appended, so the tap
+    // goes through the host; but on 2026-08-29 that call resolved without
+    // opening anything, so a plain fallback link follows after a moment.
+    const card = mount({ toolOutput: pendingCheckout({ checkoutStartUrl: START_URL }) });
+    const timersBefore = card.pendingTimers().length;
+
+    await card.click('checkout-link');
+
+    expect(card.opened).toEqual([START_URL, START_URL]);
+    const fallbackTimer = card.pendingTimers().find(timer => timer.delay === 1500);
+    expect(fallbackTimer).toBeDefined();
+    expect(card.pendingTimers().length).toBe(timersBefore + 1);
+    expect(card.visible('fallback')).toBe(false);
+
+    fallbackTimer!.cancelled = true;
+    fallbackTimer!.fn();
+
+    expect(card.visible('fallback')).toBe(true);
+    expect(card.href('fallback-link')).toBe(START_URL);
+  });
+
+  it('keeps the plain link when the host cannot open links', async () => {
+    const card = mount({ toolOutput: pendingCheckout({ checkoutStartUrl: START_URL }), withoutOpenExternal: true });
+
+    expect(card.href('checkout-link')).toBe(START_URL);
+    expect(card.opened).toEqual([]);
+    await card.click('checkout-link');
+    // No openExternal on this bridge: the anchor's own navigation is the
+    // path, and no fallback timer is armed.
+    expect(card.pendingTimers().some(timer => timer.delay === 1500)).toBe(false);
   });
 });
 

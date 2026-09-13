@@ -484,7 +484,34 @@ replaces the link with the outcome.
       conversation. So the Android button is a web-app fallback on such phones until #372 supplies a
       conversation link.)
 
-### PAY-02 — Webhook idempotency (US-EDGE-04)
+### PAY-05 — Back to the conversation after checkout (issue #372)
+
+**Status:** Not executed. Development only.
+
+Background: the checkout card now opens a start page on the API host through `window.openai.openExternal`
+instead of the Stripe URL directly. For an allowlisted redirect origin (the API origin is in
+`redirect_domains`), ChatGPT is documented to skip the safe-link modal and append a `redirectUrl`
+query parameter. The start page keeps it in a same-site cookie and forwards to Stripe; the return page
+then offers **Back to your conversation**: on Android as an intent link that opens the app by package,
+on desktop as a plain link, on iPhone and iPad text only until a device has proven the universal link.
+
+- [ ] Web (owner's click; the embedded browser blocks host-opened tabs from automated clicks): in a
+      fresh chat with the DEV app, buy the Starter Pack, and when the card shows the link, click it.
+      Record whether a safe-link modal appeared, and whether the tab that opened is the Stripe page
+      (the start page forwards in one hop). Cancel with Stripe's back arrow.
+- [ ] On the return page: is the button **Back to your conversation**? If so ChatGPT appended a
+      return link. Record the shape of the link's target (conversation URL or something else) from the
+      dev log or the page source, without pasting it into a shared place. Click it and record where
+      it lands.
+- [ ] Android (owner's phone over adb): same purchase, tap the card's link, cancel with Stripe's back
+      arrow, tap **Back to your conversation**. Expected: the ChatGPT app comes to the front on the
+      conversation, even with the app's link handling switched off.
+- [ ] If the button says **Back to ChatGPT** instead, no return link was appended: record the
+      client, and check the dev log for the start-page request's query (the API logs no values).
+- [ ] If the card's tap opened nothing, record that the fallback link appeared after a moment and
+      that it opens the checkout.
+
+
 
 **Status:** Executed 2026-09-12 in development against the PAY-04 order. Passed.
 

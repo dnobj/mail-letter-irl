@@ -210,8 +210,12 @@ const WIDGET_PACKS_ORIGIN = normalizeHttpsOrigin(
     "https://letterirl.com",
   "https://letterirl.com"
 );
+// The API origin is a redirect target too: the checkout card opens
+// /purchase/start there through openExternal, and only for an allowlisted
+// origin does ChatGPT skip the safe-link modal and append the redirectUrl
+// that the start page keeps as the way back into the conversation (#372).
 const WIDGET_REDIRECT_ORIGINS = Array.from(
-  new Set(["https://checkout.stripe.com", WIDGET_PACKS_ORIGIN])
+  new Set(["https://checkout.stripe.com", WIDGET_PACKS_ORIGIN, WIDGET_API_ORIGIN])
 );
 
 /**
