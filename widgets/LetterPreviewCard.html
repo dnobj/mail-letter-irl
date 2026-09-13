@@ -235,6 +235,10 @@
         }
       }
 
+      // The address fields are the customer's own input echoed back by the
+      // tool (originalAddress), which the card writes into innerHTML with the
+      // rest of the mockup. They are text, never markup: a recipient name
+      // pasted from a document must not be able to run in this frame.
       function formatAddress(addr) {
         if (!addr) return null;
         const lines = [];
@@ -247,7 +251,7 @@
           .replace(", ", ", ")
           .replace(/,([^,]*)$/, " $1");
         if (cityLine) lines.push(cityLine);
-        return lines.join("<br>");
+        return lines.map(line => escapeHtml(String(line))).join("<br>");
       }
 
       function renderLetterMockup(state) {
