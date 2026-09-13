@@ -512,12 +512,17 @@ still falls back to `/userinfo`.
    - **`Prod-to-Dev Sync (Management API)`** - client id
      `TZEuAJ6kTYFTXJRtu8fgUlPiqh9FAMMS`. Renamed 2026-08-24 from
      `Letter IRL API (Test Application)`, which was actively misleading: it holds
-     **Auth0 Management API access (4 of 273 permissions)** and is the client
-     `scripts/dev-sync.ts` authenticates as, via `AUTH0_PROD_CLIENT_ID` /
+     **Auth0 Management API access (4 of 273 permissions)** and was the client
+     `scripts/dev-sync.ts` authenticated as, via `AUTH0_PROD_CLIENT_ID` /
      `AUTH0_PROD_CLIENT_SECRET`, to read production users for the prod-to-dev
      sync. Deleting it as the "test app" it appeared to be would have broken that
      script silently - nothing in the repo names it, only an env var holding its
      id, so searching the codebase for the app name finds nothing.
+
+     **The script was removed on 2026-09-13, so this client now has no caller.**
+     It is a standing Management API credential on the PRODUCTION tenant with no
+     remaining purpose: delete it there, and this entry with it. Until then it is
+     the most privileged unused credential the tenant holds.
 
      Its description now says the same thing inside the dashboard, so the next
      person does not have to reconstruct it from grants.

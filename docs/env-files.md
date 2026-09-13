@@ -56,18 +56,19 @@ Letter IRL uses [Neon PostgreSQL branching](https://neon.tech/docs/introduction/
 | `production` | Live user data | Railway `.env` only; no workstation admin `.env` |
 | `dev` | Development/testing | `.env.dev` for the public development server |
 
-### Sync Dev from Production
+### Do not copy production into dev
 
-To refresh the dev branch with production data:
+There is no prod-to-dev sync. The `dev:sync` script that used to live here
+recreated the dev Neon branch from production and imported production Auth0
+users into the development tenant, which needed a production Neon API key and a
+production Auth0 Management API secret in a workstation `.env.dev` - the exact
+thing the rule above forbids. It also made development, where authentication can
+be relaxed and the dummy provider is normal, hold a copy of every letter,
+recipient address and customer record in production.
 
-```bash
-npm run dev:sync
-```
-
-This script:
-1. Deletes the existing dev branch
-2. Creates a new dev branch from production
-3. Exports/imports Auth0 users (preserving user IDs)
+Seed development from fixtures, or work against an empty dev branch created in
+the Neon console. If a production-shaped dataset is ever genuinely needed, build
+it from anonymised data rather than copying the real one.
 
 ---
 

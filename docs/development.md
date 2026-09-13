@@ -41,7 +41,7 @@ Both repositories use the same branching strategy: `feature/*` → `dev` → `ma
 │  PostGrid: live mode                                             │
 └─────────────────────────────────────────────────────────────────┘
            │
-           │ npm run dev:sync
+           │ code promotion only; no data flows this way
            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  DEVELOPMENT                                                     │
@@ -79,7 +79,7 @@ master/main (production) ──────────────────�
 | Git Branch (API) | `master` | `dev` |
 | Git Branch (Website) | `main` | `dev` |
 | Auth0 Tenant | `dev-njmdyqf8n25rqgy7` (dnicholl@letterirl.com) | `dev-ky21dxn3qmi71hjl` (dnicholl@objective.works) |
-| Neon Branch | `production` | `dev` (synced via `npm run dev:sync`) |
+| Neon Branch | `production` | `dev` (independent; never copied from production) |
 | Stripe Mode | Live (`sk_live_`) | Test (`sk_test_`) |
 | PostGrid | Live (real mail) | Test mode (no real mail) |
 | Admin Routes | Disabled | Disabled |
@@ -151,24 +151,24 @@ npm run dev
 
 ---
 
-## Syncing from Production
+## Development data
 
-The `dev:sync` command refreshes development from production:
-
-```bash
-npm run dev:sync
-```
-
-This performs:
-1. Recreates Neon dev branch from main
-2. Exports Username-Password users from production Auth0
-3. Imports users to development Auth0 (preserving user_ids)
+Development does not receive a copy of production. The `dev:sync` command was
+removed on 2026-09-13: it recreated the dev Neon branch from production and
+imported production Auth0 users into the development tenant, so development held
+every letter, recipient address and customer record production held, and running
+it needed production credentials on a workstation. Seed dev from fixtures or
+work against an empty branch.
 
 ### User ID Strategy
 
-Social login users (Google, GitHub, etc.) automatically have matching IDs across tenants because the ID comes from the provider.
+Social login users (Google, GitHub, etc.) automatically have matching IDs across
+tenants because the ID comes from the provider, so a subject created in one
+tenant is recognisable in the other with no import.
 
-Username-Password users (`auth0|xxx`) need to be imported to preserve IDs.
+Username-Password users (`auth0|xxx`) do not match across tenants. That is
+accepted: create a test account in the development tenant instead of importing a
+production one.
 
 ---
 
