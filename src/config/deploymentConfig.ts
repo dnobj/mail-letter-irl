@@ -1041,20 +1041,33 @@ export function validateDeploymentConfig(
           'localhost origins'
       });
     }
+    // Both of these were warnings while the CIMD cutover was staged (#160).
+    // They are errors now, for two reasons found on 2026-09-13. The cohort
+    // gate that the earlier reasoning treated as the backstop for an
+    // unauthenticated server is switched OFF in production, so there was no
+    // second lock. And a warning is one scrolled-past line between a copied
+    // development variable set and an open production API.
+    //
+    // Checked independently rather than as an else-if: authentication being
+    // off does not make the issuer, audience, algorithm and JWKS
+    // configuration any less worth validating, and the old chain reported
+    // only the first of the two.
     if (env.LETTER_IRL_REQUIRE_AUTH === 'false') {
       findings.push({
-        severity: 'warning',
-        rule: 'auth.enforcement_disabled_in_production',
-        message: 'LETTER_IRL_REQUIRE_AUTH=false leaves production unauthenticated'
-      });
-    } else if (env.LETTER_IRL_OAUTH_CIMD_ENFORCEMENT !== 'true') {
-      // Warning, not error: the CIMD cutover is deliberately staged (#160);
-      // escalation to an error is tracked on the release-readiness issue.
-      findings.push({
-        severity: 'warning',
+        severity: 'error',
         rule: 'auth.enforcement_disabled_in_production',
         message:
-          'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT is not enabled; OAuth configuration is not strictly validated at boot'
+          'LETTER_IRL_REQUIRE_AUTH=false leaves production unauthenticated; callers admitted ' +
+          'without a subject would share one account'
+      });
+    }
+    if (env.LETTER_IRL_OAUTH_CIMD_ENFORCEMENT !== 'true') {
+      findings.push({
+        severity: 'error',
+        rule: 'auth.oauth_validation_not_enforced',
+        message:
+          'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT is not enabled; the issuer, audience, algorithm ' +
+          'and JWKS configuration is not validated at boot'
       });
     }
   }
