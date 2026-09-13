@@ -385,7 +385,12 @@ promotion in #364, with the owner's own card, refunded under REFUND-01's steps t
 the dropped call reproduced again (one template read at 00:17:01Z, no tool call, the model saying
 "I'm ready to start the checkout"), **Create my checkout** created order b99046a9 at 00:17:31Z with
 no prompt, and the card showed the live link and the order id. Six first attempts, six drops, across
-both environments.
+both environments. **Android, native ChatGPT app, 2026-09-13 13:09Z (development, owner's S25 Ultra
+over adb, app force-stopped first):** the first "Allow once" was NOT dropped. `tools/call
+create_pack_checkout` ran at 13:09:33Z, the card rendered at widget v28 in dark theme with the
+link, Check status and the order id, and the model's own text carried the link and the order id too,
+because on native the host made the call. One of one; the dropped call is a web-client behaviour so
+far.
 
 Background: on 2026-09-11 (production) and 2026-09-12 (development) ChatGPT dropped the first
 `create_pack_checkout` after "Allow once": no request reached the API, the model said to use "the
@@ -436,6 +441,12 @@ second, which returned `submitted` and switched the card to "Paid. 2 letters add
 ChatGPT balance 2. The Dashboard refund (owner's click) delivered `refund.created` and
 `charge.refunded` at 00:50:14Z; order `refunded`, lot revoked, balance 0. The card itself still
 reads "Paid" afterwards: polling stops at the paid state and does not follow a later refund.
+**Android, native app, 2026-09-13 (development):** polls every 4-5 s from 13:09:37Z, paused at
+13:10:05Z the moment the Stripe Custom Tab came in front (the WebView went hidden), the owner paid
+with a test card, the webhook arrived at 13:12:06Z, and the single poll at 13:12:26Z on the owner's
+return to the app returned `submitted`: the card read "Paid. 2 letters added to your account. 2 of 2
+from this pack are still unused." with Check status still offered (#368) and the order id. Order
+5511c462 `fulfilled`, lot active. Visibility gating and the return refresh both work natively.
 
 Background: PAY-03 left the card showing "Open secure checkout" after the payment, for a session
 Stripe would refuse, and the model could not name the order afterwards because it never sees a
