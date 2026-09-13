@@ -495,7 +495,7 @@ export const listOrdersInputSchema: JsonSchema = {
 
 export const listOrdersOutputSchema: JsonSchema = {
   type: "object",
-  required: ["orders", "total"],
+  required: ["orders", "total", "packPurchases", "packPurchaseTotal"],
   properties: {
     orders: {
       type: "array",
@@ -518,7 +518,48 @@ export const listOrdersOutputSchema: JsonSchema = {
         }
       }
     },
-    total: { type: "number", description: "Total number of orders for this user" }
+    total: { type: "number", description: "Total number of orders for this user" },
+    packPurchases: {
+      type: "array",
+      description: "Letter pack purchases, newest first. Use the orderId with get_purchase_status.",
+      items: {
+        type: "object",
+        required: [
+          "orderId",
+          "productDescription",
+          "letters",
+          "purchaseStatus",
+          "amountCents",
+          "currency",
+          "displayAmount",
+          "createdAt"
+        ],
+        properties: {
+          orderId: { type: "string" },
+          productDescription: { type: "string" },
+          letters: { type: "number", description: "Letters the pack adds to the account" },
+          purchaseStatus: {
+            type: "string",
+            enum: [
+              "pending_payment",
+              "processing",
+              "submitted",
+              "payment_failed",
+              "refund_pending",
+              "refunded",
+              "on_hold",
+              "cancelled"
+            ],
+            description: "submitted means paid and the letters are on the account"
+          },
+          amountCents: { type: "number" },
+          currency: { type: "string" },
+          displayAmount: { type: "string", description: "Amount formatted for the currency, e.g. 5.00" },
+          createdAt: { type: "string" }
+        }
+      }
+    },
+    packPurchaseTotal: { type: "number", description: "Total number of letter pack purchases for this user" }
   }
 };
 

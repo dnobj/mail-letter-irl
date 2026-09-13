@@ -380,7 +380,12 @@ failure is recorded on #322.
 
 **Status:** Executed 2026-09-12 in development through the embedded browser; the owner paid with a
 Stripe test card. Passed: the dropped call reproduced on the first attempt and the card recovered
-without a second permission prompt.
+without a second permission prompt. **Repeated in production on 2026-09-13 (UTC) after the
+promotion in #364, with the owner's own card, refunded under REFUND-01's steps the same night:**
+the dropped call reproduced again (one template read at 00:17:01Z, no tool call, the model saying
+"I'm ready to start the checkout"), **Create my checkout** created order b99046a9 at 00:17:31Z with
+no prompt, and the card showed the live link and the order id. Six first attempts, six drops, across
+both environments.
 
 Background: on 2026-09-11 (production) and 2026-09-12 (development) ChatGPT dropped the first
 `create_pack_checkout` after "Allow once": no request reached the API, the model said to use "the
@@ -422,7 +427,15 @@ the preview cards already buy packs.
 
 **Status:** Executed 2026-09-12 in development through the embedded browser; the owner paid with a
 Stripe test card. Passed: the card switched to the paid state two seconds after the webhook, with no
-click and before the owner had returned to the tab.
+click and before the owner had returned to the tab. **Repeated in production on 2026-09-13 (UTC):**
+polls every 3-4 s for the first minute, then every 20 s, the last automatic poll at 00:27:46Z just
+past the ten-minute budget, then nothing for seventeen minutes while the owner was away; the webhook
+arrived at 00:44:50Z and the owner's return to the tab fired the visibility refresh in the same
+second, which returned `submitted` and switched the card to "Paid. 2 letters added to your account.
+2 of 2 from this pack are still unused." with the order id and no link. Order `fulfilled`, lot active,
+ChatGPT balance 2. The Dashboard refund (owner's click) delivered `refund.created` and
+`charge.refunded` at 00:50:14Z; order `refunded`, lot revoked, balance 0. The card itself still
+reads "Paid" afterwards: polling stops at the paid state and does not follow a later refund.
 
 Background: PAY-03 left the card showing "Open secure checkout" after the payment, for a session
 Stripe would refuse, and the model could not name the order afterwards because it never sees a
@@ -448,17 +461,31 @@ replaces the link with the outcome.
       the owner returned. Order b87d767f: `letter_pack / credit-pack-4`, `fulfilled`, 5.00 USD;
       purchase lot of 4 credits active for 730 days.)
 - [x] Ask ChatGPT for the balance; it should agree with the card. (8 prepaid letters, up from 6.)
-- [ ] Optional expiry path: create a checkout and, from the Stripe test dashboard, expire the session.
+- [x] Optional expiry path: create a checkout and, from the Stripe test dashboard, expire the session.
       The card should read "This checkout expired before it was paid. Nothing was charged." with
       **Create a new checkout**; clicking it creates a replacement without a permission prompt and the
-      card polls the new order. (Not run; covered by the jsdom tests and the local harness only.)
+      card polls the new order. (Executed 2026-09-13 00:15Z in development. First finding: the dev
+      Stripe destination subscribed to seven events and not `checkout.session.expired`, so Stripe
+      refused a manual delivery with "Endpoint not configured for event type"; it was set to the ten
+      events docs/railway-setup.md lists, through the Workbench Shell
+      (`stripe webhook_endpoints update … -d "enabled_events[]=…"`). Then
+      `stripe checkout sessions expire <id>` in the Shell: the webhook arrived seven seconds later,
+      the order was cancelled, the card's next poll showed the expired state, and **Create a new
+      checkout** produced a replacement with no prompt, polling under its own order id.)
 - [x] Record the readings on #322.
 
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
-- [ ] Stripe Dashboard → Developers → Webhooks → the endpoint → the delivered
-      `checkout.session.completed` event → Resend.
-- [ ] Response body is `{ "received": true, "duplicate": true }`.
-- [ ] Balance unchanged; no second purchase lot in the ledger.
+
+**Status:** Executed 2026-09-12 in development against the PAY-04 order. Passed.
+
+- [x] Stripe Dashboard → Developers → Webhooks → the endpoint → the delivered
+      `checkout.session.completed` event → Resend. (In Workbench: the sandbox named `sandbox`
+      holds the dev endpoint; the `Letterirl` environment that `/test/` URLs open has no events.
+      Webhooks → the destination → Event deliveries → the 12:27 PM CDT row → Resend.)
+- [x] Response body is `{ "received": true, "duplicate": true }`. (The resent attempt at 23:09:10Z:
+      HTTP 200, `"received": true, "duplicate": true`; the original showed `duplicate: false`.)
+- [x] Balance unchanged; no second purchase lot in the ledger. (16 credits and nine purchase lots
+      before and after; the order's lot appears once.)
 
 ### REFUND-01 — Full refund from the Stripe Dashboard (US-CREDIT-06)
 
