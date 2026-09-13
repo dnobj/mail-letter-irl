@@ -27,6 +27,8 @@ import {
   isApplePhoneOrTablet,
   parseChatgptReturnUrl,
   parseCheckoutTarget,
+  purchaseReturnDiagnostics,
+  purchaseStartDiagnostics,
   readReturnCookie,
   renderPurchaseReturnPage,
   returnCookieHeader
@@ -204,5 +206,135 @@ describe('renderPurchaseReturnPage', () => {
       // Word-bounded: the inline CSS says "border-radius".
       expect(html).not.toMatch(/\border\b|\bsession\b|\bcs_[a-z]|\bUSD\b|\$\d/i);
     }
+  });
+});
+
+describe('purchase page diagnostics', () => {
+  // The first web run of PAY-05 (2026-09-13) ended with the plain
+  // "Back to ChatGPT" button and no way to tell whether ChatGPT had
+  // appended a return link at all. These fields answer that from the log
+  // without writing a conversation id, a checkout session or a cookie.
+
+  it('records that a return link arrived, from which host, and that it was kept, without the values', () => {
+    const decision = decidePurchaseStart({ to: CHECKOUT, redirectUrl: CONVERSATION });
+    const fields = purchaseStartDiagnostics({
+      query: new URLSearchParams({ to: CHECKOUT, redirectUrl: CONVERSATION }),
+      referer: CONVERSATION,
+      userAgent: DESKTOP_UA,
+      decision
+    });
+
+    expect(fields).toEqual({
+      queryKeys: 'redirectUrl,to',
+      hasRedirectUrl: true,
+      redirectHost: 'chatgpt.com',
+      targetOk: true,
+      returnKept: true,
+      refererHost: 'chatgpt.com',
+      client: 'other'
+    });
+    const serialised = JSON.stringify(fields);
+    expect(serialised).not.toContain('6aa6ac84');
+    expect(serialised).not.toContain('cs_test');
+  });
+
+  it('records the absence of a return link, and a rejected one by host only', () => {
+    const none = purchaseStartDiagnostics({
+      query: new URLSearchParams({ to: CHECKOUT }),
+      referer: undefined,
+      userAgent: ANDROID_UA,
+      decision: decidePurchaseStart({ to: CHECKOUT, redirectUrl: null })
+    });
+    expect(none).toMatchObject({
+      queryKeys: 'to',
+      hasRedirectUrl: false,
+      redirectHost: 'none',
+      targetOk: true,
+      returnKept: false,
+      refererHost: 'none',
+      client: 'android'
+    });
+
+    const planted = 'https://evil.example/?u=https://chatgpt.com';
+    const rejected = purchaseStartDiagnostics({
+      query: new URLSearchParams({ to: CHECKOUT, redirectUrl: planted }),
+      referer: undefined,
+      userAgent: IPHONE_UA,
+      decision: decidePurchaseStart({ to: CHECKOUT, redirectUrl: planted })
+    });
+    expect(rejected).toMatchObject({
+      hasRedirectUrl: true,
+      redirectHost: 'evil.example',
+      returnKept: false,
+      client: 'apple'
+    });
+    expect(JSON.stringify(rejected)).not.toContain('u=');
+  });
+
+  it('names query parameters but never their values, and keeps the names printable', () => {
+    const query = new URLSearchParams({ to: 'https://evil.example/', 'odd key<': 'v', redirectUrl: 'not a url' });
+    const fields = purchaseStartDiagnostics({
+      query,
+      referer: 'not a url either',
+      userAgent: undefined,
+      decision: decidePurchaseStart({ to: 'https://evil.example/', redirectUrl: 'not a url' })
+    });
+
+    expect(fields).toMatchObject({
+      queryKeys: 'odd?key?,redirectUrl,to',
+      redirectHost: 'unparseable',
+      targetOk: false,
+      returnKept: false,
+      refererHost: 'unparseable',
+      client: 'other'
+    });
+    expect(JSON.stringify(fields)).not.toContain('evil.example/');
+  });
+
+  it('records whether the cookie came back and which link was offered, never the link', () => {
+    const cookie = returnCookieHeader(CONVERSATION).split(';')[0];
+    const kept = purchaseReturnDiagnostics({
+      cookieHeader: `other=1; ${cookie}`,
+      cancelled: false,
+      userAgent: ANDROID_UA,
+      conversationUrl: readReturnCookie(cookie)
+    });
+    expect(kept).toEqual({
+      outcome: 'success',
+      cookiePresent: true,
+      conversationKept: true,
+      linkOffered: 'conversation',
+      client: 'android'
+    });
+    expect(JSON.stringify(kept)).not.toContain('6aa6ac84');
+
+    // A cookie that fails the allowlist still counts as present: that
+    // distinguishes "nothing came back" from "something came back and was
+    // refused".
+    const refused = `${RETURN_COOKIE_NAME}=${encodeURIComponent('https://evil.example/')}`;
+    expect(
+      purchaseReturnDiagnostics({
+        cookieHeader: refused,
+        cancelled: true,
+        userAgent: DESKTOP_UA,
+        conversationUrl: readReturnCookie(refused)
+      })
+    ).toEqual({
+      outcome: 'cancelled',
+      cookiePresent: true,
+      conversationKept: false,
+      linkOffered: 'chatgpt',
+      client: 'other'
+    });
+
+    expect(
+      purchaseReturnDiagnostics({ cookieHeader: undefined, cancelled: false, userAgent: IPHONE_UA, conversationUrl: null })
+    ).toEqual({
+      outcome: 'success',
+      cookiePresent: false,
+      conversationKept: false,
+      linkOffered: 'none',
+      client: 'apple'
+    });
   });
 });

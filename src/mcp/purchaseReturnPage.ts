@@ -187,3 +187,70 @@ export function renderPurchaseReturnPage(params: {
     '</body></html>'
   );
 }
+
+export type PurchaseStartDecision = ReturnType<typeof decidePurchaseStart>;
+
+/** The broad client class a request came from; nothing that identifies a person. */
+export function clientClass(userAgent: string | undefined): 'android' | 'apple' | 'other' {
+  if (isAndroid(userAgent)) return 'android';
+  if (isApplePhoneOrTablet(userAgent)) return 'apple';
+  return 'other';
+}
+
+/** The hostname of a URL and nothing else, or a fixed word when there is none. */
+export function hostOnly(value: string | null | undefined): string {
+  if (!value) return 'none';
+  try {
+    const host = new URL(value).hostname;
+    return host ? host.slice(0, 80) : 'empty';
+  } catch {
+    return 'unparseable';
+  }
+}
+
+const UNSAFE_TOKEN_CHARS = /[^A-Za-z0-9_.-]/g;
+
+/**
+ * What the start page writes to the log (#372): whether ChatGPT appended a
+ * return link, which host it named, and whether the cookie was set. Names
+ * and hosts only. The return link carries a conversation id and the target
+ * is a live checkout session, so no query value and no cookie value is
+ * logged.
+ */
+export function purchaseStartDiagnostics(params: {
+  query: URLSearchParams;
+  referer: string | undefined;
+  userAgent: string | undefined;
+  decision: PurchaseStartDecision;
+}): Record<string, string | boolean> {
+  const keys = [...new Set(params.query.keys())].sort();
+  return {
+    queryKeys: keys.map(key => key.replace(UNSAFE_TOKEN_CHARS, '?')).join(',').slice(0, 200),
+    hasRedirectUrl: params.query.has('redirectUrl'),
+    redirectHost: hostOnly(params.query.get('redirectUrl')),
+    targetOk: params.decision.status === 302,
+    returnKept: params.decision.status === 302 && params.decision.cookie !== null,
+    refererHost: hostOnly(params.referer),
+    client: clientClass(params.userAgent)
+  };
+}
+
+/**
+ * What the return page writes to the log: whether the cookie came back and
+ * which kind of link the page offered. Never the link itself.
+ */
+export function purchaseReturnDiagnostics(params: {
+  cookieHeader: string | undefined;
+  cancelled: boolean;
+  userAgent: string | undefined;
+  conversationUrl: string | null;
+}): Record<string, string | boolean> {
+  const action = chatgptReturnAction(params.userAgent, params.conversationUrl);
+  return {
+    outcome: params.cancelled ? 'cancelled' : 'success',
+    cookiePresent: new RegExp(`(^|;\\s*)${RETURN_COOKIE_NAME}=`).test(params.cookieHeader ?? ''),
+    conversationKept: params.conversationUrl !== null,
+    linkOffered: action === null ? 'none' : action.href === CHATGPT_WEB_URL ? 'chatgpt' : 'conversation',
+    client: clientClass(params.userAgent)
+  };
+}
