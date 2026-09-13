@@ -3197,6 +3197,70 @@ export async function getPurchaseStatus(
   };
 }
 
+export interface PackPurchaseSummary {
+  orderId: string;
+  productDescription: string;
+  letters: number;
+  purchaseStatus: PurchaseStatusResult['purchaseStatus'];
+  amountCents: number;
+  currency: string;
+  displayAmount: string;
+  createdAt: string;
+}
+
+/**
+ * The customer's letter-pack purchases, newest first, in the same public
+ * status vocabulary as getPurchaseStatus.
+ *
+ * Until #365 a pack purchase could not be found from the conversation at all:
+ * list_orders covered mailed letters only, and get_purchase_status needs an
+ * order id the model never sees when the checkout card created the checkout
+ * itself. Every status is listed, pending and cancelled included, because "did
+ * my purchase go through?" is the question this answers.
+ */
+export async function listPackPurchases(
+  userId: string,
+  limit: number
+): Promise<{ purchases: PackPurchaseSummary[]; total: number }> {
+  const rows = await query<
+    Pick<
+      Order,
+      | 'order_id'
+      | 'status'
+      | 'product_code'
+      | 'product_snapshot'
+      | 'credits'
+      | 'amount_cents'
+      | 'currency'
+      | 'created_at'
+    >
+  >(
+    `SELECT order_id, status, product_code, product_snapshot, credits, amount_cents, currency, created_at
+       FROM orders
+      WHERE user_id = $1 AND order_type = 'letter_pack'
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [userId, limit]
+  );
+  const count = await query<{ total: number | string }>(
+    `SELECT COUNT(*) AS total FROM orders WHERE user_id = $1 AND order_type = 'letter_pack'`,
+    [userId]
+  );
+  return {
+    purchases: rows.rows.map(row => ({
+      orderId: row.order_id,
+      productDescription: String(row.product_snapshot?.name || row.product_code),
+      letters: Math.floor((row.credits ?? 0) / CREDITS_PER_LETTER),
+      purchaseStatus: publicPurchaseStatus(row.status),
+      amountCents: row.amount_cents,
+      currency: row.currency,
+      displayAmount: formatAmountForCurrency(row.amount_cents, row.currency),
+      createdAt: new Date(row.created_at).toISOString()
+    })),
+    total: Number(count.rows[0]?.total ?? 0)
+  };
+}
+
 export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
   return transaction(async client => {
     const result = await client.query<Order>(

@@ -459,8 +459,50 @@ describe('PackCheckoutCard purchase status', () => {
     expect(card.text('done')).toMatch(/2 of 2 from this pack are still unused/);
     expect(card.visible('checkout-link')).toBe(false);
     expect(card.visible('note')).toBe(false);
-    expect(card.visible('check-status-button')).toBe(false);
+    // On demand only after payment (#368): visible, but no timer behind it.
+    expect(card.visible('check-status-button')).toBe(true);
     expect(card.text('order-line')).toBe('Order ord_host_0001');
+    expect(card.pendingTimers()).toEqual([]);
+  });
+
+  it('shows a refund issued after payment when the customer returns to the tab', async () => {
+    // Polling ends at "paid", by design. On 2026-09-13 a Dashboard refund
+    // then left the card claiming two unused letters against a balance of
+    // zero (#368). One read per return to the tab, no timers, closes that.
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({ purchaseStatus: 'submitted', letters: 2, lettersRemaining: 2 });
+    await card.runNextTimer();
+    expect(card.pendingTimers()).toEqual([]);
+
+    card.setStatus({
+      purchaseStatus: 'refunded',
+      letters: 2,
+      lettersRemaining: 0,
+      message: 'This purchase was refunded. Refunds take 5-10 business days to appear on the card.'
+    });
+    card.setHidden(true);
+    card.fireVisibilityChange();
+    card.setHidden(false);
+    card.fireVisibilityChange();
+    await flush();
+
+    expect(statusCalls(card)).toHaveLength(2);
+    expect(card.text('message')).toMatch(/refunded/i);
+    expect(card.visible('done')).toBe(false);
+    expect(card.visible('check-status-button')).toBe(false);
+    expect(card.pendingTimers()).toEqual([]);
+  });
+
+  it('lets the customer check again after payment without restarting the timers', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({ purchaseStatus: 'submitted', letters: 2, lettersRemaining: 2 });
+    await card.runNextTimer();
+
+    await card.click('check-status-button');
+
+    expect(statusCalls(card)).toHaveLength(2);
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.text('check-status-button')).toBe('Check status');
     expect(card.pendingTimers()).toEqual([]);
   });
 

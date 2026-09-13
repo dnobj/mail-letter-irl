@@ -401,7 +401,29 @@ export const listOrdersOutputZ = z.object({
     status: z.string().optional(),
     sentAt: z.string().optional()
   })),
-  total: z.number()
+  total: z.number(),
+  // Letter-pack purchases, newest first, in get_purchase_status's status
+  // vocabulary (#365). Additive: the mail entries above are unchanged.
+  packPurchases: z.array(z.object({
+    orderId: z.string(),
+    productDescription: z.string(),
+    letters: z.number().int().nonnegative(),
+    purchaseStatus: z.enum([
+      "pending_payment",
+      "processing",
+      "submitted",
+      "payment_failed",
+      "refund_pending",
+      "refunded",
+      "on_hold",
+      "cancelled"
+    ]),
+    amountCents: z.number().int(),
+    currency: z.string(),
+    displayAmount: z.string(),
+    createdAt: z.string()
+  })),
+  packPurchaseTotal: z.number()
 });
 
 export const setReturnAddressOutputZ = z.object({

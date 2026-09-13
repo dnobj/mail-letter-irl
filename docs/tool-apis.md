@@ -32,7 +32,7 @@ Letter IRL currently exposes **19 tools**:
 ## Account, Orders, and Return Address
 
 - `get_account_balance`: Check remaining pre-paid letter sends plus image-generation quota metadata. Read-only.
-- `list_orders`: List recent letter and postcard orders. Read-only.
+- `list_orders`: List recent mailed letters and postcards (recipient, delivery status; ids for `get_order_status`) and letter pack purchases (payment status, letters, amount; ids for `get_purchase_status`). Read-only.
 - `get_order_status`: Retrieve the latest timeline for a specific order, or the most recent order when `orderId` is omitted. Read-only.
 - `set_return_address`: Validate and save the user's default return address for future letters and postcards.
 - `get_return_address`: Retrieve the saved return address. Read-only.
