@@ -47,7 +47,8 @@ export const TIER_RATE_MULTIPLIERS: Record<UserTier, Record<string, number>> = {
     send_letter: 2.5, // 20 -> 50/hr
     api: 2.0,         // 100 -> 200/min
     checkout: 2.0,    // 10 -> 20/min
-    mcp: 2.0,         // 60 -> 120/min
+    mcp: 2.0,         // 600 -> 1200/min per source address
+    mcp_account: 2.0, // 60 -> 120/min per account
     // admin: unchanged (no entry = 1x)
   },
 };
