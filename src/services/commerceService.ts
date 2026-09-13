@@ -392,19 +392,39 @@ function appendQuery(base: string, values: Record<string, string>): string {
     .join('&')}`;
 }
 
-function checkoutReturnUrls(orderId: string): {
-  successUrl: string;
-  cancelUrl: string;
-} {
+/**
+ * The origin that serves /purchase/return and /purchase/start. Derived the
+ * way the return URLs always were: an explicit return URL wins, then the
+ * public base, then the API URL, then production's API host.
+ */
+function purchasePagesBase(): string {
   const publicBase = (
     process.env.JIT_CHECKOUT_RETURN_URL ||
     process.env.LETTER_IRL_PUBLIC_BASE_URL ||
     process.env.LETTER_IRL_API_URL ||
     'https://api.letterirl.com/purchase/return'
   ).replace(/\/$/, '');
-  const returnBase = publicBase.endsWith('/purchase/return')
-    ? publicBase
-    : `${publicBase}/purchase/return`;
+  return publicBase.endsWith('/purchase/return')
+    ? publicBase.slice(0, -'/purchase/return'.length)
+    : publicBase;
+}
+
+/**
+ * The start page the checkout card opens instead of the Stripe URL itself
+ * (#372). It forwards to the same checkout after keeping the way back into
+ * the conversation that ChatGPT appends for allowlisted redirect targets.
+ */
+export function purchaseStartUrl(checkoutUrl: string): string {
+  return appendQuery(`${purchasePagesBase()}/purchase/start`, {
+    to: encodeURIComponent(checkoutUrl)
+  });
+}
+
+function checkoutReturnUrls(orderId: string): {
+  successUrl: string;
+  cancelUrl: string;
+} {
+  const returnBase = `${purchasePagesBase()}/purchase/return`;
   return {
     successUrl: appendQuery(returnBase, {
       outcome: 'success',

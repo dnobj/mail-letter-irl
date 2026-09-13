@@ -84,6 +84,7 @@
             rel="noopener noreferrer"
           >Open secure checkout</a>
           <p class="note hidden" id="note"></p>
+          <p class="note hidden" id="fallback"><a id="fallback-link" href="#" target="_blank" rel="noopener noreferrer">If the checkout did not open, tap here.</a></p>
           <button type="button" class="btn2 hidden" id="check-status-button">Check status</button>
           <div class="done hidden" id="done"></div>
           <div class="err hidden" id="err"></div>
@@ -91,7 +92,7 @@
           <p class="oid hidden" id="order-line"></p>
         </div>
       </div>
-      <p class="rev">pack t4</p>
+      <p class="rev">pack t5</p>
     </div>
 
     <script>
@@ -460,6 +461,7 @@
         const again = el("new-checkout-button");
         el("checkout-link").classList.add("hidden");
         el("note").classList.add("hidden");
+        show("fallback", false);
         error.classList.add("hidden");
         again.classList.add("hidden");
         switch (view.purchaseStatus) {
@@ -566,7 +568,11 @@
           // opening anything, and on 2026-09-11 the text-only path left the
           // customer with no link at all (issue #322). The anchor is correct
           // either way.
-          link.href = state.checkoutUrl;
+          // The start page records the way back into the conversation and
+          // forwards to the same Stripe checkout (#372); a result from an
+          // older server carries only the Stripe URL, which still works.
+          const openHref = state.checkoutStartUrl || state.checkoutUrl;
+          link.href = openHref;
           link.textContent = `Open secure checkout — ${formatAmount(state.amountCents, state.currency)}`;
           link.classList.remove("hidden");
           const expiry = formatExpiry(state.expiresAt);
@@ -578,7 +584,7 @@
             // anchor above is what the customer relies on if the host declines.
             opened = true;
             Promise.resolve()
-              .then(() => window.openai.openExternal({ href: state.checkoutUrl }))
+              .then(() => window.openai.openExternal({ href: openHref }))
               .catch(() => {});
           }
           startStatusPolling(state.orderId);
@@ -594,6 +600,26 @@
         if (statusView) renderStatusView();
       }
 
+      // A tap on the link goes through the host when it can (#372): only an
+      // openExternal call to an allowlisted origin gets the redirectUrl that
+      // the start page keeps as the way back into the conversation. The
+      // anchor stays a real link for hosts without the call, and a plain
+      // fallback link appears in case the call resolves without opening
+      // anything, which it did on 2026-08-29.
+      const FALLBACK_AFTER_MS = 1500;
+      function showFallbackLink(href) {
+        el("fallback-link").href = href;
+        setTimeout(() => show("fallback", true), FALLBACK_AFTER_MS);
+      }
+      el("checkout-link").addEventListener("click", event => {
+        if (typeof window.openai?.openExternal !== "function") return;
+        event.preventDefault();
+        const href = el("checkout-link").getAttribute("href");
+        Promise.resolve()
+          .then(() => window.openai.openExternal({ href }))
+          .catch(() => {});
+        showFallbackLink(href);
+      });
       el("retry-button").addEventListener("click", () => {
         void onRetryClick();
       });

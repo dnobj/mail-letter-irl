@@ -117,8 +117,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 28,
-        digest: 'cb5a7cdcd15c'
+        version: 29,
+        digest: 'f5cdcdc0ec8e'
       });
     });
   });
@@ -523,12 +523,12 @@ describe('widget image CSP', () => {
     expect(meta.ui.csp).toEqual({
       connectDomains: ['https://chatgpt.com', 'https://api.letterirl.com'],
       resourceDomains: ['https://*.oaistatic.com', 'https://*.oaiusercontent.com', 'https://api.letterirl.com'],
-      redirectDomains: ['https://checkout.stripe.com', 'https://letterirl.com']
+      redirectDomains: ['https://checkout.stripe.com', 'https://letterirl.com', 'https://api.letterirl.com']
     });
     expect(meta['openai/widgetCSP']).toEqual({
       connect_domains: ['https://chatgpt.com', 'https://api.letterirl.com'],
       resource_domains: ['https://*.oaistatic.com', 'https://*.oaiusercontent.com', 'https://api.letterirl.com'],
-      redirect_domains: ['https://checkout.stripe.com', 'https://letterirl.com']
+      redirect_domains: ['https://checkout.stripe.com', 'https://letterirl.com', 'https://api.letterirl.com']
     });
   });
 
