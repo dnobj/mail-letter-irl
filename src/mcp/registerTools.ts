@@ -483,6 +483,31 @@ type ToolName = keyof typeof toolInputSchemas;
 
 const DEFAULT_USER_ID = process.env.LETTER_IRL_DEFAULT_USER_ID ?? "mcp-user";
 
+/**
+ * The subject every tool in one registration acts for.
+ *
+ * The fallback exists so `npm run dev` works with no identity provider at
+ * all. It must never be reachable on a server that requires authentication:
+ * there, a null authInfo would mean a request was admitted with no subject,
+ * and serving it under a shared id would merge one caller's letters, balance,
+ * drafts and purchases with everyone else's.
+ *
+ * The deployment validator now refuses LETTER_IRL_REQUIRE_AUTH=false in
+ * production (auth.enforcement_disabled_in_production). This is the second
+ * lock, on the code path rather than the configuration, so that a future
+ * caller that forgets to authenticate fails loudly instead of quietly
+ * becoming the shared account.
+ */
+function resolveToolUserId(authInfo: AuthenticatedUser | null): string {
+  if (authInfo) return authInfo.userId;
+  if (process.env.LETTER_IRL_REQUIRE_AUTH !== "false") {
+    throw new Error(
+      "Refusing to register tools without an authenticated subject while authentication is required"
+    );
+  }
+  return DEFAULT_USER_ID;
+}
+
 const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Letter tools - three separate tools for different layouts
   quote_and_preview_letter: quoteAndPreviewInputZ,
@@ -624,7 +649,7 @@ export async function registerLetterTools(
   appServer: LetterIrlServer,
   authInfo: AuthenticatedUser | null = null
 ) {
-  const userId = authInfo?.userId ?? DEFAULT_USER_ID;
+  const userId = resolveToolUserId(authInfo);
   writeDiagnostic("info", "mcp.tools_registering", {
     authType: authInfo?.authType ?? "disabled"
   });

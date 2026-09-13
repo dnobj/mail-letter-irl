@@ -211,7 +211,8 @@ development state in another.
 | `http.allowed_origins_required` | error | `LETTER_IRL_ALLOWED_ORIGINS` unset in production | Set it. The fallback allowlists localhost origins |
 | `debug.enabled_in_production` | error | `DEBUG` is enabled in production | Unset it. It serves the unauthenticated `/debug/widgets` route and discloses container paths |
 | `debug.verbose_logging_in_production` | warning | `DEBUG_CONTENT` or `DEBUG_IMAGE` in production | Unset it — it widens what reaches the logs |
-| `auth.enforcement_disabled_in_production` | warning | `LETTER_IRL_REQUIRE_AUTH=false` | Re-enable authentication; production is otherwise unauthenticated |
+| `auth.enforcement_disabled_in_production` | error | `LETTER_IRL_REQUIRE_AUTH=false` in production | Re-enable authentication. Callers admitted with no subject would share one account, and the cohort gate that once bounded that is switched off |
+| `auth.oauth_validation_not_enforced` | error | `LETTER_IRL_OAUTH_CIMD_ENFORCEMENT` is not `true` in production | Set it. Without it the issuer, audience, algorithm and JWKS configuration is never validated at boot, so a mis-set value fails at the first token instead of at deploy |
 
 ### Database TLS
 
