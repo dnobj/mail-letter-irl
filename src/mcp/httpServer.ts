@@ -31,7 +31,13 @@ import {
 import { validatePromoCodePublic } from "../services/promoService.js";
 import { closePool } from "../db/index.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
-import { decidePurchaseStart, readReturnCookie, renderPurchaseReturnPage } from "./purchaseReturnPage.js";
+import {
+  decidePurchaseStart,
+  purchaseReturnDiagnostics,
+  purchaseStartDiagnostics,
+  readReturnCookie,
+  renderPurchaseReturnPage
+} from "./purchaseReturnPage.js";
 import {
   readRequestBody,
   MCP_BODY_LIMIT_BYTES,
@@ -562,6 +568,14 @@ export async function startHttpServer() {
         to: url.searchParams.get('to'),
         redirectUrl: url.searchParams.get('redirectUrl')
       });
+      // Presence, hosts and outcome only: the return link names a
+      // conversation and the target is a live checkout session.
+      writeDiagnostic("info", "purchase.start", purchaseStartDiagnostics({
+        query: url.searchParams,
+        referer: req.headers.referer,
+        userAgent: req.headers['user-agent'],
+        decision
+      }));
       res.setHeader('Cache-Control', 'no-store');
       if (decision.status === 400) {
         res.statusCode = 400;
@@ -582,16 +596,18 @@ export async function startHttpServer() {
     if (url.pathname === '/purchase/return' && req.method === 'GET') {
       const cancelled = url.searchParams.get('outcome') === 'cancelled';
       const userAgentHeader = req.headers['user-agent'];
+      const userAgent = Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader;
+      const conversationUrl = readReturnCookie(req.headers.cookie);
+      writeDiagnostic("info", "purchase.return", purchaseReturnDiagnostics({
+        cookieHeader: req.headers.cookie,
+        cancelled,
+        userAgent,
+        conversationUrl
+      }));
       res.statusCode = 200;
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store');
-      res.end(
-        renderPurchaseReturnPage({
-          cancelled,
-          userAgent: Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader,
-          conversationUrl: readReturnCookie(req.headers.cookie)
-        })
-      );
+      res.end(renderPurchaseReturnPage({ cancelled, userAgent, conversationUrl }));
       return;
     }
 
