@@ -1379,7 +1379,7 @@
     },
     {
       "name": "list_orders",
-      "description": "List the user's recent letter and postcard orders. Returns order IDs that can be used with get_order_status.",
+      "description": "List the user's recent orders: mailed letters and postcards (recipient and delivery status; use the order IDs with get_order_status) and letter pack purchases (payment status, letters in the pack, amount; use those order IDs with get_purchase_status). Use this when asked about a recent purchase, a pack, or whether a payment went through.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1393,7 +1393,9 @@
         "type": "object",
         "required": [
           "orders",
-          "total"
+          "total",
+          "packPurchases",
+          "packPurchaseTotal"
         ],
         "properties": {
           "orders": {
@@ -1441,6 +1443,66 @@
           "total": {
             "type": "number",
             "description": "Total number of orders for this user"
+          },
+          "packPurchases": {
+            "type": "array",
+            "description": "Letter pack purchases, newest first. Use the orderId with get_purchase_status.",
+            "items": {
+              "type": "object",
+              "required": [
+                "orderId",
+                "productDescription",
+                "letters",
+                "purchaseStatus",
+                "amountCents",
+                "currency",
+                "displayAmount",
+                "createdAt"
+              ],
+              "properties": {
+                "orderId": {
+                  "type": "string"
+                },
+                "productDescription": {
+                  "type": "string"
+                },
+                "letters": {
+                  "type": "number",
+                  "description": "Letters the pack adds to the account"
+                },
+                "purchaseStatus": {
+                  "type": "string",
+                  "enum": [
+                    "pending_payment",
+                    "processing",
+                    "submitted",
+                    "payment_failed",
+                    "refund_pending",
+                    "refunded",
+                    "on_hold",
+                    "cancelled"
+                  ],
+                  "description": "submitted means paid and the letters are on the account"
+                },
+                "amountCents": {
+                  "type": "number"
+                },
+                "currency": {
+                  "type": "string"
+                },
+                "displayAmount": {
+                  "type": "string",
+                  "description": "Amount formatted for the currency, e.g. 5.00"
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "packPurchaseTotal": {
+            "type": "number",
+            "description": "Total number of letter pack purchases for this user"
           }
         }
       }

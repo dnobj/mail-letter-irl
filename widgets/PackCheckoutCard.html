@@ -91,7 +91,7 @@
           <p class="oid hidden" id="order-line"></p>
         </div>
       </div>
-      <p class="rev">pack t3</p>
+      <p class="rev">pack t4</p>
     </div>
 
     <script>
@@ -475,7 +475,11 @@
                 ? `${view.lettersRemaining} of ${letters} from this pack ${view.lettersRemaining === 1 ? "is" : "are"} still unused. Nothing is sent until you choose what to mail.`
                 : "Nothing is sent until you choose what to mail.";
             done.classList.remove("hidden");
-            show("check-status-button", false);
+            // Stays available after payment: a refund issued later is only
+            // visible through a fresh status read, and this card kept
+            // claiming two unused letters against a balance of zero on
+            // 2026-09-13 (#368). No timers restart; this is on demand.
+            show("check-status-button", true);
             break;
           case "cancelled":
           case "payment_failed":
@@ -602,15 +606,19 @@
         });
       });
       // Coming back from the checkout tab is the moment the answer is wanted,
-      // and the first moment a hidden iframe is allowed to run again.
+      // and the first moment a hidden iframe is allowed to run again. The
+      // refresh also runs after a final state, once per return and with no
+      // timer behind it: polling ends at "paid", so a refund issued while the
+      // customer was away was otherwise never seen (#368). Only an active
+      // budget reschedules.
       document.addEventListener("visibilitychange", () => {
-        if (!pollingActive) return;
+        if (!trackedOrderId) return;
         if (document.hidden) {
           stopStatusPolling();
           return;
         }
         void refreshPurchaseStatus().then(settled => {
-          if (!settled) scheduleStatusPoll();
+          if (!settled && pollingActive) scheduleStatusPoll();
         });
       });
       window.addEventListener("openai:set_globals", render);

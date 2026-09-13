@@ -15,6 +15,7 @@ Letter IRL registers four OpenAI Apps SDK widgets as MCP resources with `ui://` 
 ## Runtime Bridge Notes
 
 - Widgets currently use the `window.openai` compatibility bridge, including `toolOutput`, `toolResponseMetadata`, `callTool`, and `sendFollowUpMessage` where needed.
+- A result returned to a widget through `callTool` is visible to that widget only; the model never sees it (#366). On 2026-09-12 the checkout card created a checkout this way and the model could not name the order afterwards. Rule: every widget-initiated action leaves a customer-readable trace on the card (for a checkout, the order id and the purchase outcome), and nothing relies on `sendFollowUpMessage` to inform the model: `docs/learnings/generate-image-removal-decision.md` records that call resolving without posting the message on-device (2026-08-21). The conversation-side fallback is a read-only tool the model can call itself, which is why `list_orders` lists pack purchases (#365).
 - Current OpenAI guidance prefers MCP Apps bridge notifications for new widget work, including tool-result and tool-input notifications. Treat a future bridge migration as a focused widget task, not as part of routine tool changes.
 - Widget resource metadata includes canonical `ui` metadata plus legacy `openai/*` aliases for compatibility. The connector detail panel renders our `ui.csp` back verbatim, which is how we know the canonical key is the one being read (issue #228).
 
