@@ -63,6 +63,7 @@ import { getReadiness } from "./readiness.js";
 import { kickPriceCatalog } from "../services/priceCatalog.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 import { resolveCorsOriginFor } from "./corsOrigin.js";
+import { installProcessGuards, withRequestBoundary } from "./requestBoundary.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -397,7 +398,10 @@ export async function startHttpServer() {
     }
   };
 
-  const server = http.createServer(async (req, res) => {
+  // Every route runs inside one exception boundary (src/mcp/requestBoundary.ts):
+  // an error that escapes a handler becomes a diagnostic and a 500, never an
+  // unhandled rejection that ends the process.
+  const server = http.createServer(withRequestBoundary(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? `${DEFAULT_HOST}:${DEFAULT_PORT}`}`);
 
     if (denyLegacyPublicAdminRoute(url.pathname, res)) {
@@ -898,7 +902,9 @@ export async function startHttpServer() {
 
     res.statusCode = 404;
     res.end("Not found");
-  });
+  }));
+
+  installProcessGuards();
 
   await new Promise<void>((resolve) => {
     server.listen(DEFAULT_PORT, DEFAULT_HOST, () => {
