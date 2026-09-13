@@ -3,6 +3,15 @@ import type { ServerResponse } from "node:http";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// The first test in this file pays for importing a whole server module graph
+// (every tool, the commerce and Stripe code, the database client, the auth
+// stack). On a cold transform cache or a busy disk that import alone took
+// about 12 s on 2026-09-13, over vitest's 10 s default, while CI does it in a
+// few seconds. The limit is per test and says nothing about how fast the app
+// boots; nothing here measures boot time.
+vi.setConfig({ testTimeout: 30_000 });
+
+
 import {
   denyLegacyPublicAdminRoute,
   isLegacyPublicAdminPath,
