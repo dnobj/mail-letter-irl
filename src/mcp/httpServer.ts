@@ -31,6 +31,7 @@ import {
 import { validatePromoCodePublic } from "../services/promoService.js";
 import { closePool } from "../db/index.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
+import { renderPurchaseReturnPage } from "./purchaseReturnPage.js";
 import {
   readRequestBody,
   MCP_BODY_LIMIT_BYTES,
@@ -553,13 +554,18 @@ export async function startHttpServer() {
 
     // Server-controlled Stripe return page. It intentionally shows no order
     // details; authenticated status is available only through get_purchase_status.
+    // The page's one job is the way back into ChatGPT (src/mcp/purchaseReturnPage.ts).
     if (url.pathname === '/purchase/return' && req.method === 'GET') {
       const cancelled = url.searchParams.get('outcome') === 'cancelled';
+      const userAgentHeader = req.headers['user-agent'];
       res.statusCode = 200;
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store');
       res.end(
-        `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Letter IRL</title></head><body style="font-family:system-ui;max-width:36rem;margin:4rem auto;padding:1rem"><h1>${cancelled ? 'Checkout cancelled' : 'Payment received'}</h1><p>${cancelled ? 'Your draft was not sent. Return to ChatGPT to retry or choose a letter pack.' : 'Return to ChatGPT. Letter IRL will update the purchase status as soon as Stripe confirms payment.'}</p></body></html>`
+        renderPurchaseReturnPage({
+          cancelled,
+          userAgent: Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader
+        })
       );
       return;
     }
