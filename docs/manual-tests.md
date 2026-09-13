@@ -239,19 +239,26 @@ the only rehearsal of the rollback path.
 
 Quick checks after every deployment. All should pass before considering deployment successful.
 
+**Status:** Executed 2026-09-13 (UTC) against production (build 2a0144d) and development
+(build 7d3cdc5) over plain HTTPS: `/healthz` and `/readyz` 200 on both, the protected-resource
+document exact on both (resource `/mcp`, the environment's Auth0 issuer, the seven scopes), the
+authorization-server proxy and `POST /oauth/register` 404 on both, `/manifest.json` 200 on both,
+the website 200. The DEV connector refresh after #376 listed every widget at v29. Login and
+dashboard were not exercised.
+
 ### API Health
-- [ ] `GET https://api.letterirl.com/healthz` returns 200
-- [ ] `GET https://api.letterirl.com/.well-known/oauth-protected-resource` returns
+- [x] `GET https://api.letterirl.com/healthz` returns 200
+- [x] `GET https://api.letterirl.com/.well-known/oauth-protected-resource` returns
       the exact resource, Auth0 issuer, and product scopes
-- [ ] Auth0's own discovery returns valid JSON; Letter IRL's authorization-server
+- [x] Auth0's own discovery returns valid JSON; Letter IRL's authorization-server
       proxy and `POST /oauth/register` return 404 in normal CIMD mode
 
 ### MCP Endpoint
-- [ ] ChatGPT developer-mode refresh discovers the current MCP tools
-- [ ] MCP manifest accessible at `/manifest.json`
+- [x] ChatGPT developer-mode refresh discovers the current MCP tools
+- [x] MCP manifest accessible at `/manifest.json`
 
 ### Website
-- [ ] `https://letterirl.com` loads
+- [x] `https://letterirl.com` loads
 - [ ] Login button redirects to Auth0
 - [ ] Dashboard loads after login
 
@@ -278,10 +285,17 @@ Test the full ChatGPT connector flow.
 - [ ] ChatGPT uses the manually imported public CIMD application
 
 ### MCP Tools in ChatGPT
-- [ ] Ask "What's my credit balance?" → `get_account_balance` works
-- [ ] Ask "Show my letters" → `list_orders` works
-- [ ] Ask to preview a letter → `quote_and_preview_letter` works
-- [ ] Letter preview renders in chat (widget or text)
+
+**Status:** Executed 2026-09-13 in development through the embedded browser, in one fresh chat
+with the (DEV) app: the balance (12 prepaid letters, no permission prompt for a read-only tool),
+the order history (13 mailed-letter orders and 19 letter-pack purchase records with their
+statuses, #365), a preview that rendered the letter card with the draft id, the cost and a
+**Send Letter** button, and the send itself (the Letter Sending Flow below carries the readings).
+
+- [x] Ask "What's my credit balance?" → `get_account_balance` works
+- [x] Ask "Show my letters" → `list_orders` works
+- [x] Ask to preview a letter → `quote_and_preview_letter` works
+- [x] Letter preview renders in chat (widget or text)
 
 ### Widget Rendering (if enabled)
 - [ ] Balance widget shows correct credits
@@ -497,7 +511,15 @@ replaces the link with the outcome.
 
 ### PAY-05 — Back to the conversation after checkout (issue #372)
 
-**Status:** Not executed. Development only.
+**Status:** Web run started 2026-09-13 in development; the return link did not arrive. The owner
+clicked the card's link from the embedded browser (no safe-link modal was reported), paid with a
+test card, and the return page offered **Back to ChatGPT**, the fallback for a request with no
+return cookie: order 0b7dc374 went `paid` → `fulfilled` on the webhook at 18:35:26Z with its lot
+active, so the purchase itself was sound. The API logged nothing for the two page requests, so
+whether ChatGPT appended `redirectUrl`, appended it under another name, or appended nothing could
+not be told apart; #378 added a presence-and-host log line to both pages (`purchase.start`,
+`purchase.return`) and the next click answers that from the dev log. Android not run.
+Development only.
 
 Background: the checkout card now opens a start page on the API host through `window.openai.openExternal`
 instead of the Stripe URL directly. For an allowlisted redirect origin (the API origin is in
@@ -522,7 +544,7 @@ on desktop as a plain link, on iPhone and iPad text only until a device has prov
 - [ ] If the card's tap opened nothing, record that the fallback link appeared after a moment and
       that it opens the checkout.
 
-
+### PAY-02 — Webhook idempotency (US-EDGE-04)
 
 **Status:** Executed 2026-09-12 in development against the PAY-04 order. Passed.
 
@@ -653,37 +675,56 @@ Precondition: REFUND-05 completed (3 of 5 letters refunded, 2 sent).
 
 Test the complete letter journey.
 
+**Status:** Executed 2026-09-13 in development through the embedded browser (dummy letter
+provider, so nothing was mailed), in the same chat as the MCP tool checks above. Preview at
+19:05:01Z from the saved DEV return address to a named recipient at 350 5th Ave, New York, NY
+10118 with no unit: the draft was created, the card read Text Only, 1 letter, USPS First-Class,
+**Ready to send**, and the model relayed the "add the unit if you have it" note. The card's
+**Send Letter** button sent it at 19:05:42Z with no permission prompt (the widget made the call):
+the card switched to **With the printer** with the order id, the balance read 11 (from 12), and
+`get_order_status` read accepted. Asking the model to send the same draft again with the same
+draft id produced a permission prompt, **Allow once**, and a `send_letter` call at 19:06:53Z that
+returned the same order id with `isRetry: true` and "Existing order returned (duplicate
+request)"; the balance stayed at 11. That consequential call after **Allow once** was NOT dropped
+(one of one on web), so the dropped first call in PAY-03 is not a property of every consequential
+tool. Validation: 123 Fake Street, Nowhere, CA 90000 was refused with "Recipient address could
+not be delivered to: Unable to find a match for this address" and no draft; a London address was
+refused before any provider call with "Missing required address fields: recipient.state", which
+is a clear error but not the "Only supports US" wording this list expects (the model had passed
+no country). The over-limit body, the suite variant and the outbox cases were not exercised.
+
 ### Preview (US-LETTER-01)
-- [ ] Provide valid US addresses (sender + recipient)
-- [ ] Provide text-only letter body (at most 1,600 characters and 24 lines)
-- [ ] Preview returns HTML
-- [ ] Draft ID returned
-- [ ] `canSendNow` reflects actual balance
+- [x] Provide valid US addresses (sender + recipient)
+- [x] Provide text-only letter body (at most 1,600 characters and 24 lines)
+- [x] Preview returns HTML
+- [x] Draft ID returned
+- [x] `canSendNow` reflects actual balance
 
 ### Validation Errors
-- [ ] Missing address fields → clear error
-- [ ] Non-US address → "Only supports US" error
+- [x] Missing address fields → clear error
+- [x] Non-US address → "Only supports US" error (2026-09-13: refused as a missing `state`
+      instead; clear, but not that wording)
 - [ ] Text-only body over 1,600 characters or 24 lines returns a clear limit error
 - [ ] Invalid address → suggestions returned
 - [ ] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200)
-- [ ] Same building with no unit given → draft IS created with an "add the unit if you have it" note
-- [ ] Garbage street (123 Fake Street, Nowhere) → still refused, message says what to check
+- [x] Same building with no unit given → draft IS created with an "add the unit if you have it" note
+- [x] Garbage street (123 Fake Street, Nowhere) → still refused, message says what to check
 
 ### Send (US-LETTER-02)
-- [ ] Use draft ID from preview
-- [ ] Set `confirm: true`
-- [ ] Credits deducted
-- [ ] Order ID returned
-- [ ] Status is `accepted`, or `pending` with recovery explicitly scheduled
+- [x] Use draft ID from preview
+- [x] Set `confirm: true`
+- [x] Credits deducted
+- [x] Order ID returned
+- [x] Status is `accepted`, or `pending` with recovery explicitly scheduled
 
 ### Idempotency (US-LETTER-03)
-- [ ] Call send again with same draft ID
-- [ ] Same order returned
-- [ ] `isRetry: true` in response
-- [ ] Credits NOT deducted again
+- [x] Call send again with same draft ID
+- [x] Same order returned
+- [x] `isRetry: true` in response
+- [x] Credits NOT deducted again
 
 ### Status Check (US-LETTER-04)
-- [ ] Query status with order ID
+- [x] Query status with order ID
 - [ ] Status timeline shows history
 - [ ] Recipient info shown (redacted appropriately)
 
@@ -743,9 +784,14 @@ Test promotional code redemption.
 - [ ] Second redemption blocked ("already used")
 
 ### Rate Limiting (US-SEC-05)
-- [ ] Public `/api/promo/validate` rate limited
-- [ ] 10+ requests/min from same IP → 429
-- [ ] Rate limit headers present
+
+**Status:** Executed 2026-09-13 against development over plain HTTPS: twelve
+`GET /api/public/promo/validate/<code>` calls from one address in a few seconds returned 200 with
+`X-RateLimit-Remaining` counting 9 down to 0, then 429 with `Retry-After: 53`.
+
+- [x] Public `/api/promo/validate` rate limited
+- [x] 10+ requests/min from same IP → 429
+- [x] Rate limit headers present
 
 ### New User Only (US-SEC-06)
 - [ ] Create "new users only" campaign
