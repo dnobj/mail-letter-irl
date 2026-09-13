@@ -110,6 +110,12 @@ const DEBUG_ENABLED = isDebugEnabled();
 export const BUILD_COMMIT = process.env.RAILWAY_GIT_COMMIT_SHA ?? "unknown";
 export const BUILD_BRANCH = process.env.RAILWAY_GIT_BRANCH ?? "unknown";
 
+/**
+ * Every path handleCreditApiRequest answers on. Kept as one list so the
+ * limiter and the handler cannot drift apart again (src/api/creditApiHandler.ts).
+ */
+const CREDIT_API_PREFIXES = ['/api/credits', '/api/promo', '/api/users/me'] as const;
+
 export function validateEnvironment() {
   validatePublicServerAdminConfiguration(process.env);
 
@@ -385,6 +391,14 @@ export async function startHttpServer() {
     }
 
     (req as any).auth = session.authInfo ?? undefined;
+
+    // Tool calls arrive here on the legacy transport. Until 2026-09-13 this
+    // route had no limiter at all, so one SSE stream bought unlimited tool
+    // calls. It runs after the session lookup, which is where the account
+    // becomes known, so the limit is per account like the modern transport's.
+    if (await rateLimitMiddlewareWithTier(req, res, 'mcp_account')) {
+      return;
+    }
 
     try {
       await session.transport.handlePostMessage(req, res);
@@ -777,9 +791,20 @@ export async function startHttpServer() {
       if (tempImageHandled) return;
     }
 
-    // Credit API routes
-    if (url.pathname.startsWith('/api/credits')) {
+    // Credit API routes. The prefix test used to name only /api/credits while
+    // the handler also owns /api/promo/* and /api/users/me, so those two ran
+    // with no per-identifier and no global limit: promo codes are
+    // operator-chosen words, and this was the one route where they could be
+    // guessed at line rate. Promo paths additionally take the tighter limit
+    // the public validator has always had.
+    if (CREDIT_API_PREFIXES.some(prefix => url.pathname.startsWith(prefix))) {
       if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
+        return; // Rate limited
+      }
+      if (
+        url.pathname.startsWith('/api/promo') &&
+        (await rateLimitMiddlewareWithTier(req, res, 'promo_authenticated'))
+      ) {
         return; // Rate limited
       }
     }
@@ -843,6 +868,15 @@ export async function startHttpServer() {
 
       const authInfo = await authenticateRequest(req, res, getPublicBaseUrl(req));
       if (authInfo === null) {
+        return;
+      }
+
+      // The limiter above ran before authentication and could only key on the
+      // source address, which every ChatGPT user shares. Now that the subject
+      // is known, bound the account itself; publishing it on the request is
+      // also what lets the tier multipliers apply at all.
+      (req as any).auth = authInfo;
+      if (await rateLimitMiddlewareWithTier(req, res, 'mcp_account')) {
         return;
       }
 

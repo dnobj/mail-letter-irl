@@ -51,6 +51,13 @@ const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
     windowMs: 60 * 1000,
     maxRequests: 200,
   },
+  // Promo codes are operator-chosen words, so a guess is cheap and a hit is
+  // spendable balance. The unauthenticated validator has had both limits
+  // since it was written; the authenticated twins had neither.
+  'promo_authenticated': {
+    windowMs: 60 * 1000,
+    maxRequests: 100,
+  },
 };
 
 // Cleanup interval to prevent memory leaks (run every 5 minutes)
@@ -83,10 +90,37 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 50,          // 50 requests per minute
   },
-  // MCP tool calls
+  // MCP transport, keyed on the SOURCE ADDRESS because it is checked before
+  // authentication, where there is no account to key on. Its job is to bound
+  // the cost of admitting a request (a JWT verification, or a bcrypt compare
+  // for a personal access token), not to bound a customer.
+  //
+  // 600 rather than 60 because every ChatGPT user arrives from OpenAI's
+  // shared egress addresses: at 60 a handful of concurrent customers behind
+  // one address would refuse each other. The per-account limit below is what
+  // actually bounds a customer, and the global backstop bounds everyone.
   'mcp': {
     windowMs: 60 * 1000,      // 1 minute
-    maxRequests: 60,          // 60 tool calls per minute
+    maxRequests: 600,
+  },
+  // MCP tool calls, keyed on the AUTHENTICATED ACCOUNT. This is the limit the
+  // product means by "60 tool calls per minute". Until 2026-09-13 it did not
+  // exist: the only MCP limiter ran before authentication, so req.auth was
+  // never set, every call was keyed on the source address, and the tier
+  // multipliers below were unreachable code on this path.
+  //
+  // A checkout card polls get_purchase_status every three seconds for the
+  // first minute, so one active card is about twenty calls a minute. Sixty
+  // leaves room for two cards and the model's own calls at once.
+  'mcp_account': {
+    windowMs: 60 * 1000,      // 1 minute
+    maxRequests: 60,
+  },
+  // Authenticated promo validation and redemption. Same shape as the public
+  // validator: tight per identifier, with a global backstop.
+  'promo_authenticated': {
+    windowMs: 60 * 1000,      // 1 minute
+    maxRequests: 10,
   },
   // Public promo code validation - prevent brute force enumeration
   'promo_public': {
