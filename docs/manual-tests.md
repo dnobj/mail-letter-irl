@@ -473,6 +473,11 @@ replaces the link with the outcome.
       the order was cancelled, the card's next poll showed the expired state, and **Create a new
       checkout** produced a replacement with no prompt, polling under its own order id.)
 - [x] Record the readings on #322.
+- [ ] Return page (change of 2026-09-13): the Stripe success and cancel pages land on
+      `/purchase/return`, which now shows a **Back to ChatGPT** button. On Android it opens the ChatGPT
+      app (the app is the verified handler for chatgpt.com links); on iOS it opens the app through
+      `chatgpt.com/open-app`; on desktop it opens the web app. Confirm on the phone that one tap
+      returns to the conversation without pressing Back through the checkout history.
 
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
 
