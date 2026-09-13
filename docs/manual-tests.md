@@ -473,11 +473,16 @@ replaces the link with the outcome.
       the order was cancelled, the card's next poll showed the expired state, and **Create a new
       checkout** produced a replacement with no prompt, polling under its own order id.)
 - [x] Record the readings on #322.
-- [ ] Return page (change of 2026-09-13): the Stripe success and cancel pages land on
-      `/purchase/return`, which now shows a **Back to ChatGPT** button. On Android it opens the ChatGPT
-      app (the app is the verified handler for chatgpt.com links); on iOS it opens the app through
-      `chatgpt.com/open-app`; on desktop it opens the web app. Confirm on the phone that one tap
-      returns to the conversation without pressing Back through the checkout history.
+- [x] Return page (change of 2026-09-13): the Stripe success and cancel pages land on
+      `/purchase/return`. On Android and desktop it shows a **Back to ChatGPT** button to chatgpt.com;
+      on iPhone and iPad it shows text only ("close this page and return to the ChatGPT app"), because
+      the iOS universal link has not been verified on a device and Apple devices get a proven link or
+      none. (Android, 2026-09-13, owner's phone, via Stripe's cancel arrow: the button opened chatgpt.com
+      in full Chrome, logged out, not the app. The phone has the app's handling of chatgpt.com links
+      switched off at user level, and an explicit intent to the app with the site root was handed back
+      to the browser; an explicit intent with a conversation link, `/c/<id>`, opened the app on that
+      conversation. So the Android button is a web-app fallback on such phones until #372 supplies a
+      conversation link.)
 
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
 
