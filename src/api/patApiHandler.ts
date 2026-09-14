@@ -82,8 +82,8 @@ export async function handlePATApiRequest(
       });
       return true;
     }
-    // The server cannot validate anything: 503, as restAuth answers. At 401
-    // the website sends the user to sign in again, into the same failure
+    // The server cannot validate anything: 503, as restAuth answers. The fault
+    // is the server's, not the token's, and a 401 would say the opposite
     // (#179).
     if (error instanceof Error && error.message === 'OAuth validation not configured') {
       sendJson(res, 503, {

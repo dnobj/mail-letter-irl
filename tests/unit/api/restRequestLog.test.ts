@@ -51,4 +51,17 @@ describe('the REST request log line', () => {
 
     expect(log).not.toHaveBeenCalled();
   });
+
+  it('reads the status when the response finishes, not when the listener is attached', () => {
+    // httpServer.ts attaches the listener before any handler has set a status,
+    // so a status read at attach time would log every refusal as 200.
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const res = Object.assign(new EventEmitter(), { statusCode: 200 });
+
+    logRestRequestOnFinish({ method: 'GET' } as never, res as never, '/api/letters');
+    res.statusCode = 403;
+    res.emit('finish');
+
+    expect(JSON.parse(String(log.mock.calls[0][0])).status).toBe(403);
+  });
 });
