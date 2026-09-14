@@ -93,6 +93,13 @@ Selected end state:
 
 Create a dedicated MCP API identifier rather than changing the existing website/REST audience in place. If a compatibility phase is needed, implement and test it only in DEV first. Never change the production audience implicitly.
 
+**Update, 2026-09-14: the website and REST exception was reversed.** Keeping the website on its own audience only worked while the static-DCR flag merged `LETTER_IRL_OAUTH_LEGACY_AUDIENCES` into the accepted set, so the dashboard broke silently when the flag went off. Now:
+- the website requests each environment's MCP audience with the product scopes;
+- every REST route requires the scope its MCP twin requires;
+- the server accepts exactly one audience in every mode.
+
+`https://letter-irl/api` is retired. It is deleted from each tenant after that tenant's Default Audience is repointed.
+
 ### Scopes
 
 OIDC identity scopes such as openid, profile, and email are not sufficient authorization for mail actions. Define and enforce minimal product scopes, with a documented tool-to-scope mapping. Use this initial scope model unless implementation discovers a concrete incompatibility:

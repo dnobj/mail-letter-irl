@@ -103,7 +103,8 @@ AUTH0_BASE_URL=https://letterirl.com
 AUTH0_ISSUER_BASE_URL=https://dev-njmdyqf8n25rqgy7.us.auth0.com
 AUTH0_CLIENT_ID=wX17u1wOn3XJRVba1ejIappBNpDno3ER
 AUTH0_CLIENT_SECRET=<from application settings - click eye icon to reveal>
-AUTH0_AUDIENCE=https://letter-irl/api
+AUTH0_AUDIENCE=https://api.letterirl.com/mcp
+AUTH0_SCOPE=openid profile email offline_access mail:read mail:draft mail:send
 ```
 
 ---
@@ -123,19 +124,30 @@ AUTH0_AUDIENCE=https://letter-irl/api
 
 ## API (Resource Server)
 
-**Purpose:** Define the API that the MCP server protects
+**Purpose:** Define the one API the MCP server, the REST API and the website all
+use. Its identifier is the environment's canonical MCP URL.
 
 **Setup Steps:**
 1. Applications → APIs → Create API
-2. **Name:** `Letter IRL API`
-3. **Identifier:** `https://letter-irl/api`
+2. **Name:** `Letter IRL MCP`
+3. **Identifier:** `https://api.letterirl.com/mcp` (development: the development
+   API's `/mcp` URL)
 4. **Signing Algorithm:** RS256
+5. **Permissions:** `mail:read`, `mail:draft`, `mail:send`
+6. **Application Access:** authorize `Letter IRL Website` for user-delegated
+   access with all three permissions. If the API uses per-app authorization
+   (development does), an application with no grant cannot get a token for it.
 
 **Settings:**
 | Setting | Value |
 |---------|-------|
 | RBAC | Disabled (not using roles) |
 | Allow Skipping User Consent | Enabled (first-party apps) |
+| Allow Offline Access | Enabled (refresh tokens for ChatGPT and the website) |
+
+The earlier `Letter IRL API` (`https://letter-irl/api`) is retired. Nothing
+accepts its tokens. Delete it once the Default Audience below no longer points
+at it.
 
 ---
 
@@ -193,13 +205,18 @@ separate application/authentication paths.
 
 ## Default Audience
 
-**Purpose:** Ensure tokens include the API audience by default
+**Purpose:** The audience Auth0 uses when a request names neither `audience`
+nor `resource`. The website names its audience and ChatGPT sends `resource`, so
+this is only a fallback.
 
 **Setup Steps:**
 1. Go to Settings (gear icon) → General
 2. Scroll to "API Authorization Settings"
-3. **Default Audience:** `https://letter-irl/api`
+3. **Default Audience:** the MCP API identifier (`https://api.letterirl.com/mcp`)
 4. Save
+
+Both tenants still point at the retired `https://letter-irl/api`. Repoint before
+deleting that API.
 
 ---
 
@@ -281,8 +298,7 @@ LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/
 LETTER_IRL_MCP_RESOURCE=https://api.letterirl.com/mcp
 LETTER_IRL_OAUTH_AUDIENCE=https://api.letterirl.com/mcp
 LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS=RS256
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
-LETTER_IRL_OAUTH_SCOPES=openid,email,profile
+LETTER_IRL_OAUTH_SCOPES=openid,profile,email,offline_access,mail:read,mail:draft,mail:send
 ```
 
 ### Website (letter-irl-website)
@@ -293,7 +309,8 @@ AUTH0_BASE_URL=https://letterirl.com
 AUTH0_ISSUER_BASE_URL=https://dev-njmdyqf8n25rqgy7.us.auth0.com
 AUTH0_CLIENT_ID=wX17u1wOn3XJRVba1ejIappBNpDno3ER
 AUTH0_CLIENT_SECRET=<from application settings>
-AUTH0_AUDIENCE=https://letter-irl/api
+AUTH0_AUDIENCE=https://api.letterirl.com/mcp
+AUTH0_SCOPE=openid profile email offline_access mail:read mail:draft mail:send
 ```
 
 ---
@@ -304,11 +321,12 @@ AUTH0_AUDIENCE=https://letter-irl/api
 - [x] Account created (dnicholl@letterirl.com)
 - [x] Environment tag set to Production
 - [x] Website application created (Regular Web App)
-- [x] Website/REST API created (`https://letter-irl/api`)
+- [x] MCP API created (`https://api.letterirl.com/mcp`)
+- [ ] Website application authorized for the MCP API, and website variables switched to it
+- [ ] Default audience repointed to the MCP API, then `https://letter-irl/api` deleted
 - [ ] Production CIMD/API changes await DEV acceptance and owner approval
 - [x] Legacy DCR state recorded for rollback
 - [x] Domain-level connection inventory recorded
-- [x] Default audience set
 - [x] Google connection configured
 - [ ] Microsoft connection configured
 - [ ] Apple connection configured

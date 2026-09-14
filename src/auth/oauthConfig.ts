@@ -75,11 +75,12 @@ export function getOAuthConfig(env: NodeJS.ProcessEnv = process.env): OAuthConfi
   const mcpPath = env.LETTER_IRL_MCP_PATH ?? "/mcp";
   const staticDcrCompatibility =
     env.LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY === "true";
+  // One audience in every mode. LETTER_IRL_OAUTH_LEGACY_AUDIENCES used to be
+  // merged in under the static-DCR flag, to keep the website's tokens for the
+  // retired https://letter-irl/api audience working. The website and the REST
+  // routes moved onto the MCP audience in September 2026, so nothing needs a
+  // second one, and the rollback flag no longer widens what is accepted.
   const audience = parseList(env.LETTER_IRL_OAUTH_AUDIENCE);
-
-  if (staticDcrCompatibility) {
-    audience.push(...parseList(env.LETTER_IRL_OAUTH_LEGACY_AUDIENCES));
-  }
 
   return {
     issuer: env.LETTER_IRL_OAUTH_ISSUER ?? "",
@@ -155,8 +156,11 @@ export function validateOAuthConfig(
   } else if (!config.audience.includes(config.resource)) {
     errors.push("LETTER_IRL_OAUTH_AUDIENCE must include the exact MCP resource");
   }
-  if (!config.staticDcrCompatibility && config.audience.length !== 1) {
-    errors.push("CIMD mode requires exactly one MCP audience");
+  // Both modes. The static-DCR flag used to allow a second audience because the
+  // legacy merge added one; with the merge gone, a second audience could only be
+  // a mistake in LETTER_IRL_OAUTH_AUDIENCE.
+  if (config.audience.length !== 1) {
+    errors.push("LETTER_IRL_OAUTH_AUDIENCE must name exactly one audience, the MCP resource");
   }
   if (config.algorithms.length !== 1 || config.algorithms[0] !== "RS256") {
     errors.push("LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS must be exactly RS256");

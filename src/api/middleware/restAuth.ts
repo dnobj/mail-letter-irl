@@ -4,9 +4,9 @@
  * One implementation, delegating to the same validator the MCP layer trusts.
  * Issue #209: three copies of this check lived in three handlers, each reading
  * LETTER_IRL_OAUTH_AUDIENCE straight from the environment as a single value.
- * The MCP layer reads the audience through getOAuthConfig(), which parses a
- * list and merges LETTER_IRL_OAUTH_LEGACY_AUDIENCES under the static-DCR
- * compatibility flag. The two layers therefore disagreed about which audiences
+ * The MCP layer read the audience through getOAuthConfig(), which then merged
+ * LETTER_IRL_OAUTH_LEGACY_AUDIENCES under the static-DCR compatibility flag
+ * (since removed). The two layers therefore disagreed about which audiences
  * were valid, and only the MCP one won: the website's token, minted for the
  * legacy audience, was rejected by every dashboard call.
  *

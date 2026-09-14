@@ -210,8 +210,7 @@ LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/
 LETTER_IRL_MCP_RESOURCE=https://YOUR_PUBLIC_HOST/mcp
 LETTER_IRL_OAUTH_AUDIENCE=https://YOUR_PUBLIC_HOST/mcp
 LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS=RS256
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
-LETTER_IRL_OAUTH_SCOPES=openid,email,profile
+LETTER_IRL_OAUTH_SCOPES=openid,profile,email,offline_access,mail:read,mail:draft,mail:send
 
 # Authentication
 LETTER_IRL_REQUIRE_AUTH=true  # Set to false for local testing

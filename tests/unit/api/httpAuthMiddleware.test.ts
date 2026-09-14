@@ -9,10 +9,11 @@ import { generateKeyPair, SignJWT } from "jose";
  * answers "Invalid or expired token" rather than the wording that was searched
  * for. Symptom: the dashboard loads, Buy Now returns 401 three times running.
  *
- * These pin the same property as restAuth.test.ts - the accepted audiences are
- * the config layer's - and additionally pin the response contract, since this
- * middleware writes its own responses and the website's client reads them.
- * Audit A-03 added the route's scope, checked with the real requireScopes.
+ * These pin the same property as restAuth.test.ts - the accepted audience is
+ * the config layer's, now the MCP resource alone - and additionally pin the
+ * response contract, since this middleware writes its own responses and the
+ * website's client reads them. Audit A-03 added the route's scope, checked
+ * with the real requireScopes.
  */
 
 vi.mock("../../../src/services/patService.js", () => ({
@@ -32,7 +33,7 @@ import { authenticateHttpRequest } from "../../../src/api/middleware/auth.js";
 
 const issuer = "https://dev-test.auth0.com/";
 const mcpAudience = "https://dev-api.example.com/mcp";
-const legacyAudience = "https://letter-irl/api";
+const retiredAudience = "https://letter-irl/api";
 const SEND = ["mail:send"] as const;
 
 async function mint(
@@ -74,8 +75,6 @@ describe("HTTP auth middleware (checkout route)", () => {
     vi.stubEnv("LETTER_IRL_OAUTH_JWKS_URI", `${issuer}.well-known/jwks.json`);
     vi.stubEnv("LETTER_IRL_OAUTH_AUDIENCE", mcpAudience);
     vi.stubEnv("LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS", "RS256");
-    vi.stubEnv("LETTER_IRL_OAUTH_LEGACY_AUDIENCES", legacyAudience);
-    vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "true");
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
   });
 
@@ -84,10 +83,10 @@ describe("HTTP auth middleware (checkout route)", () => {
     vi.restoreAllMocks();
   });
 
-  it("accepts the website's legacy-audience token once compatibility is on - the Buy Now case", async () => {
+  it("accepts the website's token for the MCP audience - the Buy Now case", async () => {
     const { res, state } = response();
     const user = await authenticateHttpRequest(
-      request({ authorization: `Bearer ${await mint(legacyAudience)}` }),
+      request({ authorization: `Bearer ${await mint(mcpAudience)}` }),
       res,
       SEND
     );
@@ -95,11 +94,13 @@ describe("HTTP auth middleware (checkout route)", () => {
     expect(state.statusCode).toBe(0); // no error written
   });
 
-  it("rejects the legacy audience while compatibility is off, with the checkout route's own wording", async () => {
-    vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "false");
+  it("rejects the retired website audience, even with the old rollback settings, in the checkout route's own wording", async () => {
+    // Before the merge was removed, these two settings made this token valid.
+    vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "true");
+    vi.stubEnv("LETTER_IRL_OAUTH_LEGACY_AUDIENCES", retiredAudience);
     const { res, state } = response();
     const user = await authenticateHttpRequest(
-      request({ authorization: `Bearer ${await mint(legacyAudience)}` }),
+      request({ authorization: `Bearer ${await mint(retiredAudience)}` }),
       res,
       SEND
     );
@@ -149,7 +150,7 @@ describe("HTTP auth middleware (checkout route)", () => {
   });
 
   it("refuses a valid token without the route's scope with 403 and a challenge, not a 401", async () => {
-    // 401 would send the website to sign in again, for a token that cannot change.
+    // 401 would say the token is at fault, when the token is valid and simply narrow.
     const { res, state } = response();
     const user = await authenticateHttpRequest(
       request({ authorization: `Bearer ${await mint(mcpAudience, "5m", { scope: "mail:read" })}` }),

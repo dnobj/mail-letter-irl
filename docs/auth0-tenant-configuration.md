@@ -1,6 +1,6 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** September 10, 2026
+**Last Updated:** September 14, 2026
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
 
@@ -10,7 +10,16 @@ Development and production each use a dedicated Auth0 MCP API whose identifier
 is the exact canonical environment `/mcp` URL. ChatGPT is a manually imported,
 strict third-party CIMD application using authorization code + PKCE S256 and
 `private_key_jwt` client authentication. Grant only `mail:read`, `mail:draft`,
-and `mail:send`. Keep website/REST applications and Claude/PAT paths separate.
+and `mail:send`.
+
+The website uses the same MCP API. Its application (`Letter IRL Website`) is
+authorized for the MCP API with the same three scopes and requests them at
+login. Every REST route the dashboard calls requires the scope its MCP tool
+twin requires (`src/auth/restScopes.ts`). Development was switched on
+2026-09-14; production follows the same steps. Personal access tokens remain a
+separate path. The old website/REST API, `https://letter-irl/api`, is retired:
+no code accepts its tokens, and it is deleted from each tenant once the Default
+Audience no longer points at it.
 
 **Corrected 2026-09-05, on first contact with a real import.** This document
 previously specified a *public* client with `token_endpoint_auth_method: none`,
@@ -120,7 +129,7 @@ This Auth0 tenant is configured to support:
 |----------|-------|
 | **Domain** | `dev-ky21dxn3qmi71hjl.us.auth0.com` |
 | **Region** | US (dev) |
-| **Default Audience** | `https://letter-irl/api` |
+| **Default Audience** | `https://letter-irl/api` (the retired API; repoint to the MCP API identifier before deleting it) |
 | **OIDC DCR Enabled** | Rollback inventory only; not required by ChatGPT CIMD |
 
 ### Important Endpoints
@@ -329,7 +338,7 @@ Dynamically registered via RFC 7591 when ChatGPT connects to the MCP server. Mul
 
 Auth0's Management API with 200+ scopes for programmatic tenant administration.
 
-### 2. Legacy website/REST Letter IRL API
+### 2. Retired website/REST API
 
 | Property | Value |
 |----------|-------|
@@ -337,9 +346,13 @@ Auth0's Management API with 200+ scopes for programmatic tenant administration.
 | **Name** | Letter IRL API |
 | **Scopes** | None configured |
 
-This identifier remains for website/REST compatibility. Do not repurpose it for
-ChatGPT. The dedicated MCP API identifier exactly equals the environment's
-canonical `/mcp` resource.
+**Retired 2026-09-14.** The website and the REST routes moved onto the MCP API
+(website PR #22, API PR #386). The server no longer accepts this audience in
+any mode: `LETTER_IRL_OAUTH_LEGACY_AUDIENCES` is gone, and the static-DCR flag
+no longer widens the accepted audience. The API stays in each tenant only
+because it is still the Default Audience. Repoint the Default Audience to the
+MCP API identifier first, then delete this API. The dedicated MCP API
+identifier exactly equals the environment's canonical `/mcp` resource.
 
 ---
 
@@ -575,20 +588,20 @@ still falls back to `/userinfo`.
 
 ### Environment Variables (.env)
 
-The MCP server requires these Auth0 configuration values:
+The MCP server reads these (development tenant values; `.env.dev.example` has
+the full list):
 
 ```bash
-# Auth0 Endpoints
-AUTH0_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
-AUTH0_AUTHORIZATION_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/authorize
-AUTH0_TOKEN_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oauth/token
-AUTH0_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
-AUTH0_REGISTRATION_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oidc/register
-
-# Auth0 API Configuration
-AUTH0_AUDIENCE=https://letter-irl/api
-AUTH0_SCOPES=openid,email,profile
+LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_AUTH_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/authorize
+LETTER_IRL_OAUTH_TOKEN_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oauth/token
+LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_MCP_RESOURCE=https://letter-irl-api-development.up.railway.app/mcp
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
+LETTER_IRL_OAUTH_SCOPES=openid,profile,email,offline_access,mail:read,mail:draft,mail:send
 ```
+
+`LETTER_IRL_OAUTH_AUDIENCE` must name exactly one audience, the MCP resource.
 
 ---
 
@@ -766,10 +779,10 @@ Letter IRL uses separate Auth0 tenants for complete environment isolation:
 When updating development, ensure production is also updated:
 
 1. **Connections** - All 5 identity providers with `is_domain_connection: true`
-2. **DCR** - Dynamic Client Registration enabled
-3. **Default Audience** - Set to `https://letter-irl/api`
-4. **Applications** - Create equivalent apps with appropriate callbacks
-5. **APIs** - Register `https://letter-irl/api` resource server
+2. **DCR** - Off; rollback inventory only (CIMD registration on)
+3. **Default Audience** - The MCP API identifier (both tenants still point at the retired `https://letter-irl/api`)
+4. **Applications** - Create equivalent apps with appropriate callbacks; authorize the website application for the MCP API
+5. **APIs** - The MCP API, identifier = the environment's canonical `/mcp` URL, with `mail:read`, `mail:draft` and `mail:send`
 6. **Branding** - Logo, colors, friendly name (see Branding Checklist above)
 
 ### Environment Variables by Tenant
@@ -778,12 +791,12 @@ When updating development, ensure production is also updated:
 # Production (.env)
 LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+LETTER_IRL_OAUTH_AUDIENCE=https://api.letterirl.com/mcp
 
 # Development (.env.dev)
 LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
 ```
 
 ### Applying Branding to Production

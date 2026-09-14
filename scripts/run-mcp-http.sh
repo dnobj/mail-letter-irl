@@ -12,12 +12,11 @@ export LETTER_IRL_OAUTH_AUTH_ENDPOINT="https://dev-ky21dxn3qmi71hjl.us.auth0.com
 export LETTER_IRL_OAUTH_TOKEN_ENDPOINT="https://dev-ky21dxn3qmi71hjl.us.auth0.com/oauth/token"
 export LETTER_IRL_OAUTH_JWKS_URI="https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json"
 export LETTER_IRL_OAUTH_REGISTRATION_ENDPOINT="https://dev-ky21dxn3qmi71hjl.us.auth0.com/oauth/register"
-export LETTER_IRL_OAUTH_SCOPES="openid email profile"
-export LETTER_IRL_OAUTH_AUDIENCE="https://letter-irl/api"
-
-# Optional static client fields for /oauth/register if needed later
-# export LETTER_IRL_OAUTH_CLIENT_ID="..."
-# export LETTER_IRL_OAUTH_CLIENT_SECRET="..."
+export LETTER_IRL_OAUTH_SCOPES="openid profile email offline_access mail:read mail:draft mail:send"
+# The audience is exactly the MCP resource this server is reached at, and the
+# Auth0 tenant needs an API with that identifier.
+export LETTER_IRL_MCP_RESOURCE="https://amitotically-gubernacular-elise.ngrok-free.dev/mcp"
+export LETTER_IRL_OAUTH_AUDIENCE="$LETTER_IRL_MCP_RESOURCE"
 
 echo "Using OAuth issuer: ${LETTER_IRL_OAUTH_ISSUER:-unset}"
 
