@@ -92,7 +92,7 @@
           <p class="oid hidden" id="order-line"></p>
         </div>
       </div>
-      <p class="rev">pack t5</p>
+      <p class="rev">pack t6</p>
     </div>
 
     <script>
@@ -173,6 +173,51 @@
       let statusView = null;
       let currentLetters = 0;
 
+      // ---- Saved state: reopened conversations ------------------------------
+      //
+      // A reopened conversation (a reload, or the return page's link back into
+      // the chat) mounts this card again without its tool result: the host does
+      // not replay toolOutput. The card then took the #322 empty state and
+      // offered a second checkout over one already paid (PAY-05, 2026-09-14).
+      // What the card showed is kept in widgetState, which the host restores on
+      // mount, so a reopened card resumes from it: it shows the order, asks for
+      // its status at once, and never opens the checkout by itself.
+      const SAVED_STATE_VERSION = 1;
+      const SAVED_ORDER_FIELDS = [
+        "orderId", "productDescription", "letters", "amountCents", "currency",
+        "displayAmount", "status", "checkoutUrl", "checkoutStartUrl", "expiresAt", "message"
+      ];
+      const SAVED_STATUS_FIELDS = ["orderId", "purchaseStatus", "letters", "lettersRemaining", "message"];
+
+      // This card's own copy of what it keeps, so consecutive saves build on
+      // each other even when the host updates widgetState asynchronously.
+      let saved = null;
+
+      function pick(source, fields) {
+        const out = {};
+        for (const field of fields) {
+          if (source && source[field] !== undefined) out[field] = source[field];
+        }
+        return out;
+      }
+
+      function readSaved() {
+        const value = window.openai?.widgetState;
+        if (!value || value.v !== SAVED_STATE_VERSION) return null;
+        const order = value.order;
+        if (!order || typeof order.orderId !== "string" || !order.orderId) return null;
+        return value;
+      }
+
+      function keep(patch) {
+        saved = { ...(saved || readSaved() || {}), ...patch, v: SAVED_STATE_VERSION };
+        if (typeof window.openai?.setWidgetState !== "function") return;
+        const snapshot = saved;
+        Promise.resolve()
+          .then(() => window.openai.setWidgetState(snapshot))
+          .catch(() => {});
+      }
+
       function el(id) {
         return document.getElementById(id);
       }
@@ -226,15 +271,20 @@
       function prepareEmptyState() {
         const message = el("empty-message");
         const button = el("retry-button");
+        // Worded for both ways a card lands here: a call that never reached the
+        // server (#322), and a reopened conversation with nothing saved. In the
+        // second case the purchase may well be paid, so the card must not say
+        // that nothing was charged (PAY-05, 2026-09-14).
         if (!canCallTools()) {
           // No bridge to call through: say what happened and how to recover,
           // which still beats grey placeholder bars.
           message.textContent =
-            "No checkout was created yet. Ask for the checkout again and it will appear here.";
+            "No checkout is showing on this card. Ask for the checkout again, or for your purchase status if you have already paid.";
           button.classList.add("hidden");
           return;
         }
-        message.textContent = "No checkout was created yet. Nothing has been charged.";
+        message.textContent =
+          "No checkout is showing on this card. If you have already paid for a pack, ask for your purchase status before buying another.";
         button.textContent = requestedPack() ? "Create my checkout" : "Choose a pack";
         button.classList.remove("hidden");
       }
@@ -442,6 +492,8 @@
           return false;
         }
         statusView = result;
+        // Kept so a reopened card can show it before asking again.
+        keep({ statusView: pick(result, SAVED_STATUS_FIELDS) });
         const terminal = status !== "processing";
         if (terminal) {
           pollingActive = false;
@@ -519,8 +571,11 @@
         // contract test follows the toolOutput alias through spreads to learn
         // which fields this card reads, and checks them against the schema.
         const state = retryResult || { ...responseMeta, ...output };
+        // Only when the host gave nothing: a live result, or a checkout this
+        // card created, always wins over what an earlier mount saved.
+        const restored = hasData(state) ? null : readSaved();
 
-        if (!hasData(state)) {
+        if (!hasData(state) && !restored) {
           show("state-ready", false);
           show("state-loading", !emptyShown);
           show("state-empty", emptyShown);
@@ -532,10 +587,19 @@
         show("state-loading", false);
         show("state-empty", false);
         show("state-ready", true);
-        renderReady(state);
+        renderReady(restored ? restored.order : state, restored);
       }
 
-      function renderReady(state) {
+      // The order a reopened card has already resumed, so the renders that
+      // follow every openai:set_globals do not ask for its status again.
+      let resumedOrderId = null;
+
+      function renderReady(state, restored = null) {
+        if (state.orderId && (saved || readSaved())?.order?.orderId !== state.orderId) {
+          // A different order starts clean: a status or an open recorded for
+          // the previous order says nothing about this one.
+          keep({ order: pick(state, SAVED_ORDER_FIELDS), statusView: null, openedOrderId: null });
+        }
         el("title").textContent = state.productDescription || "Letter pack";
         // Only a status view offers a replacement checkout; a fresh checkout
         // render (host-delivered or created here) starts without the offer.
@@ -579,10 +643,17 @@
           note.textContent = `Stripe handles the payment. Nothing is sent until you choose what to mail. ${expiry}`.trim();
           note.classList.remove("hidden");
           done.classList.add("hidden");
+          // A reopened card never opens the checkout by itself: the customer
+          // came back to the conversation, not to pay again. The same holds
+          // when the host does replay the result of an order already opened.
+          if (restored || (state.orderId && (saved || readSaved())?.openedOrderId === state.orderId)) {
+            opened = true;
+          }
           if (!opened && window.openai?.openExternal) {
             // Ask the host to open the checkout once, as a convenience. The
             // anchor above is what the customer relies on if the host declines.
             opened = true;
+            if (state.orderId) keep({ openedOrderId: state.orderId });
             Promise.resolve()
               .then(() => window.openai.openExternal({ href: openHref }))
               .catch(() => {});
@@ -594,6 +665,23 @@
           done.textContent = state.message ||
             "This purchase is already paid or being fulfilled. Ask for its purchase status instead of opening another checkout.";
           done.classList.remove("hidden");
+        }
+
+        if (restored && state.orderId && resumedOrderId !== state.orderId) {
+          resumedOrderId = state.orderId;
+          // The last status an earlier mount saw, shown at once so a paid
+          // purchase does not flash its payment link while the card asks.
+          const savedView = restored.statusView;
+          if (savedView?.purchaseStatus && (!savedView.orderId || savedView.orderId === state.orderId)) {
+            statusView = savedView;
+          }
+          // Then one fresh read straight away: the purchase has usually moved
+          // on while the conversation was closed, by a payment or a refund.
+          if (trackedOrderId === state.orderId) {
+            void refreshPurchaseStatus().then(settled => {
+              if (!settled && pollingActive) scheduleStatusPoll();
+            });
+          }
         }
 
         // A re-render only knows the checkout; the purchase may have moved on.
