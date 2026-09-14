@@ -427,10 +427,12 @@ the preview cards already buy packs.
       apply: the call was dropped again. The dev log shows exactly one request at 16:42:55Z, a
       `resources/read` of `PackCheckoutCard.html@v26`, and no `tools/call`. The model still wrote
       that the checkout "has been created".)
-- [x] If the card shows grey bars, wait five seconds. It should read "No checkout was created yet.
-      Nothing has been charged." with **Create my checkout** (or **Choose a pack** when the host
-      passed no pack in `toolInput`). (Seen after five seconds, with **Create my checkout**, so the
-      host had passed the pack.)
+- [x] If the card shows grey bars, wait five seconds. It should read "No checkout is showing on this
+      card. If you have already paid for a pack, ask for your purchase status before buying
+      another." with **Create my checkout** (or **Choose a pack** when the host passed no pack in
+      `toolInput`). This wording applies from widget v31. Up to v30 the card read "No checkout was
+      created yet. Nothing has been charged.", which PAY-05 found untrue on a reopened conversation.
+      (Seen after five seconds, with **Create my checkout**, so the host had passed the pack.)
 - [x] Click it. Record whether ChatGPT shows another permission prompt for the widget-initiated
       call, and whether the card then fills in with the link. The Railway dev log shows the
       `create_pack_checkout` request only for this second attempt. (No prompt at all.
@@ -518,15 +520,32 @@ replaces the link with the outcome.
 
 ### PAY-05 — Back to the conversation after checkout (issue #372)
 
-**Status:** Web run started 2026-09-13 in development; the return link did not arrive. The owner
-clicked the card's link from the embedded browser (no safe-link modal was reported), paid with a
-test card, and the return page offered **Back to ChatGPT**, the fallback for a request with no
-return cookie: order 0b7dc374 went `paid` → `fulfilled` on the webhook at 18:35:26Z with its lot
-active, so the purchase itself was sound. The API logged nothing for the two page requests, so
-whether ChatGPT appended `redirectUrl`, appended it under another name, or appended nothing could
-not be told apart; #378 added a presence-and-host log line to both pages (`purchase.start`,
-`purchase.return`) and the next click answers that from the dev log. Android not run.
-Development only.
+**Status:** Two web runs in development. Android not run.
+
+- **2026-09-13: the return link did not arrive.**
+  - The owner clicked the card's link from the embedded browser; no safe-link modal was reported.
+  - The owner paid with a test card, and the return page offered **Back to ChatGPT**, the fallback
+    for a request with no return cookie.
+  - Order 0b7dc374 went `paid` → `fulfilled` on the webhook at 18:35:26Z with its lot active, so the
+    purchase itself was sound.
+  - The API logged nothing for the two page requests. #378 then added a presence-and-host log line to
+    both.
+- **2026-09-14: the return link works.** The run used widget v30, the DEV app on ChatGPT web in the
+  owner's Chrome, and a test card.
+  - At 19:38:06Z `purchase.start` logged `hasRedirectUrl=true redirectHost=chatgpt.com targetOk=true
+    returnKept=true`.
+  - `checkout.session.completed` arrived at 19:38:26Z.
+  - `purchase.return` logged `outcome=success cookiePresent=true conversationKept=true
+    linkOffered=conversation`.
+  - **Back to your conversation** opened the same conversation, in the checkout tab.
+- **2026-09-14: it exposed a defect.**
+  - The reopened conversation gave the card no tool result. After five seconds the card read "No
+    checkout was created yet. Nothing has been charged." beside **Create my checkout**, over a paid
+    order.
+  - A reload reproduced it at 19:44Z with no API call.
+  - `create_pack_checkout` never reuses a pack order, so that button starts a second purchase.
+  - The original tab was unaffected and showed the purchase paid after its visibility refresh.
+  - Widget v31 fixes it: the card keeps its order in `widgetState` and resumes from it.
 
 Background: the checkout card now opens a start page on the API host through `window.openai.openExternal`
 instead of the Stripe URL directly. For an allowlisted redirect origin (the API origin is in
@@ -550,6 +569,11 @@ on desktop as a plain link, on iPhone and iPad text only until a device has prov
       client, and check the dev log for the start-page request's query (the API logs no values).
 - [ ] If the card's tap opened nothing, record that the fallback link appeared after a moment and
       that it opens the checkout.
+- [ ] Reopened conversation (widget v31 or later, with the DEV connector refreshed): after paying,
+      click **Back to your conversation**, or reload the conversation. Within a moment the card must
+      show the order and **Paid**. It must never show "No checkout" with **Create my checkout**, and
+      it must not open a checkout tab by itself. The dev log shows one `get_purchase_status` for the
+      order straight after the reload, and no `create_pack_checkout`.
 
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
 
