@@ -176,12 +176,13 @@
       // ---- Saved state: reopened conversations ------------------------------
       //
       // A reopened conversation (a reload, or the return page's link back into
-      // the chat) mounts this card again without its tool result: the host does
-      // not replay toolOutput. The card then took the #322 empty state and
-      // offered a second checkout over one already paid (PAY-05, 2026-09-14).
-      // What the card showed is kept in widgetState, which the host restores on
-      // mount, so a reopened card resumes from it: it shows the order, asks for
-      // its status at once, and never opens the checkout by itself.
+      // the chat) mounts this card again. ChatGPT web does not replay its tool
+      // result, though other hosts may. With no result, the card took the #322
+      // empty state and offered a second checkout over one already paid
+      // (PAY-05, 2026-09-14). What the card showed is kept in widgetState, which
+      // the host restores on mount, so a reopened card resumes from it: it shows
+      // the order, asks for its status at once, and never opens the checkout by
+      // itself.
       const SAVED_STATE_VERSION = 1;
       const SAVED_ORDER_FIELDS = [
         "orderId", "productDescription", "letters", "amountCents", "currency",
@@ -230,7 +231,11 @@
       // - A kept order that matches it carries the status an earlier mount saw.
       // - Adoption also survives a later render that finds widgetState cleared.
       // Kept state that arrives after this mount has kept an order is not
-      // adopted: by then that order is already on screen.
+      // adopted: by then that order is already on screen. This assumes that a
+      // host which replays the tool result delivers widgetState with it or
+      // before it. ChatGPT web replays no result, so it cannot split the two.
+      // A host that did split them would leave the replayed order in place of a
+      // kept replacement.
       function adoptKeptState() {
         if (retryResult || saved) return;
         const kept = readSaved();

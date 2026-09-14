@@ -903,9 +903,10 @@ describe('PackCheckoutCard in a reopened conversation', () => {
     // Drawn in the first render: the replayed result does not put the link back.
     expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
     expect(card.visible('checkout-link')).toBe(false);
-    expect(card.opened).toEqual([]);
 
     await flush();
+    // Checked after the flush, because the convenience open is a microtask.
+    expect(card.opened).toEqual([]);
     expect(statusCalls(card)).toHaveLength(1);
     expect(card.pendingTimers()).toEqual([]);
   });
@@ -952,6 +953,30 @@ describe('PackCheckoutCard in a reopened conversation', () => {
     expect(card.visible('check-status-button')).toBe(false);
   });
 
+  it('offers no status button it cannot act on, for a kept paid purchase', () => {
+    const card = mount({ widgetState: kept({ statusView: PAID_VIEW }), withoutCallTool: true });
+
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.visible('check-status-button')).toBe(false);
+  });
+
+  it('does not adopt kept state that arrives after the card has kept an order', async () => {
+    // The ordering this card assumes: a host that replays the result sends
+    // widgetState with it or before it. Kept state that arrives later is not
+    // adopted, because the card's own order is already on screen. This test
+    // pins that choice so it cannot change silently.
+    const card = mount({ toolOutput: pendingCheckout() });
+    await flush();
+    expect(card.opened).toEqual(['https://checkout.stripe.com/c/pay/cs_host']);
+
+    card.deliverWidgetState(kept({ order: { ...KEPT_ORDER, orderId: 'ord_retry_0001' } }));
+    await flush();
+
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    expect(statusCalls(card)).toEqual([]);
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+  });
+
   it('still works on a host without setWidgetState', async () => {
     const card = mount({ toolOutput: pendingCheckout(), withoutSetWidgetState: true });
     await flush();
@@ -970,11 +995,27 @@ describe('PackCheckoutCard in a reopened conversation', () => {
     expect(keptList).not.toBeNull();
     expect(body).not.toBeNull();
     const keptFields = Array.from(keptList![1].matchAll(/"([A-Za-z]+)"/g), match => match[1]);
-    const reads = Array.from(new Set(Array.from(body![1].matchAll(/\bstate\.([A-Za-z]+)/g), match => match[1])));
+    const reads = Array.from(new Set(Array.from(body![1].matchAll(/\bstate\??\.([A-Za-z]+)/g), match => match[1])));
     // hasData decides whether a kept order is drawn at all.
     for (const field of [...reads, 'orderId', 'productDescription', 'message']) {
       expect(keptFields, `renderReady reads state.${field}`).toContain(field);
     }
     expect(reads.length).toBeGreaterThan(5);
+  });
+
+  it('keeps every status field the status view reads', () => {
+    // The same tie for the kept status: a field renderStatusView reads but the
+    // card does not keep would be blank on a reopened card.
+    const html = fs.readFileSync(WIDGET_PATH, 'utf-8').replace(/\r\n/g, '\n');
+    const keptList = html.match(/const SAVED_STATUS_FIELDS = \[([\s\S]*?)\];/);
+    const body = html.match(/function renderStatusView\(\) \{([\s\S]*?)\n {6}\}\n/);
+    expect(keptList).not.toBeNull();
+    expect(body).not.toBeNull();
+    const keptFields = Array.from(keptList![1].matchAll(/"([A-Za-z]+)"/g), match => match[1]);
+    const reads = Array.from(new Set(Array.from(body![1].matchAll(/\bview\??\.([A-Za-z]+)/g), match => match[1])));
+    for (const field of reads) {
+      expect(keptFields, `renderStatusView reads view.${field}`).toContain(field);
+    }
+    expect(reads.length).toBeGreaterThan(3);
   });
 });
