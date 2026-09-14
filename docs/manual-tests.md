@@ -217,8 +217,8 @@ the only rehearsal of the rollback path.
       the recorded static client (`CHATGPT_STATIC_CLIENT_ID`,
       `CHATGPT_STATIC_REDIRECT_URIS`) and deploy. Keep `LETTER_IRL_OAUTH_AUDIENCE`
       the single `/mcp` resource: there is no legacy audience any more, and the
-      retired `https://letter-irl/api` API has no scopes, so its tokens could
-      never use a tool.
+      retired `https://letter-irl/api` API was deleted from both tenants on
+      2026-09-14.
 - [ ] Run a fresh-link smoke test and record behavior/client count.
 - [ ] Restore CIMD mode (`false`), remove the static client's MCP API grant,
       redeploy DEV, and rerun CIMD-01, CIMD-03, and CIMD-04.

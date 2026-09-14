@@ -15,13 +15,12 @@ and `mail:send`.
 The website uses the same MCP API. Its application (`Letter IRL Website`) is
 authorized for the MCP API with the same three scopes and requests them at
 login. Every REST route the dashboard calls requires the scope its MCP tool
-twin requires (`src/auth/restScopes.ts`). Development was switched on
-2026-09-14 (recorded in 2d below); production follows the same steps. Personal
-access tokens remain a separate path. The old website/REST API,
-`https://letter-irl/api`, is retired: the API server accepts exactly one
-audience, the MCP resource. Delete it from a tenant only after that
-environment's website requests the MCP audience and the Default Audience no
-longer points at it.
+twin requires (`src/auth/restScopes.ts`). Both environments were switched on
+2026-09-14 (recorded in 2d and 2e below). Personal access tokens remain a
+separate path. The old website/REST API, `https://letter-irl/api`, is retired:
+the API server accepts exactly one audience, the MCP resource. Each tenant's
+Default Audience now names its MCP API, and the old API was deleted from both
+tenants on 2026-09-14.
 
 **Corrected 2026-09-05, on first contact with a real import.** This document
 previously specified a *public* client with `token_endpoint_auth_method: none`,
@@ -131,7 +130,7 @@ This Auth0 tenant is configured to support:
 |----------|-------|
 | **Domain** | `dev-ky21dxn3qmi71hjl.us.auth0.com` |
 | **Region** | US (dev) |
-| **Default Audience** | `https://letter-irl/api` (the retired API; repoint to the MCP API identifier before deleting it) |
+| **Default Audience** | `https://letter-irl-api-development.up.railway.app/mcp` (the MCP API; repointed from the retired `https://letter-irl/api` on 2026-09-14) |
 | **OIDC DCR Enabled** | Rollback inventory only; not required by ChatGPT CIMD |
 
 ### Important Endpoints
@@ -296,7 +295,7 @@ Main application for the Letter IRL project.
 
 > **Important:** The `https://platform.openai.com/apps-manage/oauth` callback is required for the OpenAI app review process. See [OpenAI Apps SDK Auth Documentation](https://developers.openai.com/apps-sdk/build/auth/).
 
-### 3. Letter IRL API (Test Application)
+### 3. Letter IRL API (Test Application) - deleted
 
 | Property | Value |
 |----------|-------|
@@ -304,7 +303,8 @@ Main application for the Letter IRL project.
 | **Type** | Machine to Machine |
 | **Grant Types** | `client_credentials` |
 
-M2M application for testing API access.
+Auth0 created it alongside the retired `Letter IRL API`. It held no grant on
+any API, and it was deleted on 2026-09-14, after that API.
 
 ### 4. API Explorer Application
 
@@ -314,7 +314,12 @@ M2M application for testing API access.
 | **Type** | Machine to Machine |
 | **Grant Types** | `client_credentials` |
 
-Auth0's API Explorer for Management API access.
+Auth0's API Explorer for Management API access. Nothing in this repository uses
+it, and it is most likely the development credential the removed prod-to-dev
+sync authenticated as (`AUTH0_DEV_CLIENT_ID`). Its Management API client access
+was revoked on 2026-09-14. Delete it once the tenant logs show no failed token
+exchange from its client id; authorizing its client access again undoes the
+revoke.
 
 ### 5. ChatGPT (Dynamically Registered)
 
@@ -340,7 +345,7 @@ Dynamically registered via RFC 7591 when ChatGPT connects to the MCP server. Mul
 
 Auth0's Management API with 200+ scopes for programmatic tenant administration.
 
-### 2. Retired website/REST API
+### 2. Deleted website/REST API
 
 | Property | Value |
 |----------|-------|
@@ -348,19 +353,18 @@ Auth0's Management API with 200+ scopes for programmatic tenant administration.
 | **Name** | Letter IRL API |
 | **Scopes** | None configured |
 
-**Retired 2026-09-14.** In development the website and the REST routes moved
-onto the MCP API (website PR #22, API PR #386); production follows. The server
-no longer accepts this audience in any mode:
+**Retired, then deleted from both tenants on 2026-09-14.** The website and the
+REST routes moved onto the MCP API in both environments (website PRs #22 and
+#26, API PRs #386 and #388). The server no longer accepts this audience in any
+mode:
 - `LETTER_IRL_OAUTH_LEGACY_AUDIENCES` is gone.
 - The static-DCR flag no longer widens the accepted audience.
 - Token validation refuses to run with more than one configured audience.
 
-The API stays in each tenant because it is still the Default Audience, and in
-production because the production website still requests it. Delete it from a
-tenant only once both are resolved there: the Default Audience points at the
-MCP API identifier, and that environment's website requests the MCP audience.
-The dedicated MCP API identifier exactly equals the environment's canonical
-`/mcp` resource.
+Each tenant's Default Audience was repointed to its MCP API identifier before the
+API was deleted. Do not recreate it: the dedicated MCP API, whose identifier
+exactly equals the environment's canonical `/mcp` resource, is the only API
+Letter IRL uses.
 
 ---
 
@@ -431,10 +435,12 @@ still falls back to `/userinfo`.
    - **Enable the Resource Parameter Compatibility Profile** (tenant ->
      Settings -> Advanced). Auth0 does require it: ChatGPT sends `resource` and
      no `audience`, and without the profile Auth0 falls back to the tenant
-     Default Audience (`https://letter-irl/api`) and refuses with
-     `Client "tpc_..." is not authorized to access resource server`. The profile
-     is additive - `audience` is still checked first, so every existing flow
-     that sends one is unaffected.
+     Default Audience. While that was the retired `https://letter-irl/api`,
+     Auth0 refused with `Client "tpc_..." is not authorized to access resource
+     server`. Since 2026-09-14 both tenants' Default Audience names the MCP API,
+     so a request that reaches the fallback also gets the right API; keep the
+     profile on regardless. The profile is additive - `audience` is still
+     checked first, so every existing flow that sends one is unaffected.
    - **Allow Offline Access: enabled.** Without it Auth0 issues no refresh token
      however the client asks, and the connection dies at access-token expiry with
      a human re-consent as the only recovery (issue #160).
@@ -532,7 +538,7 @@ still falls back to `/userinfo`.
      the setting.
    - **`Prod-to-Dev Sync (Management API)`** - client id
      `TZEuAJ6kTYFTXJRtu8fgUlPiqh9FAMMS`. Renamed 2026-08-24 from
-     `Letter IRL API (Test Application)`, which was actively misleading: it holds
+     `Letter IRL API (Test Application)`, which was actively misleading: it held
      **Auth0 Management API access (4 of 273 permissions)** and was the client
      `scripts/dev-sync.ts` authenticated as, via `AUTH0_PROD_CLIENT_ID` /
      `AUTH0_PROD_CLIENT_SECRET`, to read production users for the prod-to-dev
@@ -541,9 +547,9 @@ still falls back to `/userinfo`.
      id, so searching the codebase for the app name finds nothing.
 
      **The script was removed on 2026-09-13, so this client now has no caller.**
-     It is a standing Management API credential on the PRODUCTION tenant with no
-     remaining purpose: delete it there, and this entry with it. Until then it is
-     the most privileged unused credential the tenant holds.
+     Its Management API client access was revoked on 2026-09-14 (now 0 of 273),
+     so it can no longer get a token for any API. Delete it, and this entry with
+     it, once the tenant logs show no failed token exchange from its client id.
 
      Its description now says the same thing inside the dashboard, so the next
      person does not have to reconstruct it from grants.
@@ -605,8 +611,37 @@ still falls back to `/userinfo`.
    API calls and the website's Auth0 SDK does not deduplicate refreshes, so 0
    would trip reuse detection and sign the customer out.
 
-   Production has not had these steps yet: the production website still
-   requests `https://letter-irl/api`.
+   Later the same day, the Default Audience was repointed from
+   `https://letter-irl/api` to the development MCP API identifier (read back
+   after a reload), and then `https://letter-irl/api` was deleted. Before the
+   repoint, a ChatGPT authorize request with neither `resource` nor `audience`
+   was refused with `Client "tpc_..." is not authorized to access resource
+   server "https://letter-irl/api"`. After it, and again after the deletion,
+   that request and the website's sign-in, with and without an audience, reach
+   the Auth0 login page with no error.
+
+2e. **Production tenant: the website on the MCP API** (2026-09-14)
+
+   Production followed the same steps on the same day. The table was read back
+   in the same way as 2d.
+
+   | Item | State | Verified by |
+   |---|---|---|
+   | API `Letter IRL MCP`, identifier `https://api.letterirl.com/mcp` | Existing | Dashboard, id `6a8bafc38557d1cb6fa22153` |
+   | API access policy | **Per-app authorization** for user-delegated and client access | API settings |
+   | Allow Skipping User Consent / Allow Offline Access | Both **enabled** | API settings |
+   | `Letter IRL Website` (`wX17u1wOn3XJRVba1ejIappBNpDno3ER`) user-delegated grant | **3 / 3** (`mail:read`, `mail:draft`, `mail:send`); client access 0 / 3 | API Access tab |
+   | Website refresh-token rotation | On; idle 1296000 s, maximum 2592000 s, overlap 30 s | Application settings, saved by the owner |
+   | Website grant types | Implicit and Client Credentials removed | Application settings |
+   | Railway `mail-letter-irl-website` (production) | `AUTH0_AUDIENCE` = `https://api.letterirl.com/mcp`; `AUTH0_SCOPE` as in 2d | `/auth/login` redirects with that audience and scope, and Auth0 answers with its login page |
+   | Dashboard end to end | Overview, Letters, Letter Packs, API Tokens and Settings load; the API logs `rest.request` at 200 for each call, with no scope refusals | Signed-in walkthrough, after API promotion PR #388 deployed |
+   | Default Audience | Repointed from `https://letter-irl/api` to `https://api.letterirl.com/mcp` | Tenant settings, read back after a reload |
+   | `Letter IRL API` (`https://letter-irl/api`) | **Deleted** | APIs list |
+   | `Prod-to-Dev Sync (Management API)` | Management API client access revoked (0 / 273); deletion pending, see 2c | API Access tab, read back after a reload |
+
+   After the repoint and the deletion, the website's sign-in and ChatGPT's
+   authorize request, both with `resource` and with neither `resource` nor
+   `audience`, reach the Auth0 login page with no error.
 
 3. **Domain-Level Connections**
    - **All 5 connections** must have `is_domain_connection: true`
@@ -812,7 +847,7 @@ When updating development, ensure production is also updated:
 
 1. **Connections** - All 5 identity providers with `is_domain_connection: true`
 2. **DCR** - Off; rollback inventory only (CIMD registration on)
-3. **Default Audience** - The MCP API identifier (both tenants still point at the retired `https://letter-irl/api`)
+3. **Default Audience** - The MCP API identifier (both tenants repointed 2026-09-14)
 4. **Applications** - Create equivalent apps with appropriate callbacks; authorize the website application for the MCP API
 5. **APIs** - The MCP API, identifier = the environment's canonical `/mcp` URL, with `mail:read`, `mail:draft` and `mail:send`
 6. **Branding** - Logo, colors, friendly name (see Branding Checklist above)
