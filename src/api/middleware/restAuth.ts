@@ -44,6 +44,7 @@ import {
   type AuthenticatedUser
 } from '../../auth/tokenValidator.js';
 import { buildWwwAuthenticateChallenge, InsufficientScopeError } from '../../auth/oauthChallenge.js';
+import { OAUTH_NOT_CONFIGURED } from '../../auth/oauthErrors.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../auth/betaAccess.js';
 import type { ProductScope } from '../../auth/toolScopes.js';
 import { writeDiagnostic } from '../../utils/diagnosticLog.js';
@@ -176,11 +177,13 @@ export async function authenticateRestRequest(
     if (error instanceof BetaAccessDeniedError) {
       return fail('forbidden');
     }
-    // validateJWTToken already emitted the structured diagnostic. Distinguish
-    // "the server cannot validate anything" from "this token failed" so an
-    // operator reading the response knows which side to look at.
+    // validateJWTToken logs a token it rejects. A server that cannot validate
+    // anything throws before that log, so it is logged here. The two outcomes
+    // stay distinct so an operator reading the response knows which side to
+    // look at.
     const message = error instanceof Error ? error.message : '';
-    if (message === 'OAuth validation not configured') {
+    if (message === OAUTH_NOT_CONFIGURED) {
+      writeDiagnostic('error', 'auth.validation_not_configured');
       return fail('not_configured');
     }
     return fail('rejected');

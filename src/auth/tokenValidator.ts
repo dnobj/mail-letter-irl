@@ -9,6 +9,7 @@ import {
   updateLastUsed,
   TOKEN_PREFIX as PAT_PREFIX
 } from "../services/patService.js";
+import { OAUTH_NOT_CONFIGURED } from "./oauthErrors.js";
 import { getOAuthConfig } from "./oauthConfig.js";
 import {
   classifyDiagnosticError,
@@ -119,7 +120,7 @@ export async function validateJWTToken(
   // every request, so a stray second audience is a configuration fault (503 on
   // the REST routes and on MCP) rather than a second set of accepted tokens.
   if (!config.issuer || !config.jwksUri || config.audience.length !== 1) {
-    throw new Error("OAuth validation not configured");
+    throw new Error(OAUTH_NOT_CONFIGURED);
   }
 
   const options: JWTVerifyOptions = {

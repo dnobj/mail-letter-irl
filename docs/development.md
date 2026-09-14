@@ -516,7 +516,8 @@ Production and development environments have different values:
 
 ### Common Issues
 
-**"OAuth validation not configured"** (503 from the REST routes and from `/mcp`)
+**"Authentication is not configured on this server"** (503 from the REST routes and `/mcp`; checkout says "Authentication is not configured")
+- Each refused request logs `auth.validation_not_configured`
 - Check `LETTER_IRL_OAUTH_ISSUER` and `LETTER_IRL_OAUTH_JWKS_URI` are set
 - Check `LETTER_IRL_OAUTH_AUDIENCE` names exactly one audience, the MCP resource
 

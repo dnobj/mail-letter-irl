@@ -19,6 +19,7 @@ import {
   type AuthenticatedUser
 } from '../auth/tokenValidator.js';
 import { InsufficientScopeError } from '../auth/oauthChallenge.js';
+import { OAUTH_NOT_CONFIGURED } from '../auth/oauthErrors.js';
 import { requiredRestScopes } from '../auth/restScopes.js';
 import { insufficientScope, sendRestAuthFailure } from './middleware/restAuth.js';
 import { rateLimitAccount } from './middleware/rateLimit.js';
@@ -85,7 +86,8 @@ export async function handlePATApiRequest(
     // The server cannot validate anything: 503, as restAuth answers. The fault
     // is the server's, not the token's, and a 401 would say the opposite
     // (#179).
-    if (error instanceof Error && error.message === 'OAuth validation not configured') {
+    if (error instanceof Error && error.message === OAUTH_NOT_CONFIGURED) {
+      writeDiagnostic('error', 'auth.validation_not_configured');
       sendJson(res, 503, {
         error: 'Service Unavailable',
         message: 'Authentication is not configured on this server',

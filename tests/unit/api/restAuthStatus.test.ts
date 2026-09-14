@@ -67,12 +67,18 @@ describe('restAuth failure statuses', () => {
 
   it('maps an unconfigured server to 503, which used to be flattened to 401', async () => {
     vi.mocked(validateJWTToken).mockRejectedValue(new Error('OAuth validation not configured'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     expect(await authenticateRestRequest(request({ authorization: 'Bearer t' }), READ)).toMatchObject({
       ok: false,
       reason: 'not_configured',
       status: 503
     });
+    // Logged here: the validator throws before its own log in this case.
+    expect(error.mock.calls.flat().map(String).join('\n')).toContain(
+      '"event":"auth.validation_not_configured"'
+    );
+    error.mockRestore();
   });
 
   it('keeps a rejected token and a missing header at 401', async () => {

@@ -291,7 +291,7 @@ Production is a separate, owner-approved operation after the implementation PR i
 5. Deploy the already accepted code through the normal dev-to-master promotion.
 6. Test a controlled production account: fresh link, consent, get_started, image generation, preview, reconnect, revoke, and controlled send only when explicitly authorized.
 7. Monitor authorization failures, client count, error rate, and sensitive logging.
-8. Disable production DCR and the static shim only after successful observation and dependency confirmation.
+8. Disable production DCR and the static shim only after successful observation and dependency confirmation. Remove the static client's MCP API grant if a rollback granted one.
 9. Record the final production configuration and rollback owner.
 
 Do not combine this promotion with unrelated deployment or database changes.
@@ -310,7 +310,7 @@ If DEV or production linking fails:
    advertises `/oauth/register`; the static registration response returns only
    that explicit inventory. Grant the rollback client user-delegated
    `mail:read`, `mail:draft` and `mail:send` on the MCP API, and remove that
-   grant when the rollback ends (Phase 6, step 3).
+   grant when the rollback ends (Phase 6 step 3 in DEV, Phase 8 step 8 in production).
 3. Restore the previously recorded Auth0 application, API access, connection, and discovery settings.
 4. Re-enable DCR only if the prior working state required it and the security impact is understood.
 5. Restore the previous deployment version if server metadata or validation caused the failure.

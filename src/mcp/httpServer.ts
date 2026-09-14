@@ -65,6 +65,7 @@ import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 import { resolveCorsOriginFor } from "./corsOrigin.js";
 import { installProcessGuards, withRequestBoundary } from "./requestBoundary.js";
 import { logRestRequestOnFinish } from "../api/restRequestLog.js";
+import { OAUTH_NOT_CONFIGURED } from "../auth/oauthErrors.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1065,7 +1066,7 @@ async function authenticateRequest(
     // any token (no issuer or JWKS URL, or more than one configured audience), so
     // authorizing again cannot help: 503, as the REST routes answer, with no
     // challenge and a line in the log (#179).
-    if (error instanceof Error && error.message === "OAuth validation not configured") {
+    if (error instanceof Error && error.message === OAUTH_NOT_CONFIGURED) {
       writeDiagnostic("error", "auth.validation_not_configured");
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
