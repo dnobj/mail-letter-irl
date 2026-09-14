@@ -108,12 +108,21 @@ describe('restAuth failure statuses', () => {
     vi.mocked(requireScopes).mockImplementation(() => {
       throw new InsufficientScopeError(['mail:send']);
     });
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     const outcome = await authenticateRestRequest(request({ authorization: 'Bearer t' }), ['mail:send']);
 
     expect(outcome).toMatchObject({ ok: false, reason: 'insufficient_scope', status: 403 });
     expect(outcome.ok ? '' : outcome.challenge).toContain('error="insufficient_scope"');
+    // Logged with the missing scope names and nothing else: no subject, no
+    // token. Exact equality, so an added field fails this too.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(warn.mock.calls[0][0]))).toEqual({
+      missing: 'mail:send',
+      event: 'auth.rest_insufficient_scope',
+      msg: 'auth.rest_insufficient_scope'
+    });
+    warn.mockRestore();
   });
 
   it('checks the scopes the caller passed', async () => {

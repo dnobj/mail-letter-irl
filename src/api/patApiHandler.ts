@@ -82,6 +82,16 @@ export async function handlePATApiRequest(
       });
       return true;
     }
+    // The server cannot validate anything: 503, as restAuth answers. At 401
+    // the website sends the user to sign in again, into the same failure
+    // (#179).
+    if (error instanceof Error && error.message === 'OAuth validation not configured') {
+      sendJson(res, 503, {
+        error: 'Service Unavailable',
+        message: 'Authentication is not configured on this server',
+      });
+      return true;
+    }
     sendJson(res, 401, {
       error: 'Unauthorized',
       message: 'Authentication failed',

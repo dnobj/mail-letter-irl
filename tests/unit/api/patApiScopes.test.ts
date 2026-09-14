@@ -174,6 +174,18 @@ describe('personal access token routes', () => {
     expect(JSON.parse(state.body).message).toBe('Token expiry must be in the future');
   });
 
+  it('answers 503 when the server cannot validate tokens, not a 401 that sends the user to sign in again', async () => {
+    vi.mocked(validateAuthorizationHeader).mockRejectedValue(
+      new Error('OAuth validation not configured')
+    );
+    const { res, state } = response();
+
+    await handlePATApiRequest(request('GET'), res, '/api/tokens');
+
+    expect(state.status).toBe(503);
+    expect(listTokens).not.toHaveBeenCalled();
+  });
+
   it('applies the account limit once the caller is known, before any route runs', async () => {
     vi.mocked(validateAuthorizationHeader).mockResolvedValue(jwt(['mail:read']));
     vi.mocked(rateLimitAccount).mockResolvedValue(true);

@@ -27,7 +27,13 @@ vi.mock('../../../src/api/middleware/restAuth.js', async importOriginal => {
   return { ...actual, authenticateRestRequest: vi.fn() };
 });
 
+vi.mock('../../../src/api/middleware/rateLimit.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/api/middleware/rateLimit.js')>()),
+  rateLimitAccount: vi.fn()
+}));
+
 import { authenticateRestRequest } from '../../../src/api/middleware/restAuth.js';
+import { rateLimitAccount } from '../../../src/api/middleware/rateLimit.js';
 
 const request = (method = 'GET') => ({ headers: {}, method }) as unknown as IncomingMessage;
 
@@ -165,5 +171,32 @@ describe('every REST handler asks for the scope its route requires', () => {
 
     // Red if a handler stops passing its route's scopes.
     expect(authenticateRestRequest).toHaveBeenLastCalledWith(req, scopes);
+  });
+});
+
+const WORKING_ROUTES = [
+  ['credits', '/api/credits/balance'],
+  ['letters', '/api/letters'],
+  ['return-address', '/api/return-address']
+] as const;
+
+describe('every REST handler bounds the account before doing any work', () => {
+  it.each(WORKING_ROUTES)('%s stops at the account limit on %s', async (name, path) => {
+    vi.mocked(authenticateRestRequest).mockResolvedValue({
+      ok: true,
+      user: { userId: 'auth0|user-1', scopes: ['mail:read', 'mail:draft', 'mail:send'] }
+    });
+    vi.mocked(rateLimitAccount).mockResolvedValue(true);
+    const entry = HANDLERS.find(([handlerName]) => handlerName === name);
+    if (!entry) throw new Error(`no handler named ${name}`);
+
+    const req = request('GET');
+    const { captured, res } = fakeResponse();
+    expect(await (await entry[2]())(req, res, path)).toBe(true);
+
+    expect(rateLimitAccount).toHaveBeenCalledWith(req, res, 'auth0|user-1', 'api_account');
+    // The stubbed limiter writes nothing, so any response here means the
+    // route's work ran before the limit was checked.
+    expect(captured.status).toBe(0);
   });
 });

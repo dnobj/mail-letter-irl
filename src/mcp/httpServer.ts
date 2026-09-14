@@ -64,7 +64,7 @@ import { kickPriceCatalog } from "../services/priceCatalog.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 import { resolveCorsOriginFor } from "./corsOrigin.js";
 import { installProcessGuards, withRequestBoundary } from "./requestBoundary.js";
-import { findRestRoute } from "../auth/restScopes.js";
+import { logRestRequestOnFinish } from "../api/restRequestLog.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -128,24 +128,6 @@ const REST_API_PREFIXES = [
   '/api/return-address',
   '/api/stripe/create-checkout-session'
 ] as const;
-
-/**
- * One value-free line per REST request once its response is written: the
- * route's id from the scope table (or "unmatched"), the method and the status.
- * Successful REST calls used to log nothing, so from the log a dashboard that
- * worked and one that was refused looked the same.
- */
-function logRestRequestOnFinish(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-  pathname: string
-): void {
-  const route = findRestRoute(req.method, pathname)?.id ?? 'unmatched';
-  const method = req.method ?? 'UNKNOWN';
-  res.once('finish', () => {
-    writeDiagnostic('info', 'rest.request', { route, method, status: res.statusCode });
-  });
-}
 
 export function validateEnvironment() {
   validatePublicServerAdminConfiguration(process.env);
