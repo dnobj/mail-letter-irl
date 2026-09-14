@@ -12,6 +12,9 @@ import { BETA_ACCESS_MESSAGE } from '../../../src/auth/betaAccess.js';
  * handlers with a stubbed outcome, which is the only thing that actually
  * catches a regression to a hardcoded status.
  *
+ * The same reasoning covers scopes (audit A-03): the compiler makes each
+ * handler pass some scopes, and only these tests check they are its route's.
+ *
  * Separate file from restAuthStatus.test.ts because vi.mock is hoisted to the
  * top of whatever file it appears in: mocking restAuth here and testing the
  * real restAuth there cannot coexist.
@@ -19,19 +22,22 @@ import { BETA_ACCESS_MESSAGE } from '../../../src/auth/betaAccess.js';
 
 vi.mock('../../../src/api/middleware/restAuth.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../../../src/api/middleware/restAuth.js')>();
-  // restAuthErrorLabel stays REAL - it is part of what is under test.
+  // The failure writer and restAuthErrorLabel stay REAL - they are part of
+  // what is under test.
   return { ...actual, authenticateRestRequest: vi.fn() };
 });
 
 import { authenticateRestRequest } from '../../../src/api/middleware/restAuth.js';
 
-const request = () => ({ headers: {} }) as unknown as IncomingMessage;
+const request = (method = 'GET') => ({ headers: {}, method }) as unknown as IncomingMessage;
 
 function fakeResponse() {
-  const captured = { status: 0, body: '' };
+  const captured = { status: 0, body: '', headers: {} as Record<string, unknown> };
   const res = {
     statusCode: 0,
-    setHeader: () => undefined,
+    setHeader: (name: string, value: unknown) => {
+      captured.headers[name.toLowerCase()] = value;
+    },
     end(chunk?: string) {
       captured.status = (this as unknown as { statusCode: number }).statusCode;
       captured.body = chunk ?? '';
@@ -114,5 +120,50 @@ describe('every REST handler forwards the status it was given', () => {
 
     expect(captured.status).toBe(401);
     expect(JSON.parse(captured.body).error).toBe('Unauthorized');
+  });
+
+  it.each(HANDLERS)('%s sends the challenge with a missing-scope refusal', async (_name, path, load) => {
+    vi.mocked(authenticateRestRequest).mockResolvedValue({
+      ok: false,
+      reason: 'insufficient_scope',
+      status: 403,
+      message: 'The bearer token does not grant this action',
+      challenge: 'Bearer realm="Letter IRL", scope="mail:send", error="insufficient_scope"'
+    });
+
+    const { captured, res } = fakeResponse();
+    await (await load())(request(), res, path);
+
+    expect(captured.status).toBe(403);
+    // Without it an OAuth client cannot learn which scope to ask for.
+    expect(String(captured.headers['www-authenticate'])).toContain('insufficient_scope');
+  });
+});
+
+const ROUTES = [
+  ['credits', 'GET', '/api/credits/balance', ['mail:read']],
+  ['credits', 'POST', '/api/promo/redeem', ['mail:send']],
+  ['letters', 'GET', '/api/letters/ltr_1', ['mail:read']],
+  ['return-address', 'GET', '/api/return-address', ['mail:read']],
+  ['return-address', 'POST', '/api/return-address', ['mail:draft']],
+  ['return-address', 'DELETE', '/api/return-address', ['mail:draft']]
+] as const;
+
+describe('every REST handler asks for the scope its route requires', () => {
+  it.each(ROUTES)('%s: %s %s', async (name, method, path, scopes) => {
+    vi.mocked(authenticateRestRequest).mockResolvedValue({
+      ok: false,
+      reason: 'rejected',
+      status: 401,
+      message: 'The bearer token was rejected'
+    });
+    const entry = HANDLERS.find(([handlerName]) => handlerName === name);
+    if (!entry) throw new Error(`no handler named ${name}`);
+
+    const req = request(method);
+    await (await entry[2]())(req, fakeResponse().res, path);
+
+    // Red if a handler stops passing its route's scopes.
+    expect(authenticateRestRequest).toHaveBeenLastCalledWith(req, scopes);
   });
 });

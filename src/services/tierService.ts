@@ -45,8 +45,10 @@ export const TIER_RATE_MULTIPLIERS: Record<UserTier, Record<string, number>> = {
   trusted: {
     auth: 1.5,        // 10 -> 15/min
     send_letter: 2.5, // 20 -> 50/hr
-    api: 2.0,         // 100 -> 200/min
-    checkout: 2.0,    // 10 -> 20/min
+    api: 2.0,         // 600 -> 1200/min per source address
+    api_account: 2.0, // 60 -> 120/min per account
+    checkout: 2.0,    // 60 -> 120/min per source address
+    checkout_account: 2.0, // 10 -> 20/min per account
     mcp: 2.0,         // 600 -> 1200/min per source address
     mcp_account: 2.0, // 60 -> 120/min per account
     // admin: unchanged (no entry = 1x)

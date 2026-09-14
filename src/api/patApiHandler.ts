@@ -13,7 +13,15 @@
 
 import type { IncomingMessage, ServerResponse } from 'http';
 import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
-import { validateAuthorizationHeader, type AuthenticatedUser } from '../auth/tokenValidator.js';
+import {
+  requireScopes,
+  validateAuthorizationHeader,
+  type AuthenticatedUser
+} from '../auth/tokenValidator.js';
+import { InsufficientScopeError } from '../auth/oauthChallenge.js';
+import { requiredRestScopes } from '../auth/restScopes.js';
+import { insufficientScope, sendRestAuthFailure } from './middleware/restAuth.js';
+import { rateLimitAccount } from './middleware/rateLimit.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
 import { createToken, listTokens, revokeToken, TokenExpiryError } from '../services/patService.js';
 import type { CreateTokenResult } from '../services/types.js';
@@ -79,6 +87,22 @@ export async function handlePATApiRequest(
       message: 'Authentication failed',
     });
     return true;
+  }
+
+  // The route's scope (src/auth/restScopes.ts). A personal access token
+  // carries none and passes, as it does on MCP; creating and revoking refuse
+  // one separately below.
+  try {
+    requireScopes(authInfo, requiredRestScopes(req.method, pathname));
+  } catch (error) {
+    if (error instanceof InsufficientScopeError) {
+      sendRestAuthFailure(res, insufficientScope(error));
+      return true;
+    }
+    throw error;
+  }
+  if (await rateLimitAccount(req, res, authInfo.userId, 'api_account')) {
+    return true; // Rate limited
   }
 
   // Route handlers

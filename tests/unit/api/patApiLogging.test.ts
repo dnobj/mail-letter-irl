@@ -1,20 +1,27 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../../src/auth/tokenValidator.js", () => ({
+vi.mock("../../../src/auth/tokenValidator.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/auth/tokenValidator.js")>()),
   validateAuthorizationHeader: vi.fn().mockResolvedValue({
     userId: "auth0|private-subject",
     authType: "jwt",
-    scopes: [],
+    scopes: ["mail:read"],
     claims: {},
     token: "private-bearer-token"
   })
 }));
 
-vi.mock("../../../src/services/patService.js", () => ({
+vi.mock("../../../src/services/patService.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/services/patService.js")>()),
   createToken: vi.fn(),
   listTokens: vi.fn(),
   revokeToken: vi.fn()
+}));
+
+vi.mock("../../../src/api/middleware/rateLimit.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/api/middleware/rateLimit.js")>()),
+  rateLimitAccount: vi.fn().mockResolvedValue(false)
 }));
 
 import { listTokens } from "../../../src/services/patService.js";

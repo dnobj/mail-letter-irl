@@ -37,8 +37,8 @@ const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
   // Backstops for the routes that had only per-identifier limits (audit A-05).
   // A per-identifier limit bounds one client; these bound everyone at once, so
   // many addresses cannot burn JWKS verification or bcrypt compares at line
-  // rate. Each is twenty times the per-identifier limit: far above any traffic
-  // this service has seen, so a hit is an incident rather than a busy day.
+  // rate. Each sits well above its per-identifier limit and far above any
+  // traffic this service has seen, so a hit is an incident, not a busy day.
   'mcp': {
     windowMs: 60 * 1000,
     maxRequests: 1200,
@@ -75,15 +75,35 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
     windowMs: 60 * 60 * 1000, // 1 hour
     maxRequests: 20,          // 20 letters per hour
   },
-  // General API endpoints
+  // REST API, keyed on the SOURCE ADDRESS because it is checked in
+  // httpServer.ts before the handler authenticates. Like 'mcp', it bounds the
+  // cost of admitting a request, not a customer: the website's dashboard calls
+  // this API from its own server, so every dashboard user arrives from one
+  // address, and at the old 100 a few busy dashboards refused each other. The
+  // per-account limit below is what bounds a customer.
   'api': {
     windowMs: 60 * 1000,      // 1 minute
-    maxRequests: 100,         // 100 requests per minute
+    maxRequests: 600,
   },
-  // Stripe checkout - prevent abuse
+  // REST API, keyed on the AUTHENTICATED ACCOUNT. Each handler checks it
+  // straight after authentication (rateLimitAccount). A dashboard page makes
+  // one to three calls, so sixty is far above a person clicking around.
+  'api_account': {
+    windowMs: 60 * 1000,      // 1 minute
+    maxRequests: 60,
+  },
+  // Stripe checkout, keyed on the source address before authentication. The
+  // same shared-address problem as 'api': at 10, the eleventh Buy Now click in
+  // a minute across every dashboard user was refused.
   'checkout': {
     windowMs: 60 * 1000,      // 1 minute
-    maxRequests: 10,          // 10 checkout attempts per minute
+    maxRequests: 60,
+  },
+  // Stripe checkout per account, checked after authentication: the limit on
+  // one customer creating checkout sessions.
+  'checkout_account': {
+    windowMs: 60 * 1000,      // 1 minute
+    maxRequests: 10,
   },
   // Admin API - moderate limits
   'admin': {
@@ -470,6 +490,28 @@ export async function rateLimitMiddlewareWithTier(
   }
 
   return false;
+}
+
+/** The per-account limits a REST handler applies once it knows the account. */
+export type AccountRateLimit = 'api_account' | 'checkout_account';
+
+/**
+ * The account stage of a REST limit, for a handler that has just
+ * authenticated. The address stage runs in httpServer.ts before
+ * authentication, where there is no account to key on, and the website's
+ * proxy sends every dashboard user from one address, so only this stage can
+ * bound a customer. Publishes the subject on req.auth, which is what the
+ * limiter keys on.
+ * @returns true if the request was refused with 429
+ */
+export async function rateLimitAccount(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  limit: AccountRateLimit
+): Promise<boolean> {
+  (req as IncomingMessage & { auth?: { userId: string } }).auth = { userId };
+  return rateLimitMiddlewareWithTier(req, res, limit);
 }
 
 // ============================================================================
