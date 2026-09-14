@@ -75,9 +75,14 @@ describe('restAuth failure statuses', () => {
       status: 503
     });
     // Logged here: the validator throws before its own log in this case.
-    expect(error.mock.calls.flat().map(String).join('\n')).toContain(
-      '"event":"auth.validation_not_configured"'
-    );
+    // Exactly one line, with no fields, so a dropped call or an added
+    // request-derived value fails this.
+    expect(
+      error.mock.calls
+        .map(([line]) => String(line))
+        .filter(line => line.includes('"event":"auth.validation_not_configured"'))
+        .map(line => JSON.parse(line))
+    ).toEqual([{ event: 'auth.validation_not_configured', msg: 'auth.validation_not_configured' }]);
     error.mockRestore();
   });
 

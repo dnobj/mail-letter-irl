@@ -129,6 +129,7 @@ describe("HTTP auth middleware (checkout route)", () => {
 
   it("answers 503, not 401, when validation is not configured", async () => {
     vi.stubEnv("LETTER_IRL_OAUTH_JWKS_URI", "");
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { res, state } = response();
     expect(await authenticateHttpRequest(
       request({ authorization: `Bearer ${await mint(mcpAudience)}` }),
@@ -136,6 +137,13 @@ describe("HTTP auth middleware (checkout route)", () => {
       SEND
     )).toBeNull();
     expect(state.statusCode).toBe(503);
+    // Logged once, with no fields: the real validator throws before its own log.
+    expect(
+      error.mock.calls
+        .map(([line]) => String(line))
+        .filter((line) => line.includes('"event":"auth.validation_not_configured"'))
+        .map((line) => JSON.parse(line))
+    ).toEqual([{ event: "auth.validation_not_configured", msg: "auth.validation_not_configured" }]);
   });
 
   it("ignores an access_token cookie: a cookie is not a credential (audit A-11)", async () => {
