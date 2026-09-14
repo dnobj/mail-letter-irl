@@ -16,12 +16,23 @@
  * REST handlers share, so the accepted audience set has one source of truth.
  * The response contract is unchanged: same status codes, same bodies, so the
  * website's proxy and its client see exactly what they saw before.
+ *
+ * It also checks the route's scope (audit A-03), the same check restAuth
+ * makes: a valid token without the scope gets 403 and a WWW-Authenticate
+ * challenge naming what is missing, never one of the 401s below.
  */
 
 import http from 'node:http';
 import { AuthenticatedUser } from '../../services/types.js';
-import { validateJWTToken } from '../../auth/tokenValidator.js';
+import {
+  requireScopes,
+  validateJWTToken,
+  type AuthenticatedUser as ValidatedUser
+} from '../../auth/tokenValidator.js';
+import { InsufficientScopeError } from '../../auth/oauthChallenge.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../auth/betaAccess.js';
+import type { ProductScope } from '../../auth/toolScopes.js';
+import { insufficientScope } from './restAuth.js';
 
 function respond(res: http.ServerResponse | undefined, statusCode: number, body: Record<string, unknown>): void {
   if (!res) return;
@@ -37,12 +48,14 @@ function respond(res: http.ServerResponse | undefined, statusCode: number, body:
  * For use with plain Node.js http.IncomingMessage
  *
  * @param req - HTTP incoming message
- * @param res - HTTP server response (optional, for error responses)
+ * @param res - HTTP server response (for error responses)
+ * @param requiredScopes - What the route requires, from requiredRestScopes
  * @returns AuthenticatedUser or null if authentication fails
  */
 export async function authenticateHttpRequest(
   req: http.IncomingMessage,
-  res?: http.ServerResponse
+  res: http.ServerResponse | undefined,
+  requiredScopes: readonly ProductScope[]
 ): Promise<AuthenticatedUser | null> {
   let token: string | null = null;
 
@@ -57,12 +70,9 @@ export async function authenticateHttpRequest(
     return null;
   }
 
+  let user: ValidatedUser;
   try {
-    const user = await validateJWTToken(token);
-    return {
-      userId: user.userId,
-      email: typeof user.claims.email === 'string' ? user.claims.email : undefined
-    };
+    user = await validateJWTToken(token);
   } catch (error: unknown) {
     // Not an authentication failure: the token was good and the account is
     // simply not admitted. 401 here would send the caller back to Auth0 to
@@ -87,4 +97,25 @@ export async function authenticateHttpRequest(
     }
     return null;
   }
+
+  // After validation, not inside it: the catch above would answer a scope
+  // refusal with 401.
+  try {
+    requireScopes(user, requiredScopes);
+  } catch (error: unknown) {
+    if (error instanceof InsufficientScopeError) {
+      const failure = insufficientScope(error);
+      if (res && failure.challenge) {
+        res.setHeader('WWW-Authenticate', failure.challenge);
+      }
+      respond(res, failure.status, { error: failure.message });
+      return null;
+    }
+    throw error;
+  }
+
+  return {
+    userId: user.userId,
+    email: typeof user.claims.email === 'string' ? user.claims.email : undefined
+  };
 }

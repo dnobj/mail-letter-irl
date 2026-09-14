@@ -12,6 +12,7 @@ import { generateKeyPair, SignJWT } from "jose";
  * These pin the same property as restAuth.test.ts - the accepted audiences are
  * the config layer's - and additionally pin the response contract, since this
  * middleware writes its own responses and the website's client reads them.
+ * Audit A-03 added the route's scope, checked with the real requireScopes.
  */
 
 vi.mock("../../../src/services/patService.js", () => ({
@@ -32,9 +33,14 @@ import { authenticateHttpRequest } from "../../../src/api/middleware/auth.js";
 const issuer = "https://dev-test.auth0.com/";
 const mcpAudience = "https://dev-api.example.com/mcp";
 const legacyAudience = "https://letter-irl/api";
+const SEND = ["mail:send"] as const;
 
-async function mint(audience: string, expiresIn = "5m"): Promise<string> {
-  return new SignJWT({ sub: "auth0|user-1", email: "user@example.invalid" })
+async function mint(
+  audience: string,
+  expiresIn = "5m",
+  claims: Record<string, unknown> = { scope: "mail:read mail:draft mail:send" }
+): Promise<string> {
+  return new SignJWT({ sub: "auth0|user-1", email: "user@example.invalid", ...claims })
     .setProtectedHeader({ alg: "RS256" })
     .setIssuer(issuer)
     .setAudience(audience)
@@ -48,11 +54,11 @@ function request(headers: Record<string, string> = {}): http.IncomingMessage {
 }
 
 function response() {
-  const state = { statusCode: 0, body: "" };
+  const state = { statusCode: 0, body: "", headers: {} as Record<string, unknown> };
   const res = {
     set statusCode(v: number) { state.statusCode = v; },
     get statusCode() { return state.statusCode; },
-    setHeader: () => undefined,
+    setHeader: (name: string, value: unknown) => { state.headers[name.toLowerCase()] = value; },
     end: (body?: string) => { state.body = body ?? ""; }
   } as unknown as http.ServerResponse;
   return { res, state };
@@ -70,15 +76,20 @@ describe("HTTP auth middleware (checkout route)", () => {
     vi.stubEnv("LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS", "RS256");
     vi.stubEnv("LETTER_IRL_OAUTH_LEGACY_AUDIENCES", legacyAudience);
     vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "true");
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
   });
 
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
 
   it("accepts the website's legacy-audience token once compatibility is on - the Buy Now case", async () => {
     const { res, state } = response();
     const user = await authenticateHttpRequest(
       request({ authorization: `Bearer ${await mint(legacyAudience)}` }),
-      res
+      res,
+      SEND
     );
     expect(user).toEqual({ userId: "auth0|user-1", email: "user@example.invalid" });
     expect(state.statusCode).toBe(0); // no error written
@@ -89,7 +100,8 @@ describe("HTTP auth middleware (checkout route)", () => {
     const { res, state } = response();
     const user = await authenticateHttpRequest(
       request({ authorization: `Bearer ${await mint(legacyAudience)}` }),
-      res
+      res,
+      SEND
     );
     expect(user).toBeNull();
     expect(state.statusCode).toBe(401);
@@ -98,7 +110,7 @@ describe("HTTP auth middleware (checkout route)", () => {
 
   it("keeps the response contract for a missing token", async () => {
     const { res, state } = response();
-    expect(await authenticateHttpRequest(request(), res)).toBeNull();
+    expect(await authenticateHttpRequest(request(), res, SEND)).toBeNull();
     expect(state.statusCode).toBe(401);
     expect(JSON.parse(state.body)).toEqual({ error: "Authentication required" });
   });
@@ -107,7 +119,8 @@ describe("HTTP auth middleware (checkout route)", () => {
     const { res, state } = response();
     expect(await authenticateHttpRequest(
       request({ authorization: `Bearer ${await mint(mcpAudience, "-5m")}` }),
-      res
+      res,
+      SEND
     )).toBeNull();
     expect(state.statusCode).toBe(401);
     expect(JSON.parse(state.body)).toEqual({ error: "Token expired" });
@@ -118,7 +131,8 @@ describe("HTTP auth middleware (checkout route)", () => {
     const { res, state } = response();
     expect(await authenticateHttpRequest(
       request({ authorization: `Bearer ${await mint(mcpAudience)}` }),
-      res
+      res,
+      SEND
     )).toBeNull();
     expect(state.statusCode).toBe(503);
   });
@@ -127,9 +141,24 @@ describe("HTTP auth middleware (checkout route)", () => {
     const { res, state } = response();
     const user = await authenticateHttpRequest(
       request({ cookie: `access_token=${await mint(mcpAudience)}` }),
-      res
+      res,
+      SEND
     );
     expect(user).toBeNull();
     expect(state.statusCode).toBe(401);
+  });
+
+  it("refuses a valid token without the route's scope with 403 and a challenge, not a 401", async () => {
+    // 401 would send the website to sign in again, for a token that cannot change.
+    const { res, state } = response();
+    const user = await authenticateHttpRequest(
+      request({ authorization: `Bearer ${await mint(mcpAudience, "5m", { scope: "mail:read" })}` }),
+      res,
+      SEND
+    );
+    expect(user).toBeNull();
+    expect(state.statusCode).toBe(403);
+    expect(String(state.headers["www-authenticate"])).toContain('scope="mail:send"');
+    expect(JSON.parse(state.body)).toEqual({ error: "The bearer token does not grant this action" });
   });
 });

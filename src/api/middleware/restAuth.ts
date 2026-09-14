@@ -26,45 +26,77 @@
  * succeed and be refused again. Making the field required means the compiler
  * finds every caller rather than trusting three handlers to be updated
  * together.
+ *
+ * Scopes (audit A-03). The REST routes used to check only that a token was
+ * valid. Once the website moved onto the MCP audience, every token issued to
+ * an MCP client became valid here too, so each route now also requires the
+ * scope its MCP twin requires (src/auth/restScopes.ts). `requiredScopes` is a
+ * required parameter for the same reason `status` is a required field. A valid
+ * token without the scope gets 403 with a WWW-Authenticate challenge naming
+ * what is missing: at 401 the client would authenticate again, receive the
+ * same token, and be refused again.
  */
 
-import type { IncomingMessage } from 'http';
-import { validateJWTToken } from '../../auth/tokenValidator.js';
+import type { IncomingMessage, ServerResponse } from 'http';
+import {
+  requireScopes,
+  validateJWTToken,
+  type AuthenticatedUser
+} from '../../auth/tokenValidator.js';
+import { buildWwwAuthenticateChallenge, InsufficientScopeError } from '../../auth/oauthChallenge.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../auth/betaAccess.js';
+import type { ProductScope } from '../../auth/toolScopes.js';
+import { writeDiagnostic } from '../../utils/diagnosticLog.js';
 
 export interface RestAuthInfo {
   userId: string;
   email?: string;
+  /** Every scope the token carries. Empty when it carries none. */
+  scopes: string[];
 }
 
 export type RestAuthFailureReason =
   | 'no_credentials'
   | 'not_configured'
   | 'rejected'
-  | 'forbidden';
+  | 'forbidden'
+  | 'insufficient_scope';
 
-export type RestAuthOutcome =
-  | { ok: true; user: RestAuthInfo }
-  | { ok: false; reason: RestAuthFailureReason; status: number; message: string };
+export interface RestAuthFailure {
+  ok: false;
+  reason: RestAuthFailureReason;
+  status: number;
+  message: string;
+  /**
+   * The WWW-Authenticate value naming the missing scopes. Present only for
+   * insufficient_scope, where it tells an OAuth client what to ask for.
+   */
+  challenge?: string;
+}
+
+export type RestAuthOutcome = { ok: true; user: RestAuthInfo } | RestAuthFailure;
 
 const MESSAGES: Record<RestAuthFailureReason, string> = {
   no_credentials: 'Missing or invalid Authorization header',
   not_configured: 'Authentication is not configured on this server',
   rejected: 'The bearer token was rejected',
-  forbidden: BETA_ACCESS_MESSAGE
+  forbidden: BETA_ACCESS_MESSAGE,
+  insufficient_scope: 'The bearer token does not grant this action'
 };
 
 /**
  * The status each outcome deserves, in one table rather than at three call
  * sites. 403 for `forbidden` is the load-bearing one: the caller authenticated
  * correctly and is simply not admitted, so telling them to authenticate again
- * would send them round a loop that cannot terminate.
+ * would send them round a loop that cannot terminate. `insufficient_scope` is
+ * 403 for the same reason.
  */
 const STATUS: Record<RestAuthFailureReason, number> = {
   no_credentials: 401,
   not_configured: 503,
   rejected: 401,
-  forbidden: 403
+  forbidden: 403,
+  insufficient_scope: 403
 };
 
 /**
@@ -78,8 +110,37 @@ export function restAuthErrorLabel(status: number): string {
   return 'Unauthorized';
 }
 
-function fail(reason: RestAuthFailureReason): RestAuthOutcome {
+function fail(reason: RestAuthFailureReason): RestAuthFailure {
   return { ok: false, reason, status: STATUS[reason], message: MESSAGES[reason] };
+}
+
+/**
+ * The failure for a token that authenticated but lacks a scope. Exported for
+ * the routes that authenticate without authenticateRestRequest (token
+ * management and checkout), so every REST scope refusal has one shape.
+ */
+export function insufficientScope(error: InsufficientScopeError): RestAuthFailure {
+  // Scope names are fixed public values, never user data.
+  writeDiagnostic('warn', 'auth.rest_insufficient_scope', {
+    missing: error.missingScopes.join(' ')
+  });
+  return {
+    ...fail('insufficient_scope'),
+    challenge: buildWwwAuthenticateChallenge(error.message, undefined, error.missingScopes)
+  };
+}
+
+/**
+ * Writes a failure as the response. The one writer for the REST handlers, so
+ * none of them can hardcode a status again (#179) or drop the challenge.
+ */
+export function sendRestAuthFailure(res: ServerResponse, failure: RestAuthFailure): void {
+  res.statusCode = failure.status;
+  res.setHeader('Content-Type', 'application/json');
+  if (failure.challenge) {
+    res.setHeader('WWW-Authenticate', failure.challenge);
+  }
+  res.end(JSON.stringify({ error: restAuthErrorLabel(failure.status), message: failure.message }));
 }
 
 function extractToken(req: IncomingMessage): string | null {
@@ -95,15 +156,20 @@ function extractToken(req: IncomingMessage): string | null {
   return null;
 }
 
-export async function authenticateRestRequest(req: IncomingMessage): Promise<RestAuthOutcome> {
+/**
+ * @param requiredScopes - What the route requires, from requiredRestScopes.
+ */
+export async function authenticateRestRequest(
+  req: IncomingMessage,
+  requiredScopes: readonly ProductScope[]
+): Promise<RestAuthOutcome> {
   const token = extractToken(req);
   if (!token) {
     return fail('no_credentials');
   }
+  let user: AuthenticatedUser;
   try {
-    const user = await validateJWTToken(token);
-    const email = typeof user.claims.email === 'string' ? user.claims.email : undefined;
-    return { ok: true, user: { userId: user.userId, email } };
+    user = await validateJWTToken(token);
   } catch (error) {
     // Checked before the message comparisons below: a beta refusal is not an
     // authentication failure, and must not be reported as one.
@@ -119,4 +185,16 @@ export async function authenticateRestRequest(req: IncomingMessage): Promise<Res
     }
     return fail('rejected');
   }
+  // Checked here rather than passed to validateJWTToken, which would log a
+  // valid token as rejected and leave this function answering 401.
+  try {
+    requireScopes(user, requiredScopes);
+  } catch (error) {
+    if (error instanceof InsufficientScopeError) {
+      return insufficientScope(error);
+    }
+    throw error;
+  }
+  const email = typeof user.claims.email === 'string' ? user.claims.email : undefined;
+  return { ok: true, user: { userId: user.userId, email, scopes: user.scopes } };
 }

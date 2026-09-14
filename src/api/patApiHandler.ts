@@ -13,9 +13,18 @@
 
 import type { IncomingMessage, ServerResponse } from 'http';
 import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
-import { validateAuthorizationHeader, type AuthenticatedUser } from '../auth/tokenValidator.js';
+import {
+  requireScopes,
+  validateAuthorizationHeader,
+  type AuthenticatedUser
+} from '../auth/tokenValidator.js';
+import { InsufficientScopeError } from '../auth/oauthChallenge.js';
+import { requiredRestScopes } from '../auth/restScopes.js';
+import { insufficientScope, sendRestAuthFailure } from './middleware/restAuth.js';
+import { rateLimitAccount } from './middleware/rateLimit.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
-import { createToken, listTokens, revokeToken } from '../services/patService.js';
+import { createToken, listTokens, revokeToken, TokenExpiryError } from '../services/patService.js';
+import type { CreateTokenResult } from '../services/types.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 /**
@@ -73,11 +82,37 @@ export async function handlePATApiRequest(
       });
       return true;
     }
+    // The server cannot validate anything: 503, as restAuth answers. The fault
+    // is the server's, not the token's, and a 401 would say the opposite
+    // (#179).
+    if (error instanceof Error && error.message === 'OAuth validation not configured') {
+      sendJson(res, 503, {
+        error: 'Service Unavailable',
+        message: 'Authentication is not configured on this server',
+      });
+      return true;
+    }
     sendJson(res, 401, {
       error: 'Unauthorized',
       message: 'Authentication failed',
     });
     return true;
+  }
+
+  // The route's scope (src/auth/restScopes.ts). A personal access token
+  // carries none and passes, as it does on MCP; creating and revoking refuse
+  // one separately below.
+  try {
+    requireScopes(authInfo, requiredRestScopes(req.method, pathname));
+  } catch (error) {
+    if (error instanceof InsufficientScopeError) {
+      sendRestAuthFailure(res, insufficientScope(error));
+      return true;
+    }
+    throw error;
+  }
+  if (await rateLimitAccount(req, res, authInfo.userId, 'api_account')) {
+    return true; // Rate limited
   }
 
   // Route handlers
@@ -168,7 +203,21 @@ async function handleCreateToken(
     }
   }
 
-  const result = await createToken(authInfo.userId, name, { expiresAt });
+  let result: CreateTokenResult;
+  try {
+    result = await createToken(authInfo.userId, name, { expiresAt });
+  } catch (error) {
+    // A refused expiry is the caller's mistake, not a server failure: answer
+    // with the rule it broke rather than the generic 500.
+    if (error instanceof TokenExpiryError) {
+      sendJson(res, 400, {
+        error: 'Bad Request',
+        message: error.message,
+      });
+      return;
+    }
+    throw error;
+  }
 
   sendJson(res, 201, {
     token: result.token,  // Raw token - shown once!

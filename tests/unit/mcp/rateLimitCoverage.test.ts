@@ -118,3 +118,56 @@ describe('the credit API prefixes', () => {
     );
   });
 });
+
+describe('the REST limits', () => {
+  // The same gap the MCP limits had: every REST limiter ran before the handler
+  // authenticated, so each was keyed on the source address. The website calls
+  // this API from its own server, so every dashboard user shared one bucket.
+  const handlers = {
+    credits: creditHandler,
+    letters: read('src/api/letterApiHandler.ts'),
+    returnAddress: read('src/api/returnAddressApiHandler.ts'),
+    tokens: read('src/api/patApiHandler.ts'),
+    checkout: read('src/api/dashboardApiHandler.ts')
+  };
+
+  it('bounds the account on the REST API and on checkout', () => {
+    expect(RATE_LIMITS.api_account).toMatchObject({ maxRequests: 60, windowMs: 60_000 });
+    expect(RATE_LIMITS.checkout_account).toMatchObject({ maxRequests: 10, windowMs: 60_000 });
+  });
+
+  it('leaves the pre-authentication address limits far above one account', () => {
+    expect(RATE_LIMITS.api.maxRequests).toBeGreaterThanOrEqual(
+      RATE_LIMITS.api_account.maxRequests * 5
+    );
+    expect(RATE_LIMITS.checkout.maxRequests).toBeGreaterThanOrEqual(
+      RATE_LIMITS.checkout_account.maxRequests * 5
+    );
+  });
+
+  it('gives the trusted tier the same headroom on both stages', () => {
+    expect(TIER_RATE_MULTIPLIERS.trusted.api_account).toBe(TIER_RATE_MULTIPLIERS.trusted.api);
+    expect(TIER_RATE_MULTIPLIERS.trusted.checkout_account).toBe(
+      TIER_RATE_MULTIPLIERS.trusted.checkout
+    );
+  });
+
+  it.each([
+    ['credits', 'authenticateRestRequest(', 'api_account'],
+    ['letters', 'authenticateRestRequest(', 'api_account'],
+    ['returnAddress', 'authenticateRestRequest(', 'api_account'],
+    ['tokens', 'validateAuthorizationHeader(', 'api_account'],
+    ['checkout', 'authenticateHttpRequest(', 'checkout_account']
+  ] as const)('%s applies its account limit after authenticating', (name, authCall, limit) => {
+    const source = handlers[name];
+    const authenticated = source.indexOf(authCall);
+    expect(authenticated, `${name} no longer authenticates where this test looks`).toBeGreaterThan(-1);
+    // Before authentication there is no account, so the limit would key on
+    // the shared address again.
+    const limited = source.indexOf('rateLimitAccount(', authenticated);
+    expect(limited, `${name} applies no account limit after authenticating`).toBeGreaterThan(
+      authenticated
+    );
+    expect(source.slice(limited, limited + 120)).toContain(`'${limit}'`);
+  });
+});

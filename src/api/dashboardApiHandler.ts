@@ -13,6 +13,8 @@ import { verifyWebhookSignature } from '../services/stripeService.js';
 import { createPackCheckout, processStripeWebhookEvent } from '../services/commerceService.js';
 import { PACK_PRODUCTS } from '../config/products.js';
 import { authenticateHttpRequest } from './middleware/auth.js';
+import { rateLimitAccount } from './middleware/rateLimit.js';
+import { requiredRestScopes } from '../auth/restScopes.js';
 import { parseCookies, serializeCookie } from '../utils/cookies.js';
 import { query } from '../db/index.js';
 import {
@@ -86,11 +88,22 @@ export async function handleCreateCheckoutSession(
   const res = enhanceResponse(rawRes);
 
   try {
-    // Authenticate user
-    const authInfo = await authenticateHttpRequest(rawReq, rawRes);
+    // Authenticate user, including the route's scope (src/auth/restScopes.ts)
+    const authInfo = await authenticateHttpRequest(
+      rawReq,
+      rawRes,
+      requiredRestScopes('POST', '/api/stripe/create-checkout-session')
+    );
 
     if (!authInfo) {
       return; // authenticateHttpRequest already sent error response
+    }
+
+    // The account stage of the checkout limit. The 'checkout' limit in
+    // httpServer.ts runs before authentication and keys on the address, which
+    // every dashboard user shares through the website's proxy.
+    if (await rateLimitAccount(rawReq, rawRes, authInfo.userId, 'checkout_account')) {
+      return; // Rate limited
     }
 
     const { productId, successUrl, cancelUrl } = req.body;

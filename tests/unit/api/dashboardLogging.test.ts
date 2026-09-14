@@ -5,12 +5,14 @@ const {
   processStripeWebhookEvent,
   verifyWebhookSignature,
   authenticateHttpRequest,
+  rateLimitAccount,
   query
 } = vi.hoisted(() => ({
   createPackCheckout: vi.fn(),
   processStripeWebhookEvent: vi.fn(),
   verifyWebhookSignature: vi.fn(),
   authenticateHttpRequest: vi.fn(),
+  rateLimitAccount: vi.fn(),
   query: vi.fn()
 }));
 vi.mock("../../../src/db/index.js", () => ({ query }));
@@ -24,6 +26,12 @@ vi.mock("../../../src/services/commerceService.js", () => ({
   createPackCheckout,
   processStripeWebhookEvent
 }));
+// The account limit is not what these tests are about, and their stub
+// requests carry no socket for it to read an address from.
+vi.mock("../../../src/api/middleware/rateLimit.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/api/middleware/rateLimit.js")>()),
+  rateLimitAccount
+}));
 
 import {
   handleAuthCallback,
@@ -34,6 +42,7 @@ import {
 describe("dashboard runtime logging privacy", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    rateLimitAccount.mockResolvedValue(false);
     authenticateHttpRequest.mockResolvedValue({
       userId: "auth0|private-user",
       email: "private@example.com",

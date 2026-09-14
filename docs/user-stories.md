@@ -1061,7 +1061,7 @@ There is a mobile workaround - ask me about it if you want to try.
 - [ ] User can name/label the token for identification
 - [ ] Token stored as bcrypt hash in database
 - [ ] Token associated with user account
-- [ ] Token has optional expiration (default: no expiration)
+- [ ] Token expires: 90 days by default, or a requested date within 365 days; a past date is refused (tokens created before this rule keep their stored expiry)
 - [ ] Returns token in format: `lirl_pat_xxxxxxxxxxxx`
 
 **Token Format:**
