@@ -104,7 +104,7 @@ The development tenant is already configured:
 - **Tenant**: `dev-ky21dxn3qmi71hjl.us.auth0.com`
 - **Account**: dnicholl@objective.works
 - **Connections**: Google, Microsoft, Apple, GitHub, Username-Password
-- **DCR**: Enabled (Settings → Advanced → OIDC Dynamic Application Registration)
+- **DCR**: Enabled today (Settings → Advanced → OIDC Dynamic Application Registration). It should be off: DCR is rollback inventory only
 - **MCP API**: `https://letter-irl-api-development.up.railway.app/mcp`, also the website's audience
 - **Website Client ID**: `ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX`
 

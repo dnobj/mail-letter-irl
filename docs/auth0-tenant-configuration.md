@@ -16,10 +16,12 @@ The website uses the same MCP API. Its application (`Letter IRL Website`) is
 authorized for the MCP API with the same three scopes and requests them at
 login. Every REST route the dashboard calls requires the scope its MCP tool
 twin requires (`src/auth/restScopes.ts`). Development was switched on
-2026-09-14; production follows the same steps. Personal access tokens remain a
-separate path. The old website/REST API, `https://letter-irl/api`, is retired:
-no code accepts its tokens, and it is deleted from each tenant once the Default
-Audience no longer points at it.
+2026-09-14 (recorded in 2d below); production follows the same steps. Personal
+access tokens remain a separate path. The old website/REST API,
+`https://letter-irl/api`, is retired: the API server accepts exactly one
+audience, the MCP resource. Delete it from a tenant only after that
+environment's website requests the MCP audience and the Default Audience no
+longer points at it.
 
 **Corrected 2026-09-05, on first contact with a real import.** This document
 previously specified a *public* client with `token_endpoint_auth_method: none`,
@@ -346,13 +348,19 @@ Auth0's Management API with 200+ scopes for programmatic tenant administration.
 | **Name** | Letter IRL API |
 | **Scopes** | None configured |
 
-**Retired 2026-09-14.** The website and the REST routes moved onto the MCP API
-(website PR #22, API PR #386). The server no longer accepts this audience in
-any mode: `LETTER_IRL_OAUTH_LEGACY_AUDIENCES` is gone, and the static-DCR flag
-no longer widens the accepted audience. The API stays in each tenant only
-because it is still the Default Audience. Repoint the Default Audience to the
-MCP API identifier first, then delete this API. The dedicated MCP API
-identifier exactly equals the environment's canonical `/mcp` resource.
+**Retired 2026-09-14.** In development the website and the REST routes moved
+onto the MCP API (website PR #22, API PR #386); production follows. The server
+no longer accepts this audience in any mode:
+- `LETTER_IRL_OAUTH_LEGACY_AUDIENCES` is gone.
+- The static-DCR flag no longer widens the accepted audience.
+- Token validation refuses to run with more than one configured audience.
+
+The API stays in each tenant because it is still the Default Audience, and in
+production because the production website still requests it. Delete it from a
+tenant only once both are resolved there: the Default Audience points at the
+MCP API identifier, and that environment's website requests the MCP audience.
+The dedicated MCP API identifier exactly equals the environment's canonical
+`/mcp` resource.
 
 ---
 
@@ -575,6 +583,30 @@ still falls back to `/userinfo`.
 
    The same settings must be applied to the **production** tenant at cutover
    (#158). They are not inherited from DEV.
+
+2d. **Development tenant: the website on the MCP API** (2026-09-14)
+
+   The development website moved onto the development MCP API on this date. The
+   table below was read from the tenant dashboard and the running deployments,
+   in the same way as 2b and 2c.
+
+   | Item | State | Verified by |
+   |---|---|---|
+   | API `Letter IRL DEV MCP`, identifier `https://letter-irl-api-development.up.railway.app/mcp` | Existing | Dashboard, id `6a6cd3b3486a4ed1b55f42f2` |
+   | API access policy | **Per-app authorization** for user-delegated and client access | API settings |
+   | Allow Skipping User Consent / Allow Offline Access | Both **enabled** | API settings |
+   | `Letter IRL Website` (`ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX`) user-delegated grant | **3 / 3** (`mail:read`, `mail:draft`, `mail:send`); client access 0 / 3 | API Access tab |
+   | Website refresh-token rotation | On; idle 1296000 s, maximum 2592000 s, overlap 30 s | Application settings, saved by the owner |
+   | Website grant types | Implicit and Client Credentials removed | Application settings |
+   | Railway `mail-letter-irl-website` (development) | `AUTH0_AUDIENCE` = the development `/mcp` resource; `AUTH0_SCOPE` = `openid profile email offline_access mail:read mail:draft mail:send` | `/auth/login` redirects with that audience and scope, and Auth0 answers with its login page |
+   | Dashboard end to end | Overview, Letters, Letter Packs, API Tokens and Settings load; the API logs `rest.request` at 200 for each call, with no scope refusals | Signed-in walkthrough and the development API log, after API PR #386 deployed |
+
+   The overlap is 30 s rather than ChatGPT's 0. The dashboard fires parallel
+   API calls and the website's Auth0 SDK does not deduplicate refreshes, so 0
+   would trip reuse detection and sign the customer out.
+
+   Production has not had these steps yet: the production website still
+   requests `https://letter-irl/api`.
 
 3. **Domain-Level Connections**
    - **All 5 connections** must have `is_domain_connection: true`

@@ -118,6 +118,20 @@ describe("REST bearer authentication", () => {
     expect(outcome).toMatchObject({ ok: false, reason: "rejected" });
   });
 
+  it("treats a second configured audience as a server fault, not a second accepted audience", async () => {
+    // validateOAuthConfig refuses this at boot only under CIMD enforcement. The
+    // validator holds the same one-audience rule on every request, so neither
+    // token is accepted.
+    vi.stubEnv("LETTER_IRL_OAUTH_AUDIENCE", `${mcpAudience} ${retiredAudience}`);
+    for (const audience of [mcpAudience, retiredAudience]) {
+      const outcome = await authenticateRestRequest(
+        request({ authorization: `Bearer ${await mint(audience)}` }),
+        ["mail:read"]
+      );
+      expect(outcome, audience).toMatchObject({ ok: false, reason: "not_configured", status: 503 });
+    }
+  });
+
   it("names a genuinely missing header for what it is", async () => {
     const outcome = await authenticateRestRequest(request(), ["mail:read"]);
     expect(outcome).toMatchObject({ ok: false, reason: "no_credentials" });

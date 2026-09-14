@@ -76,10 +76,12 @@ export function getOAuthConfig(env: NodeJS.ProcessEnv = process.env): OAuthConfi
   const staticDcrCompatibility =
     env.LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY === "true";
   // One audience in every mode. LETTER_IRL_OAUTH_LEGACY_AUDIENCES used to be
-  // merged in under the static-DCR flag, to keep the website's tokens for the
-  // retired https://letter-irl/api audience working. The website and the REST
-  // routes moved onto the MCP audience in September 2026, so nothing needs a
-  // second one, and the rollback flag no longer widens what is accepted.
+  // merged in under the static-DCR flag. It began as part of that rollback (the
+  // recorded legacy client and audience), and the website's tokens for the
+  // retired https://letter-irl/api audience later came to depend on it. The
+  // website and the REST routes moved onto the MCP audience in September 2026,
+  // and a rollback token carries the /mcp audience too, because ChatGPT sends
+  // the /mcp resource. Nothing needs a second audience.
   const audience = parseList(env.LETTER_IRL_OAUTH_AUDIENCE);
 
   return {

@@ -210,10 +210,17 @@ has not been run. Worth running before the production cutover (#158), since it i
 the only rehearsal of the rollback path.
 
 - [ ] Save the accepted CIMD configuration and deployment identifiers.
+- [ ] Grant the rollback static client user-delegated `mail:read`, `mail:draft`
+      and `mail:send` on the DEV MCP API. The API uses per-app authorization, so
+      without a grant Auth0 refuses the client for the `/mcp` resource.
 - [ ] Enable `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY=true` in DEV only with
-      the recorded legacy client/audience and deploy the rollback configuration.
+      the recorded static client (`CHATGPT_STATIC_CLIENT_ID`,
+      `CHATGPT_STATIC_REDIRECT_URIS`) and deploy. Keep `LETTER_IRL_OAUTH_AUDIENCE`
+      the single `/mcp` resource: there is no legacy audience any more, and the
+      retired `https://letter-irl/api` API has no scopes, so its tokens could
+      never use a tool.
 - [ ] Run a fresh-link smoke test and record behavior/client count.
-- [ ] Restore CIMD mode (`false`), restore the dedicated exact `/mcp` audience,
+- [ ] Restore CIMD mode (`false`), remove the static client's MCP API grant,
       redeploy DEV, and rerun CIMD-01, CIMD-03, and CIMD-04.
 - [ ] Confirm production was unchanged throughout.
 

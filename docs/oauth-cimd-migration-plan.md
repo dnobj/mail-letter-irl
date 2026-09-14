@@ -98,7 +98,7 @@ Create a dedicated MCP API identifier rather than changing the existing website/
 - every REST route requires the scope its MCP twin requires;
 - the server accepts exactly one audience in every mode.
 
-`https://letter-irl/api` is retired. It is deleted from each tenant after that tenant's Default Audience is repointed.
+`https://letter-irl/api` is retired. It is deleted from each tenant only after that environment's website requests the MCP audience and the tenant's Default Audience is repointed.
 
 ### Scopes
 

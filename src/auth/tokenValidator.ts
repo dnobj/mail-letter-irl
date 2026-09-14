@@ -114,13 +114,17 @@ export async function validateJWTToken(
   requiredScopes: readonly string[] = []
 ): Promise<AuthenticatedUser> {
   const config = getOAuthConfig();
-  if (!config.issuer || !config.jwksUri || config.audience.length === 0) {
+  // Exactly one audience, the MCP resource. validateOAuthConfig refuses more at
+  // boot, but only while CIMD enforcement is on; this holds the same rule on
+  // every request, so a stray second audience is a configuration fault (503)
+  // rather than a second set of accepted tokens.
+  if (!config.issuer || !config.jwksUri || config.audience.length !== 1) {
     throw new Error("OAuth validation not configured");
   }
 
   const options: JWTVerifyOptions = {
     issuer: config.issuer,
-    audience: config.audience.length === 1 ? config.audience[0] : config.audience,
+    audience: config.audience[0],
     algorithms: config.algorithms
   };
 
