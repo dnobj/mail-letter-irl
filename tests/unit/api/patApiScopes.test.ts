@@ -178,12 +178,20 @@ describe('personal access token routes', () => {
     vi.mocked(validateAuthorizationHeader).mockRejectedValue(
       new Error('OAuth validation not configured')
     );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { res, state } = response();
 
     await handlePATApiRequest(request('GET'), res, '/api/tokens');
 
     expect(state.status).toBe(503);
     expect(listTokens).not.toHaveBeenCalled();
+    // Logged once, with no fields: the validator throws before its own log.
+    expect(
+      error.mock.calls
+        .map(([line]) => String(line))
+        .filter(line => line.includes('"event":"auth.validation_not_configured"'))
+        .map(line => JSON.parse(line))
+    ).toEqual([{ event: 'auth.validation_not_configured', msg: 'auth.validation_not_configured' }]);
   });
 
   it('applies the account limit once the caller is known, before any route runs', async () => {

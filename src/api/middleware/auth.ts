@@ -30,6 +30,8 @@ import {
   type AuthenticatedUser as ValidatedUser
 } from '../../auth/tokenValidator.js';
 import { InsufficientScopeError } from '../../auth/oauthChallenge.js';
+import { OAUTH_NOT_CONFIGURED } from '../../auth/oauthErrors.js';
+import { writeDiagnostic } from '../../utils/diagnosticLog.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../auth/betaAccess.js';
 import type { ProductScope } from '../../auth/toolScopes.js';
 import { insufficientScope } from './restAuth.js';
@@ -81,9 +83,11 @@ export async function authenticateHttpRequest(
       respond(res, 403, { error: BETA_ACCESS_MESSAGE });
       return null;
     }
-    // validateJWTToken already emitted the structured diagnostic.
+    // validateJWTToken logs a token it rejects. A server that cannot validate
+    // anything throws before that log, so it is logged here.
     const message = error instanceof Error ? error.message : '';
-    if (message === 'OAuth validation not configured') {
+    if (message === OAUTH_NOT_CONFIGURED) {
+      writeDiagnostic('error', 'auth.validation_not_configured');
       respond(res, 503, { error: 'Authentication is not configured' });
       return null;
     }

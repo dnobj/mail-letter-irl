@@ -134,6 +134,35 @@ describe('authenticateRequest reaches the branch', () => {
     })();
   });
 
+  it('answers 503 with no challenge when the server cannot validate tokens', async () => {
+    // Authorizing again cannot fix a server with no usable OAuth configuration,
+    // so a challenge would send the client round the same loop as a beta
+    // refusal. The REST routes already answer 503 for this.
+    vi.mocked(validateAuthorizationHeader).mockRejectedValue(
+      new Error('OAuth validation not configured')
+    );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const { captured, res } = fakeResponse();
+    const result = await authenticateRequest(request('Bearer token'), res, 'https://api.example');
+
+    expect(result).toBeNull();
+    expect(captured.status).toBe(503);
+    expect(Object.keys(captured.headers).map(h => h.toLowerCase())).not.toContain(
+      'www-authenticate'
+    );
+    expect(captured.body).not.toContain('www_authenticate');
+    // Exactly one line, with no fields, so a dropped call or an added
+    // request-derived value fails this.
+    expect(
+      error.mock.calls
+        .map(([line]) => String(line))
+        .filter(line => line.includes('"event":"auth.validation_not_configured"'))
+        .map(line => JSON.parse(line))
+    ).toEqual([{ event: 'auth.validation_not_configured', msg: 'auth.validation_not_configured' }]);
+    error.mockRestore();
+  });
+
   it('does not leak the refusal into the challenge path', async () => {
     // Belt and braces on the ordering: if the beta check ran AFTER
     // buildWwwAuthenticateChallenge, the message would appear in a header.

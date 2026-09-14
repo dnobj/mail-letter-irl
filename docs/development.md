@@ -104,18 +104,17 @@ The development tenant is already configured:
 - **Tenant**: `dev-ky21dxn3qmi71hjl.us.auth0.com`
 - **Account**: dnicholl@objective.works
 - **Connections**: Google, Microsoft, Apple, GitHub, Username-Password
-- **DCR**: Enabled (Settings → Advanced → OIDC Dynamic Application Registration)
-- **API Audience**: `https://letter-irl/api`
+- **DCR**: Enabled today (Settings → Advanced → OIDC Dynamic Application Registration). It should be off: DCR is rollback inventory only
+- **MCP API**: `https://letter-irl-api-development.up.railway.app/mcp`, also the website's audience
 - **Website Client ID**: `ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX`
 
 If you need to configure a new development tenant, follow these steps:
 1. Go to [Auth0](https://auth0.com) and create a new tenant
 2. Configure connections (same as production): Google, Microsoft, Apple, GitHub, Username-Password
-3. Enable DCR: Settings → Advanced → OIDC Dynamic Application Registration
-4. Create API: `https://letter-irl/api`
-5. Set Default Audience: Settings → General → API Authorization Settings
-6. Create Regular Web Application for the website
-7. Create M2M Application for sync script with Management API access
+3. Enable Client ID Metadata Document registration: Settings → Advanced (leave DCR off)
+4. Create the MCP API: identifier = the environment's canonical `/mcp` URL, permissions `mail:read`, `mail:draft`, `mail:send`
+5. Set Default Audience to that API: Settings → General → API Authorization Settings
+6. Create a Regular Web Application for the website, and authorize it for the MCP API with all three permissions
 
 ### 2. Create Neon Development Branch
 
@@ -192,7 +191,8 @@ DATABASE_URL=postgres://...
 # Auth0 (production tenant)
 LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+LETTER_IRL_MCP_RESOURCE=https://api.letterirl.com/mcp
+LETTER_IRL_OAUTH_AUDIENCE=https://api.letterirl.com/mcp
 
 # Stripe (live mode)
 STRIPE_SECRET_KEY=sk_live_...
@@ -223,7 +223,8 @@ DATABASE_URL=postgres://...?options=branch%3Ddev
 # Auth0 (dev tenant)
 LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+LETTER_IRL_MCP_RESOURCE=https://letter-irl-api-development.up.railway.app/mcp
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
 
 # Stripe (test mode)
 STRIPE_SECRET_KEY=sk_test_...
@@ -515,8 +516,10 @@ Production and development environments have different values:
 
 ### Common Issues
 
-**"OAuth validation not configured"**
+**"Authentication is not configured on this server"** (503 from the REST routes and `/mcp`; checkout says "Authentication is not configured")
+- Each refused request logs `auth.validation_not_configured`
 - Check `LETTER_IRL_OAUTH_ISSUER` and `LETTER_IRL_OAUTH_JWKS_URI` are set
+- Check `LETTER_IRL_OAUTH_AUDIENCE` names exactly one audience, the MCP resource
 
 **"Stripe webhook signature verification failed"**
 - Ensure `STRIPE_WEBHOOK_SECRET` matches your webhook endpoint

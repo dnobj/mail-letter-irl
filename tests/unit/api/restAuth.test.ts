@@ -5,15 +5,17 @@ import { generateKeyPair, SignJWT } from "jose";
 /**
  * Issue #209. The REST handlers each carried their own bearer check reading
  * LETTER_IRL_OAUTH_AUDIENCE straight from the environment as a single value,
- * while the MCP layer read the audience through getOAuthConfig() - a list,
- * merged with LETTER_IRL_OAUTH_LEGACY_AUDIENCES under the static-DCR
- * compatibility flag. The website mints tokens for the legacy audience, so
- * every dashboard call was rejected while MCP calls were fine.
+ * while the MCP layer read the audience through getOAuthConfig(). The two
+ * disagreed about which audiences were valid, and every dashboard call was
+ * rejected while MCP calls were fine.
  *
  * These tests pin the property that closes it: the REST check accepts exactly
- * the audiences the config layer accepts. They also pin the message, because
- * "Missing or invalid Authorization header" for a present, well-formed,
- * rejected token is what sent the #209 investigation to the wrong service.
+ * the audience the config layer accepts, which is now the MCP resource alone.
+ * The website's old audience, https://letter-irl/api, is retired, and the
+ * static-DCR flag that used to merge it back in no longer does. They also pin
+ * the message, because "Missing or invalid Authorization header" for a
+ * present, well-formed, rejected token is what sent the #209 investigation to
+ * the wrong service.
  *
  * Audit A-03 added scopes. The real validator and the real requireScopes run
  * here, so these are the tests that go red if restAuth stops checking them.
@@ -41,7 +43,7 @@ import { authenticateRestRequest } from "../../../src/api/middleware/restAuth.js
 
 const issuer = "https://dev-test.auth0.com/";
 const mcpAudience = "https://dev-api.example.com/mcp";
-const legacyAudience = "https://letter-irl/api";
+const retiredAudience = "https://letter-irl/api";
 const WEBSITE_SCOPE = "openid profile email offline_access mail:read mail:draft mail:send";
 
 async function mint(
@@ -72,8 +74,6 @@ describe("REST bearer authentication", () => {
     vi.stubEnv("LETTER_IRL_OAUTH_JWKS_URI", `${issuer}.well-known/jwks.json`);
     vi.stubEnv("LETTER_IRL_OAUTH_AUDIENCE", mcpAudience);
     vi.stubEnv("LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS", "RS256");
-    vi.stubEnv("LETTER_IRL_OAUTH_LEGACY_AUDIENCES", legacyAudience);
-    vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "false");
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
   });
 
@@ -97,26 +97,39 @@ describe("REST bearer authentication", () => {
     });
   });
 
-  it("accepts the legacy audience once compatibility is on - the #209 case", async () => {
-    // This is the website's token. Before the fix it was rejected regardless of
-    // the flag, because the REST check never consulted the config layer.
-    vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "true");
+  it("rejects a token for another audience, and says so", async () => {
+    // The point is the message - it must not claim the header was missing.
     const outcome = await authenticateRestRequest(
-      request({ authorization: `Bearer ${await mint(legacyAudience)}` }),
-      ["mail:read"]
-    );
-    expect(outcome.ok).toBe(true);
-  });
-
-  it("rejects the legacy audience while compatibility is off, and says so", async () => {
-    // Same token, flag off: REST and MCP now agree, and both refuse. The point
-    // is the message - it must not claim the header was missing.
-    const outcome = await authenticateRestRequest(
-      request({ authorization: `Bearer ${await mint(legacyAudience)}` }),
+      request({ authorization: `Bearer ${await mint(retiredAudience)}` }),
       ["mail:read"]
     );
     expect(outcome).toMatchObject({ ok: false, reason: "rejected" });
     expect(outcome.ok ? "" : outcome.message).not.toMatch(/missing/i);
+  });
+
+  it("rejects the retired website audience even with the old rollback settings in place", async () => {
+    // Before the merge was removed, these two settings made this token valid.
+    vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "true");
+    vi.stubEnv("LETTER_IRL_OAUTH_LEGACY_AUDIENCES", retiredAudience);
+    const outcome = await authenticateRestRequest(
+      request({ authorization: `Bearer ${await mint(retiredAudience)}` }),
+      ["mail:read"]
+    );
+    expect(outcome).toMatchObject({ ok: false, reason: "rejected" });
+  });
+
+  it("treats a second configured audience as a server fault, not a second accepted audience", async () => {
+    // validateOAuthConfig refuses this at boot only under CIMD enforcement. The
+    // validator holds the same one-audience rule on every request, so neither
+    // token is accepted.
+    vi.stubEnv("LETTER_IRL_OAUTH_AUDIENCE", `${mcpAudience} ${retiredAudience}`);
+    for (const audience of [mcpAudience, retiredAudience]) {
+      const outcome = await authenticateRestRequest(
+        request({ authorization: `Bearer ${await mint(audience)}` }),
+        ["mail:read"]
+      );
+      expect(outcome, audience).toMatchObject({ ok: false, reason: "not_configured", status: 503 });
+    }
   });
 
   it("names a genuinely missing header for what it is", async () => {

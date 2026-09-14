@@ -4,9 +4,9 @@
  * One implementation, delegating to the same validator the MCP layer trusts.
  * Issue #209: three copies of this check lived in three handlers, each reading
  * LETTER_IRL_OAUTH_AUDIENCE straight from the environment as a single value.
- * The MCP layer reads the audience through getOAuthConfig(), which parses a
- * list and merges LETTER_IRL_OAUTH_LEGACY_AUDIENCES under the static-DCR
- * compatibility flag. The two layers therefore disagreed about which audiences
+ * The MCP layer read the audience through getOAuthConfig(), which then merged
+ * LETTER_IRL_OAUTH_LEGACY_AUDIENCES under the static-DCR compatibility flag
+ * (since removed). The two layers therefore disagreed about which audiences
  * were valid, and only the MCP one won: the website's token, minted for the
  * legacy audience, was rejected by every dashboard call.
  *
@@ -44,6 +44,7 @@ import {
   type AuthenticatedUser
 } from '../../auth/tokenValidator.js';
 import { buildWwwAuthenticateChallenge, InsufficientScopeError } from '../../auth/oauthChallenge.js';
+import { OAUTH_NOT_CONFIGURED } from '../../auth/oauthErrors.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../auth/betaAccess.js';
 import type { ProductScope } from '../../auth/toolScopes.js';
 import { writeDiagnostic } from '../../utils/diagnosticLog.js';
@@ -176,11 +177,13 @@ export async function authenticateRestRequest(
     if (error instanceof BetaAccessDeniedError) {
       return fail('forbidden');
     }
-    // validateJWTToken already emitted the structured diagnostic. Distinguish
-    // "the server cannot validate anything" from "this token failed" so an
-    // operator reading the response knows which side to look at.
+    // validateJWTToken logs a token it rejects. A server that cannot validate
+    // anything throws before that log, so it is logged here. The two outcomes
+    // stay distinct so an operator reading the response knows which side to
+    // look at.
     const message = error instanceof Error ? error.message : '';
-    if (message === 'OAuth validation not configured') {
+    if (message === OAUTH_NOT_CONFIGURED) {
+      writeDiagnostic('error', 'auth.validation_not_configured');
       return fail('not_configured');
     }
     return fail('rejected');
