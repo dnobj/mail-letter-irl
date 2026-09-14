@@ -66,6 +66,11 @@ thing the rule above forbids. It also made development, where authentication can
 be relaxed and the dummy provider is normal, hold a copy of every letter,
 recipient address and customer record in production.
 
+The Auth0 applications it authenticated as no longer have Management API access
+(revoked 2026-09-14). If a workstation `.env.dev` still holds
+`AUTH0_PROD_CLIENT_ID`, `AUTH0_PROD_CLIENT_SECRET`, `AUTH0_DEV_CLIENT_ID` or
+`AUTH0_DEV_CLIENT_SECRET`, delete those lines.
+
 Seed development from fixtures, or work against an empty dev branch created in
 the Neon console. If a production-shaped dataset is ever genuinely needed, build
 it from anonymised data rather than copying the real one.

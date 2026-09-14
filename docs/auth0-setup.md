@@ -12,10 +12,9 @@ method the CIMD document declares - currently `private_key_jwt`, verified on the
 production import 2026-09-05. Its client ID is the OpenAI-hosted HTTPS CIMD
 URL. The dedicated Auth0 MCP API identifier exactly equals that
 environment's canonical `/mcp` resource and grants only `mail:read`,
-`mail:draft`, and `mail:send`. In development the website and the REST routes
-use the same MCP API (switched 2026-09-14). The production website still
-requests the old website/REST API, `https://letter-irl/api`, until its own
-switch; see section 2d of `docs/auth0-tenant-configuration.md`.
+`mail:draft`, and `mail:send`. The website and the REST routes use the same MCP
+API in both environments (switched 2026-09-14); see sections 2d and 2e of
+`docs/auth0-tenant-configuration.md`.
 
 CIMD and the resource-parameter compatibility profile are owner-managed tenant
 settings. DCR and Letter IRL's static `/oauth/register` shim are not the target
@@ -125,8 +124,8 @@ use. Its identifier is the environment's canonical MCP URL.
 4. **Signing Algorithm:** RS256
 5. **Permissions:** `mail:read`, `mail:draft`, `mail:send`
 6. **Application Access:** authorize `Letter IRL Website` for user-delegated
-   access with all three permissions. If the API uses per-app authorization
-   (development does), an application with no grant cannot get a token for it.
+   access with all three permissions. Both tenants' MCP APIs use per-app
+   authorization, so an application with no grant cannot get a token for them.
 
 **Settings:**
 | Setting | Value |
@@ -136,10 +135,9 @@ use. Its identifier is the environment's canonical MCP URL.
 | Allow Offline Access | Enabled (refresh tokens for ChatGPT and the website) |
 
 The earlier `Letter IRL API` (`https://letter-irl/api`) is retired, and the API
-server accepts only the MCP audience. Delete it from a tenant only once both are
-true there: that environment's website requests the MCP audience, and the
-Default Audience below no longer points at it. Deleting it earlier breaks
-dashboard sign-in for a website that still requests it.
+server accepts only the MCP audience. It was deleted from both tenants on
+2026-09-14, once each environment's website requested the MCP audience and the
+Default Audience below had been repointed. Do not recreate it.
 
 ---
 
@@ -224,8 +222,10 @@ ChatGPT's requests fall back to this value.
 3. **Default Audience:** the MCP API identifier (`https://api.letterirl.com/mcp`)
 4. Save
 
-Both tenants still point at the retired `https://letter-irl/api`. Repoint before
-deleting that API.
+Both tenants were repointed on 2026-09-14 (development:
+`https://letter-irl-api-development.up.railway.app/mcp`). Before that they
+pointed at the retired `https://letter-irl/api`, and Auth0 refused a ChatGPT
+request that fell back to it, because the ChatGPT client had no grant there.
 
 ---
 
@@ -331,8 +331,9 @@ AUTH0_SCOPE=openid profile email offline_access mail:read mail:draft mail:send
 - [x] Environment tag set to Production
 - [x] Website application created (Regular Web App)
 - [x] MCP API created (`https://api.letterirl.com/mcp`)
-- [ ] Website application authorized for the MCP API, and website variables switched to it
-- [ ] Default audience repointed to the MCP API, then `https://letter-irl/api` deleted (only once the production website no longer requests it)
+- [x] Website application authorized for the MCP API, and website variables switched to it (2026-09-14)
+- [x] Default audience repointed to the MCP API, then `https://letter-irl/api` deleted (2026-09-14)
+- [ ] `Prod-to-Dev Sync (Management API)` deleted (Management API access revoked 2026-09-14; delete once the logs show nothing tried to use it)
 - [x] Legacy DCR state recorded for rollback
 - [x] Domain-level connection inventory recorded
 - [x] Google connection configured
@@ -347,7 +348,9 @@ AUTH0_SCOPE=openid profile email offline_access mail:read mail:draft mail:send
 - [x] Account exists (dnicholl@objective.works)
 - [x] Website application configured and authorized for the MCP API (2026-09-14)
 - [x] Dedicated DEV `/mcp` API created and the ChatGPT CIMD client imported
-- [ ] Default audience repointed to the MCP API, then `https://letter-irl/api` deleted
+- [x] Default audience repointed to the MCP API, then `https://letter-irl/api` deleted (2026-09-14)
+- [x] `Letter IRL API (Test Application)` deleted (2026-09-14)
+- [ ] `API Explorer Application` deleted (Management API access revoked 2026-09-14; delete once the logs show nothing tried to use it)
 - [ ] DCR turned off (still enabled; rollback inventory only)
 - [x] Legacy DCR state recorded for rollback
 - [x] Domain-level connection inventory recorded

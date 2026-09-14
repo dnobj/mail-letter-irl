@@ -5,7 +5,8 @@
 > public CIMD, authorization code + PKCE S256, no client secret, a dedicated
 > exact `/mcp` audience, and `mail:read`/`mail:draft`/`mail:send`. DCR and the
 > static registration route are temporary rollback compatibility only.
-> Website/REST and Claude/PAT authentication remain separate.
+> The website and REST routes have used the same MCP API since 2026-09-14;
+> Claude/PAT authentication remains separate.
 
 This plan outlines how to add per-user identity using Auth0 (for RFC 7591 support) while keeping Firestore and the rest of the stack on Google Cloud. The goal is to let ChatGPT authenticate each end user, so Letter IRL can map tool calls to individual Firestore accounts.
 
