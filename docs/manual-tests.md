@@ -520,7 +520,7 @@ replaces the link with the outcome.
 
 ### PAY-05 — Back to the conversation after checkout (issue #372)
 
-**Status:** Two web runs in development. Android not run.
+**Status:** Passed on the web in development on 2026-09-14, with widget v31. Android not run.
 
 - **2026-09-13: the return link did not arrive.**
   - The owner clicked the card's link from the embedded browser; no safe-link modal was reported.
@@ -546,6 +546,19 @@ replaces the link with the outcome.
   - `create_pack_checkout` never reuses a pack order, so that button starts a second purchase.
   - The original tab was unaffected and showed the purchase paid after its visibility refresh.
   - Widget v31 fixes it: the card keeps its order in `widgetState` and resumes from it.
+- **2026-09-14: passed with widget v31.** The run used the DEV app on ChatGPT web, the connector
+  refreshed to v31, and a test card.
+  - At 21:21Z the first `create_pack_checkout` after "Allow once" was dropped, and only the template
+    read reached the API. The card showed "No checkout is showing on this card…" with **Create my
+    checkout**, while ChatGPT's reply claimed the checkout had started.
+  - **Create my checkout** created the order at 21:27:11Z, and `purchase.start` kept the return link.
+  - `checkout.session.completed` arrived at 21:27:16Z, and `purchase.return` offered the conversation
+    link at 21:27:19Z.
+  - **Back to your conversation** opened the same conversation in a new tab. At 21:27:27Z that tab's
+    card read `get_purchase_status` once and showed "Paid. 2 letters added to your account." with
+    "pack t7". It opened no checkout and offered no second one.
+  - The card had created this order itself, so no host tool result could carry it. ChatGPT web
+    therefore restores `widgetState` on reopen.
 
 Background: the checkout card now opens a start page on the API host through `window.openai.openExternal`
 instead of the Stripe URL directly. For an allowlisted redirect origin (the API origin is in
@@ -558,10 +571,11 @@ on desktop as a plain link, on iPhone and iPad text only until a device has prov
       fresh chat with the DEV app, buy the Starter Pack, and when the card shows the link, click it.
       Record whether a safe-link modal appeared, and whether the tab that opened is the Stripe page
       (the start page forwards in one hop). Cancel with Stripe's back arrow.
-- [ ] On the return page: is the button **Back to your conversation**? If so ChatGPT appended a
+- [x] On the return page: is the button **Back to your conversation**? If so ChatGPT appended a
       return link. Record the shape of the link's target (conversation URL or something else) from the
       dev log or the page source, without pasting it into a shared place. Click it and record where
-      it lands.
+      it lands. (Yes, on both 2026-09-14 runs: `linkOffered=conversation`, and the button lands on
+      the same conversation.)
 - [ ] Android (owner's phone over adb): same purchase, tap the card's link, cancel with Stripe's back
       arrow, tap **Back to your conversation**. Expected: the ChatGPT app comes to the front on the
       conversation, even with the app's link handling switched off.
@@ -569,11 +583,12 @@ on desktop as a plain link, on iPhone and iPad text only until a device has prov
       client, and check the dev log for the start-page request's query (the API logs no values).
 - [ ] If the card's tap opened nothing, record that the fallback link appeared after a moment and
       that it opens the checkout.
-- [ ] Reopened conversation (widget v31 or later, with the DEV connector refreshed): after paying,
+- [x] Reopened conversation (widget v31 or later, with the DEV connector refreshed): after paying,
       click **Back to your conversation**, or reload the conversation. Within a moment the card must
       show the order and **Paid**. It must never show "No checkout" with **Create my checkout**, and
       it must not open a checkout tab by itself. The dev log shows one `get_purchase_status` for the
-      order straight after the reload, and no `create_pack_checkout`.
+      order straight after the reload, and no `create_pack_checkout`. (Passed on 2026-09-14 at
+      21:27Z. See the Status list above.)
 
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
 
