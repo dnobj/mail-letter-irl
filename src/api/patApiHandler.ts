@@ -15,7 +15,8 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
 import { validateAuthorizationHeader, type AuthenticatedUser } from '../auth/tokenValidator.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
-import { createToken, listTokens, revokeToken } from '../services/patService.js';
+import { createToken, listTokens, revokeToken, TokenExpiryError } from '../services/patService.js';
+import type { CreateTokenResult } from '../services/types.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 /**
@@ -168,7 +169,21 @@ async function handleCreateToken(
     }
   }
 
-  const result = await createToken(authInfo.userId, name, { expiresAt });
+  let result: CreateTokenResult;
+  try {
+    result = await createToken(authInfo.userId, name, { expiresAt });
+  } catch (error) {
+    // A refused expiry is the caller's mistake, not a server failure: answer
+    // with the rule it broke rather than the generic 500.
+    if (error instanceof TokenExpiryError) {
+      sendJson(res, 400, {
+        error: 'Bad Request',
+        message: error.message,
+      });
+      return;
+    }
+    throw error;
+  }
 
   sendJson(res, 201, {
     token: result.token,  // Raw token - shown once!
