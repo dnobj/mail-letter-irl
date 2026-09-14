@@ -32,6 +32,13 @@ import { validatePromoCodePublic } from "../services/promoService.js";
 import { closePool } from "../db/index.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
 import {
+  decidePurchaseStart,
+  purchaseReturnDiagnostics,
+  purchaseStartDiagnostics,
+  readReturnCookie,
+  renderPurchaseReturnPage
+} from "./purchaseReturnPage.js";
+import {
   readRequestBody,
   MCP_BODY_LIMIT_BYTES,
   WEBHOOK_BODY_LIMIT_BYTES,
@@ -56,6 +63,9 @@ import { getReadiness } from "./readiness.js";
 import { kickPriceCatalog } from "../services/priceCatalog.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 import { resolveCorsOriginFor } from "./corsOrigin.js";
+import { installProcessGuards, withRequestBoundary } from "./requestBoundary.js";
+import { logRestRequestOnFinish } from "../api/restRequestLog.js";
+import { OAUTH_NOT_CONFIGURED } from "../auth/oauthErrors.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -101,6 +111,24 @@ const DEBUG_ENABLED = isDebugEnabled();
  */
 export const BUILD_COMMIT = process.env.RAILWAY_GIT_COMMIT_SHA ?? "unknown";
 export const BUILD_BRANCH = process.env.RAILWAY_GIT_BRANCH ?? "unknown";
+
+/**
+ * Every path handleCreditApiRequest answers on. Kept as one list so the
+ * limiter and the handler cannot drift apart again (src/api/creditApiHandler.ts).
+ */
+const CREDIT_API_PREFIXES = ['/api/credits', '/api/promo', '/api/users/me'] as const;
+
+/**
+ * Every REST route family, for the request log. Checkout is REST in all but
+ * the file it lives in.
+ */
+const REST_API_PREFIXES = [
+  ...CREDIT_API_PREFIXES,
+  '/api/tokens',
+  '/api/letters',
+  '/api/return-address',
+  '/api/stripe/create-checkout-session'
+] as const;
 
 export function validateEnvironment() {
   validatePublicServerAdminConfiguration(process.env);
@@ -378,6 +406,14 @@ export async function startHttpServer() {
 
     (req as any).auth = session.authInfo ?? undefined;
 
+    // Tool calls arrive here on the legacy transport. Until 2026-09-13 this
+    // route had no limiter at all, so one SSE stream bought unlimited tool
+    // calls. It runs after the session lookup, which is where the account
+    // becomes known, so the limit is per account like the modern transport's.
+    if (await rateLimitMiddlewareWithTier(req, res, 'mcp_account')) {
+      return;
+    }
+
     try {
       await session.transport.handlePostMessage(req, res);
     } catch (error) {
@@ -390,8 +426,14 @@ export async function startHttpServer() {
     }
   };
 
-  const server = http.createServer(async (req, res) => {
+  // Every route runs inside one exception boundary (src/mcp/requestBoundary.ts):
+  // an error that escapes a handler becomes a diagnostic and a 500, never an
+  // unhandled rejection that ends the process.
+  const server = http.createServer(withRequestBoundary(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? `${DEFAULT_HOST}:${DEFAULT_PORT}`}`);
+    if (REST_API_PREFIXES.some(prefix => url.pathname.startsWith(prefix))) {
+      logRestRequestOnFinish(req, res, url.pathname);
+    }
 
     if (denyLegacyPublicAdminRoute(url.pathname, res)) {
       return;
@@ -551,16 +593,56 @@ export async function startHttpServer() {
       return;
     }
 
+    // Checkout start page (#372): the card opens this through openExternal so
+    // ChatGPT can append the way back into the conversation; the page keeps it
+    // in a same-site cookie and forwards to Stripe. Stateless; only Stripe's
+    // hosted checkout is an accepted destination and only ChatGPT origins an
+    // accepted return, so it is not an open redirect.
+    if (url.pathname === '/purchase/start' && req.method === 'GET') {
+      const decision = decidePurchaseStart({
+        to: url.searchParams.get('to'),
+        redirectUrl: url.searchParams.get('redirectUrl')
+      });
+      // Presence, hosts and outcome only: the return link names a
+      // conversation and the target is a live checkout session.
+      writeDiagnostic("info", "purchase.start", purchaseStartDiagnostics({
+        query: url.searchParams,
+        referer: req.headers.referer,
+        userAgent: req.headers['user-agent'],
+        decision
+      }));
+      res.setHeader('Cache-Control', 'no-store');
+      if (decision.status === 400) {
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end(decision.body);
+        return;
+      }
+      if (decision.cookie) res.setHeader('Set-Cookie', decision.cookie);
+      res.statusCode = 302;
+      res.setHeader('Location', decision.location);
+      res.end();
+      return;
+    }
+
     // Server-controlled Stripe return page. It intentionally shows no order
     // details; authenticated status is available only through get_purchase_status.
+    // The page's one job is the way back into ChatGPT (src/mcp/purchaseReturnPage.ts).
     if (url.pathname === '/purchase/return' && req.method === 'GET') {
       const cancelled = url.searchParams.get('outcome') === 'cancelled';
+      const userAgentHeader = req.headers['user-agent'];
+      const userAgent = Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader;
+      const conversationUrl = readReturnCookie(req.headers.cookie);
+      writeDiagnostic("info", "purchase.return", purchaseReturnDiagnostics({
+        cookieHeader: req.headers.cookie,
+        cancelled,
+        userAgent,
+        conversationUrl
+      }));
       res.statusCode = 200;
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store');
-      res.end(
-        `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Letter IRL</title></head><body style="font-family:system-ui;max-width:36rem;margin:4rem auto;padding:1rem"><h1>${cancelled ? 'Checkout cancelled' : 'Payment received'}</h1><p>${cancelled ? 'Your draft was not sent. Return to ChatGPT to retry or choose a letter pack.' : 'Return to ChatGPT. Letter IRL will update the purchase status as soon as Stripe confirms payment.'}</p></body></html>`
-      );
+      res.end(renderPurchaseReturnPage({ cancelled, userAgent, conversationUrl }));
       return;
     }
 
@@ -726,9 +808,20 @@ export async function startHttpServer() {
       if (tempImageHandled) return;
     }
 
-    // Credit API routes
-    if (url.pathname.startsWith('/api/credits')) {
+    // Credit API routes. The prefix test used to name only /api/credits while
+    // the handler also owns /api/promo/* and /api/users/me, so those two ran
+    // with no per-identifier and no global limit: promo codes are
+    // operator-chosen words, and this was the one route where they could be
+    // guessed at line rate. Promo paths additionally take the tighter limit
+    // the public validator has always had.
+    if (CREDIT_API_PREFIXES.some(prefix => url.pathname.startsWith(prefix))) {
       if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
+        return; // Rate limited
+      }
+      if (
+        url.pathname.startsWith('/api/promo') &&
+        (await rateLimitMiddlewareWithTier(req, res, 'promo_authenticated'))
+      ) {
         return; // Rate limited
       }
     }
@@ -795,6 +888,15 @@ export async function startHttpServer() {
         return;
       }
 
+      // The limiter above ran before authentication and could only key on the
+      // source address, which every ChatGPT user shares. Now that the subject
+      // is known, bound the account itself; publishing it on the request is
+      // also what lets the tier multipliers apply at all.
+      (req as any).auth = authInfo;
+      if (await rateLimitMiddlewareWithTier(req, res, 'mcp_account')) {
+        return;
+      }
+
       writeDiagnostic("info", "mcp.request_received", {
         method: req.method ?? "unknown",
         authType: authInfo?.authType ?? "disabled"
@@ -851,7 +953,9 @@ export async function startHttpServer() {
 
     res.statusCode = 404;
     res.end("Not found");
-  });
+  }));
+
+  installProcessGuards();
 
   await new Promise<void>((resolve) => {
     server.listen(DEFAULT_PORT, DEFAULT_HOST, () => {
@@ -956,6 +1060,20 @@ async function authenticateRequest(
     // raw error message would ride along in error_description.
     if (error instanceof BetaAccessDeniedError) {
       writeBetaRefusal(res);
+      return null;
+    }
+    // Also before the challenge, for the same reason. The server cannot validate
+    // any token (no issuer or JWKS URL, or more than one configured audience), so
+    // authorizing again cannot help: 503, as the REST routes answer, with no
+    // challenge and a line in the log (#179).
+    if (error instanceof Error && error.message === OAUTH_NOT_CONFIGURED) {
+      writeDiagnostic("error", "auth.validation_not_configured");
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Authentication is not configured on this server" },
+        id: null
+      }));
       return null;
     }
     const message = error instanceof Error ? error.message : String(error);

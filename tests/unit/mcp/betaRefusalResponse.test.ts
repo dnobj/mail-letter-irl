@@ -1,4 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The first test in this file pays for importing a whole server module graph
+// (every tool, the commerce and Stripe code, the database client, the auth
+// stack). On a cold transform cache or a busy disk that import alone took
+// about 12 s on 2026-09-13, over vitest's 10 s default, while CI does it in a
+// few seconds. Raised from 30 s to 60 s later the same day: under a full
+// parallel run on a loaded workstation three of these files still timed out
+// while each passed alone. The limit is per test and says nothing about how
+// fast the app boots; nothing here measures boot time.
+vi.setConfig({ testTimeout: 60_000 });
+
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../../src/auth/betaAccess.js';
 
 /**
@@ -121,6 +132,35 @@ describe('authenticateRequest reaches the branch', () => {
         'www-authenticate'
       );
     })();
+  });
+
+  it('answers 503 with no challenge when the server cannot validate tokens', async () => {
+    // Authorizing again cannot fix a server with no usable OAuth configuration,
+    // so a challenge would send the client round the same loop as a beta
+    // refusal. The REST routes already answer 503 for this.
+    vi.mocked(validateAuthorizationHeader).mockRejectedValue(
+      new Error('OAuth validation not configured')
+    );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const { captured, res } = fakeResponse();
+    const result = await authenticateRequest(request('Bearer token'), res, 'https://api.example');
+
+    expect(result).toBeNull();
+    expect(captured.status).toBe(503);
+    expect(Object.keys(captured.headers).map(h => h.toLowerCase())).not.toContain(
+      'www-authenticate'
+    );
+    expect(captured.body).not.toContain('www_authenticate');
+    // Exactly one line, with no fields, so a dropped call or an added
+    // request-derived value fails this.
+    expect(
+      error.mock.calls
+        .map(([line]) => String(line))
+        .filter(line => line.includes('"event":"auth.validation_not_configured"'))
+        .map(line => JSON.parse(line))
+    ).toEqual([{ event: 'auth.validation_not_configured', msg: 'auth.validation_not_configured' }]);
+    error.mockRestore();
   });
 
   it('does not leak the refusal into the challenge path', async () => {

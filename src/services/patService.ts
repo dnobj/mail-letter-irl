@@ -13,6 +13,7 @@
  * - Tokens are bcrypt hashed before storage
  * - Raw tokens are shown once at creation, never stored
  * - Token prefix (last 4 chars) stored for UI identification
+ * - Every new token expires: 90 days by default, 365 at most
  */
 
 import crypto from 'crypto';
@@ -34,6 +35,12 @@ import type {
 export const TOKEN_PREFIX = 'lirl_pat_';
 const TOKEN_BODY_LENGTH = 32;
 const BCRYPT_ROUNDS = 10;
+
+/** Lifetime of a token created without an explicit expiry. */
+export const DEFAULT_TOKEN_LIFETIME_DAYS = 90;
+/** The longest lifetime a caller may ask for. */
+export const MAX_TOKEN_LIFETIME_DAYS = 365;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ============================================================================
 // Token Format Validation
@@ -69,6 +76,44 @@ function generateTokenBody(): string {
 }
 
 // ============================================================================
+// Token Expiry
+// ============================================================================
+
+/**
+ * A requested expiry the service refuses. The message names the rule the
+ * request broke, so it is safe to return to the caller.
+ */
+export class TokenExpiryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TokenExpiryError';
+  }
+}
+
+/**
+ * The expiry to store for a new token (audit A-02). A token that never expires
+ * stays valid long after the client it was made for is gone, so none is issued
+ * any more: no requested expiry means the default, and a requested one must be
+ * in the future and within the maximum. Tokens created before this rule keep
+ * whatever expiry they were stored with, which may be none.
+ */
+export function resolveTokenExpiry(requested: Date | undefined, now: Date = new Date()): Date {
+  if (requested === undefined) {
+    return new Date(now.getTime() + DEFAULT_TOKEN_LIFETIME_DAYS * DAY_MS);
+  }
+  if (Number.isNaN(requested.getTime())) {
+    throw new TokenExpiryError('Token expiry is not a valid date');
+  }
+  if (requested.getTime() <= now.getTime()) {
+    throw new TokenExpiryError('Token expiry must be in the future');
+  }
+  if (requested.getTime() > now.getTime() + MAX_TOKEN_LIFETIME_DAYS * DAY_MS) {
+    throw new TokenExpiryError(`Token expiry must be within ${MAX_TOKEN_LIFETIME_DAYS} days`);
+  }
+  return requested;
+}
+
+// ============================================================================
 // US-MCP-01: Create Token
 // ============================================================================
 
@@ -77,8 +122,9 @@ function generateTokenBody(): string {
  *
  * @param userId - The user ID to create token for
  * @param name - Human-readable name for the token (1-100 chars)
- * @param options - Optional expiration date
+ * @param options - Optional expiration date; see resolveTokenExpiry
  * @returns The raw token (shown once), token ID, name, and expiration
+ * @throws TokenExpiryError when the requested expiry is refused
  */
 export async function createToken(
   userId: string,
@@ -89,6 +135,9 @@ export async function createToken(
   if (!name || name.length < 1 || name.length > 100) {
     throw new Error('Token name must be between 1 and 100 characters');
   }
+
+  // Refuse a bad expiry before touching the database
+  const expiresAt = resolveTokenExpiry(options?.expiresAt);
 
   // Verify user exists
   const userCheck = await query<{ user_id: string }>(
@@ -112,7 +161,7 @@ export async function createToken(
     `INSERT INTO personal_access_tokens (user_id, name, token_hash, token_prefix, expires_at)
      VALUES ($1, $2, $3, $4, $5)
      RETURNING token_id, name, expires_at`,
-    [userId, name, tokenHash, tokenPrefix, options?.expiresAt || null]
+    [userId, name, tokenHash, tokenPrefix, expiresAt]
   );
 
   const row = result.rows[0];

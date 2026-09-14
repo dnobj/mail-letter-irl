@@ -41,7 +41,7 @@ Both repositories use the same branching strategy: `feature/*` → `dev` → `ma
 │  PostGrid: live mode                                             │
 └─────────────────────────────────────────────────────────────────┘
            │
-           │ npm run dev:sync
+           │ code promotion only; no data flows this way
            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  DEVELOPMENT                                                     │
@@ -79,7 +79,7 @@ master/main (production) ──────────────────�
 | Git Branch (API) | `master` | `dev` |
 | Git Branch (Website) | `main` | `dev` |
 | Auth0 Tenant | `dev-njmdyqf8n25rqgy7` (dnicholl@letterirl.com) | `dev-ky21dxn3qmi71hjl` (dnicholl@objective.works) |
-| Neon Branch | `production` | `dev` (synced via `npm run dev:sync`) |
+| Neon Branch | `production` | `dev` (independent; never copied from production) |
 | Stripe Mode | Live (`sk_live_`) | Test (`sk_test_`) |
 | PostGrid | Live (real mail) | Test mode (no real mail) |
 | Admin Routes | Disabled | Disabled |
@@ -104,18 +104,17 @@ The development tenant is already configured:
 - **Tenant**: `dev-ky21dxn3qmi71hjl.us.auth0.com`
 - **Account**: dnicholl@objective.works
 - **Connections**: Google, Microsoft, Apple, GitHub, Username-Password
-- **DCR**: Enabled (Settings → Advanced → OIDC Dynamic Application Registration)
-- **API Audience**: `https://letter-irl/api`
+- **DCR**: Enabled today (Settings → Advanced → OIDC Dynamic Application Registration). It should be off: DCR is rollback inventory only
+- **MCP API**: `https://letter-irl-api-development.up.railway.app/mcp`, also the website's audience
 - **Website Client ID**: `ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX`
 
 If you need to configure a new development tenant, follow these steps:
 1. Go to [Auth0](https://auth0.com) and create a new tenant
 2. Configure connections (same as production): Google, Microsoft, Apple, GitHub, Username-Password
-3. Enable DCR: Settings → Advanced → OIDC Dynamic Application Registration
-4. Create API: `https://letter-irl/api`
-5. Set Default Audience: Settings → General → API Authorization Settings
-6. Create Regular Web Application for the website
-7. Create M2M Application for sync script with Management API access
+3. Enable Client ID Metadata Document registration: Settings → Advanced (leave DCR off)
+4. Create the MCP API: identifier = the environment's canonical `/mcp` URL, permissions `mail:read`, `mail:draft`, `mail:send`
+5. Set Default Audience to that API: Settings → General → API Authorization Settings
+6. Create a Regular Web Application for the website, and authorize it for the MCP API with all three permissions
 
 ### 2. Create Neon Development Branch
 
@@ -151,24 +150,24 @@ npm run dev
 
 ---
 
-## Syncing from Production
+## Development data
 
-The `dev:sync` command refreshes development from production:
-
-```bash
-npm run dev:sync
-```
-
-This performs:
-1. Recreates Neon dev branch from main
-2. Exports Username-Password users from production Auth0
-3. Imports users to development Auth0 (preserving user_ids)
+Development does not receive a copy of production. The `dev:sync` command was
+removed on 2026-09-13: it recreated the dev Neon branch from production and
+imported production Auth0 users into the development tenant, so development held
+every letter, recipient address and customer record production held, and running
+it needed production credentials on a workstation. Seed dev from fixtures or
+work against an empty branch.
 
 ### User ID Strategy
 
-Social login users (Google, GitHub, etc.) automatically have matching IDs across tenants because the ID comes from the provider.
+Social login users (Google, GitHub, etc.) automatically have matching IDs across
+tenants because the ID comes from the provider, so a subject created in one
+tenant is recognisable in the other with no import.
 
-Username-Password users (`auth0|xxx`) need to be imported to preserve IDs.
+Username-Password users (`auth0|xxx`) do not match across tenants. That is
+accepted: create a test account in the development tenant instead of importing a
+production one.
 
 ---
 
@@ -192,7 +191,8 @@ DATABASE_URL=postgres://...
 # Auth0 (production tenant)
 LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+LETTER_IRL_MCP_RESOURCE=https://api.letterirl.com/mcp
+LETTER_IRL_OAUTH_AUDIENCE=https://api.letterirl.com/mcp
 
 # Stripe (live mode)
 STRIPE_SECRET_KEY=sk_live_...
@@ -223,7 +223,8 @@ DATABASE_URL=postgres://...?options=branch%3Ddev
 # Auth0 (dev tenant)
 LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+LETTER_IRL_MCP_RESOURCE=https://letter-irl-api-development.up.railway.app/mcp
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
 
 # Stripe (test mode)
 STRIPE_SECRET_KEY=sk_test_...
@@ -515,8 +516,10 @@ Production and development environments have different values:
 
 ### Common Issues
 
-**"OAuth validation not configured"**
+**"Authentication is not configured on this server"** (503 from the REST routes and `/mcp`; checkout says "Authentication is not configured")
+- Each refused request logs `auth.validation_not_configured`
 - Check `LETTER_IRL_OAUTH_ISSUER` and `LETTER_IRL_OAUTH_JWKS_URI` are set
+- Check `LETTER_IRL_OAUTH_AUDIENCE` names exactly one audience, the MCP resource
 
 **"Stripe webhook signature verification failed"**
 - Ensure `STRIPE_WEBHOOK_SECRET` matches your webhook endpoint

@@ -13,9 +13,11 @@ import { getLedgerEntries } from '../services/creditLedgerService.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import {
   authenticateRestRequest,
-  restAuthErrorLabel,
+  sendRestAuthFailure,
   type RestAuthInfo as AuthInfo
 } from './middleware/restAuth.js';
+import { rateLimitAccount } from './middleware/rateLimit.js';
+import { requiredRestScopes } from '../auth/restScopes.js';
 
 /**
  * Send JSON response
@@ -40,14 +42,17 @@ export async function handleCreditApiRequest(
     return false; // Not a credit API route, continue to next handler
   }
 
-  // Authenticate request
-  const auth = await authenticateRestRequest(req);
+  // Authenticate, including the route's scope (src/auth/restScopes.ts). The
+  // status comes from the auth layer: 401 rejected, 403 not admitted or
+  // missing a scope, 503 server not configured. Hardcoding 401 told a refused
+  // beta user to authenticate again, which succeeds and is refused again.
+  const auth = await authenticateRestRequest(req, requiredRestScopes(req.method, pathname));
   if (!auth.ok) {
-    // Status comes from the auth layer: 401 rejected, 403 not admitted,
-    // 503 server not configured. Hardcoding 401 told a refused beta user to
-    // authenticate again, which succeeds and is refused again.
-    sendJson(res, auth.status, { error: restAuthErrorLabel(auth.status), message: auth.message });
+    sendRestAuthFailure(res, auth);
     return true;
+  }
+  if (await rateLimitAccount(req, res, auth.user.userId, 'api_account')) {
+    return true; // Rate limited
   }
   const authInfo = auth.user;
 

@@ -2,18 +2,17 @@
  * Dashboard API Handler
  *
  * Handles web dashboard routes including:
- * - Auth0 OAuth web flow
  * - Stripe Checkout session creation
  * - Stripe webhook processing
  */
 
 import http from 'node:http';
-import { randomBytes } from 'node:crypto';
 import { verifyWebhookSignature } from '../services/stripeService.js';
 import { createPackCheckout, processStripeWebhookEvent } from '../services/commerceService.js';
 import { PACK_PRODUCTS } from '../config/products.js';
 import { authenticateHttpRequest } from './middleware/auth.js';
-import { parseCookies, serializeCookie } from '../utils/cookies.js';
+import { rateLimitAccount } from './middleware/rateLimit.js';
+import { requiredRestScopes } from '../auth/restScopes.js';
 import { query } from '../db/index.js';
 import {
   carriedDiagnosticClass,
@@ -29,17 +28,14 @@ import {
 // Static derivation, so it is derived ONCE (#278 round 8).
 const VALID_PACK_CODES = PACK_PRODUCTS.map(product => product.productCode);
 
-// Extended request/response types with cookie support
+// Extended request/response types
 type Request = http.IncomingMessage & {
   body?: any;
-  cookies?: Record<string, string>;
   query?: Record<string, string>;
 };
 
 type Response = http.ServerResponse & {
   json: (data: any) => void;
-  cookie: (name: string, value: string, options?: any) => void;
-  clearCookie: (name: string) => void;
 };
 
 // Helper to enhance response with utility methods
@@ -51,26 +47,12 @@ function enhanceResponse(res: http.ServerResponse): Response {
     this.end(JSON.stringify(data));
   };
 
-  enhanced.cookie = function (name: string, value: string, options = {}) {
-    const cookie = serializeCookie(name, value, { path: '/', ...options });
-    const existing = this.getHeader('Set-Cookie') || [];
-    const cookies = Array.isArray(existing) ? existing : [existing.toString()];
-    cookies.push(cookie);
-    this.setHeader('Set-Cookie', cookies);
-  };
-
-  enhanced.clearCookie = function (name: string) {
-    this.cookie(name, '', { maxAge: 0 });
-  };
-
   return enhanced;
 }
 
-// Helper to enhance request with cookies
+// Helper to type the request, whose body httpServer.ts has already parsed
 function enhanceRequest(req: http.IncomingMessage): Request {
-  const enhanced = req as Request;
-  enhanced.cookies = parseCookies(req.headers.cookie);
-  return enhanced;
+  return req as Request;
 }
 
 /**
@@ -86,11 +68,22 @@ export async function handleCreateCheckoutSession(
   const res = enhanceResponse(rawRes);
 
   try {
-    // Authenticate user
-    const authInfo = await authenticateHttpRequest(rawReq, rawRes);
+    // Authenticate user, including the route's scope (src/auth/restScopes.ts)
+    const authInfo = await authenticateHttpRequest(
+      rawReq,
+      rawRes,
+      requiredRestScopes('POST', '/api/stripe/create-checkout-session')
+    );
 
     if (!authInfo) {
       return; // authenticateHttpRequest already sent error response
+    }
+
+    // The account stage of the checkout limit. The 'checkout' limit in
+    // httpServer.ts runs before authentication and keys on the address, which
+    // every dashboard user shares through the website's proxy.
+    if (await rateLimitAccount(rawReq, rawRes, authInfo.userId, 'checkout_account')) {
+      return; // Rate limited
     }
 
     const { productId, successUrl, cancelUrl } = req.body;
@@ -249,177 +242,4 @@ export async function handleStripeWebhook(
     res.statusCode = 500;
     res.json({ error: 'Webhook processing failed' });
   }
-}
-
-/**
- * Auth0 OAuth Web Flow
- *
- * These endpoints handle browser-based OAuth for the dashboard
- */
-
-/**
- * Initiate Auth0 login
- *
- * GET /auth/login
- */
-export async function handleAuthLogin(
-  rawReq: http.IncomingMessage,
-  rawRes: http.ServerResponse
-): Promise<void> {
-  const req = enhanceRequest(rawReq);
-  const res = enhanceResponse(rawRes);
-
-  try {
-    // Parse query string
-    const url = new URL(rawReq.url || '/', `http://${rawReq.headers.host}`);
-    const returnTo = url.searchParams.get('returnTo') || '/dashboard/app.html';
-
-    // Build Auth0 authorization URL
-    const issuer = process.env.LETTER_IRL_OAUTH_ISSUER || '';
-    const clientId = process.env.LETTER_IRL_OAUTH_CLIENT_ID || '';
-    const redirectUri = `${process.env.LETTER_IRL_PUBLIC_BASE_URL}/auth/callback`;
-    const audience = process.env.LETTER_IRL_OAUTH_AUDIENCE || '';
-    const scopes = 'openid email profile';
-
-    // Store returnTo in session for callback
-    res.cookie('auth_return_to', returnTo, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 5 * 60 * 1000 // 5 minutes
-    });
-
-    // Generate cryptographically secure state for CSRF protection
-    const state = randomBytes(32).toString('base64url');
-    res.cookie('auth_state', state, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 5 * 60 * 1000 // 5 minutes
-    });
-
-    const authUrl = new URL(`${issuer}authorize`);
-    authUrl.searchParams.set('response_type', 'code');
-    authUrl.searchParams.set('client_id', clientId);
-    authUrl.searchParams.set('redirect_uri', redirectUri);
-    authUrl.searchParams.set('scope', scopes);
-    authUrl.searchParams.set('audience', audience);
-    authUrl.searchParams.set('state', state);
-
-    res.statusCode = 302;
-    res.setHeader('Location', authUrl.toString());
-    res.end();
-  } catch (error: unknown) {
-    writeDiagnostic('error', 'auth.dashboard_login_failed', {
-      errorClass: classifyDiagnosticError(error, 'configuration_error')
-    });
-    res.statusCode = 500;
-    res.setHeader('Content-Type', 'text/plain');
-    res.end('Authentication error');
-  }
-}
-
-/**
- * Handle Auth0 callback
- *
- * GET /auth/callback
- */
-export async function handleAuthCallback(
-  rawReq: http.IncomingMessage,
-  rawRes: http.ServerResponse
-): Promise<void> {
-  const req = enhanceRequest(rawReq);
-  const res = enhanceResponse(rawRes);
-
-  try {
-    // Parse query string
-    const url = new URL(rawReq.url || '/', `http://${rawReq.headers.host}`);
-    const code = url.searchParams.get('code');
-    const state = url.searchParams.get('state');
-    const storedState = req.cookies?.auth_state;
-    const returnTo = req.cookies?.auth_return_to || '/dashboard/app.html';
-
-    // Verify state for CSRF protection
-    if (!state || state !== storedState) {
-      res.statusCode = 400;
-      res.end('Invalid state parameter');
-      return;
-    }
-
-    if (!code) {
-      res.statusCode = 400;
-      res.end('Missing authorization code');
-      return;
-    }
-
-    // Exchange code for tokens
-    const tokenEndpoint = process.env.LETTER_IRL_OAUTH_TOKEN_ENDPOINT || '';
-    const clientId = process.env.LETTER_IRL_OAUTH_CLIENT_ID || '';
-    const clientSecret = process.env.LETTER_IRL_OAUTH_CLIENT_SECRET || '';
-    const redirectUri = `${process.env.LETTER_IRL_PUBLIC_BASE_URL}/auth/callback`;
-
-    const tokenResponse = await fetch(tokenEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        grant_type: 'authorization_code',
-        client_id: clientId,
-        client_secret: clientSecret,
-        code,
-        redirect_uri: redirectUri
-      })
-    });
-
-    if (!tokenResponse.ok) {
-      await tokenResponse.text();
-      writeDiagnostic('error', 'auth.token_exchange_failed', {
-        errorClass: 'authorization_error',
-        status: tokenResponse.status
-      });
-      res.statusCode = 500;
-      res.end('Failed to obtain access token');
-      return;
-    }
-
-    const tokens = await tokenResponse.json();
-
-    // Store access token in httpOnly cookie
-    res.cookie('access_token', tokens.access_token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 24 * 60 * 60 * 1000 // 24 hours
-    });
-
-    // Clean up temporary cookies
-    res.clearCookie('auth_state');
-    res.clearCookie('auth_return_to');
-
-    // Redirect to original destination
-    res.statusCode = 302;
-    res.setHeader('Location', returnTo);
-    res.end();
-  } catch (error: unknown) {
-    writeDiagnostic('error', 'auth.dashboard_callback_failed', {
-      errorClass: classifyDiagnosticError(error, 'authorization_error')
-    });
-    res.statusCode = 500;
-    res.end('Authentication callback error');
-  }
-}
-
-/**
- * Handle logout
- *
- * POST /auth/logout
- */
-export async function handleAuthLogout(
-  rawReq: http.IncomingMessage,
-  rawRes: http.ServerResponse
-): Promise<void> {
-  const res = enhanceResponse(rawRes);
-  res.clearCookie('access_token');
-  res.json({ success: true });
 }

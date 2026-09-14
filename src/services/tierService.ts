@@ -45,9 +45,16 @@ export const TIER_RATE_MULTIPLIERS: Record<UserTier, Record<string, number>> = {
   trusted: {
     auth: 1.5,        // 10 -> 15/min
     send_letter: 2.5, // 20 -> 50/hr
-    api: 2.0,         // 100 -> 200/min
-    checkout: 2.0,    // 10 -> 20/min
-    mcp: 2.0,         // 60 -> 120/min
+    // The address stages (api, checkout, mcp) are checked before
+    // authentication, where there is no account and so no tier: their entries
+    // never apply. They stay equal to the account stages, so a limit that
+    // moves after authentication keeps the same headroom.
+    api: 2.0,
+    api_account: 2.0, // 60 -> 120/min per account
+    checkout: 2.0,
+    checkout_account: 2.0, // 10 -> 20/min per account
+    mcp: 2.0,
+    mcp_account: 2.0, // 60 -> 120/min per account
     // admin: unchanged (no entry = 1x)
   },
 };

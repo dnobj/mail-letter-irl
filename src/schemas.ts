@@ -341,6 +341,11 @@ export const createPackCheckoutOutputSchema: JsonSchema = {
       description:
         "Stripe-hosted checkout URL. Present it to the customer as a link to click; nothing opens on its own."
     },
+    checkoutStartUrl: {
+      type: "string",
+      description:
+        "Same checkout via Letter IRL's start page, which records the way back into the conversation; used by the card. Present checkoutUrl to the customer."
+    },
     letters: { type: "integer", description: "Letters this pack adds to the balance" },
     amountCents: { type: "integer" },
     currency: { type: "string" },

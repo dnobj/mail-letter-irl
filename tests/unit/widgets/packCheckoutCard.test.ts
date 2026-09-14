@@ -39,7 +39,11 @@ interface ScheduledTimer {
 interface MountOptions {
   toolOutput?: Record<string, unknown> | null;
   toolInput?: Record<string, unknown>;
+  widgetState?: Record<string, unknown> | null;
   withoutCallTool?: boolean;
+  withoutOpenExternal?: boolean;
+  withoutSetWidgetState?: boolean;
+  purchaseStatus?: Record<string, unknown>;
   packCheckoutFails?: boolean;
   packCheckoutOmitsUrl?: boolean;
   packListEmpty?: boolean;
@@ -48,9 +52,11 @@ interface MountOptions {
 interface Harness {
   calls: Array<{ name: string; args: Record<string, unknown> }>;
   opened: string[];
+  saves: Array<Record<string, unknown>>;
   pendingTimers: () => ScheduledTimer[];
   runNextTimer: () => Promise<void>;
   deliver: (output: Record<string, unknown> | null) => void;
+  deliverWidgetState: (state: Record<string, unknown> | null) => void;
   setStatus: (status: Record<string, unknown>) => void;
   setHidden: (hidden: boolean) => void;
   fireVisibilityChange: () => void;
@@ -93,20 +99,37 @@ function mount(options: MountOptions = {}): Harness {
   const opened: string[] = [];
   let toolOutput: Record<string, unknown> | null =
     options.toolOutput === undefined ? null : options.toolOutput;
-  let purchaseStatus: Record<string, unknown> = { purchaseStatus: 'pending_payment' };
+  let purchaseStatus: Record<string, unknown> = options.purchaseStatus ?? { purchaseStatus: 'pending_payment' };
   let hidden = false;
+
+  let widgetState: Record<string, unknown> | null =
+    options.widgetState === undefined ? null : options.widgetState;
+  const saves: Array<Record<string, unknown>> = [];
 
   const bridge: Record<string, unknown> = {
     theme: 'light',
     get toolOutput() {
       return toolOutput;
     },
+    get widgetState() {
+      return widgetState;
+    },
     toolResponseMetadata: null,
-    toolInput: options.toolInput ?? {},
-    openExternal: async ({ href }: { href: string }) => {
-      opened.push(href);
-    }
+    toolInput: options.toolInput ?? {}
   };
+  if (!options.withoutSetWidgetState) {
+    // The host keeps what the card saves; a later mount of the same card reads
+    // it back through widgetState.
+    bridge.setWidgetState = async (state: Record<string, unknown>) => {
+      saves.push(state);
+      widgetState = state;
+    };
+  }
+  if (!options.withoutOpenExternal) {
+    bridge.openExternal = async ({ href }: { href: string }) => {
+      opened.push(href);
+    };
+  }
   if (!options.withoutCallTool) {
     bridge.callTool = async (name: string, args: Record<string, unknown>) => {
       calls.push({ name, args });
@@ -189,6 +212,7 @@ function mount(options: MountOptions = {}): Harness {
   return {
     calls,
     opened,
+    saves,
     pendingTimers: () => timers.filter(timer => !timer.cancelled),
     runNextTimer: async () => {
       const timer = timers.find(candidate => !candidate.cancelled);
@@ -199,6 +223,10 @@ function mount(options: MountOptions = {}): Harness {
     },
     deliver: output => {
       toolOutput = output;
+      dom.window.dispatchEvent(new dom.window.Event('openai:set_globals'));
+    },
+    deliverWidgetState: state => {
+      widgetState = state;
       dom.window.dispatchEvent(new dom.window.Event('openai:set_globals'));
     },
     setStatus: status => {
@@ -262,8 +290,58 @@ describe('PackCheckoutCard with a tool result', () => {
   });
 });
 
+describe('PackCheckoutCard and the way back into the conversation (#372)', () => {
+  const START_URL = 'https://api.example.test/purchase/start?to=' + encodeURIComponent('https://checkout.stripe.com/c/pay/cs_host');
+
+  it('points the button and the convenience open at the start page when the result carries one', async () => {
+    // The start page forwards to the same Stripe checkout after keeping the
+    // return link ChatGPT appends; an older result without it still links
+    // straight to Stripe.
+    const card = mount({ toolOutput: pendingCheckout({ checkoutStartUrl: START_URL }) });
+    // The convenience open is a microtask after render.
+    await flush();
+
+    expect(card.href('checkout-link')).toBe(START_URL);
+    expect(card.opened).toEqual([START_URL]);
+    expect(card.visible('fallback')).toBe(false);
+  });
+
+  it('routes a tap through the host and offers a plain link if nothing opened', async () => {
+    // Only an openExternal call gets the redirectUrl appended, so the tap
+    // goes through the host; but on 2026-08-29 that call resolved without
+    // opening anything, so a plain fallback link follows after a moment.
+    const card = mount({ toolOutput: pendingCheckout({ checkoutStartUrl: START_URL }) });
+    const timersBefore = card.pendingTimers().length;
+
+    await card.click('checkout-link');
+
+    expect(card.opened).toEqual([START_URL, START_URL]);
+    const fallbackTimer = card.pendingTimers().find(timer => timer.delay === 1500);
+    expect(fallbackTimer).toBeDefined();
+    expect(card.pendingTimers().length).toBe(timersBefore + 1);
+    expect(card.visible('fallback')).toBe(false);
+
+    fallbackTimer!.cancelled = true;
+    fallbackTimer!.fn();
+
+    expect(card.visible('fallback')).toBe(true);
+    expect(card.href('fallback-link')).toBe(START_URL);
+  });
+
+  it('keeps the plain link when the host cannot open links', async () => {
+    const card = mount({ toolOutput: pendingCheckout({ checkoutStartUrl: START_URL }), withoutOpenExternal: true });
+
+    expect(card.href('checkout-link')).toBe(START_URL);
+    expect(card.opened).toEqual([]);
+    await card.click('checkout-link');
+    // No openExternal on this bridge: the anchor's own navigation is the
+    // path, and no fallback timer is armed.
+    expect(card.pendingTimers().some(timer => timer.delay === 1500)).toBe(false);
+  });
+});
+
 describe('PackCheckoutCard rendered without a tool result', () => {
-  it('keeps the skeleton until the wait elapses, then says nothing was created', async () => {
+  it('keeps the skeleton until the wait elapses, then says no checkout is showing without claiming nothing was charged', async () => {
     const card = mount({ toolInput: { pack: 'starter' } });
 
     expect(card.visible('state-empty')).toBe(false);
@@ -271,8 +349,11 @@ describe('PackCheckoutCard rendered without a tool result', () => {
 
     expect(card.visible('state-loading')).toBe(false);
     expect(card.visible('state-empty')).toBe(true);
-    expect(card.text('empty-message')).toMatch(/no checkout was created yet/i);
-    expect(card.text('empty-message')).toMatch(/nothing has been charged/i);
+    expect(card.text('empty-message')).toMatch(/no checkout is showing on this card/i);
+    // A reopened conversation with nothing saved lands here too, often after a
+    // payment, so the card must not say that nothing was charged (PAY-05).
+    expect(card.text('empty-message')).not.toMatch(/nothing has been charged/i);
+    expect(card.text('empty-message')).toMatch(/purchase status/i);
     expect(card.visible('retry-button')).toBe(true);
     expect(card.text('retry-button')).toBe('Create my checkout');
     expect(card.calls).toEqual([]);
@@ -627,5 +708,314 @@ describe('PackCheckoutCard purchase status', () => {
     expect(card.visible('checkout-link')).toBe(true);
     expect(card.visible('check-status-button')).toBe(false);
     expect(card.pendingTimers()).toEqual([]);
+  });
+});
+
+/**
+ * A reopened conversation (PAY-05, 2026-09-14).
+ *
+ * Reloading a conversation, or following the return page's link back into it,
+ * mounts this card again. ChatGPT web gives it no toolOutput; other hosts may
+ * replay the original result. The card used to take the #322 empty state and
+ * tell a customer who had just paid that nothing had been charged, beside a
+ * button that starts a second purchase. The card now keeps its order in
+ * widgetState. A mount that finds kept state resumes from it, whether or not
+ * the host replays the result.
+ *
+ * Same honest limit as above: jsdom is not ChatGPT, and only the development
+ * connector proves that the host restores widgetState on a reload.
+ */
+describe('PackCheckoutCard in a reopened conversation', () => {
+  const START_URL =
+    'https://api.example.test/purchase/start?to=' + encodeURIComponent('https://checkout.stripe.com/c/pay/cs_host');
+
+  const KEPT_ORDER = {
+    orderId: 'ord_host_0001',
+    productDescription: 'Starter Pack - 2 Letters',
+    letters: 2,
+    amountCents: 500,
+    currency: 'usd',
+    displayAmount: '5.00',
+    status: 'checkout_pending',
+    checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_host',
+    checkoutStartUrl: START_URL,
+    expiresAt: '2099-01-01T00:00:00.000Z',
+    message: 'Checkout created, not opened: show the customer the checkoutUrl as a link to click.'
+  };
+
+  const PAID_VIEW = { orderId: 'ord_host_0001', purchaseStatus: 'submitted', letters: 2, lettersRemaining: 2 };
+
+  function kept(overrides: Record<string, unknown> = {}) {
+    return { v: 1, order: { ...KEPT_ORDER }, statusView: null, ...overrides };
+  }
+
+  it('keeps exactly the order fields the ready view draws from', async () => {
+    const card = mount({
+      toolOutput: pendingCheckout({ checkoutStartUrl: START_URL, expiresAt: '2099-01-01T00:00:00.000Z' })
+    });
+    await flush();
+
+    expect(card.saves.at(-1)).toEqual({ v: 1, order: KEPT_ORDER, statusView: null });
+  });
+
+  it('keeps only the status fields it draws, once a read moves past payment', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    // The real result carries more fields than the card draws; none of them
+    // is kept.
+    card.setStatus({
+      ...PAID_VIEW,
+      orderStatus: 'fulfilled',
+      updatedAt: '2026-09-14T19:38:30.000Z',
+      productDescription: 'Starter Pack - 2 Letters',
+      amountCents: 500,
+      currency: 'usd'
+    });
+
+    await card.runNextTimer();
+
+    expect(card.saves.at(-1)!.statusView).toEqual(PAID_VIEW);
+  });
+
+  it('resumes from what it kept: the order, no open, one status read at once, then the slow interval', async () => {
+    const card = mount({ toolInput: { pack: 'starter' }, widgetState: kept() });
+    await flush();
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('state-empty')).toBe(false);
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    expect(card.href('checkout-link')).toBe(START_URL);
+    // The customer came back to the conversation, not to pay again.
+    expect(card.opened).toEqual([]);
+    expect(statusCalls(card)).toEqual([{ name: 'get_purchase_status', args: { orderId: 'ord_host_0001' } }]);
+    // A reopened conversation can hold several cards sharing one account's
+    // tool budget, so a resumed order skips the fast first minute.
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([15000]);
+  });
+
+  it('never opens the checkout on reopen', async () => {
+    const card = mount({ widgetState: kept() });
+    await flush();
+
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.opened).toEqual([]);
+  });
+
+  it('draws the paid status it kept at once, without the payment link', () => {
+    const card = mount({ toolInput: { pack: 'starter' }, widgetState: kept({ statusView: PAID_VIEW }) });
+
+    // Synchronously after mount: nothing to click before the fresh read lands.
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.visible('check-status-button')).toBe(true);
+  });
+
+  it('ignores a kept status that belongs to another order', () => {
+    const card = mount({
+      widgetState: kept({ statusView: { orderId: 'ord_other', purchaseStatus: 'submitted', letters: 5 } })
+    });
+
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.text('message')).toBe('Pay USD 5.00 to add 2 letters to your account.');
+  });
+
+  it('asks for the status once, however often the host re-renders a reopened card', async () => {
+    const card = mount({ widgetState: kept() });
+    await flush();
+
+    card.deliverWidgetState(kept());
+    card.deliver(null);
+    await flush();
+
+    expect(statusCalls(card)).toHaveLength(1);
+  });
+
+  it('stays on the resumed order when a later render finds widgetState cleared', async () => {
+    const card = mount({ widgetState: kept() });
+    await flush();
+
+    card.deliverWidgetState(null);
+    await flush();
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('state-empty')).toBe(false);
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    expect(card.pendingTimers().some(timer => timer.delay === 5000)).toBe(false);
+  });
+
+  it('replaces the empty state when the kept state arrives late', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+    await card.runNextTimer();
+    expect(card.visible('state-empty')).toBe(true);
+
+    card.deliverWidgetState(kept());
+    await flush();
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('state-empty')).toBe(false);
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    expect(card.opened).toEqual([]);
+    expect(statusCalls(card)).toHaveLength(1);
+  });
+
+  it('ignores kept state from another version or without an order', async () => {
+    for (const widgetState of [kept({ v: 2 }), { v: 1, order: {} }, { v: 1 }]) {
+      const card = mount({ toolInput: { pack: 'starter' }, widgetState });
+      await card.runNextTimer();
+
+      expect(card.visible('state-empty')).toBe(true);
+      expect(card.calls).toEqual([]);
+    }
+  });
+
+  it('resumes a kept replacement over the host result it replaced, without opening the old checkout', async () => {
+    // The host replays order A. After A expired, the card created replacement
+    // B, and the customer may have paid for B. Within one card instance the
+    // host result never changes, so a kept order that differs from it can only
+    // be a checkout the card created later. B wins, and nothing overwrites it.
+    const replacement = {
+      ...KEPT_ORDER,
+      orderId: 'ord_retry_0001',
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_retry_starter',
+      checkoutStartUrl: 'https://api.example.test/purchase/start?to=retry'
+    };
+    const card = mount({
+      toolOutput: pendingCheckout(),
+      toolInput: { pack: 'starter' },
+      widgetState: kept({ order: replacement })
+    });
+    await flush();
+
+    expect(card.text('order-line')).toBe('Order ord_retry_0001');
+    expect(card.href('checkout-link')).toBe('https://api.example.test/purchase/start?to=retry');
+    expect(card.opened).toEqual([]);
+    expect(statusCalls(card)).toEqual([{ name: 'get_purchase_status', args: { orderId: 'ord_retry_0001' } }]);
+    // Nothing wrote the replayed order over the kept one.
+    expect(card.saves).toEqual([]);
+  });
+
+  it('applies the kept paid status when the host replays the same order', async () => {
+    const card = mount({
+      toolOutput: pendingCheckout(),
+      widgetState: kept({ statusView: PAID_VIEW }),
+      purchaseStatus: PAID_VIEW
+    });
+
+    // Drawn in the first render: the replayed result does not put the link back.
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.visible('checkout-link')).toBe(false);
+
+    await flush();
+    // Checked after the flush, because the convenience open is a microtask.
+    expect(card.opened).toEqual([]);
+    expect(statusCalls(card)).toHaveLength(1);
+    expect(card.pendingTimers()).toEqual([]);
+  });
+
+  it('keeps a checkout the card created itself', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+    await card.runNextTimer();
+
+    await card.click('retry-button');
+
+    expect((card.saves.at(-1)!.order as Record<string, unknown>).orderId).toBe('ord_retry_0001');
+  });
+
+  it('starts the kept state clean for a replacement checkout', async () => {
+    const card = mount({ toolOutput: pendingCheckout(), toolInput: { pack: 'starter' } });
+    card.setStatus({ purchaseStatus: 'cancelled' });
+    await card.runNextTimer();
+    expect((card.saves.at(-1)!.statusView as Record<string, unknown>).purchaseStatus).toBe('cancelled');
+
+    card.setStatus({ purchaseStatus: 'pending_payment' });
+    await card.click('new-checkout-button');
+
+    const last = card.saves.at(-1)!;
+    expect((last.order as Record<string, unknown>).orderId).toBe('ord_retry_0001');
+    expect(last.statusView).toBeNull();
+  });
+
+  it('draws a kept order without a bridge to call through, and asks nothing', async () => {
+    const card = mount({ widgetState: kept(), withoutCallTool: true });
+    await flush();
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('check-status-button')).toBe(false);
+    expect(card.calls).toEqual([]);
+  });
+
+  it('offers no status button it cannot act on, for a kept payment still being credited', () => {
+    const card = mount({
+      widgetState: kept({ statusView: { orderId: 'ord_host_0001', purchaseStatus: 'processing', letters: 2 } }),
+      withoutCallTool: true
+    });
+
+    expect(card.text('message')).toBe('Payment confirmed. Adding 2 letters to your account...');
+    expect(card.visible('check-status-button')).toBe(false);
+  });
+
+  it('offers no status button it cannot act on, for a kept paid purchase', () => {
+    const card = mount({ widgetState: kept({ statusView: PAID_VIEW }), withoutCallTool: true });
+
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.visible('check-status-button')).toBe(false);
+  });
+
+  it('does not adopt kept state that arrives after the card has kept an order', async () => {
+    // The ordering this card assumes: a host that replays the result sends
+    // widgetState with it or before it. Kept state that arrives later is not
+    // adopted, because the card's own order is already on screen. This test
+    // pins that choice so it cannot change silently.
+    const card = mount({ toolOutput: pendingCheckout() });
+    await flush();
+    expect(card.opened).toEqual(['https://checkout.stripe.com/c/pay/cs_host']);
+
+    card.deliverWidgetState(kept({ order: { ...KEPT_ORDER, orderId: 'ord_retry_0001' } }));
+    await flush();
+
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    expect(statusCalls(card)).toEqual([]);
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+  });
+
+  it('still works on a host without setWidgetState', async () => {
+    const card = mount({ toolOutput: pendingCheckout(), withoutSetWidgetState: true });
+    await flush();
+
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.opened).toEqual(['https://checkout.stripe.com/c/pay/cs_host']);
+    expect(card.saves).toEqual([]);
+  });
+
+  it('keeps every order field the ready view reads', () => {
+    // Nothing else ties the kept copy to renderReady: a field read there but
+    // not kept would be blank on a reopened card.
+    const html = fs.readFileSync(WIDGET_PATH, 'utf-8').replace(/\r\n/g, '\n');
+    const keptList = html.match(/const SAVED_ORDER_FIELDS = \[([\s\S]*?)\];/);
+    const body = html.match(/function renderReady\(state\) \{([\s\S]*?)\n {6}\}\n/);
+    expect(keptList).not.toBeNull();
+    expect(body).not.toBeNull();
+    const keptFields = Array.from(keptList![1].matchAll(/"([A-Za-z]+)"/g), match => match[1]);
+    const reads = Array.from(new Set(Array.from(body![1].matchAll(/\bstate\??\.([A-Za-z]+)/g), match => match[1])));
+    // hasData decides whether a kept order is drawn at all.
+    for (const field of [...reads, 'orderId', 'productDescription', 'message']) {
+      expect(keptFields, `renderReady reads state.${field}`).toContain(field);
+    }
+    expect(reads.length).toBeGreaterThan(5);
+  });
+
+  it('keeps every status field the status view reads', () => {
+    // The same tie for the kept status: a field renderStatusView reads but the
+    // card does not keep would be blank on a reopened card.
+    const html = fs.readFileSync(WIDGET_PATH, 'utf-8').replace(/\r\n/g, '\n');
+    const keptList = html.match(/const SAVED_STATUS_FIELDS = \[([\s\S]*?)\];/);
+    const body = html.match(/function renderStatusView\(\) \{([\s\S]*?)\n {6}\}\n/);
+    expect(keptList).not.toBeNull();
+    expect(body).not.toBeNull();
+    const keptFields = Array.from(keptList![1].matchAll(/"([A-Za-z]+)"/g), match => match[1]);
+    const reads = Array.from(new Set(Array.from(body![1].matchAll(/\bview\??\.([A-Za-z]+)/g), match => match[1])));
+    for (const field of reads) {
+      expect(keptFields, `renderStatusView reads view.${field}`).toContain(field);
+    }
+    expect(reads.length).toBeGreaterThan(3);
   });
 });

@@ -1061,7 +1061,7 @@ There is a mobile workaround - ask me about it if you want to try.
 - [ ] User can name/label the token for identification
 - [ ] Token stored as bcrypt hash in database
 - [ ] Token associated with user account
-- [ ] Token has optional expiration (default: no expiration)
+- [ ] Token expires: 90 days by default, or a requested date within 365 days; a past date is refused (tokens created before this rule keep their stored expiry)
 - [ ] Returns token in format: `lirl_pat_xxxxxxxxxxxx`
 
 **Token Format:**
@@ -1451,7 +1451,17 @@ ChatGPT offered "Track it until delivery" to a user after sending a postcard, bu
 
 ---
 
-### US-DEV-02: Database Synchronization
+### US-DEV-02: Database Synchronization — WITHDRAWN 2026-09-13
+**Withdrawn.** The implementation (`npm run dev:sync`) was removed: satisfying
+this story meant holding a production Neon API key and a production Auth0
+Management API secret on a workstation, and giving the development environment a
+copy of every letter, recipient address and customer record in production.
+Development is where authentication can be relaxed and the dummy provider is
+normal, so that copy was the largest avoidable concentration of customer data in
+the system. "Realistic data" is to be met with anonymised fixtures instead.
+
+The criteria below are kept as a record of what was built, not as work to do.
+
 **As a** developer
 **I want** to sync production data to development
 **So that** I can test with realistic data

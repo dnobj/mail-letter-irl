@@ -30,6 +30,18 @@ describe("OAuth startup validation", () => {
     expect(validateOAuthConfig(getOAuthConfig(env), env)).toEqual([]);
   });
 
+  it("accepts a complete single-audience rollback configuration", () => {
+    // Rollback mode keeps the one-audience rule. This pins that a correct
+    // rollback still validates, so the rule cannot quietly refuse every one.
+    const env = {
+      ...validEnv(),
+      LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY: "true",
+      CHATGPT_STATIC_CLIENT_ID: "rollback-client",
+      CHATGPT_STATIC_REDIRECT_URIS: "https://chatgpt.com/connector/oauth/rollback-callback"
+    };
+    expect(validateOAuthConfig(getOAuthConfig(env), env)).toEqual([]);
+  });
+
   it("rejects cross-environment issuer selection", () => {
     const env = validEnv();
     env.LETTER_IRL_OAUTH_ISSUER = "https://production-tenant.us.auth0.com/";

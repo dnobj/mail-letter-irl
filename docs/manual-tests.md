@@ -210,10 +210,17 @@ has not been run. Worth running before the production cutover (#158), since it i
 the only rehearsal of the rollback path.
 
 - [ ] Save the accepted CIMD configuration and deployment identifiers.
+- [ ] Grant the rollback static client user-delegated `mail:read`, `mail:draft`
+      and `mail:send` on the DEV MCP API. The API uses per-app authorization, so
+      without a grant Auth0 refuses the client for the `/mcp` resource.
 - [ ] Enable `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY=true` in DEV only with
-      the recorded legacy client/audience and deploy the rollback configuration.
+      the recorded static client (`CHATGPT_STATIC_CLIENT_ID`,
+      `CHATGPT_STATIC_REDIRECT_URIS`) and deploy. Keep `LETTER_IRL_OAUTH_AUDIENCE`
+      the single `/mcp` resource: there is no legacy audience any more, and the
+      retired `https://letter-irl/api` API has no scopes, so its tokens could
+      never use a tool.
 - [ ] Run a fresh-link smoke test and record behavior/client count.
-- [ ] Restore CIMD mode (`false`), restore the dedicated exact `/mcp` audience,
+- [ ] Restore CIMD mode (`false`), remove the static client's MCP API grant,
       redeploy DEV, and rerun CIMD-01, CIMD-03, and CIMD-04.
 - [ ] Confirm production was unchanged throughout.
 
@@ -239,19 +246,26 @@ the only rehearsal of the rollback path.
 
 Quick checks after every deployment. All should pass before considering deployment successful.
 
+**Status:** Executed 2026-09-13 (UTC) against production (build 2a0144d) and development
+(build 7d3cdc5) over plain HTTPS: `/healthz` and `/readyz` 200 on both, the protected-resource
+document exact on both (resource `/mcp`, the environment's Auth0 issuer, the seven scopes), the
+authorization-server proxy and `POST /oauth/register` 404 on both, `/manifest.json` 200 on both,
+the website 200. The DEV connector refresh after #376 listed every widget at v29. Login and
+dashboard were not exercised.
+
 ### API Health
-- [ ] `GET https://api.letterirl.com/healthz` returns 200
-- [ ] `GET https://api.letterirl.com/.well-known/oauth-protected-resource` returns
+- [x] `GET https://api.letterirl.com/healthz` returns 200
+- [x] `GET https://api.letterirl.com/.well-known/oauth-protected-resource` returns
       the exact resource, Auth0 issuer, and product scopes
-- [ ] Auth0's own discovery returns valid JSON; Letter IRL's authorization-server
+- [x] Auth0's own discovery returns valid JSON; Letter IRL's authorization-server
       proxy and `POST /oauth/register` return 404 in normal CIMD mode
 
 ### MCP Endpoint
-- [ ] ChatGPT developer-mode refresh discovers the current MCP tools
-- [ ] MCP manifest accessible at `/manifest.json`
+- [x] ChatGPT developer-mode refresh discovers the current MCP tools
+- [x] MCP manifest accessible at `/manifest.json`
 
 ### Website
-- [ ] `https://letterirl.com` loads
+- [x] `https://letterirl.com` loads
 - [ ] Login button redirects to Auth0
 - [ ] Dashboard loads after login
 
@@ -278,10 +292,17 @@ Test the full ChatGPT connector flow.
 - [ ] ChatGPT uses the manually imported public CIMD application
 
 ### MCP Tools in ChatGPT
-- [ ] Ask "What's my credit balance?" → `get_account_balance` works
-- [ ] Ask "Show my letters" → `list_orders` works
-- [ ] Ask to preview a letter → `quote_and_preview_letter` works
-- [ ] Letter preview renders in chat (widget or text)
+
+**Status:** Executed 2026-09-13 in development through the embedded browser, in one fresh chat
+with the (DEV) app: the balance (12 prepaid letters, no permission prompt for a read-only tool),
+the order history (13 mailed-letter orders and 19 letter-pack purchase records with their
+statuses, #365), a preview that rendered the letter card with the draft id, the cost and a
+**Send Letter** button, and the send itself (the Letter Sending Flow below carries the readings).
+
+- [x] Ask "What's my credit balance?" → `get_account_balance` works
+- [x] Ask "Show my letters" → `list_orders` works
+- [x] Ask to preview a letter → `quote_and_preview_letter` works
+- [x] Letter preview renders in chat (widget or text)
 
 ### Widget Rendering (if enabled)
 - [ ] Balance widget shows correct credits
@@ -385,7 +406,12 @@ promotion in #364, with the owner's own card, refunded under REFUND-01's steps t
 the dropped call reproduced again (one template read at 00:17:01Z, no tool call, the model saying
 "I'm ready to start the checkout"), **Create my checkout** created order b99046a9 at 00:17:31Z with
 no prompt, and the card showed the live link and the order id. Six first attempts, six drops, across
-both environments.
+both environments. **Android, native ChatGPT app, 2026-09-13 13:09Z (development, owner's S25 Ultra
+over adb, app force-stopped first):** the first "Allow once" was NOT dropped. `tools/call
+create_pack_checkout` ran at 13:09:33Z, the card rendered at widget v28 in dark theme with the
+link, Check status and the order id, and the model's own text carried the link and the order id too,
+because on native the host made the call. One of one; the dropped call is a web-client behaviour so
+far.
 
 Background: on 2026-09-11 (production) and 2026-09-12 (development) ChatGPT dropped the first
 `create_pack_checkout` after "Allow once": no request reached the API, the model said to use "the
@@ -401,10 +427,12 @@ the preview cards already buy packs.
       apply: the call was dropped again. The dev log shows exactly one request at 16:42:55Z, a
       `resources/read` of `PackCheckoutCard.html@v26`, and no `tools/call`. The model still wrote
       that the checkout "has been created".)
-- [x] If the card shows grey bars, wait five seconds. It should read "No checkout was created yet.
-      Nothing has been charged." with **Create my checkout** (or **Choose a pack** when the host
-      passed no pack in `toolInput`). (Seen after five seconds, with **Create my checkout**, so the
-      host had passed the pack.)
+- [x] If the card shows grey bars, wait five seconds. It should read "No checkout is showing on this
+      card. If you have already paid for a pack, ask for your purchase status before buying
+      another." with **Create my checkout** (or **Choose a pack** when the host passed no pack in
+      `toolInput`). This wording applies from widget v31. Up to v30 the card read "No checkout was
+      created yet. Nothing has been charged.", which PAY-05 found untrue on a reopened conversation.
+      (Seen after five seconds, with **Create my checkout**, so the host had passed the pack.)
 - [x] Click it. Record whether ChatGPT shows another permission prompt for the widget-initiated
       call, and whether the card then fills in with the link. The Railway dev log shows the
       `create_pack_checkout` request only for this second attempt. (No prompt at all.
@@ -436,6 +464,12 @@ second, which returned `submitted` and switched the card to "Paid. 2 letters add
 ChatGPT balance 2. The Dashboard refund (owner's click) delivered `refund.created` and
 `charge.refunded` at 00:50:14Z; order `refunded`, lot revoked, balance 0. The card itself still
 reads "Paid" afterwards: polling stops at the paid state and does not follow a later refund.
+**Android, native app, 2026-09-13 (development):** polls every 4-5 s from 13:09:37Z, paused at
+13:10:05Z the moment the Stripe Custom Tab came in front (the WebView went hidden), the owner paid
+with a test card, the webhook arrived at 13:12:06Z, and the single poll at 13:12:26Z on the owner's
+return to the app returned `submitted`: the card read "Paid. 2 letters added to your account. 2 of 2
+from this pack are still unused." with Check status still offered (#368) and the order id. Order
+5511c462 `fulfilled`, lot active. Visibility gating and the return refresh both work natively.
 
 Background: PAY-03 left the card showing "Open secure checkout" after the payment, for a session
 Stripe would refuse, and the model could not name the order afterwards because it never sees a
@@ -473,6 +507,73 @@ replaces the link with the outcome.
       the order was cancelled, the card's next poll showed the expired state, and **Create a new
       checkout** produced a replacement with no prompt, polling under its own order id.)
 - [x] Record the readings on #322.
+- [x] Return page (change of 2026-09-13): the Stripe success and cancel pages land on
+      `/purchase/return`. On Android and desktop it shows a **Back to ChatGPT** button to chatgpt.com;
+      on iPhone and iPad it shows text only ("close this page and return to the ChatGPT app"), because
+      the iOS universal link has not been verified on a device and Apple devices get a proven link or
+      none. (Android, 2026-09-13, owner's phone, via Stripe's cancel arrow: the button opened chatgpt.com
+      in full Chrome, logged out, not the app. The phone has the app's handling of chatgpt.com links
+      switched off at user level, and an explicit intent to the app with the site root was handed back
+      to the browser; an explicit intent with a conversation link, `/c/<id>`, opened the app on that
+      conversation. So the Android button is a web-app fallback on such phones until #372 supplies a
+      conversation link.)
+
+### PAY-05 — Back to the conversation after checkout (issue #372)
+
+**Status:** Two web runs in development. Android not run.
+
+- **2026-09-13: the return link did not arrive.**
+  - The owner clicked the card's link from the embedded browser; no safe-link modal was reported.
+  - The owner paid with a test card, and the return page offered **Back to ChatGPT**, the fallback
+    for a request with no return cookie.
+  - Order 0b7dc374 went `paid` → `fulfilled` on the webhook at 18:35:26Z with its lot active, so the
+    purchase itself was sound.
+  - The API logged nothing for the two page requests. #378 then added a presence-and-host log line to
+    both.
+- **2026-09-14: the return link works.** The run used widget v30, the DEV app on ChatGPT web in the
+  owner's Chrome, and a test card.
+  - At 19:38:06Z `purchase.start` logged `hasRedirectUrl=true redirectHost=chatgpt.com targetOk=true
+    returnKept=true`.
+  - `checkout.session.completed` arrived at 19:38:26Z.
+  - `purchase.return` logged `outcome=success cookiePresent=true conversationKept=true
+    linkOffered=conversation`.
+  - **Back to your conversation** opened the same conversation, in the checkout tab.
+- **2026-09-14: it exposed a defect.**
+  - The reopened conversation gave the card no tool result. After five seconds the card read "No
+    checkout was created yet. Nothing has been charged." beside **Create my checkout**, over a paid
+    order.
+  - A reload reproduced it at 19:44Z with no API call.
+  - `create_pack_checkout` never reuses a pack order, so that button starts a second purchase.
+  - The original tab was unaffected and showed the purchase paid after its visibility refresh.
+  - Widget v31 fixes it: the card keeps its order in `widgetState` and resumes from it.
+
+Background: the checkout card now opens a start page on the API host through `window.openai.openExternal`
+instead of the Stripe URL directly. For an allowlisted redirect origin (the API origin is in
+`redirect_domains`), ChatGPT is documented to skip the safe-link modal and append a `redirectUrl`
+query parameter. The start page keeps it in a same-site cookie and forwards to Stripe; the return page
+then offers **Back to your conversation**: on Android as an intent link that opens the app by package,
+on desktop as a plain link, on iPhone and iPad text only until a device has proven the universal link.
+
+- [ ] Web (owner's click; the embedded browser blocks host-opened tabs from automated clicks): in a
+      fresh chat with the DEV app, buy the Starter Pack, and when the card shows the link, click it.
+      Record whether a safe-link modal appeared, and whether the tab that opened is the Stripe page
+      (the start page forwards in one hop). Cancel with Stripe's back arrow.
+- [ ] On the return page: is the button **Back to your conversation**? If so ChatGPT appended a
+      return link. Record the shape of the link's target (conversation URL or something else) from the
+      dev log or the page source, without pasting it into a shared place. Click it and record where
+      it lands.
+- [ ] Android (owner's phone over adb): same purchase, tap the card's link, cancel with Stripe's back
+      arrow, tap **Back to your conversation**. Expected: the ChatGPT app comes to the front on the
+      conversation, even with the app's link handling switched off.
+- [ ] If the button says **Back to ChatGPT** instead, no return link was appended: record the
+      client, and check the dev log for the start-page request's query (the API logs no values).
+- [ ] If the card's tap opened nothing, record that the fallback link appeared after a moment and
+      that it opens the checkout.
+- [ ] Reopened conversation (widget v31 or later, with the DEV connector refreshed): after paying,
+      click **Back to your conversation**, or reload the conversation. Within a moment the card must
+      show the order and **Paid**. It must never show "No checkout" with **Create my checkout**, and
+      it must not open a checkout tab by itself. The dev log shows one `get_purchase_status` for the
+      order straight after the reload, and no `create_pack_checkout`.
 
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
 
@@ -605,37 +706,56 @@ Precondition: REFUND-05 completed (3 of 5 letters refunded, 2 sent).
 
 Test the complete letter journey.
 
+**Status:** Executed 2026-09-13 in development through the embedded browser (dummy letter
+provider, so nothing was mailed), in the same chat as the MCP tool checks above. Preview at
+19:05:01Z from the saved DEV return address to a named recipient at 350 5th Ave, New York, NY
+10118 with no unit: the draft was created, the card read Text Only, 1 letter, USPS First-Class,
+**Ready to send**, and the model relayed the "add the unit if you have it" note. The card's
+**Send Letter** button sent it at 19:05:42Z with no permission prompt (the widget made the call):
+the card switched to **With the printer** with the order id, the balance read 11 (from 12), and
+`get_order_status` read accepted. Asking the model to send the same draft again with the same
+draft id produced a permission prompt, **Allow once**, and a `send_letter` call at 19:06:53Z that
+returned the same order id with `isRetry: true` and "Existing order returned (duplicate
+request)"; the balance stayed at 11. That consequential call after **Allow once** was NOT dropped
+(one of one on web), so the dropped first call in PAY-03 is not a property of every consequential
+tool. Validation: 123 Fake Street, Nowhere, CA 90000 was refused with "Recipient address could
+not be delivered to: Unable to find a match for this address" and no draft; a London address was
+refused before any provider call with "Missing required address fields: recipient.state", which
+is a clear error but not the "Only supports US" wording this list expects (the model had passed
+no country). The over-limit body, the suite variant and the outbox cases were not exercised.
+
 ### Preview (US-LETTER-01)
-- [ ] Provide valid US addresses (sender + recipient)
-- [ ] Provide text-only letter body (at most 1,600 characters and 24 lines)
-- [ ] Preview returns HTML
-- [ ] Draft ID returned
-- [ ] `canSendNow` reflects actual balance
+- [x] Provide valid US addresses (sender + recipient)
+- [x] Provide text-only letter body (at most 1,600 characters and 24 lines)
+- [x] Preview returns HTML
+- [x] Draft ID returned
+- [x] `canSendNow` reflects actual balance
 
 ### Validation Errors
-- [ ] Missing address fields → clear error
-- [ ] Non-US address → "Only supports US" error
+- [x] Missing address fields → clear error
+- [x] Non-US address → "Only supports US" error (2026-09-13: refused as a missing `state`
+      instead; clear, but not that wording)
 - [ ] Text-only body over 1,600 characters or 24 lines returns a clear limit error
 - [ ] Invalid address → suggestions returned
 - [ ] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200)
-- [ ] Same building with no unit given → draft IS created with an "add the unit if you have it" note
-- [ ] Garbage street (123 Fake Street, Nowhere) → still refused, message says what to check
+- [x] Same building with no unit given → draft IS created with an "add the unit if you have it" note
+- [x] Garbage street (123 Fake Street, Nowhere) → still refused, message says what to check
 
 ### Send (US-LETTER-02)
-- [ ] Use draft ID from preview
-- [ ] Set `confirm: true`
-- [ ] Credits deducted
-- [ ] Order ID returned
-- [ ] Status is `accepted`, or `pending` with recovery explicitly scheduled
+- [x] Use draft ID from preview
+- [x] Set `confirm: true`
+- [x] Credits deducted
+- [x] Order ID returned
+- [x] Status is `accepted`, or `pending` with recovery explicitly scheduled
 
 ### Idempotency (US-LETTER-03)
-- [ ] Call send again with same draft ID
-- [ ] Same order returned
-- [ ] `isRetry: true` in response
-- [ ] Credits NOT deducted again
+- [x] Call send again with same draft ID
+- [x] Same order returned
+- [x] `isRetry: true` in response
+- [x] Credits NOT deducted again
 
 ### Status Check (US-LETTER-04)
-- [ ] Query status with order ID
+- [x] Query status with order ID
 - [ ] Status timeline shows history
 - [ ] Recipient info shown (redacted appropriately)
 
@@ -695,9 +815,14 @@ Test promotional code redemption.
 - [ ] Second redemption blocked ("already used")
 
 ### Rate Limiting (US-SEC-05)
-- [ ] Public `/api/promo/validate` rate limited
-- [ ] 10+ requests/min from same IP → 429
-- [ ] Rate limit headers present
+
+**Status:** Executed 2026-09-13 against development over plain HTTPS: twelve
+`GET /api/public/promo/validate/<code>` calls from one address in a few seconds returned 200 with
+`X-RateLimit-Remaining` counting 9 down to 0, then 429 with `Retry-After: 53`.
+
+- [x] Public `/api/promo/validate` rate limited
+- [x] 10+ requests/min from same IP → 429
+- [x] Rate limit headers present
 
 ### New User Only (US-SEC-06)
 - [ ] Create "new users only" campaign

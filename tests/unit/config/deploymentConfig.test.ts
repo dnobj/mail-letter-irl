@@ -262,13 +262,38 @@ describe('validateDeploymentConfig in production', () => {
     expect(jitMessages).toContain('POSTCARD');
   });
 
-  it('warns rather than errors when production auth enforcement is staged off (server surface only)', () => {
+  it('refuses to boot production with authentication off', () => {
+    // Was a warning while the CIMD cutover was staged (#160). The cohort gate
+    // that the old reasoning treated as the backstop is switched off in
+    // production, so the warning was the only lock.
+    const authOff = env({ LETTER_IRL_REQUIRE_AUTH: 'false' });
+    expect(ruleIds(authOff, 'error')).toContain('auth.enforcement_disabled_in_production');
+  });
+
+  it('refuses to boot production without strict OAuth validation', () => {
     const enforcementOff = env({ LETTER_IRL_OAUTH_CIMD_ENFORCEMENT: undefined });
-    expect(ruleIds(enforcementOff, 'error')).toEqual([]);
-    expect(ruleIds(enforcementOff, 'warning')).toContain('auth.enforcement_disabled_in_production');
-    expect(
-      validateDeploymentConfig(enforcementOff, 'maintenance').findings.map(f => f.rule)
-    ).not.toContain('auth.enforcement_disabled_in_production');
+    expect(ruleIds(enforcementOff, 'error')).toContain('auth.oauth_validation_not_enforced');
+  });
+
+  it('reports both auth faults, where the old chain reported only the first', () => {
+    const bothOff = env({
+      LETTER_IRL_REQUIRE_AUTH: 'false',
+      LETTER_IRL_OAUTH_CIMD_ENFORCEMENT: undefined
+    });
+    const errors = ruleIds(bothOff, 'error');
+    expect(errors).toContain('auth.enforcement_disabled_in_production');
+    expect(errors).toContain('auth.oauth_validation_not_enforced');
+  });
+
+  it('leaves both auth rules to the server surface', () => {
+    // The maintenance cron serves no HTTP and authenticates no one.
+    const bothOff = env({
+      LETTER_IRL_REQUIRE_AUTH: 'false',
+      LETTER_IRL_OAUTH_CIMD_ENFORCEMENT: undefined
+    });
+    const maintenance = validateDeploymentConfig(bothOff, 'maintenance').findings.map(f => f.rule);
+    expect(maintenance).not.toContain('auth.enforcement_disabled_in_production');
+    expect(maintenance).not.toContain('auth.oauth_validation_not_enforced');
   });
 
   it('does not require the HTTP allowlists on the maintenance surface', () => {

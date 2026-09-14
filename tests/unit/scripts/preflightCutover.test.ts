@@ -458,7 +458,6 @@ describe('OAuth coverage (issue #270)', () => {
       'LETTER_IRL_OAUTH_SCOPES',
       'LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS',
       'LETTER_IRL_MCP_PATH',
-      'LETTER_IRL_OAUTH_LEGACY_AUDIENCES',
       // Mode switches, not configuration: they select which rules apply.
       'LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY',
       'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT',

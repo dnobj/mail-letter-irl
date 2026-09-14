@@ -5,12 +5,14 @@ const {
   processStripeWebhookEvent,
   verifyWebhookSignature,
   authenticateHttpRequest,
+  rateLimitAccount,
   query
 } = vi.hoisted(() => ({
   createPackCheckout: vi.fn(),
   processStripeWebhookEvent: vi.fn(),
   verifyWebhookSignature: vi.fn(),
   authenticateHttpRequest: vi.fn(),
+  rateLimitAccount: vi.fn(),
   query: vi.fn()
 }));
 vi.mock("../../../src/db/index.js", () => ({ query }));
@@ -24,9 +26,14 @@ vi.mock("../../../src/services/commerceService.js", () => ({
   createPackCheckout,
   processStripeWebhookEvent
 }));
+// The account limit is not what these tests are about, and their stub
+// requests carry no socket for it to read an address from.
+vi.mock("../../../src/api/middleware/rateLimit.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/api/middleware/rateLimit.js")>()),
+  rateLimitAccount
+}));
 
 import {
-  handleAuthCallback,
   handleCreateCheckoutSession,
   handleStripeWebhook
 } from "../../../src/api/dashboardApiHandler.js";
@@ -34,6 +41,7 @@ import {
 describe("dashboard runtime logging privacy", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    rateLimitAccount.mockResolvedValue(false);
     authenticateHttpRequest.mockResolvedValue({
       userId: "auth0|private-user",
       email: "private@example.com",
@@ -49,26 +57,6 @@ describe("dashboard runtime logging privacy", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-  });
-
-  it("does not log or return a token-exchange response body", async () => {
-    const sensitive = "access_token=private-token auth0|private-user";
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(sensitive, { status: 401 })));
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const req = {
-      url: "/auth/callback?code=private-code&state=expected",
-      headers: { host: "localhost", cookie: "auth_state=expected" }
-    };
-    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
-
-    await handleAuthCallback(req as never, res as never);
-
-    const logged = error.mock.calls.flat().map(String).join("\n");
-    const body = String(res.end.mock.calls[0][0]);
-    expect(logged).toContain('"event":"auth.token_exchange_failed"');
-    expect(logged).toContain('"status":401');
-    expect(logged).not.toContain(sensitive);
-    expect(body).not.toContain(sensitive);
   });
 
   it("does not log or return arbitrary checkout exceptions", async () => {

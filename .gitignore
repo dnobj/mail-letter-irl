@@ -9,6 +9,7 @@ data/accounts.json
 admin-token.js
 .admin-jwt
 screenshots/
+.playwright-mcp/
 # Browser test procedure credentials (documentation files are tracked)
 browser-test-procedures/config/.env.development
 browser-test-procedures/config/.env.production

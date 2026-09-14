@@ -17,7 +17,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/services/commerceService.js', () => ({
-  createPackCheckout: mocks.createPackCheckout
+  createPackCheckout: mocks.createPackCheckout,
+  // The real helper derives the origin from env; the shape is all that
+  // matters here.
+  purchaseStartUrl: (checkoutUrl: string) =>
+    `https://api.example.test/purchase/start?to=${encodeURIComponent(checkoutUrl)}`
 }));
 vi.mock('../../../src/services/userService.js', () => ({
   findUser: mocks.findUser
@@ -83,6 +87,20 @@ describe('create_pack_checkout', () => {
     expect(result.message).toMatch(/checkoutUrl as a link/i);
     expect(result.message).toMatch(/not opened/i);
     expect(result.message).toMatch(/USD 10\.00/);
+  });
+
+  it('adds a start-page URL for the card that leads to the same checkout, only while payable', async () => {
+    // #372: the card opens the start page through the host so ChatGPT can
+    // append the way back into the conversation. The model still presents
+    // checkoutUrl; the start URL wraps it and exists only for a pending order.
+    const pending = await createPackCheckoutTool.handler({ pack: 'starter' } as never, context);
+    expect(pending.checkoutStartUrl).toBe(
+      `https://api.example.test/purchase/start?to=${encodeURIComponent('https://checkout.stripe.com/c/pay/cs_test')}`
+    );
+
+    mocks.createPackCheckout.mockResolvedValue(checkoutResult({ status: 'fulfilled', reused: true }));
+    const paid = await createPackCheckoutTool.handler({ pack: 'starter' } as never, context);
+    expect(paid.checkoutStartUrl).toBeUndefined();
   });
 
   it('reports the letter counts the catalogue defines, not a local copy', async () => {
