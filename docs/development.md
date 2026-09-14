@@ -516,8 +516,9 @@ Production and development environments have different values:
 
 ### Common Issues
 
-**"OAuth validation not configured"**
+**"OAuth validation not configured"** (503 from the REST routes and from `/mcp`)
 - Check `LETTER_IRL_OAUTH_ISSUER` and `LETTER_IRL_OAUTH_JWKS_URI` are set
+- Check `LETTER_IRL_OAUTH_AUDIENCE` names exactly one audience, the MCP resource
 
 **"Stripe webhook signature verification failed"**
 - Ensure `STRIPE_WEBHOOK_SECRET` matches your webhook endpoint

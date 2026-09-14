@@ -116,8 +116,8 @@ export async function validateJWTToken(
   const config = getOAuthConfig();
   // Exactly one audience, the MCP resource. validateOAuthConfig refuses more at
   // boot, but only while CIMD enforcement is on; this holds the same rule on
-  // every request, so a stray second audience is a configuration fault (503)
-  // rather than a second set of accepted tokens.
+  // every request, so a stray second audience is a configuration fault (503 on
+  // the REST routes and on MCP) rather than a second set of accepted tokens.
   if (!config.issuer || !config.jwksUri || config.audience.length !== 1) {
     throw new Error("OAuth validation not configured");
   }

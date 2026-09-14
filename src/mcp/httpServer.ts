@@ -1061,6 +1061,20 @@ async function authenticateRequest(
       writeBetaRefusal(res);
       return null;
     }
+    // Also before the challenge, for the same reason. The server cannot validate
+    // any token (no issuer or JWKS URL, or more than one configured audience), so
+    // authorizing again cannot help: 503, as the REST routes answer, with no
+    // challenge and a line in the log (#179).
+    if (error instanceof Error && error.message === "OAuth validation not configured") {
+      writeDiagnostic("error", "auth.validation_not_configured");
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Authentication is not configured on this server" },
+        id: null
+      }));
+      return null;
+    }
     const message = error instanceof Error ? error.message : String(error);
     const challenge = buildWwwAuthenticateChallenge(message, publicBaseUrl);
     const body = {

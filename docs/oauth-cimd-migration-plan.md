@@ -247,7 +247,7 @@ After DEV acceptance:
 
 1. Disable Auth0 DCR in the development tenant if inventory confirms no other client depends on it.
 2. Disable the Letter IRL static registration compatibility flag.
-3. Remove the DEV static client setting.
+3. Remove the DEV static client setting, and the static client's MCP API grant if a rollback granted one.
 4. Re-run the full OAuth and image-generation manual suite.
 5. Observe DEV for an agreed soak period and confirm no new Auth0 clients, authorization errors, or scope failures.
 
@@ -308,7 +308,9 @@ If DEV or production linking fails:
    configured on the rollback Auth0 client. In compatibility mode, protected
    resource discovery points to Letter IRL's authorization-server proxy, which
    advertises `/oauth/register`; the static registration response returns only
-   that explicit inventory.
+   that explicit inventory. Grant the rollback client user-delegated
+   `mail:read`, `mail:draft` and `mail:send` on the MCP API, and remove that
+   grant when the rollback ends (Phase 6, step 3).
 3. Restore the previously recorded Auth0 application, API access, connection, and discovery settings.
 4. Re-enable DCR only if the prior working state required it and the security impact is understood.
 5. Restore the previous deployment version if server metadata or validation caused the failure.

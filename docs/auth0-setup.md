@@ -12,8 +12,10 @@ method the CIMD document declares - currently `private_key_jwt`, verified on the
 production import 2026-09-05. Its client ID is the OpenAI-hosted HTTPS CIMD
 URL. The dedicated Auth0 MCP API identifier exactly equals that
 environment's canonical `/mcp` resource and grants only `mail:read`,
-`mail:draft`, and `mail:send`. The website and the REST routes use the same MCP
-API; the old website/REST API, `https://letter-irl/api`, is retired.
+`mail:draft`, and `mail:send`. In development the website and the REST routes
+use the same MCP API (switched 2026-09-14). The production website still
+requests the old website/REST API, `https://letter-irl/api`, until its own
+switch; see section 2d of `docs/auth0-tenant-configuration.md`.
 
 CIMD and the resource-parameter compatibility profile are owner-managed tenant
 settings. DCR and Letter IRL's static `/oauth/register` shim are not the target
@@ -163,6 +165,17 @@ dashboard sign-in for a website that still requests it.
    authorization server, its authorization metadata advertises
    `/oauth/register`, and the registration response returns the exact callback
    inventory.
+
+**Restoring CIMD mode:**
+1. Set `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY=false` and remove
+   `CHATGPT_STATIC_CLIENT_ID` and `CHATGPT_STATIC_REDIRECT_URIS`.
+2. Remove the rollback client's MCP API grant, which undoes step 5. The server
+   does not check which client a token was issued to, so a grant left in place
+   leaves every connector linked through that client able to call every tool,
+   `mail:send` included.
+3. Turn DCR off again.
+4. Redeploy. Then delete and recreate any connector linked during the rollback,
+   because a connector keeps the client it registered with.
 
 ---
 
