@@ -192,5 +192,69 @@ describe("recentUploadStore retention (#282)", () => {
       vi.advanceTimersByTime(5 * MINUTE_MS);
       expect(getRecentUploadCount()).toBe(0);
     });
+
+    it("prunes other users' expired entries on every read", async () => {
+      await setRecentUploadedImage("user-old", URL_A, "postcard");
+
+      // setSystemTime fires no timers, so only the read itself can prune.
+      vi.setSystemTime(Date.now() + HOUR_MS + 1);
+      await getRecentUploadedImage("user-other", "postcard");
+
+      expect(getRecentUploadCount()).toBe(0);
+    });
+
+    it("prunes expired entries on every upload", async () => {
+      await setRecentUploadedImage("user-old", URL_A, "postcard");
+
+      vi.setSystemTime(Date.now() + HOUR_MS + 1);
+      await setRecentUploadedImage("user-new", URL_B, "postcard");
+
+      expect(getRecentUploadCount()).toBe(1);
+    });
+
+    it("starts the timer when a database read fills the cache, so that copy is pruned too", async () => {
+      // Review round 1: only an upload started the timer, so a copy loaded by a
+      // read on an instance nobody uploaded to stayed in memory indefinitely.
+      db.query.mockResolvedValueOnce({
+        rows: [
+          { image_url: URL_A, context: "postcard", updated_at: new Date(Date.now() - 5 * MINUTE_MS) }
+        ],
+        rowCount: 1
+      });
+
+      await expect(getRecentUploadedImage("user-1", "postcard")).resolves.toMatchObject({
+        imageUrl: URL_A
+      });
+      expect(getRecentUploadCount()).toBe(1);
+      expect(vi.getTimerCount()).toBe(1);
+
+      // 55 minutes on, the upload is exactly an hour old and stays.
+      vi.advanceTimersByTime(55 * MINUTE_MS);
+      expect(getRecentUploadCount()).toBe(1);
+      // The next tick is 65 minutes after the upload, and removes it.
+      vi.advanceTimersByTime(5 * MINUTE_MS);
+      expect(getRecentUploadCount()).toBe(0);
+    });
+
+    it("caches a database row with its own upload time, not the time it was read", async () => {
+      db.query
+        .mockResolvedValueOnce({
+          rows: [
+            { image_url: URL_A, context: "postcard", updated_at: new Date(Date.now() - 59 * MINUTE_MS) }
+          ],
+          rowCount: 1
+        })
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+      await expect(getRecentUploadedImage("user-1", "postcard")).resolves.toMatchObject({
+        imageUrl: URL_A
+      });
+
+      // Two minutes later the upload is 61 minutes old, so the cached copy must
+      // not answer: the read goes back to the database, which has nothing.
+      vi.setSystemTime(Date.now() + 2 * MINUTE_MS);
+      await expect(getRecentUploadedImage("user-1", "postcard")).resolves.toBeNull();
+      expect(db.query).toHaveBeenCalledTimes(2);
+    });
   });
 });

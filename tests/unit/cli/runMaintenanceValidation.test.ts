@@ -224,5 +224,31 @@ describe('maintenance deployment validation', () => {
       expect(logged).not.toContain('https://');
       expect(logged).not.toContain('file-secret');
     });
+
+    it('runs before mail dispatch, and dispatch waits for it to finish', async () => {
+      // Review round 1: moving the sweep after the unwrapped tasks, or dropping
+      // its await, passed every other test. Placed after them, any steady
+      // failure there would silently stop deletion with no sweep_failed line.
+      stubValidDevelopment();
+      captureOutput();
+      let sweepStarted = false;
+      let releaseSweep: (() => void) | undefined;
+      services.runMaintenanceTaskIfDue.mockImplementation((async name => {
+        if (name !== 'recent-uploads-sweep') return { ran: false };
+        sweepStarted = true;
+        await new Promise<void>(resolve => {
+          releaseSweep = resolve;
+        });
+        return { ran: true, result: 0 };
+      }) as TaskRunner);
+
+      const entry = maintenanceEntry();
+      await vi.waitFor(() => expect(sweepStarted).toBe(true));
+      expect(services.processDueLetterJobs).not.toHaveBeenCalled();
+
+      releaseSweep?.();
+      await expect(entry).resolves.toBeUndefined();
+      expect(services.processDueLetterJobs).toHaveBeenCalledTimes(1);
+    });
   });
 });

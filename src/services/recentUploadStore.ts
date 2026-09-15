@@ -12,8 +12,9 @@ import { positiveIntegerSetting } from "../utils/envSettings.js";
  *   - purgeExpiredRecentUploads deletes a row RECENT_UPLOAD_PURGE_AFTER_HOURS
  *     after its last update, which is longer than any TTL, so a row a read
  *     could still return is never deleted;
- *   - the in-process Map drops expired entries on every call and on a timer,
- *     so the URL does not linger in memory either.
+ *   - the in-process Map drops expired entries on every call and on a timer
+ *     that runs whenever it has held an entry, so the URL does not linger in
+ *     memory either.
  */
 
 interface RecentUploadRecord {
@@ -75,7 +76,7 @@ export function pruneExpiredRecentUploads(nowMs: number = Date.now()): void {
 }
 
 /**
- * Started by the first upload rather than at import: the maintenance command
+ * Started by the first entry rather than at import: the maintenance command
  * and the test suites import this module, and neither should gain a timer.
  * unref() keeps housekeeping from holding a process open.
  */
@@ -85,18 +86,28 @@ function ensurePruneTimer(): void {
   (pruneTimer as unknown as { unref?: () => void }).unref?.();
 }
 
+/**
+ * The only way an entry enters the Map, so every entry - an upload, or a row a
+ * database read brought back - is covered by the prune timer. storedAtMs is
+ * the upload's own time, never the time it was read back; otherwise a cached
+ * copy would outlive the TTL by however old the row already was.
+ */
+function rememberUpload(userId: string, record: RecentUploadRecord): void {
+  RECENT_UPLOADS.set(userId, record);
+  ensurePruneTimer();
+}
+
 export async function setRecentUploadedImage(
   userId: string,
   imageUrl: string,
   context?: string
 ): Promise<void> {
   pruneExpiredRecentUploads();
-  RECENT_UPLOADS.set(userId, {
+  rememberUpload(userId, {
     imageUrl,
     context,
     storedAtMs: Date.now()
   });
-  ensurePruneTimer();
 
   try {
     await query(
@@ -155,7 +166,7 @@ export async function getRecentUploadedImage(
     if (!matchContext(row.context ?? undefined, expectedContext)) return null;
 
     // Backfill in-memory cache
-    RECENT_UPLOADS.set(userId, {
+    rememberUpload(userId, {
       imageUrl: row.image_url,
       context: row.context ?? undefined,
       storedAtMs: updatedAt
