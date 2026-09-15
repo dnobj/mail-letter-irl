@@ -246,12 +246,22 @@ the only rehearsal of the rollback path.
 
 Quick checks after every deployment. All should pass before considering deployment successful.
 
-**Status:** Executed 2026-09-13 (UTC) against production (build 2a0144d) and development
-(build 7d3cdc5) over plain HTTPS: `/healthz` and `/readyz` 200 on both, the protected-resource
-document exact on both (resource `/mcp`, the environment's Auth0 issuer, the seven scopes), the
-authorization-server proxy and `POST /oauth/register` 404 on both, `/manifest.json` 200 on both,
-the website 200. The DEV connector refresh after #376 listed every widget at v29. Login and
-dashboard were not exercised.
+**Status:** Executed 2026-09-15 (UTC) against production (build 56f297d) and development
+(build 61a140b), after the Auth0 Default Audience repoint and the retired API's deletion (#391):
+- `/healthz` and `/readyz` return 200 on both.
+- Both protected-resource documents are exact on both: resource `/mcp`, the environment's Auth0
+  issuer, and the seven scopes.
+- Auth0's discovery document names the same issuer.
+- The authorization-server proxy and `POST /oauth/register` return 404 on both.
+- `/manifest.json` and the website return 200 on both.
+- On both websites, `/auth/login` redirects to the environment's `/authorize` with the MCP
+  audience and full scope. Auth0 answers with its login page, and also does so with the audience
+  removed (the Default Audience fallback).
+- Both dashboards load for a signed-in session, with `credits/balance`, `letters` and
+  `promo/redeem-pending` at 200.
+
+The previous run, 2026-09-13 (production 2a0144d, development 7d3cdc5), did not exercise login
+or the dashboard. The DEV connector refresh after #376 listed every widget at v29.
 
 ### API Health
 - [x] `GET https://api.letterirl.com/healthz` returns 200
@@ -266,8 +276,8 @@ dashboard were not exercised.
 
 ### Website
 - [x] `https://letterirl.com` loads
-- [ ] Login button redirects to Auth0
-- [ ] Dashboard loads after login
+- [x] Login button redirects to Auth0
+- [x] Dashboard loads after login
 
 ---
 
@@ -276,20 +286,38 @@ dashboard were not exercised.
 Test the full ChatGPT connector flow.
 
 ### OAuth Flow (US-ACCT-01, US-DCR-01)
-- [ ] Open ChatGPT → GPT that uses Letter IRL
-- [ ] Click "Sign in" when prompted
-- [ ] Auth0 login page appears
+
+**Status:** Reconnect executed 2026-09-15 in development, after the Auth0 cleanup (#391):
+- In the current ChatGPT UI, **Disconnect** (Settings → Plugins → the app → **…**) also removes
+  the app from the installed plugins. The app's own page under Plugins then offers **Install
+  plugin**, which runs the Auth0 sign-in.
+- After signing in, the first `get_account_balance` call in a fresh chat succeeded with no
+  prompt, and the development API log shows it JWT-authenticated.
+- The login provider was not recorded, so the per-provider lines stay open.
+
+- [x] Open ChatGPT → the Letter IRL app
+- [x] Click "Sign in" when prompted (here: **Install plugin** on the app's page)
+- [x] Auth0 login page appears
 - [ ] Can login with Google
 - [ ] Can login with Microsoft
 - [ ] Can login with GitHub
 - [ ] Can login with Email/Password
-- [ ] After login, redirected back to ChatGPT
-- [ ] ChatGPT shows "Connected" status
+- [x] After login, redirected back to ChatGPT
+- [x] ChatGPT shows "Connected" status (the app is installed again and its tools run)
 
 ### CIMD client-count behavior
-- [ ] After connecting, check Auth0 dashboard
-- [ ] No new client or DCR call is created during connect/reconnect
-- [ ] ChatGPT uses the manually imported public CIMD application
+
+**Status:** Executed 2026-09-15 in development, with the reconnect above:
+- The tenant held the same 7 applications before and after.
+- Its log since the test began holds only a **Success Login** and a **Success Exchange** for the
+  `ChatGPT` CIMD application, with audience
+  `https://letter-irl-api-development.up.railway.app/mcp`, and no client creation.
+- The exchange event records no scope list (`"scope": null`), so the granted scopes were not read
+  from the log.
+
+- [x] After connecting, check Auth0 dashboard
+- [x] No new client or DCR call is created during connect/reconnect
+- [x] ChatGPT uses the manually imported CIMD application
 
 ### MCP Tools in ChatGPT
 
@@ -298,6 +326,11 @@ with the (DEV) app: the balance (12 prepaid letters, no permission prompt for a 
 the order history (13 mailed-letter orders and 19 letter-pack purchase records with their
 statuses, #365), a preview that rendered the letter card with the draft id, the cost and a
 **Send Letter** button, and the send itself (the Letter Sending Flow below carries the readings).
+
+Re-run 2026-09-15 after the Auth0 cleanup, in a fresh chat with each app through Claude in
+Chrome. The production **Letter IRL** app and the **Letter IRL (DEV)** app each answered the
+balance question through `get_account_balance`, with no permission prompt. Each API's log shows
+the call JWT-authenticated and successful.
 
 - [x] Ask "What's my credit balance?" → `get_account_balance` works
 - [x] Ask "Show my letters" → `list_orders` works
@@ -1450,10 +1483,18 @@ Rollout note (July 16, 2026): the outbox migration, pooled development database 
 Run after fixing issues.
 
 ### After Auth Changes
+
+**Status:** Run 2026-09-15, after the Auth0 Default Audience repoint and the retired API's
+deletion (#391):
+- Token validation: the ChatGPT balance calls above succeeded against both APIs, and both
+  dashboards' REST calls returned 200.
+- Duplicate clients: none after the development reconnect.
+- Login providers and personal access tokens were not exercised.
+
 - [ ] All OAuth providers work
-- [ ] Token validation works
+- [x] Token validation works
 - [ ] PAT authentication works
-- [ ] No duplicate Auth0 clients created
+- [x] No duplicate Auth0 clients created
 
 ### After Payment Changes
 - [ ] Checkout creates correct session
