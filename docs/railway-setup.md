@@ -214,6 +214,7 @@ Current development placement is API and website in Railway US West, maintenance
 - `/healthz` and `/api/health` return successfully.
 - Migrations show issue #69's `021_jit_commerce_foundation.sql` before `022_admin_audit.sql`.
 - Maintenance logs show one short run and clean process exit.
+- Maintenance logs show `recent_uploads.swept` and no `recent_uploads.sweep_failed`.
 - An image remains retrievable after API restart for its documented 15 minutes.
 - Development sleeps after ten idle minutes.
 - Neon suspends after five database-idle minutes.
