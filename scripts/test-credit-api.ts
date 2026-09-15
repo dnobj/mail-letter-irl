@@ -62,7 +62,7 @@ async function testCreditFlow() {
       userId: TEST_USER_ID,
       credits: 2,
       letterId: 'letter_test_001',
-      description: 'Test letter to John Doe'
+      description: 'Sent letter (2 credits)'
     });
     console.log(`   ✅ Deducted 2 credits`);
     console.log(`   📊 New balance: ${deduction1.user.credits} credits\n`);

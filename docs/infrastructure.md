@@ -59,6 +59,7 @@ An hourly, short-lived Railway cron process runs `npm run maintenance`. It:
 
 - retries due or stale outbox rows;
 - removes expired temporary images;
+- deletes the link to a user's uploaded image 24 hours after their last upload (`recent-uploads-sweep`, #282);
 - synchronizes provider status when six hours have elapsed;
 - performs credit, draft, Stripe, and tier cleanup when one day has elapsed;
 - closes S3 and PostgreSQL clients, then exits.

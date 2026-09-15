@@ -497,7 +497,14 @@ panel's image recovery page lists those and the resolve command settles them wit
 
 The most recent uploaded image per user (one row per `user_id`), kept so a widget that lost its
 in-memory state can recover the image it was about to send. The URL is a capability URL and is
-treated as one.
+treated as one (#282):
+
+- A read returns the row for at most `LETTER_IRL_RECENT_UPLOAD_TTL_MS`. The default is one hour,
+  the cap in code is six hours, and an unreadable value falls back to one hour.
+- The maintenance task `recent-uploads-sweep` deletes a row 24 hours after its last update
+  (`purgeExpiredRecentUploads`). The six-hour cap keeps every readable row younger than that.
+- The API process also holds a copy in memory, and drops it once it is older than the TTL. That is
+  checked on every call and every five minutes.
 
 ### maintenance_tasks
 
