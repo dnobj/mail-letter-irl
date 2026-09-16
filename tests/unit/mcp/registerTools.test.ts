@@ -74,7 +74,9 @@ const otherWriteTools = [
   { name: 'generate_image_for_mail', readOnly: false },
 ];
 
-// Destructive tools: delete user data
+// Grouping only: this list completes allTools for the 22-tool coverage check.
+// Which tools are destructive is decided by buildAnnotations and pinned by the
+// exact-set assertion in the classification summary below (six tools).
 const destructiveTools = [
   { name: 'clear_return_address', readOnly: false },
 ];

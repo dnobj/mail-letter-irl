@@ -1211,7 +1211,7 @@ macOS/Linux:
 - [ ] Write tools show as "WRITE" in ChatGPT connector settings
 - [ ] Read-only tools don't require user confirmation
 - [ ] Write tools require user confirmation before execution
-- [ ] Destructive tools (the two send tools, `set_return_address`, both checkouts and `clear_return_address`) keep their permission prompt even under ChatGPT's relaxed permission setting
+- [ ] Destructive tools (the two send tools, `set_return_address`, both checkouts and `clear_return_address`) are served with `destructiveHint: true`, the signal OpenAI's review guidance asks for on irreversible outcomes; ChatGPT's permission prompt is its own contextual judgement
 - [ ] Open-world tools (send_letter) marked with `openWorldHint: true` for real-world effects
 
 **Tool Classification:**
@@ -1228,7 +1228,7 @@ macOS/Linux:
 
 **Technical Details:**
 - MCP SDK expects annotations in separate `annotations` parameter
-- Not in `_meta` (fixed; `buildAnnotations()` in `src/mcp/registerTools.ts` sets them). The table for all 22 tools is in [app-submission/openai-test-cases.md](app-submission/openai-test-cases.md#tool-annotations-verification)
+- The authoritative values are the `annotations` block that `buildAnnotations()` in `src/mcp/registerTools.ts` builds; the tool files' inline `meta` objects mirror the hints and are spread into `_meta` beside the OpenAI display keys. The table for all 22 tools is in [app-submission/openai-test-cases.md](app-submission/openai-test-cases.md#tool-annotations-verification)
 - Annotations: `readOnlyHint`, `destructiveHint`, `openWorldHint`, `idempotentHint`
 
 **Related:**

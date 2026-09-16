@@ -83,6 +83,7 @@ import {
  *
  * @see US-MCP-06: Tool Read/Write Annotations
  * @see docs/learnings/tool-annotation-decision.md
+ * @see https://developers.openai.com/plugins/deploy/app-review (the destructive-annotation guidance quoted below)
  * @see https://developers.openai.com/apps-sdk/plan/tools/
  * @see https://modelcontextprotocol.io/legacy/concepts/tools
  */

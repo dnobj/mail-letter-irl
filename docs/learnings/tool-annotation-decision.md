@@ -1,6 +1,6 @@
 # Tool Annotation Decision: readOnlyHint and idempotentHint Correctness
 
-**Last Updated:** December 31, 2025
+**Last Updated:** September 16, 2026 (addendum; the December 31, 2025 decision is kept as written above it)
 **Purpose:** Document the decision to correct tool annotations for OpenAI Apps SDK compliance
 **GitHub Issues:** #92 (readOnlyHint), #94 (idempotentHint)
 
@@ -106,7 +106,7 @@ annotations: {
 }
 ```
 
-### Destructive Tools (clear_return_address)
+### Destructive Tools (clear_return_address, as decided in December 2025; six tools since September 2026, see the addendum)
 
 ```typescript
 annotations: {
@@ -155,14 +155,16 @@ The annotations help ChatGPT "categorize and present tools appropriately" withou
 ## Addendum, September 16, 2026: irreversible outcomes are destructive
 
 The December decision read `destructiveHint` as "deletes or overwrites user data" and marked the
-send tools non-destructive because credits can be refunded. OpenAI's current app-review guidance is
-broader: set the destructive annotation to `true` if the tool "can cause irreversible outcomes
+send tools non-destructive because credits can be refunded. OpenAI's current app-review guidance
+([developers.openai.com/plugins/deploy/app-review](https://developers.openai.com/plugins/deploy/app-review),
+checked September 16, 2026) is broader: set the destructive annotation to `true` if the tool "can cause irreversible outcomes
 (deleting, overwriting, sending messages or transactions you can't undo, revoking access, or
 destructive admin actions), even in only select modes, through default parameters, or through
 indirect side effects", and explain in the justification what is irreversible and which safeguards
-apply (confirmation steps, dry runs, scoping). Since June 2026 ChatGPT users can also choose to let
-non-destructive actions run without asking, so the annotation is what keeps the permission prompt on
-a send.
+apply (confirmation steps, dry runs, scoping). Since June 2026 ChatGPT users can also choose how
+often tools ask for permission; OpenAI describes the "important actions" level as a contextual
+judgement that already covers sending and purchases, so the annotation is the signal OpenAI asks for
+and one input to that judgement, not a switch that guarantees a prompt.
 
 Under that reading `buildAnnotations()` now marks six tools destructive:
 
