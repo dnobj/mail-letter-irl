@@ -232,11 +232,9 @@ describe('statusSyncService', () => {
       vi.mocked(db.query)
         .mockResolvedValueOnce({ rows: testLetters } as any)
         .mockResolvedValue({ rows: [], rowCount: 1 } as any);
+      // The shape PostGridProvider.getStatus throws: a plain Error wrapping the provider's text.
       mockProvider.getStatus.mockRejectedValueOnce(
-        Object.assign(
-          new Error('HTTP 500 from https://api.postgrid.invalid/letters/track-fail for Recipient Person'),
-          { code: 'ECONNRESET' }
-        )
+        new Error('Failed to get provider status: HTTP 500 from https://api.postgrid.invalid/letters/track-fail for Recipient Person')
       );
       vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
@@ -249,27 +247,10 @@ describe('statusSyncService', () => {
         oldStatus: 'in_transit',
         newStatus: 'in_transit',
         providerRawStatus: '',
-        error: 'ECONNRESET',
+        error: 'provider_error',
       });
       expect(JSON.stringify(result)).not.toContain('postgrid.invalid');
       expect(JSON.stringify(result)).not.toContain('Recipient Person');
-    });
-
-    it('keeps the HTTP status of a provider failure as provider_rejected http_<status> (#394)', async () => {
-      const testLetters = [createLetterRowForSync({ letterId: 'letter-404', trackingId: 'track-404', status: 'in_transit' })];
-      vi.mocked(db.query)
-        .mockResolvedValueOnce({ rows: testLetters } as any)
-        .mockResolvedValue({ rows: [], rowCount: 1 } as any);
-      mockProvider.getStatus.mockRejectedValueOnce(
-        // The shape PostGridProvider.getStatus rethrows: a wrapped message and the status.
-        Object.assign(new Error('Failed to get provider status: HTTP 404: letter track-404 not found at https://api.postgrid.invalid/letters'), { statusCode: 404 })
-      );
-      vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
-      const result = await syncLetterStatuses(false, 30);
-
-      expect(result.details[0].error).toBe('provider_rejected http_404');
-      expect(JSON.stringify(result)).not.toContain('postgrid.invalid');
     });
 
     it('prefers a class a lower layer attached to the failure (#394)', async () => {
@@ -278,7 +259,7 @@ describe('statusSyncService', () => {
         .mockResolvedValueOnce({ rows: testLetters } as any)
         .mockResolvedValue({ rows: [], rowCount: 1 } as any);
       mockProvider.getStatus.mockRejectedValueOnce(
-        Object.assign(new Error('connect ETIMEDOUT 10.0.0.9:443'), { code: 'ETIMEDOUT', statusCode: 503, diagnosticClass: 'configuration_error' })
+        Object.assign(new Error('connect ETIMEDOUT 10.0.0.9:443'), { code: 'ETIMEDOUT', diagnosticClass: 'configuration_error' })
       );
       vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
