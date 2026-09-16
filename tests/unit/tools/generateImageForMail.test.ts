@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { _testing as imageTesting } from "../../../src/services/imageService.js";
 
 /**
  * The hybrid image tool (issue #227; decision record Addendum 3): generates
@@ -87,6 +88,9 @@ describe("generate_image_for_mail (hybrid)", () => {
       return { base64Data: TINY_JPEG_BASE64, providerRequestId: "prov-1" } as never;
     });
     vi.mocked(tempStore.storeImage).mockResolvedValue("token-1" as never);
+    // The preview is a real sharp decode of provider bytes: it runs under the
+    // same decode gate as customer images.
+    const decodeRun = vi.spyOn(imageTesting.decodeGate, "run");
 
     const result = await generateImageForMailTool.handler(
       { prompt: "a walrus playing saxophone", context: "postcard" },
@@ -94,6 +98,8 @@ describe("generate_image_for_mail (hybrid)", () => {
     );
 
     expect(result.mode).toBe("generated");
+    expect(decodeRun).toHaveBeenCalledTimes(1);
+    decodeRun.mockRestore();
     expect(result.generatedImageUrl).toContain("/api/temp-image/token-1");
     expect(result.generationsRemaining).toBe(2);
     expect(result.suggestedNextStep).toContain("quote_and_preview_postcard");

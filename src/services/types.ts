@@ -685,11 +685,6 @@ export interface ProcessedImage {
   processedHeight: number;
 }
 
-export interface ImageProcessingError extends Error {
-  code: 'IMAGE_TOO_LARGE' | 'UNSUPPORTED_FORMAT' | 'IMAGE_TOO_SMALL' | 'DOWNLOAD_FAILED' | 'PROCESSING_FAILED';
-  userMessage: string;
-}
-
 // ============================================================================
 // Postcard Draft Types (US-POSTCARD-01, US-POSTCARD-02)
 // ============================================================================

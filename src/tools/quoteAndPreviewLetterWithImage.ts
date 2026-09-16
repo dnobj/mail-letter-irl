@@ -141,7 +141,8 @@ async function handler(
 
     const processed = await downloadAndProcessLetterImageWithPreview(
       { url: imageSource },
-      'inline'
+      'inline',
+      { actorId: context.user.userId }
     );
     inlineImageData = processed.base64DataUri;
     inlineImagePreview = processed.previewDataUri;
@@ -165,6 +166,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "quote.letter.image.failed",
+        errorCode: error instanceof ImageProcessingError ? error.code : "UNKNOWN",
         errorClass: 'validation_error'
       },
       "Image processing failed"
