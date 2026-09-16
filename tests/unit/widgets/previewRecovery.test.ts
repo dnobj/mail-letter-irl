@@ -493,6 +493,37 @@ describe.each([LETTER, POSTCARD])('$file recovery from a lost preview call (#411
     expect(harness.text('id-value')).toBe('draft_retry_0002');
   });
 
+  it("clears a failed retry's error when the host result arrives", async () => {
+    const harness = await lostCall(spec, {
+      previewResponse: () => {
+        throw new Error('host refused the call');
+      }
+    });
+    await harness.click('retry-button');
+    expect(harness.visible('error-message')).toBe(true);
+
+    await harness.deliverHostResult(spec.output('draft_host_0001'));
+
+    expect(harness.visible('error-message')).toBe(false);
+    expect(harness.text('id-value')).toBe('draft_host_0001');
+  });
+
+  it('keeps a send error through a later re-render', async () => {
+    // The error clearing above must stay limited to the card's first
+    // preview, or a failed send would lose its message on the next render.
+    const harness = mount(spec, { toolOutput: spec.output('draft_host_0001') });
+    (harness.openai as Json).callTool = async () => {
+      throw new Error('send refused');
+    };
+    await flush();
+    await harness.click('send-button');
+    expect(harness.text('error-message')).toBe('Failed to send: send refused');
+
+    await harness.fireGlobals();
+
+    expect(harness.visible('error-message')).toBe(true);
+  });
+
   it('shows a thrown error', async () => {
     const harness = await lostCall(spec, {
       previewResponse: () => {

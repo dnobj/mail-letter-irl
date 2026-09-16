@@ -695,7 +695,13 @@
         }
 
         cancelEmptyTimer();
-        hideEmptyState();
+        if (!dataLoaded) {
+          // The first preview on this card. Nothing from the empty state
+          // still applies, including a failed retry's error; a send or
+          // checkout error can only appear after this point.
+          hideEmptyState();
+          document.getElementById("error-message").style.display = "none";
+        }
         dataLoaded = true;
         const card = document.getElementById("card");
         card.classList.remove("loading");
