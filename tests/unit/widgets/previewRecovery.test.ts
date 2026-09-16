@@ -985,6 +985,18 @@ describe.each([LETTER, POSTCARD])('$file keeps what it did for a reopened conver
     });
   });
 
+  it('offers the preview at once when a saved preview arrives after the first render', async () => {
+    const harness = mount(spec);
+    await flush();
+    expect(harness.pendingTimers()).toHaveLength(1);
+
+    harness.openai.widgetState = { v: 1, draftId: 'draft_host_0001' };
+    await harness.fireGlobals();
+
+    expect(harness.pendingTimers()).toEqual([]);
+    expect(harness.visible('retry-button')).toBe(true);
+  });
+
   it('switches to the kept order when the saved state arrives after the first render', async () => {
     const harness = mount(spec);
     await flush();
