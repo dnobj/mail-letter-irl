@@ -25,6 +25,7 @@ Welcome to the Letter IRL documentation. This is a physical letter mailing servi
 
 ### Architecture & Design
 
+- [September 2026 Architecture Review](architecture-review-2026-09.md) - Modularization recommendations, evidence, priorities, and evaluation gates; not an implementation mandate
 - [ACID Transaction Standard](acid-transaction-standard.md) - Authoritative engineering standard for financial and state-changing operations
 - [Overview](overview.md) - Product goals, objectives, and business constraints
 - [Use Cases](use-cases.md) - Product, marketing, and integration use cases
