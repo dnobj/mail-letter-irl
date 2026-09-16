@@ -92,7 +92,7 @@ annotations: {
 ```typescript
 annotations: {
   readOnlyHint: false,    // Modifies credits, creates letter record
-  destructiveHint: false, // Non-destructive (credits can be refunded)
+  destructiveHint: true,  // Mail cannot be recalled once printed (see the September 2026 addendum)
   openWorldHint: true,    // Sends physical mail via PostGrid/USPS
   idempotentHint: true    // Draft consumption makes retries safe
 }
@@ -139,16 +139,53 @@ The annotations help ChatGPT "categorize and present tools appropriately" withou
 | `quote_and_preview_letter_with_header_image` | false | false | true | **false** |
 | `quote_and_preview_letter_with_image` | false | false | true | **false** |
 | `quote_and_preview_postcard` | false | false | true | **false** |
-| `send_letter` | false | false | true | true |
-| `send_postcard` | false | false | true | true |
+| `send_letter` | false | **true** | true | true |
+| `send_postcard` | false | **true** | true | true |
 | `get_account_balance` | true | - | - | - |
 | `list_orders` | true | - | - | - |
 | `get_order_status` | true | - | - | - |
 | `get_return_address` | true | - | - | - |
-| `set_return_address` | false | false | true | true |
+| `set_return_address` | false | **true** | true | true |
 | `clear_return_address` | false | true | false | true |
 
-**Note:** Quote/preview tools have `idempotentHint: false` because each call creates a new draft record (see #94).
+**Note:** Quote/preview tools have `idempotentHint: false` because each call creates a new draft record (see #94). The bold destructive values changed in September 2026; see the addendum below.
+
+---
+
+## Addendum, September 16, 2026: irreversible outcomes are destructive
+
+The December decision read `destructiveHint` as "deletes or overwrites user data" and marked the
+send tools non-destructive because credits can be refunded. OpenAI's current app-review guidance is
+broader: set the destructive annotation to `true` if the tool "can cause irreversible outcomes
+(deleting, overwriting, sending messages or transactions you can't undo, revoking access, or
+destructive admin actions), even in only select modes, through default parameters, or through
+indirect side effects", and explain in the justification what is irreversible and which safeguards
+apply (confirmation steps, dry runs, scoping). Since June 2026 ChatGPT users can also choose to let
+non-destructive actions run without asking, so the annotation is what keeps the permission prompt on
+a send.
+
+Under that reading `buildAnnotations()` now marks six tools destructive:
+
+| Tool | Why |
+|------|-----|
+| `send_letter`, `send_postcard` | Physical mail cannot be recalled once printed; the terms say so. |
+| `set_return_address` | Overwrites the saved address in place. |
+| `create_mail_checkout` | Starts a payment the customer cannot undo alone, and a successful payment authorises the mail itself. |
+| `create_pack_checkout` | Starts a payment the customer cannot undo alone (refunds are discretionary). |
+| `clear_return_address` | Deletes the saved address (unchanged). |
+
+Still non-destructive, with the reasoning: `redeem_promo_code` spends a code but only adds letters
+for the customer; `generate_image_for_mail` consumes one generation and produces an image;
+`confirm_uploaded_image` overwrites only a pointer to the customer's latest upload;
+`submit_feature_request` and `upload_image` create records. The quote and preview tools create
+drafts that expire on their own.
+
+The `confirm: true` requirement on the send tools and the transactional idempotency (a consumed
+draft cannot be sent twice) remain the safeguards to describe in the justification. They are not a
+reason to omit the annotation. `buildAnnotations()` is what fills the MCP `annotations` block ChatGPT
+reads; the inline `meta` objects in the tool files (spread into `_meta` by `buildToolMeta()`) mirror
+the same hints beside the OpenAI display keys, and `scripts/verify-tool-annotations.ts` checks that
+the mirror agrees.
 
 ---
 

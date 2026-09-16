@@ -210,20 +210,20 @@ These help OpenAI measure:
 | `quote_and_preview_letter` | - | ✅ | - | - |
 | `quote_and_preview_letter_with_header_image` | - | ✅ | - | - |
 | `quote_and_preview_letter_with_image` | - | ✅ | - | - |
-| `send_letter` | - | ✅ | ✅ | - |
-| `create_mail_checkout` | - | ✅ | ✅ | - |
-| `create_pack_checkout` | - | ✅ | - | - |
+| `send_letter` | - | ✅ | ✅ | ✅ |
+| `create_mail_checkout` | - | ✅ | ✅ | ✅ |
+| `create_pack_checkout` | - | ✅ | - | ✅ |
 | `list_letter_packs` | ✅ | - | - | - |
 | `redeem_promo_code` | - | - | ✅ | - |
 | `get_purchase_status` | ✅ | - | - | - |
 | `get_order_status` | ✅ | - | - | - |
 | `get_account_balance` | ✅ | - | - | - |
 | `list_orders` | ✅ | - | - | - |
-| `set_return_address` | - | ✅ | ✅ | - |
+| `set_return_address` | - | ✅ | ✅ | ✅ |
 | `get_return_address` | ✅ | - | - | - |
 | `clear_return_address` | - | - | ✅ | ✅ |
 | `quote_and_preview_postcard` | - | ✅ | - | - |
-| `send_postcard` | - | ✅ | ✅ | - |
+| `send_postcard` | - | ✅ | ✅ | ✅ |
 | `submit_feature_request` | - | - | - | - |
 | `get_started` | ✅ | - | - | - |
 | `upload_image` | - | - | - | - |
@@ -233,6 +233,11 @@ These help OpenAI measure:
 This mirrors `buildAnnotations()` in `src/mcp/registerTools.ts`, which is authoritative. The
 preview tools are **not** read-only: each call creates a draft record, and each validates addresses
 with PostGrid ([learnings/tool-annotation-decision.md](../learnings/tool-annotation-decision.md)).
+The destructive column follows OpenAI's app-review guidance, which asks for `destructiveHint` on any
+tool that can cause an irreversible outcome (sending mail that cannot be recalled, overwriting the
+saved address, starting a payment) even through indirect side effects; the `confirm: true` checks and
+transactional idempotency are the safeguards to describe in the justification, not a reason to omit
+the annotation.
 
 Run verification: `npx tsx scripts/verify-tool-annotations.ts`
 

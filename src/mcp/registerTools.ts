@@ -72,7 +72,8 @@ import {
  * These annotations tell ChatGPT how to classify tools:
  * - readOnlyHint: true = Tool does NOT modify its environment (read operations)
  * - readOnlyHint: false = Tool modifies its environment (write operations)
- * - destructiveHint: true = Tool may delete or overwrite user data
+ * - destructiveHint: true = Tool may delete or overwrite user data, or cause an
+ *   irreversible outcome (mail that cannot be recalled, a payment)
  * - openWorldHint: true = Tool interacts with external entities (APIs, mail services)
  * - idempotentHint: true = Repeated calls with same args have no additional effect
  *
@@ -126,8 +127,23 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'confirm_uploaded_image' // Repeating the same relay overwrites with the same value
   ];
 
-  // Destructive tools that delete or overwrite user data
+  // Destructive tools. OpenAI's app-review guidance asks for destructiveHint on
+  // any tool that "can cause irreversible outcomes (deleting, overwriting,
+  // sending messages or transactions you can't undo, revoking access, or
+  // destructive admin actions), even in only select modes, through default
+  // parameters, or through indirect side effects". Mail cannot be recalled
+  // once printed, the saved address is overwritten in place, and a checkout
+  // starts a payment the customer cannot undo alone (for Pay & Send it
+  // authorises the mail itself). A spent promo code and a consumed image
+  // generation are additive for the customer, and the upload relay overwrites
+  // only a pointer to the latest upload, so those stay non-destructive.
+  // See docs/learnings/tool-annotation-decision.md (addendum, September 2026).
   const destructiveTools = [
+    'send_letter',
+    'send_postcard',
+    'set_return_address',
+    'create_mail_checkout',
+    'create_pack_checkout',
     'clear_return_address'
   ];
 

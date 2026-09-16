@@ -175,10 +175,10 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
     );
 
     it.each(sendTools)(
-      '$name should have destructiveHint: false (non-destructive)',
+      '$name should have destructiveHint: true (mail cannot be recalled once printed)',
       ({ name }) => {
         const annotations = buildAnnotations({ name, readOnly: false });
-        expect(annotations.destructiveHint).toBe(false);
+        expect(annotations.destructiveHint).toBe(true);
       }
     );
 
@@ -203,10 +203,29 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       expect(annotations.idempotentHint).toBe(true);
     });
 
-    it('should have destructiveHint: false (non-destructive)', () => {
+    it('should have destructiveHint: true (overwrites the saved address in place)', () => {
       const annotations = buildAnnotations({ name: 'set_return_address', readOnly: false });
-      expect(annotations.destructiveHint).toBe(false);
+      expect(annotations.destructiveHint).toBe(true);
     });
+  });
+
+  describe('Checkout Tools (Destructive)', () => {
+    it.each([{ name: 'create_mail_checkout' }, { name: 'create_pack_checkout' }])(
+      '$name should have destructiveHint: true (starts a payment the customer cannot undo alone)',
+      ({ name }) => {
+        const annotations = buildAnnotations({ name, readOnly: false });
+        expect(annotations.destructiveHint).toBe(true);
+        expect(annotations.readOnlyHint).toBe(false);
+      }
+    );
+
+    it.each([{ name: 'redeem_promo_code' }, { name: 'generate_image_for_mail' }, { name: 'submit_feature_request' }, { name: 'upload_image' }])(
+      '$name should stay destructiveHint: false (additive for the customer)',
+      ({ name }) => {
+        const annotations = buildAnnotations({ name, readOnly: false });
+        expect(annotations.destructiveHint).toBe(false);
+      }
+    );
   });
 
   describe('confirm_uploaded_image Tool', () => {
@@ -294,12 +313,19 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       expect(idempotentCount).toBe(7);
     });
 
-    it('should have 1 destructive tool', () => {
-      const destructiveCount = allTools.filter(t => {
+    it('should have 6 destructive tools (two sends, the address overwrite, two checkouts, the address clear)', () => {
+      const destructiveNames = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.destructiveHint === true;
-      }).length;
-      expect(destructiveCount).toBe(1);
+      }).map(t => t.name).sort();
+      expect(destructiveNames).toEqual([
+        'clear_return_address',
+        'create_mail_checkout',
+        'create_pack_checkout',
+        'send_letter',
+        'send_postcard',
+        'set_return_address',
+      ]);
     });
   });
 
