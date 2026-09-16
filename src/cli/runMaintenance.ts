@@ -10,6 +10,7 @@ import { runCommerceMaintenance } from '../services/commerceService.js';
 import { reconcilePackRefunds } from '../services/packRefundService.js';
 import { runRetentionPreview, runRetentionSweep } from '../services/retentionService.js';
 import { purgeExpiredRecentUploads } from '../services/recentUploadStore.js';
+import { purgeExpiredFeatureRequests } from '../services/featureRequestService.js';
 import { enabledUnlessDisabled, positiveIntegerSetting } from '../utils/envSettings.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
 import {
@@ -206,6 +207,46 @@ async function runRecentUploadsSweep(): Promise<void> {
   }
 }
 
+/**
+ * Delete feature requests past their published period (#393).
+ *
+ * Same shape as runRecentUploadsSweep, for the same reasons: a plain time rule
+ * on a table nothing references, wrapped so that runMaintenanceTaskIfDue's
+ * rethrow cannot skip mail dispatch, and rethrown inside the task as a CLASS
+ * because maintenance_tasks.last_error is readable by the admin reader role.
+ * Every-run interval below the hourly cron, as above.
+ */
+const FEATURE_REQUESTS_SWEEP_INTERVAL_MS = 30 * 60 * 1000;
+
+async function runFeatureRequestsSweep(): Promise<void> {
+  try {
+    const sweep = await runMaintenanceTaskIfDue(
+      'feature-requests-sweep',
+      FEATURE_REQUESTS_SWEEP_INTERVAL_MS,
+      async () => {
+        try {
+          return await purgeExpiredFeatureRequests();
+        } catch (error) {
+          const errorClass =
+            carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+          throw Object.assign(new Error(`feature requests sweep failed: ${errorClass}`), {
+            diagnosticClass: errorClass
+          });
+        }
+      }
+    );
+    console.log(`[Maintenance] Feature requests sweep ${sweep.ran ? 'completed' : 'not due'}`);
+    if (sweep.ran) {
+      // A count only - never a title, a description, or a contact address.
+      writeDiagnostic('info', 'feature_requests.swept', { deleted: sweep.result ?? 0 });
+    }
+  } catch (error) {
+    writeDiagnostic('error', 'feature_requests.sweep_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
 export async function runMaintenance(): Promise<void> {
   // Was Math.max(1, Number.parseInt(...)), the shape envSettings exists to
   // replace: '1e3' parses to 1, so a request for 1000 dispatched ONE letter a
@@ -222,6 +263,8 @@ export async function runMaintenance(): Promise<void> {
   await runContentRetention();
   // Also wrapped, and also never throws, for the same reason (#282).
   await runRecentUploadsSweep();
+  // Same wrapper, same reason; it runs after the uploads sweep (#393).
+  await runFeatureRequestsSweep();
 
   const outbox = await processDueLetterJobs(batchLimit);
   console.log('[Maintenance] Outbox summary:', outbox);

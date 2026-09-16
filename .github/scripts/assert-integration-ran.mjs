@@ -36,6 +36,7 @@ const REQUIRED = [
   'adminCommands.postgres.test.ts',
   'providerErrorMinimisation.postgres.test.ts',
   'recentUploadsSweep.postgres.test.ts',
+  'featureRequestsSweep.postgres.test.ts',
 ];
 
 /**

@@ -439,6 +439,12 @@ User-submitted feature requests for product feedback.
 - `idx_feature_requests_created_at` on created_at DESC
 - `idx_feature_requests_user_recent` on (user_id, created_at DESC) for rate limiting
 
+**Retention (#393):** the maintenance task `feature-requests-sweep` deletes a row 12 months after
+`created_at` (`purgeExpiredFeatureRequests` in `src/services/featureRequestService.ts`), the optional
+`contact_email` with it. Nothing updates a row after submission (neither admin role holds `UPDATE`
+here, so `status`, `admin_notes`, `reviewed_at` and `resolved_at` are never set), so submission time is
+the only clock. The period is published in `docs/privacy-policy.md`.
+
 ---
 
 ### stripe_webhook_events

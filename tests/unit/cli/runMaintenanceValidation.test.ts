@@ -19,6 +19,7 @@ const services = vi.hoisted(() => ({
   runDailyMaintenance: vi.fn().mockResolvedValue(undefined),
   runStatusSync: vi.fn().mockResolvedValue(undefined),
   purgeExpiredRecentUploads: vi.fn().mockResolvedValue(0),
+  purgeExpiredFeatureRequests: vi.fn().mockResolvedValue(0),
   closePool: vi.fn().mockResolvedValue(undefined)
 }));
 
@@ -50,6 +51,9 @@ vi.mock('../../../src/workers/statusSyncWorker.js', () => ({
 vi.mock('../../../src/services/recentUploadStore.js', () => ({
   purgeExpiredRecentUploads: services.purgeExpiredRecentUploads
 }));
+vi.mock('../../../src/services/featureRequestService.js', () => ({
+  purgeExpiredFeatureRequests: services.purgeExpiredFeatureRequests
+}));
 vi.mock('../../../src/db/index.js', () => ({
   closePool: services.closePool
 }));
@@ -67,6 +71,13 @@ function stubValidDevelopment(): void {
   vi.stubEnv('DATABASE_URL', 'postgresql://user:pass@fixture.example/db');
   vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_maintenance_fixture');
   vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_maintenance_fixture');
+}
+
+function captureOutput(): () => string {
+  const spies = (['log', 'info', 'warn', 'error'] as const).map(method =>
+    vi.spyOn(console, method).mockImplementation(() => undefined)
+  );
+  return () => spies.flatMap(spy => spy.mock.calls.flat().map(String)).join('\n');
 }
 
 describe('maintenance deployment validation', () => {
@@ -93,6 +104,7 @@ describe('maintenance deployment validation', () => {
     expect(services.cleanupExpiredImages).not.toHaveBeenCalled();
     expect(services.runMaintenanceTaskIfDue).not.toHaveBeenCalled();
     expect(services.purgeExpiredRecentUploads).not.toHaveBeenCalled();
+    expect(services.purgeExpiredFeatureRequests).not.toHaveBeenCalled();
 
     // Review round 1: the class-only failure diagnostic left the operator
     // with one word. The config failure itself must name its variables on
@@ -140,13 +152,6 @@ describe('maintenance deployment validation', () => {
       services.runMaintenanceTaskIfDue.mockReset().mockResolvedValue({ ran: false });
       services.purgeExpiredRecentUploads.mockReset().mockResolvedValue(0);
     });
-
-    function captureOutput(): () => string {
-      const spies = (['log', 'info', 'warn', 'error'] as const).map(method =>
-        vi.spyOn(console, method).mockImplementation(() => undefined)
-      );
-      return () => spies.flatMap(spy => spy.mock.calls.flat().map(String)).join('\n');
-    }
 
     it('is scheduled on every hourly run, under its own task name', async () => {
       stubValidDevelopment();
@@ -235,6 +240,131 @@ describe('maintenance deployment validation', () => {
       let releaseSweep: (() => void) | undefined;
       services.runMaintenanceTaskIfDue.mockImplementation((async name => {
         if (name !== 'recent-uploads-sweep') return { ran: false };
+        sweepStarted = true;
+        await new Promise<void>(resolve => {
+          releaseSweep = resolve;
+        });
+        return { ran: true, result: 0 };
+      }) as TaskRunner);
+
+      const entry = maintenanceEntry();
+      await vi.waitFor(() => expect(sweepStarted).toBe(true));
+      expect(services.processDueLetterJobs).not.toHaveBeenCalled();
+
+      releaseSweep?.();
+      await expect(entry).resolves.toBeUndefined();
+      expect(services.processDueLetterJobs).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * Issue #393. Same wrapper as the uploads sweep and the same position rule:
+   * it sits with the other housekeeping at the front of the run, after the
+   * uploads sweep and before mail dispatch, and a failure there must neither
+   * stop dispatch nor put what the driver said where the admin reader role can
+   * read it.
+   */
+  describe('feature requests sweep', () => {
+    afterEach(() => {
+      services.runMaintenanceTaskIfDue.mockReset().mockResolvedValue({ ran: false });
+      services.purgeExpiredFeatureRequests.mockReset().mockResolvedValue(0);
+    });
+
+    it('is scheduled on every hourly run, under its own task name', async () => {
+      stubValidDevelopment();
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      const call = services.runMaintenanceTaskIfDue.mock.calls.find(
+        ([name]) => name === 'feature-requests-sweep'
+      );
+      expect(call).toBeDefined();
+      expect(call?.[1]).toBeGreaterThan(0);
+      expect(call?.[1]).toBeLessThan(60 * 60 * 1000);
+    });
+
+    it('runs after the uploads sweep and before the unwrapped tasks', async () => {
+      stubValidDevelopment();
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      const names = services.runMaintenanceTaskIfDue.mock.calls.map(([name]) => name);
+      const uploads = names.indexOf('recent-uploads-sweep');
+      const requests = names.indexOf('feature-requests-sweep');
+      expect(uploads).toBeGreaterThanOrEqual(0);
+      expect(requests).toBeGreaterThan(uploads);
+      expect(requests).toBeLessThan(names.indexOf('provider-status-sync'));
+    });
+
+    it('logs the deleted count when it runs', async () => {
+      stubValidDevelopment();
+      const output = captureOutput();
+      services.purgeExpiredFeatureRequests.mockResolvedValueOnce(2);
+      services.runMaintenanceTaskIfDue.mockImplementation((async (name, _interval, task) =>
+        name === 'feature-requests-sweep' ? { ran: true, result: await task() } : { ran: false }) as TaskRunner);
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      expect(services.purgeExpiredFeatureRequests).toHaveBeenCalledTimes(1);
+      const logged = output();
+      expect(logged).toContain('"event":"feature_requests.swept"');
+      expect(logged).toContain('"deleted":2');
+      expect(logged).not.toContain('feature_requests.sweep_failed');
+    });
+
+    it('cannot stop the rest of maintenance, or leak what the driver said, when it fails', async () => {
+      stubValidDevelopment();
+      const output = captureOutput();
+      const driverError = Object.assign(
+        new Error('connect ETIMEDOUT while deleting request "Secret plan" for reply@example.invalid'),
+        { code: 'ETIMEDOUT' }
+      );
+      services.purgeExpiredFeatureRequests.mockRejectedValueOnce(driverError);
+      let rethrown: unknown;
+      services.runMaintenanceTaskIfDue.mockImplementation((async (name, _interval, task) => {
+        if (name !== 'feature-requests-sweep') return { ran: false };
+        try {
+          return { ran: true, result: await task() };
+        } catch (error) {
+          // The real runner stores error.message in maintenance_tasks.last_error,
+          // which the admin reader role can read, and then rethrows.
+          rethrown = error;
+          throw error;
+        }
+      }) as TaskRunner);
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      // Everything scheduled after the sweep still ran.
+      expect(services.processDueLetterJobs).toHaveBeenCalledTimes(1);
+      expect(services.runCommerceMaintenance).toHaveBeenCalledTimes(1);
+      expect(services.reconcileGenerationReservations).toHaveBeenCalledTimes(1);
+      expect(services.cleanupExpiredImages).toHaveBeenCalledTimes(1);
+      const names = services.runMaintenanceTaskIfDue.mock.calls.map(([name]) => name);
+      expect(names).toContain('provider-status-sync');
+      expect(names).toContain('daily-credit-and-draft-cleanup');
+
+      // What would reach maintenance_tasks.last_error is a class, never the driver's words.
+      expect(rethrown).toBeInstanceOf(Error);
+      expect((rethrown as Error).message).toContain('ETIMEDOUT');
+      expect((rethrown as Error).message).not.toContain('Secret plan');
+      expect((rethrown as Error).message).not.toContain('example.invalid');
+      expect((rethrown as { diagnosticClass?: string }).diagnosticClass).toBe('ETIMEDOUT');
+
+      const logged = output();
+      expect(logged).toContain('"event":"feature_requests.sweep_failed"');
+      expect(logged).toContain('"errorClass":"ETIMEDOUT"');
+      expect(logged).not.toContain('Secret plan');
+      expect(logged).not.toContain('example.invalid');
+    });
+
+    it('runs before mail dispatch, and dispatch waits for it to finish', async () => {
+      stubValidDevelopment();
+      captureOutput();
+      let sweepStarted = false;
+      let releaseSweep: (() => void) | undefined;
+      services.runMaintenanceTaskIfDue.mockImplementation((async name => {
+        if (name !== 'feature-requests-sweep') return { ran: false };
         sweepStarted = true;
         await new Promise<void>(resolve => {
           releaseSweep = resolve;
