@@ -1431,14 +1431,18 @@ async function transitionPaidCheckout(
     return 'fulfillment_pending';
   } catch (error) {
     await client.query('ROLLBACK TO SAVEPOINT jit_fulfillment');
-    const message = error instanceof Error ? error.message : 'JIT fulfillment failed';
+    // A class, never the message: inside the savepoint everything but the
+    // draft checks is SQL, and a draft check carries its own code as the class
+    // (mailSendService.draftError). The message interpolates draft ids and raw
+    // status labels, and both columns are readable by the admin reader role (#394).
+    const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'database_error');
     await client.query(
       `UPDATE orders
        SET status = 'refund_pending', refund_pending_at = NOW(),
            last_error_code = 'JIT_FULFILLMENT_REJECTED', last_error = $2,
            updated_at = NOW()
        WHERE order_id = $1`,
-      [order.order_id, message]
+      [order.order_id, errorClass]
     );
     await recordOrderEvent(
       client,
@@ -1446,7 +1450,7 @@ async function transitionPaidCheckout(
       'jit.fulfillment_rejected',
       'paid',
       'refund_pending',
-      { error: message }
+      { errorClass }
     );
     return 'refund_pending';
   }
@@ -3315,19 +3319,21 @@ export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
       return true;
     } catch (error) {
       await client.query('ROLLBACK TO SAVEPOINT recovery_fulfillment');
-      const message = error instanceof Error ? error.message : 'Recovery failed';
+      // A class, never the message, for the same reason as the JIT catch (#394).
+      const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'database_error');
       await client.query(
         `UPDATE orders SET status = 'refund_pending', refund_pending_at = NOW(),
            last_error_code = 'RECOVERY_FAILED', last_error = $2, updated_at = NOW()
          WHERE order_id = $1`,
-        [orderId, message]
+        [orderId, errorClass]
       );
       await recordOrderEvent(
         client,
         orderId,
         'maintenance.fulfillment_failed',
         'paid',
-        'refund_pending'
+        'refund_pending',
+        { errorClass }
       );
       return false;
     }
@@ -3358,7 +3364,6 @@ const liveRefundOperations: RefundOperations = {
 
 export async function requestRefund(
   orderId: string,
-  reason: string,
   stripeRefunds: RefundOperations = liveRefundOperations
 ): Promise<boolean> {
   const retryLimit = integerSetting('JIT_REFUND_RETRY_LIMIT', 5);
@@ -3377,23 +3382,23 @@ export async function requestRefund(
          AND stripe_payment_intent_id IS NOT NULL
          AND (
            refund_attempts = 0
-           OR updated_at <= NOW() - ($4 * INTERVAL '1 second')
+           OR updated_at <= NOW() - ($3::int * INTERVAL '1 second')
          )
        FOR UPDATE
      )
      UPDATE orders AS refundable
      SET refund_attempts = CASE
            WHEN refundable.stripe_refund_id IS NULL
-             AND candidate.refund_attempts < $3
+             AND candidate.refund_attempts < $2::int
              THEN candidate.refund_attempts + 1
            ELSE refundable.refund_attempts
          END,
          refund_pending_at = COALESCE(refund_pending_at, NOW()),
-         last_error = $2, updated_at = NOW()
+         updated_at = NOW()
      FROM candidate
      WHERE refundable.order_id = candidate.order_id
      RETURNING refundable.*, candidate.refund_attempts AS previous_refund_attempts`,
-    [orderId, reason, retryLimit, refundRetryDelaySeconds()]
+    [orderId, retryLimit, refundRetryDelaySeconds()]
   );
   const order = claimed.rows[0];
   if (!order?.stripe_payment_intent_id) return false;
@@ -3471,9 +3476,11 @@ export async function requestRefund(
           [orderId]
         );
       }
+      // The refund id and the code that put the order here. The sweep used to
+      // pass the order's previous last_error text through as a "reason" (#394).
       await recordOrderEvent(client, orderId, 'refund.requested', 'refund_pending', nextStatus, {
-        reason,
-        refundId: refund.id
+        refundId: refund.id,
+        lastErrorCode: order.last_error_code ?? null
       });
     });
     return true;
@@ -3481,7 +3488,10 @@ export async function requestRefund(
     await query(
       `UPDATE orders SET last_error_code = 'REFUND_REQUEST_FAILED', last_error = $2,
          updated_at = NOW() WHERE order_id = $1 AND status = 'refund_pending'`,
-      [orderId, error instanceof Error ? error.message : 'Refund request failed']
+      // unknown_error, not provider_error, as the fallback: this block mixes
+      // Stripe calls with SQL, and a pg SQLSTATE outside the allowlist must not
+      // be labelled a provider fault (#188, #213). Never the message (#394).
+      [orderId, carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')]
     );
     return false;
   }
@@ -3563,8 +3573,8 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
   expiredCheckouts += orphaned.rowCount || 0;
 
   let refundAttempts = 0;
-  const refunds = await query<{ order_id: string; last_error: string | null }>(
-    `SELECT order_id, last_error FROM orders
+  const refunds = await query<{ order_id: string }>(
+    `SELECT order_id FROM orders
      WHERE status = 'refund_pending'
        AND stripe_payment_intent_id IS NOT NULL
        -- A PAYMENT_AMOUNT_MISMATCH quarantine is a question for an operator,
@@ -3591,9 +3601,7 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
   );
   for (const order of refunds.rows) {
     try {
-      if (
-        await requestRefund(order.order_id, order.last_error || 'Pre-provider fulfillment failure')
-      ) {
+      if (await requestRefund(order.order_id)) {
         refundAttempts += 1;
       }
     } catch (error) {

@@ -162,6 +162,7 @@ export const sendPostcardTool: McpToolDefinition<SendPostcardInput, SendPostcard
     'openai/toolInvocation/invoking': 'Sending postcard...',
     'openai/toolInvocation/invoked': 'Postcard sent',
     'openai/widgetAccessible': true,
+    destructiveHint: true, // Mail cannot be recalled once printed
     openWorldHint: true,
     idempotentHint: true,
   },

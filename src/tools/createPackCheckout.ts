@@ -171,6 +171,7 @@ export const createPackCheckoutTool: McpToolDefinition<
     'openai/toolInvocation/invoking': 'Preparing letter pack checkout...',
     'openai/toolInvocation/invoked': 'Letter pack checkout ready',
     'openai/widgetAccessible': true,
+    destructiveHint: true, // Starts a payment the customer cannot undo alone
     openWorldHint: true,
     idempotentHint: false
   },

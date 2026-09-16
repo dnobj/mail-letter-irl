@@ -225,7 +225,7 @@ Background job tracking for letter processing.
 | scheduled_at | TIMESTAMPTZ | NO | - | When job should run |
 | started_at | TIMESTAMPTZ | YES | - | When processing started |
 | completed_at | TIMESTAMPTZ | YES | - | When finished |
-| error_message | TEXT | YES | - | Legacy twin of `last_error`; an error class and provider status only, never provider message text (migration 031) |
+| error_message | TEXT | YES | - | Legacy twin of `last_error`; an error class and provider status only, never provider or driver message text (migrations 031, 032) |
 | metadata | JSONB | YES | - | Job-specific data |
 | created_at | TIMESTAMPTZ | NO | NOW() | Job creation |
 
@@ -242,7 +242,8 @@ Migrations 020 and 023 turned this table into the transactional outbox. Added si
 `provider_dispatch_started_at`, `held_at`, `hold_reason`, `operator_resolution`, `resolved_at`,
 `completed_at`, `last_error` and `updated_at`. `status` gained `held`, and a constraint ties each status
 to the provider outcomes it may carry. `last_error` and `error_message` hold an error class and provider
-status only, `provider_rejected http_400`, never provider message text (migration 031).
+status only, `provider_rejected http_400`, never provider message text (migration 031); the unclassified
+text of failures from before 023 was rewritten to `error_text_removed` by migration 032.
 
 ### orders
 
@@ -275,8 +276,11 @@ Migration 021 made this the commerce order table. Added since the columns above:
 `hold_previous_status`, `held_at`, `credits_refunded` and `amount_refunded_cents`. `status` follows the
 commerce lifecycle (`checkout_pending`, `paid`, `fulfillment_pending`, `fulfilled`, `payment_failed`,
 `refund_pending`, `refunded`, `disputed`, `held`, `cancelled`); `credits` is required for a pack and must
-be `NULL` for `jit_mail`. `last_error` holds an error class and status only for provider failures
-(migration 031).
+be `NULL` for `jit_mail`. Under the provider, fulfilment, recovery and refund codes `last_error` holds
+an error class only: `provider_rejected http_<status>` (migration 031), the draft or outbox check code
+(`DRAFT_EXPIRED`, `LETTER_NOT_FOUND`), a diagnostic class, or `error_text_removed` where migration 032
+rewrote earlier text (#394). The checkout and amount-mismatch codes store fixed server-authored
+sentences (amounts and product codes, never message text). The refund claim no longer writes it.
 
 ### stripe_disputes
 
@@ -439,6 +443,12 @@ User-submitted feature requests for product feedback.
 - `idx_feature_requests_created_at` on created_at DESC
 - `idx_feature_requests_user_recent` on (user_id, created_at DESC) for rate limiting
 
+**Retention (#393):** the maintenance task `feature-requests-sweep` deletes a row 12 months after
+`created_at` (`purgeExpiredFeatureRequests` in `src/services/featureRequestService.ts`), the optional
+`contact_email` with it. Nothing updates a row after submission (neither admin role holds `UPDATE`
+here, so `status`, `admin_notes`, `reviewed_at` and `resolved_at` are never set), so submission time is
+the only clock. The period is published in `docs/privacy-policy.md`.
+
 ---
 
 ### stripe_webhook_events
@@ -453,7 +463,10 @@ and surfaces on the panel's alert page as an unmatched money event.
 
 Append-only history of an order's status transitions: the event type, the status it left and entered,
 and a bounded JSONB `metadata`. A `provider.terminal_failure` event's metadata carries `errorClass`
-(`provider_rejected http_400`) and the job id, never the provider's message text (migration 031).
+(`provider_rejected http_400`), never the provider's message text (migration 031). Since migration 032
+`jit.fulfillment_rejected` carries `errorClass` too, `refund.requested` carries the refund id and the
+order's `last_error_code`, and `operator.quarantine_released` carries only the cleared code: the
+operator's typed reason lives in `admin_audit_events` alone (#394).
 
 ### commerce_operational_alerts
 
@@ -467,7 +480,8 @@ raise them.
 ### commerce_operator_audit_events
 
 The older operator audit table from the commerce recovery work: hashed idempotency key, actor and
-target, a reason code, before and after state, provider evidence and an outcome, retained two years.
+target, a reason code, before and after state, provider evidence and an outcome. `retention_expires_at`
+marks two years from the row (#395); nothing enforces it yet, and the purge is designed under #398.
 The admin panel writes `admin_audit_events` instead; this table is kept for the four operations it
 recorded.
 
@@ -497,12 +511,20 @@ panel's image recovery page lists those and the resolve command settles them wit
 
 The most recent uploaded image per user (one row per `user_id`), kept so a widget that lost its
 in-memory state can recover the image it was about to send. The URL is a capability URL and is
-treated as one.
+treated as one (#282):
+
+- A read returns the row for at most `LETTER_IRL_RECENT_UPLOAD_TTL_MS`. The default is one hour,
+  the cap in code is six hours, and an unreadable value falls back to one hour.
+- The maintenance task `recent-uploads-sweep` deletes a row 24 hours after its last update
+  (`purgeExpiredRecentUploads`). The six-hour cap keeps every readable row younger than that.
+- The API process also holds a copy in memory, and drops it once it is older than the TTL. That is
+  checked on every call and every five minutes.
 
 ### maintenance_tasks
 
 One row per scheduled maintenance task (`task_name` is the key) with its last start, completion,
-lock, status and error. The panel's maintenance page shows whether a task has an error, never the
+lock, status and error class (a class since migration 032, never the driver's message). The panel's
+maintenance page shows whether a task has an error, never the
 text. The maintenance runner claims a task by its `locked_at` so two instances cannot run it at once.
 
 ### provider_routing
@@ -532,9 +554,10 @@ three bounded JSONB summaries support later authenticated reads, reveals, and co
 every `UPDATE` and `DELETE`; public privileges are revoked and provisioned application roles receive no
 mutation privilege beyond `INSERT`.
 
-Indexes cover environment plus actor/time, environment plus target/time, and correlation ID. Audit
-retention and archival must be approved before any production access; application rollback retains all
-rows.
+Indexes cover environment plus actor/time, environment plus target/time, and correlation ID. Rows are
+kept for 2 years after the action they record and are exempt from account erasure for that period
+(#395); nothing enforces the period yet, and the purge is designed under #398. Application rollback
+retains all rows.
 
 ### admin_command_runs
 
@@ -553,7 +576,7 @@ claim/retry behavior; a partial index covers claimable pending rows.
 
 Migration 022 revokes `PUBLIC` privileges but creates no role or credential. The explicit provisioning
 script (`npm run admin:provision-access`) requires pre-existing, environment-specific reader/operator
-login roles, verifies migrations 021, 022 and the latest migration the grants depend on (031) plus the
+login roles, verifies migrations 021, 022 and the latest migration the grants depend on (032) plus the
 database marker, rejects privileged roles, and reapplies the grant set in `src/admin/provisioning.ts`:
 
 - **Reader** (`letter_irl_admin_reader_<env>`): `SELECT` on the commerce, ledger, outbox, alert, audit
@@ -611,6 +634,7 @@ Production provisioning and the first production connection remain separate owne
 | 29 | 029_proportional_pack_refunds.sql | Proportional refunds of letter packs (#323) |
 | 30 | 030_ledger_description_minimisation.sql | Recipient names and operator reasons rewritten out of the two ledger description columns (#162) |
 | 31 | 031_provider_error_minimisation.sql | Provider message text rewritten out of the job, order and order-event error columns (#162) |
+| 32 | 032_error_text_minimisation.sql | Raw error text and operator reasons rewritten out of the order, event, outbox, pack-refund and maintenance columns (#394) |
 
 ---
 
@@ -659,14 +683,16 @@ Production provisioning and the first production connection remain separate owne
 
 ### commerce_order_events.metadata
 
-Bounded JSONB. For `provider.terminal_failure`:
+Bounded JSONB. For `provider.terminal_failure` and, since migration 032, `jit.fulfillment_rejected`:
 
 ```json
-{ "errorClass": "provider_rejected http_400", "jobId": "…" }
+{ "errorClass": "provider_rejected http_400" }
 ```
 
 Since migration 031 the provider's message text is not stored; the class and HTTP status are the
-operational signal.
+operational signal. `refund.requested` carries `{ "refundId": "…", "lastErrorCode": "…" }` and
+`operator.quarantine_released` carries `{ "clearedCode": "PAYMENT_AMOUNT_MISMATCH" }` (032); the
+operator's reason is on the audit row.
 
 ## Triggers
 

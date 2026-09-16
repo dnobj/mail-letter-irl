@@ -141,7 +141,8 @@ async function handler(
 
     const processed = await downloadAndProcessLetterImageWithPreview(
       { url: imageSource },
-      'header'
+      'header',
+      { actorId: context.user.userId }
     );
     headerImageData = processed.base64DataUri;
     headerImagePreview = processed.previewDataUri;
@@ -165,6 +166,7 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "quote.letter.header_image.failed",
+        errorCode: error instanceof ImageProcessingError ? error.code : "UNKNOWN",
         errorClass: 'validation_error'
       },
       "Header image processing failed"

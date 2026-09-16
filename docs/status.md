@@ -1,14 +1,34 @@
 # Letter IRL Project Status
 
-Last updated: July 16, 2026
+**Last Updated:** September 16, 2026
+**Purpose:** Current product scope, architecture, environment state, and open work
 
-Current phase: production MVP and OpenAI app submission preparation, with development-first releases.
+---
+
+## Overview
+
+Letter IRL is live in production and preparing for OpenAI Apps SDK submission. Releases go to
+development first and are promoted to production after automated and manual acceptance.
 
 ## Product
 
-Letter IRL lets an authenticated user create, preview, and send physical US letters and postcards from ChatGPT or the Letter IRL website. The product includes prepaid letter packs, address validation, image generation/upload, preview widgets, return-address storage, order history, and provider status retrieval.
+An authenticated user can create, preview, and send physical US letters and 6x9 postcards from
+ChatGPT, and manage their account on letterirl.com.
 
-The ChatGPT integration is an MCP server with OpenAI Apps SDK widget resources. Existing public MCP tool names and schemas are treated as stable compatibility contracts.
+- **Mail:** text-only letters, letters with a header image, letters with an enclosed image, and
+  postcards. Every send starts from a preview draft and needs explicit confirmation.
+- **Paying:** prepaid letter packs (2, 5 or 50 letters), bought in the conversation
+  (`create_pack_checkout`) or on the website; **Pay & Send**, which buys and sends one previewed item
+  in a single Stripe-hosted checkout; and promo codes. Both checkouts are external Stripe Checkout.
+- **Images:** attachments, `imageUrl` handoff, the upload widget (including ChatGPT Library picks),
+  and `generate_image_for_mail`, which spends the user's Letter IRL image generations or routes the
+  request to ChatGPT's free built-in generator.
+- **Account:** saved return address, balance, order and purchase history, purchase status, feature
+  requests.
+
+The MCP surface is 22 tools and 6 widgets ([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)).
+Tool names and schemas are treated as stable compatibility contracts. Widget template URIs are
+versioned (`WIDGET_TEMPLATE_VERSION`, 31 on `dev`).
 
 ## Environments
 
@@ -16,69 +36,90 @@ The ChatGPT integration is an MCP server with OpenAI Apps SDK widget resources. 
 | --- | --- | --- |
 | Backend | `master` -> Railway production | `dev` -> Railway development |
 | Website | `main` -> Railway production | `dev` -> Railway development |
-| Database | Neon production branch | Neon `dev` branch |
+| Admin panel | `letter-irl-admin-prod`, tailnet-only, full mode | `letter-irl-admin`, tailnet-only |
+| Database | Neon production branch | Neon `dev` branch (independent, never copied from production) |
 | Payments | Stripe live | Stripe test |
-| Mail provider | PostGrid live | PostGrid test/dummy |
+| Mail provider | PostGrid live | PostGrid test / dummy |
 | Auth | production Auth0 tenant | development Auth0 tenant |
 
-Railway uses one project with separate production and development environments. Neon uses one project with isolated database branches. See [infrastructure.md](infrastructure.md).
+See [infrastructure.md](infrastructure.md) for identifiers and URLs.
 
-## Current Architecture
+### What is promoted
 
-- Backend: strict ESM TypeScript compiled with `tsc`, then run with Node 22.
-- Website: Next.js standalone production server.
-- Database: Neon PostgreSQL through pooled connection strings and a five-client application pool.
-- Mail dispatch: transactional `letter_jobs` outbox with immediate provider submission.
-- Recovery: one-shot hourly Railway maintenance cron.
-- Temporary generated images: private Railway S3-compatible bucket with a 15-minute TTL.
-- Production availability: API and website stay warm.
-- Development cost control: API and website use Railway Serverless; public health wake-up acceptance passed, with authenticated ChatGPT acceptance still pending.
+Production (`master`) was last promoted on 2026-09-14 and carries migrations through
+`031_provider_error_minimisation.sql`. `dev` is ahead with the retention follow-ups that are not yet
+in production:
 
-The API process starts no queue polling, status-sync, credit-cleanup, or image-cleanup timers. `pg-boss` has been removed from the deployed architecture.
+- deletion of stale upload links 24 hours after the last upload (#397);
+- deletion of feature requests 12 months after submission (#400);
+- error classes instead of message text in the remaining writers, and migration
+  `032_error_text_minimisation.sql` (#401);
+- the related documentation (#391, #392, #399).
+
+## Architecture
+
+- **Runtime:** strict ESM TypeScript compiled with `tsc`, run with Node 22 on Railway.
+- **Database:** Neon PostgreSQL 17 through pooled connection strings and a five-client pool.
+  Migrations run as Railway's pre-deploy command, from `railway.toml` until Railway stops reading it
+  on 2026-12-01 ([deployment.md](deployment.md)).
+- **Mail dispatch:** a transactional `letter_jobs` outbox with immediate provider submission. The API
+  starts no queue, polling or cleanup timers; pg-boss has been removed.
+- **Maintenance:** a one-shot hourly Railway cron (`npm run maintenance`) that runs the retention
+  sweeps, retries outbox work, reconciles commerce and pack refunds, recovers image reservations,
+  removes expired temporary images, syncs provider status every six hours, and runs daily cleanup.
+- **Temporary images:** a private Railway S3-compatible bucket with a 15-minute TTL.
+- **Authentication:** ChatGPT uses a manually imported Auth0 CIMD application per environment and an
+  exact `/mcp` audience with `mail:read`, `mail:draft`, `mail:send`. The website and REST API use the
+  same Auth0 API since 2026-09-14. Other MCP clients use personal access tokens.
+  ([auth0-setup.md](auth0-setup.md))
+- **Operator access:** a separate admin panel service per environment, reachable only over the owner's
+  tailnet. The public API returns 404 for every legacy admin path.
+  ([admin-panel-guide.md](admin-panel-guide.md))
+- **Availability:** production API and website stay warm; development API and website use Railway
+  Serverless.
 
 ## Safety Properties
 
 - Draft consumption, order creation, credit deduction, and outbox insertion commit atomically.
-- A draft can produce at most one Letter IRL order.
-- A letter has one outbox row and a stable provider idempotency key.
-- Immediate and maintenance retries reuse the same PostGrid `Idempotency-Key`.
-- Cloud image URLs survive API restarts for their documented lifetime.
-- Production and development database/payment/provider settings remain isolated.
-- MCP request payloads containing addresses or letter text are not written to routine logs.
+- A draft can produce at most one Letter IRL order, and a letter has one outbox row with a stable
+  provider idempotency key.
+- A provider outcome that does not prove what happened is held for an operator, never resubmitted.
+- Only a verified, paid Stripe event can fund or fulfil an order.
+- Letter text, addresses and upload links are never written to logs, diagnostics, error columns or
+  audit rows ([security-and-policy.md](security-and-policy.md)).
+- Production and development database, payment, provider and identity settings stay isolated, and the
+  boot validator refuses crossed configuration ([deployment.md](deployment.md)).
 
-## Verification Status
+## Verification
 
-For the idle-cost release as of July 16, 2026:
+- **CI:** `.github/workflows/ci.yml` runs lint, build, unit and submission tests, plus the
+  real-PostgreSQL integration suites, on every pull request to `dev` or `master`.
+- **Local:** `npm run verify` and `npm run test:integration:local` mirror the two CI jobs.
+- **Manual:** [manual-tests.md](manual-tests.md) records each acceptance run against development and
+  production.
+- **Dependencies:** `npm audit --omit=dev` must report zero vulnerabilities before a production deploy.
 
-- strict backend TypeScript: passing;
-- backend source/test lint: passing;
-- backend unit suite: 651 tests passing after the final dependency and configuration updates;
-- backend production dependency audit: zero known vulnerabilities;
-- website lint and production build: passing;
-- website dependency audit: zero known vulnerabilities;
-- local API RSS: approximately `106.7 MB` compiled versus `219.3 MB` under `tsx`.
+## Open Work
 
-Development rollout status:
-
-- migration `020_transactional_outbox.sql` is applied;
-- the API, website, OAuth metadata, manifest, unauthenticated MCP challenge, and ChatGPT CORS preflight respond correctly;
-- the hourly maintenance command has completed multiple short runs and closed its database pool cleanly;
-- the development API and maintenance service use the pooled Neon development hostname;
-- Railway has a `$7` email alert and `$20` hard limit, and Neon has a `$10` email-only spending limit;
-- both development Railway web services have Serverless enabled;
-- the Neon development compute has been observed suspended with its `0.25-0.5 CU` and five-minute scale-to-zero policy active.
-- both development web services have been observed sleeping; their first health responses completed in `1.34s` (API) and `1.38s` (website), below the three-second limit;
-- post-wake manifest, OAuth metadata, ChatGPT CORS preflight, and website homepage checks pass;
-- an hourly maintenance run from a suspended Neon compute completed in about one second and closed its pool cleanly.
-
-Image restart persistence, the authenticated post-wake ChatGPT widget/image flows, and the seven-day Neon idle observation must still pass before production promotion. Production remains on the previous release with a temporary ten-minute polling safeguard until that acceptance gate is complete. Track the remaining work in [manual-tests.md](manual-tests.md) and [idle-cost-operations.md](idle-cost-operations.md).
+- **Apps SDK submission:** pre-submission; owner tasks in
+  [app-submission/owner-checklist.md](app-submission/owner-checklist.md).
+- **Content retention enforcement:** the letter and draft content sweep runs in report mode
+  (`CONTENT_RETENTION_MODE` unset) until the enforce-path defects tracked in #153 are fixed. The
+  upload-link and feature-request sweeps are separate and always enforce.
+- **Operator audit purge:** the 2-year purge of operator audit rows is tracked in #398.
+- **Railway config-as-code:** move the pre-deploy migration command out of `railway.toml` before
+  2026-12-01.
+- **Remaining CIMD cases:** CIMD-06, CIMD-07, CIMD-09 and CIMD-10 in
+  [manual-tests.md](manual-tests.md).
+- **Agentic Commerce Protocol:** planned for when OpenAI makes it available to apps like Letter IRL;
+  see [acp-implementation-guide.md](acp-implementation-guide.md).
 
 ## Release Path
 
 1. Feature branches target `dev`.
-2. Railway deploys development automatically.
-3. Automated and documented manual tests run against development.
-4. Backend `dev` is promoted to `master`; website `dev` is promoted to `main` only after acceptance.
+2. Railway deploys development automatically, running migrations first.
+3. CI, then the documented manual tests, run against development.
+4. Backend `dev` is promoted to `master`, and website `dev` to `main`, only after acceptance.
 
 ## Key Documents
 
@@ -86,6 +127,7 @@ Image restart persistence, the authenticated post-wake ChatGPT widget/image flow
 - [Deployment](deployment.md)
 - [Railway Setup](railway-setup.md)
 - [Letter Send Flow](letter-send-flow.md)
+- [Just-in-Time Purchase Plan](just-in-time-purchase-plan.md)
+- [Admin Panel Guide](admin-panel-guide.md)
 - [Manual Tests](manual-tests.md)
-- [Idle-Cost Operations](idle-cost-operations.md)
 - [OpenAI Submission Checklist](app-submission/owner-checklist.md)

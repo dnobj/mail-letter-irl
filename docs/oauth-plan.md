@@ -1,11 +1,14 @@
 # OAuth & Identity Plan (Google Cloud + Firestore)
 
-> Superseded for ChatGPT MCP authentication by
-> `docs/oauth-cimd-migration-plan.md`. The active architecture is Auth0 manual
-> public CIMD, authorization code + PKCE S256, no client secret, a dedicated
-> exact `/mcp` audience, and `mail:read`/`mail:draft`/`mail:send`. DCR and the
+> **Superseded in full; kept as history.** No part of the Google Cloud or Firestore design below was
+> built: identity is Auth0 and storage is Neon PostgreSQL. The `https://letter-irl/api` audience it
+> names was deleted from both tenants on 2026-09-14. For ChatGPT MCP authentication see
+> `docs/auth0-setup.md` and `docs/oauth-cimd-migration-plan.md`. The active architecture is Auth0 manual
+> CIMD (client authentication `private_key_jwt`, as ChatGPT's CIMD document declares), authorization
+> code + PKCE S256, a dedicated exact `/mcp` audience, and `mail:read`/`mail:draft`/`mail:send`. DCR and the
 > static registration route are temporary rollback compatibility only.
-> Website/REST and Claude/PAT authentication remain separate.
+> The website and REST routes have used the same MCP API since 2026-09-14;
+> Claude/PAT authentication remains separate.
 
 This plan outlines how to add per-user identity using Auth0 (for RFC 7591 support) while keeping Firestore and the rest of the stack on Google Cloud. The goal is to let ChatGPT authenticate each end user, so Letter IRL can map tool calls to individual Firestore accounts.
 

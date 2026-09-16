@@ -1,6 +1,16 @@
 # ChatGPT OAuth migration: Auth0 public CIMD with PKCE
 
-Status: implementation-ready  
+> **Shipped, with one correction.** CIMD is live in both tenants: the production CIMD client was
+> imported on 2026-09-05, and the website and REST API moved onto the same MCP API on 2026-09-14
+> ([auth0-setup.md](auth0-setup.md)). The plan below assumed a public client with
+> `token_endpoint_auth_method: none` and no `private_key_jwt`. That shape turned out to be
+> unachievable: ChatGPT's CIMD document declares `private_key_jwt`, and Auth0 applies the declared
+> method as given, without Enterprise. Where this plan says `none` or "public client", read the
+> corrected contract header in [auth0-tenant-configuration.md](auth0-tenant-configuration.md).
+> Open acceptance cases: CIMD-06, CIMD-07, CIMD-09 and CIMD-10 in [manual-tests.md](manual-tests.md).
+> Kept as the design record.
+
+Status: shipped (see note above)  
 Tracking issue: https://github.com/dnobj/mail-letter-irl/issues/160  
 Target branches: dev first; master only after acceptance  
 Last reviewed: 2026-07-23
@@ -98,7 +108,7 @@ Create a dedicated MCP API identifier rather than changing the existing website/
 - every REST route requires the scope its MCP twin requires;
 - the server accepts exactly one audience in every mode.
 
-`https://letter-irl/api` is retired. It is deleted from each tenant only after that environment's website requests the MCP audience and the tenant's Default Audience is repointed.
+`https://letter-irl/api` is retired. It was deleted from both tenants on 2026-09-14, after each environment's website requested the MCP audience and each tenant's Default Audience was repointed to its MCP API.
 
 ### Scopes
 

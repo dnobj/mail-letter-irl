@@ -1,5 +1,10 @@
 # Scope and Goals
 
+> **Historical (November 2025): the original v1 scope.** Much of it has since changed. Payments and
+> purchases are no longer a non-goal: letter packs and Pay & Send are live, and letters cost 2
+> internal credits each, shown to users as letters. For the current product see
+> [status.md](status.md) and [business-overview.md](business-overview.md).
+
 ## Product Snapshot
 - **Product name:** Letter IRL
 - **Primary objective:** Enable ChatGPT users to draft, review, and mail physical letters using the Apps SDK integration.

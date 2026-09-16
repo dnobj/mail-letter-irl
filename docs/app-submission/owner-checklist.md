@@ -1,6 +1,7 @@
 # OpenAI Apps SDK Owner Checklist
 
-Last updated: May 31, 2026
+**Last Updated:** September 16, 2026
+**Purpose:** Owner-managed submission tasks, assets, and the final readiness gate
 
 This checklist tracks the non-code items the project owner needs to gather, verify, or decide before submitting Letter IRL for OpenAI Apps SDK review. Keep secrets, private billing details, private tax IDs, and passwords out of this file.
 
@@ -20,22 +21,20 @@ This checklist tracks the non-code items the project owner needs to gather, veri
 
 ## Owner Tasks
 
-### DEV Auth0 public CIMD gate
+### Auth0 CIMD
 
-- [ ] Copy the current DEV ChatGPT CIMD URL and exact callback.
-- [ ] Export or screenshot the existing DEV Auth0 application/API/connection
-      settings for rollback; record client count without secrets.
-- [ ] Enable Auth0 CIMD registration and the required resource compatibility
-      profile in DEV only.
-- [ ] Import the CIMD URL as a public strict third-party app; verify
-      authorization code, PKCE S256, and `token_endpoint_auth_method: none`.
-- [ ] Create/grant the dedicated DEV `/mcp` API with only `mail:read`,
-      `mail:draft`, and `mail:send`.
-- [ ] Configure the accepted code/environment variables and deploy to Railway
-      DEV only. Do not change production.
-- [ ] Hand off to LIRL · Test · Browser for the versioned cases in
-      `docs/manual-tests.md`; do not disable DCR until dependency inventory,
-      rollback exercise, and acceptance pass.
+Done: CIMD registration is enabled and a strict third-party CIMD client is imported in both tenants
+(production import 2026-09-05), with the dedicated `/mcp` API granting only `mail:read`, `mail:draft`
+and `mail:send`. The client authenticates with `private_key_jwt`, the method ChatGPT's CIMD document
+declares; the earlier `token_endpoint_auth_method: none` target was unachievable. The website and
+REST API use the same API since 2026-09-14. Details: [auth0-setup.md](../auth0-setup.md) and
+[auth0-tenant-configuration.md](../auth0-tenant-configuration.md).
+
+Remaining:
+
+- [ ] Close CIMD-06, CIMD-07, CIMD-09 and CIMD-10 in [manual-tests.md](../manual-tests.md).
+- [ ] Decide when to turn off OIDC Dynamic Client Registration in the development tenant, which
+      [development.md](../development.md) records as still enabled as rollback inventory.
 
 ### OpenAI Platform Access
 

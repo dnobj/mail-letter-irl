@@ -217,8 +217,8 @@ the only rehearsal of the rollback path.
       the recorded static client (`CHATGPT_STATIC_CLIENT_ID`,
       `CHATGPT_STATIC_REDIRECT_URIS`) and deploy. Keep `LETTER_IRL_OAUTH_AUDIENCE`
       the single `/mcp` resource: there is no legacy audience any more, and the
-      retired `https://letter-irl/api` API has no scopes, so its tokens could
-      never use a tool.
+      retired `https://letter-irl/api` API was deleted from both tenants on
+      2026-09-14.
 - [ ] Run a fresh-link smoke test and record behavior/client count.
 - [ ] Restore CIMD mode (`false`), remove the static client's MCP API grant,
       redeploy DEV, and rerun CIMD-01, CIMD-03, and CIMD-04.
@@ -246,12 +246,22 @@ the only rehearsal of the rollback path.
 
 Quick checks after every deployment. All should pass before considering deployment successful.
 
-**Status:** Executed 2026-09-13 (UTC) against production (build 2a0144d) and development
-(build 7d3cdc5) over plain HTTPS: `/healthz` and `/readyz` 200 on both, the protected-resource
-document exact on both (resource `/mcp`, the environment's Auth0 issuer, the seven scopes), the
-authorization-server proxy and `POST /oauth/register` 404 on both, `/manifest.json` 200 on both,
-the website 200. The DEV connector refresh after #376 listed every widget at v29. Login and
-dashboard were not exercised.
+**Status:** Executed 2026-09-15 (UTC) against production (build 56f297d) and development
+(build 61a140b), after the Auth0 Default Audience repoint and the retired API's deletion (#391):
+- `/healthz` and `/readyz` return 200 on both.
+- Both protected-resource documents are exact on both: resource `/mcp`, the environment's Auth0
+  issuer, and the seven scopes.
+- Auth0's discovery document names the same issuer.
+- The authorization-server proxy and `POST /oauth/register` return 404 on both.
+- `/manifest.json` and the website return 200 on both.
+- On both websites, `/auth/login` redirects to the environment's `/authorize` with the MCP
+  audience and full scope. Auth0 answers with its login page, and also does so with the audience
+  removed (the Default Audience fallback).
+- Both dashboards load for a signed-in session, with `credits/balance`, `letters` and
+  `promo/redeem-pending` at 200.
+
+The previous run, 2026-09-13 (production 2a0144d, development 7d3cdc5), did not exercise login
+or the dashboard. The DEV connector refresh after #376 listed every widget at v29.
 
 ### API Health
 - [x] `GET https://api.letterirl.com/healthz` returns 200
@@ -266,8 +276,8 @@ dashboard were not exercised.
 
 ### Website
 - [x] `https://letterirl.com` loads
-- [ ] Login button redirects to Auth0
-- [ ] Dashboard loads after login
+- [x] Login button redirects to Auth0
+- [x] Dashboard loads after login
 
 ---
 
@@ -276,20 +286,38 @@ dashboard were not exercised.
 Test the full ChatGPT connector flow.
 
 ### OAuth Flow (US-ACCT-01, US-DCR-01)
-- [ ] Open ChatGPT → GPT that uses Letter IRL
-- [ ] Click "Sign in" when prompted
-- [ ] Auth0 login page appears
+
+**Status:** Reconnect executed 2026-09-15 in development, after the Auth0 cleanup (#391):
+- In the current ChatGPT UI, **Disconnect** (Settings → Plugins → the app → **…**) also removes
+  the app from the installed plugins. The app's own page under Plugins then offers **Install
+  plugin**, which runs the Auth0 sign-in.
+- After signing in, the first `get_account_balance` call in a fresh chat succeeded with no
+  prompt, and the development API log shows it JWT-authenticated.
+- The login provider was not recorded, so the per-provider lines stay open.
+
+- [x] Open ChatGPT → the Letter IRL app
+- [x] Click "Sign in" when prompted (here: **Install plugin** on the app's page)
+- [x] Auth0 login page appears
 - [ ] Can login with Google
 - [ ] Can login with Microsoft
 - [ ] Can login with GitHub
 - [ ] Can login with Email/Password
-- [ ] After login, redirected back to ChatGPT
-- [ ] ChatGPT shows "Connected" status
+- [x] After login, redirected back to ChatGPT
+- [x] ChatGPT shows "Connected" status (the app is installed again and its tools run)
 
 ### CIMD client-count behavior
-- [ ] After connecting, check Auth0 dashboard
-- [ ] No new client or DCR call is created during connect/reconnect
-- [ ] ChatGPT uses the manually imported public CIMD application
+
+**Status:** Executed 2026-09-15 in development, with the reconnect above:
+- The tenant held the same 7 applications before and after.
+- Its log since the test began holds only a **Success Login** and a **Success Exchange** for the
+  `ChatGPT` CIMD application, with audience
+  `https://letter-irl-api-development.up.railway.app/mcp`, and no client creation.
+- The exchange event records no scope list (`"scope": null`), so the granted scopes were not read
+  from the log.
+
+- [x] After connecting, check Auth0 dashboard
+- [x] No new client or DCR call is created during connect/reconnect
+- [x] ChatGPT uses the manually imported CIMD application
 
 ### MCP Tools in ChatGPT
 
@@ -298,6 +326,11 @@ with the (DEV) app: the balance (12 prepaid letters, no permission prompt for a 
 the order history (13 mailed-letter orders and 19 letter-pack purchase records with their
 statuses, #365), a preview that rendered the letter card with the draft id, the cost and a
 **Send Letter** button, and the send itself (the Letter Sending Flow below carries the readings).
+
+Re-run 2026-09-15 after the Auth0 cleanup, in a fresh chat with each app through Claude in
+Chrome. The production **Letter IRL** app and the **Letter IRL (DEV)** app each answered the
+balance question through `get_account_balance`, with no permission prompt. Each API's log shows
+the call JWT-authenticated and successful.
 
 - [x] Ask "What's my credit balance?" → `get_account_balance` works
 - [x] Ask "Show my letters" → `list_orders` works
@@ -520,7 +553,7 @@ replaces the link with the outcome.
 
 ### PAY-05 — Back to the conversation after checkout (issue #372)
 
-**Status:** Two web runs in development. Android not run.
+**Status:** Passed on the web in development on 2026-09-14, with widget v31. Android not run.
 
 - **2026-09-13: the return link did not arrive.**
   - The owner clicked the card's link from the embedded browser; no safe-link modal was reported.
@@ -546,6 +579,19 @@ replaces the link with the outcome.
   - `create_pack_checkout` never reuses a pack order, so that button starts a second purchase.
   - The original tab was unaffected and showed the purchase paid after its visibility refresh.
   - Widget v31 fixes it: the card keeps its order in `widgetState` and resumes from it.
+- **2026-09-14: passed with widget v31.** The run used the DEV app on ChatGPT web, the connector
+  refreshed to v31, and a test card.
+  - At 21:21Z the first `create_pack_checkout` after "Allow once" was dropped, and only the template
+    read reached the API. The card showed "No checkout is showing on this card…" with **Create my
+    checkout**, while ChatGPT's reply claimed the checkout had started.
+  - **Create my checkout** created the order at 21:27:11Z, and `purchase.start` kept the return link.
+  - `checkout.session.completed` arrived at 21:27:16Z, and `purchase.return` offered the conversation
+    link at 21:27:19Z.
+  - **Back to your conversation** opened the same conversation in a new tab. At 21:27:27Z that tab's
+    card read `get_purchase_status` once and showed "Paid. 2 letters added to your account." with
+    "pack t7". It opened no checkout and offered no second one.
+  - The card had created this order itself, so no host tool result could carry it. ChatGPT web
+    therefore restores `widgetState` on reopen.
 
 Background: the checkout card now opens a start page on the API host through `window.openai.openExternal`
 instead of the Stripe URL directly. For an allowlisted redirect origin (the API origin is in
@@ -558,10 +604,11 @@ on desktop as a plain link, on iPhone and iPad text only until a device has prov
       fresh chat with the DEV app, buy the Starter Pack, and when the card shows the link, click it.
       Record whether a safe-link modal appeared, and whether the tab that opened is the Stripe page
       (the start page forwards in one hop). Cancel with Stripe's back arrow.
-- [ ] On the return page: is the button **Back to your conversation**? If so ChatGPT appended a
+- [x] On the return page: is the button **Back to your conversation**? If so ChatGPT appended a
       return link. Record the shape of the link's target (conversation URL or something else) from the
       dev log or the page source, without pasting it into a shared place. Click it and record where
-      it lands.
+      it lands. (Yes, on both 2026-09-14 runs: `linkOffered=conversation`, and the button lands on
+      the same conversation.)
 - [ ] Android (owner's phone over adb): same purchase, tap the card's link, cancel with Stripe's back
       arrow, tap **Back to your conversation**. Expected: the ChatGPT app comes to the front on the
       conversation, even with the app's link handling switched off.
@@ -569,11 +616,12 @@ on desktop as a plain link, on iPhone and iPad text only until a device has prov
       client, and check the dev log for the start-page request's query (the API logs no values).
 - [ ] If the card's tap opened nothing, record that the fallback link appeared after a moment and
       that it opens the checkout.
-- [ ] Reopened conversation (widget v31 or later, with the DEV connector refreshed): after paying,
+- [x] Reopened conversation (widget v31 or later, with the DEV connector refreshed): after paying,
       click **Back to your conversation**, or reload the conversation. Within a moment the card must
       show the order and **Paid**. It must never show "No checkout" with **Create my checkout**, and
       it must not open a checkout tab by itself. The dev log shows one `get_purchase_status` for the
-      order straight after the reload, and no `create_pack_checkout`.
+      order straight after the reload, and no `create_pack_checkout`. (Passed on 2026-09-14 at
+      21:27Z. See the Status list above.)
 
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
 
@@ -1141,9 +1189,9 @@ returns the first outcome; every step is in the audit log.
 
 **Status:** Not run 2026-09-08: no job was held on an ambiguous outcome.
 
-**Preconditions:** Full mode as above; a job held on an ambiguous provider outcome (the stub evidence
-flow in [deployment.md](deployment.md#ambiguous-image-reservation-operator-procedure) describes how the
-dummy provider produces one).
+**Preconditions:** Full mode as above; a job held on an ambiguous provider outcome. The decision rules are in
+[deployment.md](deployment.md#operator-recovery-through-the-admin-panel). The dummy provider cannot
+produce an ambiguous outcome (its failures are definite rejections), so this case needs a real one.
 
 **Steps:**
 
@@ -1267,7 +1315,7 @@ audit.
 
 1. [ ] Open the order; verify the quarantine panel and the warning in the preview.
 2. [ ] Execute; verify the code is cleared, the order event `operator.quarantine_released` carries the
-   reason, and the next `npm run maintenance` (or hourly run) refunds the order.
+   cleared code (the reason is on the audit row alone, #394), and the next `npm run maintenance` (or hourly run) refunds the order.
 
 **Pass criteria:** Release is a deliberate operator decision, recorded, and the sweep then acts.
 
@@ -1280,8 +1328,8 @@ audit.
    verify `409 ADMIN_STALE_PREVIEW`. Preview again and execute; verify `active`.
 3. [ ] Redeem the code with a test account (`redeem_promo_code`); verify the campaign page lists the
    redemption with a masked email and that "delete" is no longer offered. End the campaign.
-4. [ ] `/images`: with an ambiguous reservation (the stub evidence flow in
-   [deployment.md](deployment.md#ambiguous-image-reservation-operator-procedure)), preview "release as
+4. [ ] `/images`: with an ambiguous reservation (decision rules in
+   [deployment.md](deployment.md#operator-recovery-through-the-admin-panel)), preview "release as
    compensation" and execute; verify the reservation is `released`, the quota is back, and `/audit` shows
    `image.resolve` alongside the domain's `image_reservation_resolve` row.
 
@@ -1435,10 +1483,18 @@ Rollout note (July 16, 2026): the outbox migration, pooled development database 
 Run after fixing issues.
 
 ### After Auth Changes
+
+**Status:** Run 2026-09-15, after the Auth0 Default Audience repoint and the retired API's
+deletion (#391):
+- Token validation: the ChatGPT balance calls above succeeded against both APIs, and both
+  dashboards' REST calls returned 200.
+- Duplicate clients: none after the development reconnect.
+- Login providers and personal access tokens were not exercised.
+
 - [ ] All OAuth providers work
-- [ ] Token validation works
+- [x] Token validation works
 - [ ] PAT authentication works
-- [ ] No duplicate Auth0 clients created
+- [x] No duplicate Auth0 clients created
 
 ### After Payment Changes
 - [ ] Checkout creates correct session

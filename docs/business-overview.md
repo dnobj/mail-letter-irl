@@ -1,6 +1,7 @@
 # Letter IRL: Business Overview
 
-**Last Updated**: November 21, 2025
+**Last Updated:** September 16, 2026
+**Purpose:** Business context: users, model, goals, and positioning
 
 ## What is Letter IRL?
 
@@ -51,20 +52,23 @@ The app integrates with ChatGPT as an MCP (Model Context Protocol) server, allow
 
 ## Business Model
 
-### Revenue Model: Credit-Based Prepaid System
+### Revenue Model: Prepaid Letter Packs and Pay & Send
 
 | Component | Description |
 |-----------|-------------|
-| **Credit Packages** | Users purchase credits upfront (e.g., 5, 10, 25 credits) |
-| **Per-Letter Cost** | Each letter costs a fixed number of credits |
-| **Margin** | Markup between PostGrid costs and credit value |
+| **Letter Packs** | Prepaid letters: Starter 2 for $5, Regular 5 for $10, Power 50 for $90, valid 24 months |
+| **Pay & Send** | One letter or postcard bought and sent in a single checkout, $4.99 |
+| **Per-Letter Cost** | One letter or postcard per send (2 internal credits; customers only see letters) |
+| **Margin** | Markup between PostGrid costs and the per-letter price |
 | **No Subscription** | Pay-as-you-go flexibility |
 
-### Pricing Structure (Estimated)
+User-facing copy says **letters**, never credits or tokens: OpenAI's app commerce guidelines restrict
+selling digital credits. See [pricing-and-credits.md](pricing-and-credits.md).
 
-- PostGrid cost: ~$0.85 (B&W) to $1.20+ (color/double-sided)
-- User cost: ~$2-5 per letter (depending on credit package)
-- Margin: 50-200%+ depending on volume pricing
+### Pricing Structure
+
+- PostGrid cost: ~$0.85 (B&W) to $1.20+ (color/double-sided), estimated
+- User cost: $1.80-$2.50 per letter in a pack, $4.99 with Pay & Send
 
 ### Potential Future Revenue Streams
 
@@ -73,7 +77,6 @@ The app integrates with ChatGPT as an MCP (Model Context Protocol) server, allow
 - Business/enterprise plans
 - International mail premium
 - Expedited delivery options
-- Postcard offerings (lower price point, higher volume)
 
 ---
 
@@ -86,22 +89,24 @@ The app integrates with ChatGPT as an MCP (Model Context Protocol) server, allow
 ### Strategic Goals
 
 1. **Build a Sustainable Business**
-   - Generate revenue through credit purchases
+   - Generate revenue through letter packs and Pay & Send
    - Achieve positive unit economics (revenue > PostGrid + overhead costs)
    - Grow user base organically through ChatGPT ecosystem
 
 2. **Create Defensible Value**
    - Seamless integration with ChatGPT (MCP/Apps SDK)
-   - Reliable delivery infrastructure (job queue, retry logic)
+   - Reliable delivery infrastructure (transactional outbox, held ambiguous outcomes, hourly recovery)
    - Trust through address validation and order tracking
    - Frictionless payment via Stripe
 
 3. **Expand to Adjacent Use Cases**
-   - Postcards (visual, lower cost, higher volume)
    - Bulk mailing (holiday cards, announcements)
    - Business correspondence
    - International mail
-   - Image/photo integration (when platform supports it)
+   - In-ChatGPT checkout through the Agentic Commerce Protocol, once available to apps like Letter IRL
+
+   Shipped since this page was first written: 6x9 postcards, images in letters and postcards
+   (upload, reuse, and Letter IRL image generation), and Pay & Send.
 
 ---
 
@@ -135,9 +140,9 @@ The app integrates with ChatGPT as an MCP (Model Context Protocol) server, allow
 - Conversion rate (preview → send)
 
 ### Revenue
-- Credit purchases
+- Letter pack and Pay & Send purchases
 - Average revenue per user (ARPU)
-- Credit utilization rate
+- Prepaid letter utilization and expiry rate
 
 ### Engagement
 - Letters sent per user
@@ -159,7 +164,7 @@ The app integrates with ChatGPT as an MCP (Model Context Protocol) server, allow
 |--------|---------|
 | **What** | Send real letters via ChatGPT conversation |
 | **Who** | Individuals who value physical mail but prefer digital convenience |
-| **How** | Credit-based pricing, PostGrid fulfillment, OAuth authentication |
+| **How** | Prepaid letter packs and Pay & Send, PostGrid fulfillment, OAuth authentication |
 | **Why** | Bridge AI and physical world, monetize conversational interface |
 | **Goal** | Profitable business proving the AI-to-action model |
 

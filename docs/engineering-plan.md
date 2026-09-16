@@ -1,5 +1,11 @@
 # Engineering Plan and Modular Architecture
 
+> **Historical (November 2025).** This was the plan for turning the prototype into a production
+> codebase, and its next steps are done. The modules it names (`src/interface`, `src/persistence`,
+> `src/widgets`, a file-backed store, pino/winston) were not built that way. For the current layout
+> see [development.md](development.md); for the rules that govern changes see
+> [acid-transaction-standard.md](acid-transaction-standard.md) and `AGENTS.md`.
+
 This plan outlines how to evolve the Letter IRL prototype into a production-ready, modular codebase with first-class debugging and logging. Each module should define narrow interfaces so teams (or Codex agents) can build and test pieces independently.
 
 ## Target Module Breakdown

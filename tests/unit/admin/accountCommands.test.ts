@@ -87,12 +87,12 @@ describe("account commands", () => {
         return "lifted" as const;
       }),
       countStandingDisputes: vi.fn(async () => 0),
-      releaseAmountMismatchQuarantine: vi.fn(async (_client: unknown, orderId: string, reason: string) => {
-        calls.release.push([orderId, reason]);
+      releaseAmountMismatchQuarantine: vi.fn(async (_client: unknown, orderId: string) => {
+        calls.release.push([orderId]);
         return "released" as const;
       }),
-      adjustCreditsWithClient: vi.fn(async (_client: unknown, userId: string, amount: number, reason: string) => {
-        calls.adjust.push([userId, amount, reason]);
+      adjustCreditsWithClient: vi.fn(async (_client: unknown, userId: string, amount: number) => {
+        calls.adjust.push([userId, amount]);
         return { user: { credits: 4 + amount } as never, transaction: { transaction_id: 7 } as never };
       }),
       grantOperatorImageEntitlement: vi.fn(async (_client: unknown, params: unknown) => {
@@ -141,10 +141,10 @@ describe("account commands", () => {
 
     const result = await commands.adjustBalance.execute(execution({}), "auth0|u1", { letters: 2, direction: "remove" }, preview);
     expect(result).toEqual({ creditsAfter: 0, transactionId: 7 });
-    // A fixed description, not the operator's reason: this string becomes the
-    // ledger description the customer reads back through the credits API, and
-    // the reason belongs to the audit trail alone (A-13).
-    expect(calls.adjust).toEqual([["auth0|u1", -4, "Operator adjustment"]]);
+    // The operator's reason never reaches the ledger seam: the description is
+    // a fixed label inside the service, and the reason belongs to the audit
+    // trail alone (A-13, #394).
+    expect(calls.adjust).toEqual([["auth0|u1", -4]]);
     expect(JSON.stringify(calls.adjust)).not.toContain("support ticket 42");
     expect(commands.adjustBalance.verb({ letters: 1, direction: "add" })).toBe("ADD-LETTERS");
   });
@@ -167,7 +167,9 @@ describe("account commands", () => {
       commands.releaseQuarantine.preview(scripted({ order: [{ ...ORDER_ROW, last_error_code: null }] }), "order_1", {}),
     ).rejects.toMatchObject({ code: "ADMIN_INVALID_STATE" });
     await commands.releaseQuarantine.execute(execution({}), "order_1", {}, preview);
-    expect(calls.release).toEqual([["order_1", "support ticket 42"]]);
+    // The reason stays on the audit row; the order event carries only the cleared code (#394).
+    expect(calls.release).toEqual([["order_1"]]);
+    expect(JSON.stringify(calls.release)).not.toContain("support ticket 42");
   });
 });
 

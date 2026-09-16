@@ -1,9 +1,12 @@
 # Security, Privacy, and Policy Requirements
 
+**Last Updated:** September 16, 2026
+**Purpose:** Consent, personal data, abuse prevention, retention, and payment security rules
+
 ## Consent and Confirmation
 
 - Always display the complete letter preview and a recipient summary before mailing.
-- Require `confirm: true` in the `send_letter` payload; reject requests lacking explicit confirmation.
+- Require `confirm: true` in the `send_letter` and `send_postcard` payloads; reject requests lacking explicit confirmation. A Pay & Send payment is itself the confirmation for that one previewed item.
 
 ## Personal Data Handling
 
@@ -13,16 +16,41 @@
 
 ## Abuse Prevention
 
-- Log body text and address blocks for moderation and audit purposes.
-- Introduce an internal `holdForReview` flag on new orders (default true during the prototype) to allow manual vetting.
-- Enforce rate limits, e.g., no more than three queued letters per user per hour, to mitigate spam and harassment risk.
+- Never write letter body text, address blocks or uploaded-image links into logs, diagnostics,
+  error columns or audit rows. Stored errors and diagnostics carry counts, identifiers and error
+  classes only (`writeDiagnostic` in `src/utils/diagnosticLog.ts`; migrations 030, 031 and 032 removed
+  the text earlier code stored). Content cleanup never compensates for what it removes by copying
+  it anywhere else (#153).
+- Moderation acts on account state, not on copies of content: an operator can block sends on an
+  account (`users.sends_blocked_reason` is an internal label the customer never sees), and every
+  operator action is recorded as an audit event.
+- Rate limits are defined in `src/api/middleware/rateLimit.ts`: per source address before
+  authentication, per account after it, and global backstops so many addresses cannot burn
+  verification work at line rate.
 - The public API authenticates with a Bearer token only. No cookie is read as a credential: the `access_token` cookie fallback was removed (audit A-11) because it was a latent CSRF vector and nothing set the cookie. CORS reflects only allowlisted origins; every other origin, including `Origin: null` from a `file://` page or sandboxed frame, receives the fallback origin and never a wildcard.
 - Per-address rate limits key on the `X-Forwarded-For` hop just before the trusted proxies' own (`TRUSTED_PROXY_HOPS`, default 1). Measured on Railway on 2026-09-08: the edge sets the client's address itself (a client-supplied value never reached the first position) and one internal hop then appends one of two addresses of its own, so the header arrives as `<client>, <internal>`. Neither end of the list is right on its own: the first hop is client-written on an edge that appends, and the last hop is the proxy's own address, which a last-hop rule keyed on for an hour in development, sharing every client's budget across two proxy addresses. Routes that had only per-identifier limits also have a global backstop (`mcp` 1200/min, `api` 2000/min, `checkout` 200/min, beside the existing 100/min on public promo validation), so many addresses cannot burn JWKS verification or bcrypt compares at line rate.
 
 ## Auditability and Retention
 
-- Persist immutable snapshots of letter content, sender/recipient addresses, and status timelines with timestamps.
-- Ensure audit logs capture the initiating user ID for each state transition.
+- Letter content, sender and recipient addresses, and draft content are kept only for the
+  periods published in `docs/privacy-policy.md` (90 days after sending; unsent drafts 24 hours,
+  content cleared within 7 days; uploaded image links within 48 hours of the last upload, which the
+  `recent-uploads-sweep` meets by deleting them at 24 hours; feature requests 12 months). The maintenance retention sweep (`src/services/retentionService.ts`,
+  migration 026) clears the content columns and quarantines what it clears in
+  `redacted_content_quarantine` for a bounded restore window. Rows, status, timestamps and
+  identifiers remain. The sweep runs in report mode until the enforce-path defects in #153 are
+  fixed, so the letter and draft periods are the design target the sweep reports against, not yet
+  a measurement.
+- What is kept for audit is the history without the content: `letter_status_history` (status
+  transitions with their source and the provider's status string), `commerce_order_events`
+  (order transitions; error classes only since 031), `commerce_operator_audit_events` and
+  `admin_audit_events` (who did what to which record, when, with what outcome and reason).
+  `admin_audit_events` is append-only by trigger (migration 022).
+- Every state transition records what initiated it: the system, the worker, the provider sync,
+  or the operator's identity for admin actions.
+- Operator audit records are kept for 2 years after the action they record and are exempt from
+  account erasure for that period (#395). `commerce_operator_audit_events.retention_expires_at`
+  marks the date; the purge that enforces it is tracked in #398.
 
 ## Future Compliance Hooks
 
@@ -32,11 +60,11 @@
 
 - **`OPENAI_API_KEY` is read by runtime code and must stay set.** In-turn image generation was reintroduced (the hybrid `generate_image_for_mail`), and five sites in `src/` read the key. Removing it does **not** fail the boot: `src/tools/generateImageForMail.ts` short-circuits on the missing key *before* the mode flag is consulted, so every image request silently degrades to the free redirect card with no alert. The key must remain only in Railway environment variables and must never be emitted in tool output, widget metadata, manifests, docs, or logs.
 - Image-generation spend protection (historical): the removed `generate_image_fallback` tool reserved one generation atomically before calling OpenAI and released it on failure. The entitlement/quota plumbing remains in the data model; see docs/learnings/generate-image-removal-decision.md.
-- Remote image URLs are untrusted input. Image processing must require HTTPS, block localhost/private/link-local/reserved IP ranges, validate DNS results before fetch, limit redirects, apply request timeouts, and enforce download size caps even when `Content-Length` is missing.
+- Remote image URLs are untrusted input. Image processing must require HTTPS, block localhost/private/link-local/reserved IP ranges, validate DNS results before fetch, limit redirects, apply one deadline to the whole transfer including the body, and enforce download size caps even when `Content-Length` is missing. The bytes are untrusted too: the format is read from the first bytes before sharp is asked anything, every image is opened under a 50-megapixel ceiling that sharp enforces on the header read, an interlaced or progressive image must also fit a decoded-bytes budget, each original is decoded once, and decodes and downloads run through in-process concurrency gates with a per-account share, so one account's request allowance cannot become an out-of-memory kill or fill the gates for everyone else (`docs/image-support.md`, Resource limits).
 - Dependency audits are part of the submission readiness checklist. `npm audit --omit=dev` must report zero vulnerabilities before OpenAI app submission and before any production deploy. As of 2026-09-08 it does: `sharp` was upgraded past four libvips CVEs (the one reachable advisory, since it decodes customer-supplied images), and an `overrides` block in `package.json` pins the transitive advisories under the connector SDK that the 2026-09-07 security review judged unreachable. Remove an override when the SDK release that supersedes it lands; do not let the count drift back up because the packages "are not used".
-- Capability URLs for temporary generated images should remain short-lived and should not be logged in full. Prefer token suffixes, hashes, or correlation IDs in logs.
+- Capability URLs for temporary generated images and for uploaded images should remain short-lived and should not be logged in full. Prefer token suffixes, hashes, or correlation IDs in logs. The stored link to a customer's uploaded image is deleted 24 hours after their last upload (#282).
 
-# Pay & Send security invariants
+## Pay & Send security invariants
 
 - Checkout products, Price IDs, amounts, and currency are server configured;
   model and widget inputs cannot override them.
@@ -52,13 +80,13 @@
 - Terminal failures before provider acceptance enter an idempotent monetary
   refund path. They do not create general-purpose credit.
 
-## Pay & Send ACID and distributed transaction boundaries
+### Pay & Send ACID and distributed transaction boundaries
 
 PostgreSQL is the ACID boundary. Stripe and the mail/image providers are never
 called inside a database transaction. Cross-system work uses durable intent,
 stable idempotency keys, leases, transactional outbox rows, and reconciliation.
 
-### Atomicity
+#### Atomicity
 
 - Checkout creation first commits an authoritative `orders` intent. Stripe is
   then called with the order's stable idempotency key, and a second transaction
@@ -90,7 +118,7 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
   alert in one transaction. A failed alert insert rolls the claim back, so a
   Stripe retry cannot be acknowledged while its monitoring work is lost.
 
-### Consistency
+#### Consistency
 
 - Database checks prevent negative cached balances, negative or over-consumed
   ledger buckets, invalid order/funding/reservation states, non-positive grants,
@@ -105,7 +133,7 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
   failures, expirations, refunds, and provider outcomes cannot move an already
   terminal order backward.
 
-### Isolation
+#### Isolation
 
 - Draft, order, user/ledger, entitlement, reservation, and outbox candidate rows
   are locked before decisions that consume or transition them. `SKIP LOCKED`
@@ -121,7 +149,7 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
   locked with `SKIP LOCKED` and released once; stale dispatches are quarantined
   without restoring quota. Concurrent reconcilers cannot resolve the same row.
 
-### Durability and compensation
+#### Durability and compensation
 
 - Orders, webhook claims, event history, credit transactions, entitlements,
   reservations, letters, refund attempts, and outbox work are committed data;
@@ -142,7 +170,8 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
   entitlement in a locked transaction. The small crash window after durable
   dispatch marking but before network I/O is also treated as ambiguous because
   the database cannot prove whether bytes reached the provider.
-- Ambiguous outcomes are resolved only through the authenticated admin route.
+- Ambiguous outcomes are resolved only through a full-mode command in the tailnet-only admin panel
+  ([admin-panel-guide.md](admin-panel-guide.md)); the public API has no admin route.
   The request binds the reservation to its expected account, uses a durable
   idempotency key, and restricts decisions to evidence-compatible enums. The
   state/counter transition and durable operator audit row commit together;

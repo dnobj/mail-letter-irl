@@ -35,6 +35,9 @@ const REQUIRED = [
   'adminReadModels.postgres.test.ts',
   'adminCommands.postgres.test.ts',
   'providerErrorMinimisation.postgres.test.ts',
+  'recentUploadsSweep.postgres.test.ts',
+  'featureRequestsSweep.postgres.test.ts',
+  'errorTextMinimisation.postgres.test.ts',
 ];
 
 /**

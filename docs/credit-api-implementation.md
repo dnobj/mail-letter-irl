@@ -404,6 +404,10 @@ export async function getTransactions(params: GetTransactionsParams): Promise<{
 
 ### 6. Refund Credits
 
+> Removed by #394: `refundCredits` and `refundCreditsToLedger` had no callers. Money is returned through
+> `requestRefund` in `src/services/commerceService.ts` (a Stripe refund, with pack credits revoked), never
+> by re-granting credits. The listing below is historical.
+
 ```typescript
 export interface RefundCreditsParams {
   userId: string;
@@ -478,8 +482,16 @@ The Credit API is implemented using Node.js HTTP handlers (not Express) in `src/
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/credits/balance` | Get current credit balance |
+| GET | `/api/credits/balance/detailed` | Balance broken down by lot and expiry |
 | GET | `/api/credits/transactions` | Get transaction history |
+| GET | `/api/credits/ledger` | Ledger lots |
 | GET | `/api/users/me` | Get current user info |
+| POST | `/api/promo/redeem` | Redeem a promo code |
+| GET | `/api/promo/validate/:code` | Check a promo code |
+| GET | `/api/promo/redemptions` | The caller's promo redemptions |
+
+Each route requires the scope listed for it in `src/auth/restScopes.ts`. The unauthenticated
+`/api/public/promo/validate/:code` is served separately in `src/mcp/httpServer.ts`.
 
 See `src/api/creditApiHandler.ts` for the full implementation.
 
@@ -572,7 +584,7 @@ curl http://localhost:8090/api/credits/transactions?limit=10 \
   -H "Authorization: Bearer <jwt_token>"
 
 # 3. Get user info
-curl http://localhost:8090/api/credits/users/me \
+curl http://localhost:8090/api/users/me \
   -H "Authorization: Bearer <jwt_token>"
 ```
 
@@ -649,13 +661,9 @@ try {
 
 ## Next Steps
 
-After implementing Credit API:
-
-1. ✅ Credit Service functions implemented
-2. ✅ Express routes configured
-3. ✅ Integrated with ACP checkout
-4. ✅ Integrated with MCP send letter tool
-5. 📝 Job Queue implementation (pg-boss)
-6. 📝 Admin API for monitoring
-
-See `docs/job-queue-implementation.md` for next phase.
+This list is historical. Credit handling is complete: the ledger, the Node HTTP handlers above (not
+Express), Stripe-hosted Checkout for packs and Pay & Send, and the send tools. Mail dispatch uses the
+transactional outbox rather than pg-boss ([letter-send-flow.md](letter-send-flow.md)), operator
+monitoring is the tailnet-only admin panel ([admin-panel-guide.md](admin-panel-guide.md)), and the
+Agentic Commerce Protocol checkout is a future plan
+([acp-implementation-guide.md](acp-implementation-guide.md)).

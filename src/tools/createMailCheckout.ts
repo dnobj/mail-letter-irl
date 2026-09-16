@@ -140,6 +140,7 @@ export const createMailCheckoutTool: McpToolDefinition<
     'openai/toolInvocation/invoking': 'Preparing secure checkout...',
     'openai/toolInvocation/invoked': 'Pay & Send checkout ready',
     'openai/widgetAccessible': true,
+    destructiveHint: true, // Starts a payment that authorises the mail itself
     openWorldHint: true,
     idempotentHint: true
   },

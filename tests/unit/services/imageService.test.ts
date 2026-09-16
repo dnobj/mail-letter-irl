@@ -32,14 +32,17 @@ global.fetch = mockFetch;
 
 // Mock sharp for image processing (will be implemented later)
 vi.mock('sharp', () => {
-  return {
-    default: vi.fn(() => ({
+  const sharpMock = Object.assign(
+    vi.fn(() => ({
       metadata: vi.fn(),
       resize: vi.fn().mockReturnThis(),
       jpeg: vi.fn().mockReturnThis(),
       toBuffer: vi.fn(),
     })),
-  };
+    // imageService pins libvips to one thread when it loads.
+    { concurrency: vi.fn() }
+  );
+  return { default: sharpMock };
 });
 
 describe('imageService', () => {

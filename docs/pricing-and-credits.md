@@ -1,6 +1,7 @@
 # Letter IRL Pricing & Packages
 
-**Last Updated:** February 5, 2026
+**Last Updated:** September 16, 2026
+**Purpose:** Letter pack and Pay & Send pricing, letter specifications, and refund handling
 
 ## Overview
 
@@ -27,15 +28,22 @@ Letter IRL offers letter packages for purchase. Users buy letter packs and use t
 ## Letter Specifications
 
 ### Standard Letter
-- **Page Limit:** One page maximum (~1,800 characters)
+- **Page Limit:** One page; the character limit depends on the layout (below)
 - **Delivery:** Standard First Class Mail (USPS)
 - **Features:** Black & white, single-sided
 
 ### Character Limits
-- **Maximum:** ~1,800 characters total (body text + sign-off)
-- **Approximately:** 300-400 words, or about 2-3 paragraphs
-- **Font:** Times New Roman, 12pt
-- **Margins:** Standard (1 inch all sides, 3.5 inch top for address window)
+
+| Layout | Tool | Characters (body + sign-off) | Lines |
+|--------|------|------------------------------|-------|
+| Text only | `quote_and_preview_letter` | 1,600 | 24 |
+| Header image | `quote_and_preview_letter_with_header_image` | 1,100 | 17 |
+| Enclosed image | `quote_and_preview_letter_with_image` | 800 | 12 |
+| Postcard (6x9) | `quote_and_preview_postcard` | 500 (message) | - |
+
+The limits are `LAYOUT_CHARACTER_LIMITS` and `LAYOUT_LINE_LIMITS` in `src/services/previewService.ts`.
+
+A text-only letter holds roughly 250-300 words.
 
 ---
 
@@ -57,15 +65,18 @@ We plan to introduce additional letter types:
 
 ## Payment Methods
 
-### Stripe Checkout
-- **Primary Method:** Credit/debit card via Stripe
-- **Security:** PCI-compliant, encrypted transactions
-- **Accepted Cards:** Visa, Mastercard, American Express, Discover
+### Stripe Checkout (current)
+- **How:** Stripe-hosted Checkout, opened from the ChatGPT card (`create_pack_checkout`,
+  `create_mail_checkout`) or from the letterirl.com dashboard. Letter IRL never sees card data
+- **Methods:** cards, plus whatever wallets and methods are enabled in Stripe for the account
+- **Security:** PCI-compliant, handled entirely by Stripe
 
-### OpenAI Agentic Commerce (Coming Soon)
-- **In-ChatGPT Purchases:** Buy letter packs directly in conversation
-- **Seamless:** No leaving ChatGPT
-- **Same Pricing:** Identical packages and rates
+### Agentic Commerce Protocol (planned, platform-gated)
+- **Goal:** complete the purchase inside ChatGPT without leaving the conversation
+- **Status:** not available to Letter IRL yet. In-ChatGPT checkout is limited-access, and OpenAI's app
+  guidelines, when last checked (2026-09-13), allowed commerce only for physical goods, not credits.
+  Pay & Send is therefore the likelier first ACP product
+- **Plan:** [acp-implementation-guide.md](acp-implementation-guide.md)
 
 ---
 
@@ -123,7 +134,7 @@ promise, and no tool in ChatGPT can request it. To ask:
 
 **Advantages:**
 1. **Predictable costs** - Know exactly what you'll pay
-2. **No hidden fees** - Letters never expire
+2. **No hidden fees** - Letters stay valid for 24 months from purchase
 3. **Volume discounts** - Save more with larger purchases
 4. **Flexibility** - Use letters when you need them
 5. **Future-ready** - Easy to add premium letter types
@@ -164,7 +175,7 @@ For high-volume users (500+ letters/month), contact us for custom pricing:
 - Custom integrations and API access
 - SLA guarantees
 
-Email: support@letter-irl.com
+Email: support@letterirl.com
 
 ---
 
@@ -175,10 +186,10 @@ This pricing is effective as of November 19, 2025 and subject to change. Users w
 **Version:** 1.0
 **Effective Date:** November 19, 2025
 
-# Pay & Send pricing
+## Pay & Send Pricing
 
-Pay & Send sells one exact physical letter or postcard and does not add prepaid
-balance. Letter packs remain the discounted prepaid option. **JIT amounts are
+Pay & Send sells one exact physical letter or postcard for **$4.99** and does not add
+prepaid balance. Letter packs remain the discounted prepaid option. **JIT amounts are
 pinned in code**, not environment configuration: `src/config/products.ts` holds
 `expectedAmountCents`, and the catalogue refuses to sell a product whose Stripe
 Price does not resolve to exactly that figure. The `*_AMOUNT_CENTS` variables

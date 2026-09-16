@@ -1,6 +1,6 @@
 # Core User Flows
 
-**Last Updated:** December 4, 2025
+**Last Updated:** September 16, 2026
 
 This document describes the primary user interaction flows for Letter IRL.
 
@@ -59,25 +59,29 @@ This is the main flow for composing and sending a letter.
     - Status: `queued`
     - Links to draft via `letter_drafts.consumed_letter_id`
 
-13. Server **queues job** via pg-boss:
-    - Creates entry in `letter_jobs`
-    - Adds job to background queue
+13. Server **inserts one outbox row** in `letter_jobs`. Steps 9-13 commit in one transaction; an
+    insufficient balance rolls all of them back.
 
-14. Server returns confirmation:
+### Step 3: Immediate Submission
+14. In the same request, the server claims the outbox row and submits the letter to PostGrid, using
+    the `letter_id` as the `Idempotency-Key`
+15. On success the letter becomes `accepted`, with `tracking_id`, `cost_cents` and
+    `expected_delivery`, and the job `completed`
+16. Server returns confirmation:
     - `orderId` (letter ID)
-    - `currentStatus: "queued_for_print"`
-    - `creditsRemaining`
+    - `currentStatus`: `accepted`, `pending` (retry scheduled) or `failed`
+    - `lettersRemaining`
+    - `isRetry: true` when the draft had already been consumed
+17. ChatGPT confirms the order in chat and may continue with status follow-up
 
-15. ChatGPT confirms the sent order in chat and may continue with status follow-up
+A timeout or `5xx` after dispatch holds the job for an operator rather than resubmitting it. The hourly
+maintenance run retries anything left due. See [letter-send-flow.md](letter-send-flow.md).
 
-### Step 3: Background Processing
-16. pg-boss worker picks up job
-17. Worker sends letter to PostGrid API
-18. Worker updates letter:
-    - Status: `sent`
-    - `tracking_id` from PostGrid
-    - `expected_delivery` date
-19. Worker marks job as completed
+### Paying for one letter instead (Pay & Send)
+When the balance is too low, the preview card offers **Pay & Send**. It calls `create_mail_checkout`
+and opens Stripe-hosted Checkout. A verified payment webhook consumes the same draft and creates the
+letter and its outbox row in one transaction; the next hourly maintenance run submits it to PostGrid.
+The user does not call `send_letter` afterwards.
 
 ---
 
@@ -102,29 +106,33 @@ This is the main flow for composing and sending a letter.
 1. User asks about remaining credits
 2. ChatGPT calls `get_account_balance`
 3. Server returns:
-   - Remaining pre-paid letter sends
-   - Letters expiring soon
-   - Image-generation quota metadata
+   - `lettersRemaining`
+   - Letters expiring soon, with dates
+   - `imageGenerationsRemaining` and `imageGenerationsAllowance`
    - `canSendStandardLetter` flag
-4. ChatGPT summarizes the balance and can point the user to `letterirl.com` to buy more
+4. ChatGPT summarizes the balance and can offer a letter pack (Flow D)
 
 ---
 
-## Flow D - Purchase Credits
+## Flow D - Buy a Letter Pack
 
-1. User indicates need for more credits
-2. ChatGPT provides purchase link:
-   - `https://letterirl.com/buy` (or similar)
-3. User clicks link and chooses package:
-   - 4 credits - $7.99
-   - 10 credits - $17.99
-   - 100 credits - $149.99
-4. User completes Stripe checkout
-5. Stripe webhook triggers:
-   - Creates `credit_ledger` entry
-   - Creates `orders` record
-   - Credits immediately available
-6. User returns to ChatGPT and can send letters
+1. User wants more letters, or a preview says the balance is too low
+2. ChatGPT calls `list_letter_packs` (or the preview card's **Buy a Letter Pack** button does):
+   - Starter - 2 letters - $5.00
+   - Regular - 5 letters - $10.00
+   - Power - 50 letters - $90.00
+3. User picks a pack; `create_pack_checkout` creates an `orders` record and a Stripe-hosted Checkout
+   Session, and `PackCheckoutCard` shows the order and the link
+4. User completes Stripe Checkout outside ChatGPT and returns to the conversation (the return page
+   offers a way back when ChatGPT supplied one)
+5. The verified `checkout.session.completed` webhook:
+   - Creates the `credit_ledger` lot (valid 24 months), attributed to the order
+   - Grants the pack's image generations
+   - Completes the order
+6. The card polls `get_purchase_status` and shows the letters added; the user can send
+
+The same packs can be bought on the letterirl.com dashboard. Prices are pinned in
+`src/config/products.ts`.
 
 ---
 
@@ -144,7 +152,14 @@ Used for public promo codes entered before login.
 4. User signs up/logs in
 5. Credits (if any) added to account on first authenticated action
 
-### Option 2: Settings Page (Authenticated)
+### Option 2: In ChatGPT
+
+1. User gives ChatGPT a code
+2. ChatGPT calls `redeem_promo_code`
+3. The server applies the same validation and ledger steps as Option 3; an invalid, expired or spent
+   code returns `redeemed: false` with the reason rather than an error
+
+### Option 3: Settings Page (Authenticated)
 Used for credit-granting promo codes by existing users.
 
 1. User goes to Dashboard → Settings → Promo Code
@@ -160,7 +175,7 @@ Used for credit-granting promo codes by existing users.
    - Linked to campaign
    - Expiration per campaign policy (default: 90 days, or "never")
 6. Server records in `promo_redemptions`
-7. User sees success message with credits added
+7. User sees a success message with the letters added
 
 ### Promo Code Types
 - **Landing-page codes** (0 credits): Reserved for future marketing or access experiments
@@ -171,12 +186,16 @@ Used for credit-granting promo codes by existing users.
 
 ## Flow F - Switch Account
 
-1. User wants to use different account
-2. ChatGPT calls `switch_account`
-3. Server invalidates current session
-4. ChatGPT initiates OAuth flow
-5. User authenticates with new account
-6. New session established with new user context
+There is no tool for this; `switch_account` was removed.
+
+1. User disconnects Letter IRL in ChatGPT's app settings
+2. User ends the Auth0 session (the tenant's `/v2/logout` URL), so the next login is not silently reused
+3. User connects Letter IRL again; ChatGPT starts the OAuth flow
+4. User signs in with the other account
+5. Tool calls now run as that account's `user_id`
+
+Each login method is a separate account, with its own letters and history
+([account-switching-guide.md](account-switching-guide.md)).
 
 ---
 

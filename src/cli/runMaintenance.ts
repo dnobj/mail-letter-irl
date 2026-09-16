@@ -9,6 +9,8 @@ import { runStatusSync } from '../workers/statusSyncWorker.js';
 import { runCommerceMaintenance } from '../services/commerceService.js';
 import { reconcilePackRefunds } from '../services/packRefundService.js';
 import { runRetentionPreview, runRetentionSweep } from '../services/retentionService.js';
+import { purgeExpiredRecentUploads } from '../services/recentUploadStore.js';
+import { purgeExpiredFeatureRequests } from '../services/featureRequestService.js';
 import { enabledUnlessDisabled, positiveIntegerSetting } from '../utils/envSettings.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
 import {
@@ -155,6 +157,97 @@ async function contentRetentionReport(days: number): Promise<void> {
   });
 }
 
+/**
+ * Every run, not daily: the interval sits below the hourly cron, so each run is
+ * due. With a one-hour interval, a few seconds of start-time jitter against
+ * last_completed_at would skip every other run.
+ */
+const RECENT_UPLOADS_SWEEP_INTERVAL_MS = 30 * 60 * 1000;
+
+/**
+ * Delete upload references past their window (#282).
+ *
+ * Separate from content retention on purpose. That sweep acts only in enforce
+ * mode and carries #153's open defects; this is a plain time rule on a table of
+ * pointers, and nothing about it should wait on those.
+ *
+ * NEVER THROWS, for the same reason as runContentRetention: runMaintenanceTaskIfDue
+ * rethrows, and a housekeeping failure must not skip mail dispatch.
+ *
+ * Inside the task a failure is rethrown as its CLASS, never the driver message:
+ * the admin reader role can read maintenance_tasks.last_error, and although
+ * the task service now stores a class itself (#394) the wrapper resolves it
+ * here so the driver's words never enter the throw path.
+ */
+async function runRecentUploadsSweep(): Promise<void> {
+  try {
+    const sweep = await runMaintenanceTaskIfDue(
+      'recent-uploads-sweep',
+      RECENT_UPLOADS_SWEEP_INTERVAL_MS,
+      async () => {
+        try {
+          return await purgeExpiredRecentUploads();
+        } catch (error) {
+          const errorClass =
+            carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+          throw Object.assign(new Error(`recent uploads sweep failed: ${errorClass}`), {
+            diagnosticClass: errorClass
+          });
+        }
+      }
+    );
+    console.log(`[Maintenance] Recent uploads sweep ${sweep.ran ? 'completed' : 'not due'}`);
+    if (sweep.ran) {
+      // A count only - never a user id, a URL, or the upload context.
+      writeDiagnostic('info', 'recent_uploads.swept', { deleted: sweep.result ?? 0 });
+    }
+  } catch (error) {
+    writeDiagnostic('error', 'recent_uploads.sweep_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
+/**
+ * Delete feature requests past their published period (#393).
+ *
+ * Same shape as runRecentUploadsSweep, for the same reasons: a plain time rule
+ * on a table nothing references, wrapped so that runMaintenanceTaskIfDue's
+ * rethrow cannot skip mail dispatch, and rethrown inside the task as a CLASS
+ * because maintenance_tasks.last_error is readable by the admin reader role.
+ * Every-run interval below the hourly cron, as above.
+ */
+const FEATURE_REQUESTS_SWEEP_INTERVAL_MS = 30 * 60 * 1000;
+
+async function runFeatureRequestsSweep(): Promise<void> {
+  try {
+    const sweep = await runMaintenanceTaskIfDue(
+      'feature-requests-sweep',
+      FEATURE_REQUESTS_SWEEP_INTERVAL_MS,
+      async () => {
+        try {
+          return await purgeExpiredFeatureRequests();
+        } catch (error) {
+          const errorClass =
+            carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+          throw Object.assign(new Error(`feature requests sweep failed: ${errorClass}`), {
+            diagnosticClass: errorClass
+          });
+        }
+      }
+    );
+    console.log(`[Maintenance] Feature requests sweep ${sweep.ran ? 'completed' : 'not due'}`);
+    if (sweep.ran) {
+      // A count only - never a title, a description, or a contact address.
+      writeDiagnostic('info', 'feature_requests.swept', { deleted: sweep.result ?? 0 });
+    }
+  } catch (error) {
+    writeDiagnostic('error', 'feature_requests.sweep_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
 export async function runMaintenance(): Promise<void> {
   // Was Math.max(1, Number.parseInt(...)), the shape envSettings exists to
   // replace: '1e3' parses to 1, so a request for 1000 dispatched ONE letter a
@@ -169,6 +262,10 @@ export async function runMaintenance(): Promise<void> {
   // anything scheduled after them is silently skipped whenever one fails.
   // runContentRetention never throws, so it cannot skip them either (#153).
   await runContentRetention();
+  // Also wrapped, and also never throws, for the same reason (#282).
+  await runRecentUploadsSweep();
+  // Same wrapper, same reason; it runs after the uploads sweep (#393).
+  await runFeatureRequestsSweep();
 
   const outbox = await processDueLetterJobs(batchLimit);
   console.log('[Maintenance] Outbox summary:', outbox);

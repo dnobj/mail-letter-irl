@@ -1,17 +1,17 @@
 # Address Validation Feature
 
-**Last Updated:** November 19, 2025
+**Last Updated:** September 16, 2026
 **Status:** ✅ Implemented (requires separate PostGrid Address Verification API key)
 
 ---
 
 ## Overview
 
-Address validation is integrated into the `quote_and_preview_letter` tool to catch address errors **before** the user commits credits. This feature uses PostGrid's Address Verification API to:
+Address validation runs in every preview tool (`quote_and_preview_letter`, `quote_and_preview_letter_with_header_image`, `quote_and_preview_letter_with_image`, `quote_and_preview_postcard`) and in `set_return_address`, to catch address errors **before** the user pays for a send. The policy lives in `src/services/addressVerificationPolicy.ts`. This feature uses PostGrid's Address Verification API to:
 
 - ✅ **Verify** addresses are deliverable
 - ✅ **Correct** minor errors (capitalization, abbreviations, missing ZIP+4)
-- ✅ **Standardize** addresses to USPS/Canada Post format
+- ✅ **Standardize** addresses to USPS format (Letter IRL mails within the US only)
 - ✅ **Geocode** addresses (latitude/longitude)
 - ❌ **Reject** invalid/undeliverable addresses
 
@@ -21,7 +21,7 @@ Address validation is integrated into the `quote_and_preview_letter` tool to cat
 
 ### User Flow
 
-1. **User calls `quote_and_preview_letter`** with sender and recipient addresses
+1. **User calls a preview tool** with sender and recipient addresses (the sender can come from a saved return address)
 2. **System validates both addresses** using PostGrid Address Verification API
 3. **One of three outcomes:**
 

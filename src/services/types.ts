@@ -55,13 +55,6 @@ export interface DeductCreditsParams {
   description?: string;
 }
 
-export interface RefundCreditsParams {
-  userId: string;
-  credits: number;
-  orderId: string;
-  reason?: string;
-}
-
 export interface GetTransactionsParams {
   userId: string;
   limit?: number;
@@ -329,16 +322,6 @@ export interface DeductCreditsFromLedgerParams {
   credits: number;
   letterId: string;
   description?: string;
-}
-
-export interface RefundCreditsToLedgerParams {
-  userId: string;
-  originalLedgerId?: string;  // Optional: link to original entry
-  credits: number;
-  orderId?: string;
-  reason?: string;
-  inheritExpiration?: boolean;  // Use same expiration as original
-  newExpirationDays?: number;   // Or set new expiration
 }
 
 export interface GetLedgerEntriesParams {
@@ -700,11 +683,6 @@ export interface ProcessedImage {
   originalHeight: number;
   processedWidth: number;
   processedHeight: number;
-}
-
-export interface ImageProcessingError extends Error {
-  code: 'IMAGE_TOO_LARGE' | 'UNSUPPORTED_FORMAT' | 'IMAGE_TOO_SMALL' | 'DOWNLOAD_FAILED' | 'PROCESSING_FAILED';
-  userMessage: string;
 }
 
 // ============================================================================

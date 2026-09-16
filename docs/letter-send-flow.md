@@ -1,6 +1,7 @@
 # Letter and Postcard Send Flow
 
-Last updated: August 5, 2026
+**Last Updated:** September 16, 2026
+**Purpose:** Draft, payment, outbox, and provider workflow for letters and postcards
 
 This document describes the current draft, payment, outbox, and provider workflow for letters and postcards.
 
@@ -36,7 +37,12 @@ Database constraints enforce one outbox row and one stable idempotency key per l
 
 ## Immediate Provider Submission
 
-After the transaction commits, the send tool claims its outbox row and submits it immediately. The PostGrid request uses the Letter IRL `letter_id` as `Idempotency-Key`.
+After the transaction commits, the send tool claims its outbox row and submits it immediately.
+
+A **Pay & Send** order takes a different route to the same outbox: the verified payment webhook
+consumes the draft and inserts the letter and its outbox row in one transaction, and nothing submits
+it in that request. The next hourly maintenance run does, so a paid item can wait up to an hour for
+provider acceptance. The PostGrid request uses the Letter IRL `letter_id` as `Idempotency-Key`.
 
 A claimed job is submitted to the provider exactly once. A successful response records the provider order ID and marks the job completed. Any outcome that does not prove what happened — `5xx`, timeout, transport loss, an unreadable body — may mean the piece was accepted and physically mailed, so it is never resubmitted: the job is held with `provider_outcome = 'ambiguous'` for operator reconciliation. Only an explicit provider rejection, which proves no mail exists, is terminal.
 

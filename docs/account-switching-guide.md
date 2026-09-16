@@ -1,6 +1,12 @@
 # Account Switching Guide
 
-**Last Updated:** November 18, 2025
+**Last Updated:** September 16, 2026
+
+> **Partly out of date.** The `switch_account` tool this guide recommends was removed
+> (commit `b5045bf`, "not useful in practice"); no Letter IRL tool logs you out. Switch accounts by
+> disconnecting Letter IRL in ChatGPT's app settings, ending the Auth0 session (Method 2), and
+> connecting again. The Auth0 logout URL below is the **development** tenant; production uses
+> `https://dev-njmdyqf8n25rqgy7.us.auth0.com/v2/logout`.
 
 This guide explains how to switch between different accounts or authentication methods when using Letter IRL in ChatGPT.
 
@@ -30,7 +36,9 @@ You might want to switch accounts to:
 
 ## How to Switch Accounts
 
-### Method 1: Using the `switch_account` Tool (Recommended)
+### Method 1: Using the `switch_account` Tool (removed)
+
+This tool no longer exists. The description below is kept for history.
 
 The easiest way to switch accounts is by asking ChatGPT directly:
 
@@ -71,18 +79,9 @@ To see which account you're currently using, simply ask for your balance:
 - "Check my credits"
 - "How many credits do I have?"
 
-**Response includes:**
-```
-Account: user@example.com (Google)
-Balance: 195 credits — That's enough for 97 letters.
-
-Tip: Use the switch_account tool to log in with a different account.
-```
-
-This shows:
-- ✅ Your email address
-- ✅ Your authentication provider
-- ✅ Your credit balance
+`get_account_balance` returns the letters remaining, letters expiring soon, and image generations
+left. It does not return the email address or login provider, so the balance alone does not identify
+the account. The letterirl.com dashboard shows the signed-in account.
 
 ---
 
@@ -242,6 +241,5 @@ If you encounter issues with account switching:
 
 ---
 
-**Last Updated:** November 18, 2025
 **Feature Version:** 0.1.0
-**Tool Added:** Phase 1 Enhancement
+**Tool:** `switch_account`, added in Phase 1 and later removed (`b5045bf`)

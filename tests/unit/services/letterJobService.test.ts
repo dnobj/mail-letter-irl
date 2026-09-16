@@ -208,6 +208,29 @@ describe('mail outbox retries', () => {
     );
   });
 
+  it('fails a job whose letter is gone with the LETTER_NOT_FOUND class, never the id-bearing message (#394)', async () => {
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [] };
+      return { rows: [] };
+    });
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
+      if (sql.includes('SELECT letter_id FROM letter_jobs')) return { rows: [{ letter_id: 'letter-1' }] };
+      if (sql.includes('UPDATE letter_jobs SET status =')) return { rows: [{ job_id: 'job-1' }], rowCount: 1 };
+      return { rows: [] };
+    });
+
+    const result = await processLetterJob('job-1', {});
+
+    expect(result).toMatchObject({ claimed: true, completed: false });
+    expect(sendLetter).not.toHaveBeenCalled();
+    const failure = clientQuery.mock.calls.find(([sql]) => String(sql).includes('UPDATE letter_jobs SET status ='));
+    expect(failure).toBeDefined();
+    expect((failure![1] as unknown[])[3]).toBe('LETTER_NOT_FOUND');
+    expect(JSON.stringify(clientQuery.mock.calls.map(([, params]) => params))).not.toContain('Letter not found');
+  });
+
   it('allows only one concurrent claimant to create a provider order', async () => {
     mockClaims();
     const [first, second] = await Promise.all([

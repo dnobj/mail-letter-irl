@@ -1,6 +1,7 @@
 # Railway Setup Guide
 
-Last updated: August 24, 2026
+**Last Updated:** September 16, 2026
+**Purpose:** Exact Railway services, commands, branches, variables, and Serverless policy
 
 Letter IRL uses one Railway project with `production` and `development` environments. Environment isolation is achieved with per-environment variables and branch deployment settings, not separate Railway projects.
 
@@ -12,8 +13,9 @@ Letter IRL uses one Railway project with `production` and `development` environm
 | `mail-letter-irl-website` | website repo | `main` | `dev` | Next standalone server |
 | `letter-irl-maintenance` | backend repo | `master` | `dev` | hourly cron |
 | `letter-irl-images` | Railway bucket | environment-owned | environment-owned | private S3-compatible storage |
+| `letter-irl-admin` / `letter-irl-admin-prod` | backend repo, `Dockerfile.admin` | `master` (`-prod`) | `dev` | tailnet-only admin panel, no public domain |
 
-Production API and website remain warm. Development API and website use Railway Serverless; cold health acceptance passed, while authenticated ChatGPT acceptance remains. The cron service is scheduled, not continuously running.
+Production API and website remain warm. Development API and website use Railway Serverless. The cron service is scheduled, not continuously running. The admin services are configured in the dashboard, not by config-as-code; their variables and settings are in [admin-panel-guide.md](admin-panel-guide.md).
 
 ## API Settings
 
@@ -140,6 +142,26 @@ The preflight (`npm run preflight:cutover -- --env <environment>`) verifies the
 price ids are *set* — it reads names, never values. Committed variables require
 an explicit service **Redeploy** to reach the running instance (issue #213).
 
+Content retention variables, read only by the maintenance service (`src/cli/runMaintenance.ts`):
+
+```env
+# Leave unset. Only the exact word `enforce` makes the sweep clear content; anything
+# else, including unset, runs the daily report. Unset in both environments until the
+# enforce-path defects in #153 are fixed.
+CONTENT_RETENTION_MODE=
+# On when unset. Any value other than true/1/yes/on/enabled - including a typo -
+# skips the retention pass entirely, report included.
+CONTENT_RETENTION_ENABLED=
+# Sent-letter content period in days. Default 90; below 2 or unparseable falls back to 90.
+CONTENT_RETENTION_DAYS=
+# Rows per sweep. Default 500; outside 1-5000 or unparseable falls back to 500.
+CONTENT_RETENTION_BATCH_SIZE=
+# Outbox rows retried per maintenance run. Default 25.
+MAINTENANCE_OUTBOX_BATCH_SIZE=
+```
+
+None of these is in `ENV_VAR_MANIFEST` yet, so `npm run preflight:cutover` does not report them.
+
 Use Railway variable references to the bucket service. Do not copy bucket credentials into Git, screenshots, logs, or documentation. The application also accepts Railway's standard `BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` names.
 
 Leave `ADMIN_ENABLED` unset. A `true` value fails API startup, and there is no public admin route in
@@ -191,7 +213,7 @@ Keep automatic deploys enabled. A feature branch must reach `dev` through a PR b
 
 After enabling, leave development idle for more than ten minutes. Confirm Railway reports both services asleep, then test MCP connect, image/widget rendering, login, and dashboard access. Disable Serverless if first-use recovery exceeds three seconds or any flow fails.
 
-The public post-wake health, manifest, OAuth metadata, CORS, and homepage checks pass. Authenticated ChatGPT widget and image checks remain required before production promotion.
+The public post-wake health, manifest, OAuth metadata, CORS, and homepage checks passed in July 2026, and the authenticated ChatGPT widget and image flows have since passed against development (see [manual-tests.md](manual-tests.md)). Re-run them after any Serverless change.
 
 ## Budget Controls
 
@@ -214,6 +236,8 @@ Current development placement is API and website in Railway US West, maintenance
 - `/healthz` and `/api/health` return successfully.
 - Migrations show issue #69's `021_jit_commerce_foundation.sql` before `022_admin_audit.sql`.
 - Maintenance logs show one short run and clean process exit.
+- Maintenance logs show `recent_uploads.swept` and no `recent_uploads.sweep_failed`.
+- Maintenance logs show `feature_requests.swept` and no `feature_requests.sweep_failed`.
 - An image remains retrievable after API restart for its documented 15 minutes.
 - Development sleeps after ten idle minutes.
 - Neon suspends after five database-idle minutes.

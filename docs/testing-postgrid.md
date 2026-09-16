@@ -1,6 +1,7 @@
 # Testing PostGrid Provider
 
-**Last Updated:** November 19, 2025
+**Last Updated:** September 16, 2026
+**Purpose:** Testing the PostGrid provider in test mode
 
 ---
 
@@ -474,35 +475,29 @@ LETTER_PROVIDER_CONFIG='{"mode":"live","verbose":false}'
 
 ## Testing Workflow Integration
 
-### Test with Letter Worker
+### Test Through the Send Path
 
-1. **Start the worker:**
+There is no separate worker. A confirmed send commits a `letter_jobs` outbox row and submits it in the
+same request; `npm run maintenance` retries anything left due ([letter-send-flow.md](letter-send-flow.md)).
+
+1. **Start the server** with test-mode PostGrid (`LETTER_PROVIDER=postgrid`,
+   `LETTER_PROVIDER_API_KEY=test_sk_...`, `LETTER_PROVIDER_CONFIG={"mode":"test"}`):
    ```bash
-   npm run mcp:http
-   ```
-   (The HTTP server includes the worker)
-
-2. **Create a letter job** (via MCP tool or directly):
-   ```typescript
-   import { createLetterJob } from '../src/services/letterJobService.js';
-
-   await createLetterJob({
-     userId: 'test-user',
-     recipientName: 'Test User',
-     recipientAddress: { ... },
-     message: 'Hello from test!',
-     creditsRequired: 2
-   });
+   npm run dev
    ```
 
-3. **Check job was processed:**
-   ```bash
-   tsx scripts/check-pgboss-jobs.ts
+2. **Preview and send a letter** with the MCP tools (`quote_and_preview_letter`, then `send_letter`
+   with `confirm: true`), or run `npm run flow`.
+
+3. **Check the outbox row:**
+   ```sql
+   SELECT job_id, status, provider_outcome, attempts, last_error
+   FROM letter_jobs ORDER BY created_at DESC LIMIT 1;
    ```
 
 4. **Verify letter in database:**
    ```sql
-   SELECT * FROM letters ORDER BY created_at DESC LIMIT 1;
+   SELECT letter_id, status, provider, tracking_id FROM letters ORDER BY created_at DESC LIMIT 1;
    ```
 
 5. **Check PostGrid dashboard** for the created letter
@@ -626,11 +621,11 @@ npm run test:postgrid -- --send-test
 # Direct API test
 tsx scripts/test-postgrid-detailed.ts
 
-# Check job queue
-tsx scripts/check-pgboss-jobs.ts
+# Start the server (sends submit immediately; no worker)
+npm run dev
 
-# Start server with worker
-npm run mcp:http
+# One maintenance pass: outbox retries and provider status sync
+npm run build && npm run maintenance
 ```
 
 ---

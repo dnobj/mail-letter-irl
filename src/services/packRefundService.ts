@@ -522,7 +522,8 @@ async function handleStripeFailure(row: PackRefundRow, error: unknown): Promise<
       if (!locked || locked.status !== 'letters_revoked') return locked?.status ?? 'failed';
       return compensatePackRefund(client, locked, {
         lastErrorCode: (code ?? errorClass).slice(0, 100),
-        failureReason: error instanceof Error ? error.message.slice(0, 80) : errorClass
+        // The class, never a slice of Stripe's message (#394).
+        failureReason: errorClass
       });
     });
   }

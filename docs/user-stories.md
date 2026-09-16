@@ -1,6 +1,6 @@
 # User Stories
 
-**Last Updated:** January 28, 2026
+**Last Updated:** September 16, 2026
 **Purpose:** Test coverage and acceptance criteria for Letter IRL
 
 ---
@@ -29,6 +29,19 @@ User stories are organized by feature area using semantic prefixes:
 
 Each story includes acceptance criteria that can be converted to test cases.
 
+### Areas without stories yet
+
+These shipped areas have no story prefix. Their acceptance criteria live elsewhere until stories are
+written:
+
+| Area | Acceptance criteria today |
+|------|---------------------------|
+| Pay & Send and in-conversation pack checkout | [just-in-time-purchase-plan.md](just-in-time-purchase-plan.md); `PAY-*` cases in [manual-tests.md](manual-tests.md) |
+| Image generation and entitlements (`generate_image_for_mail`) | [learnings/generate-image-removal-decision.md](learnings/generate-image-removal-decision.md) |
+| Refunds, disputes and proportional pack refunds | [security-and-policy.md](security-and-policy.md); `REFUND-*` cases in [manual-tests.md](manual-tests.md) |
+| Content retention and erasure | [security-and-policy.md](security-and-policy.md), [privacy-policy.md](privacy-policy.md) |
+| Operator admin panel | [admin-panel-guide.md](admin-panel-guide.md); `ADMIN-*` cases in [manual-tests.md](manual-tests.md) |
+
 ---
 
 ## Letter Sending (LETTER)
@@ -51,7 +64,7 @@ Each story includes acceptance criteria that can be converted to test cases.
 **Error Cases:**
 - [ ] Missing required address fields → Clear error listing missing fields
 - [ ] Non-US address → "Only supports mailing within United States"
-- [ ] Body exceeds 1,800 characters → "Letter exceeds one-page limit"
+- [ ] Body + sign-off over the layout's limit (1,600 characters or 24 lines for text-only) → "Letter exceeds character limit" (or "one-page limit" when both are over), with the count
 - [ ] Invalid address format → Returns corrections/suggestions
 
 ---
@@ -655,6 +668,12 @@ There is a mobile workaround - ask me about it if you want to try.
 
 ## Admin (ADMIN)
 
+> These stories describe the legacy admin dashboard, which was deleted (#162); the public API now
+> returns 404 for every `/admin*` and `/api/admin*` path. The operator surface is the tailnet-only
+> admin panel ([admin-panel-guide.md](admin-panel-guide.md)), whose acceptance cases are
+> `ADMIN-READ-*`, `ADMIN-ACCT-*`, `ADMIN-OPS-*`, `ADMIN-CMD-*`, `ADMIN-STRIPE-*` and `ADMIN-PROD-*` in
+> [manual-tests.md](manual-tests.md). Rewrite these stories against the panel before relying on them.
+
 ### US-ADMIN-01: View Dashboard
 **As an** admin
 **I want to** see system-wide metrics
@@ -840,7 +859,7 @@ There is a mobile workaround - ask me about it if you want to try.
 **So that** pricing is predictable
 
 **Acceptance Criteria:**
-- [ ] Maximum 1,800 characters (body + sign-off)
+- [ ] Maximum per layout (body + sign-off): 1,600 characters / 24 lines text-only, 1,100 / 17 with a header image, 800 / 12 with an enclosed image
 - [ ] Clear error with current count vs limit
 - [ ] Validation happens at preview time
 
@@ -1192,7 +1211,7 @@ macOS/Linux:
 - [ ] Write tools show as "WRITE" in ChatGPT connector settings
 - [ ] Read-only tools don't require user confirmation
 - [ ] Write tools require user confirmation before execution
-- [ ] Destructive tools (clear_return_address) show additional warning
+- [ ] Destructive tools (the two send tools, `set_return_address`, both checkouts and `clear_return_address`) are served with `destructiveHint: true`, the signal OpenAI's review guidance asks for on irreversible outcomes; ChatGPT's permission prompt is its own contextual judgement
 - [ ] Open-world tools (send_letter) marked with `openWorldHint: true` for real-world effects
 
 **Tool Classification:**
@@ -1202,15 +1221,14 @@ macOS/Linux:
 | `get_order_status` | READ | `readOnlyHint: true` |
 | `get_return_address` | READ | `readOnlyHint: true` |
 | `list_orders` | READ | `readOnlyHint: true` |
-| `quote_and_preview_letter` | READ | `readOnlyHint: true` |
-| `switch_account` | READ | `readOnlyHint: true` |
-| `send_letter` | WRITE | `readOnlyHint: false`, `openWorldHint: true` |
-| `set_return_address` | WRITE | `readOnlyHint: false` |
+| `quote_and_preview_letter` (and the other three preview tools) | WRITE (creates a draft) | `readOnlyHint: false`, `openWorldHint: true` |
+| `send_letter` | WRITE | `readOnlyHint: false`, `openWorldHint: true`, `destructiveHint: true` (mail cannot be recalled) |
+| `set_return_address` | WRITE | `readOnlyHint: false`, `destructiveHint: true` (overwrites the saved address) |
 | `clear_return_address` | WRITE | `readOnlyHint: false`, `destructiveHint: true` |
 
 **Technical Details:**
 - MCP SDK expects annotations in separate `annotations` parameter
-- Not in `_meta` object (current incorrect implementation)
+- The authoritative values are the `annotations` block that `buildAnnotations()` in `src/mcp/registerTools.ts` builds; the tool files' inline `meta` objects mirror the hints and are spread into `_meta` beside the OpenAI display keys. The table for all 22 tools is in [app-submission/openai-test-cases.md](app-submission/openai-test-cases.md#tool-annotations-verification)
 - Annotations: `readOnlyHint`, `destructiveHint`, `openWorldHint`, `idempotentHint`
 
 **Related:**
@@ -1520,6 +1538,10 @@ master (production)
 ---
 
 ## OAuth Registration (DCR)
+
+> ChatGPT now authenticates through a manually imported Auth0 CIMD application, not Dynamic Client
+> Registration. The static `/oauth/register` route these stories describe exists only behind the
+> environment-specific rollback flag. See [auth0-setup.md](auth0-setup.md).
 
 ### US-DCR-01: MCP Client OAuth Registration
 **As an** MCP client (ChatGPT, Claude Desktop)
@@ -1834,7 +1856,7 @@ The tool description instructs ChatGPT to suggest this tool when:
 | Category | Prefix | Count |
 |----------|--------|-------|
 | Letter Sending | US-LETTER | 7 |
-| Postcards | US-POSTCARD | 3 |
+| Postcards | US-POSTCARD | 4 |
 | Credits | US-CREDIT | 9 |
 | Promo Codes | US-PROMO | 3 |
 | Account | US-ACCT | 4 |
@@ -1842,13 +1864,13 @@ The tool description instructs ChatGPT to suggest this tool when:
 | Edge Cases | US-EDGE | 8 |
 | Security | US-SEC | 6 |
 | Data Integrity | US-DATA | 3 |
-| MCP Access | US-MCP | 13 |
+| MCP Access | US-MCP | 15 |
 | Development | US-DEV | 3 |
 | OAuth Registration | US-DCR | 2 |
 | Letter Layouts | US-LAYOUT | 6 |
 | Feedback | US-FEEDBACK | 1 |
 | Infrastructure | US-INFRA | 1 |
-| **Total** | | **77** |
+| **Total** | | **80** |
 
 ---
 
