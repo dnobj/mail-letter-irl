@@ -394,6 +394,13 @@ describe.each([LETTER, POSTCARD])('$file recovery from a lost preview call (#411
     expect(harness.text('id-value')).toBe('ord_sent_0001');
     expect(harness.text('status-pill')).toBe('With the printer');
     expect(harness.disabled('send-button')).toBe(true);
+    // What a reopened card will read names the draft that was sent.
+    expect(harness.savedStates.at(-1)).toEqual({
+      v: 1,
+      draftId: 'draft_retry_0001',
+      sent: true,
+      orderId: 'ord_sent_0001'
+    });
     await harness.click('send-button');
     expect(harness.callsTo(spec.sendTool)).toHaveLength(1);
   });
@@ -419,6 +426,13 @@ describe.each([LETTER, POSTCARD])('$file recovery from a lost preview call (#411
     ]);
     expect(harness.text('id-label')).toBe('Purchase');
     expect(harness.text('id-value')).toBe('ord_checkout_0001');
+    // The card never moved to the host draft, so it keeps the one it paid for.
+    expect(harness.savedStates.at(-1)).toEqual({
+      v: 1,
+      draftId: 'draft_retry_0001',
+      checkout: true,
+      orderId: 'ord_checkout_0001'
+    });
   });
 
   it('keeps the host result if it arrives while its own call runs', async () => {
@@ -490,6 +504,24 @@ describe.each([LETTER, POSTCARD])('$file recovery from a lost preview call (#411
 
     expect(harness.text('error-message')).toBe('Unable to create the preview: host refused the call');
     expect(harness.visible('retry-button')).toBe(true);
+  });
+
+  it('does not draw an error result, even one that carries a draft', async () => {
+    const harness = await lostCall(spec, {
+      previewResponse: () => ({
+        isError: true,
+        structuredContent: spec.output('draft_error_0001'),
+        content: [{ type: 'text', text: 'Letter IRL could not finish the preview.' }]
+      })
+    });
+
+    await harness.click('retry-button');
+
+    expect(harness.text('error-message')).toBe(
+      'Unable to create the preview: Letter IRL could not finish the preview.'
+    );
+    expect(harness.text('id-value')).not.toBe('draft_error_0001');
+    expect(harness.visible('send-button')).toBe(false);
   });
 
   it('treats a result without a draft as a failure, not a preview', async () => {
