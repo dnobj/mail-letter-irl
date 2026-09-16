@@ -72,7 +72,7 @@ const LETTER: CardSpec = {
   file: 'LetterPreviewCard',
   tool: 'quote_and_preview_letter',
   sendTool: 'send_letter',
-  waitMs: 12000,
+  waitMs: 25000,
   noun: 'letter',
   args: () => ({ recipient: { ...recipient }, bodyText: 'Hello Sam, see you soon.', signOff: 'Love, Dee' }),
   incompleteArgs: () => ({ recipient: { ...recipient }, bodyText: 'Hello Sam, see you soon.' }),
@@ -96,7 +96,7 @@ const POSTCARD: CardSpec = {
   file: 'PostcardPreviewCard',
   tool: 'quote_and_preview_postcard',
   sendTool: 'send_postcard',
-  waitMs: 30000,
+  waitMs: 45000,
   noun: 'postcard',
   args: () => ({
     recipient: { ...recipient },
@@ -135,6 +135,10 @@ interface MountOptions {
   previewResponse?: (name: string, args: Json) => unknown;
   /** get_purchase_status's answer from the start: a card may ask at mount. */
   purchaseStatus?: Json;
+  /** How many send calls reject before one succeeds. */
+  failSends?: number;
+  /** How many create_mail_checkout calls reject before one succeeds. */
+  failCheckouts?: number;
 }
 
 /** Let queued promise callbacks settle. */
@@ -156,6 +160,8 @@ function mount(spec: CardSpec, options: MountOptions = {}) {
   const calls: Array<{ name: string; args: Json }> = [];
   const savedStates: unknown[] = [];
   let purchaseStatus: Json = options.purchaseStatus ?? { purchaseStatus: 'pending_payment' };
+  let sendFailures = options.failSends ?? 0;
+  let checkoutFailures = options.failCheckouts ?? 0;
   let gate: Promise<void> | null = null;
   let openGate: (() => void) | null = null;
 
@@ -179,9 +185,17 @@ function mount(spec: CardSpec, options: MountOptions = {}) {
         return { structuredContent: spec.output('draft_retry_0001'), _meta: spec.meta() };
       }
       if (name === spec.sendTool) {
+        if (sendFailures > 0) {
+          sendFailures -= 1;
+          throw new Error('host timed out');
+        }
         return { structuredContent: { orderId: 'ord_sent_0001' } };
       }
       if (name === 'create_mail_checkout') {
+        if (checkoutFailures > 0) {
+          checkoutFailures -= 1;
+          throw new Error('host timed out');
+        }
         return {
           structuredContent: {
             orderId: 'ord_checkout_0001',
@@ -220,6 +234,14 @@ function mount(spec: CardSpec, options: MountOptions = {}) {
     callsTo: (name: string) => calls.filter(call => call.name === name),
     pendingTimers: () => timers.filter(timer => !timer.cancelled),
     /** Fire the recovery wait (the only timer a card arms before a result). */
+    /** Fire the one pending timer armed with this delay. */
+    runTimer: async (delay: number) => {
+      const pending = timers.filter(timer => !timer.cancelled && timer.delay === delay);
+      expect(pending, `exactly one pending ${delay} ms timer`).toHaveLength(1);
+      pending[0].cancelled = true;
+      pending[0].fn();
+      await flush();
+    },
     runWait: async () => {
       const pending = timers.filter(timer => !timer.cancelled);
       expect(pending, 'exactly one pending timer').toHaveLength(1);
@@ -273,6 +295,11 @@ type Harness = ReturnType<typeof mount>;
 /** The pane a card draws its preview into. */
 function previewPane(spec: CardSpec): string {
   return spec.file === 'LetterPreviewCard' ? 'mockup-container' : 'preview-front';
+}
+
+/** A tool that draws the card and takes an attached image. */
+function imageTool(spec: CardSpec): string {
+  return spec.file === 'LetterPreviewCard' ? 'quote_and_preview_letter_with_image' : spec.tool;
 }
 
 /** A lost call: no result, then the wait runs out. */
@@ -418,6 +445,7 @@ describe.each([LETTER, POSTCARD])('$file recovery from a lost preview call (#411
 
     // The host result lands while create_mail_checkout is still running.
     await harness.deliverHostResult(spec.output('draft_host_0001', eligibility(false)));
+    expect(harness.text('id-value')).toBe('draft_retry_0001');
     await harness.releaseCalls();
     await harness.deliverHostResult(spec.output('draft_host_0001', eligibility(false)));
 
@@ -431,8 +459,128 @@ describe.each([LETTER, POSTCARD])('$file recovery from a lost preview call (#411
       v: 1,
       draftId: 'draft_retry_0001',
       checkout: true,
-      orderId: 'ord_checkout_0001'
+      orderId: 'ord_checkout_0001',
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test'
     });
+  });
+
+  it('stays on its own draft after a send that failed', async () => {
+    // A send that failed on the card's side may still have gone out, and the
+    // server recognises a repeated send only when it names the same draft.
+    const harness = await lostCall(spec, { failSends: 1 });
+    await harness.click('retry-button');
+    await harness.click('send-button');
+    expect(harness.text('error-message')).toBe('Failed to send: host timed out');
+
+    await harness.deliverHostResult(spec.output('draft_host_0001'));
+    expect(harness.text('id-value')).toBe('draft_retry_0001');
+
+    await harness.click('send-button');
+    expect(harness.callsTo(spec.sendTool).map(call => call.args.draftId)).toEqual([
+      'draft_retry_0001',
+      'draft_retry_0001'
+    ]);
+  });
+
+  it('stays on its own draft after a checkout that failed to open', async () => {
+    const harness = await lostCall(spec, {
+      failCheckouts: 1,
+      previewResponse: () => ({
+        structuredContent: spec.output('draft_retry_0001', eligibility(false)),
+        _meta: spec.meta()
+      })
+    });
+    await harness.click('retry-button');
+    await harness.click('pay-send-button');
+    expect(harness.text('error-message')).toBe('Unable to open checkout: host timed out');
+
+    await harness.deliverHostResult(spec.output('draft_host_0001', eligibility(false)));
+    expect(harness.text('id-value')).toBe('draft_retry_0001');
+
+    await harness.click('pay-send-button');
+    expect(harness.callsTo('create_mail_checkout').map(call => call.args.draftId)).toEqual([
+      'draft_retry_0001',
+      'draft_retry_0001'
+    ]);
+  });
+
+  it('stops waiting on its own call after a minute, and still draws a late result', async () => {
+    const harness = await lostCall(spec);
+    harness.holdCalls();
+    await harness.click('retry-button');
+
+    await harness.runTimer(60000);
+
+    expect(harness.text('error-message')).toBe(
+      'No preview yet. It will appear here if it arrives. You can also try again, or ask for the preview in the chat.'
+    );
+    expect(harness.disabled('retry-button')).toBe(false);
+    expect(harness.text('retry-button')).toBe('Create my preview');
+
+    await harness.releaseCalls();
+
+    expect(harness.text('id-value')).toBe('draft_retry_0001');
+    expect(harness.visible('error-message')).toBe(false);
+    expect(harness.visible('empty-state')).toBe(false);
+  });
+
+  it('clears its call timeout once the call answers', async () => {
+    const harness = await lostCall(spec);
+
+    await harness.click('retry-button');
+
+    expect(harness.pendingTimers()).toEqual([]);
+  });
+
+  it('draws only the first preview when two of its own calls answer', async () => {
+    let attempt = 0;
+    const harness = await lostCall(spec, {
+      previewResponse: () => {
+        attempt += 1;
+        return { structuredContent: spec.output(`draft_retry_000${attempt}`), _meta: spec.meta() };
+      }
+    });
+    harness.holdCalls();
+    await harness.click('retry-button');
+    await harness.runTimer(60000);
+    await harness.click('retry-button');
+    expect(harness.callsTo(spec.tool)).toHaveLength(2);
+
+    await harness.releaseCalls();
+
+    expect(harness.text('id-value')).toBe('draft_retry_0001');
+    await harness.click('send-button');
+    expect(harness.callsTo(spec.sendTool).map(call => call.args.draftId)).toEqual(['draft_retry_0001']);
+  });
+
+  it.each<[string, unknown]>([
+    ['a bare file reference', 'file_000000abc'],
+    ['a file object without a download address', { file_id: 'file_1' }],
+    ['a file object with an empty download address', { download_url: '', file_id: 'file_1' }],
+    ['a file object without a file id', { download_url: 'https://files.example/x' }],
+    ['null', null]
+  ])('will not repeat a preview whose image argument is %s', async (_label, image) => {
+    // The server reads anything else as no image and falls back to the most
+    // recent upload, which may be a different picture.
+    const harness = await lostCall(spec, {
+      stamp: imageTool(spec),
+      toolInput: { ...spec.args(), image }
+    });
+
+    expect(harness.visible('retry-button')).toBe(false);
+    expect(harness.text('empty-message')).toMatch(/ask for the preview again in the chat\.$/);
+  });
+
+  it.each<[string, unknown]>([
+    ['the attached file object', { download_url: 'https://files.example/photo', file_id: 'file_1', mime_type: 'image/jpeg' }],
+    ['the empty string some clients send for no file', '']
+  ])('repeats a preview whose image argument is %s, unchanged', async (_label, image) => {
+    const args = { ...spec.args(), image };
+    const harness = await lostCall(spec, { stamp: imageTool(spec), toolInput: args });
+
+    await harness.click('retry-button');
+
+    expect(harness.calls).toEqual([{ name: imageTool(spec), args }]);
   });
 
   it('keeps the host result if it arrives while its own call runs', async () => {
@@ -601,9 +749,9 @@ describe('LetterPreviewCard picks the right preview to repeat (#411)', () => {
   });
 
   it.each([
-    ['quote_and_preview_letter_with_header_image', 30000],
-    ['quote_and_preview_letter_with_image', 30000],
-    ['quote_and_preview_letter', 12000]
+    ['quote_and_preview_letter_with_header_image', 45000],
+    ['quote_and_preview_letter_with_image', 45000],
+    ['quote_and_preview_letter', 25000]
   ])('repeats %s, the tool its page was stamped with, after %i ms', async (tool, waitMs) => {
     const args = tool === 'quote_and_preview_letter' ? LETTER.args() : imageArgs();
     const harness = mount(LETTER, { stamp: tool, toolInput: args });
@@ -675,6 +823,39 @@ describe('LetterPreviewCard picks the right preview to repeat (#411)', () => {
 
     const image = harness.document.querySelector('#mockup-container .header-image-wrapper img');
     expect(image?.getAttribute('src')).toBe('data:image/jpeg;base64,AAAA');
+    expect(harness.document.querySelector('#mockup-container .image-not-shown')).toBeNull();
+  });
+
+  it.each([
+    ['header_image', 'quote_and_preview_letter_with_header_image', '.header-image-wrapper'],
+    ['inline_image', 'quote_and_preview_letter_with_image', '.inline-image-wrapper']
+  ])('says so when it cannot show the image of a %s letter', async (layoutType, tool, wrapper) => {
+    // Whether the host returns _meta to a card's own call is not documented.
+    // An image letter drawn without its image must not pass for a finished
+    // preview.
+    const harness = await lostCall(LETTER, {
+      stamp: tool,
+      toolInput: imageArgs(),
+      previewResponse: () => ({ structuredContent: LETTER.output('draft_retry_0001', { layoutType }) })
+    });
+
+    await harness.click('retry-button');
+
+    const mockup = harness.document.getElementById('mockup-container');
+    expect(mockup?.querySelector(`${wrapper} .image-not-shown`)?.textContent).toBe(
+      'Image not shown on this card'
+    );
+    expect(mockup?.querySelector('img')).toBeNull();
+  });
+
+  it('shows no image placeholder on a text-only letter', async () => {
+    const harness = await lostCall(LETTER, {
+      previewResponse: () => ({ structuredContent: LETTER.output('draft_retry_0001') })
+    });
+
+    await harness.click('retry-button');
+
+    expect(harness.document.querySelector('#mockup-container .image-not-shown')).toBeNull();
   });
 });
 
@@ -725,8 +906,101 @@ describe.each([LETTER, POSTCARD])('$file keeps what it did for a reopened conver
       v: 1,
       draftId: 'draft_host_0001',
       checkout: true,
+      orderId: 'ord_checkout_0001',
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test'
+    });
+  });
+
+  it('offers the kept checkout link while a reopened order is unpaid', async () => {
+    const harness = mount(spec, {
+      widgetState: {
+        v: 1,
+        draftId: 'draft_host_0001',
+        checkout: true,
+        orderId: 'ord_kept_0001',
+        checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_kept'
+      }
+    });
+    await flush();
+
+    expect(harness.text('status-pill')).toBe('Checkout open - waiting for payment');
+    expect(harness.visible('checkout-link')).toBe(true);
+    expect(harness.document.getElementById('checkout-link')?.getAttribute('href')).toBe(
+      'https://checkout.stripe.com/c/pay/cs_kept'
+    );
+    expect(harness.text('checkout-link')).toBe('Open checkout');
+    expect(harness.visible('pay-send-button')).toBe(false);
+  });
+
+  it('does not offer the kept checkout link once the order is paid', async () => {
+    const harness = mount(spec, {
+      widgetState: {
+        v: 1,
+        draftId: 'draft_host_0001',
+        checkout: true,
+        orderId: 'ord_kept_0001',
+        checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_kept'
+      },
+      purchaseStatus: { purchaseStatus: 'processing' }
+    });
+    await flush();
+
+    expect(harness.text('status-pill')).toBe('Paid - preparing mail');
+    expect(harness.visible('checkout-link')).toBe(false);
+  });
+
+  it('ignores a kept checkout link that is not https', async () => {
+    const harness = mount(spec, {
+      widgetState: {
+        v: 1,
+        draftId: 'draft_host_0001',
+        checkout: true,
+        orderId: 'ord_kept_0001',
+        checkoutUrl: 'javascript:alert(1)'
+      }
+    });
+    await flush();
+
+    expect(harness.visible('checkout-link')).toBe(false);
+    expect(harness.document.getElementById('checkout-link')?.getAttribute('href')).toBe('#');
+  });
+
+  it('keeps no checkout link that is not https', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001', eligibility(false))
+    });
+    (harness.openai as Json).callTool = async (name: string) =>
+      name === 'create_mail_checkout'
+        ? { structuredContent: { orderId: 'ord_checkout_0001', checkoutUrl: 'http://checkout.example/pay' } }
+        : { structuredContent: { purchaseStatus: 'pending_payment' } };
+    await flush();
+
+    await harness.click('pay-send-button');
+
+    expect(harness.savedStates.at(-1)).toEqual({
+      v: 1,
+      draftId: 'draft_host_0001',
+      checkout: true,
       orderId: 'ord_checkout_0001'
     });
+  });
+
+  it('switches to the kept order when the saved state arrives after the first render', async () => {
+    const harness = mount(spec);
+    await flush();
+    expect(harness.pendingTimers().map(timer => timer.delay)).toEqual([spec.waitMs]);
+
+    harness.openai.widgetState = {
+      v: 1,
+      draftId: 'draft_host_0001',
+      sent: true,
+      orderId: 'ord_sent_0001'
+    };
+    await harness.fireGlobals();
+
+    expect(harness.pendingTimers()).toEqual([]);
+    expect(harness.text('status-pill')).toBe('With the printer');
+    expect(harness.visible('retry-button')).toBe(false);
   });
 
   it('is not mistaken for a reopened card once the host applies its own saved state', async () => {

@@ -26,6 +26,7 @@ import {
   getZodOutputShape,
   PREVIEW_TOOL_BY_TEMPLATE,
   PREVIEW_TOOL_META_NAME,
+  previewToolFor,
   stampPreviewTool,
   WIDGET_DEFINITIONS,
   WIDGET_MIME_TYPE,
@@ -133,7 +134,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
         version: 32,
-        digest: '7ca03030e3e3'
+        digest: '0756972a5911'
       });
     });
   });
@@ -769,17 +770,50 @@ describe('widget resources tolerate any template version (#235)', () => {
     );
   });
 
-  it('stamps the legacy letter URI as the text-only tool (#411)', async () => {
-    // Before #411 every letter tool pointed at LetterPreviewCard, so a client
-    // holding that tool list gets the text-only stamp for an image letter too.
-    // The card refuses to repeat a text-only preview whose input carries an
-    // image (see retryRequest in the widget), which is what keeps that case
-    // from turning into a preview without its image.
+  it('serves the letter card unstamped where an image letter may have drawn it (#411)', async () => {
+    // Before v32 every letter tool pointed at LetterPreviewCard, and an image
+    // call may carry no image arguments at all (the server then uses the
+    // recent upload). A text-only stamp there would let the card repeat an
+    // image letter as a text-only one, so these pages get no stamp and the
+    // card only advises asking in the chat.
     const client = await connectedClient();
 
-    const result = await client.readResource({ uri: 'ui://widgets/LetterPreviewCard.html' });
+    for (const uri of [
+      'ui://widgets/LetterPreviewCard.html',
+      'ui://widgets/LetterPreviewCard.html@v31',
+      'ui://widgets/LetterPreviewCard.html@v1',
+      'ui://widgets/LetterPreviewCard.html@vlatest'
+    ]) {
+      const result = await client.readResource({ uri });
+      const text = String(result.contents[0].text);
+      expect(text, uri).toContain('id="retry-button"');
+      expect(text, uri).not.toContain('<meta name="letter-irl-preview-tool"');
+    }
+  });
 
-    expect(String(result.contents[0].text)).toContain('content="quote_and_preview_letter"');
+  it('stamps the letter card at the current version and later ones (#411)', async () => {
+    const client = await connectedClient();
+
+    for (const uri of [
+      widgetTemplateUri('LetterPreviewCard'),
+      `ui://widgets/LetterPreviewCard.html@v${WIDGET_TEMPLATE_VERSION + 1}`
+    ]) {
+      const result = await client.readResource({ uri });
+      expect(String(result.contents[0].text), uri).toContain(
+        '<meta name="letter-irl-preview-tool" content="quote_and_preview_letter" />'
+      );
+    }
+  });
+
+  it('stamps the postcard card at any version, since only one tool ever drew it (#411)', async () => {
+    const client = await connectedClient();
+
+    for (const uri of ['ui://widgets/PostcardPreviewCard.html', 'ui://widgets/PostcardPreviewCard.html@v12']) {
+      const result = await client.readResource({ uri });
+      expect(String(result.contents[0].text), uri).toContain(
+        '<meta name="letter-irl-preview-tool" content="quote_and_preview_postcard" />'
+      );
+    }
   });
 
   it('does not stamp widgets that are not preview cards', async () => {
@@ -857,5 +891,39 @@ describe('stampPreviewTool (#411)', () => {
 
   it('leaves a page without a head tag alone', () => {
     expect(stampPreviewTool('<body></body>', 'send_letter')).toBe('<body></body>');
+  });
+});
+
+describe('previewToolFor (#411)', () => {
+  it('names the text-only tool for the letter card only from v32 on', () => {
+    expect(previewToolFor('LetterPreviewCard', 32)).toBe('quote_and_preview_letter');
+    expect(previewToolFor('LetterPreviewCard', 33)).toBe('quote_and_preview_letter');
+    expect(previewToolFor('LetterPreviewCard', WIDGET_TEMPLATE_VERSION)).toBe('quote_and_preview_letter');
+    expect(previewToolFor('LetterPreviewCard', 31)).toBeUndefined();
+    expect(previewToolFor('LetterPreviewCard', 0)).toBeUndefined();
+  });
+
+  it.each([
+    ['the legacy unversioned URI', undefined],
+    ['a version that is not a number', Number.NaN],
+    ['a fractional version', 32.5],
+    ['an unsafe integer', Number.MAX_SAFE_INTEGER + 2]
+  ])('names no tool for the letter card at %s', (_label, version) => {
+    expect(previewToolFor('LetterPreviewCard', version)).toBeUndefined();
+  });
+
+  it('names the other preview tools at any version', () => {
+    expect(previewToolFor('PostcardPreviewCard', undefined)).toBe('quote_and_preview_postcard');
+    expect(previewToolFor('PostcardPreviewCard', 3)).toBe('quote_and_preview_postcard');
+    expect(previewToolFor('LetterHeaderImagePreviewCard', 1)).toBe('quote_and_preview_letter_with_header_image');
+    expect(previewToolFor('LetterInlineImagePreviewCard', undefined)).toBe('quote_and_preview_letter_with_image');
+  });
+
+  it('names no tool for widgets that are not preview cards', () => {
+    for (const { name } of WIDGET_DEFINITIONS) {
+      if (PREVIEW_TOOL_BY_TEMPLATE.has(name)) continue;
+      expect(previewToolFor(name, WIDGET_TEMPLATE_VERSION), name).toBeUndefined();
+    }
+    expect(previewToolFor('NotAWidget', WIDGET_TEMPLATE_VERSION)).toBeUndefined();
   });
 });

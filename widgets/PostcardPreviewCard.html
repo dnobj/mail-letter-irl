@@ -237,12 +237,18 @@
       // draw the host's. LetterPreviewCard carries the same logic.
       //
       // The host mounts this card while the preview call is still running, so
-      // the wait should outlast an ordinary live call. Every postcard preview
-      // first downloads and resizes its front image, which can take longer
-      // when the server is busy. A host result that arrives after the wait
-      // still renders, and it replaces a preview this card made in the
-      // meantime (see render()).
-      const PREVIEW_WAIT_MS = 30000;
+      // the wait has to outlast a slow live call: a host result that lands
+      // after the card made its own preview is a second draft of the same
+      // postcard. Every postcard preview first downloads its front image
+      // under a 20-second deadline, then checks two addresses one after the
+      // other, each allowed 10 seconds by the PostGrid client. A host result
+      // that arrives after the wait still renders, and it replaces a preview
+      // this card made until the card acts on its own draft (see render()).
+      const PREVIEW_WAIT_MS = 45000;
+      // How long the button waits on the card's own call before it can be
+      // pressed again. A result that arrives later is still drawn, as long as
+      // the card has no preview by then.
+      const RETRY_TIMEOUT_MS = 60000;
       const RETRY_LABEL = "Create my preview";
       // The tools that draw this card. The server stamps the one that drew it
       // into the page (stampPreviewTool in src/mcp/registerTools.ts); a page
@@ -253,11 +259,33 @@
       let retryBusy = false;
       // A preview this card created itself: { output, meta, args }.
       let retryResult = null;
+      // Set when the card first tries to send or pay for the draft on screen.
+      // From then on a late host result never replaces the card's own draft,
+      // whether that attempt succeeded or not: a send that failed on the
+      // card's side may still have gone out, and the server recognises a
+      // repeated send only when it names the same draft.
+      let draftActedOn = false;
 
       function previewTool() {
         const tag = document.querySelector('meta[name="letter-irl-preview-tool"]');
         const name = tag ? tag.getAttribute("content") : null;
         return PREVIEW_TOOLS.includes(name) ? name : null;
+      }
+
+      // An attached image the card can pass back exactly as the host gave it:
+      // none, the empty string some clients send for "no file", or the file
+      // object the server reads. Anything else, such as a bare file
+      // reference, reaches the server as no image at all, and the server then
+      // falls back to the most recent upload, which may be another picture.
+      function imageArgumentRepeatable(image) {
+        if (image === undefined || image === "") return true;
+        return Boolean(
+          image &&
+            typeof image === "object" &&
+            typeof image.download_url === "string" &&
+            image.download_url &&
+            typeof image.file_id === "string",
+        );
       }
 
       // The call this card can repeat faithfully, or null.
@@ -267,7 +295,12 @@
         if (!tool || !input || typeof input !== "object" || Array.isArray(input)) return null;
         if (!input.recipient || typeof input.recipient !== "object") return null;
         if (typeof input.message !== "string") return null;
+        if (!imageArgumentRepeatable(input.image)) return null;
         return { tool, args: input };
+      }
+
+      function isHttpsUrl(value) {
+        return typeof value === "string" && /^https:\/\//i.test(value);
       }
 
       // The tool output this card is drawing: its own preview if it made one,
@@ -405,13 +438,17 @@
         document.getElementById("pay-send-button").style.display = "none";
         document.getElementById("buy-pack-button").style.display = "none";
         document.getElementById("pack-options").style.display = "none";
-        // Once following, the pill and the polling belong to the status
-        // refresh; later renders only redraw the rows above.
+        // Once following, the pill, the polling and the link belong to the
+        // status refresh; later renders only redraw the rows above.
         if (trackedOrderId !== null) return;
         trackedOrderId = orderId;
+        const checkoutUrl = isHttpsUrl(kept.checkoutUrl) ? kept.checkoutUrl : null;
         startStatusPolling("Checking the purchase...");
         void refreshPurchaseStatus().then((settled) => {
-          if (!settled) scheduleStatusPoll();
+          if (settled) return;
+          // Unpaid, or not known yet: the kept link is the way to pay.
+          if (checkoutUrl) showCheckoutLink(checkoutUrl, "Open checkout");
+          scheduleStatusPoll();
         });
       }
 
@@ -443,21 +480,39 @@
         button.classList.add("loading");
         buttonText.innerHTML = '<span class="spinner"></span> Creating preview...';
         errorMessage.style.display = "none";
+        // The first preview to arrive is the one drawn, whenever it arrives:
+        // the host's, this call's, or an earlier call's that outlasted its
+        // timeout. Any later one is left unused.
+        const drawn = Promise.resolve()
+          .then(() => window.openai.callTool(request.tool, request.args))
+          .then((result) => {
+            const output = previewOutput(result);
+            if (!output) {
+              throw new Error(resultText(result) || "The preview was not returned.");
+            }
+            if (dataLoaded) return;
+            retryResult = { output, meta: result?._meta || {}, args: request.args };
+            render();
+          });
+        const TIMED_OUT = {};
+        let timer = null;
+        const timedOut = new Promise((resolve) => {
+          timer = setTimeout(() => resolve(TIMED_OUT), RETRY_TIMEOUT_MS);
+        });
         try {
-          const result = await window.openai.callTool(request.tool, request.args);
-          const output = previewOutput(result);
-          if (!output) {
-            throw new Error(resultText(result) || "The preview was not returned.");
+          const outcome = await Promise.race([drawn, timedOut]);
+          if (outcome === TIMED_OUT && !dataLoaded) {
+            errorMessage.textContent =
+              "No preview yet. It will appear here if it arrives. You can also try again, or ask for the preview in the chat.";
+            errorMessage.style.display = "block";
           }
-          // The host's own result arrived while this call ran, and it is the
-          // one on screen: leave it there.
-          if (dataLoaded) return;
-          retryResult = { output, meta: result?._meta || {}, args: request.args };
-          render();
         } catch (error) {
-          errorMessage.textContent = `Unable to create the preview: ${error?.message || "Unknown error"}`;
-          errorMessage.style.display = "block";
+          if (!dataLoaded) {
+            errorMessage.textContent = `Unable to create the preview: ${error?.message || "Unknown error"}`;
+            errorMessage.style.display = "block";
+          }
         } finally {
+          clearTimeout(timer);
           retryBusy = false;
           button.disabled = false;
           button.classList.remove("loading");
@@ -535,18 +590,13 @@
         }
 
         // The host's result replaces a preview this card made itself, until
-        // the card acts on its own draft. Both drafts hold the same postcard
-        // and the host's is the one the conversation knows, so switching keeps
-        // a send from the card and a send from the chat on one draft, which
-        // the server sends only once. After a send or a checkout the card
-        // keeps its own draft.
+        // the card first tries to send or pay for its own draft. Both drafts
+        // hold the same postcard and the host's is the one the conversation
+        // knows, so switching keeps a send from the card and a send from the
+        // chat on one draft, which the server sends only once. From the first
+        // attempt on, successful or not, the card keeps its own draft.
         const hostOutput = window.openai?.toolOutput;
-        if (
-          retryResult &&
-          hostOutput?.draftId !== undefined &&
-          cardIsShowingDraft() &&
-          !checkoutInProgress
-        ) {
+        if (retryResult && hostOutput?.draftId !== undefined && !draftActedOn) {
           retryResult = null;
         }
         const state = retryResult ? retryResult.output : window.openai?.toolOutput;
@@ -821,6 +871,7 @@
       // Handle send button click
       async function handleSend() {
         if (sendInProgress || !currentDraftId) return;
+        draftActedOn = true;
 
         const sendButton = document.getElementById("send-button");
         const sendButtonText = document.getElementById("send-button-text");
@@ -1136,6 +1187,7 @@
 
       async function handlePayAndSend() {
         if (checkoutInProgress || !currentDraftId) return;
+        draftActedOn = true;
         const button = document.getElementById("pay-send-button");
         const buttonText = document.getElementById("pay-send-button-text");
         const errorMessage = document.getElementById("error-message");
@@ -1162,13 +1214,14 @@
           idLabel.textContent = "Purchase";
           idValue.textContent = result.orderId;
           button.classList.remove("loading");
-          // A reopened conversation follows this order instead of offering
-          // the postcard again.
-          keep(
-            typeof result.orderId === "string" && result.orderId
-              ? { draftId: currentDraftId, checkout: true, orderId: result.orderId }
-              : { draftId: currentDraftId, checkout: true },
-          );
+          // A reopened conversation follows this order, and offers this link
+          // while it is unpaid, instead of offering the postcard again.
+          const keptCheckout = { draftId: currentDraftId, checkout: true };
+          if (typeof result.orderId === "string" && result.orderId) {
+            keptCheckout.orderId = result.orderId;
+          }
+          if (isHttpsUrl(result.checkoutUrl)) keptCheckout.checkoutUrl = result.checkoutUrl;
+          keep(keptCheckout);
 
           // Show the link BEFORE handing off to the host, and never hide it
           // again. On 2026-08-29 openExternal resolved without opening

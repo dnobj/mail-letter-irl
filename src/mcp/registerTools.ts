@@ -6,7 +6,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { LetterIrlServer } from "../server.js";
 import { toolInputSchemas } from "./toolSchemas.js";
-import { widgetTemplateUri } from "./widgetUris.js";
+import { WIDGET_TEMPLATE_VERSION, widgetTemplateUri } from "./widgetUris.js";
 import {
   quoteAndPreviewInputZ,
   quoteAndPreviewLetterWithHeaderImageInputZ,
@@ -212,6 +212,35 @@ export const PREVIEW_TOOL_BY_TEMPLATE: ReadonlyMap<string, string> = new Map([
 ]);
 
 export const PREVIEW_TOOL_META_NAME = "letter-irl-preview-tool";
+
+/**
+ * The first template version from which a template has meant only the tool in
+ * PREVIEW_TOOL_BY_TEMPLATE (#411). Until v32 all three letter tools pointed at
+ * LetterPreviewCard, so a client holding an older tool list can draw an image
+ * letter from it. Stamping that page as the text-only tool would let the card
+ * repeat an image letter without its image: an image call may carry no image
+ * arguments at all and rely on the server's recent-upload fallback, which the
+ * card cannot see. Older versions and the legacy unversioned URI are therefore
+ * served unstamped, and the card offers only advice to ask in the chat.
+ * PostcardPreviewCard has only ever served the postcard tool, and the
+ * variants did not exist before v32, so neither needs a floor.
+ */
+const PREVIEW_TOOL_SINCE_VERSION: ReadonlyMap<string, number> = new Map([
+  ["LetterPreviewCard", 32]
+]);
+
+/**
+ * The preview tool to stamp into a template served at `version`, or undefined
+ * when the page must go out unstamped. `version` is undefined for the legacy
+ * unversioned URI.
+ */
+export function previewToolFor(name: string, version: number | undefined): string | undefined {
+  const tool = PREVIEW_TOOL_BY_TEMPLATE.get(name);
+  if (!tool) return undefined;
+  const since = PREVIEW_TOOL_SINCE_VERSION.get(name);
+  if (since === undefined) return tool;
+  return version !== undefined && Number.isSafeInteger(version) && version >= since ? tool : undefined;
+}
 
 /**
  * Stamps a preview card's page with the tool that draws it (#411). A page
@@ -431,7 +460,7 @@ const WIDGET_BY_NAME = new Map<string, { file: string; description: string }>([
  * handler before our code runs and is NOT logged here - so silence in this log
  * means "no read arrived", not "no read was attempted".
  */
-async function readWidgetResource(name: string, uri: string) {
+async function readWidgetResource(name: string, uri: string, version: number | undefined) {
   const widget = WIDGET_BY_NAME.get(name);
 
   if (!widget) {
@@ -445,8 +474,8 @@ async function readWidgetResource(name: string, uri: string) {
     "utf-8"
   );
   // `name` has been resolved against WIDGET_BY_NAME above, so it is one of our
-  // own template names by the time it indexes this map.
-  const text = stampPreviewTool(html, PREVIEW_TOOL_BY_TEMPLATE.get(name));
+  // own template names by the time it indexes the preview-tool map.
+  const text = stampPreviewTool(html, previewToolFor(name, version));
   console.log(`🎨 Returning widget HTML (${text.length} bytes)`);
 
   return {
@@ -491,12 +520,12 @@ export async function registerWidgetResources(mcpServer: McpServer) {
     // out (issue #235).
     const versionedUri = widgetTemplateUri(widget.name);
     const legacyUri = `ui://widgets/${widget.name}.html`;
-    const registrations: Array<[string, string]> = [
-      [widget.name, versionedUri],
-      [`${widget.name}-legacy`, legacyUri]
+    const registrations: Array<[string, string, number | undefined]> = [
+      [widget.name, versionedUri, WIDGET_TEMPLATE_VERSION],
+      [`${widget.name}-legacy`, legacyUri, undefined]
     ];
 
-    for (const [registrationName, uri] of registrations) {
+    for (const [registrationName, uri, version] of registrations) {
       // Register widget resource with canonical ui.* metadata and
       // legacy openai/* aliases for compatibility.
       mcpServer.registerResource(
@@ -504,7 +533,7 @@ export async function registerWidgetResources(mcpServer: McpServer) {
         uri,
         {},  // Empty options per docs
         async () => {
-          const result = await readWidgetResource(widget.name, uri);
+          const result = await readWidgetResource(widget.name, uri, version);
           // Unreachable: the name comes from WIDGET_DEFINITIONS itself.
           if (!result) {
             throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
@@ -533,7 +562,7 @@ export async function registerWidgetResources(mcpServer: McpServer) {
       uri,
       {},
       async () => {
-        const result = await readWidgetResource(variant.name, uri);
+        const result = await readWidgetResource(variant.name, uri, WIDGET_TEMPLATE_VERSION);
         if (!result) {
           throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
         }
@@ -571,7 +600,9 @@ export async function registerWidgetResources(mcpServer: McpServer) {
     async (uri, variables) => {
       const raw = variables.name;
       const name = Array.isArray(raw) ? raw[0] : raw;
-      const result = await readWidgetResource(String(name ?? ""), uri.toString());
+      const rawVersion = Array.isArray(variables.version) ? variables.version[0] : variables.version;
+      const version = /^\d{1,6}$/.test(String(rawVersion ?? "")) ? Number(rawVersion) : undefined;
+      const result = await readWidgetResource(String(name ?? ""), uri.toString(), version);
       if (!result) {
         // Same error the SDK raises for an unregistered URI, so an unknown
         // widget name is indistinguishable to the client from one we never

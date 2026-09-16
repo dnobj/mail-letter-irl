@@ -794,7 +794,7 @@ from the card.
       not ask, the call goes through unprompted; record that and try again in a new chat.
 - [ ] If the card fills in with the draft within a few seconds, the approved call went through.
       Record that; the lost call did not reproduce.
-- [ ] If the card stays on "Loading letter preview…", wait twelve seconds. It should read "No
+- [ ] If the card stays on "Loading letter preview…", wait 25 seconds. It should read "No
       preview is showing on this card. If this letter was already sent, there is nothing more to
       do here. Otherwise, create the preview again." with **Create my preview**. The dev log
       should show the template read and no `tools/call` for the approved call.
@@ -810,8 +810,13 @@ from the card.
 - [ ] After a lost call, ask the model whether the preview exists. With instructions r8 it should
       say the call did not complete, or point at **Create my preview**, rather than describe a
       draft it never received.
-- [ ] If time allows, repeat the lost-call steps for a postcard and for an image letter. Both wait
-      thirty seconds, and each must repeat its own tool.
+- [ ] Repeat the lost-call steps for an enclosed-image letter
+      (`quote_and_preview_letter_with_image`) with an attached image. The card waits 45 seconds
+      and must repeat that tool. In the dev log, the repeated call should log
+      `quote.letter.image.from_fileParams`, not `from_recent_upload`. Record whether the card
+      shows the image, or "Image not shown on this card", or advice to ask in the chat, which
+      means the host passed the image in a form the card will not repeat.
+- [ ] If time allows, repeat the lost-call steps for a postcard. It also waits 45 seconds.
 
 ### Validation Errors
 - [x] Missing address fields → clear error
