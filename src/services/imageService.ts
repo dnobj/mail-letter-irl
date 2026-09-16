@@ -82,11 +82,12 @@ const UNSUPPORTED_FORMAT_MESSAGE = 'Unsupported image format. Please use PNG, JP
 /**
  * Images that libvips must hold whole rather than stream (interlaced PNG,
  * progressive JPEG) are bounded by their decoded size as well as by pixels.
- * Measured on the installed libvips for a 49 MP input: a baseline JPEG peaks
- * near 63 MB and a plain 8-bit PNG near 104 MB, but an interlaced 8-bit PNG
- * near 272 MB and an interlaced 16-bit PNG near 496 MB, about twice the
- * decoded bytes. 100 MB of decoded bytes keeps such a decode near 200 MB
- * resident, in line with the streamed cases.
+ * Measured through this pipeline at one libvips thread (pinned below): a
+ * 49 MP baseline JPEG or plain 8-bit PNG peaks near 60 MB resident and a
+ * plain 16-bit RGBA PNG near 130 MB, all streamed; an interlaced or
+ * progressive image at this budget peaks near 140 to 165 MB. Without the
+ * budget, a 49 MP interlaced 16-bit PNG, a 4 MB file that passes every
+ * other check, measured near 500 MB.
  */
 const MAX_FULL_DECODE_BYTES = 100_000_000;
 
@@ -94,7 +95,11 @@ const BYTES_PER_SAMPLE: Record<string, number> = {
   char: 1, uchar: 1, short: 2, ushort: 2, int: 4, uint: 4, float: 4, complex: 8, double: 8, dpcomplex: 16,
 };
 
-const TOO_LARGE_TO_DECODE_MESSAGE = 'Image is too large to process. Please use a smaller image.';
+/** Names the size that would fit, for this image's channels and depth. */
+function tooLargeToDecodeMessage(bytesPerPixel: number): string {
+  const megapixels = Math.floor(MAX_FULL_DECODE_BYTES / bytesPerPixel / 1_000_000);
+  return `Image is too large to process. Please use an image under ${megapixels} megapixels, or save it without interlacing or progressive encoding.`;
+}
 
 const REMOTE_IMAGE_FETCH_CONFIG = {
   /** One deadline for the whole transfer: redirects, headers and body. */
@@ -104,14 +109,15 @@ const REMOTE_IMAGE_FETCH_CONFIG = {
 
 /**
  * Concurrency gates. A decode is bounded per image by the pixel ceiling and
- * the full-decode budget (about 200 MB resident at worst) and a download
- * buffer by the file-size caps, so the gates bound the multiplier: without
- * them one account's request allowance could hold dozens of decodes in flight
- * at once. Worst case with these numbers is about three decodes, fifteen held
- * input buffers and eight download buffers, under a gigabyte. Waiting callers
- * fail fast with SERVICE_BUSY once the queue is full or the wait is up, and
- * one account may hold at most two callers in each gate, so a single account
- * cannot fill a gate for everyone else.
+ * the full-decode budget (near 165 MB resident at worst, at one libvips
+ * thread) and a download buffer by the file-size caps, so the gates bound the
+ * multiplier: without them one account's request allowance could hold dozens
+ * of decodes in flight at once. Worst case with these numbers is three
+ * decodes, fifteen held input buffers and eight download buffers of at most
+ * 10 MB: about 725 MB. Waiting callers fail fast with SERVICE_BUSY once the
+ * queue is full or the wait is up, and one account may hold at most two
+ * callers in each gate, so a single account cannot fill a gate for everyone
+ * else.
  */
 const GATE_CONFIG = {
   decode: { limit: 3, maxQueue: 12, queueTimeoutMs: 15_000, perKeyLimit: 2 },
@@ -165,6 +171,16 @@ export class ImageProcessingError extends Error {
 // ============================================================================
 // Opening images and running gated work
 // ============================================================================
+
+/**
+ * One libvips thread for the whole process. Every memory figure this module
+ * is sized by was measured at one thread. sharp defaults to one on the glibc
+ * build the API runs, but switches to the core count under MALLOC_ARENA_MAX
+ * or a musl or jemalloc base image, where the same decodes measured two to
+ * three times larger. Pinning it makes the bound a property of this code
+ * rather than of the container.
+ */
+sharp.concurrency(1);
 
 /**
  * The one way this module (and generateImageForMail) opens image bytes: the
@@ -829,10 +845,9 @@ async function getImageMetadata(buffer: Buffer): Promise<{ width: number; height
   }
 
   if (metadata.isProgressive) {
-    const decodedBytes =
-      metadata.width * metadata.height * (metadata.channels ?? 4) * (BYTES_PER_SAMPLE[metadata.depth ?? ''] ?? 2);
-    if (decodedBytes > MAX_FULL_DECODE_BYTES) {
-      throw new ImageProcessingError('IMAGE_TOO_LARGE', TOO_LARGE_TO_DECODE_MESSAGE);
+    const bytesPerPixel = (metadata.channels ?? 4) * (BYTES_PER_SAMPLE[metadata.depth ?? ''] ?? 2);
+    if (metadata.width * metadata.height * bytesPerPixel > MAX_FULL_DECODE_BYTES) {
+      throw new ImageProcessingError('IMAGE_TOO_LARGE', tooLargeToDecodeMessage(bytesPerPixel));
     }
   }
 

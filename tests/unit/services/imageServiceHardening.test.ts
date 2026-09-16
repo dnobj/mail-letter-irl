@@ -190,14 +190,17 @@ describe('image pipeline hardening', () => {
   });
 
   describe('full-decode budget for interlaced and progressive images', () => {
-    const TOO_LARGE_TO_DECODE = 'Image is too large to process. Please use a smaller image.';
-
     it('refuses an interlaced PNG whose decoded bytes exceed the budget while its pixels fit the ceiling', async () => {
       // 6000x6000 RGB 8-bit interlaced: 36 MP, under the 50 MP ceiling, but 108 MB decoded.
-      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(pngHeader(6000, 6000, { interlaced: true })), { 'content-type': 'image/png' }));
+      const header = pngHeader(6000, 6000, { interlaced: true });
+      await expect(_testing.getImageMetadata(header)).rejects.toMatchObject({ code: 'IMAGE_TOO_LARGE' });
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(header), { 'content-type': 'image/png' }));
       const error = await rejection(downloadAndProcessImage({ url: REMOTE }));
       expect(error.code).toBe('IMAGE_TOO_LARGE');
-      expect(error.userMessage).toBe(TOO_LARGE_TO_DECODE);
+      // 100 MB over 3 bytes per pixel: the message names the size that would fit.
+      expect(error.userMessage).toBe(
+        'Image is too large to process. Please use an image under 33 megapixels, or save it without interlacing or progressive encoding.'
+      );
     });
 
     it('counts sample depth: a 16-bit interlaced PNG is refused at far fewer pixels', async () => {
@@ -205,13 +208,19 @@ describe('image pipeline hardening', () => {
       fetchMock.mockResolvedValueOnce(responseWith(bodyOf(pngHeader(5000, 5000, { bitDepth: 16, interlaced: true })), {}));
       const error = await rejection(downloadAndProcessImage({ url: REMOTE }));
       expect(error.code).toBe('IMAGE_TOO_LARGE');
-      expect(error.userMessage).toBe(TOO_LARGE_TO_DECODE);
+      // 100 MB over 6 bytes per pixel.
+      expect(error.userMessage).toBe(
+        'Image is too large to process. Please use an image under 16 megapixels, or save it without interlacing or progressive encoding.'
+      );
     });
 
     it('lets an interlaced PNG within the budget through to the decoder', async () => {
-      // 5000x5000 RGB 8-bit interlaced: 75 MB decoded. The bogus IDAT then fails
-      // inside sharp's decoder, which is proof the budget did not refuse it.
-      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(pngHeader(5000, 5000, { interlaced: true })), {}));
+      // 5000x5000 RGB 8-bit interlaced: 75 MB decoded. The header read admits
+      // it, and the bogus IDAT then fails inside sharp's decoder rather than
+      // in any check of this service.
+      const header = pngHeader(5000, 5000, { interlaced: true });
+      await expect(_testing.getImageMetadata(header)).resolves.toEqual({ width: 5000, height: 5000, format: 'png' });
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(header), {}));
       const outcome = await outcomeOf(downloadAndProcessImage({ url: REMOTE }));
       expect(outcome).toBeInstanceOf(Error);
       expect(outcome).not.toBeInstanceOf(ImageProcessingError);
@@ -219,10 +228,16 @@ describe('image pipeline hardening', () => {
 
     it('does not apply the budget to an image libvips can stream', async () => {
       // 6000x6000 RGBA 16-bit, not interlaced: 288 MB if decoded whole, but streamed.
-      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(pngHeader(6000, 6000, { bitDepth: 16, colourType: 6 })), {}));
+      const header = pngHeader(6000, 6000, { bitDepth: 16, colourType: 6 });
+      await expect(_testing.getImageMetadata(header)).resolves.toEqual({ width: 6000, height: 6000, format: 'png' });
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(header), {}));
       const outcome = await outcomeOf(downloadAndProcessImage({ url: REMOTE }));
       expect(outcome).toBeInstanceOf(Error);
       expect(outcome).not.toBeInstanceOf(ImageProcessingError);
+    });
+
+    it('pins libvips to one thread, the condition every memory figure was measured under', () => {
+      expect(sharp.concurrency()).toBe(1);
     });
 
     it('processes a real interlaced PNG and a real progressive JPEG', async () => {
@@ -287,6 +302,42 @@ describe('image pipeline hardening', () => {
 
       await expect(downloadAndProcessImage({ url: REMOTE })).resolves.toMatchObject({ originalWidth: 300 });
       expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('fails the download when the hops together use up the deadline, which a per-hop timer would not', async () => {
+      const stalledBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(16));
+        },
+      });
+      let reachedSecondHop!: () => void;
+      const secondHop = new Promise<void>((resolve) => { reachedSecondHop = resolve; });
+      fetchMock.mockImplementation(async () => {
+        if (fetchMock.mock.calls.length === 1) {
+          await vi.advanceTimersByTimeAsync(15_000);
+          return responseWith(null, { location: 'https://93.184.216.34/moved.png' }, 302);
+        }
+        reachedSecondHop();
+        return responseWith(stalledBody, { 'content-type': 'image/png' });
+      });
+
+      let settled = false;
+      const pending = downloadAndProcessImage({ url: REMOTE });
+      const outcome = pending.then(() => { settled = true; return null; }, (error: unknown) => { settled = true; return error; });
+
+      // The first hop advanced the clock 15 s itself; wait until the second
+      // hop's body is being read before moving the clock again, so the two
+      // advances cannot interleave.
+      await secondHop;
+      expect(settled).toBe(false);
+
+      // 6 s into the second hop's body the shared 20 s deadline has passed. A
+      // timer restarted per hop would still have 14 s to run here.
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(settled).toBe(true);
+      const error = await outcome;
+      expect(error).toBeInstanceOf(ImageProcessingError);
+      expect((error as ImageProcessingError).code).toBe('DOWNLOAD_FAILED');
     });
 
     it('fails the download when the first hop alone uses up the deadline', async () => {

@@ -77,7 +77,8 @@ All images are validated, resized to print specifications (300 DPI), optimized f
 - Unsupported format: "Unsupported image format. Please use PNG, JPEG, or WebP."
 - Too small: "Image is too small for print quality. Please use at least 100x100 pixels."
 - Too many pixels: "Image is too large. Please use an image under 50 megapixels."
-- Busy: "The image service is busy right now. Please try again in a moment."
+- Too large to decode whole: "Image is too large to process. Please use an image under N megapixels, or save it without interlacing or progressive encoding." (N depends on the image's channels and depth: 33 for 8-bit RGB, 25 for 8-bit RGBA, 16 for 16-bit RGB, 12 for 16-bit RGBA.)
+- Busy: "The image service is busy right now. Please try again in a moment." or, when it is the caller's own share of the gates that is full, "You have other images still processing. Please wait for them to finish and try again."
 
 ### 2. Letter Header Images
 
@@ -116,7 +117,8 @@ All images are validated, resized to print specifications (300 DPI), optimized f
 - Unsupported format: "Unsupported image format. Please use PNG, JPEG, or WebP."
 - Too small: "Image is too small for print quality. Please use at least 100x100 pixels."
 - Too many pixels: "Image is too large. Please use an image under 50 megapixels."
-- Busy: "The image service is busy right now. Please try again in a moment."
+- Too large to decode whole: "Image is too large to process. Please use an image under N megapixels, or save it without interlacing or progressive encoding." (N depends on the image's channels and depth: 33 for 8-bit RGB, 25 for 8-bit RGBA, 16 for 16-bit RGB, 12 for 16-bit RGBA.)
+- Busy: "The image service is busy right now. Please try again in a moment." or, when it is the caller's own share of the gates that is full, "You have other images still processing. Please wait for them to finish and try again."
 
 ### 3. Letter Inline Images
 
@@ -148,7 +150,8 @@ Same as header images, but with different output dimensions (1950×900) and plac
 - Unsupported format: "Unsupported image format. Please use PNG, JPEG, or WebP."
 - Too small: "Image is too small for print quality. Please use at least 100x100 pixels."
 - Too many pixels: "Image is too large. Please use an image under 50 megapixels."
-- Busy: "The image service is busy right now. Please try again in a moment."
+- Too large to decode whole: "Image is too large to process. Please use an image under N megapixels, or save it without interlacing or progressive encoding." (N depends on the image's channels and depth: 33 for 8-bit RGB, 25 for 8-bit RGBA, 16 for 16-bit RGB, 12 for 16-bit RGBA.)
+- Busy: "The image service is busy right now. Please try again in a moment." or, when it is the caller's own share of the gates that is full, "You have other images still processing. Please wait for them to finish and try again."
 
 ### 4. Text-Only Letters
 
@@ -165,13 +168,14 @@ Same as header images, but with different output dimensions (1950×900) and plac
 
 ### Resource limits
 
-Every image byte is customer-controlled, and decoding is where bytes become memory, so `src/services/imageService.ts` bounds the work in six ways:
+Every image byte is customer-controlled, and decoding is where bytes become memory, so `src/services/imageService.ts` bounds the work in seven ways:
 
 - **Format from the first bytes.** Before sharp is asked anything, the buffer must start with a PNG, JPEG or WebP signature; anything else is refused without a parse. libvips picks its loader by the same signatures, so only bytes bound for those three loaders ever reach it. The Content-Type header is still checked as an early hint, but a server that omits or fakes it cannot route SVG (whose "header read" is a full XML parse), GIF, TIFF or AVIF bytes to the other bundled loaders.
 - **Pixel ceiling.** Every `sharp()` call goes through one opener that sets `limitInputPixels` to 50 megapixels. sharp checks the declared size when it reads the header, so a small file claiming huge dimensions is refused before any pixel is decoded. sharp's own default is about five times higher, at which a 10 MB file can decode to about a gigabyte.
-- **Full-decode budget.** Interlaced PNGs and progressive JPEGs cannot be streamed; libvips holds them whole. Measured on the installed libvips for a 49-megapixel input: a baseline JPEG peaks near 63 MB and a plain 8-bit PNG near 104 MB, but an interlaced 8-bit PNG near 272 MB and an interlaced 16-bit PNG near 496 MB, about twice the decoded bytes. So an interlaced or progressive image must also fit 100 MB of decoded bytes (width × height × channels × bytes per sample), which keeps any single decode near 200 MB resident.
+- **Full-decode budget.** Interlaced PNGs and progressive JPEGs cannot be streamed; libvips holds them whole. So an image whose header marks it interlaced or progressive must also fit 100 MB of decoded bytes (width × height × channels × bytes per sample), and the refusal names the size that would fit for that image's channels and depth. Measured through this pipeline at one libvips thread: a 49-megapixel baseline JPEG or plain 8-bit PNG peaks near 60 MB resident and a plain 16-bit RGBA PNG near 130 MB (all streamed); an interlaced or progressive image at the budget boundary peaks near 140 to 165 MB. Without the budget, a 49-megapixel interlaced 16-bit PNG, a 4 MB file that passes every other check, measured near 500 MB.
+- **One libvips thread.** The service pins `sharp.concurrency(1)`. Every figure above was measured at one thread; sharp's default is one on the glibc build the API runs, but it switches to the core count under `MALLOC_ARENA_MAX` or a musl or jemalloc base image, where the same decodes measured two to three times larger.
 - **Decode once.** The widget preview is derived from the processed print image, not from the original, so each original is decoded exactly once. The preview is a scaled copy of the print image; a small letter original is upscaled for print first, so its preview follows the print image rather than the original.
-- **Concurrency gates.** Decodes run through an in-process gate of 3 at a time (12 may wait, 15 s each) and remote downloads through a gate of 8 (24 may wait, 15 s each). Each account may hold at most 2 callers in each gate, so one account cannot fill a gate for everyone else; the tools pass the account, and a refused caller gets a message naming its own in-flight images. Any other caller that cannot get a slot fails fast with the busy message rather than adding to memory pressure. Worst case with these numbers is about three decodes near 200 MB, fifteen held input buffers and eight download buffers of at most 10 MB: under a gigabyte. The generated-image preview in `generate_image_for_mail` uses the same opener, gate and account share.
+- **Concurrency gates.** Decodes run through an in-process gate of 3 at a time (12 may wait, 15 s each) and remote downloads through a gate of 8 (24 may wait, 15 s each). Each account may hold at most 2 callers in each gate, so one account cannot fill a gate for everyone else; the tools pass the account, and a refused caller gets a message naming its own in-flight images. Any other caller that cannot get a slot fails fast with the busy message rather than adding to memory pressure. Worst case with these numbers is three decodes near 165 MB, fifteen held input buffers and eight download buffers of at most 10 MB: about 725 MB. The generated-image preview in `generate_image_for_mail` uses the same opener, gate and account share.
 - **One download deadline.** A remote download has one 20 s deadline that covers every redirect hop, the headers and the whole body read; a server that dribbles bytes is cut off at the deadline and the byte cap is enforced whether or not Content-Length was sent. The only time outside the deadline is the DNS lookup that validates each hop's host, which Node's resolver does not let a signal abort.
 
 `tests/unit/services/imageServiceHardening.test.ts` proves each of these with real image bytes and no sharp mock.
