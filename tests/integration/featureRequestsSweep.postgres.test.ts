@@ -34,11 +34,13 @@ function databaseUrlForSchema(baseUrl: string, schema: string): string {
 
 /**
  * Explicit clocks relative to the boundary the sweep uses, written the way the
- * sweep writes it so month-end clamping lands on the same day for both sides.
- * Fixed SQL expressions, never data.
+ * sweep writes it. Two days of margin, not one: the seed and the purge take
+ * NOW() from different transactions, and a 12-month step back jumps two days
+ * across the midnight into 1 March of the year after a leap year (review
+ * round 1). Fixed SQL expressions, never data.
  */
-const JUST_INSIDE = `NOW() - INTERVAL '12 months' + INTERVAL '1 day'`;
-const JUST_PAST = `NOW() - INTERVAL '12 months' - INTERVAL '1 day'`;
+const JUST_INSIDE = `NOW() - INTERVAL '12 months' + INTERVAL '2 days'`;
+const JUST_PAST = `NOW() - INTERVAL '12 months' - INTERVAL '2 days'`;
 const RECENT = `NOW() - INTERVAL '5 minutes'`;
 const LONG_AGO = `NOW() - INTERVAL '3 years'`;
 
