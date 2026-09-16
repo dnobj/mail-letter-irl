@@ -67,11 +67,34 @@ const TOO_MANY_PIXELS_MESSAGE =
   `Image is too large. Please use an image under ${MAX_INPUT_PIXELS / 1_000_000} megapixels.`;
 
 /**
- * Formats accepted at the byte level, as sharp names them. The Content-Type
- * header is only a hint a server can omit or fake; this is the check that
- * keeps SVG, GIF, TIFF and AVIF bytes away from the other bundled loaders.
+ * The three formats this service decodes, recognised by their first bytes
+ * before sharp is asked anything. The Content-Type header is only a hint a
+ * server can omit or fake, and sharp's own header read is the loader's parse
+ * (for SVG, a full XML parse), so the signature check is what keeps SVG, GIF,
+ * TIFF and AVIF bytes away from the bundled loaders entirely.
  */
-const DECODABLE_FORMATS: ReadonlySet<string> = new Set(['jpeg', 'png', 'webp']);
+type DecodableFormat = 'jpeg' | 'png' | 'webp';
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+const UNSUPPORTED_FORMAT_MESSAGE = 'Unsupported image format. Please use PNG, JPEG, or WebP.';
+
+/**
+ * Images that libvips must hold whole rather than stream (interlaced PNG,
+ * progressive JPEG) are bounded by their decoded size as well as by pixels.
+ * Measured on the installed libvips for a 49 MP input: a baseline JPEG peaks
+ * near 63 MB and a plain 8-bit PNG near 104 MB, but an interlaced 8-bit PNG
+ * near 272 MB and an interlaced 16-bit PNG near 496 MB, about twice the
+ * decoded bytes. 100 MB of decoded bytes keeps such a decode near 200 MB
+ * resident, in line with the streamed cases.
+ */
+const MAX_FULL_DECODE_BYTES = 100_000_000;
+
+const BYTES_PER_SAMPLE: Record<string, number> = {
+  char: 1, uchar: 1, short: 2, ushort: 2, int: 4, uint: 4, float: 4, complex: 8, double: 8, dpcomplex: 16,
+};
+
+const TOO_LARGE_TO_DECODE_MESSAGE = 'Image is too large to process. Please use a smaller image.';
 
 const REMOTE_IMAGE_FETCH_CONFIG = {
   /** One deadline for the whole transfer: redirects, headers and body. */
@@ -80,21 +103,26 @@ const REMOTE_IMAGE_FETCH_CONFIG = {
 };
 
 /**
- * Concurrency gates. A decode is bounded per image by the pixel ceiling (50 MP
- * of RGBA is 200 MB) and a download buffer by the file-size caps, so the gates
- * bound the multiplier: without them one account's request allowance could
- * hold dozens of decodes in flight at once. Waiting callers fail fast with
- * SERVICE_BUSY once the queue is full or the wait is up.
+ * Concurrency gates. A decode is bounded per image by the pixel ceiling and
+ * the full-decode budget (about 200 MB resident at worst) and a download
+ * buffer by the file-size caps, so the gates bound the multiplier: without
+ * them one account's request allowance could hold dozens of decodes in flight
+ * at once. Worst case with these numbers is about three decodes, fifteen held
+ * input buffers and eight download buffers, under a gigabyte. Waiting callers
+ * fail fast with SERVICE_BUSY once the queue is full or the wait is up, and
+ * one account may hold at most two callers in each gate, so a single account
+ * cannot fill a gate for everyone else.
  */
 const GATE_CONFIG = {
-  decode: { limit: 3, maxQueue: 12, queueTimeoutMs: 15_000 },
-  download: { limit: 8, maxQueue: 24, queueTimeoutMs: 15_000 },
+  decode: { limit: 3, maxQueue: 12, queueTimeoutMs: 15_000, perKeyLimit: 2 },
+  download: { limit: 8, maxQueue: 24, queueTimeoutMs: 15_000, perKeyLimit: 2 },
 } as const;
 
 const decodeGate = createConcurrencyGate({ name: 'image-decode', ...GATE_CONFIG.decode });
 const downloadGate = createConcurrencyGate({ name: 'image-download', ...GATE_CONFIG.download });
 
 const SERVICE_BUSY_MESSAGE = 'The image service is busy right now. Please try again in a moment.';
+const ACCOUNT_BUSY_MESSAGE = 'You have other images still processing. Please wait for them to finish and try again.';
 const DOWNLOAD_FAILED_MESSAGE = "Couldn't download the image. Please try again.";
 
 // Letter image configuration (US-LAYOUT-04)
@@ -147,20 +175,33 @@ export function openImage(input: Buffer): Sharp {
   return sharp(input, { limitInputPixels: MAX_INPUT_PIXELS });
 }
 
-async function runGated<T>(gate: ConcurrencyGate, work: () => Promise<T>): Promise<T> {
+/** Per-call options shared by every processing entry point. */
+export interface ImageProcessingOptions {
+  /**
+   * The account the image is processed for. It names the caller's share of
+   * each gate (perKeyLimit), so one account cannot fill a gate for everyone.
+   */
+  actorId?: string;
+}
+
+async function runGated<T>(gate: ConcurrencyGate, work: () => Promise<T>, key?: string): Promise<T> {
   try {
-    return await gate.run(work);
+    return await gate.run(work, key);
   } catch (error) {
     if (error instanceof ConcurrencyGateError) {
-      throw new ImageProcessingError('SERVICE_BUSY', SERVICE_BUSY_MESSAGE, error);
+      throw new ImageProcessingError(
+        'SERVICE_BUSY',
+        error.reason === 'key_limit' ? ACCOUNT_BUSY_MESSAGE : SERVICE_BUSY_MESSAGE,
+        error
+      );
     }
     throw error;
   }
 }
 
 /** Runs decode or resize work under the shared decode gate. */
-export function runImageDecode<T>(work: () => Promise<T>): Promise<T> {
-  return runGated(decodeGate, work);
+export function runImageDecode<T>(work: () => Promise<T>, actorId?: string): Promise<T> {
+  return runGated(decodeGate, work, actorId);
 }
 
 async function validateRemoteImageUrl(url: string): Promise<URL> {
@@ -348,7 +389,11 @@ interface DownloadPolicy {
  * Content-Length and Content-Type headers are checked as early hints; the
  * byte cap is enforced on the body itself and the format on the bytes later.
  */
-async function downloadRemoteImage(url: string, policy: DownloadPolicy): Promise<Buffer> {
+async function downloadRemoteImage(
+  url: string,
+  policy: DownloadPolicy,
+  options: ImageProcessingOptions
+): Promise<Buffer> {
   return runGated(downloadGate, async () => {
     const controller = new AbortController();
     const deadline = setTimeout(() => controller.abort(), REMOTE_IMAGE_FETCH_CONFIG.deadlineMs);
@@ -367,10 +412,7 @@ async function downloadRemoteImage(url: string, policy: DownloadPolicy): Promise
 
       const contentType = response.headers.get('content-type');
       if (contentType && !isAllowedContentType(contentType, policy.allowedTypes)) {
-        throw new ImageProcessingError(
-          'UNSUPPORTED_FORMAT',
-          'Unsupported image format. Please use PNG, JPEG, or WebP.'
-        );
+        throw new ImageProcessingError('UNSUPPORTED_FORMAT', UNSUPPORTED_FORMAT_MESSAGE);
       }
 
       // The cap holds even when Content-Length is missing, and the deadline
@@ -393,7 +435,7 @@ async function downloadRemoteImage(url: string, policy: DownloadPolicy): Promise
     } finally {
       clearTimeout(deadline);
     }
-  });
+  }, options.actorId);
 }
 
 // ============================================================================
@@ -415,14 +457,15 @@ export type ImageInput = ImageFileParam | { url: string };
  */
 export async function downloadAndProcessImage(
   input: ImageInput,
-  size: PostcardSize = '6x9'
+  size: PostcardSize = '6x9',
+  options: ImageProcessingOptions = {}
 ): Promise<ProcessedImage> {
   // Support both OpenAI fileParams ({download_url, file_id}) and plain URLs ({url})
   const download_url = 'download_url' in input ? input.download_url : input.url;
   const targetDimensions = CONFIG.sizes[size];
 
   // 1. Download image
-  const buffer = await downloadImage(download_url);
+  const buffer = await downloadImage(download_url, options);
 
   return runGated(decodeGate, async () => {
     // 2. Get metadata and validate dimensions
@@ -449,7 +492,7 @@ export async function downloadAndProcessImage(
       processedWidth: targetDimensions.width,
       processedHeight: targetDimensions.height,
     };
-  });
+  }, options.actorId);
 }
 
 // ============================================================================
@@ -493,13 +536,14 @@ export interface ProcessedPostcardImage extends ProcessedImage {
  */
 export async function downloadAndProcessPostcardImageWithPreview(
   input: ImageInput,
-  size: PostcardSize = '6x9'
+  size: PostcardSize = '6x9',
+  options: ImageProcessingOptions = {}
 ): Promise<ProcessedPostcardImage> {
   const download_url = 'download_url' in input ? input.download_url : input.url;
   const targetDimensions = CONFIG.sizes[size];
 
   // 1. Download image
-  const buffer = await downloadImage(download_url);
+  const buffer = await downloadImage(download_url, options);
 
   return runGated(decodeGate, async () => {
     // 2. Get metadata and validate dimensions
@@ -540,7 +584,7 @@ export async function downloadAndProcessPostcardImageWithPreview(
       processedWidth: targetDimensions.width,
       processedHeight: targetDimensions.height,
     };
-  });
+  }, options.actorId);
 }
 
 // ============================================================================
@@ -557,13 +601,14 @@ export async function downloadAndProcessPostcardImageWithPreview(
  */
 export async function downloadAndProcessLetterImage(
   input: ImageInput,
-  imageType: LetterImageType
+  imageType: LetterImageType,
+  options: ImageProcessingOptions = {}
 ): Promise<ProcessedImage> {
   const download_url = 'download_url' in input ? input.download_url : input.url;
   const targetDimensions = LETTER_IMAGE_CONFIG.sizes[imageType];
 
   // 1. Download image (with letter-specific size limit)
-  const buffer = await downloadLetterImage(download_url, imageType);
+  const buffer = await downloadLetterImage(download_url, imageType, options);
 
   return runGated(decodeGate, async () => {
     // 2. Get metadata and validate
@@ -594,7 +639,7 @@ export async function downloadAndProcessLetterImage(
       processedWidth: processedMetadata.width || targetDimensions.width,
       processedHeight: processedMetadata.height || targetDimensions.height,
     };
-  });
+  }, options.actorId);
 }
 
 /**
@@ -621,13 +666,14 @@ export interface ProcessedImageWithPreview extends ProcessedImage {
  */
 export async function downloadAndProcessLetterImageWithPreview(
   input: ImageInput,
-  imageType: LetterImageType
+  imageType: LetterImageType,
+  options: ImageProcessingOptions = {}
 ): Promise<ProcessedImageWithPreview> {
   const download_url = 'download_url' in input ? input.download_url : input.url;
   const targetDimensions = LETTER_IMAGE_CONFIG.sizes[imageType];
 
   // 1. Download image (with letter-specific size limit)
-  const buffer = await downloadLetterImage(download_url, imageType);
+  const buffer = await downloadLetterImage(download_url, imageType, options);
 
   return runGated(decodeGate, async () => {
     // 2. Get metadata and validate
@@ -666,13 +712,17 @@ export async function downloadAndProcessLetterImageWithPreview(
       processedWidth: processedMetadata.width || targetDimensions.width,
       processedHeight: processedMetadata.height || targetDimensions.height,
     };
-  });
+  }, options.actorId);
 }
 
 /**
  * Download image for letter layouts with appropriate size validation
  */
-async function downloadLetterImage(url: string, imageType: LetterImageType): Promise<Buffer> {
+async function downloadLetterImage(
+  url: string,
+  imageType: LetterImageType,
+  options: ImageProcessingOptions
+): Promise<Buffer> {
   const localBuffer = await tryGetFromTempStore(url);
   if (localBuffer) return localBuffer;
 
@@ -681,7 +731,7 @@ async function downloadLetterImage(url: string, imageType: LetterImageType): Pro
     maxFileSize: LETTER_IMAGE_CONFIG.maxFileSize,
     allowedTypes: LETTER_IMAGE_CONFIG.allowedTypes,
     tooLargeMessage: `${label} image is too large. Please use an image under 5MB.`,
-  });
+  }, options);
 }
 
 /**
@@ -710,7 +760,7 @@ async function tryGetFromTempStore(url: string): Promise<Buffer | null> {
 /**
  * Download image from URL with validation
  */
-async function downloadImage(url: string): Promise<Buffer> {
+async function downloadImage(url: string, options: ImageProcessingOptions): Promise<Buffer> {
   const localBuffer = await tryGetFromTempStore(url);
   if (localBuffer) return localBuffer;
 
@@ -718,7 +768,25 @@ async function downloadImage(url: string): Promise<Buffer> {
     maxFileSize: CONFIG.maxFileSize,
     allowedTypes: CONFIG.allowedTypes,
     tooLargeMessage: 'Image is too large. Please use an image under 10MB.',
-  });
+  }, options);
+}
+
+/**
+ * The format from the first bytes. libvips picks its loader by these same
+ * signatures, so only bytes that would reach the PNG, JPEG or WebP loader
+ * are ever handed to sharp; everything else is refused without a parse.
+ */
+function sniffFormat(buffer: Buffer): DecodableFormat | null {
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(PNG_SIGNATURE)) return 'png';
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpeg';
+  if (
+    buffer.length >= 12 &&
+    buffer.toString('latin1', 0, 4) === 'RIFF' &&
+    buffer.toString('latin1', 8, 12) === 'WEBP'
+  ) {
+    return 'webp';
+  }
+  return null;
 }
 
 function isPixelLimitError(error: unknown): boolean {
@@ -726,12 +794,19 @@ function isPixelLimitError(error: unknown): boolean {
 }
 
 /**
- * Get image metadata using Sharp, and apply the two byte-level checks: the
- * format must be one this service decodes, and the declared size must be
- * under the pixel ceiling (sharp refuses the header read itself when it is
- * not). Neither check decodes a pixel.
+ * Get image metadata using Sharp, behind three byte-level checks that decode
+ * no pixel: the first bytes must carry a PNG, JPEG or WebP signature before
+ * sharp is asked anything; the declared size must be under the pixel ceiling
+ * (sharp refuses the header read itself when it is not); and an interlaced or
+ * progressive image, which libvips must hold whole, must fit the full-decode
+ * budget.
  */
 async function getImageMetadata(buffer: Buffer): Promise<{ width: number; height: number; format: string }> {
+  const format = sniffFormat(buffer);
+  if (!format) {
+    throw new ImageProcessingError('UNSUPPORTED_FORMAT', UNSUPPORTED_FORMAT_MESSAGE);
+  }
+
   let metadata: Metadata;
   try {
     metadata = await openImage(buffer).metadata();
@@ -746,13 +821,6 @@ async function getImageMetadata(buffer: Buffer): Promise<{ width: number; height
     );
   }
 
-  if (!metadata.format || !DECODABLE_FORMATS.has(metadata.format)) {
-    throw new ImageProcessingError(
-      'UNSUPPORTED_FORMAT',
-      'Unsupported image format. Please use PNG, JPEG, or WebP.'
-    );
-  }
-
   if (!metadata.width || !metadata.height) {
     throw new ImageProcessingError(
       'PROCESSING_FAILED',
@@ -760,10 +828,18 @@ async function getImageMetadata(buffer: Buffer): Promise<{ width: number; height
     );
   }
 
+  if (metadata.isProgressive) {
+    const decodedBytes =
+      metadata.width * metadata.height * (metadata.channels ?? 4) * (BYTES_PER_SAMPLE[metadata.depth ?? ''] ?? 2);
+    if (decodedBytes > MAX_FULL_DECODE_BYTES) {
+      throw new ImageProcessingError('IMAGE_TOO_LARGE', TOO_LARGE_TO_DECODE_MESSAGE);
+    }
+  }
+
   return {
     width: metadata.width,
     height: metadata.height,
-    format: metadata.format,
+    format,
   };
 }
 
@@ -806,12 +882,13 @@ export const _testing = {
   CONFIG,
   LETTER_IMAGE_CONFIG,
   MAX_INPUT_PIXELS,
-  DECODABLE_FORMATS,
+  MAX_FULL_DECODE_BYTES,
   GATE_CONFIG,
   REMOTE_IMAGE_FETCH_CONFIG,
   decodeGate,
   downloadGate,
   openImage,
+  sniffFormat,
   downloadImage,
   downloadLetterImage,
   getImageMetadata,

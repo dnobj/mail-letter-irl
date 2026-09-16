@@ -347,7 +347,9 @@ async function handler(
       "Downloading and processing postcard image"
     );
 
-    processedImage = await downloadAndProcessPostcardImageWithPreview(imageInput!, size);
+    processedImage = await downloadAndProcessPostcardImageWithPreview(imageInput!, size, {
+      actorId: context.user.userId
+    });
 
     context.logger.info(
       {

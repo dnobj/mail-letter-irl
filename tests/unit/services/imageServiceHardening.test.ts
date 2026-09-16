@@ -21,8 +21,16 @@ import { ConcurrencyGateError } from '../../../src/utils/concurrencyGate.js';
 // IP hosts, so no lookup happens and nothing is fetched (fetch is stubbed).
 const REMOTE = 'https://93.184.216.34/photo.png';
 
-/** A PNG whose IHDR declares w x h with a tiny IDAT: the decompression-bomb shape. */
-function pngHeaderBomb(width: number, height: number): Buffer {
+/**
+ * A PNG whose IHDR declares w x h (and bit depth, colour type, interlacing)
+ * with a tiny IDAT: the decompression-bomb shape. sharp reads everything the
+ * checks need from the header; the bogus IDAT only matters if a decode starts.
+ */
+function pngHeader(
+  width: number,
+  height: number,
+  { bitDepth = 8, colourType = 2, interlaced = false }: { bitDepth?: 8 | 16; colourType?: 2 | 6; interlaced?: boolean } = {}
+): Buffer {
   const chunk = (type: string, data: Buffer): Buffer => {
     const length = Buffer.alloc(4);
     length.writeUInt32BE(data.length);
@@ -34,8 +42,9 @@ function pngHeaderBomb(width: number, height: number): Buffer {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8;  // bit depth
-  ihdr[9] = 2;  // colour type: RGB
+  ihdr[8] = bitDepth;
+  ihdr[9] = colourType; // 2 = RGB, 6 = RGBA
+  ihdr[12] = interlaced ? 1 : 0;
   const idat = deflateSync(Buffer.alloc(1 + 3 * 4));
   return Buffer.concat([
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
@@ -44,6 +53,11 @@ function pngHeaderBomb(width: number, height: number): Buffer {
     chunk('IEND', Buffer.alloc(0)),
   ]);
 }
+
+const pngHeaderBomb = (width: number, height: number): Buffer => pngHeader(width, height);
+
+/** Settles a promise into its value or its error, so a rejection is never left unhandled. */
+const outcomeOf = <T,>(promise: Promise<T>): Promise<T | unknown> => promise.then((value) => value, (error: unknown) => error);
 
 async function solid(format: 'png' | 'jpeg' | 'webp' | 'gif', width: number, height: number): Promise<Buffer> {
   const base = sharp({ create: { width, height, channels: 3, background: { r: 200, g: 40, b: 40 } } });
@@ -164,8 +178,63 @@ describe('image pipeline hardening', () => {
       });
     }
 
-    it('lists exactly the three documented formats', () => {
-      expect([..._testing.DECODABLE_FORMATS].sort()).toEqual(['jpeg', 'png', 'webp']);
+    it('recognises exactly the three formats by their first bytes, before sharp is asked', async () => {
+      expect(_testing.sniffFormat(await solid('png', 20, 10))).toBe('png');
+      expect(_testing.sniffFormat(await solid('jpeg', 20, 10))).toBe('jpeg');
+      expect(_testing.sniffFormat(await solid('webp', 20, 10))).toBe('webp');
+      expect(_testing.sniffFormat(await solid('gif', 20, 10))).toBeNull();
+      expect(_testing.sniffFormat(SVG)).toBeNull();
+      expect(_testing.sniffFormat(Buffer.alloc(0))).toBeNull();
+      expect(_testing.sniffFormat(Buffer.from('RIFF....WAVEfmt '))).toBeNull();
+    });
+  });
+
+  describe('full-decode budget for interlaced and progressive images', () => {
+    const TOO_LARGE_TO_DECODE = 'Image is too large to process. Please use a smaller image.';
+
+    it('refuses an interlaced PNG whose decoded bytes exceed the budget while its pixels fit the ceiling', async () => {
+      // 6000x6000 RGB 8-bit interlaced: 36 MP, under the 50 MP ceiling, but 108 MB decoded.
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(pngHeader(6000, 6000, { interlaced: true })), { 'content-type': 'image/png' }));
+      const error = await rejection(downloadAndProcessImage({ url: REMOTE }));
+      expect(error.code).toBe('IMAGE_TOO_LARGE');
+      expect(error.userMessage).toBe(TOO_LARGE_TO_DECODE);
+    });
+
+    it('counts sample depth: a 16-bit interlaced PNG is refused at far fewer pixels', async () => {
+      // 5000x5000 RGB 16-bit interlaced: 25 MP but 150 MB decoded.
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(pngHeader(5000, 5000, { bitDepth: 16, interlaced: true })), {}));
+      const error = await rejection(downloadAndProcessImage({ url: REMOTE }));
+      expect(error.code).toBe('IMAGE_TOO_LARGE');
+      expect(error.userMessage).toBe(TOO_LARGE_TO_DECODE);
+    });
+
+    it('lets an interlaced PNG within the budget through to the decoder', async () => {
+      // 5000x5000 RGB 8-bit interlaced: 75 MB decoded. The bogus IDAT then fails
+      // inside sharp's decoder, which is proof the budget did not refuse it.
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(pngHeader(5000, 5000, { interlaced: true })), {}));
+      const outcome = await outcomeOf(downloadAndProcessImage({ url: REMOTE }));
+      expect(outcome).toBeInstanceOf(Error);
+      expect(outcome).not.toBeInstanceOf(ImageProcessingError);
+    });
+
+    it('does not apply the budget to an image libvips can stream', async () => {
+      // 6000x6000 RGBA 16-bit, not interlaced: 288 MB if decoded whole, but streamed.
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(pngHeader(6000, 6000, { bitDepth: 16, colourType: 6 })), {}));
+      const outcome = await outcomeOf(downloadAndProcessImage({ url: REMOTE }));
+      expect(outcome).toBeInstanceOf(Error);
+      expect(outcome).not.toBeInstanceOf(ImageProcessingError);
+    });
+
+    it('processes a real interlaced PNG and a real progressive JPEG', async () => {
+      const create = () => sharp({ create: { width: 640, height: 480, channels: 3, background: { r: 30, g: 60, b: 90 } } });
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(await create().png({ progressive: true }).toBuffer()), {}));
+      await expect(downloadAndProcessImage({ url: REMOTE })).resolves.toMatchObject({ processedWidth: 2700 });
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(await create().jpeg({ progressive: true }).toBuffer()), {}));
+      await expect(downloadAndProcessImage({ url: REMOTE })).resolves.toMatchObject({ processedWidth: 2700 });
+    });
+
+    it('keeps the budget at 100 MB of decoded bytes', () => {
+      expect(_testing.MAX_FULL_DECODE_BYTES).toBe(100_000_000);
     });
   });
 
@@ -205,6 +274,96 @@ describe('image pipeline hardening', () => {
       expect(cancelled).toBe(true);
     });
 
+    it('keeps one deadline across redirect hops: a slow first hop leaves the rest of it for the second', async () => {
+      fetchMock.mockImplementation(async (_url: string, init: RequestInit) => {
+        if (fetchMock.mock.calls.length === 1) {
+          // A per-hop timer would be restarted after this; one shared deadline is not.
+          await vi.advanceTimersByTimeAsync(15_000);
+          expect(init.signal?.aborted).toBe(false);
+          return responseWith(null, { location: 'https://93.184.216.34/moved.png' }, 302);
+        }
+        return responseWith(bodyOf(await solid('png', 300, 300)), { 'content-type': 'image/png' });
+      });
+
+      await expect(downloadAndProcessImage({ url: REMOTE })).resolves.toMatchObject({ originalWidth: 300 });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('fails the download when the first hop alone uses up the deadline', async () => {
+      fetchMock.mockImplementation(async () => {
+        if (fetchMock.mock.calls.length === 1) {
+          await vi.advanceTimersByTimeAsync(_testing.REMOTE_IMAGE_FETCH_CONFIG.deadlineMs + 1);
+          return responseWith(null, { location: 'https://93.184.216.34/moved.png' }, 302);
+        }
+        return responseWith(bodyOf(await solid('png', 300, 300)), { 'content-type': 'image/png' });
+      });
+
+      const error = await rejection(downloadAndProcessImage({ url: REMOTE }));
+      expect(error.code).toBe('DOWNLOAD_FAILED');
+    });
+  });
+
+  describe('per-account share of the gates', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('refuses a third concurrent download for one account and still serves another account', async () => {
+      const stalled = () =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(16));
+          },
+        });
+      fetchMock.mockImplementation(async () => responseWith(stalled(), { 'content-type': 'image/jpeg' }));
+
+      const first = outcomeOf(downloadAndProcessImage({ url: REMOTE }, '6x9', { actorId: 'account-a' }));
+      const second = outcomeOf(downloadAndProcessImage({ url: REMOTE }, '6x9', { actorId: 'account-a' }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(_testing.downloadGate.snapshot()).toMatchObject({ active: 2, keys: 1 });
+
+      const third = await rejection(downloadAndProcessImage({ url: REMOTE }, '6x9', { actorId: 'account-a' }));
+      expect(third.code).toBe('SERVICE_BUSY');
+      expect(third.userMessage).toBe('You have other images still processing. Please wait for them to finish and try again.');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      const other = outcomeOf(downloadAndProcessImage({ url: REMOTE }, '6x9', { actorId: 'account-b' }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(_testing.downloadGate.snapshot()).toMatchObject({ active: 3, keys: 2 });
+
+      // The deadlines end the stalled downloads and free every share.
+      await vi.advanceTimersByTimeAsync(_testing.REMOTE_IMAGE_FETCH_CONFIG.deadlineMs);
+      for (const settled of [first, second, other]) {
+        const outcome = await settled;
+        expect(outcome).toBeInstanceOf(ImageProcessingError);
+        expect((outcome as ImageProcessingError).code).toBe('DOWNLOAD_FAILED');
+      }
+      expect(_testing.downloadGate.snapshot()).toMatchObject({ active: 0, queued: 0, keys: 0 });
+    });
+
+    it('names the account share when the decode gate refuses for it', async () => {
+      vi.spyOn(_testing.decodeGate, 'run').mockRejectedValueOnce(new ConcurrencyGateError('image-decode', 'key_limit'));
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(await solid('jpeg', 640, 480)), { 'content-type': 'image/jpeg' }));
+
+      const error = await rejection(downloadAndProcessImage({ url: REMOTE }, '6x9', { actorId: 'account-a' }));
+      expect(error.code).toBe('SERVICE_BUSY');
+      expect(error.userMessage).toBe('You have other images still processing. Please wait for them to finish and try again.');
+    });
+
+    it('passes the account to both gates', async () => {
+      const decodeRun = vi.spyOn(_testing.decodeGate, 'run');
+      const downloadRun = vi.spyOn(_testing.downloadGate, 'run');
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(await solid('jpeg', 640, 480)), { 'content-type': 'image/jpeg' }));
+
+      await downloadAndProcessLetterImageWithPreview({ url: REMOTE }, 'header', { actorId: 'account-a' });
+
+      expect(downloadRun).toHaveBeenCalledWith(expect.any(Function), 'account-a');
+      expect(decodeRun).toHaveBeenCalledWith(expect.any(Function), 'account-a');
+    });
   });
 
   it('caps a body-less response the same way as a streamed one', async () => {
@@ -267,11 +426,11 @@ describe('image pipeline hardening', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it('bounds decodes to a handful and downloads to a few more', () => {
-      expect(_testing.GATE_CONFIG.decode).toEqual({ limit: 3, maxQueue: 12, queueTimeoutMs: 15_000 });
-      expect(_testing.GATE_CONFIG.download).toEqual({ limit: 8, maxQueue: 24, queueTimeoutMs: 15_000 });
-      expect(_testing.decodeGate.snapshot()).toMatchObject({ limit: 3, maxQueue: 12 });
-      expect(_testing.downloadGate.snapshot()).toMatchObject({ limit: 8, maxQueue: 24 });
+    it('bounds decodes to a handful, downloads to a few more, and one account to two of each', () => {
+      expect(_testing.GATE_CONFIG.decode).toEqual({ limit: 3, maxQueue: 12, queueTimeoutMs: 15_000, perKeyLimit: 2 });
+      expect(_testing.GATE_CONFIG.download).toEqual({ limit: 8, maxQueue: 24, queueTimeoutMs: 15_000, perKeyLimit: 2 });
+      expect(_testing.decodeGate.snapshot()).toMatchObject({ limit: 3, maxQueue: 12, perKeyLimit: 2 });
+      expect(_testing.downloadGate.snapshot()).toMatchObject({ limit: 8, maxQueue: 24, perKeyLimit: 2 });
     });
   });
 
