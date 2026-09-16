@@ -404,6 +404,10 @@ export async function getTransactions(params: GetTransactionsParams): Promise<{
 
 ### 6. Refund Credits
 
+> Removed by #394: `refundCredits` and `refundCreditsToLedger` had no callers. Money is returned through
+> `requestRefund` in `src/services/commerceService.ts` (a Stripe refund, with pack credits revoked), never
+> by re-granting credits. The listing below is historical.
+
 ```typescript
 export interface RefundCreditsParams {
   userId: string;

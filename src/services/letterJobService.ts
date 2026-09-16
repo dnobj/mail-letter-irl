@@ -23,7 +23,7 @@ import {
   isLetterAlreadyCompensated,
   returnConsumedCreditsForLetter
 } from './creditLedgerService.js';
-import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import { carriedDiagnosticClass, classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { summarizeProviderRejection } from './providerFailureSummary.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
@@ -290,7 +290,12 @@ async function holdAmbiguousDispatch(job: LetterJob, error: unknown): Promise<vo
 async function loadLetter(letterId: string): Promise<Letter> {
   const result = await query<Letter>('SELECT * FROM letters WHERE letter_id = $1', [letterId]);
   if (!result.rows[0]) {
-    throw new Error(`Letter not found for outbox job: ${letterId}`);
+    // The code doubles as the class, so a job failed by this stores
+    // LETTER_NOT_FOUND, never the id-bearing message (#394).
+    throw Object.assign(new Error(`Letter not found for outbox job: ${letterId}`), {
+      code: 'LETTER_NOT_FOUND',
+      diagnosticClass: 'LETTER_NOT_FOUND'
+    });
   }
   return result.rows[0];
 }
@@ -693,7 +698,9 @@ async function failOrRescheduleJob(
 
 async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => number): Promise<boolean> {
   const retryable = job.attempts < job.max_attempts;
-  const errorClass = classifyDiagnosticError(error, 'unknown_error');
+  // A class a lower layer attached (a missing letter: LETTER_NOT_FOUND) wins
+  // over re-classification (#394).
+  const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
   await transaction(async client => {
     const fundingOrderId = await lockFundingGraph(client, job);
     const owned = await client.query(
@@ -899,23 +906,6 @@ export async function processDueLetterJobs(
   }
 
   return summary;
-}
-
-export async function updateJobStatus(
-  jobId: string,
-  status: LetterJob['status'],
-  error?: string
-): Promise<void> {
-  await query(
-    // Cast every use of $1, for the reason given in failOrRescheduleJob.
-    `UPDATE letter_jobs
-     SET status = $1::varchar, last_error = $2, error_message = $2,
-         locked_at = CASE WHEN $1::varchar = 'processing' THEN NOW() ELSE NULL END,
-         completed_at = CASE WHEN $1::varchar IN ('completed', 'failed', 'cancelled') THEN NOW() ELSE NULL END,
-         updated_at = NOW()
-     WHERE job_id = $3`,
-    [status, error || null, jobId]
-  );
 }
 
 export async function getJobByLetterId(letterId: string): Promise<LetterJob | null> {

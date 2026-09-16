@@ -368,6 +368,10 @@ Process Stripe webhook events:
 
 Create `src/acp/webhookHandler.ts`:
 
+> Historical sample (2025). The API never re-grants credits on a refund: `requestRefund` in
+> `src/services/commerceService.ts` issues the Stripe refund and revokes pack credits, and the
+> `refundCredits` helper this sample imports was removed by #394.
+
 ```typescript
 import { Request, Response } from 'express';
 import Stripe from 'stripe';

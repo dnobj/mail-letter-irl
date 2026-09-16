@@ -175,8 +175,9 @@ const RECENT_UPLOADS_SWEEP_INTERVAL_MS = 30 * 60 * 1000;
  * rethrows, and a housekeeping failure must not skip mail dispatch.
  *
  * Inside the task a failure is rethrown as its CLASS, never the driver message:
- * maintenance_tasks.last_error stores error.message, and the admin reader role
- * can read that table.
+ * the admin reader role can read maintenance_tasks.last_error, and although
+ * the task service now stores a class itself (#394) the wrapper resolves it
+ * here so the driver's words never enter the throw path.
  */
 async function runRecentUploadsSweep(): Promise<void> {
   try {

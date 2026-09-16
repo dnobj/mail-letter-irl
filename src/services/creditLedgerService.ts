@@ -22,7 +22,6 @@ import {
   CreditConsumption,
   AddCreditsToLedgerParams,
   DeductCreditsFromLedgerParams,
-  RefundCreditsToLedgerParams,
   GetLedgerEntriesParams,
   CreditBalanceDetailed,
   CreditLedgerOperationResult,
@@ -416,121 +415,6 @@ export async function deductCreditsFromLedgerWithClient(
       transaction: txn,
       consumedFrom: consumptions,
     };
-}
-
-/**
- * Refund credits to user's ledger
- *
- * Creates a new ledger entry linked to the original (if provided).
- * Can inherit expiration from original or set new expiration.
- *
- * @throws Error if credits <= 0
- * @throws Error if user not found
- */
-export async function refundCreditsToLedger(
-  params: RefundCreditsToLedgerParams
-): Promise<CreditLedgerOperationResult> {
-  const {
-    userId,
-    originalLedgerId,
-    credits,
-    orderId,
-    reason,
-    inheritExpiration,
-    newExpirationDays,
-  } = params;
-
-  if (credits <= 0) {
-    throw new Error('Credits must be positive');
-  }
-
-  return await transaction(async (client) => {
-    // Get original ledger entry if provided
-    let expiresAt: Date | null = null;
-    let expirationPolicy: string = 'never';
-    let expirationDays: number | null = null;
-
-    if (originalLedgerId && inheritExpiration) {
-      const originalResult = await client.query<CreditLedgerEntry>(
-        'SELECT * FROM credit_ledger WHERE ledger_id = $1',
-        [originalLedgerId]
-      );
-      if (originalResult.rows.length > 0) {
-        const original = originalResult.rows[0];
-        expiresAt = original.expires_at || null;
-        expirationPolicy = original.expiration_policy || 'never';
-        expirationDays = original.expiration_days || null;
-      }
-    } else if (newExpirationDays) {
-      expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + newExpirationDays);
-      expirationPolicy = 'days_from_activation';
-      expirationDays = newExpirationDays;
-    }
-
-    // Update user balance
-    const userResult = await client.query<User>(
-      `UPDATE users
-       SET credits = credits + $1,
-           credits_purchased = credits_purchased - $1,
-           updated_at = NOW()
-       WHERE user_id = $2
-       RETURNING *`,
-      [credits, userId]
-    );
-
-    if (userResult.rows.length === 0) {
-      throw new Error('User not found');
-    }
-
-    const user = userResult.rows[0];
-
-    // Create ledger entry for refund
-    const ledgerResult = await client.query<CreditLedgerEntry>(
-      `INSERT INTO credit_ledger (
-        user_id, initial_amount, remaining_amount, source_type,
-        source_reference_id, activated_at, expires_at,
-        expiration_policy, expiration_days, status, description, related_ledger_id
-      ) VALUES ($1, $2, $2, 'refund', $3, NOW(), $4, $5, $6, 'active', $7, $8)
-      RETURNING *`,
-      [
-        userId,
-        credits,
-        orderId || null,
-        expiresAt,
-        expirationPolicy,
-        expirationDays,
-        reason || `Refunded ${credits} credits`,
-        originalLedgerId || null,
-      ]
-    );
-    const ledgerEntry = ledgerResult.rows[0];
-
-    // Record transaction
-    const txResult = await client.query<CreditTransaction>(
-      `INSERT INTO credit_transactions (
-        user_id, amount, balance_after, type, reference_type, reference_id, description
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *`,
-      [
-        userId,
-        credits,
-        user.credits,
-        'refund',
-        'order',
-        orderId || ledgerEntry.ledger_id,
-        reason || `Refunded ${credits} credits`,
-      ]
-    );
-    const txn = txResult.rows[0];
-
-    writeDiagnostic('info', 'credits.ledger_refunded', {
-      credits,
-      newBalance: user.credits
-    });
-
-    return { user, transaction: txn, ledgerEntry };
-  });
 }
 
 /**

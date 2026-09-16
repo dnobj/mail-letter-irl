@@ -113,7 +113,7 @@ Create `src/services/creditService.ts`:
 - `deductCredits()` - Deduct credits for letter (with balance check)
 - `getBalance()` - Get current balance
 - `getTransactions()` - Get transaction history
-- `refundCredits()` - Refund cancelled orders
+- `refundCredits()` - Refund cancelled orders (removed by #394; refunds go through `requestRefund` in commerceService)
 
 #### Step 3: TypeScript Types
 Create `src/services/types.ts`:

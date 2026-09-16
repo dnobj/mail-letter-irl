@@ -37,8 +37,14 @@ export interface CreateMailOrderResult {
   alreadyConsumed: boolean;
 }
 
-function draftError(code: string, message: string): Error & { code: string } {
-  return Object.assign(new Error(message), { code });
+/**
+ * Every code is a fixed identifier, so it doubles as the error's diagnostic
+ * class: a catch that stores a class (orders.last_error, the order event)
+ * records WHICH draft check failed without the message, which interpolates
+ * the draft id and raw status labels (#394).
+ */
+function draftError(code: string, message: string): Error & { code: string; diagnosticClass: string } {
+  return Object.assign(new Error(message), { code, diagnosticClass: code });
 }
 
 function buildLetterContent(draft: MailDraftRow): Record<string, unknown> {

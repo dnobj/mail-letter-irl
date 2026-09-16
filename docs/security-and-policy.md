@@ -15,7 +15,7 @@
 
 - Never write letter body text, address blocks or uploaded-image links into logs, diagnostics,
   error columns or audit rows. Stored errors and diagnostics carry counts, identifiers and error
-  classes only (`writeDiagnostic` in `src/utils/diagnosticLog.ts`; migrations 030 and 031 removed
+  classes only (`writeDiagnostic` in `src/utils/diagnosticLog.ts`; migrations 030, 031 and 032 removed
   the text earlier code stored). Content cleanup never compensates for what it removes by copying
   it anywhere else (#153).
 - Moderation acts on account state, not on copies of content: an operator can block sends on an

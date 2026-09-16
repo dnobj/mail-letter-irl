@@ -1315,7 +1315,7 @@ audit.
 
 1. [ ] Open the order; verify the quarantine panel and the warning in the preview.
 2. [ ] Execute; verify the code is cleared, the order event `operator.quarantine_released` carries the
-   reason, and the next `npm run maintenance` (or hourly run) refunds the order.
+   cleared code (the reason is on the audit row alone, #394), and the next `npm run maintenance` (or hourly run) refunds the order.
 
 **Pass criteria:** Release is a deliberate operator decision, recorded, and the sweep then acts.
 

@@ -37,6 +37,7 @@ const REQUIRED = [
   'providerErrorMinimisation.postgres.test.ts',
   'recentUploadsSweep.postgres.test.ts',
   'featureRequestsSweep.postgres.test.ts',
+  'errorTextMinimisation.postgres.test.ts',
 ];
 
 /**

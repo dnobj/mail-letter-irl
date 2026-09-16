@@ -203,25 +203,11 @@ export async function createLetterJob(letter: Letter): Promise<LetterJob> {
   return result.rows[0];
 }
 
-/**
- * Update job status
- */
-export async function updateJobStatus(
-  jobId: string,
-  status: string,
-  error?: string
-): Promise<void> {
-  await query(
-    `UPDATE letter_jobs
-     SET status = $1,
-         last_error = $2,
-         attempts = attempts + 1,
-         updated_at = NOW(),
-         completed_at = CASE WHEN $1 IN ('completed', 'failed') THEN NOW() ELSE completed_at END
-     WHERE job_id = $3`,
-    [status, error || null, jobId]
-  );
-}
+// There is no general status setter. The outbox's only error writers are
+// holdAmbiguousDispatch, failOrRescheduleJob (through summarizeProviderRejection)
+// and failBeforeDispatch, each storing an error CLASS in last_error and
+// error_message; completeJob nulls both. A free-text updateJobStatus existed
+// until #394 with no callers and was removed.
 
 /**
  * Get job by letter ID
@@ -236,6 +222,10 @@ export async function getJobByLetterId(letterId: string): Promise<LetterJob | nu
 ```
 
 ### Step 3: Create Job Worker
+
+> Historical. This pg-boss worker sample is superseded by `processDueLetterJobs` in
+> `src/services/letterJobService.ts` (the transactional outbox, migrations 020 and 023), and the
+> `updateJobStatus` calls below no longer exist: job errors are stored as classes, never as `error.message`.
 
 Create `src/workers/letterWorker.ts`:
 
