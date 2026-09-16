@@ -1,6 +1,7 @@
 # Deployment Guide
 
-Last updated: August 24, 2026
+**Last Updated:** September 16, 2026
+**Purpose:** Release process, environment checks, boot validation rules, and migration safety
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
 
@@ -156,9 +157,14 @@ Still verified by a human, without printing secret values:
   the tailnet-only admin service ([admin-panel-guide.md](admin-panel-guide.md)), which is where the
   issue #69 image-reservation recovery and the outbox recovery now live.
 
-`WORKER_POLLING_SECONDS` and `WORKER_TRIGGER_ON_SEND` are legacy rollout safeguards. The compiled API ignores them after the transactional-outbox release; remove them after the new maintenance service is verified.
+`WORKER_POLLING_SECONDS` and `WORKER_TRIGGER_ON_SEND` are legacy rollout safeguards from the July 2026
+transactional-outbox rollout. Nothing in `src/` reads them. Both environments run the outbox release,
+so delete either variable wherever it is still set.
 
-As of July 16, 2026, development has the transactional-outbox release and hourly maintenance service deployed. Production remains on the previous release with `WORKER_POLLING_SECONDS=600` and `WORKER_TRIGGER_ON_SEND=true` until the remaining manual acceptance checks pass.
+`CONTENT_RETENTION_MODE` is deliberately unset in both environments: the letter and draft retention
+sweep reports what it would clear and clears nothing until the enforce-path defects in #153 are
+fixed. Do not set it to `enforce` as part of a release. See the variable list in
+[railway-setup.md](railway-setup.md).
 
 ## Boot validation rules
 
@@ -184,7 +190,7 @@ development state in another.
 | Rule | Severity | Raised when | Fix |
 |---|---|---|---|
 | `provider.live_provider_required` | error | `LETTER_PROVIDER` is not an approved live provider in production — **the implicit `dummy` default counts**, so leaving it unset fails | Set `LETTER_PROVIDER=postgrid` |
-| `provider.api_key_required` | error | `LETTER_PROVIDER_API_KEY` unset in production | Set it. **`POSTGRID_API_KEY` does not satisfy this** — it is read by nothing this rule checks |
+| `provider.api_key_required` | error | `LETTER_PROVIDER_API_KEY` unset in production | Set it. **`POSTGRID_API_KEY` does not satisfy this** — it is read by nothing this rule checks. The provider factory does read it, and prefers it over `LETTER_PROVIDER_API_KEY`, so never set both |
 | `provider.live_mode_required` | error | `LETTER_PROVIDER_CONFIG` lacks `"mode": "live"` in production | Add the mode |
 | `provider.config_json_invalid` | error in production, else warning | `LETTER_PROVIDER_CONFIG` is not valid JSON | Fix the JSON |
 | `provider.test_key_in_production` | error | The provider key carries a `test_` prefix in production | Use the live key |
@@ -259,6 +265,9 @@ at `src/db/index.ts:32-37`. A `?sslmode=require` URL satisfies all three rules.
 
 ## Migration 021/022/023 integration gate
 
+PRs #164 and #165 merged long ago; the merge sequence below is kept as the record of how these
+migrations were integrated. The content-identity table is still live: do not alter the three files.
+
 Issue #69 owns `021_jit_commerce_foundation.sql` and `023_jit_recovery_state_machines.sql`. Issue #162
 owns `022_admin_audit.sql`, which refuses to apply unless 021 is already recorded. Because 022 cannot
 exist on `dev` before 021 does, a gate phrased as "rerun the proof against issue #162's final merged
@@ -297,7 +306,7 @@ It applies the real repository migrations with the real migrator and compares co
 defaults, indexes, triggers, functions, and table privileges across `001-020 -> 021 -> 022`,
 `001-020 -> 021 -> 023 -> 022`, and `001-020 -> 021 -> 022 -> 023`.
 
-### Safe merge sequence
+### Safe merge sequence (historical)
 
 1. Merge issue #69 (PR #164) into `dev` first. It carries 021 and 023 and does not depend on 022.
 2. Confirm the three blob IDs above are unchanged on the merged `dev` and on the issue #162 branch.

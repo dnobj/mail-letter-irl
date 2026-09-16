@@ -1,5 +1,27 @@
 # Stripe Shared Payment Token (SPT) Integration Guide
 
+**Last Updated:** September 16, 2026
+**Status:** Future plan (platform-gated)
+
+> **Future plan - not yet built.** The Agentic Commerce Protocol (ACP) is how Letter IRL intends to
+> sell inside ChatGPT once OpenAI makes it available to apps like this one. It is not available yet:
+> ChatGPT in-app payment collection and Instant Checkout are limited-access, so Letter IRL uses
+> external Stripe-hosted Checkout today, for letter packs (`create_pack_checkout`) and Pay & Send
+> (`create_mail_checkout`); see [just-in-time-purchase-plan.md](just-in-time-purchase-plan.md).
+> Nothing in this document exists in `src/`.
+>
+> Before building from it:
+> - Re-check it against the current ACP specification. It was written in late 2025.
+> - Re-check OpenAI's app commerce guidelines. When last checked (2026-09-13) they allowed commerce only
+>   for physical goods, not for credits or tokens. That makes Pay & Send, a single physical item, the
+>   likelier first ACP product; prepaid packs may not qualify.
+> - Adapt the code samples. They assume Express and a `src/acp/` module, but the server is plain
+>   `node:http` (`src/mcp/httpServer.ts`), and the webhook route is `/webhooks/stripe`.
+
+> The live Stripe integration is different: Stripe-hosted Checkout Sessions plus ten webhook event
+> types handled by `processStripeWebhookEvent` in `src/services/commerceService.ts`. The event list
+> and its configuration are in [railway-setup.md](railway-setup.md).
+
 ## Overview
 
 This guide covers integrating Stripe's **Shared Payment Token (SPT)** system with Letter IRL for Agentic Commerce Protocol (ACP) delegated payments.

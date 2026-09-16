@@ -1,30 +1,48 @@
 # Account and Credits Model
 
+**Last Updated:** September 16, 2026
+**Purpose:** How balances, credits and letters relate, and how previews and sends use them
+
+---
+
 ## User Account Record
-- Maintain a per-user record containing at minimum:
-  - `userId`: stable identifier derived from the Apps SDK session or auth token.
-  - `creditsRemaining`: numeric field supporting integers or fractional credits.
-  - `orders`: collection or foreign-key reference to stored letter orders.
-- Development mode can stub a single user, but the data model must support multi-user tenancy.
 
-## Credits Semantics
-- Each letter costs 2 Letter IRL credits (current flat rate).
-- All letters are limited to one page maximum (~1,800 characters).
-- Credits are decremented only when `send_letter` succeeds; previews are read-only.
-- Credit purchase flows available through Stripe checkout and OpenAI Agentic Commerce.
+- `users.user_id` is the Auth0 subject (or the PAT owner's subject). All state is scoped to it.
+- `users.credits` is a cached balance. The source of truth is the `credit_ledger`: one row per lot,
+  each with its own `source_type` (`purchase`, `promo`, `adjustment`, `refund`, `signup_bonus`,
+  `legacy`) and expiry. See
+  [database-schema.md](database-schema.md).
+- Orders, letters, drafts and purchases reference the user by `user_id`.
+- With `LETTER_IRL_REQUIRE_AUTH=false` (local development only) every call runs as
+  `LETTER_IRL_DEFAULT_USER_ID`. Production refuses to boot with authentication disabled.
 
-## Validation Rules
-- `quote_and_preview_letter` returns `requiredCredits: 2` (flat rate) and determines `canSendNow` by comparing against the authenticated user's balance.
-- `send_letter` validates:
-  - User has at least 2 credits
-  - Letter content does not exceed one page (~1,800 characters)
-  - Re-validates balance before deduction to prevent race conditions
-- Insufficient credit attempts return errors with `insufficientCredits: true` and current balance details for UI messaging.
-- Over-length letters return errors prompting user to shorten content.
+## Credits and Letters
 
-## Standard Cost Heuristics
-- **Current Model:** Flat 2 credits per letter (one page maximum).
-- **Future Plans:** May introduce tiered pricing:
-  - Basic letters: 1 credit (plain text, standard delivery)
-  - Premium letters: 2 credits (current offering)
-  - Super premium: 3+ credits (multi-page, color, expedited)
+- Internally, **one letter or postcard costs 2 credits**. Customers only ever see **letters**; tools
+  report `lettersRequired`, `lettersRemaining` and pack sizes in letters.
+- Packs grant 4, 10 or 100 credits (2, 5 or 50 letters). Purchased credits are valid for 24 months.
+- Every letter is one page; the character limit depends on the layout (1,600 / 1,100 / 800). See
+  [pricing-and-credits.md](pricing-and-credits.md#character-limits).
+- Credits are consumed FIFO by expiry, and each send records which lots it drew from
+  (`credit_consumption`), so a returned send restores the same lots with their original expiry.
+
+## Previews and Sends
+
+- Preview tools are **write** tools: they create a 24-hour draft. They never deduct credits.
+- A preview returns `lettersRequired`, `canSendNow` (compared against the caller's balance),
+  `reasonCannotSend` when it cannot, and `sendEligibility`, which describes the prepaid path, Pay & Send
+  availability and price, and the letter-pack option.
+- `send_letter` / `send_postcard` require the `draftId` and `confirm: true`. Inside one transaction
+  they lock the draft, deduct the credits, create the order and insert the outbox job. An insufficient
+  balance rolls back every effect. See [letter-send-flow.md](letter-send-flow.md).
+- Pay & Send (`create_mail_checkout`) never touches the prepaid balance: the payment funds that one
+  item.
+
+## Buying and Granting Credits
+
+- Letter packs: `create_pack_checkout` in ChatGPT, or the letterirl.com dashboard. Both use
+  Stripe-hosted Checkout; a verified webhook grants the credits.
+- Promo codes: `redeem_promo_code`.
+- Operator adjustments: the admin panel, in full mode.
+- An in-ChatGPT purchase through the Agentic Commerce Protocol is planned for when the platform allows
+  it ([acp-implementation-guide.md](acp-implementation-guide.md)).

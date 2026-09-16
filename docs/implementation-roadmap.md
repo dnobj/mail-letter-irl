@@ -1,6 +1,12 @@
 # Letter IRL - Implementation Roadmap
 
-Last Updated: January 14, 2025
+**Last Updated:** September 16, 2026 (roadmap content from December 2025)
+
+> **Historical.** The original phased plan. Most phases shipped in a different form: pg-boss was
+> replaced by a transactional outbox, the admin API by a tailnet-only panel, and purchasing uses
+> Stripe-hosted Checkout. The Agentic Commerce Protocol work is still a future plan, waiting on the
+> platform ([acp-implementation-guide.md](acp-implementation-guide.md)). Current state:
+> [status.md](status.md).
 
 ## Project Vision
 

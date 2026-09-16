@@ -1,6 +1,7 @@
 # Image Support Documentation
 
-**Last Updated**: January 2, 2026
+**Last Updated:** September 16, 2026
+**Purpose:** Image sources, processing, print specifications, and platform behavior for letters and postcards
 
 This document describes Letter IRL's image support capabilities for postcards and letters, including technical specifications, processing details, and implementation notes.
 
@@ -13,9 +14,24 @@ Letter IRL **fully supports** images in both postcards and letters:
 - **Letters with Inline Image**: Image after signature
 - **Text-Only Letters**: No images (baseline option)
 
-Images are accepted via:
-1. **File attachments** in ChatGPT (OpenAI Apps SDK `fileParams`)
-2. **Direct URLs** as fallback (publicly accessible image URLs)
+Images reach a preview tool in one of these ways, in the order the server instructions prefer:
+1. **An image already in the conversation**, including one ChatGPT generated, passed through the
+   Apps SDK `fileParams` transform
+2. **A file attachment**, through the same transform
+3. **An `imageUrl`**: a public HTTPS image, or a Letter IRL capability URL (below)
+4. **The upload widget** (`upload_image` -> `ImageUploadCard`), as a fallback after a failed handoff. It
+   uploads through the host (`window.openai.uploadFile`) or picks from the ChatGPT Library
+   (`selectFiles`), then `confirm_uploaded_image` returns the `imageUrl` and records it in
+   `recent_uploads`, so the next preview can use it even if the model drops the URL. That link is
+   readable for at most six hours and deleted 24 hours after the last upload (#282).
+
+**Letter IRL image generation.** `generate_image_for_mail` generates in-turn with the OpenAI Images API
+when the user has Letter IRL image generations left (granted by packs, Pay & Send orders and a
+one-time starter allowance) and the global daily ceiling allows it. The image is stored in the private
+Railway bucket and returned as a `/api/temp-image/<token>` capability URL that expires after 15
+minutes. Otherwise the tool returns routing guidance to ChatGPT's free built-in generator
+(`ImageRoutingCard`). See [ui-widgets.md](ui-widgets.md) and
+[learnings/generate-image-removal-decision.md](learnings/generate-image-removal-decision.md).
 
 All images are validated, resized to print specifications (300 DPI), optimized for quality, and embedded as base64 in HTML templates sent to PostGrid.
 
@@ -216,7 +232,7 @@ Each tool:
 
 **Superseded guidance** (kept for history — accurate before the August 2026 schema fixes):
 - ~~Generated images "cannot pass directly to MCP tools"; workaround was Code Interpreter resize/crop to mint a passable file reference.~~ No longer needed on any tested surface. The Code Interpreter resize still works and remains harmless if a model chooses it.
-- Desktop timing (app selected before upload) and mobile flakiness remain worth watching; when a handoff DOES fail, the recovery path is `upload_image` — its widget's "Choose from Library" picker lists generated images and preserves the exact image the user approved (PR #234). Letter IRL's own generator was removed entirely in Aug 2026 (docs/learnings/generate-image-removal-decision.md).
+- Desktop timing (app selected before upload) and mobile flakiness remain worth watching; when a handoff DOES fail, the recovery path is `upload_image` — its widget's "Choose from Library" picker lists generated images and preserves the exact image the user approved (PR #234). The original `generate_image` tool was removed in Aug 2026 and replaced by the hybrid `generate_image_for_mail` (docs/learnings/generate-image-removal-decision.md, Addendum 3).
 
 **References**:
 - Issue #227 (full evidence trail: experiments, schema fixes, per-surface verification)
@@ -319,8 +335,8 @@ Letter IRL uses **base64 data URIs** for reliability and control.
 ### Potential Future Enhancements
 
 1. **Additional Postcard Sizes**: Support 6×4 and 6×11 PostGrid sizes
-2. **ChatGPT Images Integration**: Direct integration when GitHub issue #67 is resolved (seamless AI-generated image support from GPT Image 1.5)
-3. **Image URL Generation**: Built-in image hosting for user-uploaded files
+2. ~~**ChatGPT Images Integration**~~: done August 2026 (direct handoff, see above)
+3. ~~**Image URL Generation**~~: done (upload widget and the temporary image bucket)
 4. **Advanced Styling**: Borders, fonts, letterhead templates (HTML/CSS only, no images)
 5. **Color Options**: B&W letters for cost savings
 6. **Multi-page Letters**: Support for longer letters with images

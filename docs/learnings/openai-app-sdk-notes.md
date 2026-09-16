@@ -1,11 +1,11 @@
 # OpenAI Apps SDK Notes
 
-**Last Updated:** May 30, 2026  
+**Last Updated:** September 16, 2026  
 **Purpose:** Capture practical OpenAI Apps SDK learnings for Letter IRL
 
 ## Current Status
 
-Letter IRL is integrated as an MCP-backed ChatGPT app with OAuth, Streamable HTTP, server-side tool registration, and custom Apps SDK widgets. The development app has verified visibility for 17 tools, including `generate_image` (later renamed `generate_image_fallback`, removed Aug 2026), `upload_image`, `get_started`, postcard tools, letter tools, account/order tools, return-address tools, and feature-request capture.
+Letter IRL is integrated as an MCP-backed ChatGPT app with OAuth, Streamable HTTP, server-side tool registration, and custom Apps SDK widgets. The server now registers 22 tools ([tool-apis.md](../tool-apis.md)). On May 30, 2026 the development app showed 17, including `generate_image` (later renamed `generate_image_fallback`, removed Aug 2026), `upload_image`, `get_started`, postcard tools, letter tools, account/order tools, return-address tools, and feature-request capture.
 
 ## Recent Learnings
 

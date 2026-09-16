@@ -1,6 +1,6 @@
 # Letter IRL - OpenAI Apps SDK Submission Materials
 
-**Last Updated:** December 29, 2025
+**Last Updated:** September 16, 2026
 **Target Platform:** ChatGPT App Directory
 **Submission Status:** Pre-submission
 
@@ -161,7 +161,7 @@ These help OpenAI measure:
 ### Expected Behavior
 - Tool: `get_account_balance`, `get_order_status`, or `list_orders`
 - Read-only operations, no confirmation needed
-- Shows credit balance, order history, delivery status
+- Shows letters remaining, order and purchase history, delivery status
 
 ---
 
@@ -195,7 +195,7 @@ These help OpenAI measure:
 | Invalid address (e.g., "123 Fake St, Nowhere, XX 00000") | Clear error: "Address is invalid or undeliverable" |
 | Letter too long (>1600 chars for text-only) | Clear error with character/line count |
 | No image provided for postcard | Clear error explaining image is required |
-| Insufficient credits | Preview shows `canSendNow: false` with explanation |
+| Not enough letters | Preview shows `canSendNow: false` with an explanation, and the card offers Pay & Send or a letter pack |
 | Draft expired (after 24 hours) | Clear error suggesting to create new preview |
 | Non-US address | Clear error: "US addresses only" |
 | Send without preview | Error: "draftId required from quote_and_preview" |
@@ -205,20 +205,34 @@ These help OpenAI measure:
 
 ## Tool Annotations Verification
 
-| Tool | readOnly | openWorldHint | idempotentHint | destructiveHint |
-|------|----------|---------------|----------------|-----------------|
-| `quote_and_preview_letter` | true | - | - | - |
-| `quote_and_preview_letter_with_header_image` | true | - | - | - |
-| `quote_and_preview_letter_with_image` | true | - | - | - |
-| `quote_and_preview_postcard` | true | - | - | - |
-| `send_letter` | false | ✅ | ✅ | - |
-| `send_postcard` | false | ✅ | ✅ | - |
-| `get_account_balance` | true | - | - | - |
-| `get_order_status` | true | - | - | - |
-| `list_orders` | true | - | - | - |
-| `set_return_address` | false | ✅ | - | - |
-| `get_return_address` | true | - | - | - |
-| `clear_return_address` | false | - | - | ✅ |
+| Tool | readOnlyHint | openWorldHint | idempotentHint | destructiveHint |
+|------|--------------|---------------|----------------|-----------------|
+| `quote_and_preview_letter` | - | ✅ | - | - |
+| `quote_and_preview_letter_with_header_image` | - | ✅ | - | - |
+| `quote_and_preview_letter_with_image` | - | ✅ | - | - |
+| `send_letter` | - | ✅ | ✅ | - |
+| `create_mail_checkout` | - | ✅ | ✅ | - |
+| `create_pack_checkout` | - | ✅ | - | - |
+| `list_letter_packs` | ✅ | - | - | - |
+| `redeem_promo_code` | - | - | ✅ | - |
+| `get_purchase_status` | ✅ | - | - | - |
+| `get_order_status` | ✅ | - | - | - |
+| `get_account_balance` | ✅ | - | - | - |
+| `list_orders` | ✅ | - | - | - |
+| `set_return_address` | - | ✅ | ✅ | - |
+| `get_return_address` | ✅ | - | - | - |
+| `clear_return_address` | - | - | ✅ | ✅ |
+| `quote_and_preview_postcard` | - | ✅ | - | - |
+| `send_postcard` | - | ✅ | ✅ | - |
+| `submit_feature_request` | - | - | - | - |
+| `get_started` | ✅ | - | - | - |
+| `upload_image` | - | - | - | - |
+| `generate_image_for_mail` | - | ✅ | - | - |
+| `confirm_uploaded_image` | - | - | ✅ | - |
+
+This mirrors `buildAnnotations()` in `src/mcp/registerTools.ts`, which is authoritative. The
+preview tools are **not** read-only: each call creates a draft record, and each validates addresses
+with PostGrid ([learnings/tool-annotation-decision.md](../learnings/tool-annotation-decision.md)).
 
 Run verification: `npx tsx scripts/verify-tool-annotations.ts`
 
@@ -278,7 +292,7 @@ Run verification: `npx tsx scripts/verify-tool-annotations.ts`
 
 **Test Account:**
 - Use development environment for reviewer testing
-- Provide promo code for free credits if needed
+- Provide a promo code for free letters if needed
 
 ---
 

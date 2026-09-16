@@ -1,264 +1,83 @@
-# Letter IRL MCP Server - Setup Guide
+# Local Setup and Testing
 
-## ✅ Integration Complete!
+**Last Updated:** September 16, 2026
+**Purpose:** Run the Letter IRL API locally and exercise its MCP tools
 
-The Auth0 OAuth authentication has been successfully integrated with the main Letter IRL MCP server.
+---
 
-> Current ChatGPT target: Auth0 manual CIMD registration for a public client,
-> authorization code + PKCE S256, and `token_endpoint_auth_method=none`.
-> Auth0 discovery is authoritative. Letter IRL's authorization-server proxy and
-> `/oauth/register` exist only behind the temporary rollback flag. Claude and
-> other non-ChatGPT clients use a separate OAuth adapter or PAT.
+## Overview
 
-## What's Working
+This guide covers running the server on a workstation. The full developer guide is
+[docs/development.md](docs/development.md); environment files are explained in
+[docs/env-files.md](docs/env-files.md).
 
-✅ **Auth0 OAuth 2.1 + PKCE** with 5 identity providers
-✅ **4 MCP Tools** integrated (quote, send, status, balance)
-✅ **Per-user authentication** - Each request authenticated via JWT
-✅ **Dual protocol** - Streamable HTTP (preferred) + SSE fallback
-✅ **OAuth discovery** endpoints configured
-✅ **Manifest** updated with correct endpoints
+The ChatGPT authentication path (Auth0 CIMD, exact `/mcp` audience, `mail:*` scopes) is bound to each
+environment's canonical URL: the Auth0 API identifier must equal the server's `/mcp` resource. That is
+why end-to-end ChatGPT testing, including OAuth linking and widgets, runs against the deployed
+development API (`https://letter-irl-api-development.up.railway.app/mcp`), not against a workstation.
+See [docs/auth0-setup.md](docs/auth0-setup.md).
 
-## Quick Start
+## 1. Install and configure
 
-### 1. Start the Server
-
-```bash
-cd /mnt/c/letter-irl
-npm run mcp:http
-```
-
-The server will start on `http://0.0.0.0:8788`
-
-### 2. Expose via ngrok (Already Running)
-
-Your ngrok URL is already configured:
-```
-https://amitotically-gubernacular-elise.ngrok-free.dev
-```
-
-If you need to restart ngrok:
-```bash
-ngrok http 8788
-```
-
-### 3. Add to ChatGPT
-
-1. Open ChatGPT Settings → Connectors → Create
-2. Enter MCP endpoint:
-   ```
-   https://amitotically-gubernacular-elise.ngrok-free.dev/mcp
-   ```
-3. ChatGPT will auto-discover OAuth configuration
-4. Complete Auth0 login (choose from 5 providers)
-5. Test with: "Check my Letter IRL balance"
-
-## Architecture Changes
-
-### What We Did
-
-1. **Environment Configuration** (`.env`)
-   - Added Auth0 OAuth endpoints
-   - Configured MCP paths
-   - Set CORS origins
-
-2. **HTTP Server** (`src/mcp/httpServer.ts`)
-   - Added `import "dotenv/config"` at top
-   - Updated to use per-session MCP servers (like chatgpt-auth0-hello)
-   - Auth info now properly passed to all tool handlers
-
-3. **Tool Registration** (`src/mcp/registerTools.ts`)
-   - Now accepts `authInfo` parameter
-   - User ID extracted from JWT and passed to tools
-   - Each tool execution uses authenticated user's account
-
-4. **Manifest** (`manifest.json`)
-   - Updated URL to `/mcp` (works with both Streamable HTTP and SSE)
-   - OAuth discovery points to `.well-known/oauth-authorization-server`
-
-### Key Files Modified
-
-```
-/mnt/c/letter-irl/
-├── .env                          # ✨ Created - Auth0 + server config
-├── manifest.json                 # ✅ Updated - Correct endpoints
-├── src/mcp/httpServer.ts         # ✅ Updated - dotenv + per-session servers
-└── src/mcp/registerTools.ts      # ✅ Updated - Auth context passing
-```
-
-## Testing the Integration
-
-### Test Server Health
+Requires Node.js 22 and a PostgreSQL database: an empty Neon `dev` branch or a local server. Never
+point a workstation at the production database.
 
 ```bash
-curl http://localhost:8788/healthz
-# Expected: ok
-
-curl http://localhost:8788/
-# Expected: {"status":"ok","service":"letter-irl"}
+npm ci
+cp .env.example .env
+npm run db:migrate
 ```
 
-### Test OAuth Discovery
+For tool testing without an identity provider, set `LETTER_IRL_REQUIRE_AUTH=false` in `.env`. Every
+call then runs as `LETTER_IRL_DEFAULT_USER_ID` (default `mcp-user`). Production refuses to boot with
+this setting.
+
+To make sure nothing is mailed, use the dummy provider. Setting `LETTER_PROVIDER=dummy` is **not
+enough** on its own: migration 015 seeds `provider_routing` with `postgrid` for every mail type, and
+those rows win. [docs/testing-dummy-provider.md](docs/testing-dummy-provider.md) shows both steps.
+
+## 2. Start the server
 
 ```bash
-curl http://localhost:8788/.well-known/oauth-protected-resource | jq
-curl https://YOUR_AUTH0_TENANT/.well-known/openid-configuration | jq
+npm run dev
 ```
 
-The first response must name the exact `/mcp` resource, Auth0 issuer, and three
-product scopes. Auth0's response—not a Letter IRL proxy—must describe CIMD and
-authorization-server capabilities. The imported ChatGPT application must use:
+The server binds `0.0.0.0` on `PORT`, else `LETTER_IRL_HTTP_PORT`, else 8090. `.env.example` sets 8788.
 
-```json
-{
-  "grant_types": ["authorization_code"],
-  "token_endpoint_auth_method": "none",
-  "code_challenge_method": "S256"
-}
-```
-
-### Test Tools in ChatGPT
-
-1. **Check Balance**:
-   ```
-   "Check my Letter IRL credit balance"
-   ```
-
-2. **Draft a Letter**:
-   ```
-   "Help me draft a letter to John Doe at 123 Main St, Springfield, IL 62701"
-   ```
-
-3. **View Preview**:
-   - ChatGPT will call `quote_and_preview_letter`
-   - You'll see preview HTML and credit cost
-
-4. **Send Letter** (if you approve):
-   - ChatGPT will call `send_letter` with `confirm: true`
-   - Credits deducted, order created
-
-5. **Check Status**:
-   ```
-   "What's the status of my last letter?"
-   ```
-
-## Authentication Flow
-
-```
-┌─────────┐     1. Connect       ┌──────────┐
-│ChatGPT  │ ──────────────────> │Letter IRL│
-│         │                      │MCP Server│
-└─────────┘                      └──────────┘
-     │                                 │
-     │      2. OAuth Discovery         │
-     │ <─────────────────────────────  │
-     │    (Auth0 endpoints)            │
-     │                                 │
-     │      3. Redirect to Auth0       │
-     ├────────────────────────────────>│
-     │                            ┌─────────┐
-     │      4. Login (5 options)  │ Auth0   │
-     │ <──────────────────────────┤         │
-     │                            └─────────┘
-     │      5. Authorization Code      │
-     ├────────────────────────────────>│
-     │                                 │
-     │      6. Access Token (JWT)      │
-     │ <───────────────────────────────┤
-     │                                 │
-     │      7. Tool Calls + JWT        │
-     │ ──────────────────────────────> │
-     │      (Authenticated per user)   │
-     │                                 │
-     │      8. Tool Responses          │
-     │ <─────────────────────────────  │
-     │                                 │
-```
-
-## Per-User Data Storage
-
-Each authenticated user gets their own data file:
-
-```
-/mnt/c/letter-irl/data/
-└── accounts/
-    ├── auth0|user123.json    # User's credits & orders
-    ├── google-oauth2|456.json
-    └── github|789.json
-```
-
-User ID comes from the Auth0 JWT `sub` claim.
-
-## Environment Variables Reference
+## 3. Check it
 
 ```bash
-# Server Configuration
-LETTER_IRL_HTTP_HOST=0.0.0.0
-LETTER_IRL_HTTP_PORT=8788
-LETTER_IRL_PUBLIC_BASE_URL=https://your-ngrok-url.ngrok-free.dev
-
-# MCP Endpoints
-LETTER_IRL_MCP_PATH=/mcp
-LETTER_IRL_SSE_PATH=/mcp
-LETTER_IRL_SSE_MESSAGES_PATH=/messages
-
-# Auth0 OAuth
-LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
-LETTER_IRL_OAUTH_AUTH_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/authorize
-LETTER_IRL_OAUTH_TOKEN_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oauth/token
-LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_MCP_RESOURCE=https://YOUR_PUBLIC_HOST/mcp
-LETTER_IRL_OAUTH_AUDIENCE=https://YOUR_PUBLIC_HOST/mcp
-LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS=RS256
-LETTER_IRL_OAUTH_SCOPES=openid,profile,email,offline_access,mail:read,mail:draft,mail:send
-
-# Authentication
-LETTER_IRL_REQUIRE_AUTH=true  # Set to false for local testing
-
-# CORS
-LETTER_IRL_ALLOWED_ORIGINS=https://chat.openai.com,https://chatgpt.com,https://your-ngrok-url.ngrok-free.dev
-LETTER_IRL_ALLOWED_HOSTS=your-ngrok-url.ngrok-free.dev,your-ngrok-url.ngrok-free.dev:443,localhost,127.0.0.1
+curl http://localhost:8090/healthz
+curl http://localhost:8090/readyz
+curl http://localhost:8090/.well-known/oauth-protected-resource
+curl http://localhost:8090/manifest.json
 ```
 
-## Next Steps
+`/healthz` returns `ok`. `/readyz` returns `200` with `"ready":true` when the configuration is valid,
+the database answers and provider routing is sane; a `503` names the failing check. The
+protected-resource document names the `/mcp` resource, the Auth0 issuer and the product scopes.
 
-Now that Auth0 is integrated, you can:
+## 4. Call tools
 
-1. **Test all 4 tools** in ChatGPT with real authentication
-2. **Add UI widgets** for better visual presentation
-3. **Set up proper persistence** (migrate from file-based to database)
-4. **Implement print/mail backend** integration
-5. **Add credit purchase flow**
-
-## Documentation
-
-- [Auth0 Configuration](../docs/auth0-tenant-configuration.md)
-- [OAuth Integration Learnings](../docs/chatgpt-auth0-oauth-learnings.md)
-- [Tool Specifications](../docs/tool-apis.md)
-- [Functional Requirements](../docs/functional-requirements.md)
+- **stdio:** `npm run mcp:stdio` serves the same tools over stdin/stdout for local MCP clients.
+- **HTTP:** point an MCP client such as MCP Inspector at `http://localhost:8090/mcp` with
+  `Accept: application/json, text/event-stream`.
+- **Flow harness:** `npm run flow` previews **and sends** a sample letter as `dev-user` through the
+  tool handlers. Run it only with the dummy provider.
 
 ## Troubleshooting
 
-### Server won't start
-```bash
-# Kill any process on port 8788
-lsof -ti:8788 | xargs kill -9
+- **`Invalid Host header` / `Invalid Origin header`:** add the host or origin to
+  `LETTER_IRL_ALLOWED_HOSTS` / `LETTER_IRL_ALLOWED_ORIGINS`. See [docs/mcp-debugging.md](docs/mcp-debugging.md).
+- **`Authentication is not configured on this server` (503):** either set the `LETTER_IRL_OAUTH_*`
+  variables or, for local-only testing, `LETTER_IRL_REQUIRE_AUTH=false`.
+- **Boot refused with a rule id:** look the rule up under **Boot validation rules** in
+  [docs/deployment.md](docs/deployment.md).
+- **Port already in use:** stop the other process, or set `LETTER_IRL_HTTP_PORT`.
 
-# Restart
-npm run mcp:http
-```
+## Related documentation
 
-### OAuth fails
-1. Check `.env` has correct Auth0 endpoints
-2. Verify Auth0 tenant has DCR enabled
-3. Ensure all connections are domain-level
-4. Check Auth0 logs for errors
-
-### Tools not working
-1. Check server logs for authentication errors
-2. Verify JWT is being validated (look for "user=" in logs)
-3. Ensure user account file is being created in `data/accounts/`
-
-## Success! 🎉
-
-Your Letter IRL MCP server is now fully integrated with Auth0 OAuth. All 4 tools are authenticated per-user, and you can test the complete flow in ChatGPT with 5 different login methods.
+- [Auth0 setup](docs/auth0-setup.md) and [Auth0 tenant configuration](docs/auth0-tenant-configuration.md)
+- [ChatGPT/Auth0 OAuth learnings](docs/learnings/chatgpt-auth0-oauth-learnings.md)
+- [MCP tool APIs](docs/tool-apis.md)
+- [Testing guide](docs/testing.md)

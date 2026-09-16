@@ -183,4 +183,4 @@ Note: Express cannot be combined with Certified Mail options.
 ## Related Documentation
 
 - [Widget Debugging Notes](./widget-debugging-notes.md) - How widgets receive data
-- [Image Support Notes](../image-support.md) - Previous image research (now outdated)
+- [Image Support](../image-support.md) - Current image handling reference

@@ -1,219 +1,100 @@
-# Testing the DummyProvider
+# Testing with the Dummy Provider
 
-Quick guide to test letter sending with the DummyProvider (no real API costs!).
-
-## Prerequisites
-
-1. **Server running** on port 8788
-2. **DummyProvider configured** (should be default)
-3. **Worker process running** to process jobs
+**Last Updated:** September 16, 2026
+**Purpose:** Exercise the send path locally without mailing anything or calling PostGrid
 
 ---
 
-## Step 1: Verify DummyProvider is Configured
+## Overview
 
-Check environment (DummyProvider is default):
+`DummyProvider` (`src/services/providers/DummyProvider.ts`) stands in for PostGrid. It accepts a
+letter after a short delay, returns a `DUMMY-` tracking id, and can simulate provider rejections. It
+makes no network calls.
+
+Production refuses to boot with it (`provider.live_provider_required`), and a `provider_routing` row
+naming `dummy` is refused in production too.
+
+There is no worker to start. A confirmed send commits the order, the credit deduction and one
+`letter_jobs` outbox row in one transaction, then submits that row to the provider immediately in the
+same request. `npm run maintenance` recovers anything left due or stale. See
+[letter-send-flow.md](letter-send-flow.md).
+
+## Configure
+
+Two things decide which provider a send uses, and **both** must point at the dummy provider:
+
+1. **The routing table.** The outbox resolves the provider per mail type from `provider_routing`
+   first (`getProviderForMailType`). Migration 015 seeds all four mail types with `postgrid`, so on a
+   freshly migrated database every send goes to PostGrid whatever the environment says. Point the rows
+   at the dummy provider in your local database:
+
+   ```sql
+   UPDATE provider_routing SET provider = 'dummy', updated_at = NOW();
+   ```
+
+2. **The environment.** With no enabled routing row, a send falls back to `LETTER_PROVIDER`, and to
+   `postgrid` when that is unset. Address validation and status sync read `LETTER_PROVIDER` directly
+   and default to `dummy`. Set it explicitly:
+
+   ```bash
+   LETTER_PROVIDER=dummy
+   LETTER_PROVIDER_CONFIG={"delayMs":1000,"failureRate":0.05,"costCents":100,"deliveryDays":3,"verbose":true}
+   ```
+
+Never run that `UPDATE` against a deployed database. `/readyz` and the provider registry refuse a
+`dummy` routing row in production.
+
+Every key is optional; the values above are the defaults. **The default `failureRate` is 5%**, so
+roughly one send in twenty fails on purpose. Set `"failureRate":0` when you want every send to succeed.
+
+## Send a test letter
+
+1. Start the server (`npm run dev`); see [SETUP.md](../SETUP.md).
+2. Call `quote_and_preview_letter` (or another preview tool), then `send_letter` with the returned
+   `draftId` and `confirm: true`. `npm run flow` does both with a sample letter.
+3. The log shows `[DummyProvider] Sending letter …` and the tool result reports `accepted`.
+
+The user needs a prepaid balance to take the prepaid path, and a fresh local database has none. The
+promo codes seeded by migration 007 grant zero letters, so either insert a `promo_campaigns` row with
+a positive `credits_amount` and redeem it with `redeem_promo_code`, or use the admin panel's balance
+adjustment, which needs full mode ([admin-panel-guide.md](admin-panel-guide.md)).
+
+## Simulated failures
+
+A simulated failure is returned as a **definite rejection** (`submissionOutcome:
+'definite_rejection'`, `retryable: false`): the dummy provider proves no mail exists. The outbox
+therefore treats it as terminal, not as something to retry:
+
+- the job moves to `failed` and the letter to `failed`;
+- a prepaid send has its letters returned to the credit ledger, exactly once;
+- a Pay & Send order moves to `refund_pending`.
 
 ```bash
-echo ${LETTER_PROVIDER:-dummy}
-# Should output: dummy
+LETTER_PROVIDER_CONFIG={"delayMs":0,"failureRate":1}
 ```
 
-Or configure explicitly:
+forces that path on every send. The dummy provider cannot simulate an **ambiguous** outcome (a timeout
+or `5xx` after dispatch, which the outbox holds for an operator); that path is covered by the unit and
+PostgreSQL suites.
 
-```bash
-export LETTER_PROVIDER=dummy
-export LETTER_PROVIDER_CONFIG='{"delayMs":1000,"failureRate":0.05,"costCents":100,"deliveryDays":3,"verbose":true}'
+## Inspect the result
+
+```sql
+SELECT letter_id, status, provider, tracking_id, cost_cents, expected_delivery
+FROM letters ORDER BY created_at DESC LIMIT 5;
+
+SELECT job_id, status, provider_outcome, attempts, last_error
+FROM letter_jobs ORDER BY created_at DESC LIMIT 5;
 ```
 
----
-
-## Step 2: Start the Worker
-
-The worker processes letter jobs from the queue:
-
-```bash
-cd /mnt/c/letter-irl
-
-# Option A: Start worker standalone
-npx tsx -e "
-import { initializeJobQueue } from './src/services/jobQueue.js';
-import { startLetterWorker } from './src/workers/letterWorker.js';
-await initializeJobQueue();
-await startLetterWorker();
-console.log('Worker running... Press Ctrl+C to stop');
-await new Promise(() => {}); // Keep running
-"
-
-# Option B: Worker should auto-start with server (if integrated)
-npm run mcp:http
-```
-
-You should see:
-```
-✅ DummyProvider initialized
-   Delay: 1000ms
-   Failure Rate: 5.0%
-   Cost: $1.00
-   Delivery Time: 3 days
-✅ Letter provider validated: Dummy Provider (Testing)
-✅ Letter worker started, listening for jobs on queue: send-letter
-```
-
----
-
-## Step 3: Send a Test Letter via ChatGPT
-
-1. Open ChatGPT with Letter IRL connected
-2. Send a message like:
-
-```
-Send a test letter to:
-John Doe
-123 Main St
-San Francisco, CA 94102
-
-Message: This is a test letter to verify the DummyProvider works!
-```
-
----
-
-## Step 4: Watch the Logs
-
-You should see:
-
-```
-📨 Processing letter job: abc-123 for letter xyz-456
-   Letter ID: xyz-456
-   User ID: google-oauth2|...
-   Recipient: John Doe
-📤 Sending letter via provider: Dummy Provider (Testing)
-   Tracking ID: DUMMY-abc-123
-📤 [DummyProvider] Sending letter to John Doe
-   Tracking ID: DUMMY-abc-123
-✅ [DummyProvider] Letter queued successfully
-   Expected delivery: 2025-11-20
-✅ Letter sent via Dummy Provider (Testing)
-   Tracking ID: DUMMY-abc-123
-   Cost: $1.00
-   Expected Delivery: 11/20/2025
-✅ Database updated for letter xyz-456
-✅ Letter xyz-456 sent successfully (user: google-oauth2|...)
-```
-
----
-
-## Step 5: Verify in Admin Panel
-
-Open http://localhost:8788/admin and:
-
-1. **Load Jobs** - Should show your letter job as "completed"
-2. **Load Users** - Should show credit deduction
-3. **User Lookup** - Enter your user ID to see transaction history
-
----
-
-## Testing Different Scenarios
-
-### Fast Testing (No Delay)
-```bash
-export LETTER_PROVIDER_CONFIG='{"delayMs":0,"failureRate":0,"costCents":100}'
-```
-
-### Test Failures (High Failure Rate)
-```bash
-export LETTER_PROVIDER_CONFIG='{"delayMs":500,"failureRate":0.5,"costCents":100}'
-```
-Jobs will fail 50% of the time and retry automatically!
-
-### Test Retries
-```bash
-export LETTER_PROVIDER_CONFIG='{"failureRate":0.8}'
-```
-Most jobs will fail and trigger pg-boss retry logic.
-
----
-
-## Checking Letter Status
-
-### Via Database Query
-```bash
-cd /mnt/c/letter-irl
-npx tsx -e "
-import { query } from './src/db/index.js';
-const result = await query('SELECT letter_id, status, tracking_id, provider, cost_cents, expected_delivery FROM letters ORDER BY created_at DESC LIMIT 5');
-console.table(result.rows);
-process.exit(0);
-"
-```
-
-### Via Admin API
-```bash
-curl -H "Authorization: Bearer YOUR_JWT" \
-  http://localhost:8788/api/admin/jobs?limit=10 | jq '.'
-```
-
----
+`last_error` holds an error class, never provider text (migrations 031 and 032).
 
 ## Troubleshooting
 
-### "No worker picking up jobs"
-
-**Check if worker is running:**
-```bash
-ps aux | grep letterWorker
-```
-
-**Check pg-boss queue:**
-```bash
-npx tsx -e "
-import { query } from './src/db/index.js';
-const jobs = await query('SELECT id, name, state, created_on FROM pgboss.job ORDER BY created_on DESC LIMIT 10');
-console.table(jobs.rows);
-process.exit(0);
-"
-```
-
-### "Provider not found"
-
-Make sure LETTER_PROVIDER is set:
-```bash
-export LETTER_PROVIDER=dummy
-```
-
-### "Jobs failing immediately"
-
-Check failure rate isn't too high:
-```bash
-export LETTER_PROVIDER_CONFIG='{"failureRate":0}'
-```
-
----
-
-## Expected Results
-
-✅ Letter job created in `letter_jobs` table
-✅ Job picked up by worker within seconds
-✅ DummyProvider processes letter (simulated)
-✅ Letter status updated to "sent"
-✅ Tracking ID assigned (DUMMY-...)
-✅ Cost recorded ($1.00 default)
-✅ Expected delivery date set
-✅ Job marked as "completed"
-
----
-
-## Next Steps
-
-Once DummyProvider testing works:
-
-1. Research real providers (Lob, PostGrid, Click2Mail)
-2. Get API keys
-3. Implement provider class (follow DummyProvider pattern)
-4. Register provider in `src/services/providers/index.ts`
-5. Update environment: `LETTER_PROVIDER=lob`
-6. Test with real provider (costs money!)
-
----
-
-**Happy testing!** 📬
+- **`LETTER_PROVIDER must be an approved live provider`**: the process thinks it is production. Set
+  `LETTER_IRL_DEPLOYMENT_ENVIRONMENT=development`, or run with `NODE_ENV` other than `production`.
+- **Sends reach PostGrid, or fail on missing PostGrid credentials:** the `provider_routing` rows still
+  name `postgrid`; see Configure.
+- **Every send fails:** check `failureRate` in `LETTER_PROVIDER_CONFIG`.
+- **`LETTER_PROVIDER_CONFIG` ignored:** it must be valid JSON; outside production an invalid value is
+  only a warning (`provider.config_json_invalid`).

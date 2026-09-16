@@ -1,5 +1,14 @@
 # Letter IRL Letter Packages Specification
 
+**Last Updated:** September 16, 2026
+**Purpose:** Letter pack definitions, plus planned ACP product-feed material
+
+> The authoritative pack table is `PACK_PRODUCTS` in `src/config/products.ts`; the catalogue refuses
+> to sell a pack whose Stripe Price does not match its pinned amount. The **Product Feed JSON** and
+> **Product Images** sections below belong to the planned Agentic Commerce Protocol integration
+> ([acp-implementation-guide.md](acp-implementation-guide.md)) and are not built: there is no
+> product feed, no `public/` directory, and no product image route.
+
 ## Overview
 
 Letter IRL offers three letter packages for purchase through the website dashboard or ChatGPT. Users buy letter packs and use them to send physical letters.
@@ -8,7 +17,9 @@ Letter IRL offers three letter packages for purchase through the website dashboa
 
 ## Pricing Model
 
-**Current Limitation:** All letters are limited to one page (~1,800 characters). Multi-page letters will be available in a future update.
+**Current Limitation:** All letters are limited to one page: 1,600 characters for text-only letters, 1,100 with a header image, 800 with an enclosed image (see [pricing-and-credits.md](pricing-and-credits.md)). Multi-page letters may be added later.
+
+**Validity:** Purchased letters are valid for 24 months (`PURCHASE_CREDIT_EXPIRY_DAYS` in `src/services/commerceService.ts`).
 
 **What's Included Per Letter:**
 - Printing: Black & white
@@ -103,9 +114,9 @@ Letter IRL offers three letter packages for purchase through the website dashboa
 | Regular | 5 | $10.00 | $2.00 | - | Regular use |
 | Power | 50 | $90.00 | $1.80 | 10% | Power users |
 
-## Product Feed JSON
+## Product Feed JSON (planned)
 
-Location: `public/products.json` or served at `/api/acp/v1/products.json`
+Planned location: `public/products.json`, or served at `/api/acp/v1/products.json`. Neither exists yet.
 
 ```json
 {
@@ -129,7 +140,7 @@ Location: `public/products.json` or served at `/api/acp/v1/products.json`
         "badge": null,
         "features": [
           "Send 2 letters",
-          "No expiration",
+          "Valid for 24 months",
           "Black & white printing",
           "USPS First Class Mail"
         ]
@@ -152,7 +163,7 @@ Location: `public/products.json` or served at `/api/acp/v1/products.json`
         "features": [
           "Send 5 letters",
           "Simple $2 per letter",
-          "No expiration",
+          "Valid for 24 months",
           "Black & white printing",
           "USPS First Class Mail",
           "Perfect for small businesses"
@@ -177,7 +188,7 @@ Location: `public/products.json` or served at `/api/acp/v1/products.json`
         "features": [
           "Send 50 letters",
           "10% savings per letter",
-          "No expiration",
+          "Valid for 24 months",
           "Black & white printing",
           "USPS First Class Mail",
           "Perfect for marketing campaigns"
@@ -188,7 +199,7 @@ Location: `public/products.json` or served at `/api/acp/v1/products.json`
 }
 ```
 
-## Product Images
+## Product Images (planned)
 
 ### Image Requirements
 
@@ -201,7 +212,7 @@ Location: `public/products.json` or served at `/api/acp/v1/products.json`
 ### Image Locations
 
 ```
-/mnt/c/letter-irl/public/images/products/
+public/images/products/        (planned; the directory does not exist)
 ├── starter-pack.png     (Starter Pack - 2 Letters)
 ├── regular-pack.png     (Regular Pack - 5 Letters)
 └── power-pack.png       (Power Pack - 50 Letters)
@@ -209,7 +220,8 @@ Location: `public/products.json` or served at `/api/acp/v1/products.json`
 
 ### Serve via HTTP
 
-In `src/mcp/httpServer.ts`, add static file serving:
+The sketch below is from the original plan and assumes Express. The server is plain `node:http`, so a
+real route would be added to the dispatch in `src/mcp/httpServer.ts` instead.
 
 ```typescript
 import express from 'express';
@@ -322,15 +334,9 @@ async function deductCredits(userId: string, credits: number, letterId: string) 
 
 ### Credit Expiration
 
-**Policy:** Credits never expire
-
-**Rationale:**
-- Better user experience
-- Encourages larger purchases
-- Standard practice for credit-based services
-- No complex expiration tracking needed
-
-**Future Consideration:** Could add expiration (e.g., 1 year) if needed for business reasons.
+**Policy:** Purchased letters are valid for 24 months from purchase (`PURCHASE_CREDIT_EXPIRY_DAYS = 730`),
+matching the Terms of Service. The ledger consumes lots in order of expiry, and the daily maintenance
+run marks expired lots. Promo and operator-adjustment lots carry their own expiry policy.
 
 ## Purchase Limits
 
@@ -472,28 +478,34 @@ Consider adding in future:
 ### Common Questions
 
 **Q: Do letters expire?**
-A: No, purchased letters never expire.
+A: Yes, 24 months after purchase.
 
 **Q: Can I get a refund?**
-A: Yes, unused letters can be refunded within 30 days of purchase.
+A: All purchases are final. Letter IRL may, at its discretion, refund whole unused letters at the
+price paid for that pack; email support@letterirl.com with the order id and a person decides. A send
+that fails on our side returns the letter to your balance automatically. See
+[pricing-and-credits.md](pricing-and-credits.md#refund-policy) and the Terms of Service.
 
 **Q: What if I run out of letters?**
-A: ChatGPT will notify you when your balance is low. You can purchase more anytime.
+A: When a preview needs more letters than you have, the card offers Pay & Send for that item or a
+letter pack. You can also buy a pack on letterirl.com at any time.
 
 **Q: Can I share letters with someone?**
 A: No, letters are tied to your account and non-transferable.
 
 **Q: What payment methods are accepted?**
-A: All major credit/debit cards via Stripe (Visa, Mastercard, Amex, Discover).
+A: Cards, and any wallets enabled in Stripe, through Stripe-hosted Checkout.
 
 ## Next Steps
 
-1. **Create product images** (see Image Requirements above)
-2. **Implement product feed** endpoint at `/api/acp/v1/products.json`
-3. **Set up Stripe products** in Stripe Dashboard matching these specs
-4. **Implement credit management** functions (add/deduct/check balance)
-5. **Test pricing** with small user group before full launch
-6. **Monitor metrics** and adjust pricing as needed
+Done: Stripe products and prices for all three packs, credit management, and in-conversation pack
+checkout.
+
+Remaining, for the planned ACP integration:
+
+1. **Create product images** (see Product Images above)
+2. **Implement a product feed** (see Product Feed JSON above)
+3. **Monitor metrics** and adjust pricing as needed
 
 ## Related Documentation
 
