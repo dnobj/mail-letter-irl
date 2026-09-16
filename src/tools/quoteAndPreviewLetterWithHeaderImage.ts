@@ -46,7 +46,9 @@ interface QuoteAndPreviewLetterWithHeaderImageInput {
 // Constants
 // ============================================================================
 
-const OUTPUT_TEMPLATE = widgetTemplateUri("LetterPreviewCard");
+// Its own template name, so the card knows which tool to repeat when a call
+// never reached the server (#411; see WIDGET_VARIANTS in registerTools.ts).
+const OUTPUT_TEMPLATE = widgetTemplateUri("LetterHeaderImagePreviewCard");
 
 // ============================================================================
 // Handler

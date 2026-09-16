@@ -24,8 +24,12 @@ import {
   partitionToolResult,
   normalizeHttpsOrigin,
   getZodOutputShape,
+  PREVIEW_TOOL_BY_TEMPLATE,
+  PREVIEW_TOOL_META_NAME,
+  stampPreviewTool,
   WIDGET_DEFINITIONS,
   WIDGET_MIME_TYPE,
+  WIDGET_VARIANTS,
   registerWidgetResources
 } from '../../../src/mcp/registerTools.js';
 import type { z } from 'zod';
@@ -82,6 +86,17 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
     );
 
+    it.each(WIDGET_VARIANTS)(
+      '$name serves a widget file that exists ($file)',
+      async ({ file }) => {
+        const exists = await fs
+          .access(path.join(path.resolve(__dirname, '../../../widgets'), `${file}.html`))
+          .then(() => true)
+          .catch(() => false);
+        expect(exists).toBe(true);
+      }
+    );
+
     it('should have 6 widgets defined', () => {
       expect(WIDGET_DEFINITIONS.length).toBe(6);
     });
@@ -117,8 +132,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 31,
-        digest: '2709b7a3f245'
+        version: 32,
+        digest: 'be1394dc83de'
       });
     });
   });
@@ -166,6 +181,57 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 
     it('quote_and_preview_letter references the LetterPreviewCard widget', () => {
       expect(templates.get('quote_and_preview_letter')).toBe(widgetTemplateUri('LetterPreviewCard'));
+    });
+
+    it('points each image letter tool at its own template name (#411)', () => {
+      // Literal names, not PREVIEW_TOOL_BY_TEMPLATE: the two tools take
+      // identical input, so a shared template would leave the card unable to
+      // tell which one to repeat.
+      expect(templates.get('quote_and_preview_letter_with_header_image')).toBe(
+        widgetTemplateUri('LetterHeaderImagePreviewCard')
+      );
+      expect(templates.get('quote_and_preview_letter_with_image')).toBe(
+        widgetTemplateUri('LetterInlineImagePreviewCard')
+      );
+      expect(templates.get('quote_and_preview_postcard')).toBe(widgetTemplateUri('PostcardPreviewCard'));
+    });
+
+    it('maps every preview template to the one tool that declares it, both ways (#411)', () => {
+      // The stamp names the tool a card repeats. A template shared by two
+      // tools, or a map entry naming the wrong tool, would make a card repeat
+      // a different preview than the one the customer asked for.
+      const byTemplate = new Map<string, string[]>();
+      for (const [tool, template] of templates) {
+        if (!template) continue;
+        const name = template.replace(/^ui:\/\/widgets\//, '').replace(/\.html@v\d+$/, '');
+        if (!PREVIEW_TOOL_BY_TEMPLATE.has(name)) continue;
+        byTemplate.set(name, [...(byTemplate.get(name) ?? []), tool]);
+      }
+      expect([...byTemplate.keys()].sort()).toEqual([...PREVIEW_TOOL_BY_TEMPLATE.keys()].sort());
+      for (const [name, tools] of byTemplate) {
+        expect(tools, `${name} is declared by`).toEqual([PREVIEW_TOOL_BY_TEMPLATE.get(name)]);
+      }
+    });
+
+    it('stamps only tools the card is willing to repeat (#411)', async () => {
+      // The card ignores a stamp outside its own PREVIEW_TOOLS list. A tool
+      // added on one side only would leave that tool's cards with no retry,
+      // silently.
+      const widgetDir = path.resolve(__dirname, '../../../widgets');
+      const fileOf = (name: string): string =>
+        WIDGET_VARIANTS.find(variant => variant.name === name)?.file ?? name;
+      const stampedByFile = new Map<string, string[]>();
+      for (const [name, tool] of PREVIEW_TOOL_BY_TEMPLATE) {
+        const file = fileOf(name);
+        stampedByFile.set(file, [...(stampedByFile.get(file) ?? []), tool]);
+      }
+      for (const [file, tools] of stampedByFile) {
+        const html = await fs.readFile(path.join(widgetDir, `${file}.html`), 'utf-8');
+        const listed = html.match(/const PREVIEW_TOOLS = \[([^\]]*)\]/);
+        expect(listed, `${file} declares PREVIEW_TOOLS`).not.toBeNull();
+        const names = [...(listed?.[1] ?? '').matchAll(/"([a-z_]+)"/g)].map(match => match[1]);
+        expect(names.sort(), file).toEqual([...tools].sort());
+      }
     });
 
     it('create_pack_checkout references the PackCheckoutCard widget (issue #322)', () => {
@@ -311,6 +377,14 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
      */
     const KNOWN_UNDELIVERABLE: Record<string, string[]> = {};
 
+    /**
+     * The widget file behind a template name: the card itself, or the card a
+     * preview-tool variant serves (#411).
+     */
+    function widgetFile(name: string): string {
+      return WIDGET_VARIANTS.find(variant => variant.name === name)?.file ?? name;
+    }
+
     function widgetToolNames(): Map<string, string> {
       const byWidget = new Map<string, string>();
       for (const tool of new LetterIrlServer().listTools()) {
@@ -429,8 +503,12 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
     it('binds every widget to a tool that declares it', () => {
       const bound = widgetToolNames();
       expect(bound.size).toBeGreaterThan(0);
+      const served = [
+        ...WIDGET_DEFINITIONS.map(definition => definition.name),
+        ...WIDGET_VARIANTS.map(variant => variant.name)
+      ];
       for (const widget of bound.keys()) {
-        expect(WIDGET_DEFINITIONS.map(definition => definition.name)).toContain(widget);
+        expect(served).toContain(widget);
       }
     });
 
@@ -440,7 +518,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       // vacuously green instead of failing.
       const bound = widgetToolNames();
       for (const widget of bound.keys()) {
-        const html = await fs.readFile(path.join(widgetDir, `${widget}.html`), 'utf-8');
+        const html = await fs.readFile(path.join(widgetDir, `${widgetFile(widget)}.html`), 'utf-8');
         const aliases = outputAliases(html);
         expect(aliases.size, `${widget}: no window.openai.toolOutput alias found`).toBeGreaterThan(0);
         expect(
@@ -457,7 +535,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       for (const [widget, toolName] of bound) {
         const shape = getZodOutputShape(toolName);
         if (!shape) continue;
-        const html = await fs.readFile(path.join(widgetDir, `${widget}.html`), 'utf-8');
+        const html = await fs.readFile(path.join(widgetDir, `${widgetFile(widget)}.html`), 'utf-8');
         const missing = [...fieldReads(html, outputAliases(html))]
           .filter(
             dotted =>
@@ -648,8 +726,71 @@ describe('widget resources tolerate any template version (#235)', () => {
     const { resources } = await client.listResources();
     const uris = resources.map((resource) => resource.uri);
 
-    for (const { name } of WIDGET_DEFINITIONS) {
+    for (const { name } of [...WIDGET_DEFINITIONS, ...WIDGET_VARIANTS]) {
       expect(uris).toContain(widgetTemplateUri(name));
+    }
+  });
+
+  it('serves each preview template stamped with the tool that draws it (#411)', async () => {
+    const client = await connectedClient();
+    const widgetDir = path.resolve(__dirname, '../../../widgets');
+    const cases: Array<[string, string, string]> = [
+      ['LetterPreviewCard', 'LetterPreviewCard', 'quote_and_preview_letter'],
+      ['LetterHeaderImagePreviewCard', 'LetterPreviewCard', 'quote_and_preview_letter_with_header_image'],
+      ['LetterInlineImagePreviewCard', 'LetterPreviewCard', 'quote_and_preview_letter_with_image'],
+      ['PostcardPreviewCard', 'PostcardPreviewCard', 'quote_and_preview_postcard']
+    ];
+
+    for (const [name, file, tool] of cases) {
+      const uri = widgetTemplateUri(name);
+      const result = await client.readResource({ uri });
+      const text = String(result.contents[0].text);
+      const original = await fs.readFile(path.join(widgetDir, `${file}.html`), 'utf-8');
+
+      expect(result.contents[0].uri).toBe(uri);
+      expect(result.contents[0].mimeType).toBe(WIDGET_MIME_TYPE);
+      expect(text).toContain(`<meta name="letter-irl-preview-tool" content="${tool}" />`);
+      expect(text.match(/<meta name="letter-irl-preview-tool"/g), `${name} carries one stamp`).toHaveLength(1);
+      // The stamp is the only difference from the file on disk.
+      expect(text.replace(/\n\s*<meta name="letter-irl-preview-tool"[^>]*>/, '')).toBe(original);
+    }
+  });
+
+  it('stamps a preview template requested at an older version too (#411)', async () => {
+    // A client with a cached tool list reaches the variant through the
+    // any-version template, and must still get the right tool.
+    const client = await connectedClient();
+    const stale = `ui://widgets/LetterInlineImagePreviewCard.html@v${WIDGET_TEMPLATE_VERSION - 1}`;
+
+    const result = await client.readResource({ uri: stale });
+
+    expect(String(result.contents[0].text)).toContain(
+      'content="quote_and_preview_letter_with_image"'
+    );
+  });
+
+  it('stamps the legacy letter URI as the text-only tool (#411)', async () => {
+    // Before #411 every letter tool pointed at LetterPreviewCard, so a client
+    // holding that tool list gets the text-only stamp for an image letter too.
+    // The card refuses to repeat a text-only preview whose input carries an
+    // image (see retryRequest in the widget), which is what keeps that case
+    // from turning into a preview without its image.
+    const client = await connectedClient();
+
+    const result = await client.readResource({ uri: 'ui://widgets/LetterPreviewCard.html' });
+
+    expect(String(result.contents[0].text)).toContain('content="quote_and_preview_letter"');
+  });
+
+  it('does not stamp widgets that are not preview cards', async () => {
+    const client = await connectedClient();
+
+    for (const { name } of WIDGET_DEFINITIONS) {
+      if (PREVIEW_TOOL_BY_TEMPLATE.has(name)) continue;
+      const result = await client.readResource({ uri: widgetTemplateUri(name) });
+      expect(String(result.contents[0].text), name).not.toContain(
+        `<meta name="${PREVIEW_TOOL_META_NAME}"`
+      );
     }
   });
 
@@ -680,5 +821,41 @@ describe('widget resources tolerate any template version (#235)', () => {
 
     await expect(read).rejects.toThrow(/not found/i);
     await expect(read).rejects.not.toThrow(/ENOENT|no such file/i);
+  });
+});
+
+describe('stampPreviewTool (#411)', () => {
+  const page = '<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="utf-8" />\n  </head>\n  <body></body>\n</html>\n';
+
+  it('adds the tool as a meta tag right after the opening head tag', () => {
+    expect(stampPreviewTool(page, 'quote_and_preview_letter')).toBe(
+      '<!doctype html>\n<html lang="en">\n  <head>\n    <meta name="letter-irl-preview-tool" content="quote_and_preview_letter" />\n    <meta charset="utf-8" />\n  </head>\n  <body></body>\n</html>\n'
+    );
+  });
+
+  it('keeps attributes on the head tag and stamps only the first head', () => {
+    const stamped = stampPreviewTool('<head data-x="1"></head><head></head>', 'send_letter');
+    expect(stamped).toBe(
+      '<head data-x="1">\n    <meta name="letter-irl-preview-tool" content="send_letter" /></head><head></head>'
+    );
+  });
+
+  it('does not mistake a header element for the head tag', () => {
+    expect(stampPreviewTool('<header></header>', 'send_letter')).toBe('<header></header>');
+  });
+
+  it.each([
+    ['no tool', undefined],
+    ['an empty name', ''],
+    ['a name that could break out of the attribute', 'x" onload="alert(1)'],
+    ['a name with markup', 'x/><script>'],
+    ['an upper-case name', 'Quote_And_Preview_Letter'],
+    ['a name with digits', 'tool2']
+  ])('leaves the page alone for %s', (_label, tool) => {
+    expect(stampPreviewTool(page, tool)).toBe(page);
+  });
+
+  it('leaves a page without a head tag alone', () => {
+    expect(stampPreviewTool('<body></body>', 'send_letter')).toBe('<body></body>');
   });
 });
