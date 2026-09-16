@@ -145,3 +145,48 @@ describe("provider runtime logging privacy", () => {
     }
   });
 });
+
+describe("provider status lookup failures (#394)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the HTTP status on the rethrown error, and the message names no identifier", async () => {
+    const trackingId = "letter_private-tracking-id";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { type: "letter_not_found", message: `Letter ${trackingId} was not found` }
+    }), { status: 404, headers: { "Content-Type": "application/json" } })));
+    const provider = new PostGridProvider(
+      { name: "postgrid", displayName: "PostGrid", enabled: true },
+      { apiKey: "test-key", baseUrl: "https://private-provider.example", verbose: false, timeoutMs: 100 }
+    );
+
+    const failure = await provider.getStatus(trackingId).then(
+      () => undefined,
+      (error: unknown) => error as Error & { statusCode?: number }
+    );
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure?.message).toMatch(/^Failed to get provider status: /);
+    // statusSyncService turns this into provider_rejected http_404; without it
+    // every lookup failure collapsed to provider_error (review round 2).
+    expect(failure?.statusCode).toBe(404);
+  });
+
+  it("carries no status when the request never reached the provider", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("socket timeout")));
+    const provider = new PostGridProvider(
+      { name: "postgrid", displayName: "PostGrid", enabled: true },
+      { apiKey: "test-key", baseUrl: "https://private-provider.example", verbose: false, timeoutMs: 100 }
+    );
+
+    const failure = await provider.getStatus("letter_private-tracking-id").then(
+      () => undefined,
+      (error: unknown) => error as Error & { statusCode?: number }
+    );
+
+    expect(failure?.message).toMatch(/^Failed to get provider status: /);
+    expect(failure?.statusCode).toBeUndefined();
+  });
+});

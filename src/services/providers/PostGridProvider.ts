@@ -419,7 +419,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           'error'
         );
       }
-      throw new Error(`Failed to get provider status: ${this.extractErrorMessage(error)}`);
+      // The status stays on the rethrow: the status-sync detail stores an error
+      // class, and provider_rejected http_<status> is the one signal an operator
+      // needs from a failed lookup (#394, review round 2).
+      throw Object.assign(new Error(`Failed to get provider status: ${this.extractErrorMessage(error)}`), {
+        statusCode: error instanceof PostGridRequestError ? error.statusCode : undefined
+      });
     }
   }
 

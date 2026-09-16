@@ -261,7 +261,8 @@ describe('statusSyncService', () => {
         .mockResolvedValueOnce({ rows: testLetters } as any)
         .mockResolvedValue({ rows: [], rowCount: 1 } as any);
       mockProvider.getStatus.mockRejectedValueOnce(
-        Object.assign(new Error('HTTP 404: letter track-404 not found at https://api.postgrid.invalid/letters'), { statusCode: 404 })
+        // The shape PostGridProvider.getStatus rethrows: a wrapped message and the status.
+        Object.assign(new Error('Failed to get provider status: HTTP 404: letter track-404 not found at https://api.postgrid.invalid/letters'), { statusCode: 404 })
       );
       vi.spyOn(console, 'error').mockImplementation(() => undefined);
 

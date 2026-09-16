@@ -158,12 +158,12 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     );
   }
 
-  async function seedAlert(orderId: string, packRefundId: string, failureReason: string, survives = false): Promise<void> {
+  async function seedAlert(orderId: string, packRefundId: string, failureReason: string, survives = false, alertType = 'pack_refund_failed'): Promise<void> {
     tally(failureReason, survives);
     await owner.query(
       `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
-       VALUES ($1, 'pack_refund_failed', 'critical', $2::jsonb)`,
-      [orderId, JSON.stringify({ packRefundId, lastErrorCode: 'charge_already_refunded', failureReason, creditsRestored: 2 })]
+       VALUES ($1, $2, 'critical', $3::jsonb)`,
+      [orderId, alertType, JSON.stringify({ packRefundId, lastErrorCode: 'charge_already_refunded', failureReason, creditsRestored: 2 })]
     );
   }
 
@@ -221,6 +221,9 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     await seedEvent(orders.refundFallback, 'refund.requested', { reason: `Draft expired: draft_${TOKEN}`, refundId: 're_fixture' });
     await seedEvent(orders.otherCode, 'operator.quarantine_released', { reason: `support ticket ${TOKEN}`, clearedCode: 'PAYMENT_AMOUNT_MISMATCH' });
     await seedEvent(orders.providerForm, 'provider.terminal_failure', { errorClass: 'provider_rejected http_400' }, true);
+    // the same keys under other event types are not the migration's business
+    await seedEvent(orders.providerForm, 'pack_refund.failed', { error: `pack ${TOKEN} text` }, true);
+    await seedEvent(orders.sqlMessage, 'refund.finalized', { reason: `finalized ${TOKEN}` }, true);
 
     // outbox rows: the one shape that is rewritten, and a control per term
     // of the predicate (status, outcome, the provider form, the whitespace test).
@@ -239,10 +242,12 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     await seedAlert(orders.refundFallback, packRefunds.text, `Charge ch_${TOKEN} has already been refunded`);
     await seedAlert(orders.sqlMessage, packRefunds.unreachable, UNREACHABLE, true);
     await seedAlert(orders.providerForm, packRefunds.enumValue, 'expired_or_canceled_card', true);
+    await seedAlert(orders.alreadyClass, packRefunds.revokedText, `dispute ${TOKEN} text`, true, 'stripe_dispute_created');
     await seedLedger('text', 'adjustment', 'partial_refund_failed', `Charge ch_${TOKEN} has already been refunded`);
     await seedLedger('unreachable', 'adjustment', 'partial_refund_failed', UNREACHABLE, true);
     await seedLedger('operator', 'adjustment', 'operator_adjustment', `note ${TOKEN} kept`, true);
     await seedLedger('promo', 'promo', 'partial_refund_failed', `Charge ch_${TOKEN} refused`, true);
+    await seedLedger('enumValue', 'adjustment', 'partial_refund_failed', 'expired_or_canceled_card', true);
 
     // maintenance tasks
     await seedTask('provider-status-sync', 'failed', `connect ETIMEDOUT ${TOKEN}:5432`);
@@ -252,6 +257,7 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     await seedTask('feature-requests-sweep', 'failed', 'feature requests sweep failed: ECONNRESET', true);
     await seedTask('daily-credit-and-draft-cleanup', 'completed', null, true);
     await seedTask('image-reservation-recovery', 'completed', `stale ${TOKEN} text`, true);
+    await seedTask('outbox-dispatch', 'failed', 'ETIMEDOUT', true);
   }, 180_000);
 
   afterAll(async () => {
@@ -277,8 +283,8 @@ describePostgres('migration 032 takes error text and reasons out of the operator
       `SELECT job_id, last_error, error_message FROM letter_jobs WHERE job_id = ANY($1) ORDER BY job_id`,
       [Object.values(jobs)]
     );
-    const alerts = await owner.query<{ details: Record<string, unknown> }>(
-      `SELECT details FROM commerce_operational_alerts WHERE alert_type = 'pack_refund_failed' ORDER BY details->>'packRefundId'`
+    const alerts = await owner.query<{ alert_type: string; details: Record<string, unknown> }>(
+      `SELECT alert_type, details FROM commerce_operational_alerts ORDER BY alert_type, details->>'packRefundId'`
     );
     const refunds = await owner.query<{ pack_refund_id: string; failure_reason: string | null; last_error_code: string | null }>(
       `SELECT pack_refund_id, failure_reason, last_error_code FROM commerce_pack_refunds WHERE pack_refund_id = ANY($1) ORDER BY pack_refund_id`,
@@ -350,6 +356,8 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     expect(event(orders.refundFallback, 'refund.requested')).toEqual({ refundId: 're_fixture' });
     expect(event(orders.otherCode, 'operator.quarantine_released')).toEqual({ clearedCode: 'PAYMENT_AMOUNT_MISMATCH' });
     expect(event(orders.providerForm, 'provider.terminal_failure')).toEqual({ errorClass: 'provider_rejected http_400' });
+    expect(event(orders.providerForm, 'pack_refund.failed')).toEqual({ error: `pack ${TOKEN} text` });
+    expect(event(orders.sqlMessage, 'refund.finalized')).toEqual({ reason: `finalized ${TOKEN}` });
 
     // 5. outbox: only the failed, definite, unclassified pair is rewritten
     const jobPair = (jobId: string, value: string) => ({ job_id: jobId, last_error: value, error_message: value });
@@ -362,10 +370,12 @@ describePostgres('migration 032 takes error text and reasons out of the operator
 
     // 6, 7 and 8. pack-refund text goes from a failed refund's three places;
     // the enum value, the template, a revoked refund and other lots stay
-    const alertFor = (packRefundId: string) => first.alerts.find((row) => row.details.packRefundId === packRefundId)?.details;
+    const alertFor = (packRefundId: string, alertType = 'pack_refund_failed') =>
+      first.alerts.find((row) => row.alert_type === alertType && row.details.packRefundId === packRefundId)?.details;
     expect(alertFor(packRefunds.text)).toEqual({ packRefundId: packRefunds.text, lastErrorCode: 'charge_already_refunded', creditsRestored: 2 });
     expect(alertFor(packRefunds.unreachable)).toMatchObject({ failureReason: UNREACHABLE });
     expect(alertFor(packRefunds.enumValue)).toMatchObject({ failureReason: 'expired_or_canceled_card' });
+    expect(alertFor(packRefunds.revokedText, 'stripe_dispute_created')).toMatchObject({ failureReason: `dispute ${TOKEN} text` });
     expect(first.byRefund[packRefunds.text].failure_reason).toBeNull();
     expect(first.byRefund[packRefunds.text].last_error_code).toBe('charge_already_refunded');
     expect(first.byRefund[packRefunds.unreachable].failure_reason).toBe(UNREACHABLE);
@@ -376,6 +386,7 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     expect(first.byLot[ledger.unreachable].source_metadata).toMatchObject({ failure_reason: UNREACHABLE });
     expect(first.byLot[ledger.operator].source_metadata).toMatchObject({ failure_reason: `note ${TOKEN} kept` });
     expect(first.byLot[ledger.promo].source_metadata).toMatchObject({ failure_reason: `Charge ch_${TOKEN} refused` });
+    expect(first.byLot[ledger.enumValue].source_metadata).toMatchObject({ failure_reason: 'expired_or_canceled_card' });
 
     // 9. maintenance tasks: the driver message goes; the runner's wrapped
     // prefixes, a completed task's NULL and a completed task's text stay
@@ -386,6 +397,7 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     expect(first.byTask['feature-requests-sweep'].last_error).toBe('feature requests sweep failed: ECONNRESET');
     expect(first.byTask['daily-credit-and-draft-cleanup'].last_error).toBeNull();
     expect(first.byTask['image-reservation-recovery'].last_error).toBe(`stale ${TOKEN} text`);
+    expect(first.byTask['outbox-dispatch'].last_error).toBe('ETIMEDOUT');
 
     // Nothing carrying the token survives, except the controls that must.
     expect(await leakCount()).toBe(tokensKept);

@@ -123,13 +123,14 @@ export async function syncLetterStatuses(
     } catch (error) {
       // A class, never the provider's message: the status-sync command copies
       // this detail into admin_command_runs and the audit row (#394).
-      // The provider client's errors carry an HTTP status and no code: keep the
-      // status the way the outbox does (provider_rejected http_<status>), so a
-      // 404 at the provider stays distinguishable from a 500 (review round 1).
+      // PostGridProvider.getStatus rethrows a wrapped Error that keeps the HTTP
+      // status and nothing else: keep it the way the outbox does
+      // (provider_rejected http_<status>), so a 404 at the provider stays
+      // distinguishable from a 500 (review rounds 1 and 2).
       const statusCode = (error as { statusCode?: unknown } | null)?.statusCode;
       const errorClass =
         carriedDiagnosticClass(error) ??
-        (typeof statusCode === 'number' && Number.isInteger(statusCode)
+        (typeof statusCode === 'number' && Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599
           ? summarizeProviderRejection({ metadata: { statusCode } })
           : classifyDiagnosticError(error, 'provider_error'));
       console.error('   ❌ Error syncing letter');
