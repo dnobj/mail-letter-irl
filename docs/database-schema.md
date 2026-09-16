@@ -276,10 +276,11 @@ Migration 021 made this the commerce order table. Added since the columns above:
 `hold_previous_status`, `held_at`, `credits_refunded` and `amount_refunded_cents`. `status` follows the
 commerce lifecycle (`checkout_pending`, `paid`, `fulfillment_pending`, `fulfilled`, `payment_failed`,
 `refund_pending`, `refunded`, `disputed`, `held`, `cancelled`); `credits` is required for a pack and must
-be `NULL` for `jit_mail`. `last_error` holds an error class only: `provider_rejected http_<status>` for
-provider failures (migration 031), the draft or outbox check code (`DRAFT_EXPIRED`, `LETTER_NOT_FOUND`)
-or a diagnostic class for the fulfilment, recovery and refund catches, and `error_text_removed` where
-migration 032 rewrote earlier text (#394). The refund claim no longer writes it.
+be `NULL` for `jit_mail`. Under the provider, fulfilment, recovery and refund codes `last_error` holds
+an error class only: `provider_rejected http_<status>` (migration 031), the draft or outbox check code
+(`DRAFT_EXPIRED`, `LETTER_NOT_FOUND`), a diagnostic class, or `error_text_removed` where migration 032
+rewrote earlier text (#394). The checkout and amount-mismatch codes store fixed server-authored
+sentences (amounts and product codes, never message text). The refund claim no longer writes it.
 
 ### stripe_disputes
 

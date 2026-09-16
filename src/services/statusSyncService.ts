@@ -8,6 +8,7 @@
 import { query } from '../db/index.js';
 import { getLetterProvider } from './providers/index.js';
 import { carriedDiagnosticClass, classifyDiagnosticError } from '../utils/diagnosticLog.js';
+import { summarizeProviderRejection } from './providerFailureSummary.js';
 
 export interface StatusSyncResult {
   checked: number;
@@ -122,7 +123,15 @@ export async function syncLetterStatuses(
     } catch (error) {
       // A class, never the provider's message: the status-sync command copies
       // this detail into admin_command_runs and the audit row (#394).
-      const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error');
+      // The provider client's errors carry an HTTP status and no code: keep the
+      // status the way the outbox does (provider_rejected http_<status>), so a
+      // 404 at the provider stays distinguishable from a 500 (review round 1).
+      const statusCode = (error as { statusCode?: unknown } | null)?.statusCode;
+      const errorClass =
+        carriedDiagnosticClass(error) ??
+        (typeof statusCode === 'number' && Number.isInteger(statusCode)
+          ? summarizeProviderRejection({ metadata: { statusCode } })
+          : classifyDiagnosticError(error, 'provider_error'));
       console.error('   ❌ Error syncing letter');
 
       result.errors++;

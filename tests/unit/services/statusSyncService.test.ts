@@ -254,6 +254,38 @@ describe('statusSyncService', () => {
       expect(JSON.stringify(result)).not.toContain('postgrid.invalid');
       expect(JSON.stringify(result)).not.toContain('Recipient Person');
     });
+
+    it('keeps the HTTP status of a provider failure as provider_rejected http_<status> (#394)', async () => {
+      const testLetters = [createLetterRowForSync({ letterId: 'letter-404', trackingId: 'track-404', status: 'in_transit' })];
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: testLetters } as any)
+        .mockResolvedValue({ rows: [], rowCount: 1 } as any);
+      mockProvider.getStatus.mockRejectedValueOnce(
+        Object.assign(new Error('HTTP 404: letter track-404 not found at https://api.postgrid.invalid/letters'), { statusCode: 404 })
+      );
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(result.details[0].error).toBe('provider_rejected http_404');
+      expect(JSON.stringify(result)).not.toContain('postgrid.invalid');
+    });
+
+    it('prefers a class a lower layer attached to the failure (#394)', async () => {
+      const testLetters = [createLetterRowForSync({ letterId: 'letter-carried', trackingId: 'track-carried', status: 'in_transit' })];
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: testLetters } as any)
+        .mockResolvedValue({ rows: [], rowCount: 1 } as any);
+      mockProvider.getStatus.mockRejectedValueOnce(
+        Object.assign(new Error('connect ETIMEDOUT 10.0.0.9:443'), { code: 'ETIMEDOUT', statusCode: 503, diagnosticClass: 'configuration_error' })
+      );
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(result.details[0].error).toBe('configuration_error');
+      expect(JSON.stringify(result)).not.toContain('10.0.0.9');
+    });
   });
 
   // ==========================================================================

@@ -2898,6 +2898,23 @@ describe('commerceService', () => {
       expect(paramsRecorded()).not.toContain('Draft expired');
     });
 
+    it('labels an unclassified recovery failure database_error, the savepoint fallback', async () => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+          return { rows: [{ ...baseOrder, status: 'paid' }] };
+        }
+        return { rows: [] };
+      });
+      mocks.createMail.mockRejectedValueOnce(new Error('relation "letters_secret" does not exist'));
+
+      await expect(fulfillPaidOrder('order-1')).resolves.toBe(false);
+
+      const failure = mocks.query.mock.calls.find(([sql]) => String(sql).includes("last_error_code = 'RECOVERY_FAILED'"));
+      expect(failure![1]).toEqual(['order-1', 'database_error']);
+      expect((eventInsert('maintenance.fulfillment_failed')![1] as unknown[])[4]).toBe(JSON.stringify({ errorClass: 'database_error' }));
+      expect(paramsRecorded()).not.toContain('secret');
+    });
+
     it.each([
       [
         'an allowlisted Stripe code',
@@ -2939,6 +2956,27 @@ describe('commerceService', () => {
       const failure = mocks.query.mock.calls.find(([sql]) => String(sql).includes("last_error_code = 'REFUND_REQUEST_FAILED'"));
       expect(failure).toBeDefined();
       expect(failure![1]).toEqual(['order-1', expected]);
+      expect(paramsRecorded()).not.toContain('secret');
+    });
+
+    it('prefers a class a lower layer attached when the refund request fails', async () => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('WITH candidate AS')) {
+          return {
+            rows: [{ ...baseOrder, status: 'refund_pending', refund_attempts: 1, previous_refund_attempts: 0, stripe_payment_intent_id: 'pi-1', stripe_refund_id: null }]
+          };
+        }
+        return { rows: [] };
+      });
+      mocks.findRefund.mockResolvedValue(null);
+      mocks.createRefund.mockRejectedValueOnce(
+        Object.assign(new Error('Price price_secret is not configured'), { type: 'StripeInvalidRequestError', code: 'resource_missing', diagnosticClass: 'configuration_error' })
+      );
+
+      await expect(requestRefund('order-1')).resolves.toBe(false);
+
+      const failure = mocks.query.mock.calls.find(([sql]) => String(sql).includes("last_error_code = 'REFUND_REQUEST_FAILED'"));
+      expect(failure![1]).toEqual(['order-1', 'configuration_error']);
       expect(paramsRecorded()).not.toContain('secret');
     });
 

@@ -20,7 +20,9 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  *
  * Unlike 031, whose control row was an INTERNAL message left alone, this
  * migration rewrites every whitespace-bearing value under the listed codes:
- * a message that is not provider text is still text.
+ * a message that is not provider text is still text. Every shape the live
+ * path could have stored is seeded once, and every predicate has a control
+ * that differs from the rewritten rows in exactly one term.
  */
 
 const { Pool } = pg;
@@ -37,34 +39,71 @@ function databaseUrlForSchema(baseUrl: string, schema: string): string {
   return parsed.toString();
 }
 
-// Every seeded piece of text carries this token, so one sweep of the seven
-// tables proves nothing survived. Never a realistic id or address.
+// Every seeded piece of text that must go carries this token, so one sweep of
+// the seven tables proves nothing survived. Never a realistic id or address.
 const TOKEN = 'fixture-leak-9a7b';
 const HEX64 = 'a'.repeat(64);
 const UNREACHABLE = 'Stripe unreachable after 3 attempts';
+
+/**
+ * Every message mailSendService and the outbox can throw inside the fulfilment
+ * savepoints, in the shape the catches used to store, and the code each keeps.
+ */
+const MAPPED: Array<{ key: string; code: string; message: string }> = [
+  { key: 'notFound', code: 'DRAFT_NOT_FOUND', message: `Draft not found: draft_${TOKEN}` },
+  { key: 'expired', code: 'DRAFT_EXPIRED', message: `Draft expired: draft_${TOKEN}` },
+  { key: 'cancelled', code: 'DRAFT_CANCELLED', message: `Draft was cancelled: draft_${TOKEN}` },
+  { key: 'notOwned', code: 'DRAFT_NOT_OWNED', message: `Draft draft_${TOKEN} does not belong to this user` },
+  { key: 'wrongType', code: 'DRAFT_WRONG_MAIL_TYPE', message: `Draft draft_${TOKEN} is a postcard, not a letter` },
+  { key: 'noMail', code: 'DRAFT_INCOMPLETE', message: `Draft draft_${TOKEN} has no linked mail item` },
+  { key: 'missingMail', code: 'DRAFT_INCOMPLETE', message: `Draft draft_${TOKEN} links to missing mail` },
+  { key: 'fundingConflict', code: 'DRAFT_FUNDING_CONFLICT', message: `Draft draft_${TOKEN} was already consumed by different funding` },
+  { key: 'invalidState', code: 'DRAFT_INVALID_STATE', message: `Draft draft_${TOKEN} is held` },
+  { key: 'orderMissing', code: 'JIT_ORDER_NOT_FOUND', message: `Order not found: order_${TOKEN}` },
+  { key: 'orderInvalid', code: 'JIT_ORDER_INVALID', message: `Order order_${TOKEN} is not a JIT order` },
+  { key: 'orderNotOwned', code: 'JIT_ORDER_NOT_OWNED', message: 'JIT order ownership or draft binding does not match' },
+  { key: 'orderNotPaid', code: 'JIT_ORDER_NOT_PAID', message: `Order order_${TOKEN} is checkout_pending` },
+  { key: 'letterMissing', code: 'LETTER_NOT_FOUND', message: `Letter not found for outbox job: ${TOKEN}` }
+];
+const REWRITE_CODES = ['JIT_FULFILLMENT_REJECTED', 'RECOVERY_FAILED', 'REFUND_REQUEST_FAILED', 'PROVIDER_SUBMISSION_FAILED'];
 
 describePostgres('migration 032 takes error text and reasons out of the operator columns', () => {
   let adminPool: pg.Pool;
   let owner: pg.Pool;
   let schema: string;
   const userId = `google-oauth2|${randomUUID().replace(/-/g, '')}`;
+  const mappedOrders: Record<string, string> = {};
   const orders = {
-    draftExpired: `order_${randomUUID()}`,
     sqlMessage: `order_${randomUUID()}`,
     refundFallback: `order_${randomUUID()}`,
-    letterMissing: `order_${randomUUID()}`,
-    notOwned: `order_${randomUUID()}`,
     providerForm: `order_${randomUUID()}`,
     alreadyClass: `order_${randomUUID()}`,
     sweepSentence: `order_${randomUUID()}`,
     otherCode: `order_${randomUUID()}`
   };
-  const jobs = { oldText: randomUUID(), providerForm: randomUUID(), retryable: randomUUID() };
-  const letters = { oldText: randomUUID(), providerForm: randomUUID(), retryable: randomUUID() };
-  const packRefunds = { text: randomUUID(), unreachable: randomUUID(), enumValue: randomUUID() };
-  let ledger: { text: string; unreachable: string } = { text: '', unreachable: '' };
+  const jobs = {
+    oldText: randomUUID(),
+    providerForm: randomUUID(),
+    retryableClass: randomUUID(),
+    pendingText: randomUUID(),
+    failedBeforeDispatch: randomUUID(),
+    failedClass: randomUUID()
+  };
+  const packRefunds = { text: randomUUID(), unreachable: randomUUID(), enumValue: randomUUID(), revokedText: randomUUID() };
+  const ledger: Record<string, string> = {};
+  // Token bookkeeping: how many seeded rows carry the token before the
+  // backfill, and how many controls are expected to keep it afterwards.
+  let tokensSeeded = 0;
+  let tokensKept = 0;
+  function tally(text: string | null, survives: boolean): void {
+    if (text?.includes(TOKEN)) {
+      tokensSeeded += 1;
+      if (survives) tokensKept += 1;
+    }
+  }
 
-  async function seedOrder(orderId: string, code: string, lastError: string): Promise<void> {
+  async function seedOrder(orderId: string, code: string, lastError: string, survives = false): Promise<void> {
+    tally(lastError, survives);
     await owner.query(
       `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, stripe_payment_intent_id, status,
          order_type, product_code, idempotency_key, last_error_code, last_error, refund_pending_at)
@@ -73,7 +112,8 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     );
   }
 
-  async function seedEvent(orderId: string, eventType: string, metadata: Record<string, unknown>): Promise<void> {
+  async function seedEvent(orderId: string, eventType: string, metadata: Record<string, unknown>, survives = false): Promise<void> {
+    tally(JSON.stringify(metadata), survives);
     await owner.query(
       `INSERT INTO commerce_order_events (order_id, event_type, from_status, to_status, metadata)
        VALUES ($1, $2, 'paid', 'refund_pending', $3::jsonb)`,
@@ -81,7 +121,14 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     );
   }
 
-  async function seedJob(jobId: string, letterId: string, status: string, outcome: string, text: string): Promise<void> {
+  /**
+   * completed_at is its own parameter: binding the status parameter both to
+   * the varchar column and to a comparison is the varchar-parameter defect
+   * this repo has hit before (review round 1).
+   */
+  async function seedJob(jobId: string, status: string, outcome: string, text: string, survives = false): Promise<void> {
+    tally(text, survives);
+    const letterId = randomUUID();
     await owner.query(
       `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type)
        VALUES ($1, $2, '{"body":"private words"}'::jsonb, '{"name":"Private Person"}'::jsonb, 2, $3, 'letter')`,
@@ -90,23 +137,29 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     await owner.query(
       `INSERT INTO letter_jobs (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
          next_attempt_at, completed_at, provider_outcome, last_error, error_message)
-       VALUES ($1, $2, $3, 3, 3, NOW(), $1, NOW(), CASE WHEN $3 = 'failed' THEN NOW() END, $4, $5, $5)`,
-      [jobId, letterId, status, outcome, text]
+       VALUES ($1, $2, $3, 3, 3, NOW(), $1, NOW(), $4, $5, $6, $6)`,
+      [jobId, letterId, status, status === 'failed' ? new Date() : null, outcome, text]
     );
   }
 
-  async function seedPackRefund(packRefundId: string, orderId: string, failureReason: string): Promise<void> {
+  async function seedPackRefund(packRefundId: string, orderId: string, status: 'failed' | 'letters_revoked', failureReason: string, survives = false): Promise<void> {
+    tally(failureReason, survives);
     await owner.query(
       `INSERT INTO commerce_pack_refunds (pack_refund_id, order_id, user_id, environment, letters, credits, amount_cents,
          currency, status, stripe_payment_intent_id, stripe_idempotency_key, stripe_attempts, last_error_code,
          failure_reason, reason_code, actor_subject_hash, idempotency_key_hash, failed_at)
-       VALUES ($1, $2, $3, 'development', 1, 2, 500, 'usd', 'failed', $4, $5, 1, 'charge_already_refunded', $6,
-         'customer_request', $7, $7, NOW())`,
-      [packRefundId, orderId, userId, `pi_${randomUUID().replace(/-/g, '').slice(0, 20)}`, `key_${packRefundId}`, failureReason, HEX64]
+       VALUES ($1, $2, $3, 'development', 1, 2, 500, 'usd', $4, $5, $6, 1, $7, $8, 'customer_request', $9, $9, $10)`,
+      [
+        packRefundId, orderId, userId, status,
+        `pi_${randomUUID().replace(/-/g, '').slice(0, 20)}`, `key_${packRefundId}`,
+        status === 'failed' ? 'charge_already_refunded' : null, failureReason, HEX64,
+        status === 'failed' ? new Date() : null
+      ]
     );
   }
 
-  async function seedAlert(orderId: string, packRefundId: string, failureReason: string): Promise<void> {
+  async function seedAlert(orderId: string, packRefundId: string, failureReason: string, survives = false): Promise<void> {
+    tally(failureReason, survives);
     await owner.query(
       `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
        VALUES ($1, 'pack_refund_failed', 'critical', $2::jsonb)`,
@@ -114,18 +167,20 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     );
   }
 
-  async function seedLedger(orderId: string, packRefundId: string, failureReason: string): Promise<string> {
+  async function seedLedger(key: string, sourceType: string, reason: string, failureReason: string, survives = false): Promise<void> {
+    tally(failureReason, survives);
     const result = await owner.query<{ ledger_id: string }>(
       `INSERT INTO credit_ledger (user_id, initial_amount, remaining_amount, source_type, source_reference_id, source_metadata,
          expiration_policy, status, description)
-       VALUES ($1, 2, 2, 'adjustment', $2, $3::jsonb, 'never', 'active', 'Restored after a failed proportional refund')
+       VALUES ($1, 2, 2, $2::credit_source_type, $3, $4::jsonb, 'never', 'active', 'Restored after a failed proportional refund')
        RETURNING ledger_id`,
-      [userId, orderId, JSON.stringify({ reason: 'partial_refund_failed', order_id: orderId, pack_refund_id: packRefundId, compensates_ledger_id: randomUUID(), failure_reason: failureReason })]
+      [userId, sourceType, `ref_${key}`, JSON.stringify({ reason, order_id: orders.refundFallback, pack_refund_id: packRefunds.text, compensates_ledger_id: randomUUID(), failure_reason: failureReason })]
     );
-    return result.rows[0].ledger_id;
+    ledger[key] = result.rows[0].ledger_id;
   }
 
-  async function seedTask(taskName: string, lastStatus: string, lastError: string | null): Promise<void> {
+  async function seedTask(taskName: string, lastStatus: string, lastError: string | null, survives = false): Promise<void> {
+    tally(lastError, survives);
     await owner.query(
       `INSERT INTO maintenance_tasks (task_name, last_status, last_error) VALUES ($1, $2, $3)`,
       [taskName, lastStatus, lastError]
@@ -146,48 +201,57 @@ describePostgres('migration 032 takes error text and reasons out of the operator
       [userId, `${randomUUID()}@example.test`]
     );
 
-    // orders: the old prose under each code, and the shapes that must survive.
-    await seedOrder(orders.draftExpired, 'JIT_FULFILLMENT_REJECTED', `Draft expired: draft_${TOKEN}`);
+    // orders and events: one row per mapped shape, spread over the four codes,
+    // and the same shape on a jit.fulfillment_rejected event.
+    for (const [i, shape] of MAPPED.entries()) {
+      const orderId = `order_${randomUUID()}`;
+      mappedOrders[shape.key] = orderId;
+      await seedOrder(orderId, REWRITE_CODES[i % REWRITE_CODES.length], shape.message);
+      await seedEvent(orderId, 'jit.fulfillment_rejected', { error: shape.message });
+    }
+    // prose that names no check, and the shapes that must survive
     await seedOrder(orders.sqlMessage, 'RECOVERY_FAILED', `duplicate key value violates unique constraint "${TOKEN}"`);
     await seedOrder(orders.refundFallback, 'REFUND_REQUEST_FAILED', 'Refund request failed');
-    await seedOrder(orders.letterMissing, 'PROVIDER_SUBMISSION_FAILED', `Letter not found for outbox job: ${TOKEN}`);
-    await seedOrder(orders.notOwned, 'JIT_FULFILLMENT_REJECTED', `Draft draft_${TOKEN} does not belong to this user`);
-    await seedOrder(orders.providerForm, 'PROVIDER_SUBMISSION_FAILED', 'provider_rejected http_400');
-    await seedOrder(orders.alreadyClass, 'JIT_FULFILLMENT_REJECTED', 'DRAFT_NOT_FOUND');
-    await seedOrder(orders.sweepSentence, 'REFUND_REQUEST_FAILED', 'Pre-provider fulfillment failure');
-    await seedOrder(orders.otherCode, 'PAYMENT_AMOUNT_MISMATCH', `paid 1499 ${TOKEN}`);
-
-    // order events
-    await seedEvent(orders.draftExpired, 'jit.fulfillment_rejected', { error: `Draft expired: draft_${TOKEN}` });
+    await seedOrder(orders.providerForm, 'PROVIDER_SUBMISSION_FAILED', 'provider_rejected http_400', true);
+    await seedOrder(orders.alreadyClass, 'JIT_FULFILLMENT_REJECTED', 'DRAFT_NOT_FOUND', true);
+    await seedOrder(orders.sweepSentence, 'REFUND_REQUEST_FAILED', 'Pre-provider fulfillment failure', true);
+    await seedOrder(orders.otherCode, 'PAYMENT_AMOUNT_MISMATCH', `paid 1499 ${TOKEN}`, true);
     await seedEvent(orders.sqlMessage, 'jit.fulfillment_rejected', { error: `relation "${TOKEN}" does not exist` });
-    await seedEvent(orders.alreadyClass, 'jit.fulfillment_rejected', { errorClass: 'DRAFT_NOT_FOUND' });
-    await seedEvent(orders.draftExpired, 'refund.requested', { reason: `Draft expired: draft_${TOKEN}`, refundId: 're_fixture' });
+    await seedEvent(orders.alreadyClass, 'jit.fulfillment_rejected', { errorClass: 'DRAFT_NOT_FOUND' }, true);
+    await seedEvent(orders.refundFallback, 'refund.requested', { reason: `Draft expired: draft_${TOKEN}`, refundId: 're_fixture' });
     await seedEvent(orders.otherCode, 'operator.quarantine_released', { reason: `support ticket ${TOKEN}`, clearedCode: 'PAYMENT_AMOUNT_MISMATCH' });
-    await seedEvent(orders.providerForm, 'provider.terminal_failure', { errorClass: 'provider_rejected http_400' });
+    await seedEvent(orders.providerForm, 'provider.terminal_failure', { errorClass: 'provider_rejected http_400' }, true);
 
-    // outbox rows
-    await seedJob(jobs.oldText, letters.oldText, 'failed', 'definite_failure', `Address validation failed for ${TOKEN} Lane`);
-    await seedJob(jobs.providerForm, letters.providerForm, 'failed', 'definite_failure', 'provider_rejected http_422');
-    await seedJob(jobs.retryable, letters.retryable, 'pending', 'not_dispatched', 'ETIMEDOUT');
+    // outbox rows: the one shape that is rewritten, and a control per term
+    // of the predicate (status, outcome, the provider form, the whitespace test).
+    await seedJob(jobs.oldText, 'failed', 'definite_failure', `Address validation failed for ${TOKEN} Lane`);
+    await seedJob(jobs.providerForm, 'failed', 'definite_failure', 'provider_rejected http_422', true);
+    await seedJob(jobs.failedClass, 'failed', 'definite_failure', 'ETIMEDOUT', true);
+    await seedJob(jobs.failedBeforeDispatch, 'failed', 'not_dispatched', `pre-dispatch ${TOKEN} failure`, true);
+    await seedJob(jobs.pendingText, 'pending', 'not_dispatched', `retry after ${TOKEN}`, true);
+    await seedJob(jobs.retryableClass, 'pending', 'not_dispatched', 'ETIMEDOUT', true);
 
     // pack refunds, their alerts and compensation lots
-    await seedPackRefund(packRefunds.text, orders.refundFallback, `Charge ch_${TOKEN} has already been refunded`);
-    await seedPackRefund(packRefunds.unreachable, orders.sqlMessage, UNREACHABLE);
-    await seedPackRefund(packRefunds.enumValue, orders.letterMissing, 'expired_or_canceled_card');
+    await seedPackRefund(packRefunds.text, orders.refundFallback, 'failed', `Charge ch_${TOKEN} has already been refunded`);
+    await seedPackRefund(packRefunds.unreachable, orders.sqlMessage, 'failed', UNREACHABLE, true);
+    await seedPackRefund(packRefunds.enumValue, orders.providerForm, 'failed', 'expired_or_canceled_card', true);
+    await seedPackRefund(packRefunds.revokedText, orders.alreadyClass, 'letters_revoked', `Charge ch_${TOKEN} still pending`, true);
     await seedAlert(orders.refundFallback, packRefunds.text, `Charge ch_${TOKEN} has already been refunded`);
-    await seedAlert(orders.sqlMessage, packRefunds.unreachable, UNREACHABLE);
-    await seedAlert(orders.letterMissing, packRefunds.enumValue, 'expired_or_canceled_card');
-    ledger = {
-      text: await seedLedger(orders.refundFallback, packRefunds.text, `Charge ch_${TOKEN} has already been refunded`),
-      unreachable: await seedLedger(orders.sqlMessage, packRefunds.unreachable, UNREACHABLE)
-    };
+    await seedAlert(orders.sqlMessage, packRefunds.unreachable, UNREACHABLE, true);
+    await seedAlert(orders.providerForm, packRefunds.enumValue, 'expired_or_canceled_card', true);
+    await seedLedger('text', 'adjustment', 'partial_refund_failed', `Charge ch_${TOKEN} has already been refunded`);
+    await seedLedger('unreachable', 'adjustment', 'partial_refund_failed', UNREACHABLE, true);
+    await seedLedger('operator', 'adjustment', 'operator_adjustment', `note ${TOKEN} kept`, true);
+    await seedLedger('promo', 'promo', 'partial_refund_failed', `Charge ch_${TOKEN} refused`, true);
 
     // maintenance tasks
     await seedTask('provider-status-sync', 'failed', `connect ETIMEDOUT ${TOKEN}:5432`);
-    await seedTask('recent-uploads-sweep', 'failed', 'recent uploads sweep failed: ETIMEDOUT');
-    await seedTask('content-retention-sweep', 'failed', 'retention sweeps failed: database_error');
-    await seedTask('feature-requests-sweep', 'failed', 'feature requests sweep failed: ECONNRESET');
-    await seedTask('daily-credit-and-draft-cleanup', 'completed', null);
+    await seedTask('recent-uploads-sweep', 'failed', 'recent uploads sweep failed: ETIMEDOUT', true);
+    await seedTask('content-retention-sweep', 'failed', 'retention sweeps failed: database_error', true);
+    await seedTask('content-retention-report', 'failed', 'retention preview failed: database_error', true);
+    await seedTask('feature-requests-sweep', 'failed', 'feature requests sweep failed: ECONNRESET', true);
+    await seedTask('daily-credit-and-draft-cleanup', 'completed', null, true);
+    await seedTask('image-reservation-recovery', 'completed', `stale ${TOKEN} text`, true);
   }, 180_000);
 
   afterAll(async () => {
@@ -204,8 +268,10 @@ describePostgres('migration 032 takes error text and reasons out of the operator
       [userId]
     );
     const events = await owner.query<{ order_id: string; event_type: string; metadata: Record<string, unknown> }>(
-      `SELECT order_id, event_type, metadata FROM commerce_order_events WHERE order_id = ANY($1) ORDER BY order_id, event_type`,
-      [Object.values(orders)]
+      `SELECT order_id, event_type, metadata FROM commerce_order_events
+        WHERE order_id IN (SELECT order_id FROM orders WHERE user_id = $1)
+        ORDER BY order_id, event_type`,
+      [userId]
     );
     const jobRows = await owner.query<{ job_id: string; last_error: string | null; error_message: string | null }>(
       `SELECT job_id, last_error, error_message FROM letter_jobs WHERE job_id = ANY($1) ORDER BY job_id`,
@@ -214,7 +280,7 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     const alerts = await owner.query<{ details: Record<string, unknown> }>(
       `SELECT details FROM commerce_operational_alerts WHERE alert_type = 'pack_refund_failed' ORDER BY details->>'packRefundId'`
     );
-    const refunds = await owner.query<{ pack_refund_id: string; failure_reason: string | null; last_error_code: string }>(
+    const refunds = await owner.query<{ pack_refund_id: string; failure_reason: string | null; last_error_code: string | null }>(
       `SELECT pack_refund_id, failure_reason, last_error_code FROM commerce_pack_refunds WHERE pack_refund_id = ANY($1) ORDER BY pack_refund_id`,
       [Object.values(packRefunds)]
     );
@@ -251,21 +317,25 @@ describePostgres('migration 032 takes error text and reasons out of the operator
 
   it('rewrites every old shape to a class, leaves classified rows alone, and is idempotent', async () => {
     const sql = readFileSync(path.join(repositoryMigrations, '032_error_text_minimisation.sql'), 'utf8');
-    // Nine seeded pieces of text carry the token before the backfill, and the
-    // rows that must survive do not.
-    expect(await leakCount()).toBe(9);
+    // Every seeded row that carries the token is counted before the backfill;
+    // only the controls that must keep their text remain afterwards.
+    expect(tokensSeeded).toBeGreaterThan(tokensKept);
+    expect(await leakCount()).toBe(tokensSeeded);
 
     // The migration already ran once during migrate(); the seeded rows arrived
     // after it, so this is the backfill as production will experience it.
     await owner.query(sql);
     const first = await readBack();
 
-    // 1. orders: prose becomes the check's code or the migration label; the
-    //    provider form, an existing class, the sweep's sentence and a row under
-    //    another code are untouched.
-    expect(first.byOrder[orders.draftExpired].last_error).toBe('DRAFT_EXPIRED');
-    expect(first.byOrder[orders.notOwned].last_error).toBe('DRAFT_NOT_OWNED');
-    expect(first.byOrder[orders.letterMissing].last_error).toBe('LETTER_NOT_FOUND');
+    // 1 and 2. every mapped shape keeps its code on the order and on the event
+    const event = (orderId: string, type: string) =>
+      first.events.find((row) => row.order_id === orderId && row.event_type === type)?.metadata;
+    for (const shape of MAPPED) {
+      expect(first.byOrder[mappedOrders[shape.key]].last_error, shape.key).toBe(shape.code);
+      expect(event(mappedOrders[shape.key], 'jit.fulfillment_rejected'), shape.key).toEqual({ errorClass: shape.code });
+    }
+    // prose that names no check becomes the label; the provider form, an
+    // existing class, the sweep's sentence and a row under another code stay
     expect(first.byOrder[orders.sqlMessage].last_error).toBe('error_text_removed');
     expect(first.byOrder[orders.refundFallback].last_error).toBe('error_text_removed');
     expect(first.byOrder[orders.providerForm].last_error).toBe('provider_rejected http_400');
@@ -273,23 +343,25 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     expect(first.byOrder[orders.sweepSentence].last_error).toBe('Pre-provider fulfillment failure');
     expect(first.byOrder[orders.otherCode].last_error).toBe(`paid 1499 ${TOKEN}`);
     for (const row of Object.values(first.byOrder)) expect(row.last_error_code).not.toBeNull();
-
-    // 2, 3, 4. events
-    const event = (orderId: string, type: string) =>
-      first.events.find((row) => row.order_id === orderId && row.event_type === type)?.metadata;
-    expect(event(orders.draftExpired, 'jit.fulfillment_rejected')).toEqual({ errorClass: 'DRAFT_EXPIRED' });
     expect(event(orders.sqlMessage, 'jit.fulfillment_rejected')).toEqual({ errorClass: 'error_text_removed' });
     expect(event(orders.alreadyClass, 'jit.fulfillment_rejected')).toEqual({ errorClass: 'DRAFT_NOT_FOUND' });
-    expect(event(orders.draftExpired, 'refund.requested')).toEqual({ refundId: 're_fixture' });
+
+    // 3 and 4. reasons go, the other keys stay
+    expect(event(orders.refundFallback, 'refund.requested')).toEqual({ refundId: 're_fixture' });
     expect(event(orders.otherCode, 'operator.quarantine_released')).toEqual({ clearedCode: 'PAYMENT_AMOUNT_MISMATCH' });
     expect(event(orders.providerForm, 'provider.terminal_failure')).toEqual({ errorClass: 'provider_rejected http_400' });
 
-    // 5. outbox: only the failed, definite, unclassified pair is rewritten.
-    expect(first.byJob[jobs.oldText]).toEqual({ job_id: jobs.oldText, last_error: 'error_text_removed', error_message: 'error_text_removed' });
-    expect(first.byJob[jobs.providerForm]).toEqual({ job_id: jobs.providerForm, last_error: 'provider_rejected http_422', error_message: 'provider_rejected http_422' });
-    expect(first.byJob[jobs.retryable]).toEqual({ job_id: jobs.retryable, last_error: 'ETIMEDOUT', error_message: 'ETIMEDOUT' });
+    // 5. outbox: only the failed, definite, unclassified pair is rewritten
+    const jobPair = (jobId: string, value: string) => ({ job_id: jobId, last_error: value, error_message: value });
+    expect(first.byJob[jobs.oldText]).toEqual(jobPair(jobs.oldText, 'error_text_removed'));
+    expect(first.byJob[jobs.providerForm]).toEqual(jobPair(jobs.providerForm, 'provider_rejected http_422'));
+    expect(first.byJob[jobs.failedClass]).toEqual(jobPair(jobs.failedClass, 'ETIMEDOUT'));
+    expect(first.byJob[jobs.failedBeforeDispatch]).toEqual(jobPair(jobs.failedBeforeDispatch, `pre-dispatch ${TOKEN} failure`));
+    expect(first.byJob[jobs.pendingText]).toEqual(jobPair(jobs.pendingText, `retry after ${TOKEN}`));
+    expect(first.byJob[jobs.retryableClass]).toEqual(jobPair(jobs.retryableClass, 'ETIMEDOUT'));
 
-    // 6, 7, 8. pack-refund text goes; the enum value and the template stay.
+    // 6, 7 and 8. pack-refund text goes from a failed refund's three places;
+    // the enum value, the template, a revoked refund and other lots stay
     const alertFor = (packRefundId: string) => first.alerts.find((row) => row.details.packRefundId === packRefundId)?.details;
     expect(alertFor(packRefunds.text)).toEqual({ packRefundId: packRefunds.text, lastErrorCode: 'charge_already_refunded', creditsRestored: 2 });
     expect(alertFor(packRefunds.unreachable)).toMatchObject({ failureReason: UNREACHABLE });
@@ -298,23 +370,28 @@ describePostgres('migration 032 takes error text and reasons out of the operator
     expect(first.byRefund[packRefunds.text].last_error_code).toBe('charge_already_refunded');
     expect(first.byRefund[packRefunds.unreachable].failure_reason).toBe(UNREACHABLE);
     expect(first.byRefund[packRefunds.enumValue].failure_reason).toBe('expired_or_canceled_card');
+    expect(first.byRefund[packRefunds.revokedText].failure_reason).toBe(`Charge ch_${TOKEN} still pending`);
     expect(first.byLot[ledger.text].source_metadata).not.toHaveProperty('failure_reason');
     expect(first.byLot[ledger.text].source_metadata).toMatchObject({ reason: 'partial_refund_failed', pack_refund_id: packRefunds.text });
     expect(first.byLot[ledger.unreachable].source_metadata).toMatchObject({ failure_reason: UNREACHABLE });
+    expect(first.byLot[ledger.operator].source_metadata).toMatchObject({ failure_reason: `note ${TOKEN} kept` });
+    expect(first.byLot[ledger.promo].source_metadata).toMatchObject({ failure_reason: `Charge ch_${TOKEN} refused` });
 
     // 9. maintenance tasks: the driver message goes; the runner's wrapped
-    //    prefixes, a completed task and its NULL stay.
+    // prefixes, a completed task's NULL and a completed task's text stay
     expect(first.byTask['provider-status-sync'].last_error).toBe('error_text_removed');
     expect(first.byTask['recent-uploads-sweep'].last_error).toBe('recent uploads sweep failed: ETIMEDOUT');
     expect(first.byTask['content-retention-sweep'].last_error).toBe('retention sweeps failed: database_error');
+    expect(first.byTask['content-retention-report'].last_error).toBe('retention preview failed: database_error');
     expect(first.byTask['feature-requests-sweep'].last_error).toBe('feature requests sweep failed: ECONNRESET');
     expect(first.byTask['daily-credit-and-draft-cleanup'].last_error).toBeNull();
+    expect(first.byTask['image-reservation-recovery'].last_error).toBe(`stale ${TOKEN} text`);
 
-    // Nothing carrying the token survives anywhere, except the row under a
-    // code the migration does not cover.
-    expect(await leakCount()).toBe(1);
+    // Nothing carrying the token survives, except the controls that must.
+    expect(await leakCount()).toBe(tokensKept);
 
     await owner.query(sql);
     expect(await readBack()).toEqual(first);
+    expect(await leakCount()).toBe(tokensKept);
   });
 });

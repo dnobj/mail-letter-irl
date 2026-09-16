@@ -17,17 +17,28 @@
 -- idempotent: a rewritten value has no whitespace, or no longer has the key,
 -- and so no longer matches.
 
--- 1. orders: prose under the codes that carried it. A draft or outbox check
---    keeps its code, which is what the live path writes now. Rows already
---    holding a class (no whitespace), the 031 provider form, or the sweep's
---    fixed sentence are left alone.
+-- 1. orders: prose under the codes that carried it. Every draft and JIT-order
+--    check that mailSendService can throw inside the fulfilment savepoints, and
+--    the outbox's missing-letter check, keeps its code, which is what the live
+--    path writes now; anything else becomes the label. Rows already holding a
+--    class (no whitespace), the 031 provider form and the sweep's fixed sentence
+--    are left alone. The specific shapes come before the generic
+--    "Draft <id> is <status>" and "Order <id> is <status>" ones.
 UPDATE orders
    SET last_error = CASE
-         WHEN last_error ~ '^Draft not found: '                         THEN 'DRAFT_NOT_FOUND'
-         WHEN last_error ~ '^Draft expired: '                           THEN 'DRAFT_EXPIRED'
-         WHEN last_error ~ '^Draft was cancelled: '                     THEN 'DRAFT_CANCELLED'
-         WHEN last_error ~ '^Draft \S+ does not belong to (this )?user' THEN 'DRAFT_NOT_OWNED'
-         WHEN last_error ~ '^Letter not found for outbox job: '         THEN 'LETTER_NOT_FOUND'
+         WHEN last_error ~ '^Draft not found: '                                    THEN 'DRAFT_NOT_FOUND'
+         WHEN last_error ~ '^Draft expired: '                                      THEN 'DRAFT_EXPIRED'
+         WHEN last_error ~ '^Draft was cancelled: '                                THEN 'DRAFT_CANCELLED'
+         WHEN last_error ~ '^Draft \S+ does not belong to (this )?user'            THEN 'DRAFT_NOT_OWNED'
+         WHEN last_error ~ '^Draft \S+ is a \S+, not a \S+$'                       THEN 'DRAFT_WRONG_MAIL_TYPE'
+         WHEN last_error ~ '^Draft \S+ (has no linked mail item|links to missing mail)$' THEN 'DRAFT_INCOMPLETE'
+         WHEN last_error ~ '^Draft \S+ was already consumed by different funding$' THEN 'DRAFT_FUNDING_CONFLICT'
+         WHEN last_error ~ '^Draft \S+ is \S+$'                                    THEN 'DRAFT_INVALID_STATE'
+         WHEN last_error ~ '^Order not found: '                                    THEN 'JIT_ORDER_NOT_FOUND'
+         WHEN last_error ~ '^Order \S+ is not a JIT order$'                        THEN 'JIT_ORDER_INVALID'
+         WHEN last_error = 'JIT order ownership or draft binding does not match'   THEN 'JIT_ORDER_NOT_OWNED'
+         WHEN last_error ~ '^Order \S+ is \S+$'                                    THEN 'JIT_ORDER_NOT_PAID'
+         WHEN last_error ~ '^Letter not found for outbox job: '                    THEN 'LETTER_NOT_FOUND'
          ELSE 'error_text_removed' END,
        updated_at = NOW()
  WHERE last_error_code IN ('JIT_FULFILLMENT_REJECTED', 'RECOVERY_FAILED',
@@ -36,16 +47,25 @@ UPDATE orders
    AND last_error !~ '^provider_rejected'
    AND last_error <> 'Pre-provider fulfillment failure';
 
--- 2. jit.fulfillment_rejected: the same prose under metadata->'error'. The
---    event now carries errorClass, as provider.terminal_failure has since 031.
+-- 2. jit.fulfillment_rejected: the same prose under metadata->'error', mapped
+--    the same way. The event now carries errorClass, as provider.terminal_failure
+--    has since 031.
 UPDATE commerce_order_events
    SET metadata = (metadata - 'error')
                   || jsonb_build_object('errorClass', CASE
-                       WHEN metadata->>'error' ~ '^Draft not found: '                         THEN 'DRAFT_NOT_FOUND'
-                       WHEN metadata->>'error' ~ '^Draft expired: '                           THEN 'DRAFT_EXPIRED'
-                       WHEN metadata->>'error' ~ '^Draft was cancelled: '                     THEN 'DRAFT_CANCELLED'
-                       WHEN metadata->>'error' ~ '^Draft \S+ does not belong to (this )?user' THEN 'DRAFT_NOT_OWNED'
-                       WHEN metadata->>'error' ~ '^Letter not found for outbox job: '         THEN 'LETTER_NOT_FOUND'
+                       WHEN metadata->>'error' ~ '^Draft not found: '                                    THEN 'DRAFT_NOT_FOUND'
+                       WHEN metadata->>'error' ~ '^Draft expired: '                                      THEN 'DRAFT_EXPIRED'
+                       WHEN metadata->>'error' ~ '^Draft was cancelled: '                                THEN 'DRAFT_CANCELLED'
+                       WHEN metadata->>'error' ~ '^Draft \S+ does not belong to (this )?user'            THEN 'DRAFT_NOT_OWNED'
+                       WHEN metadata->>'error' ~ '^Draft \S+ is a \S+, not a \S+$'                       THEN 'DRAFT_WRONG_MAIL_TYPE'
+                       WHEN metadata->>'error' ~ '^Draft \S+ (has no linked mail item|links to missing mail)$' THEN 'DRAFT_INCOMPLETE'
+                       WHEN metadata->>'error' ~ '^Draft \S+ was already consumed by different funding$' THEN 'DRAFT_FUNDING_CONFLICT'
+                       WHEN metadata->>'error' ~ '^Draft \S+ is \S+$'                                    THEN 'DRAFT_INVALID_STATE'
+                       WHEN metadata->>'error' ~ '^Order not found: '                                    THEN 'JIT_ORDER_NOT_FOUND'
+                       WHEN metadata->>'error' ~ '^Order \S+ is not a JIT order$'                        THEN 'JIT_ORDER_INVALID'
+                       WHEN metadata->>'error' = 'JIT order ownership or draft binding does not match'   THEN 'JIT_ORDER_NOT_OWNED'
+                       WHEN metadata->>'error' ~ '^Order \S+ is \S+$'                                    THEN 'JIT_ORDER_NOT_PAID'
+                       WHEN metadata->>'error' ~ '^Letter not found for outbox job: '                    THEN 'LETTER_NOT_FOUND'
                        ELSE 'error_text_removed' END)
  WHERE event_type = 'jit.fulfillment_rejected'
    AND metadata ? 'error';
@@ -112,7 +132,7 @@ UPDATE maintenance_tasks
    AND last_error !~ '^(retention sweeps failed|retention preview failed|recent uploads sweep failed|feature requests sweep failed): ';
 
 COMMENT ON COLUMN orders.last_error IS
-  'An error class only: provider_rejected http_<status> for provider failures (031), the draft or outbox check code, or a diagnostic class for other failures (032). Never message text.';
+  'Under the provider, fulfilment, recovery and refund codes an error class only: provider_rejected http_<status> (031), the draft or outbox check code, a diagnostic class, or error_text_removed where 032 rewrote earlier text. The checkout and amount-mismatch codes store fixed server-authored sentences. Never provider, driver or draft message text.';
 COMMENT ON COLUMN letter_jobs.last_error IS
   'An error class and provider status only (e.g. provider_rejected http_400). Never provider or driver message text (031, 032).';
 COMMENT ON COLUMN letter_jobs.error_message IS

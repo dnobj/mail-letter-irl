@@ -189,7 +189,7 @@ max_attempts        -- Maximum retry attempts (default: 3)
 scheduled_at        -- When job should run
 started_at          -- When processing started
 completed_at        -- When job completed
-error_message       -- Error details if failed
+error_message       -- An error class if failed, never message text (migrations 031, 032)
 metadata (JSONB)    -- Job-specific data
 created_at          -- Job creation time
 ```
