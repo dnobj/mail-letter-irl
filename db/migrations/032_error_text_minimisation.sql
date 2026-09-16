@@ -88,24 +88,45 @@ UPDATE commerce_order_events
 --    definite_failure with whatever text the old worker stored, and 031
 --    rewrote only the HTTP-shaped ones. Every later definite failure is
 --    HTTP-shaped and already rewritten; held and retryable rows carry a class.
-UPDATE letter_jobs
-   SET last_error = 'error_text_removed',
-       error_message = 'error_text_removed',
-       updated_at = NOW()
- WHERE status = 'failed'
-   AND provider_outcome = 'definite_failure'
-   AND COALESCE(last_error, '') !~ '^provider_rejected'
-   AND (COALESCE(last_error, '') ~ '\s' OR COALESCE(error_message, '') ~ '\s');
+--    provider_outcome itself arrives with 023, so the statement is guarded on
+--    the column existing, the way 024 and 028 guard the alert table: the
+--    legacy-scenario integration tests deliberately stage a subset of
+--    migrations, and 032 must not fail wherever 023 has not been applied. The
+--    lookup resolves letter_jobs through search_path exactly as the UPDATE does.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_attribute
+     WHERE attrelid = to_regclass('letter_jobs')
+       AND attname = 'provider_outcome'
+       AND NOT attisdropped
+  ) THEN
+    UPDATE letter_jobs
+       SET last_error = 'error_text_removed',
+           error_message = 'error_text_removed',
+           updated_at = NOW()
+     WHERE status = 'failed'
+       AND provider_outcome = 'definite_failure'
+       AND COALESCE(last_error, '') !~ '^provider_rejected'
+       AND (COALESCE(last_error, '') ~ '\s' OR COALESCE(error_message, '') ~ '\s');
+  END IF;
+END $$;
 
 -- 6, 7, 8. Pack-refund failure text: up to 80 characters of Stripe's message
 --    in the alert, the refund row and the compensation lot's metadata. Stripe's
 --    own failure_reason enum has no whitespace, and the sweep's fixed template
---    is excluded by name.
-UPDATE commerce_operational_alerts
-   SET details = details - 'failureReason'
- WHERE alert_type = 'pack_refund_failed'
-   AND details->>'failureReason' ~ '\s'
-   AND details->>'failureReason' !~ '^Stripe unreachable after \d+ attempts$';
+--    is excluded by name. commerce_operational_alerts is created by 023, so
+--    the alert statement carries the same guard as 024 and 028.
+DO $$
+BEGIN
+  IF to_regclass('commerce_operational_alerts') IS NOT NULL THEN
+    UPDATE commerce_operational_alerts
+       SET details = details - 'failureReason'
+     WHERE alert_type = 'pack_refund_failed'
+       AND details->>'failureReason' ~ '\s'
+       AND details->>'failureReason' !~ '^Stripe unreachable after \d+ attempts$';
+  END IF;
+END $$;
 
 UPDATE commerce_pack_refunds
    SET failure_reason = NULL,
