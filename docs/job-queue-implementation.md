@@ -1,7 +1,12 @@
 # Job Queue Implementation Guide
 
-**Status:** Phase 4 - In Progress
-**Last Updated:** November 15, 2025
+**Status:** Historical - superseded by the transactional outbox
+**Last Updated:** September 16, 2026 (content from November 15, 2025)
+
+> pg-boss was removed. Confirmed sends now commit a `letter_jobs` outbox row with the order and are
+> submitted in the same request; an hourly Railway cron recovers the rest
+> ([letter-send-flow.md](letter-send-flow.md), migrations 020 and 023). `src/services/jobQueue.ts`
+> survives only as a stub that throws. Kept for the design history.
 **Technology:** pg-boss (PostgreSQL-backed job queue)
 
 ---

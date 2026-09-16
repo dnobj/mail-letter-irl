@@ -1,6 +1,16 @@
 # ChatGPT OAuth migration: Auth0 public CIMD with PKCE
 
-Status: implementation-ready  
+> **Shipped, with one correction.** CIMD is live in both tenants: the production CIMD client was
+> imported on 2026-09-05, and the website and REST API moved onto the same MCP API on 2026-09-14
+> ([auth0-setup.md](auth0-setup.md)). The plan below assumed a public client with
+> `token_endpoint_auth_method: none` and no `private_key_jwt`. That shape turned out to be
+> unachievable: ChatGPT's CIMD document declares `private_key_jwt`, and Auth0 applies the declared
+> method as given, without Enterprise. Where this plan says `none` or "public client", read the
+> corrected contract header in [auth0-tenant-configuration.md](auth0-tenant-configuration.md).
+> Open acceptance cases: CIMD-06, CIMD-07, CIMD-09 and CIMD-10 in [manual-tests.md](manual-tests.md).
+> Kept as the design record.
+
+Status: shipped (see note above)  
 Tracking issue: https://github.com/dnobj/mail-letter-irl/issues/160  
 Target branches: dev first; master only after acceptance  
 Last reviewed: 2026-07-23

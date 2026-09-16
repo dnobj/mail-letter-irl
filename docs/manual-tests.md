@@ -1189,9 +1189,9 @@ returns the first outcome; every step is in the audit log.
 
 **Status:** Not run 2026-09-08: no job was held on an ambiguous outcome.
 
-**Preconditions:** Full mode as above; a job held on an ambiguous provider outcome (the stub evidence
-flow in [deployment.md](deployment.md#ambiguous-image-reservation-operator-procedure) describes how the
-dummy provider produces one).
+**Preconditions:** Full mode as above; a job held on an ambiguous provider outcome. The decision rules are in
+[deployment.md](deployment.md#operator-recovery-through-the-admin-panel). The dummy provider cannot
+produce an ambiguous outcome (its failures are definite rejections), so this case needs a real one.
 
 **Steps:**
 
@@ -1328,8 +1328,8 @@ audit.
    verify `409 ADMIN_STALE_PREVIEW`. Preview again and execute; verify `active`.
 3. [ ] Redeem the code with a test account (`redeem_promo_code`); verify the campaign page lists the
    redemption with a masked email and that "delete" is no longer offered. End the campaign.
-4. [ ] `/images`: with an ambiguous reservation (the stub evidence flow in
-   [deployment.md](deployment.md#ambiguous-image-reservation-operator-procedure)), preview "release as
+4. [ ] `/images`: with an ambiguous reservation (decision rules in
+   [deployment.md](deployment.md#operator-recovery-through-the-admin-panel)), preview "release as
    compensation" and execute; verify the reservation is `released`, the quota is back, and `/audit` shows
    `image.resolve` alongside the domain's `image_reservation_resolve` row.
 

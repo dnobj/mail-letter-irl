@@ -1,9 +1,12 @@
 # Security, Privacy, and Policy Requirements
 
+**Last Updated:** September 16, 2026
+**Purpose:** Consent, personal data, abuse prevention, retention, and payment security rules
+
 ## Consent and Confirmation
 
 - Always display the complete letter preview and a recipient summary before mailing.
-- Require `confirm: true` in the `send_letter` payload; reject requests lacking explicit confirmation.
+- Require `confirm: true` in the `send_letter` and `send_postcard` payloads; reject requests lacking explicit confirmation. A Pay & Send payment is itself the confirmation for that one previewed item.
 
 ## Personal Data Handling
 
@@ -31,8 +34,8 @@
 
 - Letter content, sender and recipient addresses, and draft content are kept only for the
   periods published in `docs/privacy-policy.md` (90 days after sending; unsent drafts 24 hours,
-  content cleared within 7 days; uploaded image links 24 hours after the last upload; feature
-  requests 12 months). The maintenance retention sweep (`src/services/retentionService.ts`,
+  content cleared within 7 days; uploaded image links within 48 hours of the last upload, which the
+  `recent-uploads-sweep` meets by deleting them at 24 hours; feature requests 12 months). The maintenance retention sweep (`src/services/retentionService.ts`,
   migration 026) clears the content columns and quarantines what it clears in
   `redacted_content_quarantine` for a bounded restore window. Rows, status, timestamps and
   identifiers remain. The sweep runs in report mode until the enforce-path defects in #153 are
@@ -61,7 +64,7 @@
 - Dependency audits are part of the submission readiness checklist. `npm audit --omit=dev` must report zero vulnerabilities before OpenAI app submission and before any production deploy. As of 2026-09-08 it does: `sharp` was upgraded past four libvips CVEs (the one reachable advisory, since it decodes customer-supplied images), and an `overrides` block in `package.json` pins the transitive advisories under the connector SDK that the 2026-09-07 security review judged unreachable. Remove an override when the SDK release that supersedes it lands; do not let the count drift back up because the packages "are not used".
 - Capability URLs for temporary generated images and for uploaded images should remain short-lived and should not be logged in full. Prefer token suffixes, hashes, or correlation IDs in logs. The stored link to a customer's uploaded image is deleted 24 hours after their last upload (#282).
 
-# Pay & Send security invariants
+## Pay & Send security invariants
 
 - Checkout products, Price IDs, amounts, and currency are server configured;
   model and widget inputs cannot override them.
@@ -77,13 +80,13 @@
 - Terminal failures before provider acceptance enter an idempotent monetary
   refund path. They do not create general-purpose credit.
 
-## Pay & Send ACID and distributed transaction boundaries
+### Pay & Send ACID and distributed transaction boundaries
 
 PostgreSQL is the ACID boundary. Stripe and the mail/image providers are never
 called inside a database transaction. Cross-system work uses durable intent,
 stable idempotency keys, leases, transactional outbox rows, and reconciliation.
 
-### Atomicity
+#### Atomicity
 
 - Checkout creation first commits an authoritative `orders` intent. Stripe is
   then called with the order's stable idempotency key, and a second transaction
@@ -115,7 +118,7 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
   alert in one transaction. A failed alert insert rolls the claim back, so a
   Stripe retry cannot be acknowledged while its monitoring work is lost.
 
-### Consistency
+#### Consistency
 
 - Database checks prevent negative cached balances, negative or over-consumed
   ledger buckets, invalid order/funding/reservation states, non-positive grants,
@@ -130,7 +133,7 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
   failures, expirations, refunds, and provider outcomes cannot move an already
   terminal order backward.
 
-### Isolation
+#### Isolation
 
 - Draft, order, user/ledger, entitlement, reservation, and outbox candidate rows
   are locked before decisions that consume or transition them. `SKIP LOCKED`
@@ -146,7 +149,7 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
   locked with `SKIP LOCKED` and released once; stale dispatches are quarantined
   without restoring quota. Concurrent reconcilers cannot resolve the same row.
 
-### Durability and compensation
+#### Durability and compensation
 
 - Orders, webhook claims, event history, credit transactions, entitlements,
   reservations, letters, refund attempts, and outbox work are committed data;
@@ -167,7 +170,8 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
   entitlement in a locked transaction. The small crash window after durable
   dispatch marking but before network I/O is also treated as ambiguous because
   the database cannot prove whether bytes reached the provider.
-- Ambiguous outcomes are resolved only through the authenticated admin route.
+- Ambiguous outcomes are resolved only through a full-mode command in the tailnet-only admin panel
+  ([admin-panel-guide.md](admin-panel-guide.md)); the public API has no admin route.
   The request binds the reservation to its expected account, uses a durable
   idempotency key, and restricts decisions to evidence-compatible enums. The
   state/counter transition and durable operator audit row commit together;

@@ -1,5 +1,9 @@
 # User Dashboard & Stripe Payment Implementation
 
+> **Archived (December 2025).** Describes the first customer dashboard built inside this API. The
+> dashboard now lives in the `letter-irl-website` repository, and the purchase flow is described in
+> [just-in-time-purchase-plan.md](../just-in-time-purchase-plan.md). Do not build from this page.
+
 **Created:** November 19, 2025
 **Status:** Fully implemented, awaiting Stripe configuration
 **Purpose:** Web-based user dashboard for purchasing credits via Stripe Checkout

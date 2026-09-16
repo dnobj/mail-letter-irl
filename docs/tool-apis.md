@@ -1,11 +1,11 @@
 # MCP Tool API Specifications
 
-**Last Updated:** May 30, 2026  
+**Last Updated:** September 16, 2026  
 **Purpose:** Practical reference for the MCP tools exposed by Letter IRL
 
 The runtime MCP registry is the source of truth. The checked-in `manifest.json` is generated from that registry with `npm run manifest:generate`, and submission-facing tests verify that the manifest, widget list, and runtime tool registry stay aligned.
 
-Letter IRL currently exposes **19 tools**:
+Letter IRL currently exposes **22 tools** and **6 widgets**:
 
 ## Onboarding
 
@@ -18,10 +18,12 @@ Letter IRL currently exposes **19 tools**:
 - `quote_and_preview_letter_with_image`: Create a free draft preview for a letter with an enclosed image after the signature. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterPreviewCard.html@v<N>`.
 - `send_letter`: Send a letter from a prior draft. Requires `draftId` and `confirm: true`. Idempotent retries with the same draft return the existing order rather than charging twice.
 
-## Buying letters
+## Buying Letters and Pay & Send
 
 - `list_letter_packs`: List the packs available to buy, with how many letters each adds and what it costs. Read-only. Packs whose Stripe Price has not resolved are omitted rather than offered, because buying one would fail.
-- `create_pack_checkout`: Create a Stripe-hosted checkout for one pack size (`starter`, `regular`, `power`). Payment adds letters to the balance; it does not send anything, so the customer still chooses and sends afterward.
+- `create_pack_checkout`: Create a Stripe-hosted checkout for one pack size (`starter`, `regular`, `power`). Payment adds letters to the balance; it does not send anything, so the customer still chooses and sends afterward. Uses `ui://widgets/PackCheckoutCard.html@v<N>`.
+- `create_mail_checkout`: Create a Stripe-hosted Pay & Send checkout for one previewed letter or postcard draft. Paying sends that exact item; see [Pay & Send Details](#pay--send-details).
+- `get_purchase_status`: Read the status of a pack or Pay & Send purchase by `orderId`. Read-only. Has no widget of its own; `PackCheckoutCard` and the preview cards poll it through `callTool`.
 - `redeem_promo_code`: Redeem a promo code to add prepaid letters. Returns `redeemed: false` with the reason for an invalid, expired or spent code - an ordinary answer rather than an error.
 
 ## Postcards
@@ -40,7 +42,7 @@ Letter IRL currently exposes **19 tools**:
 
 ## Images
 
-- `generate_image_for_mail`: hybrid image tool for requests addressed to Letter IRL. With Letter IRL image generations remaining (pack/JIT grants plus a one-time starter allowance) it generates in-turn via the OpenAI Images API and returns an imageUrl for previews; with none left, or past the global daily ceiling, it returns a redirect card with a copy-ready prompt for free built-in generation. Never hard-fails. See docs/learnings/generate-image-removal-decision.md Addendum 3.
+- `generate_image_for_mail`: Uses `ui://widgets/ImageRoutingCard.html@v<N>`. Hybrid image tool for requests addressed to Letter IRL. With Letter IRL image generations remaining (pack/JIT grants plus a one-time starter allowance) it generates in-turn via the OpenAI Images API and returns an imageUrl for previews; with none left, or past the global daily ceiling, it returns a redirect card with a copy-ready prompt for free built-in generation. Never hard-fails. See docs/learnings/generate-image-removal-decision.md Addendum 3.
 - `upload_image`: Open the image upload widget as a fallback when direct attachment or `imageUrl` handoff does not work. Uses `ui://widgets/ImageUploadCard.html@v<N>`.
 - `confirm_uploaded_image`: Internal widget relay that confirms an uploaded image and returns the `imageUrl` plus next-step guidance.
 
@@ -48,29 +50,9 @@ Letter IRL currently exposes **19 tools**:
 
 - `submit_feature_request`: Capture unsupported formats, workflows, integrations, or product-improvement requests.
 
-## Schema Notes
+## Pay & Send Details
 
-- Every tool has a JSON input and output schema in the runtime tool definition.
-- The MCP SDK registration also passes Zod `inputSchema` and `outputSchema` shapes for runtime validation.
-- Tool responses split data intentionally:
-  - `structuredContent`: compact model-facing fields validated by the runtime output schema.
-  - `content`: short model narration.
-  - `_meta`: widget-only fields such as preview HTML and compressed letter-image previews.
-- Preview tools create database draft records, so they are write tools even though they do not send mail or charge the user.
-- Send tools require a draft and explicit confirmation. The assistant must not claim mail was sent unless the corresponding send tool succeeds.
-
-## Verification
-
-Run these after tool, schema, or widget changes:
-
-```bash
-npm run manifest:generate
-npm run test:submission
-```
-
-# Pay & Send tools
-
-## `create_mail_checkout`
+### `create_mail_checkout`
 
 Input: `{ draftId: string }`.
 
@@ -82,7 +64,7 @@ description, expiry, and current order status. Payment is authorization to mail
 the immutable draft; the model must not call `send_letter` or `send_postcard`
 after payment.
 
-## `get_purchase_status`
+### `get_purchase_status`
 
 Input: `{ orderId: string }`.
 
@@ -100,6 +82,33 @@ proportional refund), and `amountRefundedCents`. These are the numbers an
 operator reads before touching a refund in Stripe (#323). The pack message
 never says a refund will be issued; refund requests go to
 `support@letterirl.com` with the order id, and a person decides.
+
+### Preview eligibility
+
 Preview tools retain `canSendNow` for compatibility and now also return
 `sendEligibility`, containing prepaid eligibility, Pay & Send availability and
 exact price, and the configured letter-pack destination.
+
+## Schema Notes
+
+- Three files define tool schemas, and they reach different places:
+  - `src/zodSchemas.ts` holds the Zod input and output shapes that `src/mcp/registerTools.ts` passes to `mcpServer.registerTool`. The SDK turns them into the JSON Schema returned by MCP `tools/list`, which is what ChatGPT reads, and validates calls against them. **A contract change that ChatGPT must see goes here.** `src/contracts/outputConformance.ts` proves at compile time that each tool's output type matches its served output schema.
+  - `src/schemas.ts` holds the JSON schemas on each tool module's definition object. `/manifest.json` and the checked-in `manifest.json` are generated from these, not from the Zod shapes, so the two must be changed together.
+  - `src/mcp/toolSchemas.ts` holds Zod input schemas that type the registration maps and back `tests/unit/mcp/schemaConsistency.test.ts`. Nothing serves them.
+- Registration iterates the tool list in `src/server.ts` and **silently skips** any tool missing from the Zod input or output map in `registerTools.ts`.
+- Adding a tool therefore touches: `src/tools/<tool>.ts`; its export in `src/tools/index.ts`; the `tools` array in `src/server.ts` (order matters, see [learnings/openai-app-sdk-notes.md](learnings/openai-app-sdk-notes.md)); `src/zodSchemas.ts` and both maps in `src/mcp/registerTools.ts`; `src/schemas.ts`; `src/mcp/toolSchemas.ts`; then `npm run manifest:generate` and `npm run test:submission`.
+- Tool responses split data intentionally:
+  - `structuredContent`: compact model-facing fields validated by the runtime output schema.
+  - `content`: short model narration.
+  - `_meta`: widget-only fields such as preview HTML and compressed letter-image previews.
+- Preview tools create database draft records, so they are write tools even though they do not send mail or charge the user.
+- Send tools require a draft and explicit confirmation. The assistant must not claim mail was sent unless the corresponding send tool succeeds.
+
+## Verification
+
+Run these after tool, schema, or widget changes:
+
+```bash
+npm run manifest:generate
+npm run test:submission
+```

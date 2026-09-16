@@ -1,7 +1,7 @@
 # Letter IRL - Service Provider System
 
-**Last Updated:** November 18, 2025
-**Status:** ✅ Implemented with DummyProvider and PostGridProvider
+**Last Updated:** September 16, 2026
+**Status:** ✅ Implemented with DummyProvider, PostGridProvider and DIYProvider
 
 ---
 
@@ -18,26 +18,31 @@ The Service Provider System provides a flexible, pluggable architecture for send
 ## Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│         Letter Worker                   │
-│  (processes jobs from pg-boss queue)    │
-└──────────────┬──────────────────────────┘
+┌─────────────────────────────────────────────┐
+│  Outbox dispatch (letterJobService.ts)      │
+│  immediately after a send commits, and      │
+│  from the hourly maintenance run            │
+└──────────────┬──────────────────────────────┘
                │
                ▼
-┌─────────────────────────────────────────┐
-│    Provider Factory (index.ts)          │
-│  getLetterProvider()                    │
-│  - Reads LETTER_PROVIDER from env       │
-│  - Returns configured provider instance │
-└──────────────┬──────────────────────────┘
+┌─────────────────────────────────────────────┐
+│    Provider Factory (index.ts)              │
+│  - provider_routing row for the mail type,  │
+│    else LETTER_PROVIDER                     │
+│  - Returns the registered provider instance │
+└──────────────┬──────────────────────────────┘
                │
-      ┌────────┴────────┐
-      ▼                 ▼
-┌──────────┐     ┌──────────┐      ┌──────────┐
-│  Dummy   │     │   Lob    │      │PostGrid  │
-│ Provider │     │ Provider │  ... │ Provider │
-└──────────┘     └──────────┘      └──────────┘
+      ┌────────┼─────────────────┐
+      ▼        ▼                 ▼
+┌──────────┐ ┌──────────┐ ┌──────────┐
+│  Dummy   │ │ PostGrid │ │   DIY    │
+│ Provider │ │ Provider │ │ Provider │
+└──────────┘ └──────────┘ └──────────┘
 ```
+
+Production accepts only `postgrid` (`APPROVED_LIVE_PROVIDERS` in `src/config/deploymentConfig.ts`),
+and refuses a `provider_routing` row naming `dummy`. There is no pg-boss worker; see
+[letter-send-flow.md](letter-send-flow.md).
 
 ---
 
@@ -69,7 +74,10 @@ LETTER_PROVIDER_CONFIG='{"delayMs":1000,"failureRate":0.05,"costCents":100,"deli
 
 ---
 
-### 2. **Lob Provider** (Planned)
+### 2. **Lob Provider** (Evaluated, not implemented)
+
+The registration is commented out in `src/services/providers/index.ts`. The notes below are from the
+original evaluation.
 
 **Purpose:** Production letter fulfillment
 
@@ -125,7 +133,7 @@ LETTER_PROVIDER_CONFIG='{"mode":"test","verbose":true}'
 
 ---
 
-### 4. **Click2Mail Provider** (Planned - Recommended for Launch)
+### 4. **Click2Mail Provider** (Evaluated, not implemented)
 
 **Purpose:** Production fulfillment with tracking and fast production
 
@@ -159,6 +167,19 @@ LETTER_PROVIDER_CONFIG='{"mode":"test","verbose":true}'
 - But: IMb tracking included vs 200+ volume minimum
 
 See `docs/mail-provider-comparison.md` for detailed provider comparison.
+
+---
+
+### 5. **DIYProvider** ✅ Implemented
+
+**Purpose:** Manual fulfilment. The provider does no external call: it reports success, the outbox
+records `provider = 'diy'`, and a separate `letter-irl-diy` dashboard reads those letters from the
+shared database so a person can print, mail and update them
+(`src/services/providers/DIYProvider.ts`).
+
+**Configuration:** select it per mail type with a `provider_routing` row, or with `LETTER_PROVIDER=diy`.
+It is not an approved live provider, so the production boot validator refuses it as
+`LETTER_PROVIDER`.
 
 ---
 
@@ -196,7 +217,7 @@ interface LetterFulfillmentProvider {
 
 ```bash
 # Provider Selection
-LETTER_PROVIDER=dummy                    # Provider name (dummy, lob, postgrid, etc.)
+LETTER_PROVIDER=dummy                    # Provider name: dummy, postgrid or diy (production: postgrid only)
 
 # Provider API Key (for real providers)
 LETTER_PROVIDER_API_KEY=your_api_key    # Provider-specific API key
@@ -253,9 +274,9 @@ LETTER_PROVIDER_CONFIG='{"mode":"live","verbose":false}'
 
 ## Usage
 
-### In Worker (Automatic)
+### In the Outbox (Automatic)
 
-The worker automatically uses the configured provider:
+The outbox dispatch resolves the provider for each job. The sketch below shows the provider API itself:
 
 ```typescript
 import { getLetterProvider } from '../services/providers/index.js';
@@ -521,10 +542,12 @@ See `docs/mail-provider-comparison.md` for detailed comparison.
 
 - [x] Define provider interface
 - [x] Implement DummyProvider
-- [x] Integrate with worker
+- [x] Integrate with the send path (now the transactional outbox)
 - [x] Add configuration system
 - [x] **Implement PostGrid provider** ✅ **COMPLETE**
 - [ ] Add webhook support for PostGrid status updates
+- [x] Implement DIY provider
+- [x] Per-mail-type routing (`provider_routing`, migration 015)
 - [ ] Implement Lob provider
 - [ ] Add provider fallback logic
 - [ ] Add cost tracking/comparison

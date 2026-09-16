@@ -1,8 +1,27 @@
 # Out-of-Scope and Future Enhancements
 
-## Credit Purchase and Top-Up
-- Future tool: `top_up_balance` integrating with payment providers (e.g., Stripe) or identity-linked funding flows (e.g., Worldcoin/WLD).
-- Not exposed in v1 to simplify Apps SDK review and avoid payment compliance hurdles.
+**Last Updated:** September 16, 2026
+**Purpose:** Features deliberately left out, and the plans for them
+
+## Shipped Since v1
+
+- **Letter packs in the conversation:** `list_letter_packs` and `create_pack_checkout`, through
+  Stripe-hosted Checkout.
+- **Just-in-Time Pay & Send:** `create_mail_checkout` buys and sends one exact letter or postcard.
+  Design and acceptance criteria: [just-in-time-purchase-plan.md](just-in-time-purchase-plan.md);
+  tracking: [GitHub issue #69](https://github.com/dnobj/mail-letter-irl/issues/69).
+
+## In-ChatGPT Checkout (Agentic Commerce Protocol)
+- Complete purchases inside ChatGPT through ACP once OpenAI makes it available to apps like Letter
+  IRL. Today in-ChatGPT checkout is limited-access, so both purchase paths use external Stripe
+  Checkout.
+- OpenAI's app guidelines, when last checked (2026-09-13), allowed commerce only for physical goods,
+  so Pay & Send is the likelier first ACP product.
+- Plan: [acp-implementation-guide.md](acp-implementation-guide.md),
+  [acp-quickstart.md](acp-quickstart.md), [acp-stripe-integration.md](acp-stripe-integration.md).
+
+## Identity-Linked Funding
+- Identity-linked funding flows (e.g., Worldcoin/WLD) remain an idea, not a plan.
 
 ## Proof-of-Origin and Authenticity
 - Roadmap feature to embed a QR code or code snippet in printed letters for verification of print time, integrity, and optional sender verification.
@@ -16,10 +35,3 @@
 - Handling undeliverable mail, return-to-sender workflows, or mailbox services are deferred.
 - Prototype assumes undeliverable items are unmanaged at this stage.
 
-## Just-in-Time Pay & Send
-- Add a hosted checkout that purchases and sends one exact physical letter or postcard without requiring a letter pack.
-- Keep packs as the discounted prepaid option; do not expose internal credits as stand-alone digital goods.
-- Treat successful payment as explicit send authorization, then fulfill from verified Stripe webhooks through the transactional outbox.
-- Keep Letter IRL-funded image generation purchase-gated initially, with explicit entitlements and a disabled-by-default trial flag.
-- Detailed design and acceptance criteria: [Just-in-Time Purchase Implementation Plan](just-in-time-purchase-plan.md)
-- Tracking: [GitHub issue #69](https://github.com/dnobj/mail-letter-irl/issues/69)

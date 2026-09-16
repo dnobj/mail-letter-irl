@@ -1,5 +1,13 @@
 # Database Setup Guide - Neon PostgreSQL
 
+**Last Updated:** September 16, 2026
+**Purpose:** Creating a Neon project and connecting to it
+
+> The account and connection steps still apply. The table summary, next steps and timeline further
+> down are from November 2025: the schema now has 30 tables, including the `migrations` ledger, across 32 migration files
+> ([database-schema.md](database-schema.md)), and mail dispatch uses a transactional outbox, not
+> pg-boss. Development uses an independent `dev` branch that is never copied from production.
+
 ## Step 1: Create Neon Account
 
 1. Go to https://neon.tech
@@ -34,20 +42,22 @@ After project is created:
 
 ## Step 4: Add to .env File
 
-In `/mnt/c/letter-irl/.env`, add:
+In the repository's `.env`, add the **development** branch's pooled connection string (never
+production's):
 
 ```bash
-# Neon PostgreSQL Database
-DATABASE_URL=postgresql://username:password@ep-cool-name-123456.us-east-2.aws.neon.tech/neondb?sslmode=require
+# Neon PostgreSQL Database (pooled `-pooler` hostname)
+DATABASE_URL=postgresql://username:password@ep-cool-name-123456-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require
 ```
 
 Replace with your actual connection string from Step 3.
 
 ## Step 5: Install Dependencies
 
+From the repository root:
+
 ```bash
-cd /mnt/c/letter-irl
-npm install
+npm ci
 ```
 
 This will install:
@@ -198,16 +208,17 @@ created_at          -- Job creation time
 
 ### Database Branching
 
-Create a copy of your database for testing:
+Create a branch for testing migrations or features:
 
 1. In Neon Dashboard → "Branches" tab
-2. Click "New Branch"
-3. Use for testing migrations or new features
-4. Delete when done
+2. Click "New Branch" and branch from the **development** branch, never from production: a branch
+   of production copies every letter, address and customer record into a less protected place
+3. Use it for testing migrations or new features
+4. Delete it when done
 
 ### Connection Pooling
 
-Neon includes built-in connection pooling. Use the **pooled connection string** for production:
+Neon includes built-in connection pooling. Use the **pooled connection string** in every deployed environment:
 
 ```
 DATABASE_URL=postgresql://username:password@ep-cool-name-123456-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require
@@ -285,13 +296,12 @@ All database tables created successfully:
 
 Now that database is set up:
 
-1. ✅ Database connected and migrated
-2. 📝 **Build Credit API** - See `docs/credit-api-implementation.md`
-3. 📝 **Build Letter Job Queue** - See `docs/job-queue-implementation.md`
-4. 📝 **Build Admin API** - See `docs/admin-api-implementation.md`
-5. 🔌 **Integrate with ACP** - See `docs/acp-quickstart.md`
+All of the original steps are done except the Agentic Commerce Protocol integration, which is a future
+plan ([acp-quickstart.md](acp-quickstart.md)). The job queue became the transactional outbox
+([letter-send-flow.md](letter-send-flow.md)) and the admin API became the tailnet-only admin panel
+([admin-panel-guide.md](admin-panel-guide.md)).
 
-## Implementation Timeline
+## Implementation Timeline (November 2025, historical)
 
 **Week 1: Database Setup** ✅ COMPLETE
 - Neon PostgreSQL project created

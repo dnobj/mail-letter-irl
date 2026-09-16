@@ -10,33 +10,33 @@ Both repositories use the same branching strategy: `feature/*` → `dev` → `ma
 
 | Repository | Purpose | Deployed To |
 |------------|---------|-------------|
-| `letter-irl` (this repo) | MCP server / API | Railway → api.letterirl.com |
-| `letter-irl-website` | Marketing site + user dashboard | Railway → letterirl.com |
+| `letter-irl` (this repo; GitHub `dnobj/mail-letter-irl`) | MCP server / API | Railway → api.letterirl.com |
+| `letter-irl-website` (GitHub `dnobj/mail-letter-irl-website`) | Marketing site + user dashboard | Railway → letterirl.com |
 
 **letter-irl (API):**
 - MCP server for ChatGPT/AI assistants
 - REST API for dashboard
 - Stripe webhooks
-- Background workers (pg-boss)
+- Hourly maintenance cron (`npm run maintenance`): outbox recovery, status sync, retention sweeps
 
 **letter-irl-website:**
 - Next.js 16 with `@auth0/nextjs-auth0`
 - Marketing pages
 - User dashboard (credits, letters, account)
-- Located at: `/mnt/c/letter-irl-website`
+- Sibling checkout: `../letter-irl-website`
 
 ## Critical Facts
 
 **Primary Goal: OpenAI Apps SDK**
 - We are building for the **OpenAI Apps SDK** (ChatGPT apps platform)
 - MCP (Model Context Protocol) is the *implementation protocol*, not the goal
-- Apps SDK submission expected before end of 2025
+- Apps SDK submission is in preparation; see `docs/app-submission/owner-checklist.md`
 - MCP client support (Claude Desktop, etc.) is a compatible side benefit
 
 **Hosting & Infrastructure**
 - **Railway** for hosting - NOT Vercel
 - **Neon PostgreSQL** for database - NOT other databases
-- **pg-boss** for job queue - PostgreSQL-backed, NOT Redis
+- **Transactional outbox** (`letter_jobs`) plus an hourly Railway cron - NOT pg-boss (removed), NOT Redis. The API process starts no polling timers
 
 **Development vs Production Environments**
 - Two fully isolated environments exist for all services
@@ -58,10 +58,10 @@ Both repositories use the same branching strategy: `feature/*` → `dev` → `ma
 
 | Component | Technology |
 |-----------|------------|
-| Runtime | Node.js 20+ with TypeScript |
+| Runtime | Node.js 22, strict ESM TypeScript compiled with `tsc` |
 | Server | Custom HTTP (MCP SDK) |
 | Database | PostgreSQL 17 (Neon serverless) |
-| Job Queue | pg-boss |
+| Mail dispatch | Transactional outbox (`letter_jobs`) + hourly maintenance cron |
 | Auth | Auth0 OAuth 2.1 + PKCE |
 | Payments | Stripe |
 | Mail Provider | PostGrid |
@@ -75,7 +75,7 @@ When you need more detail, read these docs:
 - `docs/status.md` - Current state, architecture, progress
 - `docs/infrastructure.md` - External services configuration
 - `docs/letter-send-flow.md` - How letters are sent (drafts, credits, jobs)
-- `docs/database-schema.md` - Complete schema (13 tables)
+- `docs/database-schema.md` - Complete schema reference (SQL migrations remain authoritative)
 - `docs/user-stories.md` - Acceptance criteria and test coverage
 - `docs/standards.md` - Documentation standards (follow when updating docs)
 
@@ -92,5 +92,6 @@ Check `docs/learnings/` for debugging notes and integration quirks:
 npm run dev          # Development with watch
 npm run start        # Production mode
 npm run db:migrate   # Run migrations
+npm run verify       # Lint, build, unit and submission tests (mirrors the CI `checks` job)
 npm run admin:dev    # Admin panel against .env.admin.local (docs/admin-panel-guide.md)
 ```

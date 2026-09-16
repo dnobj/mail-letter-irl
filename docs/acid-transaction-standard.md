@@ -1,5 +1,8 @@
 # ACID Transaction Standard
 
+**Last Updated:** September 16, 2026
+**Purpose:** Required transaction, idempotency, outbox, recovery, and review rules for durable mutations
+
 ACID—**Atomicity, Consistency, Isolation, and Durability**—is the guiding principle for every Letter IRL operation that changes durable business state. This standard applies to financial balances and ledger entries, purchases and orders, drafts, letters and postcards, fulfillment jobs, refunds, promotions, image quota reservations, and administrative mutations.
 
 The goal is not merely to use a database transaction. After failures, retries, concurrent requests, and process restarts, the database must still describe one valid business outcome.
@@ -94,17 +97,21 @@ Prefer integration tests against PostgreSQL for locking, constraint, isolation, 
 ### The real-PostgreSQL suite is a required gate, not an optional extra
 
 `npm run test:run` does **not** execute `tests/integration/commerceAcid.postgres.test.ts`. That
-suite is opt-in and silently *skips* unless `LIRL_RUN_POSTGRES_INTEGRATION=true` is set, and this
-repository has no CI. A green default test run is therefore **not** evidence of any locking,
-constraint, isolation, migration, or rollback property.
+suite is opt-in and silently *skips* unless `LIRL_RUN_POSTGRES_INTEGRATION=true` is set. A green
+default test run is therefore **not** evidence of any locking, constraint, isolation, migration, or
+rollback property.
 
-Any PR that changes a financial, fulfillment, refund, entitlement, migration, or admin mutation
-must run the suite against a disposable local PostgreSQL and record the real pass count in its
-evidence. Reporting only `npm run test:run` for such a change is incomplete evidence.
+CI runs the real-PostgreSQL suites on every pull request to `dev` or `master` (the
+`postgres-integration` job in `.github/workflows/ci.yml`, against `postgres:17`), and fails if they
+skipped. That proves the suites ran; it does not prove they cover the change. Any PR that changes a
+financial, fulfillment, refund, entitlement, migration, or admin mutation must also run the suite
+locally before review, record the real pass count, and name the scenarios above that cover the
+change. Reporting only `npm run test:run` for such a change is incomplete evidence.
+`npm run test:integration:local` mirrors the CI job.
 
 ```bash
 docker run -d --name lirl-acid -e POSTGRES_PASSWORD=lirl_test_password \
-  -e POSTGRES_DB=letterirl_acid_test -p 127.0.0.1:55432:5432 postgres:16-alpine
+  -e POSTGRES_DB=letterirl_acid_test -p 127.0.0.1:55432:5432 postgres:17-alpine
 export LIRL_RUN_POSTGRES_INTEGRATION=true
 export LIRL_TEST_DATABASE_URL='postgresql://postgres:lirl_test_password@127.0.0.1:55432/letterirl_acid_test'
 npm run test:integration:postgres

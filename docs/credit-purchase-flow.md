@@ -1,8 +1,32 @@
-# Letter IRL Purchase Flow
+# Letter IRL Purchase Flow (ACP)
+
+**Last Updated:** September 16, 2026
+**Status:** Future plan (platform-gated)
+
+> **Future plan - not yet built.** The Agentic Commerce Protocol (ACP) is how Letter IRL intends to
+> sell inside ChatGPT once OpenAI makes it available to apps like this one. It is not available yet:
+> ChatGPT in-app payment collection and Instant Checkout are limited-access, so Letter IRL uses
+> external Stripe-hosted Checkout today, for letter packs (`create_pack_checkout`) and Pay & Send
+> (`create_mail_checkout`); see [just-in-time-purchase-plan.md](just-in-time-purchase-plan.md).
+> Nothing in this document exists in `src/`.
+>
+> Before building from it:
+> - Re-check it against the current ACP specification. It was written in late 2025.
+> - Re-check OpenAI's app commerce guidelines. When last checked (2026-09-13) they allowed commerce only
+>   for physical goods, not for credits or tokens. That makes Pay & Send, a single physical item, the
+>   likelier first ACP product; prepaid packs may not qualify.
+> - Adapt the code samples. They assume Express and a `src/acp/` module, but the server is plain
+>   `node:http` (`src/mcp/httpServer.ts`), and the webhook route is `/webhooks/stripe`.
+
+> **How purchasing works today:** a preview card offers **Pay & Send** (`create_mail_checkout`) or
+> **Buy a Letter Pack** (`list_letter_packs` then `create_pack_checkout`). Both open Stripe-hosted
+> Checkout outside ChatGPT, a verified webhook credits or fulfils the order, and the card polls
+> `get_purchase_status`. See [ui-widgets.md](ui-widgets.md) and
+> [just-in-time-purchase-plan.md](just-in-time-purchase-plan.md).
 
 ## Overview
 
-This document describes the complete end-to-end flow for purchasing Letter IRL letter packs through ChatGPT using the Agentic Commerce Protocol (ACP).
+This document describes the planned end-to-end flow for purchasing Letter IRL letter packs through ChatGPT using the Agentic Commerce Protocol (ACP).
 
 ## User Experience Flow
 

@@ -1,5 +1,8 @@
 # Environment Configuration Files
 
+**Last Updated:** September 16, 2026
+**Purpose:** Every `.env` file used locally, what reads it, and what must never go in one
+
 This document describes all environment configuration files used in the Letter IRL project.
 
 ## Quick Reference
@@ -9,20 +12,20 @@ This document describes all environment configuration files used in the Letter I
 | `.env` | Production config (Railway) | `npm start` |
 | `.env.dev` | Development server | `npm run dev:env` |
 | `.env.local` | Local overrides | `npm run dev:local` |
-| `.env.test` | Test database | `npm test` |
+| `.env.test` | Test settings, loaded by `tests/setup.ts` | `npm test` |
+| `.env.admin.local` | Local admin panel (development reader role only) | `npm run admin:dev` |
+| `.env.integration.local` | Local PostgreSQL URLs for the integration suites | `npm run test:integration:local` |
 
 ## File Details
 
-### `.env` - Production Configuration
+### `.env` - Local Server Configuration
 
-Main configuration file used by Railway deployment. Contains:
-- Production Neon database URL
-- Production Auth0 tenant credentials
-- Live Stripe keys
-- PostGrid API keys
-- Production CORS/host settings
+Read by `npm start` and `npm run dev` through `dotenv`. Railway does **not** use a `.env` file; each
+service's variables are set in Railway ([railway-setup.md](railway-setup.md)). Copy `.env.example`
+and point it at a development database, test-mode Stripe keys and a test or dummy mail provider.
+Never put production credentials in a workstation `.env`.
 
-**Used by:** `npm start`, Railway deployment
+**Used by:** `npm start`, `npm run dev`
 
 **Never commit:** This file contains secrets and is gitignored.
 
@@ -43,7 +46,7 @@ Each environment file has a corresponding `.example` template:
 | Template | Copy to |
 |----------|---------|
 | `.env.example` | `.env` |
-| `.env.admin.example` | Legacy tombstone; do not copy |
+| `.env.admin.example` | `.env.admin.local` |
 | `.env.dev.example` | `.env.dev` |
 | `.env.test.example` | `.env.test` |
 
@@ -53,7 +56,7 @@ Letter IRL uses [Neon PostgreSQL branching](https://neon.tech/docs/introduction/
 
 | Branch | Purpose | Used By |
 |--------|---------|---------|
-| `production` | Live user data | Railway `.env` only; no workstation admin `.env` |
+| `production` | Live user data | Railway service variables only; never a workstation file |
 | `dev` | Development/testing | `.env.dev` for the public development server |
 
 ### Do not copy production into dev
@@ -79,10 +82,12 @@ it from anonymised data rather than copying the real one.
 
 ## Common Tasks
 
-### Local admin status
+### Local admin panel
 
-There is no supported local admin browser workflow until issue #162 slices 2 and 3 land. Do not use the
-legacy page or `/api/admin` handlers. Database grant provisioning is a separate, explicit operation; see
+Copy `.env.admin.example` to `.env.admin.local`, fill in the development reader URL and a session
+secret, and run `npm run admin:dev`. The panel starts in `local-dev` mode on `http://localhost:8790`
+and refuses that mode on Railway, under `NODE_ENV=production`, and outside the development
+environment. Database grant provisioning is a separate, explicit operation; see
 [admin-panel-guide.md](admin-panel-guide.md).
 
 ---
@@ -100,5 +105,5 @@ legacy page or `/api/admin` handlers. Database grant provisioning is a separate,
 ## Related Documentation
 
 - [Infrastructure Setup](infrastructure.md) - External service configuration
-- [Admin Panel Guide](admin-panel-guide.md) - Admin dashboard features
+- [Admin Panel Guide](admin-panel-guide.md) - Operator panel setup and features
 - [Development Guide](development.md) - Local development workflow

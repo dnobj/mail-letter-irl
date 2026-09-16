@@ -1,8 +1,8 @@
 # UI Widgets
 
-**Last Updated:** August 20, 2026
+**Last Updated:** September 16, 2026
 
-Letter IRL registers four OpenAI Apps SDK widgets as MCP resources with `ui://` URIs and `text/html;profile=mcp-app`. Widget template URIs are versioned (`ui://widgets/<name>.html@v<N>` via `src/mcp/widgetUris.ts`) because the native mobile apps cache widget metadata aggressively (issue #235); bump `WIDGET_TEMPLATE_VERSION` on any widget change — a digest-pinning test enforces this — and the legacy unversioned URI stays registered as a transition alias for stale clients. Tool results keep model-facing data in `structuredContent` and send large render payloads, such as preview HTML and compressed letter-image previews, through widget-only `_meta`.
+Letter IRL registers six OpenAI Apps SDK widgets as MCP resources with `ui://` URIs and `text/html;profile=mcp-app`. Widget template URIs are versioned (`ui://widgets/<name>.html@v<N>` via `src/mcp/widgetUris.ts`) because the native mobile apps cache widget metadata aggressively (issue #235); bump `WIDGET_TEMPLATE_VERSION` on any widget change — a digest-pinning test enforces this — and the legacy unversioned URI stays registered as a transition alias for stale clients. Tool results keep model-facing data in `structuredContent` and send large render payloads, such as preview HTML and compressed letter-image previews, through widget-only `_meta`.
 
 ## Registered Widgets
 
@@ -10,6 +10,7 @@ Letter IRL registers four OpenAI Apps SDK widgets as MCP resources with `ui://` 
 - `PostcardPreviewCard`: Shows postcard front and back previews from `_meta.previewFrontHtml` and `_meta.previewBackHtml`, then can call `send_postcard` only after explicit user confirmation.
 - `ImageUploadCard`: Opens a file picker fallback for image handoff problems, uploads a photo, and calls `confirm_uploaded_image` with the resulting `imageUrl`. When the host exposes `window.openai.selectFiles` (plan/region-gated), it also offers a "Choose from Library" button that picks a file already in the user's ChatGPT Library and reuses the same confirm/follow-up handoff without re-uploading; because pick-time download URLs are temporary, a fresh URL is re-resolved via `getFileDownloadUrl` when the user confirms.
 - `GetStartedCard`: Presents onboarding guidance, purchase prerequisite messaging, and example prompts for new users.
+- `ImageRoutingCard`: The `generate_image_for_mail` result, in one of two states. **Generated**: the image made in-turn with one of the user's Letter IRL image generations, a credit line with the generations remaining, and the image URL with a Copy button so it can be handed to a preview tool. **Redirect** (no generations left, the global daily ceiling reached, generation turned off or unconfigured, or the provider failed): an explanation and the prompt with a Copy button, so the user can resend it without mentioning Letter IRL and let ChatGPT's built-in generator make it free. On desktop (`redirectStyle: "handoff"`) the card says replying "go ahead" is enough; on mobile (`"resend"`) it asks for the copy-and-resend. It deliberately does not call `sendFollowUpMessage` (see [learnings/generate-image-removal-decision.md](learnings/generate-image-removal-decision.md)).
 - `PackCheckoutCard`: Shows a letter pack checkout with the pack, the price, the order id and the Stripe link as a real anchor. Rendered without a tool result (ChatGPT has dropped the first consequential call after "Allow once", issue #322), it waits five seconds and then offers to create the checkout itself through `callTool`, using the pack from `toolInput` when present and otherwise listing the packs via `list_letter_packs`. While a checkout is open it polls `get_purchase_status` in the preview cards' visibility-gated shape (3 s for the first minute, then 15 s, for ten minutes, plus a Check status button) and replaces the link with the outcome: paid with the letters added, still being credited, expired or failed with a new-checkout offer when the pack is known, or the server's message for refunds and holds. A checkout the card created, and any status it has shown, take precedence over a later `openai:set_globals`. The card keeps the order it shows and the last status it saw in `widgetState`. A reload, or the return page's link back into the conversation, reopens the card instance. A reopened instance resumes from that kept state whether or not the host replays the tool result, provided the host delivers the kept state no later than the result. It draws the kept order and status at once, reads the status once straight away when it can call tools, polls at the slow interval for up to nine minutes, and never opens the checkout by itself. Its link points at the API's `/purchase/start` page (`checkoutStartUrl`) and a tap goes through `openExternal`, so for the allowlisted API origin ChatGPT appends the `redirectUrl` that the start page keeps in a same-site cookie and the return page turns into **Back to your conversation** (#372); a plain fallback link appears if the host call opens nothing. Both pages log one line per request (`purchase.start`, `purchase.return`) carrying presence, host and outcome fields only, never the link, the cookie or the checkout session.
 
 ## Runtime Bridge Notes
@@ -43,7 +44,7 @@ reproduce enforcement locally (dev-mode ChatGPT never enforces it).
 - Clearly show recipient context before confirmation when available.
 - Prefer direct conversation image reuse or `imageUrl` handoff before opening the upload widget.
 
-# Pay & Send preview actions
+## Pay & Send Preview Actions
 
 When prepaid balance is sufficient, letter and postcard preview widgets retain
 their existing Send action. When it is insufficient, the widgets render the
@@ -65,5 +66,5 @@ tab, so a timer alone could not cover the window it existed for. Refreshing
 stops once payment is confirmed: the remaining hop to provider acceptance is
 owned by the hourly maintenance job, so there is nothing a short poll could
 observe. A **Check status** button covers the rest, and webhook delay shows as
-processing rather than failure. Widget CSP is
-limited to the configured Letter IRL endpoint and Stripe-hosted Checkout.
+processing rather than failure. Stripe Checkout is reached as a redirect
+target; the full widget policy is under [Content Security Policy](#content-security-policy).
