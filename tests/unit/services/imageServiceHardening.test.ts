@@ -236,7 +236,16 @@ describe('image pipeline hardening', () => {
       expect(outcome).not.toBeInstanceOf(ImageProcessingError);
     });
 
-    it('pins libvips to one thread, the condition every memory figure was measured under', () => {
+    it('pins libvips to one thread, the condition every memory figure was measured under', async () => {
+      // On CI's Linux runners sharp already defaults to one thread, so a plain
+      // read of the value would pass without the pin. Raise it, load a fresh
+      // copy of the service, and expect the pin to have brought it back down;
+      // sharp itself is external to vitest's module registry, so its native
+      // global survives the reset.
+      sharp.concurrency(2);
+      expect(sharp.concurrency()).toBe(2);
+      vi.resetModules();
+      await import('../../../src/services/imageService.js');
       expect(sharp.concurrency()).toBe(1);
     });
 
