@@ -48,6 +48,7 @@ All images are validated, resized to print specifications (300 DPI), optimized f
 | Property | Value |
 |----------|-------|
 | Max File Size | 10 MB |
+| Max Resolution | 50 megapixels (about 7000×7000), checked on the header before any decode |
 | Min Resolution | 100×100 pixels |
 | Recommended Resolution | 1872×1248 pixels (optimal for 6×9 at 300 DPI) |
 | Supported Formats | PNG, JPEG, WebP |
@@ -64,8 +65,8 @@ All images are validated, resized to print specifications (300 DPI), optimized f
 **Processing Pipeline**:
 1. Download image from URL or file attachment
 2. Validate file size (≤10 MB)
-3. Validate format (PNG, JPEG, or WebP)
-4. Validate dimensions (≥100×100 pixels)
+3. Validate format (PNG, JPEG, or WebP) from the bytes; the Content-Type header is only an early hint
+4. Validate dimensions (≥100×100 pixels and ≤50 megapixels; the ceiling is enforced on the header read, before any pixel is decoded)
 5. Resize to 2700×1800 using Sharp with `cover` fit (crops and fills)
 6. Convert to JPEG at quality 85
 7. Encode as base64 data URI
@@ -75,6 +76,8 @@ All images are validated, resized to print specifications (300 DPI), optimized f
 - File too large: "Image is too large. Please use an image under 10MB."
 - Unsupported format: "Unsupported image format. Please use PNG, JPEG, or WebP."
 - Too small: "Image is too small for print quality. Please use at least 100x100 pixels."
+- Too many pixels: "Image is too large. Please use an image under 50 megapixels."
+- Busy: "The image service is busy right now. Please try again in a moment."
 
 ### 2. Letter Header Images
 
@@ -85,6 +88,7 @@ All images are validated, resized to print specifications (300 DPI), optimized f
 | Property | Value |
 |----------|-------|
 | Max File Size | 5 MB |
+| Max Resolution | 50 megapixels (about 7000×7000), checked on the header before any decode |
 | Min Resolution | 100×100 pixels |
 | Supported Formats | PNG, JPEG, WebP |
 | Output Dimensions | 1950×600 pixels (6.5"×2" at 300 DPI) |
@@ -100,8 +104,8 @@ All images are validated, resized to print specifications (300 DPI), optimized f
 **Processing Pipeline**:
 1. Download image from URL or file attachment
 2. Validate file size (≤5 MB)
-3. Validate format (PNG, JPEG, or WebP)
-4. Validate dimensions (≥100×100 pixels)
+3. Validate format (PNG, JPEG, or WebP) from the bytes; the Content-Type header is only an early hint
+4. Validate dimensions (≥100×100 pixels and ≤50 megapixels; the ceiling is enforced on the header read, before any pixel is decoded)
 5. Resize to fit within 1950×600 using Sharp with `inside` fit (maintains aspect ratio)
 6. Convert to JPEG at quality 85
 7. Encode as base64 data URI
@@ -111,6 +115,8 @@ All images are validated, resized to print specifications (300 DPI), optimized f
 - File too large: "Header image is too large. Please use an image under 5MB."
 - Unsupported format: "Unsupported image format. Please use PNG, JPEG, or WebP."
 - Too small: "Image is too small for print quality. Please use at least 100x100 pixels."
+- Too many pixels: "Image is too large. Please use an image under 50 megapixels."
+- Busy: "The image service is busy right now. Please try again in a moment."
 
 ### 3. Letter Inline Images
 
@@ -121,6 +127,7 @@ All images are validated, resized to print specifications (300 DPI), optimized f
 | Property | Value |
 |----------|-------|
 | Max File Size | 5 MB |
+| Max Resolution | 50 megapixels (about 7000×7000), checked on the header before any decode |
 | Min Resolution | 100×100 pixels |
 | Supported Formats | PNG, JPEG, WebP |
 | Output Dimensions | 1950×900 pixels (6.5"×3" at 300 DPI) |
@@ -140,6 +147,8 @@ Same as header images, but with different output dimensions (1950×900) and plac
 - File too large: "Inline image is too large. Please use an image under 5MB."
 - Unsupported format: "Unsupported image format. Please use PNG, JPEG, or WebP."
 - Too small: "Image is too small for print quality. Please use at least 100x100 pixels."
+- Too many pixels: "Image is too large. Please use an image under 50 megapixels."
+- Busy: "The image service is busy right now. Please try again in a moment."
 
 ### 4. Text-Only Letters
 
@@ -153,6 +162,18 @@ Same as header images, but with different output dimensions (1950×900) and plac
 ---
 
 ## Technical Implementation
+
+### Resource limits
+
+Every image byte is customer-controlled, and decoding is where bytes become memory, so `src/services/imageService.ts` bounds the work in five ways:
+
+- **Pixel ceiling.** Every `sharp()` call goes through one opener that sets `limitInputPixels` to 50 megapixels. sharp checks the declared size when it reads the header, so a small file claiming huge dimensions is refused before any pixel is decoded. sharp's own default is about five times higher, at which a 10 MB file can decode to about a gigabyte.
+- **Format from the bytes.** After the header read, the detected format must be `jpeg`, `png` or `webp`. The Content-Type header is still checked as an early hint, but a server that omits or fakes it cannot route SVG, GIF, TIFF or AVIF bytes to the other bundled loaders.
+- **Decode once.** The widget preview is derived from the processed print image, not from the original, so each original is decoded exactly once. The preview is always smaller than the processed image, so nothing is lost.
+- **Concurrency gates.** Decodes run through an in-process gate of 3 at a time (12 may wait, 15 s each) and remote downloads through a gate of 8 (24 may wait, 15 s each). A caller that cannot get a slot fails fast with the busy message rather than adding to memory pressure. The generated-image preview in `generate_image_for_mail` uses the same opener and gate.
+- **One download deadline.** A remote download has one 20 s deadline that covers every redirect hop, the headers and the whole body read; a server that dribbles bytes is cut off at the deadline and the byte cap is enforced whether or not Content-Length was sent.
+
+`tests/unit/services/imageServiceHardening.test.ts` proves each of these with real image bytes and no sharp mock.
 
 ### Image Service
 
