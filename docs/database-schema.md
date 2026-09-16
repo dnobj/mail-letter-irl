@@ -467,7 +467,8 @@ raise them.
 ### commerce_operator_audit_events
 
 The older operator audit table from the commerce recovery work: hashed idempotency key, actor and
-target, a reason code, before and after state, provider evidence and an outcome, retained two years.
+target, a reason code, before and after state, provider evidence and an outcome. `retention_expires_at`
+marks two years from the row (#395); nothing enforces it yet, and the purge is designed under #398.
 The admin panel writes `admin_audit_events` instead; this table is kept for the four operations it
 recorded.
 
@@ -539,9 +540,10 @@ three bounded JSONB summaries support later authenticated reads, reveals, and co
 every `UPDATE` and `DELETE`; public privileges are revoked and provisioned application roles receive no
 mutation privilege beyond `INSERT`.
 
-Indexes cover environment plus actor/time, environment plus target/time, and correlation ID. Audit
-retention and archival must be approved before any production access; application rollback retains all
-rows.
+Indexes cover environment plus actor/time, environment plus target/time, and correlation ID. Rows are
+kept for 2 years after the action they record and are exempt from account erasure for that period
+(#395); nothing enforces the period yet, and the purge is designed under #398. Application rollback
+retains all rows.
 
 ### admin_command_runs
 

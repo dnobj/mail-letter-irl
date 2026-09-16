@@ -104,6 +104,7 @@ We may disclose information if required by law (e.g., subpoena, court order) or 
 | **Letter Drafts** | Unsent drafts expire after 24 hours, and their content is deleted within 7 days. Drafts you have paid for follow the letter-content schedule above. |
 | **Uploaded Image Links** | Deleted within 48 hours of your last upload. An image you use in a draft or letter follows the schedules above. |
 | **Account Data** | Retained while your account is active |
+| **Support and Audit Records** | Records of actions our team takes on your account are kept for up to 2 years after the action, including after your account is deleted. |
 | **Transaction History** | Retained for accounting and legal compliance |
 | **Expired Credits** | Records retained, but credits no longer usable |
 
