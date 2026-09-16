@@ -36,7 +36,7 @@ For owner-managed submission tasks such as organization verification, screenshot
 - [x] Tool-level `securitySchemes`
 - [x] `_meta["mcp/www_authenticate"]` on auth-required tool errors
 - [x] Widget MIME `text/html;profile=mcp-app`
-- [x] Read/write annotations align with actual side effects
+- [x] Read/write and destructive annotations align with actual side effects: the two send tools, `set_return_address` and both checkouts are marked destructive because their outcomes cannot be undone ([learnings/tool-annotation-decision.md](learnings/tool-annotation-decision.md), September 2026 addendum)
 - [x] Runtime-derived manifest and widget inventory
 - [x] First-run onboarding surface (`get_started`)
 

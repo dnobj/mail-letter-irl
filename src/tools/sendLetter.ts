@@ -184,6 +184,7 @@ export const sendLetterTool: McpToolDefinition<SendLetterInput, SendLetterOutput
     'openai/toolInvocation/invoking': 'Sending letter...',
     'openai/toolInvocation/invoked': 'Letter sent',
     'openai/widgetAccessible': true,
+    destructiveHint: true, // Mail cannot be recalled once printed
     openWorldHint: true,
     idempotentHint: true,
   },

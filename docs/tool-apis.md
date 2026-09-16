@@ -38,7 +38,7 @@ Letter IRL currently exposes **22 tools** and **6 widgets**:
 - `get_order_status`: Retrieve the latest timeline for a specific order, or the most recent order when `orderId` is omitted. Read-only.
 - `set_return_address`: Validate and save the user's default return address for future letters and postcards.
 - `get_return_address`: Retrieve the saved return address. Read-only.
-- `clear_return_address`: Clear the saved return address. Requires `confirm: true` and is marked destructive.
+- `clear_return_address`: Clear the saved return address. Requires `confirm: true` and is marked destructive, as are `send_letter`, `send_postcard`, `set_return_address`, `create_mail_checkout` and `create_pack_checkout` (irreversible outcomes: mail that cannot be recalled, an overwritten address, a payment; see [learnings/tool-annotation-decision.md](learnings/tool-annotation-decision.md)).
 
 ## Images
 

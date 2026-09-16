@@ -1211,7 +1211,7 @@ macOS/Linux:
 - [ ] Write tools show as "WRITE" in ChatGPT connector settings
 - [ ] Read-only tools don't require user confirmation
 - [ ] Write tools require user confirmation before execution
-- [ ] Destructive tools (clear_return_address) show additional warning
+- [ ] Destructive tools (the two send tools, `set_return_address`, both checkouts and `clear_return_address`) are served with `destructiveHint: true`, the signal OpenAI's review guidance asks for on irreversible outcomes; ChatGPT's permission prompt is its own contextual judgement
 - [ ] Open-world tools (send_letter) marked with `openWorldHint: true` for real-world effects
 
 **Tool Classification:**
@@ -1222,13 +1222,13 @@ macOS/Linux:
 | `get_return_address` | READ | `readOnlyHint: true` |
 | `list_orders` | READ | `readOnlyHint: true` |
 | `quote_and_preview_letter` (and the other three preview tools) | WRITE (creates a draft) | `readOnlyHint: false`, `openWorldHint: true` |
-| `send_letter` | WRITE | `readOnlyHint: false`, `openWorldHint: true` |
-| `set_return_address` | WRITE | `readOnlyHint: false` |
+| `send_letter` | WRITE | `readOnlyHint: false`, `openWorldHint: true`, `destructiveHint: true` (mail cannot be recalled) |
+| `set_return_address` | WRITE | `readOnlyHint: false`, `destructiveHint: true` (overwrites the saved address) |
 | `clear_return_address` | WRITE | `readOnlyHint: false`, `destructiveHint: true` |
 
 **Technical Details:**
 - MCP SDK expects annotations in separate `annotations` parameter
-- Not in `_meta` (fixed; `buildAnnotations()` in `src/mcp/registerTools.ts` sets them). The table for all 22 tools is in [app-submission/openai-test-cases.md](app-submission/openai-test-cases.md#tool-annotations-verification)
+- The authoritative values are the `annotations` block that `buildAnnotations()` in `src/mcp/registerTools.ts` builds; the tool files' inline `meta` objects mirror the hints and are spread into `_meta` beside the OpenAI display keys. The table for all 22 tools is in [app-submission/openai-test-cases.md](app-submission/openai-test-cases.md#tool-annotations-verification)
 - Annotations: `readOnlyHint`, `destructiveHint`, `openWorldHint`, `idempotentHint`
 
 **Related:**
