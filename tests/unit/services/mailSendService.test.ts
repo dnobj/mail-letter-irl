@@ -239,7 +239,8 @@ describe('createMailOrderFromDraft', () => {
         mailType: 'letter',
         funding: { type: 'jit_order', orderId: 'order-jit' }
       })
-    ).rejects.toMatchObject({ code: 'DRAFT_FUNDING_CONFLICT' });
+    // The code doubles as the diagnostic class, so a catch that stores a class records which check failed (#394).
+    ).rejects.toMatchObject({ code: 'DRAFT_FUNDING_CONFLICT', diagnosticClass: 'DRAFT_FUNDING_CONFLICT' });
 
     expect(deductCredits).not.toHaveBeenCalled();
     expect(createOutboxJob).not.toHaveBeenCalled();
@@ -282,7 +283,7 @@ describe('createMailOrderFromDraft', () => {
         userId: 'user-1',
         mailType: 'letter'
       })
-    ).rejects.toMatchObject({ code: 'DRAFT_CHECKOUT_PENDING' });
+    ).rejects.toMatchObject({ code: 'DRAFT_CHECKOUT_PENDING', diagnosticClass: 'DRAFT_CHECKOUT_PENDING' });
     expect(deductCredits).not.toHaveBeenCalled();
     expect(createOutboxJob).not.toHaveBeenCalled();
   });

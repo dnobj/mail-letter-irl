@@ -17,13 +17,12 @@
 
 import type pg from 'pg';
 
-import { transaction, query } from '../db/index.js';
+import { query } from '../db/index.js';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import {
   User,
   CreditTransaction,
   DeductCreditsParams,
-  RefundCreditsParams,
   GetTransactionsParams,
   CreditBalance,
   CreditOperationResult,
@@ -36,7 +35,6 @@ import {
   addCreditsToLedger,
   addCreditsToLedgerWithClient,
   deductCreditsFromLedger,
-  refundCreditsToLedger,
   getDetailedBalance as getLedgerDetailedBalance,
   getAvailableCredits,
   hasSufficientCredits as ledgerHasSufficientCredits,
@@ -103,37 +101,6 @@ export async function deductCreditsWithDetails(
     letterId: params.letterId,
     description: params.description,
   });
-}
-
-/**
- * Refund credits to user (from cancelled order)
- *
- * - Creates new ledger entry for refunded credits
- * - Adds credits back to balance
- * - Decrements lifetime credits_purchased
- * - Records refund transaction
- * - All operations are atomic (uses transaction)
- *
- * @throws Error if user not found
- * @throws Error if credits <= 0
- */
-export async function refundCredits(params: RefundCreditsParams): Promise<CreditOperationResult> {
-  const { userId, credits, orderId, reason } = params;
-
-  // Use ledger service for refund
-  const result = await refundCreditsToLedger({
-    userId,
-    credits,
-    orderId,
-    reason,
-    // Refunded credits don't expire by default
-    newExpirationDays: undefined,
-  });
-
-  return {
-    user: result.user,
-    transaction: result.transaction,
-  };
 }
 
 /**
@@ -227,33 +194,27 @@ export async function hasSufficientCredits(userId: string, creditsRequired: numb
   return await ledgerHasSufficientCredits(userId, creditsRequired);
 }
 
+/** The ledger description every operator adjustment carries (A-13, #394). */
+export const OPERATOR_ADJUSTMENT_LABEL = 'Operator adjustment';
+
 /**
- * Manual credit adjustment (admin only)
+ * Manual credit adjustment (admin only), on the caller's client so an
+ * operator command can commit it together with its run row and audit row
+ * (issue #162).
  *
  * - Can add or remove credits
  * - Records as 'adjustment' type transaction
  * - Use positive amount to add, negative to remove
  * - For positive adjustments, creates a ledger entry (never expires by default)
+ * - The description is always OPERATOR_ADJUSTMENT_LABEL: the customer reads it
+ *   back through the credits API, so the operator's reason never goes here (#394)
  *
  * @throws Error if user not found
- */
-export async function adjustCredits(
-  userId: string,
-  amount: number,
-  reason: string
-): Promise<CreditOperationResult> {
-  return transaction((client) => adjustCreditsWithClient(client, userId, amount, reason));
-}
-
-/**
- * The same adjustment on the caller's client, so an operator command can
- * commit it together with its run row and audit row (issue #162).
  */
 export async function adjustCreditsWithClient(
   client: Pick<pg.PoolClient, 'query'>,
   userId: string,
-  amount: number,
-  reason: string
+  amount: number
 ): Promise<CreditOperationResult> {
   if (!Number.isInteger(amount) || amount === 0) {
     throw new Error('Adjustment amount must be a non-zero integer');
@@ -265,7 +226,7 @@ export async function adjustCreditsWithClient(
       userId,
       credits: amount,
       sourceType: 'adjustment',
-      description: reason,
+      description: OPERATOR_ADJUSTMENT_LABEL,
       expirationPolicy: 'never',
     });
     return { user: result.user, transaction: result.transaction };
@@ -329,7 +290,7 @@ export async function adjustCreditsWithClient(
     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING transaction_id, user_id, amount, balance_after, type,
               reference_type, reference_id, created_at`,
-    [userId, amount, user.credits, 'adjustment', 'manual', null, reason]
+    [userId, amount, user.credits, 'adjustment', 'manual', null, OPERATOR_ADJUSTMENT_LABEL]
   );
   const txn = txResult.rows[0];
   writeDiagnostic('info', 'credits.adjusted', {

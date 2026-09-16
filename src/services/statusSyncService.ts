@@ -7,6 +7,7 @@
 
 import { query } from '../db/index.js';
 import { getLetterProvider } from './providers/index.js';
+import { carriedDiagnosticClass, classifyDiagnosticError } from '../utils/diagnosticLog.js';
 
 export interface StatusSyncResult {
   checked: number;
@@ -119,7 +120,9 @@ export async function syncLetterStatuses(
         result.details.push(detail);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      // A class, never the provider's message: the status-sync command copies
+      // this detail into admin_command_runs and the audit row (#394).
+      const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error');
       console.error('   ❌ Error syncing letter');
 
       result.errors++;
@@ -129,7 +132,7 @@ export async function syncLetterStatuses(
         oldStatus: letter.status,
         newStatus: letter.status,
         providerRawStatus: '',
-        error: errorMessage
+        error: errorClass
       });
     }
   }

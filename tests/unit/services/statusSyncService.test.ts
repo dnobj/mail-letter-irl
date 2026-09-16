@@ -168,7 +168,8 @@ describe('statusSyncService', () => {
       const errorDetail = result.details.find(d => d.error);
       expect(errorDetail).toBeDefined();
       expect(errorDetail?.letterId).toBe('letter-error');
-      expect(errorDetail?.error).toBe('Provider API error');
+      // A class, never the provider message: the detail reaches the admin command run and its audit row (#394).
+      expect(errorDetail?.error).toBe('provider_error');
     });
 
     it('should not count letters with same status as updated', async () => {
@@ -220,6 +221,38 @@ describe('statusSyncService', () => {
         newStatus: 'delivered',
         providerRawStatus: 'Delivered to mailbox at 2:30 PM',
       });
+    });
+
+    it('records a class, never the provider message, when a letter fails to sync (#394)', async () => {
+      const testLetters = [createLetterRowForSync({
+        letterId: 'letter-fail',
+        trackingId: 'track-fail',
+        status: 'in_transit',
+      })];
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: testLetters } as any)
+        .mockResolvedValue({ rows: [], rowCount: 1 } as any);
+      mockProvider.getStatus.mockRejectedValueOnce(
+        Object.assign(
+          new Error('HTTP 500 from https://api.postgrid.invalid/letters/track-fail for Recipient Person'),
+          { code: 'ECONNRESET' }
+        )
+      );
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(result.errors).toBe(1);
+      expect(result.details[0]).toEqual({
+        letterId: 'letter-fail',
+        trackingId: 'track-fail',
+        oldStatus: 'in_transit',
+        newStatus: 'in_transit',
+        providerRawStatus: '',
+        error: 'ECONNRESET',
+      });
+      expect(JSON.stringify(result)).not.toContain('postgrid.invalid');
+      expect(JSON.stringify(result)).not.toContain('Recipient Person');
     });
   });
 

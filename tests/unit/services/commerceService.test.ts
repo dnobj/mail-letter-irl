@@ -132,6 +132,7 @@ import {
   PackAmountNotConfiguredError,
   createPackCheckout,
   createJitCheckout,
+  fulfillPaidOrder,
   getSendEligibility,
   processStripeWebhookEvent,
   repairFulfilledPackGrant,
@@ -446,7 +447,7 @@ describe('commerceService', () => {
       } as any);
     }],
     ['operator refund request', async () => {
-      await requestRefund('order-1', 'operator requested');
+      await requestRefund('order-1');
     }],
     ['reconciliation pack repair', async () => {
       await repairFulfilledPackGrant({
@@ -881,7 +882,7 @@ describe('commerceService', () => {
     // (admin bulk-retry, second sweep) cannot bypass it (#278 round 8).
     mocks.query.mockResolvedValue({ rows: [] });
 
-    await requestRefund('order-q', 'sweep retry');
+    await requestRefund('order-q');
 
     const claim = mocks.query.mock.calls
       .map(([sql]) => String(sql))
@@ -2732,7 +2733,7 @@ describe('commerceService', () => {
     });
     mocks.retrieveRefund.mockResolvedValue({ id: 're-1', status: 'succeeded' });
 
-    await expect(requestRefund('order-1', 'retry')).resolves.toBe(true);
+    await expect(requestRefund('order-1')).resolves.toBe(true);
 
     expect(mocks.retrieveRefund).toHaveBeenCalledWith('re-1');
     expect(mocks.findRefund).not.toHaveBeenCalled();
@@ -2765,16 +2766,16 @@ describe('commerceService', () => {
     mocks.createRefund.mockResolvedValue({ id: 're-1', status: 'pending' });
 
     const results = await Promise.all([
-      requestRefund('order-1', 'provider rejected'),
-      requestRefund('order-1', 'provider rejected')
+      requestRefund('order-1'),
+      requestRefund('order-1')
     ]);
 
     expect(results.sort()).toEqual([false, true]);
     expect(mocks.findRefund).toHaveBeenCalledTimes(1);
     expect(mocks.createRefund).toHaveBeenCalledTimes(1);
     expect(mocks.query).toHaveBeenCalledWith(
-      expect.stringContaining("updated_at <= NOW() - ($4 * INTERVAL '1 second')"),
-      ['order-1', 'provider rejected', 5, 300]
+      expect.stringContaining("updated_at <= NOW() - ($3::int * INTERVAL '1 second')"),
+      ['order-1', 5, 300]
     );
   });
 
@@ -2793,7 +2794,7 @@ describe('commerceService', () => {
     });
     mocks.findRefund.mockResolvedValue({ id: 're-recovered', status: 'pending' });
 
-    await expect(requestRefund('order-1', 'retry')).resolves.toBe(true);
+    await expect(requestRefund('order-1')).resolves.toBe(true);
 
     expect(mocks.findRefund).toHaveBeenCalledWith('pi-1', 'order-1');
     expect(mocks.createRefund).not.toHaveBeenCalled();
@@ -2821,12 +2822,183 @@ describe('commerceService', () => {
       });
       mocks.createRefund.mockResolvedValue({ id: 're-retry', status: 'pending' });
 
-      await expect(requestRefund('order-1', 'retry')).resolves.toBe(true);
+      await expect(requestRefund('order-1')).resolves.toBe(true);
 
       expect(mocks.findRefund).toHaveBeenCalledWith('pi-1', 'order-1');
       expect(mocks.createRefund).toHaveBeenCalledWith('pi-1', 'order-1', 3);
     }
   );
+
+  /**
+   * Issue #394. The three catches that stored error.message, the refund event
+   * that copied a "reason" through, and the sweep that read last_error back to
+   * pass it in. Every stored value is a class; no parameter may carry a
+   * fragment of the message.
+   */
+  describe('error text minimisation (#394)', () => {
+    const paramsRecorded = () => JSON.stringify(mocks.query.mock.calls.map(([, params]) => params));
+    const eventInsert = (type: string) =>
+      mocks.query.mock.calls.find(
+        ([sql, params]) =>
+          String(sql).includes('INSERT INTO commerce_order_events') && (params as unknown[])?.[1] === type
+      );
+
+    it.each([
+      [
+        'a draft check carrying its code',
+        Object.assign(new Error('Draft draft-1 does not belong to this user'), {
+          code: 'DRAFT_NOT_OWNED',
+          diagnosticClass: 'DRAFT_NOT_OWNED'
+        }),
+        'DRAFT_NOT_OWNED'
+      ],
+      ['a plain error', new Error('relation "letters_secret" does not exist'), 'database_error'],
+      ['a non-error throw', 'boom secret', 'unknown_error']
+    ])('stores a class, never the message, when JIT fulfilment is rejected by %s', async (_label, thrown, expected) => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+        if (sql.includes('SELECT * FROM orders')) return { rows: [baseOrder] };
+        return { rows: [] };
+      });
+      mocks.createMail.mockRejectedValueOnce(thrown);
+
+      await expect(processStripeWebhookEvent(checkoutEvent())).resolves.toMatchObject({ duplicate: false });
+
+      const rejection = mocks.query.mock.calls.find(([sql]) =>
+        String(sql).includes("last_error_code = 'JIT_FULFILLMENT_REJECTED'")
+      );
+      expect(rejection).toBeDefined();
+      expect(rejection![1]).toEqual(['order-1', expected]);
+      const event = eventInsert('jit.fulfillment_rejected');
+      expect(event).toBeDefined();
+      expect((event![1] as unknown[])[4]).toBe(JSON.stringify({ errorClass: expected }));
+      expect(paramsRecorded()).not.toContain('secret');
+      expect(paramsRecorded()).not.toContain('does not belong');
+    });
+
+    it('stores a class, never the message, when recovery of a paid order is rejected', async () => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+          return { rows: [{ ...baseOrder, status: 'paid' }] };
+        }
+        return { rows: [] };
+      });
+      mocks.createMail.mockRejectedValueOnce(
+        Object.assign(new Error('Draft expired: draft-1'), { code: 'DRAFT_EXPIRED', diagnosticClass: 'DRAFT_EXPIRED' })
+      );
+
+      await expect(fulfillPaidOrder('order-1')).resolves.toBe(false);
+
+      const failure = mocks.query.mock.calls.find(([sql]) => String(sql).includes("last_error_code = 'RECOVERY_FAILED'"));
+      expect(failure).toBeDefined();
+      expect(failure![1]).toEqual(['order-1', 'DRAFT_EXPIRED']);
+      const event = eventInsert('maintenance.fulfillment_failed');
+      expect(event).toBeDefined();
+      expect((event![1] as unknown[])[4]).toBe(JSON.stringify({ errorClass: 'DRAFT_EXPIRED' }));
+      expect(paramsRecorded()).not.toContain('Draft expired');
+    });
+
+    it.each([
+      [
+        'an allowlisted Stripe code',
+        Object.assign(new Error('No such payment_intent: pi-1 on acct_secret'), {
+          type: 'StripeInvalidRequestError',
+          code: 'resource_missing'
+        }),
+        'resource_missing'
+      ],
+      [
+        'a Stripe type without a code',
+        Object.assign(new Error('socket hang up at acct_secret'), { type: 'StripeConnectionError' }),
+        'StripeConnectionError'
+      ],
+      ['a plain error', new Error('relation "orders_secret" does not exist'), 'unknown_error']
+    ])('stores a class, never the message, when the refund request fails with %s', async (_label, thrown, expected) => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('WITH candidate AS')) {
+          return {
+            rows: [
+              {
+                ...baseOrder,
+                status: 'refund_pending',
+                refund_attempts: 1,
+                previous_refund_attempts: 0,
+                stripe_payment_intent_id: 'pi-1',
+                stripe_refund_id: null
+              }
+            ]
+          };
+        }
+        return { rows: [] };
+      });
+      mocks.findRefund.mockResolvedValue(null);
+      mocks.createRefund.mockRejectedValueOnce(thrown);
+
+      await expect(requestRefund('order-1')).resolves.toBe(false);
+
+      const failure = mocks.query.mock.calls.find(([sql]) => String(sql).includes("last_error_code = 'REFUND_REQUEST_FAILED'"));
+      expect(failure).toBeDefined();
+      expect(failure![1]).toEqual(['order-1', expected]);
+      expect(paramsRecorded()).not.toContain('secret');
+    });
+
+    it('records the refund id and the order error code on refund.requested, and claims without a reason', async () => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('WITH candidate AS')) {
+          return {
+            rows: [
+              {
+                ...baseOrder,
+                status: 'refund_pending',
+                refund_attempts: 1,
+                previous_refund_attempts: 0,
+                stripe_payment_intent_id: 'pi-1',
+                last_error_code: 'JIT_FULFILLMENT_REJECTED',
+                last_error: 'DRAFT_EXPIRED'
+              }
+            ]
+          };
+        }
+        if (sql.includes('SET stripe_refund_id = $2')) return { rows: [{ order_id: 'order-1' }] };
+        return { rows: [] };
+      });
+      mocks.findRefund.mockResolvedValue(null);
+      mocks.createRefund.mockResolvedValue({ id: 're-1', status: 'pending' });
+
+      await expect(requestRefund('order-1')).resolves.toBe(true);
+
+      const claim = mocks.query.mock.calls.find(([sql]) => String(sql).includes('WITH candidate AS'));
+      expect(claim).toBeDefined();
+      expect(String(claim![0])).not.toMatch(/last_error = /);
+      expect(claim![1]).toEqual(['order-1', 5, 300]);
+      const event = eventInsert('refund.requested');
+      expect(event).toBeDefined();
+      expect((event![1] as unknown[])[4]).toBe(JSON.stringify({ refundId: 're-1', lastErrorCode: 'JIT_FULFILLMENT_REJECTED' }));
+      expect(paramsRecorded()).not.toContain('reason');
+    });
+
+    it('selects only the order id for the refund sweep and asks for each refund by id alone', async () => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes("status = 'refund_pending'") && sql.includes('refund_attempts < $2')) {
+          return { rows: [{ order_id: 'order-1' }] };
+        }
+        return { rows: [] };
+      });
+      mocks.retrieveSession.mockResolvedValue(null);
+
+      await runCommerceMaintenance();
+
+      const sweep = mocks.query.mock.calls
+        .map(([sql]) => String(sql))
+        .find(sql => sql.includes("status = 'refund_pending'") && sql.includes('refund_attempts < $2'));
+      expect(sweep).toBeDefined();
+      expect(sweep!.replace(/\s+/g, ' ')).toMatch(/^SELECT order_id FROM orders WHERE/);
+      expect(sweep).not.toContain('last_error FROM');
+      const claim = mocks.query.mock.calls.find(([sql]) => String(sql).includes('WITH candidate AS'));
+      expect(claim).toBeDefined();
+      expect(claim![1]).toEqual(['order-1', 5, 300]);
+    });
+  });
 });
 
 /**

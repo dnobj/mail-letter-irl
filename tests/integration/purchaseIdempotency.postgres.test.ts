@@ -626,10 +626,10 @@ describePostgres('purchase idempotency at the database boundary (#152)', () => {
       [control.orderId, `pi_${control.sessionId}`]
     );
 
-    await expect(commerce.requestRefund(quarantined.orderId, 'operator asked')).resolves.toBe(
+    await expect(commerce.requestRefund(quarantined.orderId)).resolves.toBe(
       false
     );
-    await commerce.requestRefund(control.orderId, 'operator asked');
+    await commerce.requestRefund(control.orderId);
 
     // The control was claimed; the quarantined order was not. Only the
     // PAYMENT_AMOUNT_MISMATCH clause separates them.

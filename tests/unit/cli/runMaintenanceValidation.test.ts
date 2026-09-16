@@ -198,8 +198,8 @@ describe('maintenance deployment validation', () => {
         try {
           return { ran: true, result: await task() };
         } catch (error) {
-          // The real runner stores error.message in maintenance_tasks.last_error,
-          // which the admin reader role can read, and then rethrows.
+          // The real runner stores the error's class in maintenance_tasks.last_error
+          // (#394), which the admin reader role can read, and then rethrows.
           rethrown = error;
           throw error;
         }
@@ -326,8 +326,8 @@ describe('maintenance deployment validation', () => {
         try {
           return { ran: true, result: await task() };
         } catch (error) {
-          // The real runner stores error.message in maintenance_tasks.last_error,
-          // which the admin reader role can read, and then rethrows.
+          // The real runner stores the error's class in maintenance_tasks.last_error
+          // (#394), which the admin reader role can read, and then rethrows.
           rethrown = error;
           throw error;
         }

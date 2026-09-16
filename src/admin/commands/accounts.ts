@@ -172,16 +172,11 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
       requireClient(execution);
       const signed = (input.direction === "add" ? 1 : -1) * input.letters * CREDITS_PER_LETTER;
       try {
-        const result = await seams.adjustCreditsWithClient(
-          execution.client as never,
-          userId,
-          signed,
-          // A fixed string, not the operator's reason: this becomes the
-          // ledger description, which the customer can read back through
-          // GET /api/credits/transactions. The reason belongs to the audit
-          // trail alone (issue #162 security review, A-13).
-          "Operator adjustment",
-        );
+        // The ledger description is a fixed label inside adjustCreditsWithClient,
+        // never the operator's reason: the customer can read it back through
+        // GET /api/credits/transactions, and the reason belongs to the audit
+        // trail alone (issue #162 security review, A-13; #394).
+        const result = await seams.adjustCreditsWithClient(execution.client as never, userId, signed);
         return { creditsAfter: result.user.credits, transactionId: result.transaction.transaction_id };
       } catch (error) {
         throw mapDomainError(error);
@@ -264,7 +259,7 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
     },
     async execute(execution, orderId) {
       requireClient(execution);
-      const outcome = await seams.releaseAmountMismatchQuarantine(execution.client as never, orderId, execution.reason);
+      const outcome = await seams.releaseAmountMismatchQuarantine(execution.client as never, orderId);
       if (outcome !== "released") throw new AdminFoundationError("ADMIN_INVALID_STATE");
       return { outcome };
     },

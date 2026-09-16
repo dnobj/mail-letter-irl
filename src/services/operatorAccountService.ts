@@ -59,11 +59,14 @@ export type ReleaseQuarantineOutcome = 'released' | 'not_quarantined';
  * Clear a PAYMENT_AMOUNT_MISMATCH quarantine so the hourly sweep may refund
  * the order. The sweep gates on the code (commerceService, refund lane), so
  * clearing it is the operator's deliberate "yes, refund this one".
+ *
+ * The operator's typed reason is not stored here: the command runner writes
+ * it to admin_audit_events, and this event is readable by the admin reader
+ * role (#394).
  */
 export async function releaseAmountMismatchQuarantine(
   client: Client,
-  orderId: string,
-  reason: string
+  orderId: string
 ): Promise<ReleaseQuarantineOutcome> {
   const order = await client.query(
     'SELECT status, last_error_code FROM orders WHERE order_id = $1 FOR UPDATE',
@@ -79,7 +82,7 @@ export async function releaseAmountMismatchQuarantine(
   await client.query(
     `INSERT INTO commerce_order_events (order_id, event_type, from_status, to_status, metadata)
      VALUES ($1, 'operator.quarantine_released', $2, $2, $3::jsonb)`,
-    [orderId, row.status, JSON.stringify({ reason: reason.slice(0, 500), clearedCode: 'PAYMENT_AMOUNT_MISMATCH' })]
+    [orderId, row.status, JSON.stringify({ clearedCode: 'PAYMENT_AMOUNT_MISMATCH' })]
   );
   return 'released';
 }

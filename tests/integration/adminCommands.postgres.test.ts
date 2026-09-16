@@ -506,7 +506,13 @@ describePostgres('admin commands through the operator role', () => {
       `SELECT event_type, metadata FROM commerce_order_events WHERE order_id = $1`,
       [orderId]
     );
-    expect(events.rows).toEqual([{ event_type: 'operator.quarantine_released', metadata: { reason: 'integration test reason', clearedCode: 'PAYMENT_AMOUNT_MISMATCH' } }]);
+    expect(events.rows).toEqual([{ event_type: 'operator.quarantine_released', metadata: { clearedCode: 'PAYMENT_AMOUNT_MISMATCH' } }]);
+    // The reason lives on the audit row alone (#394).
+    const releaseAudit = await owner.query<{ reason: string }>(
+      `SELECT reason FROM admin_audit_events WHERE command_id = $1`,
+      [outcome.commandId]
+    );
+    expect(releaseAudit.rows).toEqual([{ reason: 'integration test reason' }]);
     await expect(confirmation('order.release_quarantine', orderId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
   }, 60_000);
 

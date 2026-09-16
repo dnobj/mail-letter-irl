@@ -138,9 +138,7 @@ describePostgres('refund finalization', () => {
   it('records the refund and revokes the pack', async () => {
     const { userId, orderId } = await seedRefundablePack(6);
 
-    const finalized = await commerce.requestRefund(
-      orderId, 'customer asked', refundOperations('succeeded')
-    );
+    const finalized = await commerce.requestRefund(orderId, refundOperations('succeeded'));
 
     // Before the cast, this returned false: the statement threw after Stripe
     // had already paid the customer back.
@@ -175,9 +173,7 @@ describePostgres('refund finalization', () => {
   it('leaves an unfinished refund pending, without revoking anything', async () => {
     const { userId, orderId } = await seedRefundablePack(6);
 
-    const finalized = await commerce.requestRefund(
-      orderId, 'customer asked', refundOperations('pending')
-    );
+    const finalized = await commerce.requestRefund(orderId, refundOperations('pending'));
 
     expect(finalized).toBe(true);
 
@@ -205,7 +201,7 @@ describePostgres('refund finalization', () => {
     const { userId, orderId } = await seedRefundablePack(6);
     const operations = refundOperations('succeeded');
 
-    await commerce.requestRefund(orderId, 'customer asked', operations);
+    await commerce.requestRefund(orderId, operations);
 
     // Make the claim depend on the settled status and nothing else. The
     // retry-delay throttle would otherwise refuse the replay on its own, and
@@ -222,7 +218,7 @@ describePostgres('refund finalization', () => {
     // A retry after the order has settled must find nothing left to claim: the
     // claim predicate requires refund_pending. Replay is where a refund path
     // pays twice, so it is asserted rather than assumed.
-    const second = await commerce.requestRefund(orderId, 'customer asked again', operations);
+    const second = await commerce.requestRefund(orderId, operations);
     expect(second).toBe(false);
 
     const account = await pool.query<{ credits: number; credits_purchased: number }>(
