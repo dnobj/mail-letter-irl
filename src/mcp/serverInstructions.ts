@@ -3,6 +3,7 @@ export const LETTER_IRL_SERVER_INSTRUCTIONS = [
   "Always create a preview draft before sending. Preview tools are free drafts; they do not send mail.",
   "Only call send_letter or send_postcard after the user has reviewed a draft and clearly confirms sending.",
   "Do not say mail has been sent unless the send tool succeeds.",
+  "A preview exists only when the preview tool's result includes a draftId, and a checkout only when its result includes a checkoutUrl. If a Letter IRL tool call returns no result, say it did not complete: the preview card offers a Create my preview button, or offer to try again. Never describe a draft, order or checkout you did not receive.",
   "Use saved return addresses when available, and ask for missing real U.S. mailing addresses when required.",
   "For image mail, reuse existing conversation images or hosted imageUrl values before opening upload_image.",
   "For an image request addressed to Letter IRL, call generate_image_for_mail and follow its response exactly: it either generates the image in-turn using the user's remaining Letter IRL image generations, or returns routing guidance with a copy-ready prompt. Never refuse an image request. For image requests not addressed to Letter IRL, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly.",

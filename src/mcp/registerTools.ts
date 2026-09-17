@@ -6,7 +6,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { LetterIrlServer } from "../server.js";
 import { toolInputSchemas } from "./toolSchemas.js";
-import { widgetTemplateUri } from "./widgetUris.js";
+import { WIDGET_TEMPLATE_VERSION, widgetTemplateUri } from "./widgetUris.js";
 import {
   quoteAndPreviewInputZ,
   quoteAndPreviewLetterWithHeaderImageInputZ,
@@ -171,6 +171,87 @@ export const WIDGET_DEFINITIONS = [
   { name: "ImageRoutingCard", description: "Shows a generated image with its credit line, or image-routing guidance with a copy-ready prompt" },
   { name: "PackCheckoutCard", description: "Shows a letter pack checkout with the pack, the price and the link that opens Stripe" },
 ];
+
+/**
+ * Template names that serve an existing widget's HTML for a different preview
+ * tool (#411).
+ *
+ * A preview card offers to repeat a preview call that never reached the server
+ * (ChatGPT web loses calls approved with "Allow once"), and to repeat it the
+ * card must know which tool drew it. The header-image and inline-image letter
+ * tools take identical input, so the card cannot tell them apart from
+ * toolInput, and the host passes no tool name. Each preview tool therefore
+ * points at its own template name, and readWidgetResource stamps that tool
+ * into the page. A variant is the same widget file under another name, not a
+ * new widget: WIDGET_DEFINITIONS stays the list of cards.
+ */
+export const WIDGET_VARIANTS = [
+  {
+    name: "LetterHeaderImagePreviewCard",
+    file: "LetterPreviewCard",
+    description: "Shows a header-image letter preview with cost, delivery info, and status"
+  },
+  {
+    name: "LetterInlineImagePreviewCard",
+    file: "LetterPreviewCard",
+    description: "Shows an inline-image letter preview with cost, delivery info, and status"
+  }
+] as const;
+
+/**
+ * The preview tool each preview template serves, stamped into the page by
+ * readWidgetResource as `<meta name="letter-irl-preview-tool">` (#411). Keep in
+ * step with each preview tool's openai/outputTemplate;
+ * tests/unit/mcp/widgetResources.test.ts checks both directions.
+ */
+export const PREVIEW_TOOL_BY_TEMPLATE: ReadonlyMap<string, string> = new Map([
+  ["LetterPreviewCard", "quote_and_preview_letter"],
+  ["LetterHeaderImagePreviewCard", "quote_and_preview_letter_with_header_image"],
+  ["LetterInlineImagePreviewCard", "quote_and_preview_letter_with_image"],
+  ["PostcardPreviewCard", "quote_and_preview_postcard"]
+]);
+
+export const PREVIEW_TOOL_META_NAME = "letter-irl-preview-tool";
+
+/**
+ * The first template version from which a template has meant only the tool in
+ * PREVIEW_TOOL_BY_TEMPLATE (#411). Until v32 all three letter tools pointed at
+ * LetterPreviewCard, so a client holding an older tool list can draw an image
+ * letter from it. Stamping that page as the text-only tool would let the card
+ * repeat an image letter without its image: an image call may carry no image
+ * arguments at all and rely on the server's recent-upload fallback, which the
+ * card cannot see. Older versions and the legacy unversioned URI are therefore
+ * served unstamped, and the card offers only advice to ask in the chat.
+ * PostcardPreviewCard has only ever served the postcard tool, and the
+ * variants did not exist before v32, so neither needs a floor.
+ */
+const PREVIEW_TOOL_SINCE_VERSION: ReadonlyMap<string, number> = new Map([
+  ["LetterPreviewCard", 32]
+]);
+
+/**
+ * The preview tool to stamp into a template served at `version`, or undefined
+ * when the page must go out unstamped. `version` is undefined for the legacy
+ * unversioned URI.
+ */
+export function previewToolFor(name: string, version: number | undefined): string | undefined {
+  const tool = PREVIEW_TOOL_BY_TEMPLATE.get(name);
+  if (!tool) return undefined;
+  const since = PREVIEW_TOOL_SINCE_VERSION.get(name);
+  if (since === undefined) return tool;
+  return version !== undefined && Number.isSafeInteger(version) && version >= since ? tool : undefined;
+}
+
+/**
+ * Stamps a preview card's page with the tool that draws it (#411). A page
+ * without a `<head>` is returned unchanged, and a card without the stamp
+ * offers no retry, so a failure here degrades to today's behaviour.
+ */
+export function stampPreviewTool(html: string, tool: string | undefined): string {
+  if (!tool || !/^[a-z_]+$/.test(tool)) return html;
+  const tag = `<meta name="${PREVIEW_TOOL_META_NAME}" content="${tool}" />`;
+  return html.replace(/<head(\s[^>]*)?>/i, (open) => `${open}\n    ${tag}`);
+}
 
 
 /**
@@ -338,11 +419,18 @@ export function buildWidgetResourceMeta(description: string) {
 }
 
 /**
- * Widgets indexed by name, for resolving a client-supplied template variable.
+ * Template names indexed to the widget file they serve and the description
+ * they publish, for resolving a client-supplied template variable. Covers the
+ * cards and their preview-tool variants (#411).
  */
-const WIDGET_BY_NAME = new Map(
-  WIDGET_DEFINITIONS.map((widget) => [widget.name, widget] as const)
-);
+const WIDGET_BY_NAME = new Map<string, { file: string; description: string }>([
+  ...WIDGET_DEFINITIONS.map(
+    (widget) => [widget.name, { file: widget.name, description: widget.description }] as const
+  ),
+  ...WIDGET_VARIANTS.map(
+    (variant) => [variant.name, { file: variant.file, description: variant.description }] as const
+  )
+]);
 
 /**
  * Read one widget's HTML as an MCP resource payload, or null if `name` is not
@@ -350,9 +438,10 @@ const WIDGET_BY_NAME = new Map(
  *
  * SECURITY: `name` reaches this function from a client-supplied URI template
  * variable (see the version template in registerWidgetResources), so it is
- * resolved against WIDGET_DEFINITIONS *before* any filesystem access, and the
- * canonical name from that table - never the caller's string - is what reaches
- * path.join. Without that lookup this function is a path-traversal sink:
+ * resolved against WIDGET_BY_NAME (the cards plus their preview-tool variants)
+ * *before* any filesystem access, and the file name from that table - never
+ * the caller's string - is what reaches path.join. Without that lookup this
+ * function is a path-traversal sink:
  * UriTemplate.match does not percent-decode, so a read of
  * `ui://widgets/..%2F..%2Fsecret.html@v1` arrives here as the literal name
  * `..%2F..%2Fsecret`. Returning early on an unknown name is what makes the
@@ -371,7 +460,7 @@ const WIDGET_BY_NAME = new Map(
  * handler before our code runs and is NOT logged here - so silence in this log
  * means "no read arrived", not "no read was attempted".
  */
-async function readWidgetResource(name: string, uri: string) {
+async function readWidgetResource(name: string, uri: string, version: number | undefined) {
   const widget = WIDGET_BY_NAME.get(name);
 
   if (!widget) {
@@ -381,16 +470,19 @@ async function readWidgetResource(name: string, uri: string) {
 
   console.log(`🎨 Widget resource requested: ${uri}`);
   const html = await fs.readFile(
-    path.join(DEFAULT_WIDGET_DIR, `${widget.name}.html`),
+    path.join(DEFAULT_WIDGET_DIR, `${widget.file}.html`),
     "utf-8"
   );
-  console.log(`🎨 Returning widget HTML (${html.length} bytes)`);
+  // `name` has been resolved against WIDGET_BY_NAME above, so it is one of our
+  // own template names by the time it indexes the preview-tool map.
+  const text = stampPreviewTool(html, previewToolFor(name, version));
+  console.log(`🎨 Returning widget HTML (${text.length} bytes)`);
 
   return {
     contents: [{
       uri,
       mimeType: WIDGET_MIME_TYPE,
-      text: html,
+      text,
       _meta: buildWidgetResourceMeta(widget.description)
     }]
   };
@@ -428,12 +520,12 @@ export async function registerWidgetResources(mcpServer: McpServer) {
     // out (issue #235).
     const versionedUri = widgetTemplateUri(widget.name);
     const legacyUri = `ui://widgets/${widget.name}.html`;
-    const registrations: Array<[string, string]> = [
-      [widget.name, versionedUri],
-      [`${widget.name}-legacy`, legacyUri]
+    const registrations: Array<[string, string, number | undefined]> = [
+      [widget.name, versionedUri, WIDGET_TEMPLATE_VERSION],
+      [`${widget.name}-legacy`, legacyUri, undefined]
     ];
 
-    for (const [registrationName, uri] of registrations) {
+    for (const [registrationName, uri, version] of registrations) {
       // Register widget resource with canonical ui.* metadata and
       // legacy openai/* aliases for compatibility.
       mcpServer.registerResource(
@@ -441,7 +533,7 @@ export async function registerWidgetResources(mcpServer: McpServer) {
         uri,
         {},  // Empty options per docs
         async () => {
-          const result = await readWidgetResource(widget.name, uri);
+          const result = await readWidgetResource(widget.name, uri, version);
           // Unreachable: the name comes from WIDGET_DEFINITIONS itself.
           if (!result) {
             throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
@@ -452,6 +544,32 @@ export async function registerWidgetResources(mcpServer: McpServer) {
 
       console.log(`📦 Registered widget resource: ${uri}`);
     }
+  }
+
+  // The preview-tool variants (#411): the same file under their own versioned
+  // URI, registered exactly for the same reason as the cards above. No legacy
+  // unversioned alias: no client has ever held one of these names.
+  for (const variant of WIDGET_VARIANTS) {
+    try {
+      await fs.access(path.join(DEFAULT_WIDGET_DIR, `${variant.file}.html`));
+    } catch {
+      console.warn(`⚠️  Widget file not found for ${variant.name}: ${variant.file}.html`);
+      continue;
+    }
+    const uri = widgetTemplateUri(variant.name);
+    mcpServer.registerResource(
+      variant.name,
+      uri,
+      {},
+      async () => {
+        const result = await readWidgetResource(variant.name, uri, WIDGET_TEMPLATE_VERSION);
+        if (!result) {
+          throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
+        }
+        return result;
+      }
+    );
+    console.log(`📦 Registered widget resource: ${uri}`);
   }
 
   // Serve ANY version of a widget URI, not just the current one.
@@ -482,7 +600,9 @@ export async function registerWidgetResources(mcpServer: McpServer) {
     async (uri, variables) => {
       const raw = variables.name;
       const name = Array.isArray(raw) ? raw[0] : raw;
-      const result = await readWidgetResource(String(name ?? ""), uri.toString());
+      const rawVersion = Array.isArray(variables.version) ? variables.version[0] : variables.version;
+      const version = /^\d{1,6}$/.test(String(rawVersion ?? "")) ? Number(rawVersion) : undefined;
+      const result = await readWidgetResource(String(name ?? ""), uri.toString(), version);
       if (!result) {
         // Same error the SDK raises for an unregistered URI, so an unknown
         // widget name is indistinguishable to the client from one we never
