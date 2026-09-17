@@ -13,6 +13,20 @@ const capState = vi.hoisted(() => ({
   lettersTodayGlobal: 0
 }));
 
+/**
+ * The duplicate check (#412), answered ahead of mocks.query for the same
+ * reason as the caps: the tests below queue mocks.query responses in order,
+ * and the check's queries must not consume them. The draft is null by
+ * default, which skips the comparison, so every older test runs as before.
+ */
+const dupState = vi.hoisted(() => ({
+  activeOrder: false,
+  draft: null as Record<string, unknown> | null,
+  letters: [] as Record<string, unknown>[],
+  orders: [] as Record<string, unknown>[],
+  calls: [] as Array<{ sql: string; params: unknown[] }>
+}));
+
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   transaction: vi.fn(),
@@ -86,6 +100,17 @@ vi.mock('../../../src/db/index.js', () => ({
   // answered, whatever a given test does to mocks.query. Everything else falls
   // through untouched.
   query: (sql: string, params?: unknown[]) => {
+    if (typeof sql === 'string' && sql.includes('duplicate mail check')) {
+      dupState.calls.push({ sql, params: params ?? [] });
+      const rows = sql.includes('duplicate mail check: active order')
+        ? (dupState.activeOrder ? [{ order_id: 'order-active' }] : [])
+        : sql.includes('duplicate mail check: draft')
+          ? (dupState.draft ? [dupState.draft] : [])
+          : sql.includes('duplicate mail check: letters')
+            ? dupState.letters
+            : dupState.orders;
+      return Promise.resolve({ rows, rowCount: rows.length });
+    }
     if (typeof sql === 'string' && sql.includes('SUM(amount_cents)')) {
       return Promise.resolve({
         rows: [{ total: String(capState.chargedTodayCents) }],
@@ -200,6 +225,11 @@ describe('commerceService', () => {
     capState.chargedTodayCents = 0;
     capState.lettersTodayForUser = 0;
     capState.lettersTodayGlobal = 0;
+    dupState.activeOrder = false;
+    dupState.draft = null;
+    dupState.letters = [];
+    dupState.orders = [];
+    dupState.calls = [];
     vi.stubEnv('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', '1');
     mocks.transaction.mockImplementation(async callback => callback({ query: mocks.query }));
     mocks.jitEnabled.mockReturnValue(true);
@@ -3035,6 +3065,102 @@ describe('commerceService', () => {
       const claim = mocks.query.mock.calls.find(([sql]) => String(sql).includes('WITH candidate AS'));
       expect(claim).toBeDefined();
       expect(claim![1]).toEqual(['order-1', 5, 300]);
+    });
+  });
+  describe('the duplicate check before a new checkout (#412)', () => {
+    const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e';
+    const mail = (extra: Record<string, unknown> = {}) => ({
+      mail_type: 'letter',
+      layout_type: 'text_only',
+      postcard_size: null,
+      sender: { name: 'Dee', addressLine1: '1 Main St', city: 'Springfield', state: 'IL', postalCode: '62701' },
+      recipient: { name: 'Sam Rivera', addressLine1: '350 5th Ave', city: 'New York', state: 'NY', postalCode: '10118' },
+      body_text: 'Hi Sam',
+      sign_off: 'Best',
+      header_image_md5: EMPTY_MD5,
+      inline_image_md5: EMPTY_MD5,
+      front_image_md5: EMPTY_MD5,
+      age_seconds: 300,
+      ...extra
+    });
+    const tagged = (label: string) => dupState.calls.filter(call => call.sql.includes(`duplicate mail check: ${label}`));
+
+    beforeEach(() => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('sends_blocked_reason')) return { rows: [{ sends_blocked_reason: null }] };
+        if (sql.includes('SELECT mail_type FROM letter_drafts')) return { rows: [{ mail_type: 'letter' }] };
+        return { rows: [] };
+      });
+      dupState.draft = mail();
+    });
+
+    it('refuses the same mail sent in the last day, before any order or session exists', async () => {
+      dupState.letters = [mail()];
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+        code: 'DUPLICATE_RECENT_MAIL',
+        duplicate: { kind: 'sent', recipientName: 'Sam Rivera', ageSeconds: 300 }
+      });
+
+      expect(mocks.transaction).not.toHaveBeenCalled();
+      expect(mocks.createJitSession).not.toHaveBeenCalled();
+      expect(tagged('active order')[0].params).toEqual(['draft-1', 'user-1', ACTIVE_JIT_STATUSES]);
+      expect(tagged('draft')[0].params).toEqual(['draft-1', 'user-1']);
+      expect(tagged('letters')[0].params).toEqual(['user-1', 'letter', '']);
+      expect(tagged('orders')[0].params).toEqual(['user-1', 'draft-1', 'letter']);
+    });
+
+    it('refuses while a checkout for the same mail is still open', async () => {
+      dupState.orders = [mail({ status: 'checkout_pending' })];
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+        code: 'DUPLICATE_RECENT_MAIL',
+        duplicate: { kind: 'checkout_open' }
+      });
+      expect(mocks.transaction).not.toHaveBeenCalled();
+    });
+
+    it('lets different mail on to the checkout', async () => {
+      dupState.letters = [mail({ body_text: 'Hi Sam, again' })];
+
+      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+      expect(tagged('letters')).toHaveLength(1);
+      expect(mocks.transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('buys another copy when the person asked, without checking', async () => {
+      dupState.letters = [mail()];
+
+      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1', allowDuplicate: true }).catch(() => undefined);
+
+      expect(dupState.calls).toEqual([]);
+      expect(mocks.transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('reuses a draft with an active order without comparing the mail', async () => {
+      dupState.activeOrder = true;
+      dupState.letters = [mail()];
+
+      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+      expect(tagged('active order')).toHaveLength(1);
+      expect(tagged('draft')).toEqual([]);
+      expect(tagged('letters')).toEqual([]);
+      expect(mocks.transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('comes after the account and cap gates', async () => {
+      dupState.letters = [mail()];
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('sends_blocked_reason')) return { rows: [{ sends_blocked_reason: 'payment_disputed' }] };
+        return { rows: [] };
+      });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+        code: 'ACCOUNT_SENDS_BLOCKED'
+      });
+      expect(dupState.calls).toEqual([]);
     });
   });
 });

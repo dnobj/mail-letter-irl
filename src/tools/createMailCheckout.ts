@@ -3,9 +3,15 @@ import { formatAmountForCurrency } from '../config/products.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { createMailCheckoutInputSchema, createMailCheckoutOutputSchema } from '../schemas.js';
 import { createJitCheckout } from '../services/commerceService.js';
+import {
+  DuplicateMailError,
+  duplicateMailMessage,
+  isDuplicateMailError
+} from '../services/duplicateMailService.js';
 
 interface CreateMailCheckoutInput {
   draftId: string;
+  sendAnotherCopy?: boolean;
 }
 
 interface CreateMailCheckoutOutput {
@@ -21,6 +27,13 @@ interface CreateMailCheckoutOutput {
 }
 
 export function friendlyCheckoutError(error: unknown): Error {
+  // #412: server-authored, and the model needs this tool's own retry advice.
+  if (isDuplicateMailError(error)) {
+    return new DuplicateMailError(
+      error.duplicate,
+      duplicateMailMessage(error.duplicate, 'create_mail_checkout')
+    );
+  }
   const source = (error ?? {}) as { code?: string };
   // The helper, not a fifth hand-rolled cast: an unchecked cast asserts the
   // property is a string without verifying it, so a non-string class
@@ -105,7 +118,8 @@ async function handler(
   try {
     const result = await createJitCheckout({
       userId: context.user.userId,
-      draftId: input.draftId
+      draftId: input.draftId,
+      allowDuplicate: input.sendAnotherCopy === true
     });
     const pending = result.status === 'checkout_pending';
     return {
@@ -132,7 +146,7 @@ export const createMailCheckoutTool: McpToolDefinition<
 > = {
   name: 'create_mail_checkout',
   description:
-    'Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward.',
+    'Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.',
   readOnly: false,
   inputSchema: createMailCheckoutInputSchema,
   outputSchema: createMailCheckoutOutputSchema,

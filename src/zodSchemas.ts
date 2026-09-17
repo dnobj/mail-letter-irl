@@ -79,11 +79,13 @@ export const quoteAndPreviewLetterWithImageInputZ = z.object({
 
 export const sendLetterInputZ = z.object({
   draftId: z.string(),
-  confirm: z.boolean()
+  confirm: z.boolean(),
+  sendAnotherCopy: z.boolean().optional().describe("Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.")
 });
 
 export const createMailCheckoutInputZ = z.object({
-  draftId: z.string()
+  draftId: z.string(),
+  sendAnotherCopy: z.boolean().optional().describe("Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.")
 });
 
 export const listLetterPacksInputZ = z.object({});
@@ -160,7 +162,8 @@ export const quoteAndPreviewPostcardInputZ = z.object({
 
 export const sendPostcardInputZ = z.object({
   draftId: z.string(),
-  confirm: z.boolean()
+  confirm: z.boolean(),
+  sendAnotherCopy: z.boolean().optional().describe("Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.")
 });
 
 // ============================================================================

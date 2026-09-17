@@ -60,9 +60,13 @@ describe("Schema Consistency", () => {
       const manifestRequired = (getManifestTool("send_letter")?.inputSchema as Record<string, unknown>)
         .required as string[];
 
-      expect(zodRequired.sort()).toEqual(["confirm", "draftId"]);
-      expect(mcpRequired.sort()).toEqual(["confirm", "draftId"]);
+      // sendAnotherCopy (#412) is optional in every layer: only draftId and
+      // confirm are required.
+      expect(zodRequired.sort()).toEqual(["confirm", "draftId", "sendAnotherCopy"]);
+      expect(mcpRequired.sort()).toEqual(["confirm", "draftId", "sendAnotherCopy"]);
       expect([...manifestRequired].sort()).toEqual(["confirm", "draftId"]);
+      expect(sendLetterInputZ.shape.sendAnotherCopy.isOptional()).toBe(true);
+      expect(toolInputSchemas.send_letter.shape.sendAnotherCopy.isOptional()).toBe(true);
     });
   });
 
@@ -88,11 +92,13 @@ describe("Schema Consistency", () => {
   });
 
   describe("JIT commerce schemas", () => {
-    it("registers create_mail_checkout with only the server-priced draft ID", () => {
-      expect(Object.keys(createMailCheckoutInputZ.shape)).toEqual(["draftId"]);
-      expect(Object.keys(toolInputSchemas.create_mail_checkout.shape)).toEqual(["draftId"]);
+    it("registers create_mail_checkout with the server-priced draft ID and the another-copy flag only", () => {
+      expect(Object.keys(createMailCheckoutInputZ.shape)).toEqual(["draftId", "sendAnotherCopy"]);
+      expect(Object.keys(toolInputSchemas.create_mail_checkout.shape)).toEqual(["draftId", "sendAnotherCopy"]);
+      expect(createMailCheckoutInputZ.shape.sendAnotherCopy.isOptional()).toBe(true);
       const manifestTool = getManifestTool("create_mail_checkout");
       expect(manifestTool).toBeDefined();
+      expect((manifestTool?.inputSchema as any).required).toEqual(["draftId"]);
       expect((manifestTool?.inputSchema as any).properties).not.toHaveProperty("amountCents");
       expect((manifestTool?.inputSchema as any).properties).not.toHaveProperty("priceId");
     });

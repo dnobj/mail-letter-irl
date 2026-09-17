@@ -69,10 +69,12 @@ export const toolInputSchemas = {
   }),
   send_letter: z.object({
     draftId: z.string(),
-    confirm: z.boolean()
+    confirm: z.boolean(),
+    sendAnotherCopy: z.boolean().optional()
   }),
   create_mail_checkout: z.object({
-    draftId: z.string()
+    draftId: z.string(),
+    sendAnotherCopy: z.boolean().optional()
   }),
   list_letter_packs: z.object({}),
   create_pack_checkout: z.object({
@@ -118,7 +120,8 @@ export const toolInputSchemas = {
   }),
   send_postcard: z.object({
     draftId: z.string(),
-    confirm: z.boolean()
+    confirm: z.boolean(),
+    sendAnotherCopy: z.boolean().optional()
   }),
   // Feedback tools
   submit_feature_request: z.object({

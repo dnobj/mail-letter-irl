@@ -24,6 +24,7 @@ import { lockAccountForBalanceChange } from './accountLock.js';
 import { addCreditsToLedgerWithClient } from './creditLedgerService.js';
 import { grantImageEntitlementWithClient } from './imageGenerationLimitService.js';
 import { createMailOrderFromDraftWithClient } from './mailSendService.js';
+import { assertNoRecentDuplicateMail, draftHasActiveOrder } from './duplicateMailService.js';
 import {
   createJitCheckoutSession,
   createPackCheckoutSession,
@@ -106,6 +107,8 @@ export interface CreatePackCheckoutParams {
 export interface CreateJitCheckoutParams {
   userId: string;
   draftId: string;
+  /** The person asked for another copy of mail sent or paid for in the last 24 hours (#412). */
+  allowDuplicate?: boolean;
 }
 
 export interface PurchaseStatusResult {
@@ -970,6 +973,18 @@ export async function createJitCheckout(
     params.userId,
     getJitProductConfig(peekedMailType).amountCents
   );
+
+  // #412: the same mail sent, paid for or awaiting payment in the last 24
+  // hours refuses a NEW checkout unless the person asked for another copy.
+  // Here with the caps, before any order or Stripe session exists. A draft
+  // that already has an active order is a reuse: prepareJitOrder returns that
+  // order, nothing new is bought, and it was checked when it was created.
+  if (
+    !params.allowDuplicate &&
+    !(await draftHasActiveOrder({ query }, { ...params, statuses: ACTIVE_JIT_STATUSES }))
+  ) {
+    await assertNoRecentDuplicateMail({ query }, { userId: params.userId, draftId: params.draftId });
+  }
 
   const prepared = await prepareJitOrder(params);
   // The asymmetry with prepareJitOrder's reuse branch is DELIBERATE (#279).

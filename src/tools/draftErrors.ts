@@ -28,6 +28,11 @@
 
 import { BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
+import {
+  DuplicateMailError,
+  duplicateMailMessage,
+  isDuplicateMailError
+} from '../services/duplicateMailService.js';
 
 export type DraftMailType = 'letter' | 'postcard';
 
@@ -69,6 +74,16 @@ export function friendlyDraftError(
   // in a way that the generic default-deny string is not.
   if (error instanceof SpendLimitError) {
     return new Error(error.message);
+  }
+
+  // #412: the same mail went out recently. The message is server-authored,
+  // and the model needs this tool's own retry advice; the details travel on
+  // to the widget (registerTools.ts).
+  if (isDuplicateMailError(error)) {
+    return new DuplicateMailError(
+      error.duplicate,
+      duplicateMailMessage(error.duplicate, mailType === 'postcard' ? 'send_postcard' : 'send_letter')
+    );
   }
 
   const code = (error as { code?: string })?.code;

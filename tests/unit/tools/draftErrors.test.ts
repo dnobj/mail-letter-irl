@@ -6,6 +6,7 @@ import {
   type DraftMailType
 } from '../../../src/tools/draftErrors.js';
 import { SpendLimitError } from '../../../src/services/betaSpendLimits.js';
+import { DuplicateMailError } from '../../../src/services/duplicateMailService.js';
 
 /**
  * The send surface's redaction guarantee, made exhaustive (#179).
@@ -185,6 +186,33 @@ describe('spend-limit wording survives', () => {
     const lookalike = Object.assign(new Error('Please try again tomorrow.'), {
       code: 'ACCOUNT_DAILY_MAIL_CAP'
     });
+    expect(friendlyDraftError(lookalike, 'draft-1', 'letter').message).toBe(
+      'Unable to send letter. Please contact Letter IRL support.'
+    );
+  });
+});
+
+/**
+ * The duplicate refusal (#412) is server-authored and must reach the model
+ * with the right tool's retry advice and its details intact, for the widget.
+ */
+describe('duplicate refusals survive', () => {
+  const duplicate = { kind: 'sent' as const, mailType: 'letter' as const, recipientName: 'Sam Rivera', ageSeconds: 600 };
+
+  it.each<[DraftMailType, string]>([
+    ['letter', 'call send_letter again with the same draftId, confirm: true and sendAnotherCopy: true.'],
+    ['postcard', 'call send_postcard again with the same draftId, confirm: true and sendAnotherCopy: true.']
+  ])('%s: keeps the details and names the right tool', (mailType, advice) => {
+    const source = new DuplicateMailError({ ...duplicate, mailType });
+    const friendly = friendlyDraftError(source, 'draft-1', mailType);
+    expect(friendly).toBeInstanceOf(DuplicateMailError);
+    expect((friendly as DuplicateMailError).duplicate).toEqual({ ...duplicate, mailType });
+    expect(friendly.message).toContain('This same ' + mailType + ' to Sam Rivera was already sent from this account 10 minutes ago.');
+    expect(friendly.message).toContain(advice);
+  });
+
+  it('is keyed on the type, not the code', () => {
+    const lookalike = Object.assign(new Error('Possible duplicate: trust me'), { code: 'DUPLICATE_RECENT_MAIL' });
     expect(friendlyDraftError(lookalike, 'draft-1', 'letter').message).toBe(
       'Unable to send letter. Please contact Letter IRL support.'
     );

@@ -1,6 +1,6 @@
 # Letter and Postcard Send Flow
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 17, 2026
 **Purpose:** Draft, payment, outbox, and provider workflow for letters and postcards
 
 This document describes the current draft, payment, outbox, and provider workflow for letters and postcards.
@@ -27,13 +27,36 @@ The preview response includes a `draftId`. Sending is a separate, explicit tool 
 3. returns the existing order if the draft was already consumed;
 4. inserts the Letter IRL order;
 5. locks and deducts prepaid sends from the user's ledger;
-6. marks the draft consumed and links it to the order;
-7. inserts one `letter_jobs` outbox row;
-8. commits.
+6. checks the daily caps, then refuses the same mail sent recently (below), unless the caller asked for another copy;
+7. marks the draft consumed and links it to the order;
+8. inserts one `letter_jobs` outbox row;
+9. commits.
 
 Any error rolls back every effect. An insufficient balance therefore creates no order, consumes no draft, inserts no job, and deducts no sends.
 
 Database constraints enforce one outbox row and one stable idempotency key per letter. Concurrent calls serialize on the draft lock, so the second call returns the first order.
+
+## The Same Mail Twice
+
+Each draft is sent at most once, but two drafts can hold the same mail. On ChatGPT web a preview call approved with "Allow once" can finish late, after the preview card has made its own draft (#411). If the person sends one draft from the card and confirms the other in the chat, two identical letters are mailed and paid for (#412).
+
+So a send from balance, and a new Pay & Send checkout, is refused when the account has the same mail from the last 24 hours (a draft's whole lifetime), unless the call passes `sendAnotherCopy: true`. The check lives in `src/services/duplicateMailService.ts`.
+
+- **The same mail.** Every one of these matches, ignoring capitalization and runs of whitespace:
+  - the kind (letter or postcard), and the letter's layout or the postcard's size;
+  - the recipient's name and full address, and the return address;
+  - the body and sign-off, or the postcard message;
+  - the printed image, compared by the MD5 of the processed image data rather than by its link, because the two drafts can reach one picture through different links.
+- **Already out.** Any of these counts:
+  - mail created from the account, unless it failed or was cancelled;
+  - a Pay & Send order that is paid but not yet mail;
+  - a Pay & Send checkout that is still open.
+- **Where it runs.**
+  - For a send from balance, the check runs after the deduction, beside the daily caps, because the account row is already locked there, so two sends cannot both pass. A refusal rolls the send back.
+  - For Pay & Send, it runs in `createJitCheckout` with the caps, before any order or Stripe session exists.
+  - A draft that already has an active order is a reuse, and is not checked again.
+  - Pay & Send fulfilment, which runs after the customer has paid, is never checked.
+- **The refusal.** It is an MCP error result whose text starts with `Possible duplicate:`. The text tells the model what went out, when, and to ask the user before repeating the call with `sendAnotherCopy: true`. `_meta["letterirl/duplicateMail"]` carries `{kind, mailType, recipientName, ageMinutes}` for the preview cards, which say what went out and turn the button into **Send another copy** or **Pay for another copy**.
 
 ## Immediate Provider Submission
 
@@ -87,6 +110,7 @@ Generated images receive a capability URL backed by a private Railway bucket. Th
 ## Required Tests
 
 - duplicate and concurrent send calls create one order and one deduction;
+- a second draft of the same mail is refused within 24 hours and sent only with `sendAnotherCopy: true` (`tests/integration/duplicateMail.postgres.test.ts`);
 - insufficient balance rolls back all effects;
 - `429`, `503`, timeout, and network failures are held as ambiguous rather than resubmitted;
 - a terminal failure returns the customer's Letter Pack exactly once, and an ambiguous one never does;

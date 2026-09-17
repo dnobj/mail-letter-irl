@@ -203,7 +203,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">postcard t24</p>
+      <p class="rev">postcard t25</p>
     </div>
 
     <script type="module">
@@ -565,6 +565,79 @@
           (entry) => entry && entry.type === "text" && typeof entry.text === "string",
         );
         return part ? part.text : "";
+      }
+
+      // ---- The same mail twice (#412) ------------------------------------
+      //
+      // The server refuses a send or a checkout for mail that went out, was
+      // paid for or is awaiting payment in the last 24 hours, unless the
+      // person asks for another copy. The refusal comes back as an error
+      // result with its details in _meta. Its text starts with
+      // DUPLICATE_PREFIX, which is all that is left when a host drops _meta
+      // or turns the error into a rejection.
+      const DUPLICATE_META_KEY = "letterirl/duplicateMail";
+      const DUPLICATE_PREFIX = "Possible duplicate:";
+      const MAIL_NOUN = "postcard";
+      const ANOTHER_COPY_SEND_LABEL = "Send another copy";
+      const ANOTHER_COPY_PAY_LABEL = "Pay for another copy";
+      // Set once the person has been told about the earlier copy. From then
+      // on, this card's send or checkout asks for another copy.
+      let anotherCopy = false;
+
+      // The refusal's details, {} when only its text says so, or null.
+      function duplicateDetails(result, error) {
+        const details = result?._meta?.[DUPLICATE_META_KEY];
+        if (details && typeof details === "object") return details;
+        const text = error ? String(error?.message ?? "") : resultText(result);
+        return text.startsWith(DUPLICATE_PREFIX) ? {} : null;
+      }
+
+      function duplicateAge(minutes) {
+        if (typeof minutes !== "number" || !Number.isFinite(minutes)) return "recently";
+        if (minutes < 1) return "less than a minute ago";
+        if (minutes < 60) return minutes === 1 ? "1 minute ago" : `${minutes} minutes ago`;
+        const hours = Math.floor(minutes / 60);
+        return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+      }
+
+      function duplicateNotice(details) {
+        const name =
+          typeof details.recipientName === "string" && details.recipientName
+            ? ` to ${details.recipientName}`
+            : "";
+        const when = duplicateAge(details.ageMinutes);
+        if (details.kind === "sent") {
+          return `You already sent this same ${MAIL_NOUN}${name} ${when}. Send another copy only if you want two.`;
+        }
+        if (details.kind === "paid") {
+          return `You already paid to send this same ${MAIL_NOUN}${name} ${when}. Send another copy only if you want two.`;
+        }
+        if (details.kind === "checkout_open") {
+          return `A checkout for this same ${MAIL_NOUN}${name} was started ${when} and is still open. If you pay for both, two copies are mailed.`;
+        }
+        return `This same ${MAIL_NOUN} was sent or paid for recently. Send another copy only if you want two.`;
+      }
+
+      // Nothing was sent or charged. Says why, and turns the button that was
+      // pressed into the another-copy button.
+      function showDuplicate(details, action) {
+        anotherCopy = true;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.textContent = duplicateNotice(details);
+        errorMessage.style.display = "block";
+        if (action === "send") {
+          const sendButton = document.getElementById("send-button");
+          sendButton.classList.remove("loading");
+          sendButton.disabled = false;
+          document.getElementById("send-button-text").textContent = ANOTHER_COPY_SEND_LABEL;
+          sendInProgress = false;
+        } else {
+          const payButton = document.getElementById("pay-send-button");
+          payButton.classList.remove("loading");
+          payButton.disabled = false;
+          document.getElementById("pay-send-button-text").textContent = ANOTHER_COPY_PAY_LABEL;
+          checkoutInProgress = false;
+        }
       }
 
       async function handleCreatePreview() {
@@ -1128,7 +1201,7 @@
         if (!sendInProgress && !checkoutInProgress) {
           sendButton.style.display = effectiveCanSendNow ? "flex" : "none";
           sendButton.disabled = !effectiveCanSendNow;
-          sendButtonText.textContent = "Send Postcard";
+          sendButtonText.textContent = anotherCopy ? ANOTHER_COPY_SEND_LABEL : "Send Postcard";
 
           const payAndSend = sendEligibility?.payAndSend;
           const letterPack = sendEligibility?.letterPack;
@@ -1145,7 +1218,9 @@
           paySendButton.style.display = payAndSendAvailable ? "flex" : "none";
           paySendButton.disabled = !payAndSendAvailable;
           if (payAndSendAvailable && payAndSend.amountCents) {
-            paySendButtonText.textContent = `Pay & Send (${formatPayAmount(payAndSend)})`;
+            paySendButtonText.textContent = anotherCopy
+              ? ANOTHER_COPY_PAY_LABEL
+              : `Pay & Send (${formatPayAmount(payAndSend)})`;
           }
           const packsBuyable = !effectiveCanSendNow && Boolean(letterPack?.available);
           buyPackButton.style.display =
@@ -1186,10 +1261,18 @@
         const sentDraftId = currentDraftId;
         try {
           // Call send_postcard via OpenAI callTool
-          const result = await window.openai.callTool("send_postcard", {
-            draftId: sentDraftId,
-            confirm: true,
-          });
+          const sendArgs = { draftId: sentDraftId, confirm: true };
+          if (anotherCopy) sendArgs.sendAnotherCopy = true;
+          const result = await window.openai.callTool("send_postcard", sendArgs);
+          // A refused send comes back as an error result, not a rejection.
+          if (result?.isError) {
+            const duplicate = duplicateDetails(result, null);
+            if (duplicate) {
+              showDuplicate(duplicate, "send");
+              return;
+            }
+            throw new Error(resultText(result) || "The postcard was not sent.");
+          }
 
           // Extract orderId
           const orderId =
@@ -1224,6 +1307,11 @@
           sendButtonText.innerHTML = "Postcard Sent!";
           // Keep button disabled
         } catch (error) {
+          const duplicate = duplicateDetails(null, error);
+          if (duplicate) {
+            showDuplicate(duplicate, "send");
+            return;
+          }
           // Show error message
           errorMessage.textContent = `Failed to send: ${error.message || "Unknown error"}`;
           errorMessage.style.display = "block";
@@ -1489,11 +1577,18 @@
         buttonText.innerHTML =
           '<span class="spinner"></span> Preparing checkout...';
         try {
-          const result = toolData(
-            await window.openai.callTool("create_mail_checkout", {
-              draftId: currentDraftId,
-            }),
-          );
+          const checkoutArgs = { draftId: currentDraftId };
+          if (anotherCopy) checkoutArgs.sendAnotherCopy = true;
+          const raw = await window.openai.callTool("create_mail_checkout", checkoutArgs);
+          if (raw?.isError) {
+            const duplicate = duplicateDetails(raw, null);
+            if (duplicate) {
+              showDuplicate(duplicate, "pay");
+              return;
+            }
+            throw new Error(resultText(raw) || "Checkout URL was not returned");
+          }
+          const result = toolData(raw);
           if (!result.checkoutUrl) {
             throw new Error(result.message || "Checkout URL was not returned");
           }
@@ -1548,6 +1643,11 @@
             buttonText.textContent = "Use the checkout link below";
           }
         } catch (error) {
+          const duplicate = duplicateDetails(null, error);
+          if (duplicate) {
+            showDuplicate(duplicate, "pay");
+            return;
+          }
           errorMessage.textContent = `Unable to open checkout: ${error.message || "Unknown error"}`;
           errorMessage.style.display = "block";
           button.classList.remove("loading");

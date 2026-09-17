@@ -8,6 +8,11 @@ import { LetterIrlServer } from "../server.js";
 import { toolInputSchemas } from "./toolSchemas.js";
 import { WIDGET_TEMPLATE_VERSION, widgetTemplateUri } from "./widgetUris.js";
 import {
+  DUPLICATE_MAIL_META_KEY,
+  type DuplicateMailError,
+  isDuplicateMailError
+} from "../services/duplicateMailService.js";
+import {
   quoteAndPreviewInputZ,
   quoteAndPreviewLetterWithHeaderImageInputZ,
   quoteAndPreviewLetterWithImageInputZ,
@@ -845,12 +850,20 @@ export async function registerLetterTools(
 
         console.log(`Tool request ${tool.name} (mobile: ${isMobile ?? 'unknown'})`);
 
-        const { result, meta } = await appServer.execute({
-          toolName: tool.name,
-          input: args,
-          userId,
-          isMobile
-        });
+        let executed;
+        try {
+          executed = await appServer.execute({
+            toolName: tool.name,
+            input: args,
+            userId,
+            isMobile
+          });
+        } catch (error) {
+          // #412: a refusal the card acts on, so its details travel with it.
+          if (isDuplicateMailError(error)) return buildDuplicateMailToolResult(error);
+          throw error;
+        }
+        const { result, meta } = executed;
 
         const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
 
@@ -885,6 +898,28 @@ export async function registerLetterTools(
     );
   }
 
+}
+
+/**
+ * The refusal of a send or checkout for mail that went out recently (#412).
+ * An error result, so the model reads it as "nothing happened", with the
+ * details the card needs in _meta. Error results skip output-schema
+ * validation, so nothing here has to match a tool's output schema.
+ */
+export function buildDuplicateMailToolResult(error: DuplicateMailError) {
+  const { kind, mailType, recipientName, ageSeconds } = error.duplicate;
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: error.message }],
+    _meta: {
+      [DUPLICATE_MAIL_META_KEY]: {
+        kind,
+        mailType,
+        recipientName,
+        ageMinutes: Math.floor(Math.max(0, ageSeconds) / 60)
+      }
+    }
+  };
 }
 
 export function summarizeToolResult(

@@ -7,6 +7,7 @@ import { deductCreditsFromLedgerWithClient } from './creditLedgerService.js';
 import { isBetaAccessAllowed, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
 import { assertMailWithinDailyCaps } from './betaSpendLimits.js';
 import { createLetterJobWithClient } from './letterJobService.js';
+import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import type { Letter, LetterDraft, LetterJob, Order, PostcardDraft } from './types.js';
 
 export type SendMailType = 'letter' | 'postcard';
@@ -27,6 +28,12 @@ export interface CreateMailOrderParams {
   userId: string;
   mailType: SendMailType;
   funding?: MailFunding;
+  /**
+   * The person asked for another copy of mail sent or paid for in the last
+   * 24 hours (#412). Prepaid sends only; Pay & Send is checked when its
+   * checkout is created.
+   */
+  allowDuplicate?: boolean;
 }
 
 export interface CreateMailOrderResult {
@@ -320,6 +327,21 @@ export async function createMailOrderFromDraftWithClient(
     // and refusing here would strand their money. Pay & Send is capped in
     // createJitCheckout instead, before any charge exists.
     await assertMailWithinDailyCaps(client, params.userId, 0);
+
+    // #412: the same mail sent, paid for or awaiting payment in the last 24
+    // hours refuses this send unless the person asked for another copy. Here
+    // for the reason the caps are: the account row is already locked, so two
+    // sends from one account cannot both pass. The letters row above is this
+    // send, so it is excluded; a throw rolls everything back. Prepaid only,
+    // like the caps: jit_order funding runs after the customer has paid, and
+    // Pay & Send is checked in createJitCheckout instead.
+    if (!params.allowDuplicate) {
+      await assertNoRecentDuplicateMail(client, {
+        userId: params.userId,
+        draftId: params.draftId,
+        excludeLetterId: letterId
+      });
+    }
   } else {
     creditsRemaining = await loadCreditsRemaining(client, params.userId);
   }

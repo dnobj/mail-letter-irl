@@ -64,3 +64,24 @@ describe('server instructions: calls that return nothing', () => {
     }
   });
 });
+
+/**
+ * The duplicate line of the server instructions (#412).
+ *
+ * A send or checkout refused because the same mail went out recently must not
+ * be repeated with sendAnotherCopy unless the user asks for another copy.
+ */
+describe('server instructions: the same mail twice', () => {
+  const line = LETTER_IRL_SERVER_INSTRUCTIONS.split('\n').find(entry => /sendAnotherCopy/.test(entry));
+
+  it('names every tool that can refuse, and the flag', () => {
+    expect(line).toBeDefined();
+    expect(line).toMatch(/send_letter, send_postcard or create_mail_checkout/);
+    expect(line).toMatch(/already sent, paid for, or is awaiting payment/);
+  });
+
+  it('allows another copy only when the user asks for one', () => {
+    expect(line).toMatch(/tell the user/);
+    expect(line).toMatch(/sendAnotherCopy: true only if they ask for another copy/);
+  });
+});
