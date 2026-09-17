@@ -28,9 +28,11 @@ ChatGPT, and manage their account on letterirl.com.
 
 The MCP surface is 22 tools and 6 widgets ([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)).
 Tool names and schemas are treated as stable compatibility contracts. Widget template URIs are
-versioned (`WIDGET_TEMPLATE_VERSION`, 33 on `dev`). Since v32 the two image letter tools each have
+versioned (`WIDGET_TEMPLATE_VERSION`, 34 on `dev`). Since v32 the two image letter tools each have
 their own template name, served from the letter card (#411). Since v33 every card shows the
 website's mark, and an empty preview or pack card suggests a higher thinking effort to Instant users.
+Since v34 an empty image letter or postcard card lets the person choose or upload an image that the
+card cannot pass back, and previews it by link (#414).
 
 ## Environments
 

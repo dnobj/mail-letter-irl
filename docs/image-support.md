@@ -25,6 +25,15 @@ Images reach a preview tool in one of these ways, in the order the server instru
    `recent_uploads`, so the next preview can use it even if the model drops the URL. That link is
    readable for at most six hours and deleted 24 hours after the last upload (#282).
 
+   A request whose `image` names a picture the server cannot open is stricter (#414). Such a
+   request carries a string other than `""` (a sandbox path such as `/mnt/data/photo.png`, or a mobile
+   placeholder such as `chat_upload://image_0`) or a file object without a download address. It uses a
+   recent upload only if that upload is at most ten minutes old, which covers the upload card's own
+   recovery. An older upload may be a different picture, so the tool asks for the image instead. The
+   served schema's preprocess keeps such a string as a marker file object
+   (`src/utils/imageFileParam.ts`), so the JSON schema ChatGPT reads is unchanged. The resolver is
+   `src/services/previewImageSource.ts`.
+
 **Letter IRL image generation.** `generate_image_for_mail` generates in-turn with the OpenAI Images API
 when the user has Letter IRL image generations left (granted by packs, Pay & Send orders and a
 one-time starter allowance) and the global daily ceiling allows it. The image is stored in the private

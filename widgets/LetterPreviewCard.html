@@ -123,6 +123,16 @@
           <button class="send-button" id="retry-button" style="display: none">
             <span id="retry-button-text">Create my preview</span>
           </button>
+          <!-- An image attached or generated in the chat reaches this card as
+               a reference it cannot pass back (#414). The person picks the
+               image again, and the card previews it by link. -->
+          <button class="send-button" id="choose-image-button" style="display: none">
+            <span id="choose-image-button-text">Choose from library</span>
+          </button>
+          <button class="send-button secondary" id="upload-image-button" style="display: none">
+            <span id="upload-image-button-text">Upload the image</span>
+          </button>
+          <input type="file" id="image-file-input" accept="image/png,image/jpeg,image/webp" hidden />
           <!-- Only after a wait that ran out. A card cannot tell which model
                is selected (neither window.openai nor the request metadata
                says), so the tip names the setting where the loss shows up. -->
@@ -169,7 +179,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t23</p>
+      <p class="rev">letter t24</p>
     </div>
 
     <script type="module">
@@ -234,6 +244,24 @@
       // the card has no preview by then.
       const RETRY_TIMEOUT_MS = 60000;
       const RETRY_LABEL = "Create my preview";
+      // ---- Recovery with an image picked on the card (#414) ---------------
+      //
+      // ChatGPT passes an image attached or generated in the chat to this
+      // card as a sandbox path, which the server cannot open. The person
+      // picks the image again, from the ChatGPT library or from the device,
+      // and the card previews it by link: getFileDownloadUrl, then the
+      // stamped tool with imageUrl in place of image, as the upload card does.
+      const CHOOSE_LABEL = "Choose from library";
+      const UPLOAD_LABEL = "Upload the image";
+      const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+      const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+      // The library picker waits on the person, so it has no timeout. If the
+      // host never answers, the buttons come back after two minutes, and a
+      // pick that answers after that is ignored.
+      const PICKER_STUCK_MS = 120000;
+      // Bumped by every image pick or upload, so a late answer from an older
+      // one changes nothing.
+      let imageFlow = 0;
       // The tools that draw this card. The server stamps the one that drew it
       // into the page (stampPreviewTool in src/mcp/registerTools.ts); a page
       // without that stamp offers no retry.
@@ -276,13 +304,22 @@
         );
       }
 
-      // The call this card can repeat faithfully, or null.
-      function retryRequest() {
+      // The stamped tool and the host's arguments, when they describe a whole
+      // letter; otherwise null.
+      function hostRequest() {
         const tool = previewTool();
         const input = window.openai?.toolInput;
         if (!tool || !input || typeof input !== "object" || Array.isArray(input)) return null;
         if (!input.recipient || typeof input.recipient !== "object") return null;
         if (typeof input.bodyText !== "string" || typeof input.signOff !== "string") return null;
+        return { tool, input };
+      }
+
+      // The call this card can repeat faithfully, or null.
+      function retryRequest() {
+        const host = hostRequest();
+        if (!host) return null;
+        const { tool, input } = host;
         // Image arguments on the text-only template mean the page was drawn
         // for an image letter. Repeating the call would drop the image, so the
         // card asks for the preview again in the chat instead.
@@ -296,8 +333,35 @@
         return { tool, args: input };
       }
 
+      // The call to make with an image the person picks again, when the
+      // host's image is the only thing this card cannot pass back; otherwise
+      // null. Its arguments leave the image out, and the pick adds imageUrl.
+      function imageRequest() {
+        const host = hostRequest();
+        if (!host || host.tool === "quote_and_preview_letter") return null;
+        if (imageArgumentRepeatable(host.input.image)) return null;
+        const { image, imageUrl, ...args } = host.input;
+        return { tool: host.tool, args };
+      }
+
       function isHttpsUrl(value) {
         return typeof value === "string" && /^https:\/\//i.test(value);
+      }
+
+      function canPreviewByLink() {
+        return (
+          Boolean(imageRequest()) &&
+          typeof window.openai?.callTool === "function" &&
+          typeof window.openai?.getFileDownloadUrl === "function"
+        );
+      }
+
+      function canChooseImage() {
+        return canPreviewByLink() && typeof window.openai?.selectFiles === "function";
+      }
+
+      function canUploadImage() {
+        return canPreviewByLink() && typeof window.openai?.uploadFile === "function";
       }
 
       // The tool output this card is drawing: its own preview if it made one,
@@ -395,12 +459,18 @@
         document.getElementById("send-button").style.display = "none";
         const canRetry =
           Boolean(retryRequest()) && typeof window.openai?.callTool === "function";
+        const canChoose = canChooseImage();
+        const canUpload = canUploadImage();
+        let next = "Otherwise, ask for the preview again in the chat.";
+        if (canRetry) next = "Otherwise, create the preview again.";
+        else if (canChoose && canUpload) next = "Otherwise, choose the image from your ChatGPT library or upload it again, and this card creates the preview.";
+        else if (canChoose) next = "Otherwise, choose the image from your ChatGPT library, and this card creates the preview.";
+        else if (canUpload) next = "Otherwise, upload the image again, and this card creates the preview.";
         document.getElementById("empty-message").textContent =
-          "No preview is showing on this card. If this letter was already sent, there is nothing more to do here. " +
-          (canRetry
-            ? "Otherwise, create the preview again."
-            : "Otherwise, ask for the preview again in the chat.");
+          "No preview is showing on this card. If this letter was already sent, there is nothing more to do here. " + next;
         document.getElementById("retry-button").style.display = canRetry ? "flex" : "none";
+        document.getElementById("choose-image-button").style.display = canChoose ? "flex" : "none";
+        document.getElementById("upload-image-button").style.display = canUpload ? "flex" : "none";
         // A reopened card is empty because the host does not replay results,
         // not because a call was lost.
         document.getElementById("empty-hint").style.display = resumed ? "none" : "block";
@@ -418,6 +488,8 @@
         document.getElementById("id-value").textContent = orderId || "—";
         document.getElementById("send-button").style.display = "none";
         document.getElementById("retry-button").style.display = "none";
+        document.getElementById("choose-image-button").style.display = "none";
+        document.getElementById("upload-image-button").style.display = "none";
         document.getElementById("empty-hint").style.display = "none";
         document.getElementById("empty-message").textContent = kept.sent
           ? "This letter was sent to the printer from this card. Ask for its status in the chat."
@@ -474,10 +546,23 @@
         if (retryBusy || dataLoaded) return;
         const request = retryRequest();
         if (!request || typeof window.openai?.callTool !== "function") return;
-        const button = document.getElementById("retry-button");
-        const buttonText = document.getElementById("retry-button-text");
-        const errorMessage = document.getElementById("error-message");
         retryBusy = true;
+        try {
+          await runPreview(
+            request,
+            document.getElementById("retry-button"),
+            document.getElementById("retry-button-text"),
+            RETRY_LABEL,
+          );
+        } finally {
+          retryBusy = false;
+        }
+      }
+
+      // Calls the preview tool from the card and draws the result the way
+      // render() draws the host's. The caller holds retryBusy.
+      async function runPreview(request, button, buttonText, label) {
+        const errorMessage = document.getElementById("error-message");
         button.disabled = true;
         button.classList.add("loading");
         buttonText.innerHTML = '<span class="spinner"></span> Creating preview...';
@@ -515,10 +600,143 @@
           }
         } finally {
           clearTimeout(timer);
-          retryBusy = false;
           button.disabled = false;
           button.classList.remove("loading");
-          buttonText.textContent = RETRY_LABEL;
+          buttonText.textContent = label;
+        }
+      }
+
+      function showImageError(text) {
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.textContent = text;
+        errorMessage.style.display = "block";
+      }
+
+      function setImageButtonsDisabled(disabled) {
+        document.getElementById("choose-image-button").disabled = disabled;
+        document.getElementById("upload-image-button").disabled = disabled;
+      }
+
+      // Previews a picked or uploaded file by link. The caller holds
+      // retryBusy.
+      async function previewFile(fileId, flow, button, buttonText, label) {
+        let url = null;
+        try {
+          const result = await window.openai.getFileDownloadUrl({ fileId });
+          url = result?.downloadUrl || result?.download_url || null;
+        } catch (error) {
+          url = null;
+        }
+        if (flow !== imageFlow || dataLoaded) return;
+        const request = imageRequest();
+        if (!request) return;
+        if (!isHttpsUrl(url)) {
+          showImageError("Unable to get a link to that image. Please try again.");
+          return;
+        }
+        await runPreview(
+          { tool: request.tool, args: { ...request.args, imageUrl: url } },
+          button,
+          buttonText,
+          label,
+        );
+      }
+
+      async function handleChooseImage() {
+        if (retryBusy || dataLoaded || !canChooseImage()) return;
+        const flow = ++imageFlow;
+        const button = document.getElementById("choose-image-button");
+        const buttonText = document.getElementById("choose-image-button-text");
+        retryBusy = true;
+        setImageButtonsDisabled(true);
+        buttonText.innerHTML = '<span class="spinner"></span> Opening your library...';
+        document.getElementById("error-message").style.display = "none";
+        const stuck = setTimeout(() => {
+          if (flow !== imageFlow) return;
+          imageFlow += 1;
+          retryBusy = false;
+          setImageButtonsDisabled(false);
+          buttonText.textContent = CHOOSE_LABEL;
+          showImageError("Your library did not open. Please try again.");
+        }, PICKER_STUCK_MS);
+        try {
+          let files = null;
+          try {
+            files = await window.openai.selectFiles();
+          } catch (error) {
+            files = null;
+          }
+          // A preview that arrived meanwhile ends the pick.
+          if (flow !== imageFlow || dataLoaded) return;
+          clearTimeout(stuck);
+          const picked = Array.isArray(files) ? files[0] : null;
+          const fileId = picked?.fileId || picked?.file_id;
+          if (typeof fileId !== "string" || !fileId) {
+            showImageError("No image was chosen.");
+            return;
+          }
+          const mimeType = picked.mimeType || picked.mime_type;
+          if (mimeType && !IMAGE_TYPES.includes(mimeType)) {
+            showImageError("That file is not a JPEG, PNG or WebP image.");
+            return;
+          }
+          await previewFile(fileId, flow, button, buttonText, CHOOSE_LABEL);
+        } finally {
+          clearTimeout(stuck);
+          if (flow === imageFlow) {
+            retryBusy = false;
+            setImageButtonsDisabled(false);
+            buttonText.textContent = CHOOSE_LABEL;
+          }
+        }
+      }
+
+      function handleUploadImage() {
+        if (retryBusy || dataLoaded || !canUploadImage()) return;
+        document.getElementById("image-file-input").click();
+      }
+
+      async function handleImageFile(event) {
+        const input = event.target;
+        const file = input.files && input.files[0];
+        input.value = "";
+        if (!file || retryBusy || dataLoaded || !canUploadImage()) return;
+        if (!IMAGE_TYPES.includes(file.type)) {
+          showImageError("That file is not a JPEG, PNG or WebP image.");
+          return;
+        }
+        if (file.size > MAX_IMAGE_BYTES) {
+          showImageError("That image is larger than 10 MB.");
+          return;
+        }
+        const flow = ++imageFlow;
+        const button = document.getElementById("upload-image-button");
+        const buttonText = document.getElementById("upload-image-button-text");
+        retryBusy = true;
+        setImageButtonsDisabled(true);
+        buttonText.innerHTML = '<span class="spinner"></span> Uploading...';
+        document.getElementById("error-message").style.display = "none";
+        try {
+          let fileId = null;
+          try {
+            const uploaded = await window.openai.uploadFile(file);
+            fileId = uploaded?.fileId || uploaded?.file_id || null;
+          } catch (error) {
+            showImageError(`Unable to upload the image: ${error?.message || "Unknown error"}`);
+            return;
+          }
+          if (dataLoaded) return;
+          if (typeof fileId !== "string" || !fileId) {
+            showImageError("The upload did not return a file.");
+            return;
+          }
+          await previewFile(fileId, flow, button, buttonText, UPLOAD_LABEL);
+        } finally {
+          if (flow === imageFlow) {
+            retryBusy = false;
+            setImageButtonsDisabled(false);
+            buttonText.textContent = UPLOAD_LABEL;
+          }
         }
       }
 
@@ -1431,6 +1649,15 @@
       document
         .getElementById("retry-button")
         .addEventListener("click", handleCreatePreview);
+      document
+        .getElementById("choose-image-button")
+        .addEventListener("click", handleChooseImage);
+      document
+        .getElementById("upload-image-button")
+        .addEventListener("click", handleUploadImage);
+      document
+        .getElementById("image-file-input")
+        .addEventListener("change", handleImageFile);
       document
         .getElementById("check-status-button")
         .addEventListener("click", () => {
