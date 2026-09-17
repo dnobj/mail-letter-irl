@@ -360,6 +360,7 @@ describe.each([LETTER, POSTCARD])('$file recovery from a lost preview call (#411
 
     expect(harness.calls).toEqual([{ name: spec.tool, args: spec.args() }]);
     expect(harness.visible('empty-state')).toBe(false);
+    expect(harness.visible('empty-hint')).toBe(false);
     expect(harness.text('id-label')).toBe('Draft');
     expect(harness.text('id-value')).toBe('draft_retry_0001');
     expect(harness.text('status-pill')).toBe('Ready to send');
@@ -412,6 +413,7 @@ describe.each([LETTER, POSTCARD])('$file recovery from a lost preview call (#411
     await harness.deliverHostResult(spec.output('draft_host_0001'));
 
     expect(harness.visible('empty-state')).toBe(false);
+    expect(harness.visible('empty-hint')).toBe(false);
     expect(harness.visible('send-button')).toBe(true);
     expect(harness.text('id-value')).toBe('draft_host_0001');
   });

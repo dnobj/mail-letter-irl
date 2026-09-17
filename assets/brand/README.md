@@ -34,8 +34,8 @@ Since widget template v33 the six ChatGPT widgets show **the website's mark**, t
 the website's navbar and footer (`public/logo.jpg` in `letter-irl-website`), so the cards
 match the site. It is a different drawing from the design-tool mark above.
 
-- `website/logo.jpg` is a copy of that file, taken from the website's `main` branch in
-  September 2026. It is a JPEG on white.
+- `website/logo.jpg` is a copy of that file, taken from the website's `main` branch at
+  `bc81767` (the file itself last changed in `97fa271`). It is a JPEG on white.
 - `scripts/build-widget-logo.ts` makes the white transparent and trims the mark. It writes
   `png/widget-logo-light.png` and `png/widget-logo-dark.png` at 4x the header size of
   22.5 by 14 CSS pixels. The dark one lifts the blues 34% toward white, as the old dark mark

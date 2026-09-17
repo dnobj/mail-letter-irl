@@ -174,26 +174,38 @@ async function main() {
   const { width, height } = await sharp(light).metadata();
   if (!width || !height) throw new Error("could not read the rendered logo size");
 
-  await fs.mkdir(OUT_DIR, { recursive: true });
-  await fs.writeFile(path.join(OUT_DIR, "widget-logo-light.png"), light);
-  await fs.writeFile(path.join(OUT_DIR, "widget-logo-dark.png"), dark);
-
   const logoRule =
     `.logo{width:${width / SCALE}px;height:${height / SCALE}px;flex:none;display:block;` +
     `background:url("${dataUri(light)}") center/contain no-repeat}`;
   const darkRule = `.dark .logo{background-image:url("${dataUri(dark)}")}`;
 
+  // Every widget is rewritten in memory first, so a widget that does not have
+  // exactly one of each piece stops the run before anything is written.
+  const count = (text: string, pattern: RegExp) => (text.match(pattern) ?? []).length;
+  const rewrites: Array<{ file: string; name: string; html: string; next: string }> = [];
   const files = (await fs.readdir(WIDGET_DIR)).filter((name) => name.endsWith(".html"));
   for (const name of files) {
     const file = path.join(WIDGET_DIR, name);
     const html = await fs.readFile(file, "utf-8");
-    if (!/^[ \t]*\.logo\{[^\n]*\}\r?$/m.test(html)) throw new Error(`${name} has no .logo rule`);
+    const logoRules = count(html, /^[ \t]*\.logo\{[^\n]*\}\r?$/gm);
+    const darkRules = count(html, /^[ \t]*\.dark \.logo\{[^\n]*\}\r?$/gm);
+    const spans = count(html, /<span class="logo"[^>]*>/g);
+    if (logoRules !== 1 || darkRules > 1 || spans !== 1) {
+      throw new Error(`${name}: expected one .logo rule, at most one .dark .logo rule and one logo span; found ${logoRules}, ${darkRules}, ${spans}`);
+    }
     const next = html
       .replace(/^[ \t]*\.dark \.logo\{[^\n]*\}\r?\n/m, "")
       .replace(/^([ \t]*)\.logo\{[^\n]*\}(\r?)$/m, (_match, indent: string, cr: string) =>
         `${indent}${logoRule}${cr}\n${indent}${darkRule}${cr}`
       )
       .replace(/<span class="logo"[^>]*>[\s\S]*?<\/span>/, '<span class="logo" aria-hidden="true"></span>');
+    rewrites.push({ file, name, html, next });
+  }
+
+  await fs.mkdir(OUT_DIR, { recursive: true });
+  await fs.writeFile(path.join(OUT_DIR, "widget-logo-light.png"), light);
+  await fs.writeFile(path.join(OUT_DIR, "widget-logo-dark.png"), dark);
+  for (const { file, name, html, next } of rewrites) {
     if (next !== html) await fs.writeFile(file, next);
     console.log(`${name}: ${next === html ? "unchanged" : "updated"}`);
   }
