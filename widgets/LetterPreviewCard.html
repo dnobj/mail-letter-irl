@@ -256,10 +256,10 @@
       const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
       const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
       // The host calls of a pick or an upload have no timeout: the library
-      // picker waits on the person, and an upload can be slow. After two
-      // minutes without an answer the buttons come back, so the person can
-      // try again. A new attempt replaces the waiting one; if the waiting one
-      // answers first, it carries on.
+      // picker waits on the person, and an upload can be slow. Each call gets
+      // its own two-minute wait, after which the buttons come back so the
+      // person can try again. A new attempt replaces the waiting one; if the
+      // waiting one answers first, it carries on.
       const IMAGE_WAIT_MS = 120000;
       // Bumped by every image pick or upload, so a late answer from an older
       // one changes nothing.
@@ -647,15 +647,22 @@
         return flow;
       }
 
-      // Gives the buttons back if the flow's host calls have not answered.
-      function armImageWait(flow, buttonText, label) {
-        return setTimeout(() => {
-          if (flow !== imageFlow || !retryBusy) return;
+      // Runs one host call of a pick or an upload, and gives the buttons back
+      // if it has not answered after IMAGE_WAIT_MS. The call keeps waiting;
+      // imageFlowCurrent decides whether its answer is still used.
+      async function waitForHost(flow, buttonText, label, call) {
+        const wait = setTimeout(() => {
+          if (flow !== imageFlow || !retryBusy || dataLoaded || keptOrderShown()) return;
           retryBusy = false;
           setImageButtonsDisabled(false);
           buttonText.textContent = label;
           showImageError("Still waiting for the image. If nothing happened, please try again.");
         }, IMAGE_WAIT_MS);
+        try {
+          return await call();
+        } finally {
+          clearTimeout(wait);
+        }
       }
 
       // Whether an answer for this flow should still be used: no newer
@@ -673,11 +680,13 @@
       }
 
       // Previews a picked or uploaded file by link. The preview call has its
-      // own timeout, so the flow's wait stops when it starts.
-      async function previewFile(fileId, flow, button, buttonText, label, busyHtml, stopWait) {
+      // own timeout.
+      async function previewFile(fileId, flow, button, buttonText, label, busyHtml) {
         let url = null;
         try {
-          const result = await window.openai.getFileDownloadUrl({ fileId });
+          const result = await waitForHost(flow, buttonText, label, () =>
+            window.openai.getFileDownloadUrl({ fileId }),
+          );
           url = result?.downloadUrl || result?.download_url || null;
         } catch (error) {
           url = null;
@@ -689,7 +698,6 @@
           showImageError("Unable to get a link to that image. Please try again.");
           return;
         }
-        stopWait();
         await runPreview(
           { tool: request.tool, args: { ...request.args, imageUrl: url } },
           button,
@@ -704,11 +712,10 @@
         const buttonText = document.getElementById("choose-image-button-text");
         const busyHtml = '<span class="spinner"></span> Opening your library...';
         const flow = beginImageFlow(buttonText, busyHtml);
-        const wait = armImageWait(flow, buttonText, CHOOSE_LABEL);
         try {
           let files = null;
           try {
-            files = await window.openai.selectFiles();
+            files = await waitForHost(flow, buttonText, CHOOSE_LABEL, () => window.openai.selectFiles());
           } catch (error) {
             files = null;
           }
@@ -724,9 +731,8 @@
             showImageError("That file is not a JPEG, PNG or WebP image.");
             return;
           }
-          await previewFile(fileId, flow, button, buttonText, CHOOSE_LABEL, busyHtml, () => clearTimeout(wait));
+          await previewFile(fileId, flow, button, buttonText, CHOOSE_LABEL, busyHtml);
         } finally {
-          clearTimeout(wait);
           if (flow === imageFlow) {
             retryBusy = false;
             setImageButtonsDisabled(false);
@@ -744,7 +750,13 @@
         const input = event.target;
         const file = input.files && input.files[0];
         input.value = "";
-        if (!file || retryBusy || dataLoaded || !canUploadImage()) return;
+        if (!file || dataLoaded || !canUploadImage()) return;
+        if (retryBusy) {
+          // An earlier pick answered after its buttons came back, and it is
+          // still being previewed.
+          showImageError("An image you chose earlier is still on its way. Try again once it has arrived.");
+          return;
+        }
         if (!IMAGE_TYPES.includes(file.type)) {
           showImageError("That file is not a JPEG, PNG or WebP image.");
           return;
@@ -757,13 +769,12 @@
         const buttonText = document.getElementById("upload-image-button-text");
         const busyHtml = '<span class="spinner"></span> Uploading...';
         const flow = beginImageFlow(buttonText, busyHtml);
-        const wait = armImageWait(flow, buttonText, UPLOAD_LABEL);
         try {
           let fileId = null;
           let failed = false;
           let failure = null;
           try {
-            const uploaded = await window.openai.uploadFile(file);
+            const uploaded = await waitForHost(flow, buttonText, UPLOAD_LABEL, () => window.openai.uploadFile(file));
             fileId = uploaded?.fileId || uploaded?.file_id || null;
           } catch (error) {
             failed = true;
@@ -778,9 +789,8 @@
             showImageError("The upload did not return a file.");
             return;
           }
-          await previewFile(fileId, flow, button, buttonText, UPLOAD_LABEL, busyHtml, () => clearTimeout(wait));
+          await previewFile(fileId, flow, button, buttonText, UPLOAD_LABEL, busyHtml);
         } finally {
-          clearTimeout(wait);
           if (flow === imageFlow) {
             retryBusy = false;
             setImageButtonsDisabled(false);
@@ -994,7 +1004,7 @@
       function render() {
         applyTheme();
         adoptKeptState();
-        if (resumed && (resumed.sent === true || resumed.checkout === true)) {
+        if (keptOrderShown()) {
           // Whatever else arrives, a reopened card that sent this letter or
           // started paying for it shows that and nothing else.
           cancelEmptyTimer();
