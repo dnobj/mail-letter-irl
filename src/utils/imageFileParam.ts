@@ -36,9 +36,12 @@ export function usableImageFile(image: unknown): ImageFileParam | null {
 }
 
 /**
- * True when an image was named but cannot be read: the marker above, or any
- * other file object without a download address.
+ * True when an image was named but cannot be read: the marker above, any
+ * other file object without a download address, or a string other than ""
+ * that did not go through the preprocess (a caller that skips the schema must
+ * not regain the older-upload fallback).
  */
 export function isUnresolvedImageReference(image: unknown): boolean {
+  if (typeof image === "string") return image !== "";
   return typeof image === "object" && image !== null && usableImageFile(image) === null;
 }

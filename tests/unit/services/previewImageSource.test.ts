@@ -4,7 +4,7 @@
  *
  * A request that names a picture the server cannot open (a sandbox path, a
  * mobile placeholder) must not silently print an older upload, which may be a
- * different picture. It may still use an upload made within the last ten
+ * different picture. It may still use an upload made within the last five
  * minutes: that is the upload card answering this very failure.
  */
 
@@ -82,6 +82,8 @@ describe('preprocessImageFileParam', () => {
     expect(isUnresolvedImageReference(file)).toBe(false);
     expect(usableImageFile(MARKER)).toBeNull();
     expect(isUnresolvedImageReference(MARKER)).toBe(true);
+    expect(isUnresolvedImageReference('/mnt/data/photo.png')).toBe(true);
+    expect(usableImageFile('/mnt/data/photo.png')).toBeNull();
     expect(isUnresolvedImageReference({ file_id: 'file_1' })).toBe(true);
     for (const absent of [undefined, null, '']) {
       expect(usableImageFile(absent)).toBeNull();
@@ -139,7 +141,7 @@ describe('resolvePreviewImageSource', () => {
     expect(recentUpload).toHaveBeenCalledWith('user-1', 'header_image');
   });
 
-  it('uses a fresh upload for a named picture it cannot open', async () => {
+  it('uses an upload exactly at the window for a named picture it cannot open', async () => {
     uploadAged(UNRESOLVED_REFERENCE_UPLOAD_WINDOW_MS);
     await expect(resolvePreviewImageSource({ image: MARKER }, 'user-1', 'postcard')).resolves.toEqual({
       kind: 'recent_upload',
@@ -177,8 +179,23 @@ describe('resolvePreviewImageSource', () => {
     });
   });
 
-  it('keeps the ten-minute window', () => {
-    expect(UNRESOLVED_REFERENCE_UPLOAD_WINDOW_MS).toBe(10 * MINUTE);
+  it('treats a raw string as a named picture', async () => {
+    // A caller that skips the served schema must not regain the fallback.
+    uploadAged(30 * MINUTE);
+    await expect(resolvePreviewImageSource({ image: '/mnt/data/photo.png' }, 'user-1', 'inline_image')).resolves.toEqual({
+      kind: 'none',
+      unresolvedReference: true,
+      skippedUploadAgeMs: 30 * MINUTE
+    });
+    uploadAged(30 * MINUTE);
+    await expect(resolvePreviewImageSource({ image: '' }, 'user-1', 'inline_image')).resolves.toMatchObject({
+      kind: 'recent_upload',
+      unresolvedReference: false
+    });
+  });
+
+  it('keeps the five-minute window', () => {
+    expect(UNRESOLVED_REFERENCE_UPLOAD_WINDOW_MS).toBe(5 * MINUTE);
   });
 });
 
@@ -196,11 +213,14 @@ function context(): ToolContext {
 const recipient = { name: 'R', addressLine1: '1 Main St', city: 'KC', state: 'MO', postalCode: '64111', country: 'US' };
 const DOWNLOAD_STOPPED = new Error('download stopped by the test');
 
+const LETTER_DOWNLOAD_FAILED = 'Could not process image. Please try a different image.';
+
 describe.each([
-  ['quote_and_preview_letter_with_image', quoteAndPreviewLetterWithImageTool, { bodyText: 'hi', signOff: 'bye' }, 'inline_image'],
-  ['quote_and_preview_letter_with_header_image', quoteAndPreviewLetterWithHeaderImageTool, { bodyText: 'hi', signOff: 'bye' }, 'header_image'],
-  ['quote_and_preview_postcard', quoteAndPreviewPostcardTool, { message: 'hi' }, 'postcard']
-] as const)('%s handler', (_name, tool, extras, uploadContext) => {
+  ['quote_and_preview_letter_with_image', quoteAndPreviewLetterWithImageTool, { bodyText: 'hi', signOff: 'bye' }, 'inline_image', LETTER_DOWNLOAD_FAILED],
+  ['quote_and_preview_letter_with_header_image', quoteAndPreviewLetterWithHeaderImageTool, { bodyText: 'hi', signOff: 'bye' }, 'header_image', 'Could not process header image. Please try a different image.'],
+  // The postcard rethrows a download failure that is not an ImageProcessingError.
+  ['quote_and_preview_postcard', quoteAndPreviewPostcardTool, { message: 'hi' }, 'postcard', DOWNLOAD_STOPPED.message]
+] as const)('%s handler', (_name, tool, extras, uploadContext, downloadFailed) => {
   const download = () =>
     _name === 'quote_and_preview_postcard'
       ? vi.mocked(downloadAndProcessPostcardImageWithPreview)
@@ -211,7 +231,9 @@ describe.each([
   });
 
   // A sender in the request keeps the postcard handler, which checks the
-  // addresses before the picture, away from the saved-address lookup.
+  // addresses before the picture, away from the saved-address lookup. Every
+  // download is stopped, so a handler that got as far as the picture fails
+  // with its own download error.
   const run = (image: unknown) =>
     (tool.handler as (input: unknown, ctx: ToolContext) => Promise<unknown>)(
       { sender: { ...recipient }, recipient: { ...recipient }, ...extras, image },
@@ -221,30 +243,38 @@ describe.each([
   it('asks for the picture instead of printing an older upload', async () => {
     uploadAged(UNRESOLVED_REFERENCE_UPLOAD_WINDOW_MS + MINUTE);
     await expect(run(MARKER)).rejects.toThrow(/IMAGE UPLOAD NEEDED/);
+    expect(recentUpload).toHaveBeenCalledWith('user-1', uploadContext);
+    expect(download()).not.toHaveBeenCalled();
+  });
+
+  it('asks for the picture when a raw string reaches it', async () => {
+    uploadAged(UNRESOLVED_REFERENCE_UPLOAD_WINDOW_MS + MINUTE);
+    await expect(run('/mnt/data/beach.png')).rejects.toThrow(/IMAGE UPLOAD NEEDED/);
     expect(download()).not.toHaveBeenCalled();
   });
 
   it('uses the upload the card just made', async () => {
     uploadAged(MINUTE);
-    await expect(run(MARKER)).rejects.not.toThrow(/IMAGE UPLOAD NEEDED/);
+    await expect(run(MARKER)).rejects.toThrow(downloadFailed);
     expect(recentUpload).toHaveBeenCalledWith('user-1', uploadContext);
     expect(download()).toHaveBeenCalledTimes(1);
-    const [source] = download().mock.calls[0];
-    expect(source).toEqual({ url: UPLOAD_URL });
+    expect(download().mock.calls[0][0]).toEqual({ url: UPLOAD_URL });
   });
 
   it('still uses an older upload when no picture was named', async () => {
     uploadAged(50 * MINUTE);
-    await expect(run(undefined)).rejects.not.toThrow(/IMAGE UPLOAD NEEDED/);
+    await expect(run(undefined)).rejects.toThrow(downloadFailed);
+    expect(download()).toHaveBeenCalledTimes(1);
     expect(download().mock.calls[0][0]).toEqual({ url: UPLOAD_URL });
   });
 
   it('downloads a readable file itself', async () => {
     const file = { download_url: 'https://files.example/f1', file_id: 'file_1' };
     uploadAged(MINUTE);
-    await expect(run(file)).rejects.not.toThrow(/IMAGE UPLOAD NEEDED/);
-    const [source] = download().mock.calls[0];
-    expect('download_url' in (source as object) ? (source as { download_url: string }).download_url : (source as { url: string }).url).toBe(file.download_url);
+    await expect(run(file)).rejects.toThrow(downloadFailed);
+    expect(download()).toHaveBeenCalledTimes(1);
+    const source = download().mock.calls[0][0] as { download_url?: string; url?: string };
+    expect(source.download_url ?? source.url).toBe(file.download_url);
     expect(recentUpload).not.toHaveBeenCalled();
   });
 });

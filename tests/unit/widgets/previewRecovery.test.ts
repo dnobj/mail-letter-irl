@@ -1120,7 +1120,7 @@ describe.each([LETTER, POSTCARD])('$file previews a chat image picked again (#41
     expect(harness.calls).toEqual([{ name: imageTool(spec), args: linkedArgs() }]);
   });
 
-  it('gives the buttons back when the library never answers, and ignores a late pick', async () => {
+  it('gives the buttons back when the library has not answered, and still uses a later pick', async () => {
     let answer: (files: unknown) => void = () => {};
     const harness = await lostChatImage({
       fileApis: allFileApis({ selectFiles: () => new Promise(resolve => { answer = resolve; }) })
@@ -1132,24 +1132,184 @@ describe.each([LETTER, POSTCARD])('$file previews a chat image picked again (#41
     expect(harness.disabled('choose-image-button')).toBe(false);
     expect(harness.disabled('upload-image-button')).toBe(false);
     expect(harness.text('choose-image-button')).toBe('Choose from library');
-    expect(harness.text('error-message')).toBe('Your library did not open. Please try again.');
+    expect(harness.text('error-message')).toBe('Still waiting for the image. If nothing happened, please try again.');
 
+    // Someone browsing the library for a while still gets their pick.
+    harness.holdCalls();
     answer([{ fileId: 'file_pick', mimeType: 'image/png' }]);
     await flush();
-    expect(harness.fileCalls.map(call => call.name)).toEqual(['selectFiles']);
-    expect(harness.calls).toEqual([]);
+    expect(harness.disabled('choose-image-button')).toBe(true);
+    expect(harness.disabled('upload-image-button')).toBe(true);
+    expect(harness.visible('error-message')).toBe(false);
+    expect(harness.calls).toEqual([{ name: imageTool(spec), args: linkedArgs() }]);
 
-    // The buttons work again.
+    await harness.releaseCalls();
+    expect(harness.text('id-value')).toBe('draft_retry_0001');
+  });
+
+  it('drops a waiting pick once the person starts again', async () => {
+    let answer: (files: unknown) => void = () => {};
+    const harness = await lostChatImage({
+      fileApis: allFileApis({
+        selectFiles: () => new Promise(resolve => { answer = resolve; }),
+        uploadFile: () => new Promise(() => {})
+      })
+    });
+    await harness.click('choose-image-button');
+    await harness.runTimer(120000);
+
     await harness.pickDeviceFile({ name: 'beach.jpg', type: 'image/jpeg' });
+    expect(harness.text('upload-image-button')).toBe('Uploading...');
+    answer([{ fileId: 'file_pick', mimeType: 'image/png' }]);
+    await flush();
+
+    expect(harness.fileCalls.map(call => call.name)).toEqual(['selectFiles', 'uploadFile']);
+    expect(harness.calls).toEqual([]);
+    // The upload still owns the buttons.
+    expect(harness.disabled('choose-image-button')).toBe(true);
+    expect(harness.text('upload-image-button')).toBe('Uploading...');
+  });
+
+  it('gives the buttons back when an upload has not answered, and still uses a later one', async () => {
+    let answer: (value: unknown) => void = () => {};
+    const harness = await lostChatImage({
+      fileApis: allFileApis({ uploadFile: () => new Promise(resolve => { answer = resolve; }) })
+    });
+    await harness.pickDeviceFile({ name: 'beach.jpg', type: 'image/jpeg' });
+
+    await harness.runTimer(120000);
+
+    expect(harness.disabled('upload-image-button')).toBe(false);
+    expect(harness.text('upload-image-button')).toBe('Upload the image');
+    expect(harness.text('error-message')).toBe('Still waiting for the image. If nothing happened, please try again.');
+
+    answer({ fileId: 'file_pick' });
+    await flush();
     expect(harness.calls).toEqual([{ name: imageTool(spec), args: linkedArgs() }]);
   });
 
-  it('stops waiting for the library once it answers', async () => {
+  it('gives the buttons back when the image link has not answered', async () => {
+    let answer: (value: unknown) => void = () => {};
+    const harness = await lostChatImage({
+      fileApis: allFileApis({ getFileDownloadUrl: () => new Promise(resolve => { answer = resolve; }) })
+    });
+    await harness.click('choose-image-button');
+    expect(harness.fileCalls.map(call => call.name)).toEqual(['selectFiles', 'getFileDownloadUrl']);
+
+    await harness.runTimer(120000);
+
+    expect(harness.disabled('choose-image-button')).toBe(false);
+    expect(harness.text('error-message')).toBe('Still waiting for the image. If nothing happened, please try again.');
+
+    answer({ downloadUrl: LINK });
+    await flush();
+    expect(harness.calls).toEqual([{ name: imageTool(spec), args: linkedArgs() }]);
+  });
+
+  it('ends the image wait when the preview call starts, which has its own timeout', async () => {
     const harness = await lostChatImage();
+    harness.holdCalls();
 
     await harness.click('choose-image-button');
 
-    expect(harness.pendingTimers().map(timer => timer.delay)).not.toContain(120000);
+    expect(harness.calls).toHaveLength(1);
+    expect(harness.pendingTimers().map(timer => timer.delay)).toEqual([60000]);
+    await harness.runTimer(60000);
+    expect(harness.text('error-message')).toBe(
+      'No preview yet. It will appear here if it arrives. You can also try again, or ask for the preview in the chat.'
+    );
+    expect(harness.disabled('choose-image-button')).toBe(false);
+    expect(harness.text('choose-image-button')).toBe('Choose from library');
+
+    await harness.releaseCalls();
+    expect(harness.text('id-value')).toBe('draft_retry_0001');
+  });
+
+  it('ends the image wait when the pick ends', async () => {
+    const harness = await lostChatImage({ fileApis: allFileApis({ selectFiles: () => [] }) });
+
+    await harness.click('choose-image-button');
+
+    expect(harness.pendingTimers()).toEqual([]);
+  });
+
+  it('ignores a pick that answers after a kept order arrived', async () => {
+    let answer: (files: unknown) => void = () => {};
+    const harness = await lostChatImage({
+      fileApis: allFileApis({ selectFiles: () => new Promise(resolve => { answer = resolve; }) })
+    });
+    await harness.click('choose-image-button');
+
+    harness.openai.widgetState = { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001' };
+    await harness.fireGlobals();
+    answer([{ fileId: 'file_pick', mimeType: 'image/png' }]);
+    await flush();
+
+    expect(harness.fileCalls.map(call => call.name)).toEqual(['selectFiles']);
+    expect(harness.calls).toEqual([]);
+    expect(harness.text('status-pill')).toBe('With the printer');
+  });
+
+  it('keeps an open pick through a re-render', async () => {
+    const harness = await lostChatImage({
+      fileApis: allFileApis({ selectFiles: () => new Promise(() => {}) })
+    });
+    await harness.click('choose-image-button');
+
+    harness.openai.theme = 'dark';
+    await harness.fireGlobals();
+
+    expect(harness.text('choose-image-button')).toBe('Opening your library...');
+    expect(harness.disabled('choose-image-button')).toBe(true);
+    expect(harness.disabled('upload-image-button')).toBe(true);
+  });
+
+  it('switches to a late host draft after a picked preview until it acts on it', async () => {
+    const harness = await lostChatImage();
+    await harness.click('choose-image-button');
+    expect(harness.text('id-value')).toBe('draft_retry_0001');
+
+    await harness.deliverHostResult(spec.output('draft_host_0001'));
+    expect(harness.text('id-value')).toBe('draft_host_0001');
+
+    await harness.click('send-button');
+    expect(harness.callsTo(spec.sendTool).map(call => call.args.draftId)).toEqual(['draft_host_0001']);
+  });
+
+  it.each<[string, Json]>([
+    ['a sandbox path', { imageUrl: '/mnt/data/beach.png' }],
+    ['an http address', { imageUrl: 'http://example.com/beach.jpg' }],
+    ['a link that is not text', { imageUrl: 42 }]
+  ])('offers the pick for %s given as imageUrl', async (_label, extra) => {
+    const { image, imageUrl, ...rest } = chatImageArgs();
+    const harness = await lostCall(spec, {
+      stamp: imageTool(spec),
+      toolInput: { ...rest, ...extra },
+      fileApis: allFileApis()
+    });
+
+    expect(harness.visible('retry-button')).toBe(false);
+    expect(harness.visible('choose-image-button')).toBe(true);
+
+    await harness.click('choose-image-button');
+    expect(harness.calls).toEqual([{ name: imageTool(spec), args: { ...rest, imageUrl: LINK } }]);
+  });
+
+  it.each<[string, Json]>([
+    ['an https imageUrl', { imageUrl: 'https://example.com/beach.jpg' }],
+    ['an empty imageUrl', { imageUrl: '' }],
+    ['a usable file object beside a sandbox imageUrl', {
+      imageUrl: '/mnt/data/beach.png',
+      image: { download_url: 'https://files.example/x', file_id: 'file_1' }
+    }]
+  ])('repeats the call for %s', async (_label, extra) => {
+    const { image, imageUrl, ...rest } = chatImageArgs();
+    const args = { ...rest, ...extra };
+    const harness = await lostCall(spec, { stamp: imageTool(spec), toolInput: args, fileApis: allFileApis() });
+
+    expect(harness.visible('choose-image-button')).toBe(false);
+    await harness.click('retry-button');
+    expect(harness.calls).toEqual([{ name: imageTool(spec), args }]);
   });
 
   it('keeps a host result that arrives while the image is being picked', async () => {

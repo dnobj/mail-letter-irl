@@ -24,6 +24,7 @@ import type { PostcardSize, ImageFileParam } from "../services/types.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
 import { resolvePreviewImageSource } from "../services/previewImageSource.js";
+import { isUnresolvedImageReference, usableImageFile } from "../utils/imageFileParam.js";
 import {
   DELIVERY_CLASS,
   DELIVERY_DISCLAIMER,
@@ -123,14 +124,6 @@ async function handler(
   let imageInput: ImageInput | null = null;
   let imageSourceUrl: string | undefined;
 
-  // Type guard: Check if image is a valid ImageFileParam object (not empty string from mobile)
-  const isValidImageFileParam = (img: unknown): img is ImageFileParam =>
-    typeof img === 'object' && img !== null && 'download_url' in img;
-
-  // Check if we have file_id even without download_url (potential mobile workaround via sediment://)
-  const hasFileIdOnly = (img: unknown): img is { file_id: string } =>
-    typeof img === 'object' && img !== null && 'file_id' in img && !('download_url' in img);
-
   // Debug flag - enabled in dev environment
   const isDebug = process.env.NODE_ENV === 'development' ||
                   process.env.DEBUG_IMAGE === 'true';
@@ -153,9 +146,10 @@ async function handler(
         hasFileName: imageObj && 'file_name' in imageObj,
         // Log actual values (truncated for URLs, full for file_id)
         mimeType: imageObj?.mime_type as string | undefined,
-        // Validation results
-        isValidFileParam: isValidImageFileParam(input.image),
-        hasFileIdOnly: hasFileIdOnly(input.image)
+        // Validation results (#414: the marker for an unreadable reference is
+        // an object with an empty download address)
+        isUsableFile: usableImageFile(input.image) !== null,
+        unresolvedReference: isUnresolvedImageReference(input.image)
       },
       "Debug: Full image parameter details for mobile investigation"
     );

@@ -16,8 +16,15 @@ import { isUnresolvedImageReference, usableImageFile } from "../utils/imageFileP
 import { getRecentUploadedImage } from "./recentUploadStore.js";
 import type { ImageFileParam } from "./types.js";
 
-/** How recent an upload must be to stand in for a picture the request named but the server cannot open. */
-export const UNRESOLVED_REFERENCE_UPLOAD_WINDOW_MS = 10 * 60 * 1000;
+/**
+ * How recent an upload must be to stand in for a picture the request named
+ * but the server cannot open. The upload card's follow-up reaches the model
+ * within seconds; the margin is for an approval prompt. Inside the window a
+ * different picture whose handoff also failed would still get the upload, so
+ * the window stays short, and the preview card shows the picture before
+ * anything is sent.
+ */
+export const UNRESOLVED_REFERENCE_UPLOAD_WINDOW_MS = 5 * 60 * 1000;
 
 export type PreviewImageSource =
   | { kind: "file"; url: string; file: ImageFileParam }
