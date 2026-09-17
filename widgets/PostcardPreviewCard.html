@@ -574,7 +574,8 @@
       // person asks for another copy. The refusal comes back as an error
       // result with its details in _meta. Its text starts with
       // DUPLICATE_PREFIX, which is all that is left when a host drops _meta
-      // or turns the error into a rejection.
+      // or turns the error into a rejection. A host may put its own words in
+      // front of a rejection's message, so the prefix is looked for anywhere.
       const DUPLICATE_META_KEY = "letterirl/duplicateMail";
       const DUPLICATE_PREFIX = "Possible duplicate:";
       const MAIL_NOUN = "postcard";
@@ -589,7 +590,7 @@
         const details = result?._meta?.[DUPLICATE_META_KEY];
         if (details && typeof details === "object") return details;
         const text = error ? String(error?.message ?? "") : resultText(result);
-        return text.startsWith(DUPLICATE_PREFIX) ? {} : null;
+        return text.includes(DUPLICATE_PREFIX) ? {} : null;
       }
 
       function duplicateAge(minutes) {

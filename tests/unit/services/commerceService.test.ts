@@ -16,16 +16,35 @@ const capState = vi.hoisted(() => ({
 /**
  * The duplicate check (#412), answered ahead of mocks.query for the same
  * reason as the caps: the tests below queue mocks.query responses in order,
- * and the check's queries must not consume them. The draft is null by
- * default, which skips the comparison, so every older test runs as before.
+ * and the check's queries must not consume them. The check runs on the order
+ * transaction's client, so the default transaction below routes through
+ * `answer` too. The draft is null by default, which skips the comparison, so
+ * every older test runs as before. `trail`, when set, records every statement
+ * from either side in the order it ran.
  */
-const dupState = vi.hoisted(() => ({
-  activeOrder: false,
-  draft: null as Record<string, unknown> | null,
-  letters: [] as Record<string, unknown>[],
-  orders: [] as Record<string, unknown>[],
-  calls: [] as Array<{ sql: string; params: unknown[] }>
-}));
+const dupState = vi.hoisted(() => {
+  const state = {
+    draft: null as Record<string, unknown> | null,
+    letters: [] as Record<string, unknown>[],
+    orders: [] as Record<string, unknown>[],
+    calls: [] as Array<{ sql: string; params: unknown[] }>,
+    trail: null as string[] | null,
+    /** The check's rows, or undefined for any other statement. */
+    answer(sql: unknown, params?: unknown[]) {
+      if (typeof sql !== 'string') return undefined;
+      state.trail?.push(sql);
+      if (!sql.includes('duplicate mail check')) return undefined;
+      state.calls.push({ sql, params: params ?? [] });
+      const rows = sql.includes('duplicate mail check: draft')
+        ? (state.draft ? [state.draft] : [])
+        : sql.includes('duplicate mail check: letters')
+          ? state.letters
+          : state.orders;
+      return Promise.resolve({ rows, rowCount: rows.length });
+    }
+  };
+  return state;
+});
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
@@ -100,17 +119,8 @@ vi.mock('../../../src/db/index.js', () => ({
   // answered, whatever a given test does to mocks.query. Everything else falls
   // through untouched.
   query: (sql: string, params?: unknown[]) => {
-    if (typeof sql === 'string' && sql.includes('duplicate mail check')) {
-      dupState.calls.push({ sql, params: params ?? [] });
-      const rows = sql.includes('duplicate mail check: active order')
-        ? (dupState.activeOrder ? [{ order_id: 'order-active' }] : [])
-        : sql.includes('duplicate mail check: draft')
-          ? (dupState.draft ? [dupState.draft] : [])
-          : sql.includes('duplicate mail check: letters')
-            ? dupState.letters
-            : dupState.orders;
-      return Promise.resolve({ rows, rowCount: rows.length });
-    }
+    const duplicate = dupState.answer(sql, params);
+    if (duplicate) return duplicate;
     if (typeof sql === 'string' && sql.includes('SUM(amount_cents)')) {
       return Promise.resolve({
         rows: [{ total: String(capState.chargedTodayCents) }],
@@ -225,13 +235,18 @@ describe('commerceService', () => {
     capState.chargedTodayCents = 0;
     capState.lettersTodayForUser = 0;
     capState.lettersTodayGlobal = 0;
-    dupState.activeOrder = false;
     dupState.draft = null;
     dupState.letters = [];
     dupState.orders = [];
     dupState.calls = [];
+    dupState.trail = null;
     vi.stubEnv('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', '1');
-    mocks.transaction.mockImplementation(async callback => callback({ query: mocks.query }));
+    // Rest arguments keep each call's arity, which toHaveBeenCalledWith compares.
+    mocks.transaction.mockImplementation(async callback =>
+      callback({
+        query: (...args: [string, unknown[]?]) => dupState.answer(...args) ?? mocks.query(...args)
+      })
+    );
     mocks.jitEnabled.mockReturnValue(true);
     mocks.getJitProduct.mockReturnValue({
       productCode: 'jit-letter',
@@ -3084,17 +3099,64 @@ describe('commerceService', () => {
       ...extra
     });
     const tagged = (label: string) => dupState.calls.filter(call => call.sql.includes(`duplicate mail check: ${label}`));
+    const pendingDraft = (extra: Record<string, unknown> = {}) => ({
+      draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter',
+      required_credits: 2, status: 'pending',
+      expires_at: new Date(Date.now() + 6 * 60 * 60_000),
+      ...extra
+    });
+    /** The draft's current order, sessionless and at today's price unless a test says otherwise. */
+    const currentOrder = (extra: Record<string, unknown> = {}) => ({
+      ...baseOrder,
+      stripe_checkout_session_id: null,
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 45 * 60_000),
+      ...extra
+    });
+    const INSERT = 'INSERT INTO orders';
+    const inserted = () => mocks.query.mock.calls.some(([sql]) => String(sql).includes(INSERT));
+
+    let draftRow: Record<string, unknown>;
+    let activeRows: Record<string, unknown>[];
+    let credits: number;
+    let trail: string[];
+    const position = (fragment: string) => trail.findIndex(sql => sql.includes(fragment));
 
     beforeEach(() => {
-      mocks.query.mockImplementation(async (sql: string) => {
+      draftRow = pendingDraft();
+      activeRows = [];
+      credits = 0;
+      trail = [];
+      dupState.trail = trail;
+      dupState.draft = mail();
+      mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
         if (sql.includes('sends_blocked_reason')) return { rows: [{ sends_blocked_reason: null }] };
         if (sql.includes('SELECT mail_type FROM letter_drafts')) return { rows: [{ mail_type: 'letter' }] };
+        if (sql.includes('SELECT * FROM letter_drafts')) return { rows: [draftRow] };
+        if (sql.includes('status = ANY($2::varchar[])')) return { rows: activeRows };
+        if (sql.includes('SELECT credits FROM users')) return { rows: [{ credits }] };
+        if (sql.includes(INSERT)) {
+          return { rows: [{ ...baseOrder, order_id: params[0], checkout_expires_at: params[8] }] };
+        }
+        if (sql.includes('SET stripe_checkout_session_id = $2')) {
+          return {
+            rows: [{ ...baseOrder, order_id: params[0], stripe_checkout_session_id: params[1], checkout_url: params[2] }]
+          };
+        }
+        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+          return { rows: [{ ...baseOrder, order_id: params[0] }] };
+        }
         return { rows: [] };
       });
-      dupState.draft = mail();
+      mocks.createJitSession.mockResolvedValue({
+        success: true,
+        sessionId: 'cs-new',
+        sessionUrl: 'https://checkout.stripe.test/cs-new',
+        expiresAt: new Date(Date.now() + 40 * 60_000)
+      });
     });
 
-    it('refuses the same mail sent in the last day, before any order or session exists', async () => {
+    it('refuses the same mail sent in the last day, as the last step before a new order', async () => {
       dupState.letters = [mail()];
 
       await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
@@ -3102,9 +3164,17 @@ describe('commerceService', () => {
         duplicate: { kind: 'sent', recipientName: 'Sam Rivera', ageSeconds: 300 }
       });
 
-      expect(mocks.transaction).not.toHaveBeenCalled();
+      expect(inserted()).toBe(false);
       expect(mocks.createJitSession).not.toHaveBeenCalled();
-      expect(tagged('active order')[0].params).toEqual(['draft-1', 'user-1', ACTIVE_JIT_STATUSES]);
+      // Thrown out of the order transaction, which the real one rolls back.
+      expect(mocks.transaction).toHaveBeenCalledTimes(1);
+      await expect(mocks.transaction.mock.results[0].value).rejects.toMatchObject({ code: 'DUPLICATE_RECENT_MAIL' });
+      // After the draft lock, the look for an order to reuse, and the balance.
+      const check = position('duplicate mail check: draft');
+      expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')).toBeGreaterThan(-1);
+      expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')).toBeLessThan(check);
+      expect(position('status = ANY($2::varchar[])')).toBeLessThan(check);
+      expect(position('SELECT credits FROM users')).toBeLessThan(check);
       expect(tagged('draft')[0].params).toEqual(['draft-1', 'user-1']);
       expect(tagged('letters')[0].params).toEqual(['user-1', 'letter', '']);
       expect(tagged('orders')[0].params).toEqual(['user-1', 'draft-1', 'letter']);
@@ -3117,37 +3187,107 @@ describe('commerceService', () => {
         code: 'DUPLICATE_RECENT_MAIL',
         duplicate: { kind: 'checkout_open' }
       });
-      expect(mocks.transaction).not.toHaveBeenCalled();
+      expect(inserted()).toBe(false);
     });
 
-    it('lets different mail on to the checkout', async () => {
+    it('opens a checkout for different mail', async () => {
       dupState.letters = [mail({ body_text: 'Hi Sam, again' })];
 
-      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({
+        success: true,
+        reused: false,
+        checkoutUrl: 'https://checkout.stripe.test/cs-new'
+      });
 
       expect(tagged('letters')).toHaveLength(1);
-      expect(mocks.transaction).toHaveBeenCalledTimes(1);
+      expect(position('duplicate mail check: orders')).toBeLessThan(position(INSERT));
+      expect(mocks.createJitSession).toHaveBeenCalledTimes(1);
     });
 
     it('buys another copy when the person asked, without checking', async () => {
       dupState.letters = [mail()];
 
-      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1', allowDuplicate: true }).catch(() => undefined);
+      await expect(
+        createJitCheckout({ userId: 'user-1', draftId: 'draft-1', allowDuplicate: true })
+      ).resolves.toMatchObject({ success: true, reused: false });
 
       expect(dupState.calls).toEqual([]);
-      expect(mocks.transaction).toHaveBeenCalledTimes(1);
+      expect(inserted()).toBe(true);
     });
 
-    it('reuses a draft with an active order without comparing the mail', async () => {
-      dupState.activeOrder = true;
+    it.each<[string, Record<string, unknown>]>([
+      ['that already has a session', {
+        stripe_checkout_session_id: 'cs-open',
+        checkout_url: 'https://checkout.stripe.test/cs-open',
+        checkout_expires_at: new Date(Date.now() + 20 * 60_000)
+      }],
+      ['without a session, at today\'s price', {}],
+      ['that is paid', { status: 'paid' }]
+    ])('hands back an order %s without comparing the mail', async (_label, extra) => {
       dupState.letters = [mail()];
+      activeRows = [currentOrder(extra)];
 
-      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({
+        orderId: 'order-1',
+        reused: true
+      });
 
-      expect(tagged('active order')).toHaveLength(1);
-      expect(tagged('draft')).toEqual([]);
-      expect(tagged('letters')).toEqual([]);
-      expect(mocks.transaction).toHaveBeenCalledTimes(1);
+      expect(dupState.calls).toEqual([]);
+      expect(inserted()).toBe(false);
+    });
+
+    it.each<[string, Record<string, unknown>, string]>([
+      ['too near expiry for Stripe', { checkout_expires_at: new Date(Date.now() + 10 * 60_000) }, 'CHECKOUT_WINDOW_TOO_SHORT'],
+      ['priced before a price change', { amount_cents: 399 }, 'PRICE_CHANGED_BEFORE_SESSION']
+    ])('checks the order that replaces a sessionless one %s', async (_label, extra, reason) => {
+      dupState.letters = [mail()];
+      activeRows = [currentOrder(extra)];
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+        code: 'DUPLICATE_RECENT_MAIL'
+      });
+
+      // Cancelled for a replacement first, in the transaction the refusal
+      // then leaves, so the real one undoes the cancellation too.
+      const cancel = mocks.query.mock.calls.find(([sql]) => String(sql).includes("SET status = 'cancelled'"));
+      expect(JSON.stringify(cancel)).toContain(reason);
+      expect(position("SET status = 'cancelled'")).toBeLessThan(position('duplicate mail check: draft'));
+      expect(inserted()).toBe(false);
+      await expect(mocks.transaction.mock.results[0].value).rejects.toMatchObject({ code: 'DUPLICATE_RECENT_MAIL' });
+    });
+
+    it.each<[string, Record<string, unknown>, string]>([
+      ['already sent', { status: 'consumed' }, 'DRAFT_INVALID_STATE'],
+      ['cancelled', { status: 'cancelled' }, 'DRAFT_INVALID_STATE'],
+      ['expired', { status: 'expired' }, 'DRAFT_EXPIRED'],
+      ['past its expiry', { expires_at: new Date(Date.now() - 60_000) }, 'DRAFT_EXPIRED']
+    ])('refuses a draft that is %s for that reason, never as a copy of itself', async (_label, extra, code) => {
+      dupState.letters = [mail()];
+      draftRow = pendingDraft(extra);
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({ code });
+
+      expect(dupState.calls).toEqual([]);
+    });
+
+    it.each<[string, () => void, string]>([
+      ['the balance can pay', () => { credits = 2; }, 'PREPAID_BALANCE_AVAILABLE'],
+      ['the price is unresolved', () => {
+        mocks.getJitProduct.mockReturnValue({
+          productCode: 'jit-letter', priceId: 'price-jit-letter', amountCents: 0, currency: 'usd',
+          name: 'Pay & Send One Physical Letter', description: 'x', mailType: 'letter'
+        });
+      }, 'JIT_NOT_CONFIGURED'],
+      ['the draft expires too soon', () => {
+        draftRow = pendingDraft({ expires_at: new Date(Date.now() + 35 * 60_000) });
+      }, 'DRAFT_TOO_CLOSE_TO_EXPIRY']
+    ])('gives other refusals first: %s', async (_label, arrange, code) => {
+      dupState.letters = [mail()];
+      arrange();
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({ code });
+
+      expect(dupState.calls).toEqual([]);
     });
 
     it('comes after the account and cap gates', async () => {

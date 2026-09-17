@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { migrate } from '../../src/cli/migrate.js';
 import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/disposableDatabase.js';
 
@@ -18,10 +18,44 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  *   - md5() over JSON text and draft columns agreeing, so an image letter
  *     matches the mail it became;
  *   - the whole prepaid send refusing a second copy inside its transaction
- *     and rolling the deduction back.
+ *     and rolling the deduction back;
+ *   - a Pay & Send checkout checked only where a new order is created: an
+ *     open checkout is handed back unchecked, a refused replacement leaves the
+ *     row it would replace as it was, and a sent draft is refused as sent.
  *
+ * Stripe is the one thing stubbed: a priced product and a session that opens.
  * Every test uses its own account, so no cleanup is needed between them.
  */
+
+const stripeDouble = vi.hoisted(() => ({ sessions: [] as string[] }));
+
+vi.mock('../../src/services/priceCatalog.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../src/services/priceCatalog.js')>()),
+  ensurePriceCatalog: async () => undefined
+}));
+
+vi.mock('../../src/services/stripeService.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../src/services/stripeService.js')>()),
+  isJitPurchaseEnabled: () => true,
+  getJitProductConfig: (mailType: 'letter' | 'postcard') => ({
+    productCode: mailType === 'postcard' ? 'jit-postcard' : 'jit-letter',
+    mailType,
+    priceId: `price_test_${mailType}`,
+    amountCents: 499,
+    currency: 'usd',
+    name: 'Pay & Send',
+    description: 'Test product'
+  }),
+  createJitCheckoutSession: async (params: { orderId: string; expiresAt?: Date }) => {
+    stripeDouble.sessions.push(params.orderId);
+    return {
+      success: true,
+      sessionId: `cs_test_${params.orderId}`,
+      sessionUrl: `https://checkout.stripe.test/${params.orderId}`,
+      expiresAt: params.expiresAt
+    };
+  }
+}));
 
 const { Pool } = pg;
 const enabled = process.env.LIRL_RUN_POSTGRES_INTEGRATION === 'true';
@@ -76,6 +110,7 @@ describePostgres('duplicate mail check (#412)', () => {
   let schema: string;
   let duplicates: typeof import('../../src/services/duplicateMailService.js');
   let mailSend: typeof import('../../src/services/mailSendService.js');
+  let commerce: typeof import('../../src/services/commerceService.js');
   let closeServicePool: (() => Promise<void>) | undefined;
 
   const savedCaps = {
@@ -99,6 +134,7 @@ describePostgres('duplicate mail check (#412)', () => {
     process.env.DATABASE_URL = scoped;
     duplicates = await import('../../src/services/duplicateMailService.js');
     mailSend = await import('../../src/services/mailSendService.js');
+    commerce = await import('../../src/services/commerceService.js');
     closeServicePool = (await import('../../src/db/index.js')).closePool;
   }, 180_000);
 
@@ -116,19 +152,24 @@ describePostgres('duplicate mail check (#412)', () => {
     await adminPool.end();
   }, 60_000);
 
-  /** An account with ten credits: five letters. */
-  async function seedUser(): Promise<string> {
+  /**
+   * An account with ten credits (five letters) by default. Pay & Send needs
+   * one that cannot pay from balance, so it passes 0.
+   */
+  async function seedUser(credits = 10): Promise<string> {
     const userId = `auth0|duplicates-${randomUUID()}`;
     await pool.query(
       `INSERT INTO users (user_id, email, credits, credits_purchased)
-       VALUES ($1, $2, 10, 10)`,
-      [userId, `${randomUUID()}@test.invalid`]
+       VALUES ($1, $2, $3, $4)`,
+      [userId, `${randomUUID()}@test.invalid`, credits, credits]
     );
-    await pool.query(
-      `INSERT INTO credit_ledger (user_id, initial_amount, remaining_amount, source_type)
-       VALUES ($1, 10, 10, 'adjustment')`,
-      [userId]
-    );
+    if (credits > 0) {
+      await pool.query(
+        `INSERT INTO credit_ledger (user_id, initial_amount, remaining_amount, source_type)
+         VALUES ($1, $2, $3, 'adjustment')`,
+        [userId, credits, credits]
+      );
+    }
     return userId;
   }
 
@@ -426,30 +467,101 @@ describePostgres('duplicate mail check (#412)', () => {
     expect(await accountState(userId)).toEqual({ credits: 10, letters: '0', jobs: '0' });
   });
 
-  it('tells an active order apart for the checkout path', async () => {
-    const userId = await seedUser();
-    const draftId = await seedDraft(userId);
-    const db = { query: (text: string, params?: unknown[]) => pool.query(text, params) } as any;
-    const statuses = ['checkout_pending', 'paid', 'fulfillment_pending', 'refund_pending', 'disputed', 'held'];
+  describe('through Pay & Send', () => {
+    async function ordersOf(userId: string) {
+      const result = await pool.query<{
+        order_id: string;
+        draft_id: string;
+        status: string;
+        stripe_checkout_session_id: string | null;
+      }>(
+        `SELECT order_id, draft_id::text AS draft_id, status, stripe_checkout_session_id
+         FROM orders WHERE user_id = $1 ORDER BY order_id`,
+        [userId]
+      );
+      return result.rows;
+    }
 
-    await expect(duplicates.draftHasActiveOrder(db, { draftId, userId, statuses })).resolves.toBe(false);
-    await seedOrder(userId, draftId, { status: 'checkout_pending' });
-    await expect(duplicates.draftHasActiveOrder(db, { draftId, userId, statuses })).resolves.toBe(true);
-    await expect(
-      duplicates.draftHasActiveOrder(db, { draftId, userId: `${userId}-other`, statuses })
-    ).resolves.toBe(false);
-  });
+    it('refuses a new checkout for a letter already sent, before any order or session exists', async () => {
+      const userId = await seedUser(0);
+      await seedLetter(userId);
+      const draftId = await seedDraft(userId);
+      const sessions = stripeDouble.sessions.length;
 
-  it('refuses through the checkout path the same way', async () => {
-    const userId = await seedUser();
-    const first = await seedDraft(userId);
-    await mailSend.createMailOrderFromDraft({ draftId: first, userId, mailType: 'letter' });
-    const draftId = await seedDraft(userId);
-    const db = { query: (text: string, params?: unknown[]) => pool.query(text, params) } as any;
+      await expect(commerce.createJitCheckout({ userId, draftId })).rejects.toMatchObject({
+        code: 'DUPLICATE_RECENT_MAIL',
+        duplicate: { kind: 'sent', mailType: 'letter', recipientName: 'Sam Rivera' }
+      });
 
-    await expect(duplicates.assertNoRecentDuplicateMail(db, { userId, draftId })).rejects.toMatchObject({
-      code: 'DUPLICATE_RECENT_MAIL',
-      duplicate: { kind: 'sent' }
+      expect(await ordersOf(userId)).toEqual([]);
+      expect(stripeDouble.sessions).toHaveLength(sessions);
+    });
+
+    it('opens the checkout when the person asked for another copy', async () => {
+      const userId = await seedUser(0);
+      await seedLetter(userId);
+      const draftId = await seedDraft(userId);
+
+      const copy = await commerce.createJitCheckout({ userId, draftId, allowDuplicate: true });
+
+      expect(copy).toMatchObject({ success: true, reused: false, status: 'checkout_pending' });
+      expect(copy.checkoutUrl).toBe(`https://checkout.stripe.test/${copy.orderId}`);
+      expect(await ordersOf(userId)).toEqual([
+        {
+          order_id: copy.orderId,
+          draft_id: draftId,
+          status: 'checkout_pending',
+          stripe_checkout_session_id: `cs_test_${copy.orderId}`
+        }
+      ]);
+    });
+
+    it('hands back the open checkout for the same draft without asking again', async () => {
+      const userId = await seedUser(0);
+      const draftId = await seedDraft(userId);
+      const first = await commerce.createJitCheckout({ userId, draftId });
+      await seedLetter(userId);
+
+      const again = await commerce.createJitCheckout({ userId, draftId });
+
+      expect(again).toMatchObject({ orderId: first.orderId, checkoutUrl: first.checkoutUrl, reused: true });
+      expect(await ordersOf(userId)).toHaveLength(1);
+    });
+
+    it('checks the order that replaces one too near expiry, and leaves that one alone on a refusal', async () => {
+      const userId = await seedUser(0);
+      const draftId = await seedDraft(userId);
+      // No session, and inside Stripe's 30-minute floor: prepareJitOrder
+      // cancels this row and inserts a new order in its place.
+      const stale = await seedOrder(userId, draftId, { status: 'checkout_pending', checkoutMinutesLeft: 10 });
+      await seedLetter(userId);
+
+      await expect(commerce.createJitCheckout({ userId, draftId })).rejects.toMatchObject({
+        code: 'DUPLICATE_RECENT_MAIL',
+        duplicate: { kind: 'sent' }
+      });
+      expect(await ordersOf(userId)).toEqual([
+        { order_id: stale, draft_id: draftId, status: 'checkout_pending', stripe_checkout_session_id: null }
+      ]);
+
+      const copy = await commerce.createJitCheckout({ userId, draftId, allowDuplicate: true });
+
+      expect(copy.reused).toBe(false);
+      const orders = await ordersOf(userId);
+      expect(orders).toHaveLength(2);
+      expect(orders.find(order => order.order_id === stale)?.status).toBe('cancelled');
+      expect(orders.find(order => order.order_id === copy.orderId)?.status).toBe('checkout_pending');
+    });
+
+    it('refuses a draft that was already sent as sent, not as a copy of itself', async () => {
+      const userId = await seedUser();
+      const draftId = await seedDraft(userId);
+      await mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
+
+      await expect(commerce.createJitCheckout({ userId, draftId })).rejects.toMatchObject({
+        code: 'DRAFT_INVALID_STATE'
+      });
+      expect(await ordersOf(userId)).toEqual([]);
     });
   });
 });

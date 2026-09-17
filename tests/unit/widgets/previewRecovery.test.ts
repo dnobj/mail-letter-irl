@@ -1647,10 +1647,13 @@ describe.each([LETTER, POSTCARD])('$file and the same mail twice (#412)', spec =
     expect(harness.text('send-button')).toBe('Send another copy');
   });
 
-  it('recognises a refusal the host turns into a rejection', async () => {
+  it.each([
+    ['as it is', 'Possible duplicate: This same mail was already sent.'],
+    ['behind words of its own', 'Tool call failed: Possible duplicate: This same mail was already sent.']
+  ])('recognises a refusal the host turns into a rejection, %s', async (_label, message) => {
     const harness = await ready({
       sendResponse: () => {
-        throw new Error('Possible duplicate: This same mail was already sent.');
+        throw new Error(message);
       }
     });
     await harness.click('send-button');
@@ -1724,7 +1727,7 @@ describe.each([LETTER, POSTCARD])('$file and the same mail twice (#412)', spec =
   it('recognises a checkout refusal the host turns into a rejection', async () => {
     const harness = await payable({
       checkoutResponse: () => {
-        throw new Error('Possible duplicate: A Pay & Send checkout for this same mail is open.');
+        throw new Error('Error: Possible duplicate: A Pay & Send checkout for this same mail is open.');
       }
     });
     await harness.click('pay-send-button');

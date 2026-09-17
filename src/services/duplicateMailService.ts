@@ -316,27 +316,10 @@ export async function findRecentDuplicateMail(
 }
 
 /**
- * Whether the draft already has a Pay & Send order in one of `statuses`. A
- * new checkout for such a draft reuses that order, so nothing new is bought.
- */
-export async function draftHasActiveOrder(
-  db: DuplicateMailQueryable,
-  params: { draftId: string; userId: string; statuses: readonly string[] }
-): Promise<boolean> {
-  const result = await db.query<{ order_id: string }>(
-    `/* duplicate mail check: active order */
-     SELECT order_id FROM orders
-     WHERE draft_id = $1::uuid AND user_id = $2 AND order_type = 'jit_mail'
-       AND status = ANY($3::varchar[])
-     LIMIT 1`,
-    [params.draftId, params.userId, params.statuses]
-  );
-  return Boolean(result.rows?.[0]);
-}
-
-/**
  * Refuses a send or a new checkout for mail that already went out, was paid
- * for, or is awaiting payment. A draft that is not this user's is left to the
+ * for, or is awaiting payment. Both callers run it inside their transaction,
+ * with the draft locked and known to be pending, so the draft never matches
+ * mail made from itself. A draft that is not this user's is left to the
  * caller's own ownership check.
  */
 export async function assertNoRecentDuplicateMail(

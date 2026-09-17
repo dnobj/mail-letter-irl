@@ -52,9 +52,11 @@ So a send from balance, and a new Pay & Send checkout, is refused when the accou
   - a Pay & Send order that is paid but not yet mail;
   - a Pay & Send checkout that is still open.
 - **Where it runs.**
-  - For a send from balance, the check runs after the deduction, beside the daily caps, because the account row is already locked there, so two sends cannot both pass. A refusal rolls the send back.
-  - For Pay & Send, it runs in `createJitCheckout` with the caps, before any order or Stripe session exists.
-  - A draft that already has an active order is a reuse, and is not checked again.
+  - For a send from balance, the check runs after the deduction, beside the daily caps. The account row is already locked there, so two sends from one account cannot both pass. A refusal rolls the send back.
+  - For Pay & Send, it runs in `prepareJitOrder` as the last step before a new order is inserted, before any Stripe session exists.
+    - A checkout handed back for the same draft is not checked again, because nothing new is bought. That includes an open checkout and a paid order.
+    - A sessionless order being replaced is checked. That happens when it is too near expiry for Stripe or was priced before a price change. A refusal also rolls back that order's cancellation.
+    - This check is a best-effort net. Checkouts for two identical drafts lock different rows, so two made at the same moment can both pass.
   - Pay & Send fulfilment, which runs after the customer has paid, is never checked.
 - **The refusal.** It is an MCP error result whose text starts with `Possible duplicate:`. The text tells the model what went out, when, and to ask the user before repeating the call with `sendAnotherCopy: true`. `_meta["letterirl/duplicateMail"]` carries `{kind, mailType, recipientName, ageMinutes}` for the preview cards, which say what went out and turn the button into **Send another copy** or **Pay for another copy**.
 
@@ -110,7 +112,7 @@ Generated images receive a capability URL backed by a private Railway bucket. Th
 ## Required Tests
 
 - duplicate and concurrent send calls create one order and one deduction;
-- a second draft of the same mail is refused within 24 hours and sent only with `sendAnotherCopy: true` (`tests/integration/duplicateMail.postgres.test.ts`);
+- a second draft of the same mail is refused within 24 hours, from balance and at a new Pay & Send checkout, and goes through only with `sendAnotherCopy: true` (`tests/integration/duplicateMail.postgres.test.ts`);
 - insufficient balance rolls back all effects;
 - `429`, `503`, timeout, and network failures are held as ambiguous rather than resubmitted;
 - a terminal failure returns the customer's Letter Pack exactly once, and an ambiguous one never does;
