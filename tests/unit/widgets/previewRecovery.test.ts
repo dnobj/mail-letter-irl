@@ -524,6 +524,40 @@ describe.each([LETTER, POSTCARD])('$file recovery from a lost preview call (#411
     expect(harness.visible('empty-state')).toBe(false);
   });
 
+  it('shows no timeout message over a preview that arrived meanwhile', async () => {
+    const harness = await lostCall(spec);
+    harness.holdCalls();
+    await harness.click('retry-button');
+    await harness.deliverHostResult(spec.output('draft_host_0001'));
+
+    await harness.runTimer(60000);
+
+    expect(harness.visible('error-message')).toBe(false);
+    expect(harness.text('id-value')).toBe('draft_host_0001');
+
+    await harness.releaseCalls();
+
+    expect(harness.visible('error-message')).toBe(false);
+    expect(harness.text('id-value')).toBe('draft_host_0001');
+  });
+
+  it('shows no retry error over a preview that arrived meanwhile', async () => {
+    const harness = await lostCall(spec, {
+      previewResponse: () => {
+        throw new Error('host refused the call');
+      }
+    });
+    harness.holdCalls();
+    await harness.click('retry-button');
+    await harness.deliverHostResult(spec.output('draft_host_0001'));
+
+    await harness.releaseCalls();
+
+    expect(harness.callsTo(spec.tool)).toHaveLength(1);
+    expect(harness.visible('error-message')).toBe(false);
+    expect(harness.text('id-value')).toBe('draft_host_0001');
+  });
+
   it('clears its call timeout once the call answers', async () => {
     const harness = await lostCall(spec);
 
