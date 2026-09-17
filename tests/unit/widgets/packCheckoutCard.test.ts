@@ -359,6 +359,22 @@ describe('PackCheckoutCard rendered without a tool result', () => {
     expect(card.calls).toEqual([]);
   });
 
+  it('suggests a higher thinking effort with the empty state only', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+    expect(card.visible('empty-hint')).toBe(false);
+
+    await card.runNextTimer();
+
+    expect(card.visible('empty-hint')).toBe(true);
+    expect(card.text('empty-hint')).toBe(
+      "Tip: with Instant selected, ChatGPT sometimes doesn't run an action you approved. A higher thinking effort can help."
+    );
+
+    await card.click('retry-button');
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('empty-hint')).toBe(false);
+  });
+
   it('creates the requested pack itself and draws the link from the result', async () => {
     const card = mount({ toolInput: { pack: 'starter' } });
     await card.runNextTimer();

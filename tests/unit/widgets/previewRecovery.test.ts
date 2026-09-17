@@ -333,6 +333,26 @@ describe.each([LETTER, POSTCARD])('$file recovery from a lost preview call (#411
     expect(harness.calls).toEqual([]);
   });
 
+  it('suggests a higher thinking effort once the wait runs out', async () => {
+    const harness = mount(spec);
+    await flush();
+    expect(harness.visible('empty-hint')).toBe(false);
+
+    await harness.runWait();
+
+    expect(harness.visible('empty-hint')).toBe(true);
+    expect(harness.text('empty-hint')).toBe(
+      "Tip: with Instant selected, ChatGPT sometimes doesn't run an action you approved. A higher thinking effort can help."
+    );
+  });
+
+  it('keeps the tip when it cannot repeat the call', async () => {
+    const harness = await lostCall(spec, { noCallTool: true });
+
+    expect(harness.visible('retry-button')).toBe(false);
+    expect(harness.visible('empty-hint')).toBe(true);
+  });
+
   it('repeats the preview with exactly the host arguments and draws the result', async () => {
     const harness = await lostCall(spec);
 
@@ -1049,6 +1069,33 @@ describe.each([LETTER, POSTCARD])('$file keeps what it did for a reopened conver
     expect(harness.visible('retry-button')).toBe(false);
   });
 
+  it('drops the tip when saved state arrives after the wait ran out', async () => {
+    const harness = await lostCall(spec);
+    expect(harness.visible('empty-hint')).toBe(true);
+
+    harness.openai.widgetState = { v: 1, draftId: 'draft_host_0001' };
+    await harness.fireGlobals();
+
+    expect(harness.visible('retry-button')).toBe(true);
+    expect(harness.visible('empty-hint')).toBe(false);
+  });
+
+  it('drops the tip when a kept order arrives after the wait ran out', async () => {
+    const harness = await lostCall(spec);
+    expect(harness.visible('empty-hint')).toBe(true);
+
+    harness.openai.widgetState = {
+      v: 1,
+      draftId: 'draft_host_0001',
+      sent: true,
+      orderId: 'ord_sent_0001'
+    };
+    await harness.fireGlobals();
+
+    expect(harness.text('status-pill')).toBe('With the printer');
+    expect(harness.visible('empty-hint')).toBe(false);
+  });
+
   it('is not mistaken for a reopened card once the host applies its own saved state', async () => {
     const harness = mount(spec, {
       toolOutput: spec.output('draft_host_0001'),
@@ -1081,6 +1128,7 @@ describe.each([LETTER, POSTCARD])('$file keeps what it did for a reopened conver
     expect(harness.text('id-label')).toBe('Order');
     expect(harness.text('id-value')).toBe('ord_sent_0001');
     expect(harness.visible('retry-button')).toBe(false);
+    expect(harness.visible('empty-hint')).toBe(false);
     expect(harness.visible('send-button')).toBe(false);
     expect(harness.visible('purchase-actions')).toBe(false);
 
@@ -1154,6 +1202,8 @@ describe.each([LETTER, POSTCARD])('$file keeps what it did for a reopened conver
     expect(harness.pendingTimers()).toEqual([]);
     expect(harness.visible('empty-state')).toBe(true);
     expect(harness.visible('retry-button')).toBe(true);
+    // Nothing was lost: the host does not replay results into a reopened card.
+    expect(harness.visible('empty-hint')).toBe(false);
 
     await harness.click('retry-button');
     expect(harness.text('id-value')).toBe('draft_retry_0001');
