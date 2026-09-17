@@ -779,6 +779,45 @@ no country). The over-limit body, the suite variant and the outbox cases were no
 - [x] Draft ID returned
 - [x] `canSendNow` reflects actual balance
 
+### PREVIEW-01 — Preview card recovery after a lost "Allow once" (issue #411)
+
+**Status:** Not yet executed.
+
+Background: on 2026-09-16 ChatGPT web lost six of six preview calls approved with **Allow once**,
+including one clicked by the owner. After each approval no `tools/call` reached the development
+API, the card stayed on its loading state, and the model usually said the preview had been
+created. The preview cards now wait and then offer **Create my preview**, which repeats the call
+from the card.
+
+- [ ] With the (DEV) connector refreshed to widget v32 or later, start a fresh chat and ask for a
+      text-only letter preview. If ChatGPT asks for permission, click **Allow once**. If it does
+      not ask, the call goes through unprompted; record that and try again in a new chat.
+- [ ] If the card fills in with the draft within a few seconds, the approved call went through.
+      Record that; the lost call did not reproduce.
+- [ ] If the card stays on "Loading letter preview…", wait 25 seconds. It should read "No
+      preview is showing on this card. If this letter was already sent, there is nothing more to
+      do here. Otherwise, create the preview again." with **Create my preview**. The dev log
+      should show the template read and no `tools/call` for the approved call.
+- [ ] Click **Create my preview**. The dev log shows `tools/call quote_and_preview_letter`, and the
+      card fills in with the letter, the cost, the delivery line and the draft id, with **Send
+      Letter** when the balance covers it. Record whether ChatGPT asked for permission for the
+      card's call.
+- [ ] Reload the page. The reopened card should offer **Create my preview** straight away, without
+      the wait.
+- [ ] Create the preview again and send it from the card (the dummy provider mails nothing), then
+      reload. The card should read "This letter was sent to the printer from this card. Ask for its
+      status in the chat." with **With the printer** and no buttons.
+- [ ] After a lost call, ask the model whether the preview exists. With instructions r8 it should
+      say the call did not complete, or point at **Create my preview**, rather than describe a
+      draft it never received.
+- [ ] Repeat the lost-call steps for an enclosed-image letter
+      (`quote_and_preview_letter_with_image`) with an attached image. The card waits 45 seconds
+      and must repeat that tool. In the dev log, the repeated call should log
+      `quote.letter.image.from_fileParams`, not `from_recent_upload`. Record whether the card
+      shows the image, or "Image not shown on this card", or advice to ask in the chat, which
+      means the host passed the image in a form the card will not repeat.
+- [ ] If time allows, repeat the lost-call steps for a postcard. It also waits 45 seconds.
+
 ### Validation Errors
 - [x] Missing address fields → clear error
 - [x] Non-US address → "Only supports US" error (2026-09-13: refused as a missing `state`

@@ -26,5 +26,10 @@
  *     ceiling) and degrades to a copy-the-prompt redirect card otherwise.
  *     sendFollowUpMessage auto-nudge was dropped: on-device it resolved
  *     without ever posting the message (false positive).
+ * r8: not image routing, but the same instructions block (#411): a preview
+ *     exists only with a draftId, a call that returns nothing did not
+ *     complete, and the preview card offers Create my preview. ChatGPT web
+ *     loses calls approved with "Allow once" and the model then claimed the
+ *     preview existed.
  */
-export const STEERING_COPY_REV = 7;
+export const STEERING_COPY_REV = 8;
