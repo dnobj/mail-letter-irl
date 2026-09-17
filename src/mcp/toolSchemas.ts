@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { preprocessImageFileParam } from "../utils/imageFileParam.js";
 
 const addressSchema = z.object({
   name: z.string(),
@@ -23,10 +24,11 @@ const addressSchema = z.object({
 // attached, and per openai-apps-sdk-examples#185 also 'chat_upload' /
 // 'chat_upload://image_N') instead of file objects. That tolerance now lives
 // in the preprocess step, which zod-to-json-schema serializes as the INNER
-// object (contract-conformant) while at runtime coercing any string to
-// undefined - landing on the handlers' existing graceful no-image fallback.
+// object (contract-conformant). At runtime '' becomes no image and any other
+// string becomes a marker for a picture the server cannot open (#414; see
+// utils/imageFileParam.ts). Same preprocess as src/zodSchemas.ts.
 const imageFileParamSchema = z.preprocess(
-  (value) => (typeof value === "string" ? undefined : value),
+  preprocessImageFileParam,
   z
     .object({
       download_url: z.string(),

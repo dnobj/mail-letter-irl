@@ -23,7 +23,8 @@ import { downloadAndProcessPostcardImageWithPreview, ImageProcessingError, type 
 import type { PostcardSize, ImageFileParam } from "../services/types.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
-import { getRecentUploadedImage } from "../services/recentUploadStore.js";
+import { resolvePreviewImageSource } from "../services/previewImageSource.js";
+import { isUnresolvedImageReference, usableImageFile } from "../utils/imageFileParam.js";
 import {
   DELIVERY_CLASS,
   DELIVERY_DISCLAIMER,
@@ -123,14 +124,6 @@ async function handler(
   let imageInput: ImageInput | null = null;
   let imageSourceUrl: string | undefined;
 
-  // Type guard: Check if image is a valid ImageFileParam object (not empty string from mobile)
-  const isValidImageFileParam = (img: unknown): img is ImageFileParam =>
-    typeof img === 'object' && img !== null && 'download_url' in img;
-
-  // Check if we have file_id even without download_url (potential mobile workaround via sediment://)
-  const hasFileIdOnly = (img: unknown): img is { file_id: string } =>
-    typeof img === 'object' && img !== null && 'file_id' in img && !('download_url' in img);
-
   // Debug flag - enabled in dev environment
   const isDebug = process.env.NODE_ENV === 'development' ||
                   process.env.DEBUG_IMAGE === 'true';
@@ -153,18 +146,22 @@ async function handler(
         hasFileName: imageObj && 'file_name' in imageObj,
         // Log actual values (truncated for URLs, full for file_id)
         mimeType: imageObj?.mime_type as string | undefined,
-        // Validation results
-        isValidFileParam: isValidImageFileParam(input.image),
-        hasFileIdOnly: hasFileIdOnly(input.image)
+        // Validation results (#414: the marker for an unreadable reference is
+        // an object with an empty download address)
+        isUsableFile: usableImageFile(input.image) !== null,
+        unresolvedReference: isUnresolvedImageReference(input.image)
       },
       "Debug: Full image parameter details for mobile investigation"
     );
   }
 
-  if (input.image && isValidImageFileParam(input.image)) {
+  // A file ChatGPT resolved, then imageUrl, then a recent upload through the
+  // upload card (see previewImageSource.ts).
+  const resolved = await resolvePreviewImageSource(input, context.user.userId, "postcard");
+  if (resolved.kind === "file") {
     // OpenAI fileParams (preferred)
-    imageInput = input.image;
-    imageSourceUrl = input.image.download_url;
+    imageInput = resolved.file;
+    imageSourceUrl = resolved.url;
     context.logger.info(
       {
         correlationId: context.correlationId,
@@ -172,10 +169,10 @@ async function handler(
       },
       "Using image from OpenAI fileParams"
     );
-  } else if (input.imageUrl) {
+  } else if (resolved.kind === "url") {
     // Direct URL (fallback for code interpreter images)
-    imageInput = { url: input.imageUrl };
-    imageSourceUrl = input.imageUrl;
+    imageInput = { url: resolved.url };
+    imageSourceUrl = resolved.url;
     context.logger.info(
       {
         correlationId: context.correlationId,
@@ -184,22 +181,18 @@ async function handler(
       },
       "Using image from direct URL"
     );
-  } else {
-    // Fallback: if ChatGPT drops imageUrl on the follow-up tool call,
-    // reuse the most recently confirmed upload for this user.
-    const recent = await getRecentUploadedImage(context.user.userId, "postcard");
-    if (recent?.imageUrl) {
-      imageInput = { url: recent.imageUrl };
-      imageSourceUrl = recent.imageUrl;
-      context.logger.info(
-        {
-          correlationId: context.correlationId,
-          event: "quote.postcard.image_from_recent_upload",
-          imageAgeMs: recent.ageMs
-        },
-        "Using recent uploaded image fallback for postcard"
-      );
-    }
+  } else if (resolved.kind === "recent_upload") {
+    imageInput = { url: resolved.url };
+    imageSourceUrl = resolved.url;
+    context.logger.info(
+      {
+        correlationId: context.correlationId,
+        event: "quote.postcard.image_from_recent_upload",
+        imageAgeMs: resolved.ageMs,
+        unresolvedReference: resolved.unresolvedReference
+      },
+      "Using recent uploaded image fallback for postcard"
+    );
   }
 
   if (!imageInput) {
@@ -207,7 +200,9 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "quote.postcard.no_image",
-        isMobile: context.isMobile
+        isMobile: context.isMobile,
+        unresolvedReference: resolved.kind === "none" && resolved.unresolvedReference,
+        skippedUploadAgeMs: resolved.kind === "none" ? resolved.skippedUploadAgeMs : undefined
       },
       "No image provided for postcard"
     );

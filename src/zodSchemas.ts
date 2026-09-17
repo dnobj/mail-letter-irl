@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { preprocessImageFileParam } from "./utils/imageFileParam.js";
 
 export const addressZ = z.object({
   name: z.string(),
@@ -33,12 +34,15 @@ export const quoteAndPreviewInputZ = z.object({
 // "image": {} and the model could only improvise bare id/path strings).
 //
 // The permissiveness existed for runtime edge cases - mobile sends strings
-// ("attached", "", "chat_upload://image_N") instead of file objects. That
-// tolerance now lives in the preprocess step: serialization uses the inner
-// object (contract-conformant), while any string coerces to undefined at
-// runtime and lands on the handlers' existing graceful no-image fallback.
+// ("attached", "", "chat_upload://image_N") instead of file objects, and a
+// sandbox path ("/mnt/data/photo.png") arrives when ChatGPT did not swap in
+// the file. That tolerance now lives in the preprocess step: serialization
+// uses the inner object (contract-conformant). At runtime "" becomes no
+// image, and any other string becomes a marker for a picture the server
+// cannot open, which the handlers do not replace with an older upload (#414;
+// see utils/imageFileParam.ts and services/previewImageSource.ts).
 const imageFileParamZ = z.preprocess(
-  (value) => (typeof value === "string" ? undefined : value),
+  preprocessImageFileParam,
   z
     .object({
       download_url: z.string(),
