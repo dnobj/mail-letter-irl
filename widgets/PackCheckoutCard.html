@@ -9,12 +9,13 @@
          chrome, Georgia only inside paper artifacts, paper stays cream in
          both themes. Shell copied from GetStartedCard so the two cards match. */
       :root{--sf:#fff;--sf2:#fafafa;--bd:#e4e4e7;--bd2:#f0f0f2;--tx:#111113;--tb:#3f3f46;--mut:#71717a;--faint:#a1a1aa;--ok:#15803d;--okbg:#ecfdf3;--er:#b91c1c;--erbg:#fef2f2;--btn:#2563eb;--btntx:#fff}
-      .dark{--sf:#2a2a2e;--sf2:#232327;--bd:#3a3a40;--bd2:#323238;--tx:#f4f4f5;--tb:#d4d4d8;--mut:#a1a1aa;--faint:#71717a;--ok:#4ade80;--okbg:#143622;--er:#f87171;--erbg:#3b1d1d;--btn:#3b82f6;--btntx:#fff;--li-blue:#6f98f2}
+      .dark{--sf:#2a2a2e;--sf2:#232327;--bd:#3a3a40;--bd2:#323238;--tx:#f4f4f5;--tb:#d4d4d8;--mut:#a1a1aa;--faint:#71717a;--ok:#4ade80;--okbg:#143622;--er:#f87171;--erbg:#3b1d1d;--btn:#3b82f6;--btntx:#fff}
       *{box-sizing:border-box}
       body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
       .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;color:var(--tb);overflow:hidden}
       .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
-      .logo{width:17px;height:11px;flex:none;display:block}
+      .logo{width:22.5px;height:14px;flex:none;display:block;background:url("data:image/png;base64,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") center/contain no-repeat}
+      .dark .logo{background-image:url("data:image/png;base64,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")}
       .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
       .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
       .bd{padding:14px}
@@ -51,7 +52,7 @@
   </head>
   <body>
     <div class="w">
-      <div class="hd"><span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 21"><path fill="none" stroke="var(--li-blue,#2563eb)" stroke-width="3" stroke-linejoin="round" d="M11.3 2.4c5.2 0 9.4 3.3 9.4 7.4 0 4.1-4.2 7.4-9.4 7.4-.8 0-1.6-.1-2.4-.2l-5.7 2.6 1.8-4.1C3 14.2 1.9 12 1.9 9.8c0-4.1 4.2-7.4 9.4-7.4Z"></path><g transform="rotate(-8 24 8.6)"><rect x="16.5" y="3" width="14.6" height="10" rx="1.6" fill="var(--li-orange,#f97316)"></rect><path fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" d="m18 4.7 5.8 4 5.8-4"></path></g></svg></span><b>Letter IRL</b><span class="ctx">Letter pack</span></div>
+      <div class="hd"><span class="logo" aria-hidden="true"></span><b>Letter IRL</b><span class="ctx">Letter pack</span></div>
       <div class="bd">
         <!-- Skeleton until toolOutput arrives, or until EMPTY_AFTER_MS says it never will -->
         <div id="state-loading">
@@ -68,6 +69,10 @@
           <button type="button" class="btn hidden" id="retry-button">Create my checkout</button>
           <div class="opts hidden" id="pack-options"></div>
           <div class="err hidden" id="retry-error"></div>
+          <!-- A card cannot tell which model is selected (neither
+               window.openai nor the request metadata says), so the tip
+               names the setting where the loss shows up. -->
+          <p class="note" id="empty-hint">Tip: with Instant selected, ChatGPT sometimes doesn't run an action you approved. A higher thinking effort can help.</p>
         </div>
         <div id="state-ready" class="hidden">
           <h1 class="title" id="title">Letter pack</h1>
@@ -92,7 +97,7 @@
           <p class="oid hidden" id="order-line"></p>
         </div>
       </div>
-      <p class="rev">pack t7</p>
+      <p class="rev">pack t8</p>
     </div>
 
     <script>

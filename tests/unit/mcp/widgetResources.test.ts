@@ -133,9 +133,37 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 32,
-        digest: '0756972a5911'
+        version: 33,
+        digest: 'dc47b762a0d1'
       });
+    });
+  });
+
+  describe('widget header logo', () => {
+    it("shows the website's mark in every widget, exactly as scripts/build-widget-logo.ts wrote it", async () => {
+      // The script writes the two PNGs and inlines them; a widget edited by
+      // hand, or a PNG rebuilt without re-running it, shows up here.
+      const widgetDir = path.resolve(__dirname, '../../../widgets');
+      const brandDir = path.resolve(__dirname, '../../../assets/brand/png');
+      const light = await fs.readFile(path.join(brandDir, 'widget-logo-light.png'));
+      const dark = await fs.readFile(path.join(brandDir, 'widget-logo-dark.png'));
+      // A PNG's width and height sit at bytes 16 and 20; the files are 4x the CSS size.
+      const cssSize = (png: Buffer) => ({ width: png.readUInt32BE(16) / 4, height: png.readUInt32BE(20) / 4 });
+      expect(cssSize(light)).toEqual({ width: 22.5, height: 14 });
+      expect(cssSize(dark)).toEqual(cssSize(light));
+
+      const logoRule =
+        '.logo{width:22.5px;height:14px;flex:none;display:block;' +
+        `background:url("data:image/png;base64,${light.toString('base64')}") center/contain no-repeat}`;
+      const darkRule = `.dark .logo{background-image:url("data:image/png;base64,${dark.toString('base64')}")}`;
+      for (const { name } of WIDGET_DEFINITIONS) {
+        const html = await fs.readFile(path.join(widgetDir, `${name}.html`), 'utf-8');
+        expect(html.split(logoRule), name).toHaveLength(2);
+        expect(html.split(darkRule), name).toHaveLength(2);
+        expect(html, name).toContain('<div class="hd"><span class="logo" aria-hidden="true"></span><b>Letter IRL</b>');
+        // Each card switches themes on the root element, which the dark rule relies on.
+        expect(html, name).toContain('document.documentElement.classList.toggle("dark", theme === "dark")');
+      }
     });
   });
 
