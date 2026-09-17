@@ -781,7 +781,11 @@ no country). The over-limit body, the suite variant and the outbox cases were no
 
 ### PREVIEW-01 — Preview card recovery after a lost "Allow once" (issue #411)
 
-**Status:** Not yet executed.
+**Status:** Executed 2026-09-17 in development through Claude in Chrome, between 00:18 and 00:30
+UTC, after #413 deployed. The connector refresh logged `tools/list` at steering revision 8 and
+widget v32, then eight template reads at v32. Passed for text-only letters, image letters given
+as a URL, and postcards. An image attached or generated in the chat cannot be recovered (#414).
+The send step was not run.
 
 Background: on 2026-09-16 ChatGPT web lost six of six preview calls approved with **Allow once**,
 including one clicked by the owner. After each approval no `tools/call` reached the development
@@ -789,34 +793,46 @@ API, the card stayed on its loading state, and the model usually said the previe
 created. The preview cards now wait and then offer **Create my preview**, which repeats the call
 from the card.
 
-- [ ] With the (DEV) connector refreshed to widget v32 or later, start a fresh chat and ask for a
+- [x] With the (DEV) connector refreshed to widget v32 or later, start a fresh chat and ask for a
       text-only letter preview. If ChatGPT asks for permission, click **Allow once**. If it does
-      not ask, the call goes through unprompted; record that and try again in a new chat.
-- [ ] If the card fills in with the draft within a few seconds, the approved call went through.
-      Record that; the lost call did not reproduce.
-- [ ] If the card stays on "Loading letter preview…", wait 25 seconds. It should read "No
+      not ask, the call goes through unprompted; record that and try again in a new chat. (Asked
+      every time. All four approved calls in this run were lost again: the dev log showed the
+      template read and no `tools/call`.)
+- [x] If the card fills in with the draft within a few seconds, the approved call went through.
+      Record that; the lost call did not reproduce. (Did not apply.)
+- [x] If the card stays on "Loading letter preview…", wait 25 seconds. It should read "No
       preview is showing on this card. If this letter was already sent, there is nothing more to
       do here. Otherwise, create the preview again." with **Create my preview**. The dev log
-      should show the template read and no `tools/call` for the approved call.
-- [ ] Click **Create my preview**. The dev log shows `tools/call quote_and_preview_letter`, and the
+      should show the template read and no `tools/call` for the approved call. (As described.)
+- [x] Click **Create my preview**. The dev log shows `tools/call quote_and_preview_letter`, and the
       card fills in with the letter, the cost, the delivery line and the draft id, with **Send
       Letter** when the balance covers it. Record whether ChatGPT asked for permission for the
-      card's call.
-- [ ] Reload the page. The reopened card should offer **Create my preview** straight away, without
-      the wait.
+      card's call. (The call arrived and succeeded, and the card showed Text Only, 1 Letter,
+      **Ready to send** and **Send Letter**. No permission prompt for the card's call.)
+- [x] Reload the page. The reopened card should offer **Create my preview** straight away, without
+      the wait. (Offered within seven seconds of the reload.)
 - [ ] Create the preview again and send it from the card (the dummy provider mails nothing), then
       reload. The card should read "This letter was sent to the printer from this card. Ask for its
-      status in the chat." with **With the printer** and no buttons.
-- [ ] After a lost call, ask the model whether the preview exists. With instructions r8 it should
+      status in the chat." with **With the printer** and no buttons. (Not run: clicking Send needs
+      the owner's go.)
+- [x] After a lost call, ask the model whether the preview exists. With instructions r8 it should
       say the call did not complete, or point at **Create my preview**, rather than describe a
-      draft it never received.
-- [ ] Repeat the lost-call steps for an enclosed-image letter
+      draft it never received. (Observed without asking: three of the four replies still claimed
+      success, and one said the call did not complete. The card is what recovers.)
+- [x] Repeat the lost-call steps for an enclosed-image letter
       (`quote_and_preview_letter_with_image`) with an attached image. The card waits 45 seconds
       and must repeat that tool. In the dev log, the repeated call should log
       `quote.letter.image.from_fileParams`, not `from_recent_upload`. Record whether the card
       shows the image, or "Image not shown on this card", or advice to ask in the chat, which
-      means the host passed the image in a form the card will not repeat.
-- [ ] If time allows, repeat the lost-call steps for a postcard. It also waits 45 seconds.
+      means the host passed the image in a form the card will not repeat. (Run twice. With the
+      image given as a URL, the card repeated that tool, the log showed
+      `quote.letter.image.from_url`, and the card drew the draft with the image, so ChatGPT
+      returns `_meta` to a card's own call. With an image generated in the chat, the approval
+      panel showed the image argument as a sandbox file path. The card offered only the advice
+      to ask in the chat, as designed; #414 tracks recovering that case.)
+- [x] If time allows, repeat the lost-call steps for a postcard. It also waits 45 seconds. (With
+      the front image given as a URL: `tools/call quote_and_preview_postcard` from the card, and
+      the card drew the front image with **Send Postcard**.)
 
 ### Validation Errors
 - [x] Missing address fields → clear error
