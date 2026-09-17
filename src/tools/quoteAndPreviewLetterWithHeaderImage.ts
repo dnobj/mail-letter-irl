@@ -24,7 +24,7 @@ import {
 import { downloadAndProcessLetterImageWithPreview, ImageProcessingError } from "../services/imageService.js";
 import type { ImageFileParam } from "../services/types.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
-import { getRecentUploadedImage } from "../services/recentUploadStore.js";
+import { resolvePreviewImageSource } from "../services/previewImageSource.js";
 
 // ============================================================================
 // Types
@@ -68,15 +68,13 @@ async function handler(
     "Processing quote_and_preview_letter_with_header_image"
   );
 
-  // Type guard: Check if image is a valid ImageFileParam object (not empty string from mobile)
-  const isValidImageFileParam = (img: unknown): img is ImageFileParam =>
-    typeof img === 'object' && img !== null && 'download_url' in img;
-
-  // Get image source - REQUIRED
-  let imageSource = (isValidImageFileParam(input.image) ? input.image.download_url : null) || input.imageUrl;
+  // Get image source - REQUIRED. A file ChatGPT resolved, then imageUrl, then
+  // a recent upload through the upload card (see previewImageSource.ts).
+  const resolved = await resolvePreviewImageSource(input, context.user.userId, "header_image");
+  const imageSource = resolved.kind === "none" ? undefined : resolved.url;
 
   // Log image source
-  if (isValidImageFileParam(input.image)) {
+  if (resolved.kind === "file") {
     context.logger.info(
       {
         correlationId: context.correlationId,
@@ -84,7 +82,7 @@ async function handler(
       },
       "Using header image from OpenAI fileParams"
     );
-  } else if (imageSource) {
+  } else if (resolved.kind === "url") {
     context.logger.info(
       {
         correlationId: context.correlationId,
@@ -93,21 +91,16 @@ async function handler(
       },
       "Using header image from URL"
     );
-  } else {
-    // Fallback: if ChatGPT drops imageUrl on the follow-up tool call,
-    // reuse the most recently confirmed upload for this user.
-    const recent = await getRecentUploadedImage(context.user.userId, "header_image");
-    if (recent?.imageUrl) {
-      imageSource = recent.imageUrl;
-      context.logger.info(
-        {
-          correlationId: context.correlationId,
-          event: "quote.letter.header_image.from_recent_upload",
-          imageAgeMs: recent.ageMs
-        },
-        "Using recent uploaded image fallback for letter with header image"
-      );
-    }
+  } else if (resolved.kind === "recent_upload") {
+    context.logger.info(
+      {
+        correlationId: context.correlationId,
+        event: "quote.letter.header_image.from_recent_upload",
+        imageAgeMs: resolved.ageMs,
+        unresolvedReference: resolved.unresolvedReference
+      },
+      "Using recent uploaded image fallback for letter with header image"
+    );
   }
 
   if (!imageSource) {
@@ -115,7 +108,9 @@ async function handler(
       {
         correlationId: context.correlationId,
         event: "quote.letter.header_image.no_image",
-        isMobile: context.isMobile
+        isMobile: context.isMobile,
+        unresolvedReference: resolved.kind === "none" && resolved.unresolvedReference,
+        skippedUploadAgeMs: resolved.kind === "none" ? resolved.skippedUploadAgeMs : undefined
       },
       "No header image provided"
     );
