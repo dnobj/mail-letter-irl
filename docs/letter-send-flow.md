@@ -54,7 +54,7 @@ So a send from balance, and a new Pay & Send checkout, is refused when the accou
 - **Where it runs.**
   - For a send from balance, the check runs after the deduction, beside the daily caps. The account row is already locked there, so two sends from one account cannot both pass. A refusal rolls the send back.
   - For Pay & Send, it runs in `prepareJitOrder` as the last step before a new order is inserted, before any Stripe session exists.
-    - A checkout handed back for the same draft is not checked again, because nothing new is bought. That includes an open checkout and a paid order.
+    - An order handed back for the same draft is not checked again, because nothing new is bought: it is the same order at the same price. That covers an order with a Stripe session, and a sessionless one still at today's price, which gets a fresh session for the same order. It also covers an order past checkout: paid, being refunded, disputed or held.
     - A sessionless order being replaced is checked. That happens when it is too near expiry for Stripe or was priced before a price change. A refusal also rolls back that order's cancellation.
     - This check is a best-effort net. Checkouts for two identical drafts lock different rows, so two made at the same moment can both pass.
   - Pay & Send fulfilment, which runs after the customer has paid, is never checked.

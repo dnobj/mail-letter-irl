@@ -3120,7 +3120,12 @@ describe('commerceService', () => {
     let activeRows: Record<string, unknown>[];
     let credits: number;
     let trail: string[];
-    const position = (fragment: string) => trail.findIndex(sql => sql.includes(fragment));
+    /** Where the first statement containing `fragment` ran. Throws when none did, so an order check cannot pass on -1. */
+    const position = (fragment: string) => {
+      const index = trail.findIndex(sql => sql.includes(fragment));
+      if (index < 0) throw new Error(`no statement ran containing: ${fragment}`);
+      return index;
+    };
 
     beforeEach(() => {
       draftRow = pendingDraft();
@@ -3171,7 +3176,6 @@ describe('commerceService', () => {
       await expect(mocks.transaction.mock.results[0].value).rejects.toMatchObject({ code: 'DUPLICATE_RECENT_MAIL' });
       // After the draft lock, the look for an order to reuse, and the balance.
       const check = position('duplicate mail check: draft');
-      expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')).toBeGreaterThan(-1);
       expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')).toBeLessThan(check);
       expect(position('status = ANY($2::varchar[])')).toBeLessThan(check);
       expect(position('SELECT credits FROM users')).toBeLessThan(check);
