@@ -31,5 +31,8 @@
  *     complete, and the preview card offers Create my preview. ChatGPT web
  *     loses calls approved with "Allow once" and the model then claimed the
  *     preview existed.
+ * r9: not image routing either (#412): a send or checkout refused because
+ *     the same mail went out recently is repeated with sendAnotherCopy only
+ *     when the user asks for another copy.
  */
-export const STEERING_COPY_REV = 8;
+export const STEERING_COPY_REV = 9;

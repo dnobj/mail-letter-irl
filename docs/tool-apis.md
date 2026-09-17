@@ -16,7 +16,7 @@ Letter IRL currently exposes **22 tools** and **6 widgets**:
 - `quote_and_preview_letter`: Create a free draft preview for a text-only physical letter. Requires a real U.S. recipient address, `bodyText`, and `signOff`; sender is optional when a saved return address exists. Creates a draft, so it is not read-only. Uses `ui://widgets/LetterPreviewCard.html@v<N>`.
 - `quote_and_preview_letter_with_header_image`: Create a free draft preview for a letter with a header image at the top. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterHeaderImagePreviewCard.html@v<N>`, which serves the letter card under its own name so the card knows which preview to repeat (#411).
 - `quote_and_preview_letter_with_image`: Create a free draft preview for a letter with an enclosed image after the signature. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterInlineImagePreviewCard.html@v<N>`, the letter card under its own name for the same reason.
-- `send_letter`: Send a letter from a prior draft. Requires `draftId` and `confirm: true`. Idempotent retries with the same draft return the existing order rather than charging twice.
+- `send_letter`: Send a letter from a prior draft. Requires `draftId` and `confirm: true`. Idempotent retries with the same draft return the existing order rather than charging twice. The same letter sent, paid for or awaiting payment from the account in the last 24 hours refuses the call unless `sendAnotherCopy: true` is passed, which the model does only after the user asks for another copy ([letter-send-flow.md](letter-send-flow.md#the-same-mail-twice)).
 
 ## Buying Letters and Pay & Send
 
@@ -29,7 +29,7 @@ Letter IRL currently exposes **22 tools** and **6 widgets**:
 ## Postcards
 
 - `quote_and_preview_postcard`: Create a free draft preview for a 6x9 physical postcard with a front image and back message. Accepts an attached image or `imageUrl`; sender is optional when a saved return address exists. Creates a draft and uses `ui://widgets/PostcardPreviewCard.html@v<N>`.
-- `send_postcard`: Send a postcard from a prior draft. Requires `draftId` and `confirm: true`. Idempotent retries with the same draft return the existing order rather than charging twice.
+- `send_postcard`: Send a postcard from a prior draft. Requires `draftId` and `confirm: true`. Idempotent retries with the same draft return the existing order rather than charging twice. Refuses the same postcard sent recently unless `sendAnotherCopy: true` is passed, as `send_letter` does.
 
 ## Account, Orders, and Return Address
 
@@ -54,7 +54,7 @@ Letter IRL currently exposes **22 tools** and **6 widgets**:
 
 ### `create_mail_checkout`
 
-Input: `{ draftId: string }`.
+Input: `{ draftId: string, sendAnotherCopy?: boolean }`.
 
 Creates or reuses the one active hosted checkout for an authenticated user's
 pending letter or postcard draft. The tool never accepts a price, currency,
@@ -62,7 +62,9 @@ Stripe Price ID, recipient, or mail content. It returns the commerce `orderId`,
 hosted `checkoutUrl`, exact server-configured amount/currency, product
 description, expiry, and current order status. Payment is authorization to mail
 the immutable draft; the model must not call `send_letter` or `send_postcard`
-after payment.
+after payment. A new checkout for mail sent, paid for or awaiting payment in the
+last 24 hours is refused unless `sendAnotherCopy` is true
+([letter-send-flow.md](letter-send-flow.md#the-same-mail-twice)).
 
 ### `get_purchase_status`
 

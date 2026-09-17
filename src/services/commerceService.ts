@@ -24,6 +24,7 @@ import { lockAccountForBalanceChange } from './accountLock.js';
 import { addCreditsToLedgerWithClient } from './creditLedgerService.js';
 import { grantImageEntitlementWithClient } from './imageGenerationLimitService.js';
 import { createMailOrderFromDraftWithClient } from './mailSendService.js';
+import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import {
   createJitCheckoutSession,
   createPackCheckoutSession,
@@ -106,6 +107,8 @@ export interface CreatePackCheckoutParams {
 export interface CreateJitCheckoutParams {
   userId: string;
   draftId: string;
+  /** The person asked for another copy of mail sent or paid for in the last 24 hours (#412). */
+  allowDuplicate?: boolean;
 }
 
 export interface PurchaseStatusResult {
@@ -884,6 +887,21 @@ async function prepareJitOrder(
 
     const orderId = randomUUID();
     const expiresAt = checkoutExpiry(new Date(draft.expires_at));
+    // #412: a NEW checkout for the same mail sent, paid for or awaiting
+    // payment in the last 24 hours is refused unless the person asked for
+    // another copy. Here, as the last refusal before the insert, because only
+    // here is a new order certain: every reuse has returned above, a stale or
+    // repriced row has just been cancelled for a replacement, the draft is
+    // locked and pending, and no Stripe session exists. Checking earlier, with
+    // the caps, had to guess which rows prepareJitOrder reuses, and guessed
+    // wrong for those two. A throw rolls the transaction back, cancellation
+    // included, so a refusal changes nothing.
+    //
+    // Best effort under concurrency, unlike the send from balance: two
+    // checkouts for two identical drafts lock different rows, so both can pass.
+    if (!params.allowDuplicate) {
+      await assertNoRecentDuplicateMail(client, { userId: params.userId, draftId: params.draftId });
+    }
     const inserted = await client.query<Order>(
       `INSERT INTO orders (
          order_id, user_id, order_type, draft_id, product_code, product_snapshot,
@@ -971,6 +989,8 @@ export async function createJitCheckout(
     getJitProductConfig(peekedMailType).amountCents
   );
 
+  // The same-mail check (#412) runs inside prepareJitOrder, just before a new
+  // order is inserted: only there is it known that the call buys something.
   const prepared = await prepareJitOrder(params);
   // The asymmetry with prepareJitOrder's reuse branch is DELIBERATE (#279).
   //

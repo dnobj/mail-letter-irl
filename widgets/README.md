@@ -20,6 +20,7 @@ Receives data via `window.openai.toolOutput` from the three letter preview tools
 - Uses `openai:set_globals` event to receive data (data arrives after widget loads)
 - Shows loading shimmer animation until data arrives
 - With no result after the wait, offers **Create my preview**, which repeats the stamped preview tool through `callTool` (#411; see `docs/ui-widgets.md`), with a tip for Instant users under it
+- A send the server refuses is a failure, not a sent letter; the same letter sent in the last 24 hours offers **Send another copy** (#412)
 - For an image attached or generated in the chat, which it cannot pass back, offers **Choose from library** and **Upload the image** instead, and previews the chosen file by link (#414)
 - Registered as MCP resource with `ui://widgets/LetterPreviewCard.html@v<N>` URI, and served for the image letter tools as `LetterHeaderImagePreviewCard` and `LetterInlineImagePreviewCard`
 - Served as `text/html;profile=mcp-app`, which tells ChatGPT to inject the runtime bridge

@@ -212,7 +212,11 @@ export const sendLetterInputSchema: JsonSchema = {
   required: ["draftId", "confirm"],
   properties: {
     draftId: { type: "string", description: "Draft ID from quote_and_preview_letter" },
-    confirm: { type: "boolean", description: "Must be true or request fails" }
+    confirm: { type: "boolean", description: "Must be true or request fails" },
+    sendAnotherCopy: {
+      type: "boolean",
+      description: "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise."
+    }
   }
 };
 
@@ -260,6 +264,10 @@ export const createMailCheckoutInputSchema: JsonSchema = {
     draftId: {
       type: "string",
       description: "Owned pending draft ID from a letter or postcard preview"
+    },
+    sendAnotherCopy: {
+      type: "boolean",
+      description: "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise."
     }
   }
 };
@@ -655,7 +663,11 @@ export const sendPostcardInputSchema: JsonSchema = {
   required: ["draftId", "confirm"],
   properties: {
     draftId: { type: "string", description: "Draft ID from quote_and_preview_postcard" },
-    confirm: { type: "boolean", description: "Must be true or request fails" }
+    confirm: { type: "boolean", description: "Must be true or request fails" },
+    sendAnotherCopy: {
+      type: "boolean",
+      description: "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise."
+    }
   }
 };
 

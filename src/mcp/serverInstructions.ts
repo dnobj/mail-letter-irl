@@ -3,6 +3,7 @@ export const LETTER_IRL_SERVER_INSTRUCTIONS = [
   "Always create a preview draft before sending. Preview tools are free drafts; they do not send mail.",
   "Only call send_letter or send_postcard after the user has reviewed a draft and clearly confirms sending.",
   "Do not say mail has been sent unless the send tool succeeds.",
+  "If send_letter, send_postcard or create_mail_checkout says the same mail was already sent, paid for, or is awaiting payment, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy.",
   "A preview exists only when the preview tool's result includes a draftId, and a checkout only when its result includes a checkoutUrl. If a Letter IRL tool call returns no result, say it did not complete: the preview card offers a Create my preview button, or offer to try again. Never describe a draft, order or checkout you did not receive.",
   "Use saved return addresses when available, and ask for missing real U.S. mailing addresses when required.",
   "For image mail, reuse existing conversation images or hosted imageUrl values before opening upload_image.",

@@ -139,6 +139,10 @@ interface MountOptions {
   failSends?: number;
   /** How many create_mail_checkout calls reject before one succeeds. */
   failCheckouts?: number;
+  /** What the send tool answers, instead of the usual order (#412). */
+  sendResponse?: (args: Json) => unknown;
+  /** What create_mail_checkout answers, instead of the usual checkout (#412). */
+  checkoutResponse?: (args: Json) => unknown;
   /** The host's file bridge. Only the functions given are exposed. */
   fileApis?: {
     selectFiles?: () => unknown;
@@ -191,6 +195,7 @@ function mount(spec: CardSpec, options: MountOptions = {}) {
         return { structuredContent: spec.output('draft_retry_0001'), _meta: spec.meta() };
       }
       if (name === spec.sendTool) {
+        if (options.sendResponse) return options.sendResponse(args);
         if (sendFailures > 0) {
           sendFailures -= 1;
           throw new Error('host timed out');
@@ -198,6 +203,7 @@ function mount(spec: CardSpec, options: MountOptions = {}) {
         return { structuredContent: { orderId: 'ord_sent_0001' } };
       }
       if (name === 'create_mail_checkout') {
+        if (options.checkoutResponse) return options.checkoutResponse(args);
         if (checkoutFailures > 0) {
           checkoutFailures -= 1;
           throw new Error('host timed out');
@@ -1555,6 +1561,189 @@ describe('LetterPreviewCard picks an image only for an image letter (#414)', () 
     expect(harness.calls).toEqual([
       { name: 'quote_and_preview_letter_with_header_image', args: { ...rest, imageUrl: 'https://files.example/x' } }
     ]);
+  });
+});
+
+describe.each([LETTER, POSTCARD])('$file and the same mail twice (#412)', spec => {
+  const label = spec.file === 'LetterPreviewCard' ? 'Send Letter' : 'Send Postcard';
+  const sentLabel = spec.file === 'LetterPreviewCard' ? 'Letter Sent!' : 'Postcard Sent!';
+  const refusal = (details?: Json, text = 'Possible duplicate: This same mail was already sent.') => ({
+    isError: true,
+    content: [{ type: 'text', text }],
+    ...(details ? { _meta: { 'letterirl/duplicateMail': details } } : {})
+  });
+  const sentDetails = { kind: 'sent', mailType: spec.noun, recipientName: 'Sam Rivera', ageMinutes: 4 };
+
+  /** A card showing the host's draft, able to send from balance. */
+  const ready = async (options: MountOptions = {}) => {
+    const harness = mount(spec, { toolOutput: spec.output('draft_host_0001'), ...options });
+    await flush();
+    expect(harness.text('send-button')).toBe(label);
+    return harness;
+  };
+
+  /** A card showing the host's draft, offering Pay & Send only. */
+  const payable = async (options: MountOptions = {}) => {
+    const harness = mount(spec, { toolOutput: spec.output('draft_host_0001', eligibility(false)), ...options });
+    await flush();
+    expect(harness.visible('pay-send-button')).toBe(true);
+    return harness;
+  };
+
+  it('says the same mail went out, and sends another copy only on the next click', async () => {
+    let calls = 0;
+    const harness = await ready({
+      sendResponse: () => (calls++ === 0 ? refusal(sentDetails) : { structuredContent: { orderId: 'ord_copy_0001' } })
+    });
+
+    await harness.click('send-button');
+
+    expect(harness.text('error-message')).toBe(
+      `You already sent this same ${spec.noun} to Sam Rivera 4 minutes ago. Send another copy only if you want two.`
+    );
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('send-button')).toBe('Send another copy');
+    expect(harness.disabled('send-button')).toBe(false);
+    expect(harness.text('id-value')).toBe('draft_host_0001');
+    expect(harness.savedStates.some(state => (state as Json).sent === true)).toBe(false);
+
+    await harness.click('send-button');
+
+    expect(harness.callsTo(spec.sendTool).map(call => call.args)).toEqual([
+      { draftId: 'draft_host_0001', confirm: true },
+      { draftId: 'draft_host_0001', confirm: true, sendAnotherCopy: true }
+    ]);
+    expect(harness.text('send-button')).toBe(sentLabel);
+    expect(harness.text('id-value')).toBe('ord_copy_0001');
+    expect(harness.visible('error-message')).toBe(false);
+    expect(harness.savedStates.at(-1)).toMatchObject({ sent: true, orderId: 'ord_copy_0001' });
+  });
+
+  it.each<[string, Json, string]>([
+    ['a paid order', { kind: 'paid', recipientName: 'Sam Rivera', ageMinutes: 125 },
+      `You already paid to send this same ${spec.noun} to Sam Rivera 2 hours ago. Send another copy only if you want two.`],
+    ['an open checkout', { kind: 'checkout_open', recipientName: 'Sam Rivera', ageMinutes: 0 },
+      `A checkout for this same ${spec.noun} to Sam Rivera was started less than a minute ago and is still open. If you pay for both, two copies are mailed.`],
+    ['one minute', { kind: 'sent', recipientName: '', ageMinutes: 1 },
+      `You already sent this same ${spec.noun} 1 minute ago. Send another copy only if you want two.`],
+    ['one hour', { kind: 'sent', recipientName: 'Sam', ageMinutes: 60 },
+      `You already sent this same ${spec.noun} to Sam 1 hour ago. Send another copy only if you want two.`],
+    ['no usable age', { kind: 'sent', recipientName: 'Sam', ageMinutes: 'soon' },
+      `You already sent this same ${spec.noun} to Sam recently. Send another copy only if you want two.`],
+    ['an unknown kind', { kind: 'other' },
+      `This same ${spec.noun} was sent or paid for recently. Send another copy only if you want two.`]
+  ])('words %s', async (_label, details, text) => {
+    const harness = await ready({ sendResponse: () => refusal(details) });
+    await harness.click('send-button');
+    expect(harness.text('error-message')).toBe(text);
+  });
+
+  it('recognises the refusal from its text when the details are missing', async () => {
+    const harness = await ready({ sendResponse: () => refusal() });
+    await harness.click('send-button');
+    expect(harness.text('error-message')).toBe(
+      `This same ${spec.noun} was sent or paid for recently. Send another copy only if you want two.`
+    );
+    expect(harness.text('send-button')).toBe('Send another copy');
+  });
+
+  it.each([
+    ['as it is', 'Possible duplicate: This same mail was already sent.'],
+    ['behind words of its own', 'Tool call failed: Possible duplicate: This same mail was already sent.']
+  ])('recognises a refusal the host turns into a rejection, %s', async (_label, message) => {
+    const harness = await ready({
+      sendResponse: () => {
+        throw new Error(message);
+      }
+    });
+    await harness.click('send-button');
+    expect(harness.text('send-button')).toBe('Send another copy');
+    expect(harness.text('error-message')).toContain('sent or paid for recently');
+  });
+
+  it('shows any other refused send as a failure, never as sent', async () => {
+    const harness = await ready({
+      sendResponse: () => ({ isError: true, content: [{ type: 'text', text: 'Draft has expired.' }] })
+    });
+
+    await harness.click('send-button');
+
+    expect(harness.text('error-message')).toBe('Failed to send: Draft has expired.');
+    expect(harness.text('send-button')).toBe('Retry Send');
+    expect(harness.text('status-pill')).toBe('Send failed');
+    expect(harness.savedStates.some(state => (state as Json).sent === true)).toBe(false);
+
+    await harness.click('send-button');
+    expect(harness.callsTo(spec.sendTool).at(-1)!.args).not.toHaveProperty('sendAnotherCopy');
+  });
+
+  it('shows a refused send with no text as a failure too', async () => {
+    const harness = await ready({ sendResponse: () => ({ isError: true }) });
+    await harness.click('send-button');
+    expect(harness.text('error-message')).toBe(`Failed to send: The ${spec.noun} was not sent.`);
+  });
+
+  it('keeps the another-copy label through a re-render', async () => {
+    const harness = await ready({ sendResponse: () => refusal(sentDetails) });
+    await harness.click('send-button');
+
+    await harness.fireGlobals();
+
+    expect(harness.text('send-button')).toBe('Send another copy');
+    expect(harness.visible('error-message')).toBe(true);
+  });
+
+  it('asks for another copy at checkout once told, and opens it', async () => {
+    let calls = 0;
+    const harness = await payable({
+      checkoutResponse: () =>
+        calls++ === 0
+          ? refusal({ kind: 'checkout_open', recipientName: 'Sam Rivera', ageMinutes: 3 })
+          : { structuredContent: { orderId: 'ord_checkout_0002', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_copy' } }
+    });
+
+    await harness.click('pay-send-button');
+
+    expect(harness.text('error-message')).toBe(
+      `A checkout for this same ${spec.noun} to Sam Rivera was started 3 minutes ago and is still open. If you pay for both, two copies are mailed.`
+    );
+    expect(harness.text('pay-send-button')).toBe('Pay for another copy');
+    expect(harness.disabled('pay-send-button')).toBe(false);
+    expect(harness.visible('checkout-link')).toBe(false);
+
+    await harness.fireGlobals();
+    expect(harness.text('pay-send-button')).toBe('Pay for another copy');
+
+    await harness.click('pay-send-button');
+
+    expect(harness.callsTo('create_mail_checkout').map(call => call.args)).toEqual([
+      { draftId: 'draft_host_0001' },
+      { draftId: 'draft_host_0001', sendAnotherCopy: true }
+    ]);
+    expect(harness.visible('checkout-link')).toBe(true);
+    expect(harness.text('id-value')).toBe('ord_checkout_0002');
+  });
+
+  it('recognises a checkout refusal the host turns into a rejection', async () => {
+    const harness = await payable({
+      checkoutResponse: () => {
+        throw new Error('Error: Possible duplicate: A Pay & Send checkout for this same mail is open.');
+      }
+    });
+    await harness.click('pay-send-button');
+    expect(harness.text('pay-send-button')).toBe('Pay for another copy');
+  });
+
+  it('shows any other refused checkout with its reason', async () => {
+    const harness = await payable({
+      checkoutResponse: () => ({ isError: true, content: [{ type: 'text', text: 'Pay & Send is not currently available.' }] })
+    });
+
+    await harness.click('pay-send-button');
+
+    expect(harness.text('error-message')).toBe('Unable to open checkout: Pay & Send is not currently available.');
+    expect(harness.text('pay-send-button')).toBe('Retry Pay & Send');
+    expect(harness.visible('checkout-link')).toBe(false);
   });
 });
 

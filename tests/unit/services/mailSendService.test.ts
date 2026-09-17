@@ -18,9 +18,38 @@ let activeCheckout = false;
 let lettersTodayForUser = 0;
 let lettersTodayGlobal = 0;
 let transactionChain: Promise<unknown>;
+// The duplicate check (#412): mail the account sent recently, as the letters
+// query returns it, and every tagged query in the order it ran.
+let recentLetters: Record<string, any>[] = [];
+let duplicateQueries: Array<{ sql: string; params: any[] }> = [];
+
+const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e';
+
+/** The current draft as the duplicate check reads it. */
+function comparableRow(source: DraftState, extra: Record<string, any> = {}) {
+  return {
+    mail_type: source.mail_type,
+    layout_type: source.layout_type ?? null,
+    postcard_size: source.postcard_size ?? null,
+    sender: source.sender,
+    recipient: source.recipient,
+    body_text: source.body_text,
+    sign_off: source.sign_off,
+    header_image_md5: EMPTY_MD5,
+    inline_image_md5: EMPTY_MD5,
+    front_image_md5: EMPTY_MD5,
+    ...extra
+  };
+}
 
 const client = {
   query: vi.fn(async (sql: string, params?: any[]) => {
+    if (sql.includes('duplicate mail check')) {
+      duplicateQueries.push({ sql, params: params ?? [] });
+      if (sql.includes('duplicate mail check: draft')) return { rows: [comparableRow(draft)] };
+      if (sql.includes('duplicate mail check: letters')) return { rows: recentLetters };
+      return { rows: [] };
+    }
     if (sql.startsWith('SELECT * FROM letter_drafts')) {
       return { rows: [{ ...draft }] };
     }
@@ -112,6 +141,8 @@ describe('createMailOrderFromDraft', () => {
     activeCheckout = false;
     lettersTodayForUser = 0;
     lettersTodayGlobal = 0;
+    recentLetters = [];
+    duplicateQueries = [];
     draft = {
       draft_id: 'draft-1',
       user_id: 'user-1',
@@ -459,6 +490,85 @@ describe('createMailOrderFromDraft', () => {
         mailType: 'letter'
       });
       expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+  });
+  /**
+   * The same mail twice (#412). Checked after the deduction, like the caps,
+   * so the account row is locked and two sends cannot both pass; a refusal
+   * rolls the deduction back.
+   */
+  describe('the duplicate check', () => {
+    const send = (extra: Record<string, unknown> = {}) =>
+      createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter', ...extra });
+
+    it('refuses mail that went out in the last day, and rolls the send back', async () => {
+      recentLetters = [comparableRow(draft, { age_seconds: 180 })];
+
+      await expect(send()).rejects.toMatchObject({
+        code: 'DUPLICATE_RECENT_MAIL',
+        duplicate: { kind: 'sent', mailType: 'letter', recipientName: 'Recipient', ageSeconds: 180 }
+      });
+
+      expect(deductCredits).toHaveBeenCalledTimes(1);
+      expect(createOutboxJob).not.toHaveBeenCalled();
+      expect(draft.status).toBe('pending');
+      expect(savedLetter).toBeNull();
+    });
+
+    it('checks after the deduction, and leaves this send out', async () => {
+      await send();
+
+      const letters = duplicateQueries.find(query => query.sql.includes('duplicate mail check: letters'))!;
+      expect(letters.params).toEqual(['user-1', 'letter', savedLetter!.letter_id]);
+      const draftRead = duplicateQueries.find(query => query.sql.includes('duplicate mail check: draft'))!;
+      expect(draftRead.params).toEqual(['draft-1', 'user-1']);
+
+      const checkCall = client.query.mock.calls.findIndex(([sql]) => String(sql).includes('duplicate mail check'));
+      const checkOrder = client.query.mock.invocationCallOrder[checkCall];
+      expect(deductCredits.mock.invocationCallOrder[0]).toBeLessThan(checkOrder);
+      const outboxOrder = createOutboxJob.mock.invocationCallOrder[0];
+      expect(checkOrder).toBeLessThan(outboxOrder);
+    });
+
+    it('sends another copy when the person asked for one', async () => {
+      recentLetters = [comparableRow(draft)];
+
+      await expect(send({ allowDuplicate: true })).resolves.toMatchObject({ alreadyConsumed: false });
+
+      expect(duplicateQueries).toEqual([]);
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets different mail through', async () => {
+      recentLetters = [comparableRow(draft, { body_text: 'Something else' })];
+
+      await expect(send()).resolves.toMatchObject({ alreadyConsumed: false });
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('never checks Pay & Send fulfilment, which runs after the customer paid', async () => {
+      recentLetters = [comparableRow(draft)];
+      commerceOrder = {
+        order_id: 'order-jit',
+        order_type: 'jit_mail',
+        user_id: 'user-1',
+        draft_id: 'draft-1',
+        status: 'paid'
+      };
+
+      await send({ funding: { type: 'jit_order', orderId: 'order-jit' } });
+
+      expect(duplicateQueries).toEqual([]);
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns the existing order for a draft already sent, without checking', async () => {
+      recentLetters = [comparableRow(draft)];
+      draft = { ...draft, status: 'consumed', consumed_letter_id: 'letter-prepaid' };
+      savedLetter = { letter_id: 'letter-prepaid', user_id: 'user-1', funding_type: 'prepaid_balance' };
+
+      await expect(send()).resolves.toMatchObject({ alreadyConsumed: true });
+      expect(duplicateQueries).toEqual([]);
     });
   });
 });

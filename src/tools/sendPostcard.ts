@@ -13,6 +13,7 @@ import { friendlyDraftError as sharedDraftError } from './draftErrors.js';
 interface SendPostcardInput {
   draftId: string;
   confirm: boolean;
+  sendAnotherCopy?: boolean;
 }
 
 type PublicStatus =
@@ -75,6 +76,7 @@ async function handler(
       draftId: input.draftId,
       userId: context.user.userId,
       mailType: 'postcard',
+      allowDuplicate: input.sendAnotherCopy === true,
     });
   } catch (error) {
     throw friendlyDraftError(error, input.draftId);
@@ -154,7 +156,7 @@ async function handler(
 export const sendPostcardTool: McpToolDefinition<SendPostcardInput, SendPostcardOutput> = {
   name: 'send_postcard',
   description:
-    'Send a physical postcard using a draft from quote_and_preview_postcard. Requires a draftId and confirm: true. Safe retries return the existing order instead of charging twice, and the response may suggest saving the sender as your return address.',
+    'Send a physical postcard using a draft from quote_and_preview_postcard. Requires a draftId and confirm: true. Safe retries return the existing order instead of charging twice, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.',
   readOnly: false,
   inputSchema: sendPostcardInputSchema,
   outputSchema: sendPostcardOutputSchema,
