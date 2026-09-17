@@ -197,10 +197,10 @@ const recipient = { name: 'R', addressLine1: '1 Main St', city: 'KC', state: 'MO
 const DOWNLOAD_STOPPED = new Error('download stopped by the test');
 
 describe.each([
-  ['quote_and_preview_letter_with_image', quoteAndPreviewLetterWithImageTool, { bodyText: 'hi', signOff: 'bye' }],
-  ['quote_and_preview_letter_with_header_image', quoteAndPreviewLetterWithHeaderImageTool, { bodyText: 'hi', signOff: 'bye' }],
-  ['quote_and_preview_postcard', quoteAndPreviewPostcardTool, { message: 'hi' }]
-] as const)('%s handler', (_name, tool, extras) => {
+  ['quote_and_preview_letter_with_image', quoteAndPreviewLetterWithImageTool, { bodyText: 'hi', signOff: 'bye' }, 'inline_image'],
+  ['quote_and_preview_letter_with_header_image', quoteAndPreviewLetterWithHeaderImageTool, { bodyText: 'hi', signOff: 'bye' }, 'header_image'],
+  ['quote_and_preview_postcard', quoteAndPreviewPostcardTool, { message: 'hi' }, 'postcard']
+] as const)('%s handler', (_name, tool, extras, uploadContext) => {
   const download = () =>
     _name === 'quote_and_preview_postcard'
       ? vi.mocked(downloadAndProcessPostcardImageWithPreview)
@@ -227,6 +227,7 @@ describe.each([
   it('uses the upload the card just made', async () => {
     uploadAged(MINUTE);
     await expect(run(MARKER)).rejects.not.toThrow(/IMAGE UPLOAD NEEDED/);
+    expect(recentUpload).toHaveBeenCalledWith('user-1', uploadContext);
     expect(download()).toHaveBeenCalledTimes(1);
     const [source] = download().mock.calls[0];
     expect(source).toEqual({ url: UPLOAD_URL });

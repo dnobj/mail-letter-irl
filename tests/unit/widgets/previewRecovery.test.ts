@@ -972,6 +972,39 @@ describe.each([LETTER, POSTCARD])('$file previews a chat image picked again (#41
     expect(harness.calls).toEqual([]);
   });
 
+  it('clears an earlier error as soon as a new pick starts', async () => {
+    let calls = 0;
+    const harness = await lostChatImage({
+      fileApis: allFileApis({ selectFiles: () => (calls++ === 0 ? [] : new Promise(() => {})) })
+    });
+    await harness.click('choose-image-button');
+    expect(harness.visible('error-message')).toBe(true);
+
+    await harness.click('choose-image-button');
+
+    expect(harness.visible('error-message')).toBe(false);
+    expect(harness.text('choose-image-button')).toBe('Opening your library...');
+  });
+
+  it('clears an earlier error as soon as a new upload starts', async () => {
+    let calls = 0;
+    const harness = await lostChatImage({
+      fileApis: allFileApis({
+        uploadFile: () => {
+          if (calls++ === 0) throw new Error('network down');
+          return new Promise(() => {});
+        }
+      })
+    });
+    await harness.pickDeviceFile({ name: 'beach.jpg', type: 'image/jpeg' });
+    expect(harness.visible('error-message')).toBe(true);
+
+    await harness.pickDeviceFile({ name: 'beach.jpg', type: 'image/jpeg' });
+
+    expect(harness.visible('error-message')).toBe(false);
+    expect(harness.text('upload-image-button')).toBe('Uploading...');
+  });
+
   it('refuses a library file that is not a supported image', async () => {
     const harness = await lostChatImage({
       fileApis: allFileApis({ selectFiles: () => [{ fileId: 'file_pick', mimeType: 'application/pdf' }] })
