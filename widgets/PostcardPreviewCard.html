@@ -427,6 +427,9 @@
         if (!kept) return;
         saved = kept;
         resumed = kept;
+        // Anything the empty card said before, such as a wait message, is
+        // about a state this card no longer shows.
+        document.getElementById("error-message").style.display = "none";
       }
 
       function keep(patch) {

@@ -1298,6 +1298,21 @@ describe.each([LETTER, POSTCARD])('$file previews a chat image picked again (#41
     expect(harness.text('status-pill')).toBe('With the printer');
   });
 
+  it('clears a wait message when a kept order arrives afterwards', async () => {
+    const harness = await lostChatImage({
+      fileApis: allFileApis({ selectFiles: () => new Promise(() => {}) })
+    });
+    await harness.click('choose-image-button');
+    await harness.runTimer(120000);
+    expect(harness.visible('error-message')).toBe(true);
+
+    harness.openai.widgetState = { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001' };
+    await harness.fireGlobals();
+
+    expect(harness.text('status-pill')).toBe('With the printer');
+    expect(harness.visible('error-message')).toBe(false);
+  });
+
   it('says so when a file is chosen while an earlier image is still on its way', async () => {
     let answer: (files: unknown) => void = () => {};
     const harness = await lostChatImage({
