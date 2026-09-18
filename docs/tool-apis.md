@@ -13,6 +13,12 @@ Letter IRL currently exposes **22 tools** and **6 widgets**:
 
 ## Letter Drafts and Sending
 
+All four preview tools accept an optional `sendAsGift` ([gift-letters.md](gift-letters.md)): `true`
+sends the draft as the account's gift letter, free and with a printed card for the recipient;
+omitted, a gift letter is used only when the balance cannot pay. A gift preview returns `giftCard`
+(`state`: `funded` or `unfunded`, and a `description`), and any preview returns
+`giftLettersAvailable` when the account has some. Both are absent while gift letters are off.
+
 - `quote_and_preview_letter`: Create a free draft preview for a text-only physical letter. Requires a real U.S. recipient address, `bodyText`, and `signOff`; sender is optional when a saved return address exists. Creates a draft, so it is not read-only. Uses `ui://widgets/LetterPreviewCard.html@v<N>`.
 - `quote_and_preview_letter_with_header_image`: Create a free draft preview for a letter with a header image at the top. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterHeaderImagePreviewCard.html@v<N>`, which serves the letter card under its own name so the card knows which preview to repeat (#411).
 - `quote_and_preview_letter_with_image`: Create a free draft preview for a letter with an enclosed image after the signature. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterInlineImagePreviewCard.html@v<N>`, the letter card under its own name for the same reason.
@@ -24,7 +30,7 @@ Letter IRL currently exposes **22 tools** and **6 widgets**:
 - `create_pack_checkout`: Create a Stripe-hosted checkout for one pack size (`starter`, `regular`, `power`). Payment adds letters to the balance; it does not send anything, so the customer still chooses and sends afterward. Uses `ui://widgets/PackCheckoutCard.html@v<N>`.
 - `create_mail_checkout`: Create a Stripe-hosted Pay & Send checkout for one previewed letter or postcard draft. Paying sends that exact item; see [Pay & Send Details](#pay--send-details).
 - `get_purchase_status`: Read the status of a pack or Pay & Send purchase by `orderId`. Read-only. Has no widget of its own; `PackCheckoutCard` and the preview cards poll it through `callTool`.
-- `redeem_promo_code`: Redeem a promo code to add prepaid letters. Returns `redeemed: false` with the reason for an invalid, expired or spent code - an ordinary answer rather than an error.
+- `redeem_promo_code`: Redeem a promo code, or a gift code printed on a letter, to add letters. A gift code or seed campaign reports `giftLetters`. Returns `redeemed: false` with the reason for an invalid, expired or spent code - an ordinary answer rather than an error.
 
 ## Postcards
 
@@ -33,7 +39,7 @@ Letter IRL currently exposes **22 tools** and **6 widgets**:
 
 ## Account, Orders, and Return Address
 
-- `get_account_balance`: Check remaining pre-paid letter sends plus image-generation quota metadata. Read-only.
+- `get_account_balance`: Check remaining pre-paid letter sends plus image-generation quota metadata, and `giftLettersRemaining` when the account holds gift letters (not counted in `lettersRemaining`). Read-only.
 - `list_orders`: List recent mailed letters and postcards (recipient, delivery status; ids for `get_order_status`) and letter pack purchases (payment status, letters, amount; ids for `get_purchase_status`). Read-only.
 - `get_order_status`: Retrieve the latest timeline for a specific order, or the most recent order when `orderId` is omitted. Read-only.
 - `set_return_address`: Validate and save the user's default return address for future letters and postcards.

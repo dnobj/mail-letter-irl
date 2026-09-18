@@ -27,6 +27,13 @@
 - Rate limits are defined in `src/api/middleware/rateLimit.ts`: per source address before
   authentication, per account after it, and global backstops so many addresses cannot burn
   verification work at line rate.
+- Gift letters ([gift-letters.md](gift-letters.md)) give mail away, so their controls bound cost
+  rather than identity: each chain code is single-use and grants one gift letter with one less
+  budget, so the free letters descending from any grant are at most its budget; seed campaigns keep
+  their redemption cap and allow one claim per normalised email; a daily gift-send budget fails
+  closed; and the programme flag is off unless explicitly on. A sender cannot redeem their own code.
+  The public lookup (`GET /api/public/gift/:code`) shares the promo validator's rate limit and says
+  whether a code can be claimed, never who sent it.
 - The public API authenticates with a Bearer token only. No cookie is read as a credential: the `access_token` cookie fallback was removed (audit A-11) because it was a latent CSRF vector and nothing set the cookie. CORS reflects only allowlisted origins; every other origin, including `Origin: null` from a `file://` page or sandboxed frame, receives the fallback origin and never a wildcard.
 - Per-address rate limits key on the `X-Forwarded-For` hop just before the trusted proxies' own (`TRUSTED_PROXY_HOPS`, default 1). Measured on Railway on 2026-09-08: the edge sets the client's address itself (a client-supplied value never reached the first position) and one internal hop then appends one of two addresses of its own, so the header arrives as `<client>, <internal>`. Neither end of the list is right on its own: the first hop is client-written on an edge that appends, and the last hop is the proxy's own address, which a last-hop rule keyed on for an hour in development, sharing every client's budget across two proxy addresses. Routes that had only per-identifier limits also have a global backstop (`mcp` 1200/min, `api` 2000/min, `checkout` 200/min, beside the existing 100/min on public promo validation), so many addresses cannot burn JWKS verification or bcrypt compares at line rate.
 

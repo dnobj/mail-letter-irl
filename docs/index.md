@@ -31,6 +31,7 @@ maintenance job.
 - [Pricing and Credits](pricing-and-credits.md) - letter packs, Pay & Send, specifications, refunds
 - [Letter Packages](credit-packages-spec.md) - pack definitions (plus planned ACP feed material)
 - [Account and Credits](account-credits.md) - how credits, letters and balances relate
+- [Gift Letters](gift-letters.md) - free sends that print a card with a code for the recipient (built, off by default)
 - [Just-in-Time Purchase Plan](just-in-time-purchase-plan.md) - Pay & Send design record (shipped)
 - [Future Roadmap](future-roadmap.md) - out-of-scope features and plans
 

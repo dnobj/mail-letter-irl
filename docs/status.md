@@ -20,6 +20,9 @@ ChatGPT, and manage their account on letterirl.com.
 - **Paying:** prepaid letter packs (2, 5 or 50 letters), bought in the conversation
   (`create_pack_checkout`) or on the website; **Pay & Send**, which buys and sends one previewed item
   in a single Stripe-hosted checkout; and promo codes. Both checkouts are external Stripe Checkout.
+- **Gift letters:** free sends that print a card for the recipient, with a code for a letter of
+  their own while the chain's budget lasts ([gift-letters.md](gift-letters.md)). Built behind
+  `LETTER_IRL_GIFT_LETTERS_ENABLED`, which is off in every environment until GIFT-01 passes.
 - **Images:** attachments, `imageUrl` handoff, the upload widget (including ChatGPT Library picks),
   and `generate_image_for_mail`, which spends the user's Letter IRL image generations or routes the
   request to ChatGPT's free built-in generator.
@@ -112,6 +115,8 @@ in production:
   (`CONTENT_RETENTION_MODE` unset) until the enforce-path defects tracked in #153 are fixed. The
   upload-link and feature-request sweeps are separate and always enforce.
 - **Operator audit purge:** the 2-year purge of operator audit rows is tracked in #398.
+- **Gift letters:** GIFT-01 in [manual-tests.md](manual-tests.md), including a physical test
+  print, before the programme is switched on; the website's claim page ships separately.
 - **Railway config-as-code:** move the pre-deploy migration command out of `railway.toml` before
   2026-12-01.
 - **Remaining CIMD cases:** CIMD-06, CIMD-07, CIMD-09 and CIMD-10 in

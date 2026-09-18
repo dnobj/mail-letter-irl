@@ -15,6 +15,7 @@ User stories are organized by feature area using semantic prefixes:
 | `US-POSTCARD` | Postcards | Postcard preview, send, image handling |
 | `US-CREDIT` | Credits | Balance, purchases, expiration |
 | `US-PROMO` | Promo Codes | Campaign redemption |
+| `US-GIFT` | Gift Letters | Free sends that print a card with a code for the recipient |
 | `US-ACCT` | Account | Authentication, profile |
 | `US-ADMIN` | Admin | Dashboard, investigation, management |
 | `US-EDGE` | Edge Cases | Error handling, idempotency |
@@ -602,6 +603,54 @@ There is a mobile workaround - ask me about it if you want to try.
 **Acceptance Criteria:**
 - [ ] Lists all user's redemptions
 - [ ] Shows: campaign code, name, credits, redeemed_at
+
+---
+
+## Gift Letters (GIFT)
+
+See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_ENABLED`.
+
+### US-GIFT-01: Send a Gift Letter
+**As a** user with a gift letter
+**I want to** send it and have my recipient receive a card with it
+**So that** they can send a letter of their own
+
+**Acceptance Criteria:**
+- [x] A preview uses a gift letter when asked (`sendAsGift`), or when the balance cannot pay
+- [x] Someone who can pay is never switched to a gift without asking
+- [x] The preview shows the extra page and which card will print; Pay & Send is not offered
+- [x] The send uses one gift letter and no credits; a refused send rolls it back
+- [x] With budget left the card carries a single-use code worth one less budget; at zero, the plain card
+- [ ] A test print scans and clears PostGrid's integrity QR (GIFT-01)
+
+**Test Coverage:** `tests/unit/services/mailSendServiceGift.test.ts`, `tests/unit/tools/giftLetterTools.test.ts`, `tests/integration/giftLetters.postgres.test.ts`
+
+### US-GIFT-02: Claim a Gift Code
+**As a** recipient of a gift letter
+**I want to** claim the code on the card, in ChatGPT or on the website
+**So that** a free letter is waiting in my account
+
+**Acceptance Criteria:**
+- [x] The code redeems through `redeem_promo_code` and the website's promo box, typed or scanned
+- [x] Read-alike characters are accepted (O for 0, I and L for 1, any hyphens or spaces)
+- [x] One redemption per code, under concurrency
+- [x] The sender cannot redeem their own code
+- [ ] The website's claim page keeps the code across sign-in (website repository)
+
+**Test Coverage:** `tests/unit/services/giftLetterService.test.ts`, `tests/integration/giftLetters.postgres.test.ts`
+
+### US-GIFT-03: Seed Letters for Press and Influencers
+**As an** operator
+**I want to** grant gift letters, optionally printing a multi-use seed code
+**So that** a letter that is photographed and shared can be claimed by more than one reader
+
+**Acceptance Criteria:**
+- [x] `gift.grant` previews the cost bound and cannot grant twice on replay
+- [x] A seed campaign is a promo campaign with a gift budget; its cap is its cost bound
+- [x] One claim of a seed per normalised email
+- [x] `gift.void_code` voids an issued code
+
+**Test Coverage:** `tests/unit/admin/giftCommands.test.ts`, `tests/unit/services/promoServiceSeed.test.ts`
 
 ---
 
