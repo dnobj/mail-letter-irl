@@ -40,8 +40,8 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       layout_type, header_image_data, header_image_url, inline_image_data, inline_image_url,
-      status, expires_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending', $15)
+      is_gift_send, status, expires_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'pending', $16)
     RETURNING draft_id, expires_at`,
     [
       params.userId,
@@ -58,6 +58,7 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       params.headerImageUrl ?? null,
       params.inlineImageData ?? null,
       params.inlineImageUrl ?? null,
+      params.isGiftSend === true,
       expiresAt,
     ]
   );
@@ -86,8 +87,8 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       mail_type, front_image_data, front_image_url, postcard_size,
-      status, expires_at
-    ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, 'postcard', $9, $10, $11, 'pending', $12)
+      is_gift_send, status, expires_at
+    ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, 'postcard', $9, $10, $11, $12, 'pending', $13)
     RETURNING draft_id, expires_at`,
     [
       params.userId,
@@ -101,6 +102,7 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
       params.frontImageData,
       params.frontImageUrl,
       postcardSize,
+      params.isGiftSend === true,
       expiresAt,
     ]
   );

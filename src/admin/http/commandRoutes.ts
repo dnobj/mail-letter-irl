@@ -46,6 +46,8 @@ function backHrefFor(command: CommandDefinition<any>, targetId: string): string 
       return /^[0-9a-f-]{36}$/i.test(targetId) ? `/promos/${encodeURIComponent(targetId)}` : "/promos";
     case "image_reservation":
       return "/images";
+    case "gift_code":
+      return "/gifts";
     case "provider_routing":
     case "provider":
       return "/routing";

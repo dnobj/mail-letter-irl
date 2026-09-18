@@ -7,6 +7,7 @@ import { getBalance, getDetailedBalance } from "../services/creditService.js";
 import { findUser } from "../services/userService.js";
 import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
 import { CREDITS_PER_LETTER } from "../config/products.js";
+import { getGiftBalance } from "../services/giftLetterService.js";
 
 interface ExpiringLettersInfo {
   letters: number;
@@ -22,6 +23,8 @@ interface GetAccountBalanceOutput {
   expiringLettersDetails?: ExpiringLettersInfo[];
   imageGenerationsRemaining?: number;
   imageGenerationsAllowance?: number;
+  /** Unsent gift letters (docs/gift-letters.md). Not part of lettersRemaining. */
+  giftLettersRemaining?: number;
 }
 
 
@@ -107,6 +110,15 @@ async function handler(
     // Ignore — user may not exist yet
   }
 
+  // Gift letters are counted apart from the balance: a normal send never
+  // spends one (docs/gift-letters.md).
+  let giftLettersRemaining = 0;
+  try {
+    giftLettersRemaining = (await getGiftBalance(userId)).available;
+  } catch {
+    // Ignore, as with the image quota above
+  }
+
   // Enhanced message with identity information
   const identityLine = `Account: ${email} (${authProvider})`;
   let balanceLine: string;
@@ -129,7 +141,11 @@ async function handler(
     }
   }
 
-  const message = `${identityLine}\n${balanceLine}${expirationWarning}`;
+  const giftLine =
+    giftLettersRemaining > 0
+      ? `\nGift letters: ${giftLettersRemaining}. A gift letter is free to send and adds a printed card for the recipient.`
+      : '';
+  const message = `${identityLine}\n${balanceLine}${giftLine}${expirationWarning}`;
 
   context.logger.info(
     {
@@ -150,7 +166,8 @@ async function handler(
     lettersExpiringSoon: lettersExpiringSoon > 0 ? lettersExpiringSoon : undefined,
     expiringLettersDetails: expiringLettersDetails.length > 0 ? expiringLettersDetails : undefined,
     imageGenerationsRemaining,
-    imageGenerationsAllowance
+    imageGenerationsAllowance,
+    giftLettersRemaining: giftLettersRemaining > 0 ? giftLettersRemaining : undefined
   };
 }
 

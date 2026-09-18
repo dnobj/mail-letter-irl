@@ -207,6 +207,7 @@ describe("promo commands", () => {
       maxPerUser: 1,
       requiresNewUser: true,
       endsAt: "2026-12-31",
+      giftGenerationsRemaining: null,
     });
     expect(() => commands.create.parseInput(new Map([["code", "no spaces here"], ["name", "x"], ["creditsAmount", "2"]]))).toThrowError(
       expect.objectContaining({ code: "ADMIN_INVALID_REQUEST" }),
@@ -220,6 +221,35 @@ describe("promo commands", () => {
     expect(preview.expectedVersion).toBeUndefined();
     await commands.create.execute(execution({}), "WELCOME10", input, preview);
     expect(seams.createCampaignWithClient).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ code: "WELCOME10", createdBy: "owner@example.com", requiresNewUser: true }));
+  });
+
+  it("creates a seed campaign that grants a gift letter, and refuses a budget out of range", async () => {
+    const { seams, commands } = harness();
+    const input = commands.create.parseInput(
+      new Map([
+        ["code", "jane-smith"],
+        ["name", "Jane's readers"],
+        ["creditsAmount", "0"],
+        ["maxTotalRedemptions", "200"],
+        ["giftGenerationsRemaining", "1"],
+        ["requiresNewUser", "on"],
+      ]),
+    );
+    expect(input).toMatchObject({ code: "JANE-SMITH", creditsAmount: 0, giftGenerationsRemaining: 1, maxTotalRedemptions: 200 });
+    const preview = await commands.create.preview(scripted(), "JANE-SMITH", input);
+    expect(preview.display).toContainEqual(["Gift letter", "seed code: grants a gift letter with budget 1"]);
+    // The cap is the cost bound on a multi-use seed; the preview says so.
+    expect(preview.warnings.some((warning) => warning.includes("total redemptions cap is the cost bound"))).toBe(true);
+    await commands.create.execute(execution({}), "JANE-SMITH", input, preview);
+    expect(seams.createCampaignWithClient).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ code: "JANE-SMITH", giftGenerationsRemaining: 1 }),
+    );
+    for (const budget of ["21", "-1", "x"]) {
+      expect(() =>
+        commands.create.parseInput(new Map([["code", "SEED"], ["name", "x"], ["creditsAmount", "0"], ["giftGenerationsRemaining", budget]])),
+      ).toThrowError(expect.objectContaining({ code: "ADMIN_INVALID_REQUEST" }));
+    }
   });
 
   it("allows only the documented status transitions and binds the campaign version", async () => {

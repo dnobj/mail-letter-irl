@@ -40,6 +40,8 @@ interface QuoteAndPreviewLetterWithImageInput {
   image?: ImageFileParam | string;
   // Alternative: direct image URL
   imageUrl?: string;
+  /** Send as the account's gift letter (docs/gift-letters.md). */
+  sendAsGift?: boolean;
 }
 
 // ============================================================================
@@ -202,6 +204,7 @@ async function handler(
     senderValidation,
     recipientValidation,
     addressWarnings,
+    sendAsGift: input.sendAsGift,
     context
   });
 }

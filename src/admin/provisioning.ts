@@ -15,7 +15,7 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * exist yet fails the whole transaction.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "032_error_text_minimisation.sql";
+  "033_gift_letters.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";
@@ -57,6 +57,10 @@ export const ADMIN_READER_TABLES = [
   "stripe_disputes",
   "image_entitlements",
   "image_generation_reservations",
+  // Gift letters and their codes (033). No content or address; a code is a
+  // bearer value like a promo code, which this list already includes.
+  "gift_letters",
+  "gift_codes",
   "admin_environment_marker",
   "admin_audit_events",
   "admin_command_runs",
@@ -124,6 +128,7 @@ export const ADMIN_READER_COLUMN_GRANTS: Readonly<
     "postcard_size",
     "layout_type",
     "redacted_at",
+    "is_gift_send",
   ],
   personal_access_tokens: [
     "token_id",
@@ -304,6 +309,11 @@ export const ADMIN_OPERATOR_WRITE_GRANTS: Readonly<
   commerce_pack_refunds: { insert: "table", update: "table" },
   image_entitlements: { insert: "table", update: "table" },
   image_generation_reservations: { update: "table" },
+  // gift.grant inserts; a pack refund or dispute (revokePackLots) revokes and
+  // marks rows; a job resolved as rejected returns the gift as a new row.
+  gift_letters: { insert: "table", update: "table" },
+  // gift.void_code, the dispute path and the failed-send return void codes.
+  gift_codes: { update: ["status", "voided_at", "void_reason", "updated_at"] },
   promo_campaigns: { insert: "table", update: "table", delete: true },
   provider_routing: { update: "table" },
   admin_operations: { insert: "table" },

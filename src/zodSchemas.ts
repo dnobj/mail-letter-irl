@@ -11,12 +11,19 @@ export const addressZ = z.object({
   country: z.string()
 });
 
+// Gift letters (docs/gift-letters.md). Functional wording only: tool text is
+// not a place to promote anything (docs/apps-sdk-guidelines.md).
+const SEND_AS_GIFT_DESCRIPTION =
+  "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay.";
+const sendAsGiftZ = z.boolean().optional().describe(SEND_AS_GIFT_DESCRIPTION);
+
 // Text-only letter schema
 export const quoteAndPreviewInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
   recipient: addressZ,
   bodyText: z.string(),
-  signOff: z.string()
+  signOff: z.string(),
+  sendAsGift: sendAsGiftZ
 });
 
 // ============================================================================
@@ -62,7 +69,8 @@ export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
   // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL
-  imageUrl: z.string().optional()
+  imageUrl: z.string().optional(),
+  sendAsGift: sendAsGiftZ
 });
 
 // Letter with inline image (image after signature, like enclosing a photo)
@@ -74,7 +82,8 @@ export const quoteAndPreviewLetterWithImageInputZ = z.object({
   // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL
-  imageUrl: z.string().optional()
+  imageUrl: z.string().optional(),
+  sendAsGift: sendAsGiftZ
 });
 
 export const sendLetterInputZ = z.object({
@@ -157,7 +166,8 @@ export const quoteAndPreviewPostcardInputZ = z.object({
   // Mobile may send file_id without download_url (sediment:// protocol)
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL (for when fileParams isn't available)
-  imageUrl: z.string().optional()
+  imageUrl: z.string().optional(),
+  sendAsGift: sendAsGiftZ
 });
 
 export const sendPostcardInputZ = z.object({
@@ -269,6 +279,12 @@ export const sendEligibilityZ = z.object({
   })
 });
 
+// A gift send's card, for the model and the preview card (docs/gift-letters.md).
+const giftCardZ = z.object({
+  state: z.enum(["funded", "unfunded"]),
+  description: z.string()
+});
+
 export const quoteAndPreviewOutputZ = z.object({
   lettersRequired: z.number(),
   canSendNow: z.boolean(),
@@ -285,7 +301,9 @@ export const quoteAndPreviewOutputZ = z.object({
   savedReturnAddressNote: z.string().optional(),
   senderAddressValidation: addressValidationZ.optional(),
   recipientAddressValidation: addressValidationZ.optional(),
-  addressWarnings: z.array(z.string()).optional()
+  addressWarnings: z.array(z.string()).optional(),
+  giftCard: giftCardZ.optional(),
+  giftLettersAvailable: z.number().int().nonnegative().optional()
 });
 
 export const sendLetterOutputZ = z.object({
@@ -317,6 +335,9 @@ export const redeemPromoCodeOutputZ = z.object({
   // Letters, not credits: the service reports the ledger unit and this is the
   // only unit a customer sees (#308).
   letters: z.number().int().nonnegative().optional(),
+  // Gift letters from a gift code (docs/gift-letters.md): free sends that
+  // print a card for the recipient.
+  giftLetters: z.number().int().nonnegative().optional(),
   expiresAt: z.string().optional(),
   message: z.string()
 });
@@ -405,7 +426,9 @@ export const getAccountBalanceOutputZ = z.object({
     daysUntilExpiry: z.number().optional()
   })).optional(),
   imageGenerationsRemaining: z.number().int().optional(),
-  imageGenerationsAllowance: z.number().int().optional()
+  imageGenerationsAllowance: z.number().int().optional(),
+  // Unsent gift letters, apart from lettersRemaining (docs/gift-letters.md).
+  giftLettersRemaining: z.number().int().nonnegative().optional()
 });
 
 export const listOrdersOutputZ = z.object({
@@ -488,7 +511,9 @@ export const quoteAndPreviewPostcardOutputZ = z.object({
   savedReturnAddressNote: z.string().optional(),
   senderAddressValidation: addressValidationZ.optional(),
   recipientAddressValidation: addressValidationZ.optional(),
-  addressWarnings: z.array(z.string()).optional()
+  addressWarnings: z.array(z.string()).optional(),
+  giftCard: giftCardZ.optional(),
+  giftLettersAvailable: z.number().int().nonnegative().optional()
 });
 
 export const sendPostcardOutputZ = z.object({

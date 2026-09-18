@@ -90,6 +90,15 @@ export interface PackProductDefinition {
   readonly expectedAmountCents: number;
   readonly name: string;
   readonly description: string;
+  /**
+   * Gift letters granted with the pack when gift letters are enabled, and the
+   * budget each carries: how many further funded cards may follow it. A
+   * budget of 1 means the pack's gift letter prints a code, and the letter
+   * that code grants prints the plain card. See docs/gift-letters.md for the
+   * cost bound this sets per pack.
+   */
+  readonly giftLetters: number;
+  readonly giftGenerationsRemaining: number;
 }
 
 export interface JitProductDefinition {
@@ -110,7 +119,9 @@ export const PACK_PRODUCTS: readonly PackProductDefinition[] = [
     priceEnv: 'STRIPE_PRICE_STARTER',
     expectedAmountCents: 500,
     name: 'Starter Pack - 2 Letters',
-    description: 'Two prepaid physical letters or postcards'
+    description: 'Two prepaid physical letters or postcards',
+    giftLetters: 1,
+    giftGenerationsRemaining: 1
   },
   {
     productCode: 'credit-pack-10',
@@ -119,7 +130,9 @@ export const PACK_PRODUCTS: readonly PackProductDefinition[] = [
     priceEnv: 'STRIPE_PRICE_REGULAR',
     expectedAmountCents: 1000,
     name: 'Regular Pack - 5 Letters',
-    description: 'Five prepaid physical letters or postcards'
+    description: 'Five prepaid physical letters or postcards',
+    giftLetters: 1,
+    giftGenerationsRemaining: 1
   },
   {
     productCode: 'credit-pack-100',
@@ -128,7 +141,9 @@ export const PACK_PRODUCTS: readonly PackProductDefinition[] = [
     priceEnv: 'STRIPE_PRICE_POWER',
     expectedAmountCents: 9000,
     name: 'Power Pack - 50 Letters',
-    description: 'Fifty prepaid physical letters or postcards'
+    description: 'Fifty prepaid physical letters or postcards',
+    giftLetters: 1,
+    giftGenerationsRemaining: 1
   }
 ] as const;
 

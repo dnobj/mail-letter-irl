@@ -1,5 +1,6 @@
 import { createAccountCommands } from "./accounts.js";
 import { alertTransitionCommand } from "./alerts.js";
+import { createGiftCommands } from "./gifts.js";
 import { createImageCommands } from "./images.js";
 import { jobResolveCommand, jobRetryCommand } from "./jobs.js";
 import { createOpsCommands } from "./ops.js";
@@ -12,6 +13,7 @@ const accounts = createAccountCommands();
 const promos = createPromoCommands();
 const images = createImageCommands();
 const ops = createOpsCommands();
+const gifts = createGiftCommands();
 
 /** Every command the panel can run, keyed by route name. */
 export const ADMIN_COMMANDS: ReadonlyArray<CommandDefinition<any>> = [
@@ -27,6 +29,8 @@ export const ADMIN_COMMANDS: ReadonlyArray<CommandDefinition<any>> = [
   promos.create,
   promos.transition,
   promos.remove,
+  gifts.grant,
+  gifts.voidCode,
   images.resolve,
   ops.setTier,
   ops.routing,

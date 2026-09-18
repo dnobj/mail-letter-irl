@@ -56,6 +56,8 @@ export const HANDLED_DRAFT_ERROR_CODES = [
   'DRAFT_NOT_OWNED',
   'DRAFT_WRONG_MAIL_TYPE',
   'FUNDING_AMOUNT_MISMATCH',
+  'GIFT_LETTERS_DISABLED',
+  'GIFT_LETTER_UNAVAILABLE',
   'JIT_ORDER_INVALID',
   'JIT_ORDER_NOT_FOUND',
   'JIT_ORDER_NOT_OWNED',
@@ -149,6 +151,20 @@ export function friendlyDraftError(
     return new Error(
       'The payment recorded for this draft does not match its price. Please contact Letter IRL support before retrying.'
     );
+  }
+  // Gift sends (docs/gift-letters.md). Upstream interpolates the draft id.
+  if (code === 'GIFT_LETTERS_DISABLED') {
+    return new Error(
+      `Gift letters are not available right now. Please preview the ${noun} again to send it from your balance.`
+    );
+  }
+  if (code === 'GIFT_LETTER_UNAVAILABLE') {
+    return new Error(
+      `This account has no gift letter left to use. Please preview the ${noun} again to send it from your balance.`
+    );
+  }
+  if (code === 'GIFT_CODE_UNAVAILABLE') {
+    return new Error(`Unable to prepare the gift card for this ${noun}. Please try again.`);
   }
   if (code === 'JIT_ORDER_NOT_FOUND') {
     return new Error('That Pay & Send order could not be found. Please start a new checkout.');

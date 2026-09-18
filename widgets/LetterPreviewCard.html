@@ -34,6 +34,17 @@
       .sign-off{margin-top:5px;white-space:pre-wrap;font-size:7.2px}
       .inline-image-wrapper{width:100%;max-height:25%;margin-top:5px;display:flex;justify-content:center}
       .inline-image-wrapper img{max-width:100%;max-height:100%;object-fit:contain;border-radius:3px}
+      /* Gift letter page 2 (docs/gift-letters.md): a miniature of the card
+         the send prints on an extra page. Drawn from state.giftCard; the code
+         is a placeholder because it does not exist until the send. */
+      .letter-mockup-container{gap:10px;flex-wrap:wrap;align-items:flex-start}
+      .gift-page-mockup{width:120px;aspect-ratio:8.5/11;background:#fdfcf8;border:1px solid #e6e0d2;border-radius:4px;box-shadow:0 2px 10px rgba(43,36,29,.12);padding:10px 8px;box-sizing:border-box;color:#2b241d;font-family:Georgia,"Times New Roman",serif;position:relative}
+      .gift-mini-card{border:1px solid #2b241d;border-radius:5px;padding:6px 5px;text-align:left}
+      .gift-mini-eyebrow{font-size:5px;letter-spacing:.1em;text-transform:uppercase;color:#8a7a64;margin-bottom:3px}
+      .gift-mini-title{font-size:7.5px;line-height:1.25;margin-bottom:5px}
+      .gift-mini-qr{width:30px;height:30px;background:repeating-conic-gradient(#2b241d 0 25%,#fdfcf8 0 50%) 0 0/6px 6px;border:2px solid #fdfcf8;outline:1px solid #2b241d;margin-bottom:4px}
+      .gift-mini-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:6.5px;font-weight:700;letter-spacing:.05em}
+      .gift-page-label{position:absolute;bottom:4px;right:6px;font-size:6px;color:#a8916b;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
       .image-not-shown{width:100%;border:1px dashed #d9cdb8;border-radius:3px;padding:6px 4px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:7px;color:#8a7a64;text-align:center}
 
       /* Layout badge - production color semantics kept */
@@ -937,6 +948,27 @@
         return lines.map(line => escapeHtml(String(line))).join("<br>");
       }
 
+      /**
+       * The extra page a gift letter prints (docs/gift-letters.md), in
+       * miniature. Funded cards carry a code for a free letter of the
+       * recipient's own; unfunded ones only say the letter was sent with
+       * Letter IRL. Returns "" for every other letter.
+       */
+      function giftPageMockup(giftCard) {
+        if (!giftCard || (giftCard.state !== "funded" && giftCard.state !== "unfunded")) return "";
+        const funded = giftCard.state === "funded";
+        return `
+          <div class="gift-page-mockup" aria-label="Extra printed page: ${funded ? "gift card" : "Letter IRL card"}">
+            <div class="gift-mini-card">
+              <div class="gift-mini-eyebrow">${funded ? "A gift inside" : "Sent with Letter IRL"}</div>
+              <div class="gift-mini-title">${funded ? "A letter for you to send" : "This letter began as a conversation"}</div>
+              <div class="gift-mini-qr" aria-hidden="true"></div>
+              <div class="gift-mini-code">${funded ? "XXXX-XXXX" : "letterirl.com"}</div>
+            </div>
+            <span class="gift-page-label">Page 2</span>
+          </div>`;
+      }
+
       const IMAGE_NOT_SHOWN_HTML =
         '<div class="image-not-shown">Image not shown on this card</div>';
 
@@ -1052,6 +1084,7 @@
             </div>
           </div>
         `;
+        mockupHtml += giftPageMockup(state.giftCard);
 
         container.innerHTML = mockupHtml;
       }
@@ -1163,10 +1196,14 @@
         document.getElementById("layout-type").textContent =
           layoutLabels[layoutType] || "Text Only";
 
+        // A gift send is free and needs no balance (docs/gift-letters.md).
+        const isGiftSend = Boolean(state.giftCard);
+
         // Cost - lettersRequired is already in letters (1 letter = 1 standard letter)
         const letters = lettersRequired ?? 1;
-        document.getElementById("cost").textContent =
-          `${letters} Letter${letters === 1 ? "" : "s"}`;
+        document.getElementById("cost").textContent = isGiftSend
+          ? "Free (gift letter)"
+          : `${letters} Letter${letters === 1 ? "" : "s"}`;
 
         // Delivery info
         const deliveryText = [];
@@ -1192,10 +1229,15 @@
         // letters. They agree exactly under flat pricing, which is pinned by
         // tests/unit/tools/letterBalanceEquivalence.test.ts - if that test
         // reddens, this line is what it is warning about.
+        //
+        // A gift send spends a gift letter, not the balance, so a refreshed
+        // balance says nothing about it.
         const effectiveCanSendNow =
-          refreshedLetters !== null
-            ? refreshedLetters >= (lettersRequired ?? 1)
-            : canSendNow;
+          isGiftSend
+            ? canSendNow
+            : refreshedLetters !== null
+              ? refreshedLetters >= (lettersRequired ?? 1)
+              : canSendNow;
 
         // Status pill - only while this card still describes a draft.
         if (cardIsShowingDraft()) {
@@ -1216,9 +1258,14 @@
         }
 
         // Note about saved return address
+        // and, on a gift send, what the extra page is. Both are shown: they
+        // say different things and neither is long.
         const noteEl = document.getElementById("note");
-        if (savedReturnAddressNote) {
-          noteEl.textContent = savedReturnAddressNote;
+        const noteParts = [];
+        if (isGiftSend && state.giftCard.description) noteParts.push(state.giftCard.description);
+        if (savedReturnAddressNote) noteParts.push(savedReturnAddressNote);
+        if (noteParts.length > 0) {
+          noteEl.textContent = noteParts.join(" ");
           noteEl.style.display = "block";
         } else {
           noteEl.style.display = "none";
@@ -1243,7 +1290,9 @@
         if (!sendInProgress && !checkoutInProgress) {
           sendButton.style.display = effectiveCanSendNow ? "flex" : "none";
           sendButton.disabled = !effectiveCanSendNow;
-          sendButtonText.textContent = anotherCopy ? ANOTHER_COPY_SEND_LABEL : "Send Letter";
+          sendButtonText.textContent = anotherCopy
+            ? ANOTHER_COPY_SEND_LABEL
+            : isGiftSend ? "Send Gift Letter" : "Send Letter";
 
           const payAndSend = sendEligibility?.payAndSend;
           const letterPack = sendEligibility?.letterPack;

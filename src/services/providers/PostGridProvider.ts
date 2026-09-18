@@ -28,6 +28,12 @@ import type {
   LetterLayoutType
 } from './types.js';
 import { writeDiagnostic } from '../../utils/diagnosticLog.js';
+import {
+  buildGiftLetterPage,
+  buildGiftPostcardBlock,
+  type CardFragment
+} from '../giftCardRenderer.js';
+import { giftQrFormat } from '../../config/giftLetters.js';
 
 type PostGridOperation =
   | 'create_letter'
@@ -280,6 +286,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     }
 
     try {
+      // A gift letter's card (docs/gift-letters.md). Built here, from the code
+      // the send transaction wrote into the letter, never from a stored image.
+      const giftPage = params.giftCard
+        ? await buildGiftLetterPage(params.giftCard, params.senderName || '', giftQrFormat())
+        : undefined;
+
       // Build request payload
       const request: PostGridLetterRequest = {
         to: this.buildContact(params.recipientName, params.recipientAddress),
@@ -291,6 +303,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           layoutType: params.layoutType,
           headerImageData: params.headerImageData,
           inlineImageData: params.inlineImageData,
+          giftPage,
         }),
         description: `Letter to ${params.recipientName}`,
         // Enable color printing for layouts with images
@@ -516,6 +529,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       layoutType?: LetterLayoutType;
       headerImageData?: string;
       inlineImageData?: string;
+      /** A gift letter's extra page; absent for every other letter. */
+      giftPage?: CardFragment;
     }
   ): string {
     const layoutType = options?.layoutType || 'text_only';
@@ -530,19 +545,19 @@ export class PostGridProvider implements LetterFulfillmentProvider {
 
     switch (layoutType) {
       case 'header_image':
-        return this.generateHeaderImageHTML(escapedMessage, options?.headerImageData);
+        return this.generateHeaderImageHTML(escapedMessage, options?.headerImageData, options?.giftPage);
       case 'inline_image':
-        return this.generateInlineImageHTML(escapedMessage, options?.inlineImageData);
+        return this.generateInlineImageHTML(escapedMessage, options?.inlineImageData, options?.giftPage);
       case 'text_only':
       default:
-        return this.generateTextOnlyHTML(escapedMessage);
+        return this.generateTextOnlyHTML(escapedMessage, options?.giftPage);
     }
   }
 
   /**
    * Generate text-only layout HTML
    */
-  private generateTextOnlyHTML(escapedMessage: string): string {
+  private generateTextOnlyHTML(escapedMessage: string, giftPage?: CardFragment): string {
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -559,11 +574,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     .letter-body {
       white-space: pre-wrap;
       word-wrap: break-word;
-    }
+    }${giftPage?.css ?? ''}
   </style>
 </head>
 <body>
-  <div class="letter-body">${escapedMessage}</div>
+  <div class="letter-body">${escapedMessage}</div>${giftPage?.html ?? ''}
 </body>
 </html>`;
   }
@@ -572,7 +587,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * Generate header image layout HTML (US-LAYOUT-01)
    * Header image appears at top of content area, below the address window
    */
-  private generateHeaderImageHTML(escapedMessage: string, headerImageData?: string): string {
+  private generateHeaderImageHTML(
+    escapedMessage: string,
+    headerImageData?: string,
+    giftPage?: CardFragment
+  ): string {
     const headerHtml = headerImageData
       ? `<div class="header-image"><img src="${headerImageData}" alt="Header"></div>`
       : '';
@@ -604,12 +623,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     .letter-body {
       white-space: pre-wrap;
       word-wrap: break-word;
-    }
+    }${giftPage?.css ?? ''}
   </style>
 </head>
 <body>
   ${headerHtml}
-  <div class="letter-body">${escapedMessage}</div>
+  <div class="letter-body">${escapedMessage}</div>${giftPage?.html ?? ''}
 </body>
 </html>`;
   }
@@ -618,7 +637,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * Generate inline image layout HTML (US-LAYOUT-02)
    * Inline image appears after the message/signature
    */
-  private generateInlineImageHTML(escapedMessage: string, inlineImageData?: string): string {
+  private generateInlineImageHTML(
+    escapedMessage: string,
+    inlineImageData?: string,
+    giftPage?: CardFragment
+  ): string {
     const inlineHtml = inlineImageData
       ? `<div class="inline-image"><img src="${inlineImageData}" alt="Photo"></div>`
       : '';
@@ -650,12 +673,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       max-width: 100%;
       max-height: 3in;
       object-fit: contain;
-    }
+    }${giftPage?.css ?? ''}
   </style>
 </head>
 <body>
   <div class="letter-body">${escapedMessage}</div>
-  ${inlineHtml}
+  ${inlineHtml}${giftPage?.html ?? ''}
 </body>
 </html>`;
   }
@@ -1110,6 +1133,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         '6x11': '11x6'  // 11" tall x 6" wide -> PostGrid wants 11x6
       };
       const postGridSize = postGridSizeMap[size];
+      const giftBlock = params.giftCard
+        ? await buildGiftPostcardBlock(params.giftCard, params.senderName || '', giftQrFormat())
+        : undefined;
 
       // Build request payload
       const request: PostGridPostcardRequest = {
@@ -1122,7 +1148,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         backHTML: this.generatePostcardBackHTML(
           params.backMessage,
           params.senderName,
-          params.senderAddress
+          params.senderAddress,
+          giftBlock
         ),
         size: postGridSize,
         description: `Postcard to ${params.recipientName}`
@@ -1249,7 +1276,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   private generatePostcardBackHTML(
     message: string,
     _senderName?: string,
-    _senderAddress?: PostcardParams['senderAddress']
+    _senderAddress?: PostcardParams['senderAddress'],
+    giftBlock?: CardFragment
   ): string {
     // Escape HTML special characters in message
     const escapedMessage = message
@@ -1291,13 +1319,13 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       color: #333;
       white-space: pre-wrap;
       word-wrap: break-word;
-    }
+    }${giftBlock?.css ?? ''}
   </style>
 </head>
 <body>
   <div class="postcard-back">
     <div class="message-area">
-      <div class="message">${escapedMessage}</div>
+      <div class="message">${escapedMessage}</div>${giftBlock?.html ?? ''}
     </div>
   </div>
 </body>

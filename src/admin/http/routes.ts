@@ -40,6 +40,7 @@ export const NAV_ITEMS = [
   { href: "/jobs", label: "Jobs" },
   { href: "/disputes", label: "Disputes" },
   { href: "/promos", label: "Promos" },
+  { href: "/gifts", label: "Gifts" },
   { href: "/images", label: "Images" },
   { href: "/maintenance", label: "Maintenance" },
   { href: "/stripe", label: "Stripe" },

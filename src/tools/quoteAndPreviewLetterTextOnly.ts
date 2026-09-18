@@ -31,6 +31,8 @@ interface QuoteAndPreviewLetterTextOnlyInput {
   recipient: Address;
   bodyText: string;
   signOff: string;
+  /** Send as the account's gift letter (docs/gift-letters.md). */
+  sendAsGift?: boolean;
 }
 
 // ============================================================================
@@ -85,6 +87,7 @@ async function handler(
     senderValidation,
     recipientValidation,
     addressWarnings,
+    sendAsGift: input.sendAsGift,
     context
   });
 }

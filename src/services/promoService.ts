@@ -24,6 +24,12 @@ import {
 } from './types.js';
 import { addCreditsToLedger } from './creditLedgerService.js';
 import { findUser } from './userService.js';
+import { grantGiftLettersWithClient } from './giftLetterService.js';
+import { normalizeEmail } from './giftCodes.js';
+import { isGiftLettersEnabled } from '../config/giftLetters.js';
+
+const SEED_EMAIL_INDEX = 'idx_promo_redemptions_campaign_email';
+const SEED_EMAIL_ALREADY_USED = 'This code has already been redeemed with this email address.';
 
 /**
  * Create a new promo campaign
@@ -302,6 +308,31 @@ export async function redeemPromoCode(
 
   const campaign = validation.campaign!;
 
+  // A seed campaign (docs/gift-letters.md) grants a gift letter, and may grant
+  // letters from the ledger beside it. It is multi-use, so it is the one code
+  // where identity bounds cost: one claim per person, where a person is their
+  // email with +tags and Gmail dots removed. Everything about an ordinary
+  // campaign is unchanged below.
+  const isSeed =
+    campaign.gift_generations_remaining !== null && campaign.gift_generations_remaining !== undefined;
+  if (isSeed && !isGiftLettersEnabled()) {
+    return { success: false, error: 'This code is not available right now.' };
+  }
+  const emailNormalized = isSeed ? normalizeEmail(email) : null;
+  if (isSeed && emailNormalized) {
+    const claimed = await query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM promo_redemptions WHERE campaign_id = $1 AND email_normalized = $2
+       ) AS exists`,
+      [campaign.campaign_id, emailNormalized]
+    );
+    if (claimed.rows[0]?.exists) return { success: false, error: SEED_EMAIL_ALREADY_USED };
+  }
+  // An ordinary campaign always takes the ledger path, as it always has. A
+  // seed campaign takes it only when it also grants letters, because a lot
+  // must hold at least one credit.
+  const grantsCredits = !isSeed || campaign.credits_amount > 0;
+
   // Calculate expiration
   let expiresAt: Date | undefined;
   if (campaign.expiration_policy === 'fixed_date' && campaign.fixed_expiration_date) {
@@ -312,95 +343,135 @@ export async function redeemPromoCode(
   }
   // 'never' policy means no expiration
 
-  return await transaction(async (client) => {
-    // ATOMIC INCREMENT FIRST - prevents race condition (US-EDGE-08)
-    // This UPDATE only succeeds if:
-    // - Campaign has no limit (max_total_redemptions IS NULL), OR
-    // - Current redemptions is still below the limit
-    const incrementResult = await client.query<PromoCampaign>(
-      `UPDATE promo_campaigns
-       SET current_redemptions = current_redemptions + 1,
-           updated_at = NOW()
-       WHERE campaign_id = $1
-         AND status = 'active'
-         AND (max_total_redemptions IS NULL OR current_redemptions < max_total_redemptions)
-       RETURNING *`,
-      [campaign.campaign_id]
-    );
+  try {
+    return await transaction(async (client) => {
+      // ATOMIC INCREMENT FIRST - prevents race condition (US-EDGE-08)
+      // This UPDATE only succeeds if:
+      // - Campaign has no limit (max_total_redemptions IS NULL), OR
+      // - Current redemptions is still below the limit
+      const incrementResult = await client.query<PromoCampaign>(
+        `UPDATE promo_campaigns
+         SET current_redemptions = current_redemptions + 1,
+             updated_at = NOW()
+         WHERE campaign_id = $1
+           AND status = 'active'
+           AND (max_total_redemptions IS NULL OR current_redemptions < max_total_redemptions)
+         RETURNING *`,
+        [campaign.campaign_id]
+      );
 
-    // If no rows affected, the limit was reached between validation and now
-    if (incrementResult.rows.length === 0) {
-      // Don't throw - return error result so transaction can rollback cleanly
+      // If no rows affected, the limit was reached between validation and now
+      if (incrementResult.rows.length === 0) {
+        // Don't throw - return error result so transaction can rollback cleanly
+        return {
+          success: false,
+          error: 'Promo code redemption limit reached',
+        };
+      }
+
+      // Upsert user (credit_ledger has FK constraint on users)
+      await client.query(
+        `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
+         VALUES ($1, $2, $3, 0, 0)
+         ON CONFLICT (user_id) DO UPDATE
+         SET credits = users.credits + $3,
+             updated_at = NOW()`,
+        [userId, email || `${userId}@unknown.com`, grantsCredits ? campaign.credits_amount : 0]
+      );
+
+      const ledgerEntry = grantsCredits
+        ? await grantPromoCreditsWithClient(client, { userId, campaign, promoCode, expiresAt })
+        : undefined;
+
+      let giftId: string | null = null;
+      if (isSeed) {
+        const granted = await grantGiftLettersWithClient(client, {
+          userId,
+          quantity: 1,
+          generationsRemaining: campaign.gift_generations_remaining!,
+          source: 'seed_redemption',
+          sourceReferenceId: `${campaign.campaign_id}:${userId}`,
+          sourceCampaignId: campaign.campaign_id
+        });
+        giftId = granted[0]?.gift_id ?? null;
+      }
+
+      // Record redemption
+      await client.query(
+        `INSERT INTO promo_redemptions (campaign_id, user_id, ledger_id, gift_id, email_normalized)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [campaign.campaign_id, userId, ledgerEntry?.ledger_id ?? null, giftId, emailNormalized]
+      );
+
+      // Note: Increment already done above with atomic check
+
+      console.log(`🎁 Redeemed promo for ${grantsCredits ? campaign.credits_amount : 0} credits`);
+
       return {
-        success: false,
-        error: 'Promo code redemption limit reached',
+        success: true,
+        credits: grantsCredits ? campaign.credits_amount : 0,
+        giftLetters: isSeed ? (giftId ? 1 : 0) : undefined,
+        expiresAt,
+        ledgerId: ledgerEntry?.ledger_id,
       };
+    });
+  } catch (error) {
+    // Two claims of one seed from one email racing past the check above: the
+    // unique index settles it, and the loser rolled back whole.
+    const pgError = error as { code?: string; constraint?: string };
+    if (pgError?.code === '23505' && pgError.constraint === SEED_EMAIL_INDEX) {
+      return { success: false, error: SEED_EMAIL_ALREADY_USED };
     }
+    throw error;
+  }
+}
 
-    // Upsert user (credit_ledger has FK constraint on users)
-    await client.query(
-      `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
-       VALUES ($1, $2, $3, 0, 0)
-       ON CONFLICT (user_id) DO UPDATE
-       SET credits = users.credits + $3,
-           updated_at = NOW()`,
-      [userId, email || `${userId}@unknown.com`, campaign.credits_amount]
-    );
+/**
+ * The ledger half of a redemption: one promo lot and its transaction row.
+ * Unchanged from when it lived inline in redeemPromoCode; split out so a seed
+ * campaign that grants only a gift letter can skip it.
+ */
+async function grantPromoCreditsWithClient(
+  client: pg.PoolClient,
+  params: { userId: string; campaign: PromoCampaign; promoCode: string; expiresAt?: Date }
+): Promise<CreditLedgerEntry> {
+  const { userId, campaign, promoCode, expiresAt } = params;
+  // Add credits via ledger
+  const ledgerResult = await client.query<CreditLedgerEntry>(
+    `INSERT INTO credit_ledger (
+      user_id, initial_amount, remaining_amount, source_type,
+      source_reference_id, source_metadata, activated_at, expires_at,
+      expiration_policy, expiration_days, status, description
+    ) VALUES ($1, $2, $2, 'promo', $3, $4, NOW(), $5, $6, $7, 'active', $8)
+    RETURNING *`,
+    [
+      userId,
+      campaign.credits_amount,
+      campaign.campaign_id,
+      JSON.stringify({ promo_code: promoCode, campaign_name: campaign.name }),
+      expiresAt || null,
+      campaign.expiration_policy,
+      campaign.expiration_days || null,
+      `Promo: ${campaign.name} (${promoCode})`,
+    ]
+  );
 
-    // Add credits via ledger
-    const ledgerResult = await client.query<CreditLedgerEntry>(
-      `INSERT INTO credit_ledger (
-        user_id, initial_amount, remaining_amount, source_type,
-        source_reference_id, source_metadata, activated_at, expires_at,
-        expiration_policy, expiration_days, status, description
-      ) VALUES ($1, $2, $2, 'promo', $3, $4, NOW(), $5, $6, $7, 'active', $8)
-      RETURNING *`,
-      [
-        userId,
-        campaign.credits_amount,
-        campaign.campaign_id,
-        JSON.stringify({ promo_code: promoCode, campaign_name: campaign.name }),
-        expiresAt || null,
-        campaign.expiration_policy,
-        campaign.expiration_days || null,
-        `Promo: ${campaign.name} (${promoCode})`,
-      ]
-    );
+  const ledgerEntry = ledgerResult.rows[0];
 
-    const ledgerEntry = ledgerResult.rows[0];
-
-    // Record transaction
-    await client.query(
-      `INSERT INTO credit_transactions (
-        user_id, amount, balance_after, type, reference_type, reference_id, description
-      ) VALUES ($1, $2, (SELECT credits FROM users WHERE user_id = $3), 'adjustment', 'manual', $4, $5)`,
-      [
-        userId,
-        campaign.credits_amount,
-        userId,  // Separate param for subquery to avoid type inference issues
-        String(ledgerEntry.ledger_id),  // Cast UUID to string for VARCHAR column
-        `Promo: ${campaign.name} (${promoCode})`,
-      ]
-    );
-
-    // Record redemption
-    await client.query(
-      `INSERT INTO promo_redemptions (campaign_id, user_id, ledger_id)
-       VALUES ($1, $2, $3)`,
-      [campaign.campaign_id, userId, ledgerEntry.ledger_id]
-    );
-
-    // Note: Increment already done above with atomic check
-
-    console.log(`🎁 Redeemed promo for ${campaign.credits_amount} credits`);
-
-    return {
-      success: true,
-      credits: campaign.credits_amount,
-      expiresAt,
-      ledgerId: ledgerEntry.ledger_id,
-    };
-  });
+  // Record transaction
+  await client.query(
+    `INSERT INTO credit_transactions (
+      user_id, amount, balance_after, type, reference_type, reference_id, description
+    ) VALUES ($1, $2, (SELECT credits FROM users WHERE user_id = $3), 'adjustment', 'manual', $4, $5)`,
+    [
+      userId,
+      campaign.credits_amount,
+      userId,  // Separate param for subquery to avoid type inference issues
+      String(ledgerEntry.ledger_id),  // Cast UUID to string for VARCHAR column
+      `Promo: ${campaign.name} (${promoCode})`,
+    ]
+  );
+  return ledgerEntry;
 }
 
 /**
@@ -534,14 +605,16 @@ export async function createCampaignWithClient(
     startsAt = new Date(),
     endsAt,
     requiresNewUser = false,
+    giftGenerationsRemaining = null,
     createdBy,
   } = params;
   const result = await client.query<PromoCampaign>(
     `INSERT INTO promo_campaigns (
       code, name, description, credits_amount, expiration_policy,
       expiration_days, fixed_expiration_date, max_total_redemptions,
-      max_per_user, starts_at, ends_at, requires_new_user, status, created_by
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'draft', $13)
+      max_per_user, starts_at, ends_at, requires_new_user, status, created_by,
+      gift_generations_remaining
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'draft', $13, $14)
     RETURNING *`,
     [
       code.toUpperCase().trim(),
@@ -557,6 +630,7 @@ export async function createCampaignWithClient(
       endsAt || null,
       requiresNewUser,
       createdBy || null,
+      giftGenerationsRemaining,
     ]
   );
   return result.rows[0];

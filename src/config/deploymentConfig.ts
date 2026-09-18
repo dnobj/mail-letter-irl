@@ -445,6 +445,35 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     advisory: true,
     secret: false,
     services: ['api']
+  },
+  /**
+   * Gift letters (docs/gift-letters.md). Off unless explicitly enabled, so an
+   * absent flag is the intended production state until the owner turns it on;
+   * listed so the preflight shows which environments have it. The landing URL
+   * and the daily cap have working defaults. API only: the card's link is
+   * written into the letter at send time, so the maintenance run that prints
+   * a retried letter never reads either.
+   */
+  {
+    name: 'LETTER_IRL_GIFT_LETTERS_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_GIFT_DAILY_SEND_CAP',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_GIFT_LANDING_BASE_URL',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
   }
 ];
 
