@@ -8,7 +8,9 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
 import { getBalance, getTransactions, getDetailedBalance } from '../services/creditService.js';
 import { getUser } from '../services/userService.js';
-import { validatePromoCode, redeemPromoCode, getUserRedemptions } from '../services/promoService.js';
+import { validatePromoCode, getUserRedemptions } from '../services/promoService.js';
+import { redeemCode } from '../services/codeRedemptionService.js';
+import { getGiftBalance } from '../services/giftLetterService.js';
 import { getLedgerEntries } from '../services/creditLedgerService.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import {
@@ -136,12 +138,16 @@ export async function handleCreditApiRequest(
 async function handleGetBalance(res: ServerResponse, authInfo: AuthInfo) {
   try {
     const balance = await getBalance(authInfo.userId);
+    const gifts = await getGiftBalance(authInfo.userId);
 
     sendJson(res, 200, {
       userId: authInfo.userId,
       credits: balance.credits,
       creditsPurchased: balance.credits_purchased,
-      creditsUsed: balance.credits_used
+      creditsUsed: balance.credits_used,
+      // Gift letters (docs/gift-letters.md) are counted separately: they are
+      // not credits and a normal send never spends them.
+      giftLetters: gifts.available
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -330,18 +336,25 @@ async function handleRedeemPromo(
     return;
   }
 
-  const result = await redeemPromoCode({
+  // Promo codes and printed gift codes share this endpoint, so the claim
+  // page and the dashboard's promo box both reach gift codes unchanged.
+  const result = await redeemCode({
     userId: authInfo.userId,
     email: authInfo.email,
-    promoCode: body.code
+    code: String(body.code)
   });
 
   if (result.success) {
+    const giftLetters = result.giftLetters ?? 0;
     sendJson(res, 200, {
       success: true,
-      credits: result.credits,
+      credits: result.credits ?? 0,
+      giftLetters,
       expiresAt: result.expiresAt,
-      message: `Successfully redeemed ${result.credits} credits!`
+      message:
+        giftLetters > 0
+          ? `Added ${giftLetters} gift ${giftLetters === 1 ? 'letter' : 'letters'} to your account.`
+          : `Successfully redeemed ${result.credits} credits!`
     });
   } else {
     sendJson(res, 400, {

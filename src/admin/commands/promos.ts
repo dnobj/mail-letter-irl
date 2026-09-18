@@ -7,6 +7,8 @@ import {
 import type { PromoCampaignStatus } from "../../services/types.js";
 import { AdminFoundationError } from "../errors.js";
 import { readCampaign, readCampaignByCode } from "../queries/promos.js";
+import { readGiftCode } from "../queries/gifts.js";
+import { normalizeGiftCode } from "../../services/giftCodes.js";
 import { type CommandDefinition } from "./runner.js";
 
 export interface PromoCommandSeams {
@@ -25,6 +27,8 @@ export interface CreatePromoInput {
   maxPerUser: number;
   requiresNewUser: boolean;
   endsAt: string | null;
+  /** Non-null makes a seed code (docs/gift-letters.md). */
+  giftGenerationsRemaining: number | null;
 }
 
 const STATUSES: PromoCampaignStatus[] = ["draft", "active", "paused", "ended", "expired"];
@@ -67,6 +71,8 @@ export function createPromoCommands(overrides: Partial<PromoCommandSeams> = {}) 
       const maxTotalRaw = (fields.get("maxTotalRedemptions") ?? "").trim();
       const maxTotalRedemptions = maxTotalRaw === "" ? null : integerIn(maxTotalRaw, 1, 100_000);
       const maxPerUser = integerIn(fields.get("maxPerUser") || "1", 1, 10);
+      const giftRaw = (fields.get("giftGenerationsRemaining") ?? "").trim();
+      const giftGenerationsRemaining = giftRaw === "" ? null : integerIn(giftRaw, 0, 20);
       const endsAtRaw = (fields.get("endsAt") ?? "").trim();
       const endsAt = endsAtRaw === "" ? null : /^\d{4}-\d{2}-\d{2}$/.test(endsAtRaw) && !Number.isNaN(Date.parse(endsAtRaw)) ? endsAtRaw : undefined;
       if (
@@ -78,7 +84,8 @@ export function createPromoCommands(overrides: Partial<PromoCommandSeams> = {}) 
         expirationDays === null ||
         (maxTotalRaw !== "" && maxTotalRedemptions === null) ||
         maxPerUser === null ||
-        endsAt === undefined
+        endsAt === undefined ||
+        (giftRaw !== "" && giftGenerationsRemaining === null)
       ) {
         throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
       }
@@ -92,12 +99,19 @@ export function createPromoCommands(overrides: Partial<PromoCommandSeams> = {}) 
         maxPerUser,
         requiresNewUser: fields.get("requiresNewUser") === "on" || fields.get("requiresNewUser") === "true",
         endsAt,
+        giftGenerationsRemaining,
       };
     },
     async preview(client, targetId, input) {
       if (targetId !== input.code) throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
       const existing = await readCampaignByCode(client, input.code);
       if (existing) throw new AdminFoundationError("ADMIN_INVALID_STATE");
+      // Redemption tries chain codes first, so a campaign whose code reads as
+      // a printed gift code would redeem that gift instead (docs/gift-letters.md).
+      const asChainCode = normalizeGiftCode(input.code);
+      if (asChainCode && (await readGiftCode(client, asChainCode))) {
+        throw new AdminFoundationError("ADMIN_INVALID_STATE");
+      }
       return {
         targetId: input.code,
         summary: { ...input },
@@ -110,8 +124,16 @@ export function createPromoCommands(overrides: Partial<PromoCommandSeams> = {}) 
           ["Per user", String(input.maxPerUser)],
           ["New users only", input.requiresNewUser ? "yes" : "no"],
           ["Ends", input.endsAt ?? "no end date"],
+          ["Gift letter", input.giftGenerationsRemaining === null ? "none (ordinary promo)" : `seed code: grants a gift letter with budget ${input.giftGenerationsRemaining}`],
         ],
-        warnings: ["Created as a draft; activate it with a second command once the details are checked."],
+        warnings: [
+          "Created as a draft; activate it with a second command once the details are checked.",
+          ...(input.giftGenerationsRemaining === null
+            ? []
+            : [
+                `A seed code is multi-use. Each claim is a free letter plus up to ${input.giftGenerationsRemaining} more down its chain, so the total redemptions cap is the cost bound; consider New accounts only.`,
+              ]),
+        ],
       };
     },
     async execute(execution, _targetId, input) {
@@ -127,6 +149,7 @@ export function createPromoCommands(overrides: Partial<PromoCommandSeams> = {}) 
         maxPerUser: input.maxPerUser,
         endsAt: input.endsAt ? new Date(`${input.endsAt}T23:59:59.000Z`) : undefined,
         requiresNewUser: input.requiresNewUser,
+        giftGenerationsRemaining: input.giftGenerationsRemaining,
         createdBy: execution.actorId,
       });
       return { campaignId: campaign.campaign_id, code: campaign.code, status: campaign.status };

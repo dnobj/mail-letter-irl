@@ -29,6 +29,8 @@ import {
   handleStripeWebhook
 } from "../api/dashboardApiHandler.js";
 import { validatePromoCodePublic } from "../services/promoService.js";
+import { lookupGiftCodePublic } from "../services/giftLetterService.js";
+import { giftCodeFromPath } from "../services/giftCodes.js";
 import { closePool } from "../db/index.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
 import {
@@ -716,8 +718,41 @@ export async function startHttpServer() {
       return;
     }
 
-    // Handle CORS preflight for public promo endpoint
-    if (url.pathname.startsWith('/api/public/promo/') && req.method === 'OPTIONS') {
+    // Public gift code lookup (docs/gift-letters.md): what the claim page may
+    // know before sign-in. Validity, kind and a redeem-by date; never who sent
+    // it. Shares the promo_public budget, since both answer "is this a code".
+    if (url.pathname.startsWith('/api/public/gift/') && req.method === 'GET') {
+      const origin = resolveCorsOrigin(req.headers.origin);
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Content-Type', 'application/json');
+      if (rateLimitMiddlewareWithGlobal(req, res, 'promo_public')) return;
+
+      // Empty, or a malformed percent-encoding: a bad request, not a fault.
+      const code = giftCodeFromPath(url.pathname);
+      if (!code) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ valid: false, reason: 'not_found' }));
+        return;
+      }
+      try {
+        const result = await lookupGiftCodePublic(code);
+        res.statusCode = 200;
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        writeDiagnostic('error', 'gift.public_lookup_failed', {
+          errorClass: classifyDiagnosticError(error, 'database_error')
+        });
+        res.statusCode = 500;
+        res.end(JSON.stringify({ valid: false, reason: 'unavailable' }));
+      }
+      return;
+    }
+
+    // Handle CORS preflight for public promo and gift endpoints
+    if (
+      (url.pathname.startsWith('/api/public/promo/') || url.pathname.startsWith('/api/public/gift/')) &&
+      req.method === 'OPTIONS'
+    ) {
       respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
       return;
     }

@@ -23,6 +23,7 @@ import {
   isLetterAlreadyCompensated,
   returnConsumedCreditsForLetter
 } from './creditLedgerService.js';
+import { returnGiftLetterForFailedSendWithClient } from './giftLetterService.js';
 import { carriedDiagnosticClass, classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { summarizeProviderRejection } from './providerFailureSummary.js';
 
@@ -331,6 +332,7 @@ function letterParams(letter: Letter, job: LetterJob): LetterParams {
     layoutType: content.layoutType || 'text_only',
     headerImageData: content.headerImageData,
     inlineImageData: content.inlineImageData,
+    giftCard: content.giftCard,
     metadata: {
       letterId: letter.letter_id,
       userId: letter.user_id,
@@ -367,6 +369,7 @@ function postcardParams(letter: Letter, job: LetterJob): PostcardParams {
     frontImageBase64: content.frontImageData,
     backMessage: content.message,
     size: (content.postcardSize || '6x9') as PostcardSize,
+    giftCard: content.giftCard,
     metadata: {
       letterId: letter.letter_id,
       userId: letter.user_id,
@@ -565,11 +568,14 @@ async function recoverProviderAcceptancePersistence(
  * Return a prepaid send's credits when the job ends terminally.
  *
  * Only for prepaid_balance letters: jit_order funding is compensated by moving
- * the order to refund_pending, which the Stripe path then settles.
+ * the order to refund_pending, which the Stripe path then settles. A gift
+ * letter gets its gift back and the code it printed voided
+ * (returnGiftLetterForFailedSendWithClient).
  *
  * Idempotent inside returnConsumedCreditsForLetter, so replayed failure
  * handling, a re-run of maintenance, or two concurrent handlers that both reach
- * a terminal transition cannot return the pack twice.
+ * a terminal transition cannot return the pack twice. The gift return keys on
+ * the letter the same way.
  */
 async function returnPrepaidCreditsForFailedLetter(
   client: Pick<pg.PoolClient, 'query'>,
@@ -581,6 +587,14 @@ async function returnPrepaidCreditsForFailedLetter(
     [letterId]
   );
   const row = letter.rows[0];
+  if (row?.funding_type === 'gift_letter') {
+    await returnGiftLetterForFailedSendWithClient(client, {
+      letterId,
+      userId: row.user_id,
+      failureCode
+    });
+    return;
+  }
   if (!row || row.funding_type !== 'prepaid_balance') return;
   await returnConsumedCreditsForLetter(client, {
     letterId,

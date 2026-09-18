@@ -26,8 +26,8 @@ The preview response includes a `draftId`. Sending is a separate, explicit tool 
 2. validates ownership, mail type, state, and expiry;
 3. returns the existing order if the draft was already consumed;
 4. inserts the Letter IRL order;
-5. locks and deducts prepaid sends from the user's ledger;
-6. checks the daily caps, then refuses the same mail sent recently (below), unless the caller asked for another copy;
+5. locks and deducts prepaid sends from the user's ledger, or, for a draft previewed as a gift send, uses one gift letter under the same account lock and decides its card ([Gift Letters](gift-letters.md));
+6. checks the daily caps (and, for a gift send, the daily gift budget), then refuses the same mail sent recently (below), unless the caller asked for another copy;
 7. marks the draft consumed and links it to the order;
 8. inserts one `letter_jobs` outbox row;
 9. commits.
@@ -92,6 +92,8 @@ Three paths reach it, and all three are guarded by the same exactly-once check, 
 Once a pack has been returned, an operator retry of that job is refused. Nothing re-deducts on the way back through the outbox, so resending would give the customer the pack and the letter; selling them a new send is a deliberate decision rather than a side effect of a retry.
 
 An ambiguous outcome returns nothing. The piece may physically exist, and an unnecessary hold is recoverable while refunding posted mail is not.
+
+A gift letter (`funding_type = 'gift_letter'`) consumed no credits, so its compensation is a gift: the same three paths void the code printed on it and grant a replacement gift letter with the same budget, once, keyed by the letter. Nothing is returned if the code was already redeemed, which proves the letter arrived, or if the purchase that granted the gift has been refunded or disputed. Either counts as compensation for the retry guard.
 
 ## Hourly Recovery
 

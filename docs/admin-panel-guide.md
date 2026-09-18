@@ -356,13 +356,17 @@ Commands available:
 | Adjust letter balance | an account | `adjustCreditsWithClient` (letters in the UI, credits in the ledger; removal FIFO; atomic with the run and audit rows) |
 | Grant image generations | an account | `grantOperatorImageEntitlement` (one grant per command id, one-year expiry) |
 | Release amount-mismatch quarantine | an order carrying `PAYMENT_AMOUNT_MISMATCH` | clears the code and records `operator.quarantine_released`; the hourly sweep then acts |
-| Create / change status / delete promo | `promo_campaigns` | client-taking promo service functions with a validated status machine and an `updated_at` version; delete refused once redeemed |
+| Create / change status / delete promo | `promo_campaigns` | client-taking promo service functions with a validated status machine and an `updated_at` version; delete refused once redeemed. The create form's gift budget makes a seed campaign ([gift-letters.md](gift-letters.md)); a code that reads as a printed gift code is refused |
+| Grant gift letters | an account | `grantGiftLettersWithClient` (source `operator`, keyed by the command id so a replay grants nothing; optionally bound to a seed campaign whose code the letters then print). The preview states the cost bound |
+| Void a gift code | an issued `gift_codes` row | sets it `void` with class `operator`; refused once redeemed or void |
 | Resolve ambiguous image reservation | `image_generation_reservations` in `ambiguous` | `resolveAmbiguousGenerationReservation` (issue #69's operator recovery, now reachable) |
 | Set / clear tier override | an account | `setTierOverride` (the daily calculation skips overridden accounts; the API's tier cache lasts five minutes) |
 | Change provider routing | `provider_routing` by mail type | validated against the runtime provider registry, versioned on `updated_at`; production never accepts `dummy` |
 | Provider status sync | letters of the last N days | `syncLetterStatuses` (dry run by default; apply updates statuses and history) |
 
-Read-only pages beyond the P0 set: **Retention** (report mode counts and the quarantine's metadata; no
+Read-only pages beyond the P0 set: **Gifts** (unsent gift letters, gift sends today, outstanding and
+redeemed chain codes, the newest codes with a void action; an account page adds that account's gift
+letters, the codes it printed or redeemed, and the grant form), **Retention** (report mode counts and the quarantine's metadata; no
 restore until `retentionService`'s restore defects are fixed), **Routing** (the routing table, the
 registry, stuck letters), **Support** (token counts, feature requests without contact emails). Manual
 cases: `ADMIN-OPS-01` to `ADMIN-OPS-03` and `ADMIN-LEGACY-01`.

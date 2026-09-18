@@ -15,6 +15,7 @@ import { transaction, query } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import { lockAccountForBalanceChange } from './accountLock.js';
+import { isGiftLetterCompensated } from './giftLetterService.js';
 import {
   User,
   CreditTransaction,
@@ -788,6 +789,9 @@ export async function isLetterAlreadyCompensated(
   params: { letterId: string; userId: string }
 ): Promise<boolean> {
   if (await hasReturnedCreditsForLetter(client, params)) return true;
+  // A gift letter consumed no credits; its compensation is a returned gift
+  // or the reversal of the purchase that granted it.
+  if (await isGiftLetterCompensated(client, params.letterId)) return true;
   const consumed = await client.query<{ all_revoked: boolean | null }>(
     `SELECT bool_and(lot.status = 'revoked') AS all_revoked
        FROM credit_consumption consumption

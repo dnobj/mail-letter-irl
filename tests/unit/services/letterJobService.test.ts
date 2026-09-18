@@ -161,6 +161,38 @@ describe('mail outbox retries', () => {
     }));
   });
 
+  it("hands a gift letter's card to the provider, exactly as the send wrote it", async () => {
+    // docs/gift-letters.md: the card is written into the letter at send time
+    // so a retry from the maintenance run prints the same code and link.
+    const giftCard = {
+      state: 'funded',
+      code: 'K7M2QX9A',
+      url: 'https://letterirl.com/g/K7M2QX9A',
+      displayUrl: 'letterirl.com/g',
+      redeemBy: '2026-12-16',
+    };
+    const giftLetter = { ...letter, funding_type: 'gift_letter', content: { ...letter.content, giftCard } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...giftLetter }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...giftLetter }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ giftCard, color: false }));
+  });
+
+  it('hands no card for an ordinary letter', async () => {
+    mockClaims();
+    await processLetterJob('job-1', {});
+    expect(sendLetter.mock.calls[0][0].giftCard).toBeUndefined();
+  });
+
   it('retries, not holds, when the provider cannot even be resolved', async () => {
     // Issue #155's runtime guards make getProviderForMailType throw in
     // production (dummy refused, construction failure rethrown). The provider

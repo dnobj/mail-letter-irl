@@ -149,7 +149,7 @@ export interface Letter {
   credits_cost: number;
   status: LetterStatus;
   mail_type: MailType;
-  funding_type: 'prepaid_balance' | 'jit_order';
+  funding_type: 'prepaid_balance' | 'jit_order' | 'gift_letter';
   funding_order_id?: string;
   preview_html?: string;
   tracking_id?: string;
@@ -390,6 +390,11 @@ export interface PromoCampaign {
   ends_at?: Date;
   requires_new_user: boolean;
   status: PromoCampaignStatus;
+  /**
+   * Set on a seed campaign (docs/gift-letters.md): redeeming it grants a gift
+   * letter with this budget. NULL on an ordinary campaign.
+   */
+  gift_generations_remaining?: number | null;
   created_by?: string;
   created_at: Date;
   updated_at: Date;
@@ -399,7 +404,9 @@ export interface PromoRedemption {
   redemption_id: string;
   campaign_id: string;
   user_id: string;
-  ledger_id: string;
+  /** NULL when a seed campaign granted only a gift letter. */
+  ledger_id: string | null;
+  gift_id?: string | null;
   redeemed_at: Date;
 }
 
@@ -416,6 +423,8 @@ export interface CreatePromoCampaignParams {
   startsAt?: Date;
   endsAt?: Date;
   requiresNewUser?: boolean;
+  /** Makes the campaign a seed code: redeeming it grants a gift letter with this budget. */
+  giftGenerationsRemaining?: number | null;
   createdBy?: string;
 }
 
@@ -428,6 +437,8 @@ export interface RedeemPromoParams {
 export interface RedeemPromoResult {
   success: boolean;
   credits?: number;
+  /** Gift letters a seed campaign granted. */
+  giftLetters?: number;
   expiresAt?: Date;
   ledgerId?: string;
   error?: string;
@@ -478,6 +489,8 @@ export interface LetterDraft {
   expires_at: Date;
   consumed_at?: Date;
   consumed_letter_id?: string;
+  /** Sent as a gift letter (migration 033): funded by one, and prints its card. */
+  is_gift_send?: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -499,6 +512,8 @@ export interface CreateDraftParams {
   headerImageUrl?: string;                // Original URL for debugging
   inlineImageData?: string;               // Base64 data URI for inline image
   inlineImageUrl?: string;                // Original URL for debugging
+  /** Funded by a gift letter and printed with its card (migration 033). */
+  isGiftSend?: boolean;
 }
 
 export interface CreateDraftResult {
@@ -725,6 +740,8 @@ export interface CreatePostcardDraftParams {
   senderValidation?: Record<string, unknown>;
   recipientValidation?: Record<string, unknown>;
   expiresInHours?: number;        // Default: 24
+  /** Funded by a gift letter and printed with its card (migration 033). */
+  isGiftSend?: boolean;
 }
 
 export interface CreatePostcardDraftResult {

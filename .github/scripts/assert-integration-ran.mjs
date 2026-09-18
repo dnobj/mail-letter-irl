@@ -39,6 +39,7 @@ const REQUIRED = [
   'featureRequestsSweep.postgres.test.ts',
   'errorTextMinimisation.postgres.test.ts',
   'duplicateMail.postgres.test.ts',
+  'giftLetters.postgres.test.ts',
 ];
 
 /**

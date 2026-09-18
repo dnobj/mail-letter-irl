@@ -6,6 +6,7 @@ import {
   globalDailyMailCeiling,
   isMailSendingEnabled
 } from '../auth/betaAccess.js';
+import { giftDailySendCap } from '../config/giftLetters.js';
 
 /**
  * Daily spend ceilings for the limited beta (#179).
@@ -196,6 +197,29 @@ export async function assertChargeWithinDailyCap(
     throw new SpendLimitError(
       'ACCOUNT_DAILY_CHARGE_CAP',
       'This account has reached its daily purchase limit. Please try again tomorrow.'
+    );
+  }
+}
+
+/**
+ * The gift letter budget (docs/gift-letters.md): gift letters sent per UTC day
+ * across every account. Gift letters cost real postage and nobody pays for
+ * them, so this is the ceiling on what the programme can spend in a day, and
+ * it fails closed like everything else in this file.
+ *
+ * Called after the letters row is inserted, like assertMailWithinDailyCaps
+ * from mailSendService, so the count already includes this send. A cap of 0
+ * refuses every gift send.
+ */
+export async function assertGiftSendWithinDailyCap(client: SpendLimitQueryable): Promise<void> {
+  const sent = await client.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM letters
+     WHERE funding_type = 'gift_letter' AND created_at >= ${UTC_DAY_START}`
+  );
+  if (countOf(sent.rows) > giftDailySendCap()) {
+    throw new SpendLimitError(
+      'GIFT_DAILY_SEND_CAP',
+      'Gift letters have reached their limit for today. Preview the letter again to send it from your balance, or try again tomorrow.'
     );
   }
 }

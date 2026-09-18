@@ -67,6 +67,10 @@ export function friendlyCheckoutError(error: unknown): Error {
       return friendly(
         'This draft is expired or too close to expiry. Please create a new preview.'
       );
+    case 'DRAFT_IS_GIFT':
+      return friendly(
+        'This draft uses a gift letter, so there is nothing to pay. Send it with the Send action.'
+      );
     case 'PREPAID_BALANCE_AVAILABLE':
       return friendly(
         'You already have enough prepaid balance to send this draft. Use the Send action.'

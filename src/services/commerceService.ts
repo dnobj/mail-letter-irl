@@ -23,6 +23,11 @@ import {
 import { lockAccountForBalanceChange } from './accountLock.js';
 import { addCreditsToLedgerWithClient } from './creditLedgerService.js';
 import { grantImageEntitlementWithClient } from './imageGenerationLimitService.js';
+import {
+  grantGiftLettersWithClient,
+  revokeGiftLettersForOrderWithClient
+} from './giftLetterService.js';
+import { isGiftLettersEnabled } from '../config/giftLetters.js';
 import { createMailOrderFromDraftWithClient } from './mailSendService.js';
 import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import {
@@ -745,6 +750,12 @@ async function prepareJitOrder(
         code: 'DRAFT_EXPIRED'
       });
     }
+    // A gift draft is free and prints a gift card; selling it would charge
+    // for a free letter and print a card nobody paid the budget for. Refused
+    // here, before any charge, because fulfilment runs after one.
+    if (draft.is_gift_send) {
+      throw Object.assign(new Error('Draft is a gift send'), { code: 'DRAFT_IS_GIFT' });
+    }
 
     // ONE derivation for the whole transaction: the reprice branch and the
     // insert below must price against the SAME row or they silently diverge
@@ -1414,6 +1425,20 @@ async function transitionPaidCheckout(
       sourceOrderId: order.order_id,
       quantity: packImageGrant(credits)
     });
+    // docs/gift-letters.md. Only while the programme is on: a pack bought
+    // with it off grants none, and turning it on later does not backfill.
+    // Idempotent per order, like the two grants above.
+    const packProduct = PACK_PRODUCTS.find(product => product.productCode === order.product_code);
+    if (packProduct && packProduct.giftLetters > 0 && isGiftLettersEnabled()) {
+      await grantGiftLettersWithClient(client, {
+        userId: order.user_id,
+        quantity: packProduct.giftLetters,
+        generationsRemaining: packProduct.giftGenerationsRemaining,
+        source: 'pack_purchase',
+        sourceReferenceId: order.order_id,
+        sourceOrderId: order.order_id
+      });
+    }
     await client.query(
       `UPDATE orders
        SET status = 'fulfilled', fulfilled_at = NOW(), completed_at = NOW(), updated_at = NOW()
@@ -1685,9 +1710,30 @@ export async function revokePackLots(
       options.cause === 'partial_refund' ? 'payment_refunded' : options.cause ?? 'payment_refunded',
       options.disputeId
     );
+    // The pack's gift letters go with it (docs/gift-letters.md). Idempotent,
+    // and outside revokeWholePack's early return so a replayed reversal that
+    // finds no credit lots left still settles them.
+    await revokeGiftLettersForOrderWithClient(
+      client,
+      order.order_id,
+      options.cause === 'payment_disputed' ? 'payment_disputed' : 'payment_refunded'
+    );
     return { creditsTaken: taken, lots: [] };
   }
-  return revokePackCreditsProportionally(client, order, options.credits, options.packRefundId);
+  const proportional = await revokePackCreditsProportionally(
+    client,
+    order,
+    options.credits,
+    options.packRefundId
+  );
+  // A proportional refund that takes every letter left on the pack reverses
+  // what remains of the purchase, so its gift letters go too; one that leaves
+  // letters behind leaves the gift with them. Never voids printed codes: a
+  // refund is not a fraud signal (docs/gift-letters.md).
+  if (proportional.exhausted) {
+    await revokeGiftLettersForOrderWithClient(client, order.order_id, 'payment_refunded');
+  }
+  return { creditsTaken: proportional.creditsTaken, lots: proportional.lots };
 }
 
 async function revokeWholePack(
@@ -1823,7 +1869,7 @@ async function revokePackCreditsProportionally(
   order: Order,
   credits: number,
   packRefundId?: string
-): Promise<{ creditsTaken: number; lots: RevokedPackLot[] }> {
+): Promise<{ creditsTaken: number; lots: RevokedPackLot[]; exhausted: boolean }> {
   if (!Number.isInteger(credits) || credits <= 0) {
     throw new Error(`revokePackLots: credits must be a positive integer, got ${credits}`);
   }
@@ -1918,7 +1964,7 @@ async function revokePackCreditsProportionally(
       `Proportional refund of ${letters} ${letters === 1 ? 'letter' : 'letters'} for ${order.order_id}`
     ]
   );
-  return { creditsTaken: credits, lots: taken };
+  return { creditsTaken: credits, lots: taken, exhausted: available === credits };
 }
 async function stopFundedMailBeforeFinancialReversal(
   client: pg.PoolClient,

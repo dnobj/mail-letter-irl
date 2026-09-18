@@ -31,7 +31,8 @@
 - Payments or credit purchases.
 - Batch, bulk, or campaign mailings.
 - Special delivery classes (certified, registered, signature-required).
-- Legal compliance automations, notarization, or authenticity QR codes.
+- Legal compliance automations, notarization, or authenticity QR codes. (The QR on a gift
+  letter's card is a claim link, not an authenticity mark; see gift-letters.md.)
 - Automatic verification of letter authenticity (kept on roadmap).
 
 ## Hand-off Notes

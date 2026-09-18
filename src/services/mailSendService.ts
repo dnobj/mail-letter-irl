@@ -5,9 +5,12 @@ import type pg from 'pg';
 import { transaction } from '../db/index.js';
 import { deductCreditsFromLedgerWithClient } from './creditLedgerService.js';
 import { isBetaAccessAllowed, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
-import { assertMailWithinDailyCaps } from './betaSpendLimits.js';
+import { assertGiftSendWithinDailyCap, assertMailWithinDailyCaps } from './betaSpendLimits.js';
 import { createLetterJobWithClient } from './letterJobService.js';
 import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
+import { consumeGiftLetterForSendWithClient } from './giftLetterService.js';
+import { isGiftLettersEnabled } from '../config/giftLetters.js';
+import type { GiftCardContent } from './giftCardRenderer.js';
 import type { Letter, LetterDraft, LetterJob, Order, PostcardDraft } from './types.js';
 
 export type SendMailType = 'letter' | 'postcard';
@@ -42,6 +45,9 @@ export interface CreateMailOrderResult {
   job?: LetterJob;
   creditsRemaining: number;
   alreadyConsumed: boolean;
+  /** What paid for this mail. 'gift_letter' mail also prints giftCard. */
+  fundingType: Letter['funding_type'];
+  giftCard?: GiftCardContent;
 }
 
 /**
@@ -170,7 +176,9 @@ export async function createMailOrderFromDraftWithClient(
       letter: existingLetter,
       draft,
       creditsRemaining: await loadCreditsRemaining(client, params.userId),
-      alreadyConsumed: true
+      alreadyConsumed: true,
+      fundingType: existingLetter.funding_type,
+      giftCard: (existingLetter.content as { giftCard?: GiftCardContent } | null)?.giftCard
     };
   }
 
@@ -219,6 +227,14 @@ export async function createMailOrderFromDraftWithClient(
     throw draftError('DRAFT_INVALID_STATE', `Draft ${params.draftId} is ${draft.status}`);
   }
 
+  // A gift draft is funded by a gift letter instead of the balance. Pay & Send
+  // ignores the flag: that path runs after Stripe has charged, and
+  // createJitCheckout refuses a gift draft before any charge exists.
+  const useGift = funding.type !== 'jit_order' && draft.is_gift_send === true;
+  if (useGift && !isGiftLettersEnabled()) {
+    throw draftError('GIFT_LETTERS_DISABLED', `Draft ${params.draftId} is a gift send and gift letters are off`);
+  }
+
   let jitOrder: Order | undefined;
   if (funding.type === 'prepaid_balance') {
     const activeCheckout = await client.query<{ order_id: string }>(
@@ -261,7 +277,8 @@ export async function createMailOrderFromDraftWithClient(
   const letterId = randomUUID();
   const content =
     params.mailType === 'postcard' ? buildPostcardContent(draft) : buildLetterContent(draft);
-  const fundingType = funding.type === 'jit_order' ? 'jit_order' : 'prepaid_balance';
+  const fundingType: Letter['funding_type'] =
+    funding.type === 'jit_order' ? 'jit_order' : useGift ? 'gift_letter' : 'prepaid_balance';
 
   const letterResult = await client.query<Letter>(
     `INSERT INTO letters (
@@ -281,10 +298,40 @@ export async function createMailOrderFromDraftWithClient(
       funding.type === 'jit_order' ? funding.orderId : null
     ]
   );
-  const letter = letterResult.rows[0];
+  let letter = letterResult.rows[0];
 
   let creditsRemaining: number;
-  if (funding.type === 'prepaid_balance') {
+  let giftCard: GiftCardContent | undefined;
+  if (useGift) {
+    // Takes the account lock, so the caps and the duplicate check below are
+    // serialised per account exactly as on the prepaid path.
+    const consumed = await consumeGiftLetterForSendWithClient(client, {
+      userId: params.userId,
+      letterId
+    });
+    if (!consumed) {
+      throw draftError('GIFT_LETTER_UNAVAILABLE', `No gift letter available for draft ${params.draftId}`);
+    }
+    await assertMailWithinDailyCaps(client, params.userId, 0);
+    await assertGiftSendWithinDailyCap(client);
+    if (!params.allowDuplicate) {
+      await assertNoRecentDuplicateMail(client, {
+        userId: params.userId,
+        draftId: params.draftId,
+        excludeLetterId: letterId
+      });
+    }
+    // Written into the letter so whichever process prints it, the API now or
+    // the maintenance run on a retry, prints the same code and link. The
+    // duplicate check reads named content keys and never this one.
+    giftCard = consumed.card;
+    const updated = await client.query<Letter>(
+      `UPDATE letters SET content = content || $2::jsonb WHERE letter_id = $1 RETURNING *`,
+      [letterId, JSON.stringify({ giftCard })]
+    );
+    letter = updated.rows[0] ?? letter;
+    creditsRemaining = await loadCreditsRemaining(client, params.userId);
+  } else if (funding.type === 'prepaid_balance') {
     const requiredCredits = funding.requiredCredits ?? draft.required_credits;
     if (requiredCredits !== draft.required_credits) {
       throw draftError('FUNDING_AMOUNT_MISMATCH', 'Prepaid funding does not match the draft');
@@ -370,7 +417,9 @@ export async function createMailOrderFromDraftWithClient(
     draft: { ...draft, status: 'consumed', consumed_letter_id: letterId },
     job,
     creditsRemaining,
-    alreadyConsumed: false
+    alreadyConsumed: false,
+    fundingType,
+    giftCard
   };
 }
 

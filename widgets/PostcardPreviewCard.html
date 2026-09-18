@@ -38,6 +38,12 @@
       /* Postcard back mockup - paper artifact, cream in both themes */
       .postcard-back-mockup{width:100%;aspect-ratio:9/6;background:#fdfcf8;border:1px solid #e6e0d2;border-radius:8px;box-shadow:0 2px 8px rgba(43,36,29,.1);display:flex;overflow:hidden;color:#2b241d}
       .postcard-message-side{width:53%;padding:11px 12px;border-right:1px solid #e6e0d2;display:flex;align-items:flex-start}
+      /* Gift postcard (docs/gift-letters.md): the card takes the foot of the
+         message half, as it does in print. */
+      .postcard-message-side.with-gift{flex-direction:column;justify-content:space-between;align-items:stretch}
+      .postcard-gift-strip{display:flex;align-items:center;gap:6px;border-top:1px solid #d9cdb8;padding-top:5px;margin-top:5px;font-family:Georgia,"Times New Roman",serif;font-size:6.5px;line-height:1.35;color:#2b241d}
+      .postcard-gift-qr{flex:none;width:20px;height:20px;background:repeating-conic-gradient(#2b241d 0 25%,#fdfcf8 0 50%) 0 0/4px 4px;outline:1px solid #2b241d}
+      .postcard-gift-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700}
       .postcard-message-text{font-family:Georgia,"Times New Roman",serif;font-size:9.5px;line-height:1.6;color:#4a4036;white-space:pre-wrap;word-wrap:break-word}
       .postcard-address-side{width:47%;padding:9px 10px;position:relative;display:flex;flex-direction:column;justify-content:flex-end}
       .postcard-stamp{position:absolute;top:9px;right:10px;width:32px;height:38px;border:1.5px dashed #c8b393;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:6px;letter-spacing:.12em;color:#a8916b}
@@ -1076,10 +1082,25 @@
               .replace(/, (\d)/, " $1"),
           );
 
+          // The gift strip, from state.giftCard: a placeholder code, because the
+          // real one is minted at send.
+          const giftCard = state.giftCard;
+          const giftStrip =
+            giftCard && (giftCard.state === "funded" || giftCard.state === "unfunded")
+              ? `<div class="postcard-gift-strip">
+                  <span class="postcard-gift-qr" aria-hidden="true"></span>
+                  <span>${
+                    giftCard.state === "funded"
+                      ? `<strong>A gift from you:</strong> a free letter of their own. Code <span class="postcard-gift-code">XXXX-XXXX</span>`
+                      : `<strong>Sent with Letter IRL</strong> &middot; letterirl.com`
+                  }</span>
+                </div>`
+              : "";
+
           previewBack.innerHTML = `
             <div class="postcard-back-mockup">
-              <div class="postcard-message-side">
-                <div class="postcard-message-text">${escapedMessage}</div>
+              <div class="postcard-message-side${giftStrip ? " with-gift" : ""}">
+                <div class="postcard-message-text">${escapedMessage}</div>${giftStrip}
               </div>
               <div class="postcard-address-side">
                 <div class="postcard-stamp">STAMP</div>
@@ -1122,10 +1143,14 @@
           recipientRow.style.display = "flex";
         }
 
+        // A gift send is free and needs no balance (docs/gift-letters.md).
+        const isGiftSend = Boolean(state.giftCard);
+
         // Cost - lettersRequired is already in letters (1 letter = 1 postcard)
         const letters = lettersRequired ?? 1;
-        document.getElementById("cost").textContent =
-          `${letters} Letter${letters === 1 ? "" : "s"}`;
+        document.getElementById("cost").textContent = isGiftSend
+          ? "Free (gift letter)"
+          : `${letters} Letter${letters === 1 ? "" : "s"}`;
 
         // Delivery info
         const deliveryText = [];
@@ -1151,10 +1176,15 @@
         // letters. They agree exactly under flat pricing, which is pinned by
         // tests/unit/tools/letterBalanceEquivalence.test.ts - if that test
         // reddens, this line is what it is warning about.
+        //
+        // A gift send spends a gift letter, not the balance, so a refreshed
+        // balance says nothing about it.
         const effectiveCanSendNow =
-          refreshedLetters !== null
-            ? refreshedLetters >= (lettersRequired ?? 1)
-            : canSendNow;
+          isGiftSend
+            ? canSendNow
+            : refreshedLetters !== null
+              ? refreshedLetters >= (lettersRequired ?? 1)
+              : canSendNow;
 
         // Status pill - only while this card still describes a draft.
         if (cardIsShowingDraft()) {
@@ -1174,10 +1204,14 @@
           }
         }
 
-        // Note about saved return address
+        // Note about saved return address and, on a gift send, what the
+        // card on the back is.
         const noteEl = document.getElementById("note");
-        if (savedReturnAddressNote) {
-          noteEl.textContent = savedReturnAddressNote;
+        const noteParts = [];
+        if (isGiftSend && state.giftCard.description) noteParts.push(state.giftCard.description);
+        if (savedReturnAddressNote) noteParts.push(savedReturnAddressNote);
+        if (noteParts.length > 0) {
+          noteEl.textContent = noteParts.join(" ");
           noteEl.style.display = "block";
         } else {
           noteEl.style.display = "none";
@@ -1202,7 +1236,9 @@
         if (!sendInProgress && !checkoutInProgress) {
           sendButton.style.display = effectiveCanSendNow ? "flex" : "none";
           sendButton.disabled = !effectiveCanSendNow;
-          sendButtonText.textContent = anotherCopy ? ANOTHER_COPY_SEND_LABEL : "Send Postcard";
+          sendButtonText.textContent = anotherCopy
+            ? ANOTHER_COPY_SEND_LABEL
+            : isGiftSend ? "Send Gift Postcard" : "Send Postcard";
 
           const payAndSend = sendEligibility?.payAndSend;
           const letterPack = sendEligibility?.letterPack;

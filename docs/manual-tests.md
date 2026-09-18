@@ -971,6 +971,45 @@ Test promotional code redemption.
 
 ---
 
+## Gift Letters
+
+### GIFT-01 — Gift letter end to end, and the test print
+
+**Status:** Not run. Gates switching `LETTER_IRL_GIFT_LETTERS_ENABLED` on in production
+([gift-letters.md](gift-letters.md)).
+
+Development, with `LETTER_IRL_GIFT_LETTERS_ENABLED=true`,
+`LETTER_IRL_GIFT_LANDING_BASE_URL` set to the development website, and the DEV connector refreshed
+after deploy (widget v36).
+
+1. [ ] Buy a Starter pack in test mode. `get_account_balance` reports `giftLettersRemaining: 1`.
+2. [ ] Preview a letter with `sendAsGift: true`. The card shows "Free (gift letter)", a second
+       page, "Send Gift Letter", and no Pay & Send.
+3. [ ] Send it. The admin **Gifts** page lists a new chain code issued to the account.
+4. [ ] **The test print.** Open the letter in the PostGrid test dashboard and download its PDF.
+       Print it at 100% on plain paper and check:
+       - [ ] page 2 holds the card in its upper half, clear of PostGrid's integrity QR and
+             sequence ids at the bottom left;
+       - [ ] the QR scans on an iPhone and on the S25 Ultra, in ordinary indoor light, and opens
+             `<website>/g/<code>`;
+       - [ ] the printed code, typed at `<website>/g`, is accepted;
+       - [ ] the QR rendered at all. If it is missing or blurred, set
+             `LETTER_IRL_GIFT_QR_FORMAT=png` and repeat from step 2;
+       - [ ] PostGrid's cost for the letter shows the extra B&W page and no colour.
+5. [ ] On a second Auth0 account, redeem the code (`redeem_promo_code`, or the website). It
+       reports one gift letter; the admin page shows the code redeemed.
+6. [ ] Redeem it again from a third account: refused as already used. Redeem it from the sender's
+       account: refused as their own code.
+7. [ ] From the second account, preview and send. Its budget is 0, so the preview and the print
+       show the plain "Sent with Letter IRL" card and no new code is issued.
+8. [ ] Repeat 2 to 4 with a postcard: the strip sits at the foot of the message half and a message
+       over 350 characters is refused.
+9. [ ] Create a seed campaign (credits 0, budget 1, cap 2, new accounts only), activate it, grant
+       an account one gift letter bound to it, send, and confirm the card prints the campaign
+       code. Claim it from two accounts; the third claim is refused at the cap.
+
+---
+
 ## Admin Operator Interface
 
 The legacy public page and API stay disabled (`ADMIN_ENABLED=true` fails the public server's boot). The

@@ -29,7 +29,11 @@ export const quoteAndPreviewLetterTextOnlyInputSchema: JsonSchema = {
     },
     recipient: addressSchema,
     bodyText: { type: "string", description: "Letter body. Must not exceed 1600 characters OR 24 lines. Write as continuous paragraphs - do NOT put blank lines between sentences." },
-    signOff: { type: "string", description: "Closing/signature (e.g., 'Sincerely, Name')" }
+    signOff: { type: "string", description: "Closing/signature (e.g., 'Sincerely, Name')" },
+    sendAsGift: {
+      type: "boolean",
+      description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
+    }
   }
 };
 
@@ -66,6 +70,10 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
     imageUrl: {
       type: "string",
       description: "URL of header image (fallback if no file attached)"
+    },
+    sendAsGift: {
+      type: "boolean",
+      description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
     }
   }
 };
@@ -99,6 +107,10 @@ export const quoteAndPreviewLetterWithImageInputSchema: JsonSchema = {
     imageUrl: {
       type: "string",
       description: "URL of image (fallback if no file attached)"
+    },
+    sendAsGift: {
+      type: "boolean",
+      description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
     }
   }
 };
@@ -164,6 +176,15 @@ export const quoteAndPreviewOutputSchema: JsonSchema = {
   type: "object",
   required: ["previewHtml", "lettersRequired", "canSendNow", "sendEligibility", "draftId", "draftExpiresAt", "layoutType"],
   properties: {
+    giftCard: {
+      type: "object",
+      description: "Present on a gift send: the card its extra printed page carries",
+      properties: {
+        state: { type: "string", enum: ["funded", "unfunded"] },
+        description: { type: "string" }
+      }
+    },
+    giftLettersAvailable: { type: "integer", description: "Unsent gift letters on the account, when there are any" },
     previewHtml: { type: "string" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for standard letter)" },
     canSendNow: { type: "boolean" },
@@ -383,6 +404,7 @@ export const redeemPromoCodeOutputSchema: JsonSchema = {
   properties: {
     redeemed: { type: "boolean" },
     letters: { type: "integer", description: "Letters added to the balance" },
+    giftLetters: { type: "integer", description: "Gift letters added: free sends that print a card for the recipient" },
     expiresAt: { type: "string", description: "When the added letters expire, if they do" },
     message: { type: "string" }
   }
@@ -495,7 +517,8 @@ export const getAccountBalanceOutputSchema: JsonSchema = {
       }
     },
     imageGenerationsRemaining: { type: "integer", description: "Number of explicit image-entitlement units remaining" },
-    imageGenerationsAllowance: { type: "integer", description: "Total image-entitlement units granted by qualifying purchases" }
+    imageGenerationsAllowance: { type: "integer", description: "Total image-entitlement units granted by qualifying purchases" },
+    giftLettersRemaining: { type: "integer", description: "Unsent gift letters: free sends that print a card for the recipient. Not included in lettersRemaining." }
   }
 };
 
@@ -617,6 +640,10 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
     imageUrl: {
       type: "string",
       description: "REQUIRED when using a hosted image: set this to the imageUrl returned by confirm_uploaded_image (the upload widget flow) or another publicly accessible image URL. This is the URL of the image for the postcard front."
+    },
+    sendAsGift: {
+      type: "boolean",
+      description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
     }
   }
 };
@@ -625,6 +652,15 @@ export const quoteAndPreviewPostcardOutputSchema: JsonSchema = {
   type: "object",
   required: ["previewFrontHtml", "previewBackHtml", "lettersRequired", "canSendNow", "sendEligibility", "draftId", "draftExpiresAt"],
   properties: {
+    giftCard: {
+      type: "object",
+      description: "Present on a gift send: the card its extra printed page carries",
+      properties: {
+        state: { type: "string", enum: ["funded", "unfunded"] },
+        description: { type: "string" }
+      }
+    },
+    giftLettersAvailable: { type: "integer", description: "Unsent gift letters on the account, when there are any" },
     previewFrontHtml: { type: "string", description: "HTML preview of postcard front (image)" },
     previewBackHtml: { type: "string", description: "HTML preview of postcard back (message)" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for 6x9 postcard)" },

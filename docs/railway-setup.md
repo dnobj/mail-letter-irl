@@ -87,6 +87,10 @@ LETTER_IRL_BETA_GATE_ENABLED=<true to restrict access to the invited cohort>
 LETTER_IRL_BETA_DAILY_MAIL_CAP=<global letters per day>
 LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP=<letters per account per day>
 LETTER_IRL_BETA_ACCOUNT_DAILY_SPEND_CAP_CENTS=<spend per account per day>
+# Gift letters (docs/gift-letters.md): off unless explicitly true. API service only.
+LETTER_IRL_GIFT_LETTERS_ENABLED=<true to turn the programme on; unset keeps it off>
+LETTER_IRL_GIFT_DAILY_SEND_CAP=<gift sends per UTC day, all accounts; default 20; 0 stops them>
+LETTER_IRL_GIFT_LANDING_BASE_URL=<the website the printed QR opens; default https://letterirl.com>
 STRIPE_PRICE_REGULAR=<price_ id>
 STRIPE_PRICE_POWER=<price_ id>
 STRIPE_CURRENCY=usd

@@ -12,6 +12,7 @@
  */
 
 import { Address, LetterLayoutType } from "../contracts/types.js";
+import { giftLetterPageSvg, type CardFragment, type GiftCardContent } from "./giftCardRenderer.js";
 
 // ============================================================================
 // Character Limits by Layout Type
@@ -59,6 +60,17 @@ export interface LayoutPreviewInput extends PreviewInput {
   layoutType: LetterLayoutType;
   headerImageData?: string;   // Base64 data URI
   inlineImageData?: string;   // Base64 data URI
+  /** A gift send's card, drawn by the same renderer print uses. */
+  giftCard?: GiftCardContent;
+}
+
+/**
+ * The gift card page, from giftCardRenderer - the renderer PostGridProvider
+ * prints with - so the preview cannot drift from the print. Empty for every
+ * letter that is not a gift send.
+ */
+function giftPageFor(input: LayoutPreviewInput): CardFragment {
+  return input.giftCard ? giftLetterPageSvg(input.giftCard, input.sender.name) : { css: '', html: '' };
 }
 
 export interface LayoutDetectionInput {
@@ -254,6 +266,7 @@ export function renderLayoutPreviewHtml(input: LayoutPreviewInput): string {
  * Render text-only layout preview
  */
 function renderTextOnlyPreview(input: LayoutPreviewInput): string {
+  const giftPage = giftPageFor(input);
   // Trim trailing newlines from body text to prevent gap before sign-off
   const trimmedBodyText = input.bodyText.replace(/\n+$/, '');
 
@@ -279,7 +292,7 @@ function renderTextOnlyPreview(input: LayoutPreviewInput): string {
     }
     .sign-off {
       white-space: pre-wrap;
-    }
+    }${giftPage.css}
   </style>
 </head>
 <body>
@@ -289,7 +302,7 @@ function renderTextOnlyPreview(input: LayoutPreviewInput): string {
     ${escapeHtml(input.sender.city)}, ${escapeHtml(input.sender.state)} ${escapeHtml(input.sender.postalCode)}
   </div>
   <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
-  <div class="sign-off">${escapeHtml(input.signOff)}</div>
+  <div class="sign-off">${escapeHtml(input.signOff)}</div>${giftPage.html}
 </body>
 </html>`;
 }
@@ -298,6 +311,7 @@ function renderTextOnlyPreview(input: LayoutPreviewInput): string {
  * Render header image layout preview
  */
 function renderHeaderImagePreview(input: LayoutPreviewInput): string {
+  const giftPage = giftPageFor(input);
   const headerImageHtml = input.headerImageData
     ? `<div class="header-image"><img src="${input.headerImageData}" alt="Header" style="width: 100%; max-height: 2in; object-fit: contain;"></div>`
     : '';
@@ -335,7 +349,7 @@ function renderHeaderImagePreview(input: LayoutPreviewInput): string {
     }
     .sign-off {
       white-space: pre-wrap;
-    }
+    }${giftPage.css}
   </style>
 </head>
 <body>
@@ -346,7 +360,7 @@ function renderHeaderImagePreview(input: LayoutPreviewInput): string {
     ${escapeHtml(input.sender.city)}, ${escapeHtml(input.sender.state)} ${escapeHtml(input.sender.postalCode)}
   </div>
   <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
-  <div class="sign-off">${escapeHtml(input.signOff)}</div>
+  <div class="sign-off">${escapeHtml(input.signOff)}</div>${giftPage.html}
 </body>
 </html>`;
 }
@@ -355,6 +369,7 @@ function renderHeaderImagePreview(input: LayoutPreviewInput): string {
  * Render inline image layout preview
  */
 function renderInlineImagePreview(input: LayoutPreviewInput): string {
+  const giftPage = giftPageFor(input);
   const inlineImageHtml = input.inlineImageData
     ? `<div class="inline-image"><img src="${input.inlineImageData}" alt="Photo" style="max-width: 100%; max-height: 3in; object-fit: contain;"></div>`
     : '';
@@ -393,7 +408,7 @@ function renderInlineImagePreview(input: LayoutPreviewInput): string {
     .inline-image img {
       max-width: 100%;
       max-height: 3in;
-    }
+    }${giftPage.css}
   </style>
 </head>
 <body>
@@ -404,7 +419,7 @@ function renderInlineImagePreview(input: LayoutPreviewInput): string {
   </div>
   <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
   <div class="sign-off">${escapeHtml(input.signOff)}</div>
-  ${inlineImageHtml}
+  ${inlineImageHtml}${giftPage.html}
 </body>
 </html>`;
 }

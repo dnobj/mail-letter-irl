@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * Today's charge total, for the daily purchase cap (#179). Held on a hoisted
@@ -172,6 +172,7 @@ import {
   processStripeWebhookEvent,
   repairFulfilledPackGrant,
   requestRefund,
+  revokePackLots,
   runCommerceMaintenance
 } from '../../../src/services/commerceService.js';
 import { clearDiagnosticChangeSlot } from '../../../src/utils/diagnosticLog.js';
@@ -477,6 +478,86 @@ describe('commerceService', () => {
       expect.anything(),
       expect.objectContaining({ sourceType: 'purchase', sourceOrderId: 'order-1' })
     );
+  });
+
+  describe('gift letters with a pack (docs/gift-letters.md)', () => {
+    const pendingPackOrder = {
+      ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4',
+      credits: 4, amount_cents: 500, draft_id: undefined, status: 'checkout_pending'
+    };
+
+    function packWebhook() {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+        if (sql.includes('SELECT * FROM orders')) return { rows: [pendingPackOrder] };
+        return { rows: [] };
+      });
+      return processStripeWebhookEvent(checkoutEvent({ amount_total: 500 }) as any);
+    }
+
+    afterEach(() => {
+      delete process.env.LETTER_IRL_GIFT_LETTERS_ENABLED;
+    });
+
+    it('grants the pack its gift letter, keyed by the order, while the programme is on', async () => {
+      process.env.LETTER_IRL_GIFT_LETTERS_ENABLED = 'true';
+      await expect(packWebhook()).resolves.toMatchObject({ status: 'fulfilled' });
+      const grants = mocks.query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO gift_letters'));
+      expect(grants).toHaveLength(1);
+      // user, budget, source, reference, index, order
+      expect(grants[0][1].slice(0, 6)).toEqual(['user-1', 1, 'pack_purchase', 'order-1', 0, 'order-1']);
+      expect(String(grants[0][0])).toContain('ON CONFLICT (source, source_reference_id, grant_index) DO NOTHING');
+    });
+
+    it('grants none while the programme is off', async () => {
+      await expect(packWebhook()).resolves.toMatchObject({ status: 'fulfilled' });
+      expect(mocks.query).not.toHaveBeenCalledWith(expect.stringContaining('INSERT INTO gift_letters'), expect.anything());
+    });
+
+    it("revokes a refunded pack's unsent gift letters and leaves its printed codes alone", async () => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-gift-refund' }] };
+        if (sql.includes('SELECT * FROM orders')) {
+          return { rows: [{ ...baseOrder, order_type: 'letter_pack', credits: 4, amount_cents: 1999, status: 'fulfilled' }] };
+        }
+        if (sql.includes('UPDATE users')) return { rows: [{ credits: 0 }] };
+        return { rows: [] };
+      });
+      await processStripeWebhookEvent({
+        id: 'evt-gift-refund',
+        type: 'charge.refunded',
+        data: { object: { id: 'ch-1', payment_intent: 'pi-1', amount_refunded: 1999 } }
+      } as any);
+      expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining("UPDATE gift_letters SET status = 'revoked'"), ['order-1']);
+      expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining('source_reversed_at = COALESCE'), ['order-1']);
+      expect(mocks.query).not.toHaveBeenCalledWith(expect.stringContaining("void_reason = 'purchase_reversed'"), expect.anything());
+    });
+
+    it('revokes the gift letters when a proportional refund takes every letter left, and only then', async () => {
+      const order = { ...baseOrder, order_type: 'letter_pack', credits: 4, amount_cents: 500, status: 'fulfilled' } as any;
+      async function refund(liveCredits: number, credits: number) {
+        const calls: string[] = [];
+        const client = {
+          query: vi.fn(async (sql: string) => {
+            calls.push(sql);
+            if (sql.includes('SELECT ledger_id, remaining_amount FROM credit_ledger')) {
+              return { rows: [{ ledger_id: 'lot-1', remaining_amount: liveCredits }] };
+            }
+            if (sql.includes('INSERT INTO credit_ledger')) return { rows: [{ ledger_id: 'audit-1' }] };
+            if (sql.includes('FROM users') || sql.includes('UPDATE users')) return { rows: [{ credits: liveCredits }] };
+            return { rows: [] };
+          })
+        };
+        await revokePackLots(client as never, order, { credits, cause: 'partial_refund' });
+        return calls;
+      }
+      // Two of four credits back: letters remain, so does the gift.
+      expect((await refund(4, 2)).some(sql => sql.includes('UPDATE gift_letters'))).toBe(false);
+      // The last two back: the purchase is reversed as far as it can be.
+      const exhausting = await refund(2, 2);
+      expect(exhausting.some(sql => sql.includes("UPDATE gift_letters SET status = 'revoked'"))).toBe(true);
+      expect(exhausting.some(sql => sql.includes("void_reason = 'purchase_reversed'"))).toBe(false);
+    });
   });
 
   // Deterministic proof of the canonical order. The PostgreSQL concurrency

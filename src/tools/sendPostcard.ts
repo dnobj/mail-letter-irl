@@ -140,7 +140,16 @@ async function handler(
     currentStatus,
     statusTimeline: [
       { timestampISO: now, statusText: 'Order placed' },
-      { timestampISO: now, statusText: 'Letter deducted from balance' },
+      {
+        timestampISO: now,
+        // A gift letter is free and prints a card (docs/gift-letters.md).
+        statusText:
+          created.fundingType === 'gift_letter'
+            ? (created.giftCard?.state === 'funded'
+                ? 'Gift letter used; a card with a gift code for the recipient is included'
+                : 'Gift letter used; a Letter IRL card is included')
+            : 'Letter deducted from balance'
+      },
       { timestampISO: now, statusText: submissionText },
     ],
     recipientSummary: { name: recipient.name, city: recipient.city, state: recipient.state },

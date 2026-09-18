@@ -19,6 +19,8 @@ import {
 } from "../services/previewService.js";
 import { createDraft } from "../services/draftService.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
+import { giftCardSummary, resolveGiftSendChoice } from "./giftSendChoice.js";
+import type { GiftCardState } from "../services/giftCardRenderer.js";
 import {
   DELIVERY_CLASS,
   DELIVERY_DISCLAIMER,
@@ -93,6 +95,10 @@ export interface LetterQuoteOutput {
     suggestions?: string;
   };
   addressWarnings?: string[];
+  /** Present on a gift send (docs/gift-letters.md): the card its extra page prints. */
+  giftCard?: { state: GiftCardState; description: string };
+  /** Unsent gift letters on the account, when there are any. */
+  giftLettersAvailable?: number;
 }
 
 // ============================================================================
@@ -485,7 +491,24 @@ export interface CreateLetterDraftParams {
   addressWarnings?: string[];
   usedSavedReturnAddress: boolean;
   savedReturnAddressNote?: string;
+  /** The caller's sendAsGift; undefined lets the balance decide. */
+  sendAsGift?: boolean;
   context: ToolContext;
+}
+
+/**
+ * A gift draft is sent free, so Pay & Send is never offered for it: the
+ * checkout refuses a gift draft, and a card should not show a button the
+ * server will refuse.
+ */
+export function giftSendEligibility(eligibility: SendEligibility): SendEligibility {
+  return {
+    ...eligibility,
+    payAndSend: {
+      available: false,
+      unavailableReason: "This uses a gift letter, so there is nothing to pay."
+    }
+  };
 }
 
 export async function createLetterDraftAndBuildOutput(
@@ -509,13 +532,19 @@ export async function createLetterDraftAndBuildOutput(
     addressWarnings,
     usedSavedReturnAddress,
     savedReturnAddressNote,
+    sendAsGift,
     context
   } = params;
 
   // Calculate credits
   const requiredCredits = estimateRequiredCredits(bodyText, signOff);
   const available = context.user.creditsRemaining;
-  const canSendNow = available >= requiredCredits;
+  const gift = await resolveGiftSendChoice({
+    userId: context.user.userId,
+    requested: sendAsGift,
+    balanceCanPay: available >= requiredCredits
+  });
+  const canSendNow = gift.isGift || available >= requiredCredits;
   const lettersRequired = Math.max(1, Math.ceil(requiredCredits / 2));
 
   context.logger.info(
@@ -525,7 +554,8 @@ export async function createLetterDraftAndBuildOutput(
       availableCredits: available,
       requiredCredits,
       lettersRequired,
-      canSendNow
+      canSendNow,
+      giftSend: gift.isGift
     },
     "Computed preview requirements"
   );
@@ -541,6 +571,7 @@ export async function createLetterDraftAndBuildOutput(
     layoutType,
     headerImageData: headerImagePreview || headerImageData,
     inlineImageData: inlineImagePreview || inlineImageData,
+    giftCard: gift.card,
   });
 
   // Create draft
@@ -559,6 +590,7 @@ export async function createLetterDraftAndBuildOutput(
     headerImageUrl,
     inlineImageData,
     inlineImageUrl,
+    isGiftSend: gift.isGift,
   });
 
   context.logger.info(
@@ -579,7 +611,9 @@ export async function createLetterDraftAndBuildOutput(
     lettersRequired,
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
-    sendEligibility: getSendEligibility(available, requiredCredits, "letter"),
+    sendEligibility: gift.isGift
+      ? giftSendEligibility(getSendEligibility(available, requiredCredits, "letter"))
+      : getSendEligibility(available, requiredCredits, "letter"),
     deliveryClass: DELIVERY_CLASS,
     deliveryEstimate: DELIVERY_ESTIMATE,
     deliveryDisclaimer: DELIVERY_DISCLAIMER,
@@ -593,6 +627,8 @@ export async function createLetterDraftAndBuildOutput(
     usedSavedReturnAddress: usedSavedReturnAddress || undefined,
     savedReturnAddressNote,
     addressWarnings,
+    giftCard: gift.card ? giftCardSummary(gift.card.state) : undefined,
+    giftLettersAvailable: gift.giftLettersAvailable > 0 ? gift.giftLettersAvailable : undefined,
   };
 
   // Add address validation results

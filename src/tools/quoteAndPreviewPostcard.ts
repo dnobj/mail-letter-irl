@@ -10,7 +10,9 @@
  */
 
 import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
-import { validateAddressesWithProvider, outputValidationStatus } from "./letterHelpers.js";
+import { giftSendEligibility, validateAddressesWithProvider, outputValidationStatus } from "./letterHelpers.js";
+import { giftCardSummary, resolveGiftSendChoice } from "./giftSendChoice.js";
+import { giftPostcardBlockSvg, type GiftCardContent, type GiftCardState } from "../services/giftCardRenderer.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import {
   quoteAndPreviewPostcardInputSchema,
@@ -45,6 +47,8 @@ interface QuoteAndPreviewPostcardInput {
   image?: ImageFileParam | string;
   // Alternative: direct image URL (for when fileParams isn't available)
   imageUrl?: string;
+  /** Send as the account's gift letter (docs/gift-letters.md). */
+  sendAsGift?: boolean;
 }
 
 export interface QuoteAndPreviewPostcardOutput {
@@ -96,6 +100,10 @@ export interface QuoteAndPreviewPostcardOutput {
     errors?: string[];
     suggestions?: string;
   };
+  /** Present on a gift send: the card printed across the foot of the message half. */
+  giftCard?: { state: GiftCardState; description: string };
+  /** Unsent gift letters on the account, when there are any. */
+  giftLettersAvailable?: number;
 }
 
 // ============================================================================
@@ -104,6 +112,12 @@ export interface QuoteAndPreviewPostcardOutput {
 
 const OUTPUT_TEMPLATE = widgetTemplateUri("PostcardPreviewCard");
 const MAX_MESSAGE_LENGTH = 500;
+/**
+ * A gift postcard gives the foot of the message half, about 1.3in of 5.2in,
+ * to the card, so its message is shorter. Checked only once the preview knows
+ * it is a gift send.
+ */
+const MAX_GIFT_MESSAGE_LENGTH = 350;
 const POSTCARD_CREDITS_COST = 2; // 2 internal credits = 1 letter/postcard
 
 // ============================================================================
@@ -216,20 +230,33 @@ async function handler(
     }
   }
 
+  // Whether this is a gift send decides the message limit, so it is resolved
+  // before the limit is checked (docs/gift-letters.md).
+  const requiredCredits = POSTCARD_CREDITS_COST;
+  const available = context.user.creditsRemaining;
+  const gift = await resolveGiftSendChoice({
+    userId: context.user.userId,
+    requested: input.sendAsGift,
+    balanceCanPay: available >= requiredCredits
+  });
+  const messageLimit = gift.isGift ? MAX_GIFT_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
+
   // Validate message length
-  if (input.message.length > MAX_MESSAGE_LENGTH) {
+  if (input.message.length > messageLimit) {
     context.logger.warn(
       {
         correlationId: context.correlationId,
         event: "quote.postcard.message_too_long",
         messageLength: input.message.length,
-        maxLength: MAX_MESSAGE_LENGTH
+        maxLength: messageLimit
       },
       "Postcard message too long"
     );
     throw new Error(
-      `Postcard message is too long (${input.message.length}/${MAX_MESSAGE_LENGTH} characters). ` +
-      `Please shorten your message to fit on the postcard back.`
+      `Postcard message is too long (${input.message.length}/${messageLimit} characters). ` +
+      (gift.isGift
+        ? `A gift postcard leaves room for the gift card, so please shorten your message.`
+        : `Please shorten your message to fit on the postcard back.`)
     );
   }
 
@@ -380,10 +407,10 @@ async function handler(
     await validateAddressesWithProvider(sender, input.recipient, context, "quote.postcard");
 
   // Check credits
-  const requiredCredits = POSTCARD_CREDITS_COST;
-  const available = context.user.creditsRemaining;
-  const canSendNow = available >= requiredCredits;
-  const sendEligibility = getSendEligibility(available, requiredCredits, "postcard");
+  const canSendNow = gift.isGift || available >= requiredCredits;
+  const sendEligibility = gift.isGift
+    ? giftSendEligibility(getSendEligibility(available, requiredCredits, "postcard"))
+    : getSendEligibility(available, requiredCredits, "postcard");
   const lettersRequired = 1; // User-facing: 1 letter = 1 postcard
 
   context.logger.info(
@@ -393,7 +420,8 @@ async function handler(
       availableCredits: available,
       requiredCredits,
       lettersRequired,
-      canSendNow
+      canSendNow,
+      giftSend: gift.isGift
     },
     "Computed preview requirements"
   );
@@ -401,7 +429,7 @@ async function handler(
   // Generate preview HTML using smaller preview image (~10-20KB vs ~200-400KB)
   // Full-quality image is stored in draft for PostGrid printing
   const previewFrontHtml = generatePreviewFrontHtml(processedImage.previewDataUri, size);
-  const previewBackHtml = generatePreviewBackHtml(input.message, sender);
+  const previewBackHtml = generatePreviewBackHtml(input.message, sender, gift.card);
 
   // Create draft for idempotent send
   const draftResult = await createPostcardDraft({
@@ -416,6 +444,7 @@ async function handler(
     previewHtml: previewFrontHtml,
     senderValidation: senderValidation ? { status: senderValidation.status } : undefined,
     recipientValidation: recipientValidation ? { status: recipientValidation.status } : undefined,
+    isGiftSend: gift.isGift,
   });
 
   context.logger.info(
@@ -456,6 +485,8 @@ async function handler(
     usedSavedReturnAddress: usedSavedReturnAddress || undefined,
     savedReturnAddressNote: savedReturnAddressNote,
     addressWarnings,
+    giftCard: gift.card ? giftCardSummary(gift.card.state, 'postcard') : undefined,
+    giftLettersAvailable: gift.giftLettersAvailable > 0 ? gift.giftLettersAvailable : undefined,
   };
 
   // Add address validation results if available
@@ -605,7 +636,9 @@ function generatePreviewFrontHtml(imageBase64: string, size: PostcardSize): stri
 /**
  * Generate HTML preview for postcard back (message + return address)
  */
-function generatePreviewBackHtml(message: string, sender: Address): string {
+export function generatePreviewBackHtml(message: string, sender: Address, giftCard?: GiftCardContent): string {
+  // The gift strip comes from the renderer the print uses (giftCardRenderer).
+  const giftBlock = giftCard ? giftPostcardBlockSvg(giftCard, sender.name) : { css: '', html: '' };
   const escapedMessage = escapeHtml(message).replace(/\n/g, '<br>');
 
   return `<!DOCTYPE html>
@@ -645,7 +678,7 @@ function generatePreviewBackHtml(message: string, sender: Address): string {
       bottom: 0;
       width: 1px;
       background: #ddd;
-    }
+    }${giftBlock.css}
   </style>
 </head>
 <body>
@@ -656,7 +689,7 @@ function generatePreviewBackHtml(message: string, sender: Address): string {
       ${sender.addressLine2 ? escapeHtml(sender.addressLine2) + '<br>' : ''}
       ${escapeHtml(sender.city)}, ${escapeHtml(sender.state)} ${escapeHtml(sender.postalCode)}
     </div>
-    <div class="message">${escapedMessage}</div>
+    <div class="message">${escapedMessage}</div>${giftBlock.html}
   </div>
 </body>
 </html>`;

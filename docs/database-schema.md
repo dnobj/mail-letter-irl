@@ -24,6 +24,7 @@ migration 021 as its immediate predecessor.
 | System | `migrations`, `personal_access_tokens` |
 | Operations | `commerce_operational_alerts`, `commerce_operator_audit_events`, `maintenance_tasks`, `provider_routing` |
 | Images | `image_entitlements`, `image_generation_reservations`, `recent_uploads` |
+| Gift letters | `gift_letters`, `gift_codes` |
 | Retention | `redacted_content_quarantine` |
 | Admin foundation | `admin_environment_marker`, `admin_audit_events`, `admin_command_runs`, `admin_operations` |
 
@@ -156,6 +157,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | front_image_data | TEXT | YES | - | Base64 JPEG for postcard front (NULL for letters) |
 | front_image_url | TEXT | YES | - | Original image URL for debugging |
 | postcard_size | VARCHAR(10) | YES | - | Postcard size: '6x9' (NULL for letters) |
+| is_gift_send | BOOLEAN | NO | false | Previewed as a gift send: funded by a gift letter and printed with its card (033) |
 | created_at | TIMESTAMPTZ | NO | NOW() | Draft creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
 
@@ -331,6 +333,7 @@ Promotional credit campaigns with redeemable codes.
 | ends_at | TIMESTAMPTZ | YES | - | Campaign end (NULL = no end) |
 | requires_new_user | BOOLEAN | NO | false | New users only |
 | status | VARCHAR(50) | NO | 'draft' | draft, active, paused, ended, expired |
+| gift_generations_remaining | INTEGER | YES | - | Set on a seed campaign: redeeming grants a gift letter with this budget (033) |
 | created_by | VARCHAR(255) | YES | - | Admin who created |
 | created_at | TIMESTAMPTZ | NO | NOW() | Creation timestamp |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
@@ -351,11 +354,15 @@ User promo code redemption tracking.
 | redemption_id | UUID | NO | gen_random_uuid() | Primary key |
 | campaign_id | UUID | NO | - | FK to promo_campaigns |
 | user_id | VARCHAR(255) | NO | - | FK to users |
-| ledger_id | UUID | NO | - | FK to credit_ledger |
+| ledger_id | UUID | YES | - | FK to credit_ledger; NULL when a seed campaign granted only a gift letter (033) |
+| gift_id | UUID | YES | - | FK to gift_letters, for a seed campaign (033) |
+| email_normalized | TEXT | YES | - | The redeemer's normalised email, written for seed campaigns only (033) |
 | redeemed_at | TIMESTAMPTZ | NO | NOW() | Redemption timestamp |
 
 **Constraints:**
 - UNIQUE(campaign_id, user_id) - One redemption per user per campaign
+- `promo_redemption_grants_something`: ledger_id or gift_id is set
+- `idx_promo_redemptions_campaign_email` (unique, partial): one claim of a seed campaign per normalised email
 
 ---
 
@@ -501,6 +508,24 @@ operator command, with its reference and order), the quantity, how many are cons
 (`active`, `depleted`, `expired`, `revoked`) and an optional expiry. One entitlement per source
 reference, so a replayed grant is a no-op.
 
+### gift_letters
+
+The gift letter entitlement ([gift-letters.md](gift-letters.md)): one row per gift letter, with its
+budget (`generations_remaining`), its source (`pack_purchase`, `seed_redemption`,
+`chain_redemption`, `operator`, `send_failed`) and reference, the order or campaign that granted it,
+the chain code that granted it (`parent_code`), an optional seed campaign whose code it prints
+(`card_campaign_id`), a status (`available`, `consumed`, `expired`, `revoked`), an expiry, the letter
+that used it, and `source_reversed_at` when the purchase behind a used gift is refunded or disputed.
+Unique per `(source, source_reference_id, grant_index)`, so a replayed grant is a no-op.
+
+### gift_codes
+
+Single-use chain codes, one per gift letter sent with budget left: the canonical 8-character
+Crockford code (primary key, format CHECK), the gift letter and the letter it was printed on (each
+UNIQUE: the branching factor of 1 that bounds the cost), the sender, the budget it grants, a status
+(`issued`, `redeemed`, `void`), an expiry, the redeemer, and a void class (`send_failed`,
+`purchase_reversed`, `operator`).
+
 ### image_generation_reservations
 
 One row per generation attempt against an entitlement, `reserved` while the provider call is in
@@ -635,6 +660,7 @@ Production provisioning and the first production connection remain separate owne
 | 30 | 030_ledger_description_minimisation.sql | Recipient names and operator reasons rewritten out of the two ledger description columns (#162) |
 | 31 | 031_provider_error_minimisation.sql | Provider message text rewritten out of the job, order and order-event error columns (#162) |
 | 32 | 032_error_text_minimisation.sql | Raw error text and operator reasons rewritten out of the order, event, outbox, pack-refund and maintenance columns (#394) |
+| 33 | 033_gift_letters.sql | Gift letters: gift_letters, gift_codes, the gift_letter funding type, gift drafts, seed campaigns and gift-only redemptions |
 
 ---
 
@@ -653,6 +679,21 @@ Production provisioning and the first production connection remain separate owne
     "state": "ST",
     "postalCode": "12345",
     "country": "US"
+  }
+}
+```
+
+A gift letter also carries the card the send decided, so every process that prints it prints the
+same code and link:
+
+```json
+{
+  "giftCard": {
+    "state": "funded",
+    "code": "K7M2QX9A",
+    "url": "https://letterirl.com/g/K7M2QX9A",
+    "displayUrl": "letterirl.com/g",
+    "redeemBy": "2026-12-16"
   }
 }
 ```

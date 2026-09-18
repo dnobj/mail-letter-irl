@@ -45,7 +45,8 @@ export const toolInputSchemas = {
     sender: addressSchema.optional(),  // Optional - will use saved return address if not provided
     recipient: addressSchema,
     bodyText: z.string(),
-    signOff: z.string()
+    signOff: z.string(),
+    sendAsGift: z.boolean().optional()
   }),
   quote_and_preview_letter_with_header_image: z.object({
     sender: addressSchema.optional(),
@@ -55,7 +56,8 @@ export const toolInputSchemas = {
     // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
     image: imageFileParamSchema.optional(),
     // Alternative: direct image URL
-    imageUrl: z.string().optional()
+    imageUrl: z.string().optional(),
+    sendAsGift: z.boolean().optional()
   }),
   quote_and_preview_letter_with_image: z.object({
     sender: addressSchema.optional(),
@@ -65,7 +67,8 @@ export const toolInputSchemas = {
     // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
     image: imageFileParamSchema.optional(),
     // Alternative: direct image URL
-    imageUrl: z.string().optional()
+    imageUrl: z.string().optional(),
+    sendAsGift: z.boolean().optional()
   }),
   send_letter: z.object({
     draftId: z.string(),
@@ -116,7 +119,8 @@ export const toolInputSchemas = {
     // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
     image: imageFileParamSchema.optional(),
     // Alternative: direct image URL
-    imageUrl: z.string().optional()
+    imageUrl: z.string().optional(),
+    sendAsGift: z.boolean().optional()
   }),
   send_postcard: z.object({
     draftId: z.string(),

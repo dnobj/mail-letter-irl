@@ -23,6 +23,11 @@ Letter IRL offers letter packages for purchase. Users buy letter packs and use t
 
 **Best Value:** Power Pack - 10% discount per letter compared to Regular
 
+**Gift letter:** while `LETTER_IRL_GIFT_LETTERS_ENABLED` is on, every pack also grants one gift
+letter: a free send that prints a card for the recipient with a code for a letter of their own
+([Gift Letters](gift-letters.md)). The pack price does not change. At most one further free letter
+descends from each pack's gift, so the most a pack's gift can cost is about $2.66 in postage.
+
 ---
 
 ## Letter Specifications

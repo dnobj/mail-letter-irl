@@ -1,3 +1,5 @@
+import type { GiftCardContent } from '../giftCardRenderer.js';
+
 /**
  * Letter Fulfillment Service Provider Types
  *
@@ -68,6 +70,9 @@ export interface LetterParams {
 
   /** Inline image as base64 data URI (for inline_image layout) */
   inlineImageData?: string;
+
+  /** A gift letter's card, printed as an extra page (docs/gift-letters.md). */
+  giftCard?: GiftCardContent;
 }
 
 /**
@@ -354,6 +359,9 @@ export interface PostcardParams {
 
   /** Optional metadata to pass to provider */
   metadata?: Record<string, any>;
+
+  /** A gift letter's card, printed across the foot of the message half. */
+  giftCard?: GiftCardContent;
 }
 
 /**
