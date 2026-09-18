@@ -5,6 +5,7 @@ import { PostGridProvider } from '../../../src/services/providers/PostGridProvid
 import type { GiftCardContent } from '../../../src/services/giftCardRenderer.js';
 import { readFileSync } from 'node:fs';
 import { renderLayoutPreviewHtml } from '../../../src/services/previewService.js';
+import { generatePreviewBackHtml } from '../../../src/tools/quoteAndPreviewPostcard.js';
 
 const BASELINE: Record<string, string> = JSON.parse(
   readFileSync(new URL('../../fixtures/nonGiftPrintHtml.385578d.json', import.meta.url), 'utf8')
@@ -125,6 +126,19 @@ describe('PostGrid gift card', () => {
     await provider().sendLetter({ ...letter, layoutType: 'text_only', giftCard: card });
     expect(bodies[0].html).toContain('src="data:image/png;base64,');
     expect(bodies[0].html).not.toContain('<svg');
+  });
+
+  it('previews every other postcard back byte for byte as before', () => {
+    const html = generatePreviewBackHtml('Wish you <were> here' + String.fromCharCode(10) + 'See you soon', {
+      name: 'Sarah & Co',
+      addressLine1: '1 Main St',
+      addressLine2: 'Apt 2',
+      city: 'Austin',
+      state: 'TX',
+      postalCode: '78701',
+      country: 'US'
+    });
+    expect(html).toBe(BASELINE.preview_postcard_back);
   });
 
   it('puts the card at the foot of the postcard message half, and nowhere else changes', async () => {

@@ -312,6 +312,13 @@ describe('returnGiftLetterForFailedSendWithClient', () => {
     expect(ran('INSERT INTO gift_letters')[0].params[7]).toBe(far);
   });
 
+  it('keeps a gift that never expired never expiring', async () => {
+    on('SELECT * FROM gift_letters', [gift({ status: 'consumed', expires_at: null })]);
+    on('SELECT * FROM gift_codes WHERE letter_id', [{ code: 'K7M2QX9A', status: 'issued' }]);
+    await returnGiftLetterForFailedSendWithClient(client, { letterId: 'letter-1', userId: 'user-1', failureCode: 'X' });
+    expect(ran('INSERT INTO gift_letters')[0].params[7]).toBeNull();
+  });
+
   it('returns nothing on a replay', async () => {
     on("source = 'send_failed' AND source_reference_id", [{ gift_id: 'returned' }]);
     expect(await returnGiftLetterForFailedSendWithClient(client, { letterId: 'letter-1', userId: 'user-1', failureCode: 'X' })).toBe(0);

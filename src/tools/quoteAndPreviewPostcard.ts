@@ -636,7 +636,7 @@ function generatePreviewFrontHtml(imageBase64: string, size: PostcardSize): stri
 /**
  * Generate HTML preview for postcard back (message + return address)
  */
-function generatePreviewBackHtml(message: string, sender: Address, giftCard?: GiftCardContent): string {
+export function generatePreviewBackHtml(message: string, sender: Address, giftCard?: GiftCardContent): string {
   // The gift strip comes from the renderer the print uses (giftCardRenderer).
   const giftBlock = giftCard ? giftPostcardBlockSvg(giftCard, sender.name) : { css: '', html: '' };
   const escapedMessage = escapeHtml(message).replace(/\n/g, '<br>');

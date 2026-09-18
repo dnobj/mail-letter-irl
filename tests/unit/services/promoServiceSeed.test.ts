@@ -36,7 +36,7 @@ vi.mock('../../../src/services/userService.js', () => ({ findUser: vi.fn(async (
 const grantGift = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/services/giftLetterService.js', () => ({ grantGiftLettersWithClient: grantGift }));
 
-import { redeemPromoCode } from '../../../src/services/promoService.js';
+import { deleteCampaignWithClient, redeemPromoCode } from '../../../src/services/promoService.js';
 
 function campaign(overrides: Record<string, any> = {}) {
   return {
@@ -140,5 +140,32 @@ describe('redeemPromoCode: seed campaigns', () => {
     expect(grantGift).not.toHaveBeenCalled();
     expect(ran('email_normalized = $2')).toHaveLength(0);
     expect(ran('INSERT INTO promo_redemptions')[0].params).toEqual(['campaign-1', 'r', 'ledger-1', null, null]);
+  });
+});
+
+describe('deleteCampaignWithClient', () => {
+  function campaignClient(row: Record<string, string | number>) {
+    const deletes: string[] = [];
+    const client = {
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes('FOR UPDATE')) return { rows: [row] };
+        if (sql.startsWith('DELETE')) deletes.push(sql);
+        return { rows: [] };
+      })
+    };
+    return { client, deletes };
+  }
+
+  it('deletes an unused campaign', async () => {
+    const { client, deletes } = campaignClient({ current_redemptions: 0, redeemed: '0', gifts: '0' });
+    await deleteCampaignWithClient(client as never, 'campaign-1');
+    expect(deletes).toHaveLength(1);
+  });
+
+  it('refuses a campaign any gift letter names: its code may be on paper already', async () => {
+    const { client, deletes } = campaignClient({ current_redemptions: 0, redeemed: '0', gifts: '1' });
+    await expect(deleteCampaignWithClient(client as never, 'campaign-1')).rejects.toThrow('invalid_state');
+    expect(deletes).toHaveLength(0);
+    expect(String(client.query.mock.calls[0][0])).toContain('g.card_campaign_id = c.campaign_id OR g.source_campaign_id = c.campaign_id');
   });
 });

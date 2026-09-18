@@ -587,12 +587,15 @@ export async function returnGiftLetterForFailedSendWithClient(
 
   // A fresh lifetime at least: a gift used near the end of its life and
   // refused days later must not come back already expired, which would
-  // compensate the customer with nothing.
+  // compensate the customer with nothing. One that never expired still never
+  // does.
   const freshExpiry = daysFromNow(giftLetterTtlDays());
   const expiresAt =
-    gift.expires_at && new Date(gift.expires_at).getTime() > freshExpiry.getTime()
-      ? gift.expires_at
-      : freshExpiry;
+    gift.expires_at === null
+      ? null
+      : new Date(gift.expires_at).getTime() > freshExpiry.getTime()
+        ? gift.expires_at
+        : freshExpiry;
 
   await client.query(
     `INSERT INTO gift_letters (

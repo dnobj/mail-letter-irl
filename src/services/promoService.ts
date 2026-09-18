@@ -666,14 +666,23 @@ export async function deleteCampaignWithClient(
   client: Pick<pg.PoolClient, 'query'>,
   campaignId: string
 ): Promise<void> {
-  const current = await client.query<{ current_redemptions: number; redeemed: string }>(
+  // A campaign any gift letter names is ended, never deleted, like one with
+  // redemptions: its code may be printed on a letter already in the mail
+  // (docs/gift-letters.md), and deleting it would SET NULL across gift_letters
+  // while holding the campaign, against a failed-send return that holds a gift
+  // row and wants the campaign.
+  const current = await client.query<{ current_redemptions: number; redeemed: string; gifts: string }>(
     `SELECT c.current_redemptions,
-            (SELECT COUNT(*) FROM promo_redemptions r WHERE r.campaign_id = c.campaign_id)::text AS redeemed
+            (SELECT COUNT(*) FROM promo_redemptions r WHERE r.campaign_id = c.campaign_id)::text AS redeemed,
+            (SELECT COUNT(*) FROM gift_letters g
+              WHERE g.card_campaign_id = c.campaign_id OR g.source_campaign_id = c.campaign_id)::text AS gifts
      FROM promo_campaigns c WHERE c.campaign_id = $1 FOR UPDATE`,
     [campaignId]
   );
   const row = current.rows[0];
   if (!row) throw new Error('not_found');
-  if (row.current_redemptions > 0 || Number(row.redeemed) > 0) throw new Error('invalid_state');
+  if (row.current_redemptions > 0 || Number(row.redeemed) > 0 || Number(row.gifts) > 0) {
+    throw new Error('invalid_state');
+  }
   await client.query('DELETE FROM promo_campaigns WHERE campaign_id = $1', [campaignId]);
 }
