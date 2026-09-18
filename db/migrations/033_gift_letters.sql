@@ -50,7 +50,14 @@ CREATE TABLE gift_letters (
   source TEXT NOT NULL,
   source_reference_id TEXT NOT NULL,
   grant_index INTEGER NOT NULL DEFAULT 0 CHECK (grant_index >= 0),
-  source_order_id VARCHAR(255) REFERENCES orders(order_id) ON DELETE SET NULL,
+  -- Deliberately NOT a foreign key. The failed-send return inserts a row
+  -- carrying this value while it holds the account lock, and a foreign key
+  -- would then take FOR KEY SHARE on the order, after users. The refund and
+  -- dispute paths hold the order FOR UPDATE and then lock users, so the two
+  -- would invert (#288). Revocation matches by value, as revokeWholePack
+  -- does for credit_ledger; orders rows are only ever deleted by the users
+  -- cascade, which deletes these rows too.
+  source_order_id VARCHAR(255),
   source_campaign_id UUID REFERENCES promo_campaigns(campaign_id) ON DELETE SET NULL,
   -- The chain code whose redemption granted this letter, if any.
   parent_code TEXT,

@@ -296,6 +296,22 @@ describe('returnGiftLetterForFailedSendWithClient', () => {
     expect(insert.params[6]).toBe('c-1'); // keeps its seed binding
   });
 
+  it('gives the replacement a fresh life when the used gift was near its end', async () => {
+    on('SELECT * FROM gift_letters', [gift({ status: 'consumed', expires_at: PAST })]);
+    on('SELECT * FROM gift_codes WHERE letter_id', [{ code: 'K7M2QX9A', status: 'issued' }]);
+    await returnGiftLetterForFailedSendWithClient(client, { letterId: 'letter-1', userId: 'user-1', failureCode: 'X' });
+    const expiresAt = ran('INSERT INTO gift_letters')[0].params[7] as Date;
+    expect(expiresAt.getTime()).toBeGreaterThan(Date.now() + 170 * 86_400_000);
+  });
+
+  it('keeps a later expiry when the used gift had more life left than a fresh one', async () => {
+    const far = new Date(Date.now() + 400 * 86_400_000);
+    on('SELECT * FROM gift_letters', [gift({ status: 'consumed', expires_at: far })]);
+    on('SELECT * FROM gift_codes WHERE letter_id', [{ code: 'K7M2QX9A', status: 'issued' }]);
+    await returnGiftLetterForFailedSendWithClient(client, { letterId: 'letter-1', userId: 'user-1', failureCode: 'X' });
+    expect(ran('INSERT INTO gift_letters')[0].params[7]).toBe(far);
+  });
+
   it('returns nothing on a replay', async () => {
     on("source = 'send_failed' AND source_reference_id", [{ gift_id: 'returned' }]);
     expect(await returnGiftLetterForFailedSendWithClient(client, { letterId: 'letter-1', userId: 'user-1', failureCode: 'X' })).toBe(0);

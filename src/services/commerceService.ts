@@ -1720,7 +1720,20 @@ export async function revokePackLots(
     );
     return { creditsTaken: taken, lots: [] };
   }
-  return revokePackCreditsProportionally(client, order, options.credits, options.packRefundId);
+  const proportional = await revokePackCreditsProportionally(
+    client,
+    order,
+    options.credits,
+    options.packRefundId
+  );
+  // A proportional refund that takes every letter left on the pack reverses
+  // what remains of the purchase, so its gift letters go too; one that leaves
+  // letters behind leaves the gift with them. Never voids printed codes: a
+  // refund is not a fraud signal (docs/gift-letters.md).
+  if (proportional.exhausted) {
+    await revokeGiftLettersForOrderWithClient(client, order.order_id, 'payment_refunded');
+  }
+  return { creditsTaken: proportional.creditsTaken, lots: proportional.lots };
 }
 
 async function revokeWholePack(
@@ -1856,7 +1869,7 @@ async function revokePackCreditsProportionally(
   order: Order,
   credits: number,
   packRefundId?: string
-): Promise<{ creditsTaken: number; lots: RevokedPackLot[] }> {
+): Promise<{ creditsTaken: number; lots: RevokedPackLot[]; exhausted: boolean }> {
   if (!Number.isInteger(credits) || credits <= 0) {
     throw new Error(`revokePackLots: credits must be a positive integer, got ${credits}`);
   }
@@ -1951,7 +1964,7 @@ async function revokePackCreditsProportionally(
       `Proportional refund of ${letters} ${letters === 1 ? 'letter' : 'letters'} for ${order.order_id}`
     ]
   );
-  return { creditsTaken: credits, lots: taken };
+  return { creditsTaken: credits, lots: taken, exhausted: available === credits };
 }
 async function stopFundedMailBeforeFinancialReversal(
   client: pg.PoolClient,

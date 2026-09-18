@@ -172,6 +172,7 @@ import {
   processStripeWebhookEvent,
   repairFulfilledPackGrant,
   requestRefund,
+  revokePackLots,
   runCommerceMaintenance
 } from '../../../src/services/commerceService.js';
 import { clearDiagnosticChangeSlot } from '../../../src/utils/diagnosticLog.js';
@@ -530,6 +531,32 @@ describe('commerceService', () => {
       expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining("UPDATE gift_letters SET status = 'revoked'"), ['order-1']);
       expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining('source_reversed_at = COALESCE'), ['order-1']);
       expect(mocks.query).not.toHaveBeenCalledWith(expect.stringContaining("void_reason = 'purchase_reversed'"), expect.anything());
+    });
+
+    it('revokes the gift letters when a proportional refund takes every letter left, and only then', async () => {
+      const order = { ...baseOrder, order_type: 'letter_pack', credits: 4, amount_cents: 500, status: 'fulfilled' } as any;
+      async function refund(liveCredits: number, credits: number) {
+        const calls: string[] = [];
+        const client = {
+          query: vi.fn(async (sql: string) => {
+            calls.push(sql);
+            if (sql.includes('SELECT ledger_id, remaining_amount FROM credit_ledger')) {
+              return { rows: [{ ledger_id: 'lot-1', remaining_amount: liveCredits }] };
+            }
+            if (sql.includes('INSERT INTO credit_ledger')) return { rows: [{ ledger_id: 'audit-1' }] };
+            if (sql.includes('FROM users') || sql.includes('UPDATE users')) return { rows: [{ credits: liveCredits }] };
+            return { rows: [] };
+          })
+        };
+        await revokePackLots(client as never, order, { credits, cause: 'partial_refund' });
+        return calls;
+      }
+      // Two of four credits back: letters remain, so does the gift.
+      expect((await refund(4, 2)).some(sql => sql.includes('UPDATE gift_letters'))).toBe(false);
+      // The last two back: the purchase is reversed as far as it can be.
+      const exhausting = await refund(2, 2);
+      expect(exhausting.some(sql => sql.includes("UPDATE gift_letters SET status = 'revoked'"))).toBe(true);
+      expect(exhausting.some(sql => sql.includes("void_reason = 'purchase_reversed'"))).toBe(false);
     });
   });
 

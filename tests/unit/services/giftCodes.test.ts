@@ -3,6 +3,7 @@ import {
   GIFT_CODE_ALPHABET,
   formatGiftCode,
   generateGiftCode,
+  giftCodeFromPath,
   isCanonicalGiftCode,
   normalizeEmail,
   normalizeGiftCode
@@ -62,6 +63,14 @@ describe('chain codes', () => {
 
   it('prints in two groups of four', () => {
     expect(formatGiftCode('K7M2QX9A')).toBe('K7M2-QX9A');
+  });
+
+  it('reads the code from a public lookup path, and nothing from a malformed one', () => {
+    expect(giftCodeFromPath('/api/public/gift/K7M2-QX9A')).toBe('K7M2-QX9A');
+    expect(giftCodeFromPath('/api/public/gift/JANE%20SMITH')).toBe('JANE SMITH');
+    expect(giftCodeFromPath('/api/public/gift/%E0')).toBe('');
+    expect(giftCodeFromPath('/api/public/gift/')).toBe('');
+    expect(giftCodeFromPath('/api/public/promo/validate/X')).toBe('');
   });
 });
 

@@ -398,6 +398,11 @@ describePostgres('gift letters (033)', () => {
       const userId = await seedUser();
       await grant(userId, 3);
       const sent = await sendGift(userId);
+      // Used at the very end of its life: the replacement must still be usable.
+      await pool.query(
+        `UPDATE gift_letters SET expires_at = NOW() - INTERVAL '1 hour' WHERE consumed_by_letter_id = $1`,
+        [sent.letter.letter_id]
+      );
       const jobs = await processSent(sent);
 
       // Premise: the stub was reached and the job ended, or every assertion
@@ -409,10 +414,11 @@ describePostgres('gift letters (033)', () => {
 
       expect(await codeFor(sent.letter.letter_id)).toMatchObject({ status: 'void', void_reason: 'send_failed' });
       const returned = await pool.query(
-        `SELECT generations_remaining, status FROM gift_letters WHERE source = 'send_failed' AND source_reference_id = $1`,
+        `SELECT generations_remaining, status, expires_at > NOW() AS live
+           FROM gift_letters WHERE source = 'send_failed' AND source_reference_id = $1`,
         [sent.letter.letter_id]
       );
-      expect(returned.rows).toEqual([{ generations_remaining: 3, status: 'available' }]);
+      expect(returned.rows).toEqual([{ generations_remaining: 3, status: 'available', live: true }]);
 
       // A replay hands nothing more back, and an operator retry is refused.
       await db.transaction(client =>
@@ -478,6 +484,43 @@ describePostgres('gift letters (033)', () => {
         { status: 'revoked', reversed: false }
       ]);
       expect(await codeFor(sent.letter.letter_id)).toMatchObject({ status: 'issued' });
+    });
+
+    it('revokes the gifts only once a proportional refund takes every letter left', async () => {
+      const userId = await seedUser();
+      const orderId = `gift-pack-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (order_id, user_id, order_type, product_code, product_snapshot, credits, amount_cents, currency, idempotency_key, status)
+         VALUES ($1, $2, 'letter_pack', 'credit-pack-4', '{}', 4, 500, 'usd', $3, 'fulfilled')`,
+        [orderId, userId, `pack:${orderId}`]
+      );
+      await pool.query(`UPDATE users SET credits = 4, credits_purchased = 4 WHERE user_id = $1`, [userId]);
+      await pool.query(
+        `INSERT INTO credit_ledger (user_id, initial_amount, remaining_amount, source_type, source_reference_id, source_order_id)
+         VALUES ($1, 4, 4, 'purchase', $2, $2)`,
+        [userId, orderId]
+      );
+      await db.transaction(client =>
+        gifts.grantGiftLettersWithClient(client, {
+          userId,
+          quantity: 1,
+          generationsRemaining: 1,
+          source: 'pack_purchase',
+          sourceReferenceId: orderId,
+          sourceOrderId: orderId
+        })
+      );
+      const order = (await pool.query('SELECT * FROM orders WHERE order_id = $1', [orderId])).rows[0];
+
+      // One letter of two back: the pack, and its gift, live on.
+      await db.transaction(client => commerce.revokePackLots(client, order, { credits: 2 }));
+      expect(await available(userId)).toBe(1);
+
+      // The last letter back reverses what remained of the purchase.
+      await db.transaction(client => commerce.revokePackLots(client, order, { credits: 2 }));
+      expect(await available(userId)).toBe(0);
+      const gift = await pool.query(`SELECT status FROM gift_letters WHERE source_order_id = $1`, [orderId]);
+      expect(gift.rows).toEqual([{ status: 'revoked' }]);
     });
 
     it('also voids the unredeemed code on a dispute', async () => {

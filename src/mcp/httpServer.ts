@@ -30,6 +30,7 @@ import {
 } from "../api/dashboardApiHandler.js";
 import { validatePromoCodePublic } from "../services/promoService.js";
 import { lookupGiftCodePublic } from "../services/giftLetterService.js";
+import { giftCodeFromPath } from "../services/giftCodes.js";
 import { closePool } from "../db/index.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
 import {
@@ -726,14 +727,15 @@ export async function startHttpServer() {
       res.setHeader('Content-Type', 'application/json');
       if (rateLimitMiddlewareWithGlobal(req, res, 'promo_public')) return;
 
-      const code = url.pathname.replace('/api/public/gift/', '');
+      // Empty, or a malformed percent-encoding: a bad request, not a fault.
+      const code = giftCodeFromPath(url.pathname);
       if (!code) {
         res.statusCode = 400;
         res.end(JSON.stringify({ valid: false, reason: 'not_found' }));
         return;
       }
       try {
-        const result = await lookupGiftCodePublic(decodeURIComponent(code));
+        const result = await lookupGiftCodePublic(code);
         res.statusCode = 200;
         res.end(JSON.stringify(result));
       } catch (error) {

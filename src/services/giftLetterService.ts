@@ -585,6 +585,15 @@ export async function returnGiftLetterForFailedSendWithClient(
   }
   if (gift.source_reversed_at) return 0;
 
+  // A fresh lifetime at least: a gift used near the end of its life and
+  // refused days later must not come back already expired, which would
+  // compensate the customer with nothing.
+  const freshExpiry = daysFromNow(giftLetterTtlDays());
+  const expiresAt =
+    gift.expires_at && new Date(gift.expires_at).getTime() > freshExpiry.getTime()
+      ? gift.expires_at
+      : freshExpiry;
+
   await client.query(
     `INSERT INTO gift_letters (
        user_id, generations_remaining, source, source_reference_id, grant_index,
@@ -599,7 +608,7 @@ export async function returnGiftLetterForFailedSendWithClient(
       gift.source_campaign_id,
       gift.parent_code,
       gift.card_campaign_id,
-      gift.expires_at
+      expiresAt
     ]
   );
   writeDiagnostic('info', 'gift.returned_after_failed_send', { failureCode: params.failureCode });

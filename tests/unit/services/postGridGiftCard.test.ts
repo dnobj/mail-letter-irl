@@ -3,6 +3,12 @@ import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PostGridProvider } from '../../../src/services/providers/PostGridProvider.js';
 import type { GiftCardContent } from '../../../src/services/giftCardRenderer.js';
+import { readFileSync } from 'node:fs';
+import { renderLayoutPreviewHtml } from '../../../src/services/previewService.js';
+
+const BASELINE: Record<string, string> = JSON.parse(
+  readFileSync(new URL('../../fixtures/nonGiftPrintHtml.385578d.json', import.meta.url), 'utf8')
+);
 
 /**
  * What PostGrid is actually sent for a gift letter (docs/gift-letters.md):
@@ -86,9 +92,32 @@ describe('PostGrid gift card', () => {
     expect(bodies[0].addressPlacement).toBe('top_first_page');
   });
 
-  it('sends every other letter exactly as before', async () => {
-    await provider().sendLetter({ ...letter, layoutType: 'text_only' });
-    expect(bodies[0].html).not.toMatch(/gift-|<svg/);
+  it('sends every other letter byte for byte as the code before gift letters did', async () => {
+    // BASELINE was produced by commit 385578d, the parent of the gift letter
+    // change, from these same inputs (tests/fixtures/nonGiftPrintHtml.385578d.json).
+    const baselineLetter = { ...letter, senderName: 'Sarah & <Co>', message: 'Hello "there"\nLove, Sarah' };
+    await provider().sendLetter({ ...baselineLetter, layoutType: 'text_only' });
+    await provider().sendLetter({ ...baselineLetter, layoutType: 'header_image', headerImageData: 'data:image/jpeg;base64,AAAA' });
+    await provider().sendLetter({ ...baselineLetter, layoutType: 'inline_image', inlineImageData: 'data:image/jpeg;base64,BBBB' });
+    expect(bodies[0].html).toBe(BASELINE.letter_text_only);
+    expect(bodies[1].html).toBe(BASELINE.letter_header_image);
+    expect(bodies[2].html).toBe(BASELINE.letter_inline_image);
+  });
+
+  it('previews every other letter byte for byte as before', () => {
+    const sender = { name: 'Sarah', addressLine1: '1 Main St', city: 'Austin', state: 'TX', postalCode: '78701', country: 'US' };
+    for (const layoutType of ['text_only', 'header_image', 'inline_image'] as const) {
+      const html = renderLayoutPreviewHtml({
+        sender,
+        recipient: { ...sender, name: 'Grandma' },
+        bodyText: 'Hello there\n\n',
+        signOff: 'Love, Sarah',
+        layoutType,
+        headerImageData: 'data:image/jpeg;base64,AAAA',
+        inlineImageData: 'data:image/jpeg;base64,BBBB'
+      });
+      expect(html).toBe(BASELINE[`preview_${layoutType}`]);
+    }
   });
 
   it('embeds a PNG when the SVG fallback is switched off', async () => {
@@ -115,8 +144,13 @@ describe('PostGrid gift card', () => {
     expect(back).toContain('.message-area { flex-direction: column;');
     expect(await decodeFirstSvg(back)).toBe('https://letterirl.com/g/K7M2QX9A');
 
-    await provider().sendPostcard(postcard);
-    expect(bodies[1].backHTML).not.toMatch(/gift-|<svg|flex-direction: column/);
-    expect(bodies[1].frontHTML).toBe(bodies[0].frontHTML);
+    await provider().sendPostcard({
+      ...postcard,
+      senderName: 'Sarah',
+      frontImageBase64: 'data:image/jpeg;base64,CCCC',
+      backMessage: 'Wish you <were> here'
+    });
+    expect(bodies[1].backHTML).toBe(BASELINE.postcard_back);
+    expect(bodies[1].frontHTML).toBe(BASELINE.postcard_front);
   });
 });

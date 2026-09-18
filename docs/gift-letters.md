@@ -99,10 +99,11 @@ The claim page is `letterirl.com/g/<code>` (the QR) or `letterirl.com/g` with th
 
 ## Failure, refunds and disputes
 
-- **Provider refuses the piece:** the code on it is voided (`send_failed`) and a replacement gift letter with the same budget is granted, once, keyed by the letter. Nothing is returned if the code has already been redeemed (the letter evidently arrived) or the purchase that granted the gift was reversed. `isLetterAlreadyCompensated` counts either as compensation, so an operator retry cannot re-mail it.
-- **Pack refund:** unsent gift letters from the pack are revoked; sent ones are marked `source_reversed_at`; printed codes stay valid, because the recipient did nothing wrong.
+- **Provider refuses the piece:** the code on it is voided (`send_failed`) and a replacement gift letter with the same budget is granted, once, keyed by the letter. The replacement lives at least a fresh `LETTER_IRL_GIFT_LETTER_TTL_DAYS`, so a gift used at the end of its life does not come back already expired. Nothing is returned if the code has already been redeemed (the letter evidently arrived) or the purchase that granted the gift was reversed. `isLetterAlreadyCompensated` counts either as compensation, so an operator retry cannot re-mail it.
+- **Pack refund:** a whole-pack refund, or a proportional refund that takes every letter left, revokes the pack's unsent gift letters and marks sent ones `source_reversed_at`; printed codes stay valid, because the recipient did nothing wrong. A proportional refund that leaves letters behind leaves the gift with them.
 - **Pack dispute:** as a refund, and unredeemed codes the pack's letters printed are also voided, which stops the chain at its first hop.
-- **Known limitation:** a dispute later won restores the pack's credits but not its gift letters.
+- **Known limitations:** a dispute later won restores the pack's credits but not its gift letters. Deleting the sender's account deletes their letters and so the codes printed on them; a recipient holding one is told it is not found.
+- **Lock order:** `gift_letters.source_order_id` is deliberately not a foreign key. The failed-send return writes it while holding the account lock, and a foreign key would lock the order after the account, the reverse of the refund path (#288).
 
 ## Settings
 

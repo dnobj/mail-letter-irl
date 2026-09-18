@@ -70,3 +70,17 @@ export function normalizeEmail(raw: string | null | undefined): string | null {
   if (!local) return null;
   return `${local}@${domain}`;
 }
+
+/**
+ * The code in a public lookup path (/api/public/gift/<code>), or '' when the
+ * segment is empty or its percent-encoding is malformed. Scanners send
+ * malformed encodings; they are bad requests, not faults.
+ */
+export function giftCodeFromPath(pathname: string, prefix = '/api/public/gift/'): string {
+  if (!pathname.startsWith(prefix)) return '';
+  try {
+    return decodeURIComponent(pathname.slice(prefix.length));
+  } catch {
+    return '';
+  }
+}
