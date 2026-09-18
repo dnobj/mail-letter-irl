@@ -834,6 +834,43 @@ from the card.
       the front image given as a URL: `tools/call quote_and_preview_postcard` from the card, and
       the card drew the front image with **Send Postcard**.)
 
+### DUPLICATE-01 — The same letter twice (issue #412)
+
+**Status:** Executed 2026-09-17 in development through Claude in Chrome, after #419 deployed and
+with the (DEV) connector refreshed to widget v35. Thinking effort was Medium, and every call
+approved with **Allow once** ran. Passed, except the Pay & Send step, which was not run.
+
+Background: each draft is sent at most once, but two drafts can hold the same letter, and the #411
+recovery makes that likely. A send from the balance, or a new Pay & Send checkout, is now refused
+when the account has the same mail from the last 24 hours. It goes through only when the person
+asks for another copy ([letter-send-flow.md](letter-send-flow.md)).
+
+- [x] Refresh the (DEV) connector. Its settings page should list `sendAnotherCopy` in the input
+      schemas of `send_letter`, `send_postcard` and `create_mail_checkout`. (Before the refresh it
+      still listed the old schema.)
+- [x] Ask for a text-only letter preview and send it from the card. (Sent: **Letter Sent!** and
+      **With the printer**.)
+- [x] Ask for a second preview of exactly the same letter, then ask ChatGPT to send it. The
+      refusal should reach the model, which should say what went out and ask before trying again.
+      (It said an identical letter to the same recipient had been sent from this account about 22
+      minutes earlier, that nothing was sent or charged, and that it would send another copy if
+      asked.)
+- [x] Say yes. The approval panel should describe an explicit request for another copy, and the
+      send should succeed. (It did: "Sent successfully as an intentional additional copy.")
+- [x] Ask for a third preview of the same letter and click **Send Letter** on its card. The card
+      should say the same letter went out recently and turn its button into **Send another copy**.
+      (It did, with the shorter notice "This same letter was sent or paid for recently. Send another
+      copy only if you want two." **Send another copy** was not clicked.)
+- [ ] With a balance too small to send, open a Pay & Send checkout for a letter, then a checkout
+      for the same letter from another draft. The card should say a checkout for this same letter
+      is still open and offer **Pay for another copy**. (Not run.)
+
+The card showed the shorter notice because the details in `_meta` never reached it. The server
+does send them on the error result (`tests/unit/mcp/duplicateMailRefusal.test.ts` checks this over a real
+MCP transport), and a successful call does return `_meta` to a card (PREVIEW-01). So ChatGPT
+gives a card no `_meta` for a refused call; see
+[openai-app-sdk-notes.md](learnings/openai-app-sdk-notes.md).
+
 ### Validation Errors
 - [x] Missing address fields → clear error
 - [x] Non-US address → "Only supports US" error (2026-09-13: refused as a missing `state`
