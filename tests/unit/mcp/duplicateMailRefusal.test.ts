@@ -4,6 +4,9 @@ vi.mock("../../../src/auth/identity.js", () => ({
   prepareAuthenticatedUser: vi.fn().mockResolvedValue(undefined)
 }));
 
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildDuplicateMailToolResult, registerLetterTools } from "../../../src/mcp/registerTools.js";
 import { DuplicateMailError } from "../../../src/services/duplicateMailService.js";
 
@@ -96,5 +99,45 @@ describe("duplicate mail refusals", () => {
     });
 
     await expect(callback({ draftId: "draft-1", confirm: true }, {})).rejects.toBe(lookalike);
+  });
+
+  /**
+   * On ChatGPT web a card whose send was refused showed its text-only notice,
+   * so the card never saw these details (2026-09-17). A successful call does
+   * return _meta to a card (PREVIEW-01). This runs the refusal through a real
+   * McpServer and client, which the tests above bypass, to show the details
+   * do leave the server on an error result.
+   */
+  it("reaches an MCP client with the details in _meta", async () => {
+    vi.stubEnv("LETTER_IRL_REQUIRE_AUTH", "true");
+    vi.stubEnv("LETTER_IRL_OAUTH_SCOPES", "openid profile email mail:read mail:draft mail:send");
+    const server = new McpServer({ name: "duplicate-refusal-test", version: "0.0.0" });
+    await registerLetterTools(
+      server,
+      {
+        listTools: () => [{ name: "send_postcard", description: "Send a postcard", readOnly: false, meta: {} }],
+        execute: vi.fn(async () => {
+          throw new DuplicateMailError(duplicate);
+        })
+      } as any,
+      {
+        userId: "auth0|test",
+        claims: {},
+        token: "token",
+        authType: "jwt" as const,
+        scopes: ["mail:read", "mail:draft", "mail:send"]
+      }
+    );
+    const client = new Client({ name: "duplicate-refusal-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const result = await client.callTool({ name: "send_postcard", arguments: { draftId: "draft-1", confirm: true } });
+
+    expect(result.isError).toBe(true);
+    expect((result.content as Array<{ text: string }>)[0].text).toMatch(/^Possible duplicate: /);
+    expect(result._meta).toEqual({
+      "letterirl/duplicateMail": { kind: "paid", mailType: "postcard", recipientName: "Sam Rivera", ageMinutes: 122 }
+    });
   });
 });

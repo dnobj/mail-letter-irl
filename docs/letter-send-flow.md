@@ -1,6 +1,6 @@
 # Letter and Postcard Send Flow
 
-**Last Updated:** September 17, 2026
+**Last Updated:** September 18, 2026
 **Purpose:** Draft, payment, outbox, and provider workflow for letters and postcards
 
 This document describes the current draft, payment, outbox, and provider workflow for letters and postcards.
@@ -58,7 +58,7 @@ So a send from balance, and a new Pay & Send checkout, is refused when the accou
     - A sessionless order being replaced is checked. That happens when it is too near expiry for Stripe or was priced before a price change. A refusal also rolls back that order's cancellation.
     - This check is a best-effort net. Checkouts for two identical drafts lock different rows, so two made at the same moment can both pass.
   - Pay & Send fulfilment, which runs after the customer has paid, is never checked.
-- **The refusal.** It is an MCP error result whose text starts with `Possible duplicate:`. The text tells the model what went out, when, and to ask the user before repeating the call with `sendAnotherCopy: true`. `_meta["letterirl/duplicateMail"]` carries `{kind, mailType, recipientName, ageMinutes}` for the preview cards, which say what went out and turn the button into **Send another copy** or **Pay for another copy**.
+- **The refusal.** It is an MCP error result whose text starts with `Possible duplicate:`. The text tells the model what went out, when, and to ask the user before repeating the call with `sendAnotherCopy: true`. `_meta["letterirl/duplicateMail"]` carries `{kind, mailType, recipientName, ageMinutes}` for the preview cards, which say what went out and turn the button into **Send another copy** or **Pay for another copy**. On ChatGPT web a refused call reaches the card without `_meta`, so the cards recognise the refusal by its text and show a shorter notice ([ui-widgets.md](ui-widgets.md)).
 
 ## Immediate Provider Submission
 
