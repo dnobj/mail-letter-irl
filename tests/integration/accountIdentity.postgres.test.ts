@@ -218,10 +218,14 @@ describePostgres('one account per address', () => {
       const email = address();
       const userId = await seedAccount(email, 4);
 
+      // 'adjustment', not 'purchase': migration 027 requires a purchase grant
+      // to name the order that funded it, and this is about the account row,
+      // not attribution. addCreditsToLedger moves the lifetime purchased total
+      // for every source type it handles.
       const result = await ledger.addCreditsToLedger({
         userId,
         credits: 6,
-        sourceType: 'purchase'
+        sourceType: 'adjustment'
       });
 
       expect(result.user.credits).toBe(10);
@@ -237,7 +241,7 @@ describePostgres('one account per address', () => {
         userId,
         email,
         credits: 4,
-        sourceType: 'purchase'
+        sourceType: 'adjustment'
       });
 
       expect(result.user.email).toBe(email);
@@ -283,7 +287,7 @@ describePostgres('one account per address', () => {
           userId: subject('collider'),
           email,
           credits: 2,
-          sourceType: 'purchase'
+          sourceType: 'adjustment'
         })
       ).rejects.toBeInstanceOf(users.EmailAlreadyLinkedError);
     });
