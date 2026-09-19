@@ -36,6 +36,9 @@ vi.mock('../../../src/db/index.js', () => {
 vi.mock('../../../src/services/userService.js', () => {
   return {
     findUser: vi.fn(),
+    // The account row the ledger's foreign key needs. It no longer arrives as
+    // an INSERT on this mock client, so the step numbering below skips it.
+    ensureAccountRowWithClient: vi.fn(async () => ({})),
   };
 });
 
@@ -252,13 +255,11 @@ describe('promoService', () => {
           query: vi.fn()
             // 1. Atomic increment FIRST (succeeds - under limit)
             .mockResolvedValueOnce({ rows: [{ ...campaign, current_redemptions: 51 }], rowCount: 1 })
-            // 2. Upsert user
-            .mockResolvedValueOnce({ rows: [createUserRow({ ...testUsers.alex, credits: 5 })] })
-            // 3. Insert ledger entry
+            // 2. Insert ledger entry
             .mockResolvedValueOnce({ rows: [{ ...mockLedgerEntry, ledger_id: 'uuid-123' }] })
-            // 4. Insert transaction
+            // 3. Insert transaction
             .mockResolvedValueOnce({ rows: [{ transaction_id: 1 }] })
-            // 5. Insert redemption
+            // 4. Insert redemption
             .mockResolvedValueOnce({ rows: [] }),
         };
         return callback(mockClient as any);
@@ -320,13 +321,11 @@ describe('promoService', () => {
           query: vi.fn()
             // 1. Atomic increment (succeeds - no limit)
             .mockResolvedValueOnce({ rows: [{ ...campaign, current_redemptions: 1 }], rowCount: 1 })
-            // 2. Upsert user
-            .mockResolvedValueOnce({ rows: [createUserRow({ ...testUsers.alex, credits: 2 })] })
-            // 3. Insert ledger entry
+            // 2. Insert ledger entry
             .mockResolvedValueOnce({ rows: [{ ...mockLedgerEntry, ledger_id: 'uuid-456' }] })
-            // 4. Insert transaction
+            // 3. Insert transaction
             .mockResolvedValueOnce({ rows: [{ transaction_id: 2 }] })
-            // 5. Insert redemption
+            // 4. Insert redemption
             .mockResolvedValueOnce({ rows: [] }),
         };
         return callback(mockClient as any);
@@ -384,17 +383,13 @@ describe('promoService', () => {
             if (sql.includes('UPDATE promo_campaigns')) {
               return { rows: [campaign], rowCount: 1 };
             }
-            // 2. Upsert user
-            if (sql.includes('INSERT INTO users')) {
-              return { rows: [createUserRow({ ...testUsers.alex, credits: 5 })] };
-            }
-            // 3. Insert ledger entry
+            // 2. Insert ledger entry
             if (sql.includes('INSERT INTO credit_ledger')) {
               // Capture the expires_at parameter (index 4 in the params)
               capturedExpiresAt = params[4];
               return { rows: [{ ledger_id: 'uuid-789', expires_at: capturedExpiresAt }] };
             }
-            // 4. Insert transaction
+            // 3. Insert transaction
             if (sql.includes('INSERT INTO credit_transactions')) {
               return { rows: [{ transaction_id: 3 }] };
             }
@@ -475,13 +470,11 @@ describe('promoService', () => {
           query: vi.fn()
             // 1. Atomic increment succeeds (was 0, now 1)
             .mockResolvedValueOnce({ rows: [{ ...singleUseCampaign, current_redemptions: 1 }], rowCount: 1 })
-            // 2. Upsert user
-            .mockResolvedValueOnce({ rows: [createUserRow({ ...testUsers.alex, credits: 10 })] })
-            // 3. Insert ledger
+            // 2. Insert ledger
             .mockResolvedValueOnce({ rows: [{ ledger_id: 'uuid-first' }] })
-            // 4. Insert transaction
+            // 3. Insert transaction
             .mockResolvedValueOnce({ rows: [{ transaction_id: 10 }] })
-            // 5. Insert redemption
+            // 4. Insert redemption
             .mockResolvedValueOnce({ rows: [] }),
         };
         return callback(mockClient as any);

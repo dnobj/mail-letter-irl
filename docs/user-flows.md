@@ -194,7 +194,9 @@ There is no tool for this; `switch_account` was removed.
 4. User signs in with the other account
 5. Tool calls now run as that account's `user_id`
 
-Each login method is a separate account, with its own letters and history
+Login methods sharing one confirmed email address are one account, joined at
+sign-in by an Auth0 post-login Action, so step 4 lands back on the same account
+unless the other method carries a different address
 ([account-switching-guide.md](account-switching-guide.md)).
 
 ---

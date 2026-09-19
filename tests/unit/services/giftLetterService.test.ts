@@ -40,6 +40,7 @@ import {
   returnGiftLetterForFailedSendWithClient,
   revokeGiftLettersForOrderWithClient
 } from '../../../src/services/giftLetterService.js';
+import { VerifiedEmailRequiredError } from '../../../src/auth/verifiedEmail.js';
 
 function on(match: string, rows: any[] | ((params: any[]) => any[])): void {
   state.handlers.push((sql, params) =>
@@ -238,8 +239,24 @@ describe('redeemChainCode', () => {
 
   it('re-checks under the lock: a code redeemed between the read and the lock is refused', async () => {
     on('FROM gift_codes gc', [code()]);
+    on('UPDATE users', [{ user_id: 'r' }]);
     on('FOR UPDATE', [code({ status: 'redeemed' })]);
     expect(await redeemChainCode({ userId: 'r', rawCode: 'K7M2QX9A' })).toMatchObject({ success: false, reason: 'redeemed' });
+    expect(ran('INSERT INTO gift_letters')).toHaveLength(0);
+  });
+
+  it('refuses a redeemer with neither an account nor an address to open one', async () => {
+    // The row gift_letters.user_id needs used to be opened from
+    // `${userId}@unknown.com`. That account is real, its address is not, and
+    // the own-code check above - which compares mailboxes - cannot see it.
+    // One walked through it on 2026-09-18. There is no address of last
+    // resort now: no row and no address is a refusal.
+    on('FROM gift_codes gc', [code()]);
+    on('FOR UPDATE', [code()]);
+    await expect(redeemChainCode({ userId: 'stranger', rawCode: 'K7M2QX9A' })).rejects.toBeInstanceOf(
+      VerifiedEmailRequiredError
+    );
+    expect(ran('INSERT INTO users')).toHaveLength(0);
     expect(ran('INSERT INTO gift_letters')).toHaveLength(0);
   });
 

@@ -381,11 +381,18 @@ Add a Post Login Action containing:
 
 ```javascript
 exports.onExecutePostLogin = async (event, api) => {
-  if (event.user.email) {
-    api.accessToken.setCustomClaim("https://letterirl.com/email", event.user.email);
-  }
+  if (!event.user.email || event.user.email_verified !== true) return;
+  api.accessToken.setCustomClaim("https://letterirl.com/email", event.user.email);
+  api.accessToken.setCustomClaim("https://letterirl.com/email_verified", true);
 };
 ```
+
+**Only a confirmed address.** The address is what a Letter IRL account is, and
+what the linking Action below joins identities on, so an unconfirmed one must
+not reach either. The server treats the address claim as confirmed unless a
+verdict claim beside it says otherwise (`src/auth/verifiedEmail.ts`), which is
+only safe while this Action holds to that: set the claim for a confirmed
+address, or set neither.
 
 **The namespace is load-bearing.** Auth0 silently drops a non-namespaced custom
 claim that collides with a reserved OIDC name, and `email` is reserved - the
@@ -399,9 +406,95 @@ Deploying the Action is not enough on its own - it must also be dragged into
 the **Post Login trigger flow** and applied, or it never runs.
 
 The server reads `LETTER_IRL_OAUTH_EMAIL_CLAIM` (default
-`https://letterirl.com/email`), so the two environments can namespace against
-their own domains. It prefers a standard `email` claim when one is present, and
-still falls back to `/userinfo`.
+`https://letterirl.com/email`) and
+`LETTER_IRL_OAUTH_EMAIL_VERIFIED_CLAIM` (default
+`https://letterirl.com/email_verified`), so the two environments can namespace
+against their own domains. It prefers a standard `email` claim when one is
+present, and still falls back to `/userinfo`.
+
+### Required Post Login Action: linking one person's sign-in methods
+
+**Auth0 mints a subject per sign-in method.** Without this Action, one person
+signing in with Google and with a password is two subjects presenting one
+address - and `users.email` is `NOT NULL UNIQUE`, so the second one collides,
+is refused, and that person has no account. This Action makes the address the
+identity by joining the identities behind it.
+
+It must run **before** the email-claim Action, so the claim carries the
+surviving account's address. Drag it above in the Post Login trigger flow.
+
+```javascript
+const { ManagementClient } = require("auth0");
+
+exports.onExecutePostLogin = async (event, api) => {
+  // An address nobody has proved they own is not an identity. A password
+  // sign-up that has not confirmed its address is refused here, at the source,
+  // rather than being allowed to claim someone else's account.
+  if (!event.user.email || event.user.email_verified !== true) {
+    api.access.deny("Confirm your email address, then sign in again.");
+    return;
+  }
+
+  let management;
+  try {
+    management = new ManagementClient({
+      domain: event.secrets.AUTH0_DOMAIN,
+      clientId: event.secrets.LINKING_CLIENT_ID,
+      clientSecret: event.secrets.LINKING_CLIENT_SECRET
+    });
+
+    const { data: matches } = await management.usersByEmail.getByEmail({
+      email: event.user.email
+    });
+
+    // Only confirmed addresses, and only other accounts.
+    const others = matches.filter(
+      user => user.email_verified === true && user.user_id !== event.user.user_id
+    );
+    if (others.length === 0) return;
+
+    // The oldest account survives: it is the one with the history.
+    const primary = others
+      .concat(event.user)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
+    if (primary.user_id === event.user.user_id) return;
+
+    const [provider, ...rest] = event.user.user_id.split("|");
+    await management.users.link({ id: primary.user_id }, {
+      provider,
+      user_id: rest.join("|")
+    });
+    api.authentication.setPrimaryUser(primary.user_id);
+  } catch (error) {
+    // Deny rather than let a second account be created. A denied login is
+    // recoverable in a minute; a split account is not recoverable at all
+    // without an operator merging two histories by hand.
+    api.access.deny("Sign-in is temporarily unavailable. Please try again.");
+  }
+};
+```
+
+**Its credentials are a machine-to-machine application**, named
+`Account Linking (<environment>)`, authorized for the Management API with
+exactly `read:users` and `update:users` - nothing else, because nothing else is
+needed and this secret lives in an Action. Put the domain, client id and secret
+in the Action's own **Secrets**, never in a repository or an env file.
+
+It also needs the `auth0` npm module added under the Action's **Dependencies**.
+
+**Confirm the connection sends the email.** Authentication -> Database ->
+`Username-Password-Authentication` -> **Requires Username** / email settings,
+and Branding -> Email Templates -> **Verification Email** enabled. Without it
+the deny above locks every new password account out permanently.
+
+**What linking does not join.** An Apple sign-in that hides the address behind
+a private relay address carries a different address, so it stays a different
+account, as documented in `docs/account-switching-guide.md`. Accounts opened
+before this Action existed are merged by an operator, not by it.
+
+**After anyone is linked, check the subject lists.**
+`LETTER_IRL_BETA_ALLOWED_SUBJECTS` and `LETTER_IRL_ADMIN_USER_IDS` name
+subjects, and only the surviving primary subject counts afterwards.
 
 ### Required Auth0 CIMD Configuration
 

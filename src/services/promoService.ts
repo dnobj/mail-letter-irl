@@ -23,7 +23,7 @@ import {
   CreditLedgerEntry,
 } from './types.js';
 import { addCreditsToLedger } from './creditLedgerService.js';
-import { findUser } from './userService.js';
+import { ensureAccountRowWithClient, findUser } from './userService.js';
 import { grantGiftLettersWithClient } from './giftLetterService.js';
 import { normalizeEmail } from './giftCodes.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
@@ -369,15 +369,15 @@ export async function redeemPromoCode(
         };
       }
 
-      // Upsert user (credit_ledger has FK constraint on users)
-      await client.query(
-        `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
-         VALUES ($1, $2, $3, 0, 0)
-         ON CONFLICT (user_id) DO UPDATE
-         SET credits = users.credits + $3,
-             updated_at = NOW()`,
-        [userId, email || `${userId}@unknown.com`, grantsCredits ? campaign.credits_amount : 0]
-      );
+      // The account row credit_ledger's foreign key needs. A redemption that
+      // carries no address can only credit an account that already exists; it
+      // may not open one from a made-up address, which is what this did until
+      // 2026-09-19 and which defeated the very per-email rules below.
+      await ensureAccountRowWithClient(client, {
+        userId,
+        email,
+        credits: grantsCredits ? campaign.credits_amount : 0
+      });
 
       const ledgerEntry = grantsCredits
         ? await grantPromoCreditsWithClient(client, { userId, campaign, promoCode, expiresAt })

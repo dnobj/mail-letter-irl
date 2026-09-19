@@ -41,16 +41,12 @@ async function handler(
   const user = await findUser(userId);
   const email = user?.email || 'Unknown';
 
-  // Extract auth provider from userId (format: "google-oauth2|123456")
-  const providerPart = userId.split('|')[0] || 'unknown';
-  const providerMap: Record<string, string> = {
-    'google-oauth2': 'Google',
-    'windowslive': 'Microsoft',
-    'apple': 'Apple',
-    'github': 'GitHub',
-    'auth0': 'Email/Password'
-  };
-  const authProvider = providerMap[providerPart] || providerPart;
+  // The subject prefix used to be translated into a provider name and shown
+  // beside the address ("Account: you@example.com (Google)"). Auth0 mints a
+  // subject per sign-in method and the post-login Action now links a person's
+  // methods into one account, so that prefix names whichever method happened
+  // to open the account - not the one in use, and not the only one. The
+  // address is the account's identity; it is what is shown.
 
   // Internal credit values (2 credits = 1 letter)
   let internalCredits: number;
@@ -120,7 +116,7 @@ async function handler(
   }
 
   // Enhanced message with identity information
-  const identityLine = `Account: ${email} (${authProvider})`;
+  const identityLine = `Account: ${email}`;
   let balanceLine: string;
   if (lettersRemaining === 0) {
     // Points at the conversation, not the website. create_pack_checkout and
@@ -153,8 +149,7 @@ async function handler(
       event: "balance.lookup",
       lettersRemaining,
       lettersExpiringSoon,
-      canSendStandardLetter,
-      authProvider
+      canSendStandardLetter
     },
     "Retrieved account balance from database"
   );

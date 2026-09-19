@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { prepareAuthenticatedUser } from "../../../src/auth/identity.js";
+import { VerifiedEmailRequiredError } from "../../../src/auth/verifiedEmail.js";
 import { AuthenticatedUser } from "../../../src/auth/tokenValidator.js";
 
 function user(authType: "jwt" | "pat"): AuthenticatedUser {
@@ -55,17 +56,19 @@ describe("an account that cannot be created", () => {
   // The account does not exist, and the customer discovers that later, in
   // whichever subsystem writes first. Production found it three ways at once
   // and none of them said so.
-  it("reports the missing account at error level, naming the consequence", async () => {
+  it("refuses, and reports it at error level naming the consequence", async () => {
     const logged: string[] = [];
     const spy = vi.spyOn(console, "error").mockImplementation(value => {
       logged.push(String(value));
     });
 
-    await prepareAuthenticatedUser(user("jwt"), {
-      fetchUserInfo: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
-      findExistingUser: vi.fn().mockResolvedValue(null),
-      upsertUser: vi.fn()
-    });
+    await expect(
+      prepareAuthenticatedUser(user("jwt"), {
+        fetchUserInfo: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+        findExistingUser: vi.fn().mockResolvedValue(null),
+        upsertUser: vi.fn()
+      })
+    ).rejects.toBeInstanceOf(VerifiedEmailRequiredError);
 
     spy.mockRestore();
 
@@ -74,9 +77,25 @@ describe("an account that cannot be created", () => {
       entry => entry.event === "auth.account_missing_no_verified_email"
     );
     expect(account, "no account-missing diagnostic was emitted").toBeDefined();
-    expect(account?.consequence).toBe("account_writes_will_fail");
+    expect(account?.consequence).toBe("account_not_opened");
     // Warn was the old level, and a warning is what let this sit unnoticed.
     expect(account?.msg).toBe("auth.account_missing_no_verified_email");
+  });
+
+  it("says nothing about the account it could not open beyond a fixed sentence", async () => {
+    // The message reaches a customer through a tool result and an HTTP body,
+    // so nothing from the request may be interpolated into it.
+    const refusal = await prepareAuthenticatedUser(
+      { ...user("jwt"), userId: "auth0|secret-subject" },
+      {
+        fetchUserInfo: vi.fn(),
+        findExistingUser: vi.fn().mockResolvedValue(null),
+        upsertUser: vi.fn()
+      },
+      {} as NodeJS.ProcessEnv
+    ).catch((error: Error) => error);
+
+    expect((refusal as Error).message).not.toContain("secret-subject");
   });
 
   it("says nothing when the account already exists", async () => {
@@ -159,15 +178,17 @@ describe("the namespaced email claim", () => {
     // property: the whole point is that the bare name never arrives.
     const upsertUser = vi.fn();
 
-    await prepareAuthenticatedUser(
-      { ...user("jwt"), claims: { "not-the-claim": "wrong@example.com" } },
-      {
-        fetchUserInfo: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
-        findExistingUser: vi.fn().mockResolvedValue(null),
-        upsertUser
-      },
-      {} as NodeJS.ProcessEnv
-    );
+    await expect(
+      prepareAuthenticatedUser(
+        { ...user("jwt"), claims: { "not-the-claim": "wrong@example.com" } },
+        {
+          fetchUserInfo: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+          findExistingUser: vi.fn().mockResolvedValue(null),
+          upsertUser
+        },
+        {} as NodeJS.ProcessEnv
+      )
+    ).rejects.toBeInstanceOf(VerifiedEmailRequiredError);
 
     expect(upsertUser).not.toHaveBeenCalled();
   });
@@ -189,5 +210,90 @@ describe("the namespaced email claim", () => {
     );
 
     expect(upsertUser).toHaveBeenCalledWith("user-1", "fallback@example.com");
+  });
+});
+
+describe("an address the issuer will not vouch for", () => {
+  // The rule is asymmetric on purpose (src/auth/verifiedEmail.ts): an explicit
+  // `email_verified: false` refuses, silence does not. The gate that stops an
+  // unconfirmed address before a subject exists is the Auth0 Action; this is
+  // what the server does with what reaches it.
+  const NS = "https://letterirl.com/email";
+  const NS_VERIFIED = "https://letterirl.com/email_verified";
+
+  it("opens no account from an address the Action marks unconfirmed", async () => {
+    const upsertUser = vi.fn();
+
+    await expect(
+      prepareAuthenticatedUser(
+        {
+          ...user("jwt"),
+          claims: { [NS]: "unconfirmed@example.com", [NS_VERIFIED]: false }
+        },
+        { fetchUserInfo: vi.fn(), findExistingUser: vi.fn().mockResolvedValue(null), upsertUser },
+        {} as NodeJS.ProcessEnv
+      )
+    ).rejects.toBeInstanceOf(VerifiedEmailRequiredError);
+
+    expect(upsertUser).not.toHaveBeenCalled();
+  });
+
+  it("opens no account from a userinfo document that says the same", async () => {
+    const upsertUser = vi.fn();
+
+    await expect(
+      prepareAuthenticatedUser(
+        user("jwt"),
+        {
+          fetchUserInfo: vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ email: "unconfirmed@example.com", email_verified: false })
+          }),
+          findExistingUser: vi.fn().mockResolvedValue(null),
+          upsertUser
+        },
+        { LETTER_IRL_OAUTH_ISSUER: "https://tenant.example.com/" } as NodeJS.ProcessEnv
+      )
+    ).rejects.toBeInstanceOf(VerifiedEmailRequiredError);
+
+    expect(upsertUser).not.toHaveBeenCalled();
+  });
+
+  it("leaves an existing account alone rather than re-pointing it at one", async () => {
+    // Someone who already has an account keeps it. Their stored address was
+    // confirmed when it was written, and an unconfirmed one arriving later -
+    // which is how an address someone else owns would arrive - must not
+    // replace it, nor lock them out of an account that already works.
+    const upsertUser = vi.fn();
+
+    const email = await prepareAuthenticatedUser(
+      { ...user("jwt"), claims: { [NS]: "unconfirmed@example.com", [NS_VERIFIED]: false } },
+      {
+        fetchUserInfo: vi.fn(),
+        findExistingUser: vi.fn().mockResolvedValue({ email: "known@example.com" }),
+        upsertUser
+      },
+      {} as NodeJS.ProcessEnv
+    );
+
+    expect(upsertUser).not.toHaveBeenCalled();
+    expect(email).toBe("known@example.com");
+  });
+
+  it("hands the confirmed address back to its caller", async () => {
+    // The REST middleware used to read the standard `email` claim alone, which
+    // Auth0 does not put on an access token minted for a custom API, so every
+    // route saw `email: undefined`. It takes this return value now.
+    const email = await prepareAuthenticatedUser(
+      { ...user("jwt"), claims: { [NS]: "confirmed@example.com" } },
+      {
+        fetchUserInfo: vi.fn(),
+        findExistingUser: vi.fn().mockResolvedValue(null),
+        upsertUser: vi.fn()
+      },
+      {} as NodeJS.ProcessEnv
+    );
+
+    expect(email).toBe("confirmed@example.com");
   });
 });

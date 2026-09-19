@@ -28,6 +28,7 @@
 import type pg from 'pg';
 import { query, transaction } from '../db/index.js';
 import { lockAccountForBalanceChange } from './accountLock.js';
+import { ensureAccountRowWithClient } from './userService.js';
 import {
   giftCodeTtlDays,
   giftLandingBaseUrl,
@@ -438,14 +439,14 @@ export async function redeemChainCode(params: {
   }
 
   return transaction(async client => {
-    // gift_letters.user_id needs the row; an authenticated caller normally
-    // has it already. Same fallback email as promoService's upsert.
-    await client.query(
-      `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
-       VALUES ($1, $2, 0, 0, 0)
-       ON CONFLICT (user_id) DO NOTHING`,
-      [params.userId, params.email || `${params.userId}@unknown.com`]
-    );
+    // gift_letters.user_id needs the row; an authenticated caller normally has
+    // it already. A redeemer with neither a row nor an address is refused: an
+    // account opened from a made-up address is exactly what walked through the
+    // own-code check above on 2026-09-18.
+    await ensureAccountRowWithClient(client, {
+      userId: params.userId,
+      email: params.email
+    });
     await lockAccountForBalanceChange(client, params.userId);
     const locked = await client.query<GiftCodeRow>(
       'SELECT * FROM gift_codes WHERE code = $1 FOR UPDATE',

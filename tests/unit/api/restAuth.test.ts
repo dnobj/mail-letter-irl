@@ -27,6 +27,18 @@ vi.mock("../../../src/services/patService.js", () => ({
   updateLastUsed: vi.fn().mockResolvedValue(undefined)
 }));
 
+// The middleware opens the account row now, so the two functions that would
+// reach PostgreSQL are replaced and everything else - the claim reading, the
+// refusals - runs for real.
+vi.mock("../../../src/services/userService.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../../src/services/userService.js")>();
+  return {
+    ...actual,
+    findUser: vi.fn(async () => null),
+    getOrCreateUser: vi.fn(async (userId: string, email: string) => ({ user_id: userId, email }))
+  };
+});
+
 // Resolve the remote JWKS to our local public key. createRemoteJWKSet is the
 // only thing in the path that touches the network, and this is its seam.
 let publicKey: Awaited<ReturnType<typeof generateKeyPair>>["publicKey"];

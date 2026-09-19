@@ -1544,11 +1544,46 @@ End-to-end test of complete user experience.
 
 ### Multi-Provider Journey (US-ACCT-02)
 1. [ ] Login with Google
-2. [ ] Note user ID
-3. [ ] Switch account
-4. [ ] Login with GitHub
-5. [ ] Different user ID (separate account)
-6. [ ] Each account has own credits/letters
+2. [ ] Note the email on the balance
+3. [ ] End the Auth0 session
+4. [ ] Login with GitHub **on the same confirmed address**
+5. [ ] Same account: one balance, the same letters
+6. [ ] An address the two methods do NOT share is a different account
+
+### LINK-01 — One account per confirmed address
+
+Run on development first, after the two Post Login Actions and the
+`Account Linking` machine-to-machine application are in place
+([auth0-tenant-configuration.md](auth0-tenant-configuration.md)), and again on
+production before anyone but the owner signs in there.
+
+**Preconditions:** both Actions are in the Post Login trigger flow, with
+`link-verified-email` **above** the email-claim Action; the API is deployed and
+`/readyz` is green; the connector has been refreshed.
+
+1. [ ] Sign in to the website with Google. Note the balance and the letter
+       count.
+2. [ ] Sign out, then sign in with a password on the same confirmed address.
+3. [ ] The dashboard shows **one** account: the same balance, the same letters.
+4. [ ] Auth0 -> User Management shows one user with two identities, and the
+       Action logs show the link.
+5. [ ] A brand-new password sign-up is refused until its address is confirmed,
+       with "Confirm your email address, then sign in again."
+6. [ ] An Apple sign-in with **Hide My Email** on is a separate account, as
+       documented.
+7. [ ] In ChatGPT, connect Letter IRL on an address that already has an account
+       through another method. It connects rather than answering "We couldn't
+       connect this account" - the failure that started this work on
+       2026-09-18.
+8. [ ] `get_account_balance` names the address and no longer names a sign-in
+       provider.
+9. [ ] Gift rules still hold across the linked methods: a code printed on your
+       own letter is refused whichever method you sign in with.
+10. [ ] A token with no confirmed address gets the sentence, not a broken
+       account: every tool answers "Letter IRL needs a confirmed email
+       address...", and the dashboard answers 403 with the same text. (Simulate
+       by removing the email-claim Action from the flow on development only,
+       with a fresh subject, then put it back.)
 
 ---
 

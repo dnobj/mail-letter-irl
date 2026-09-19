@@ -662,8 +662,9 @@ See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_EN
 **So that** I can start sending letters without a separate signup process
 
 **Acceptance Criteria:**
-- [ ] User record created on first MCP tool call
-- [ ] Email extracted from OAuth token
+- [ ] User record created on the first authenticated call, from MCP, the REST API or checkout
+- [ ] Confirmed email extracted from the OAuth token, or refused with a sentence that says so
+- [ ] No account is ever opened under a placeholder address
 - [ ] No signup credits by default (must purchase or use promo)
 - [ ] Clear messaging about credit balance (0 credits)
 - [ ] Guidance on how to get credits (purchase or promo code)
@@ -686,6 +687,7 @@ See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_EN
 - [ ] Uses Auth0 for dynamic client registration
 - [ ] JWT tokens validated via JWKS
 - [ ] User created/retrieved on first MCP tool call
+- [ ] Providers sharing one confirmed address reach ONE account (LINK-01)
 
 ---
 
@@ -698,6 +700,7 @@ See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_EN
 - [ ] Returns Auth0 logout URL
 - [ ] Lists available auth methods
 - [ ] After logout, can re-authenticate with different provider
+- [ ] Re-authenticating on the same confirmed address returns to the SAME account
 
 ---
 
@@ -1068,10 +1071,13 @@ See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_EN
 - [ ] Case-insensitive code matching (PROMO123 = promo123)
 - [ ] Expired campaigns cannot be redeemed
 
-**Multi-Account Detection (Future):**
-- [ ] Same email across providers detected (google vs github)
+**Multi-Account Detection:**
+- [x] Same email across providers is one account: an Auth0 post-login Action links the
+      identities behind a confirmed address, so a second sign-in method is not a second
+      chance at a campaign
+- [x] No account is opened under `<subject>@unknown.com`, which was invisible to every
+      per-email rule here, including the gift own-code check
 - [ ] Suspicious patterns flagged for admin review
-- [ ] Currently: Auth0 handles identity linking
 
 ---
 

@@ -15,6 +15,7 @@ import { transaction, query } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import { lockAccountForBalanceChange } from './accountLock.js';
+import { ensureAccountRowWithClient } from './userService.js';
 import { isGiftLetterCompensated } from './giftLetterService.js';
 import {
   User,
@@ -100,18 +101,15 @@ export async function addCreditsToLedger(
   }
 
   return await transaction(async (client) => {
-    // Upsert user (create if doesn't exist)
-    const userResult = await client.query<User>(
-      `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
-       VALUES ($1, $2, $3, $3, 0)
-       ON CONFLICT (user_id) DO UPDATE
-       SET credits = users.credits + $3,
-           credits_purchased = users.credits_purchased + $3,
-           updated_at = NOW()
-       RETURNING *`,
-      [userId, email || `${userId}@unknown.com`, credits]
-    );
-    const user = userResult.rows[0];
+    // Open the account if this grant carries an address, credit it either way.
+    // An account that does not exist and has no address to open it from is
+    // refused rather than invented; see ensureAccountRowWithClient.
+    const user = await ensureAccountRowWithClient(client, {
+      userId,
+      email,
+      credits,
+      countAsPurchased: true
+    });
 
     // Create ledger entry
     const ledgerResult = await client.query<CreditLedgerEntry>(
@@ -208,17 +206,12 @@ export async function addCreditsToLedgerWithClient(
     }
   }
 
-  const userResult = await client.query<User>(
-    `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
-     VALUES ($1, $2, $3, $3, 0)
-     ON CONFLICT (user_id) DO UPDATE
-     SET credits = users.credits + $3,
-         credits_purchased = users.credits_purchased + $3,
-         updated_at = NOW()
-     RETURNING *`,
-    [userId, email || `${userId}@unknown.com`, credits]
-  );
-  const user = userResult.rows[0];
+  const user = await ensureAccountRowWithClient(client, {
+    userId,
+    email,
+    credits,
+    countAsPurchased: true
+  });
 
   // RETURNING names its columns rather than *, here and on the transaction
   // insert below: the admin operator role has no SELECT on the description

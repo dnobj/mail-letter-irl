@@ -46,6 +46,15 @@ import {
 import { buildWwwAuthenticateChallenge, InsufficientScopeError } from '../../auth/oauthChallenge.js';
 import { OAUTH_NOT_CONFIGURED } from '../../auth/oauthErrors.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../auth/betaAccess.js';
+import {
+  VerifiedEmailRequiredError,
+  VERIFIED_EMAIL_MESSAGE
+} from '../../auth/verifiedEmail.js';
+import { prepareAuthenticatedUser } from '../../auth/identity.js';
+import {
+  EmailAlreadyLinkedError,
+  EMAIL_ALREADY_LINKED_MESSAGE
+} from '../../services/userService.js';
 import type { ProductScope } from '../../auth/toolScopes.js';
 import { writeDiagnostic } from '../../utils/diagnosticLog.js';
 
@@ -61,6 +70,8 @@ export type RestAuthFailureReason =
   | 'not_configured'
   | 'rejected'
   | 'forbidden'
+  | 'no_account'
+  | 'account_conflict'
   | 'insufficient_scope';
 
 export interface RestAuthFailure {
@@ -82,6 +93,8 @@ const MESSAGES: Record<RestAuthFailureReason, string> = {
   not_configured: 'Authentication is not configured on this server',
   rejected: 'The bearer token was rejected',
   forbidden: BETA_ACCESS_MESSAGE,
+  no_account: VERIFIED_EMAIL_MESSAGE,
+  account_conflict: EMAIL_ALREADY_LINKED_MESSAGE,
   insufficient_scope: 'The bearer token does not grant this action'
 };
 
@@ -97,6 +110,13 @@ const STATUS: Record<RestAuthFailureReason, number> = {
   not_configured: 503,
   rejected: 401,
   forbidden: 403,
+  // Authenticated, admitted, and still has no account: 403 for the same reason
+  // `forbidden` is. Authorizing again would produce the same token and the
+  // same answer; what has to change is the address, at the provider.
+  no_account: 403,
+  // 409, because two accounts want one address and only the customer can say
+  // which sign-in method is theirs.
+  account_conflict: 409,
   insufficient_scope: 403
 };
 
@@ -107,6 +127,7 @@ const STATUS: Record<RestAuthFailureReason, number> = {
  */
 export function restAuthErrorLabel(status: number): string {
   if (status === 403) return 'Forbidden';
+  if (status === 409) return 'Conflict';
   if (status === 503) return 'Service Unavailable';
   return 'Unauthorized';
 }
@@ -198,6 +219,21 @@ export async function authenticateRestRequest(
     }
     throw error;
   }
-  const email = typeof user.claims.email === 'string' ? user.claims.email : undefined;
+  // The account row, opened here if this is the caller's first arrival.
+  //
+  // Until now only the MCP layer did this (registerTools), so a person whose
+  // first visit was the dashboard or a gift claim reached routes that all
+  // assume a users row and got three different failures instead of one
+  // answer. It also settles `email`, which this function used to read from the
+  // standard `email` claim alone - a claim Auth0 does not put on an access
+  // token minted for a custom API, so it was undefined on every request.
+  let email: string | undefined;
+  try {
+    email = (await prepareAuthenticatedUser(user)) ?? undefined;
+  } catch (error) {
+    if (error instanceof VerifiedEmailRequiredError) return fail('no_account');
+    if (error instanceof EmailAlreadyLinkedError) return fail('account_conflict');
+    throw error;
+  }
   return { ok: true, user: { userId: user.userId, email, scopes: user.scopes } };
 }
