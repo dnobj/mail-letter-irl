@@ -67,20 +67,24 @@ export const DEFAULT_EMAIL_CLAIM = "https://letterirl.com/email";
 /**
  * Where the same Action states whether that address is confirmed.
  *
- * **Silence is trusted; a negative refuses.** An issuer that says
- * `email_verified: false` is refused, and an address that arrives with no
- * verdict beside it is taken as confirmed. That asymmetry is deliberate and it
- * is the same rule for all three sources below.
+ * **Silence is not confirmation.** An address opens an account only when the
+ * issuer says, in so many words, that it has been confirmed. Absent, null,
+ * "yes", 1 - none of those is a verdict, and none of them opens an account.
  *
- * Two reasons. The Action's contract, written out in
- * docs/auth0-tenant-configuration.md, is that it sets the address claim ONLY
- * for a confirmed address, so silence from it means "vouched for", not
- * "unknown". And the gate that actually stops an unconfirmed address from
- * reaching an account is in Auth0 itself - the post-login Action refuses the
- * login and refuses to link the identity - which is the only place that can
- * stop it before a subject exists. Refusing here on silence would add nothing
- * to that and would take every session down the moment a claim shape changed,
- * on a tenant we configure by hand and cannot roll back with a deploy.
+ * An earlier draft of this file trusted silence, on the argument that the
+ * Action only ever sets the address claim for a confirmed address and that
+ * refusing on silence risked an outage while a tenant was mid-update. Both
+ * halves were wrong. The Action deployed on both tenants until 2026-09-19 set
+ * the claim for ANY address, confirmed or not, so silence from it meant
+ * nothing - and trusting it would let an unconfirmed sign-up take the account
+ * slot of the address's real owner, which is the one thing this whole change
+ * exists to prevent. And the outage it was meant to avoid does not exist:
+ * an account that ALREADY exists is never refused (see identity.ts), so a
+ * tenant mid-update keeps every customer it has and only stops opening new
+ * accounts - which is the documented prerequisite anyway.
+ *
+ * Refusing costs a new customer a sentence telling them to confirm their
+ * address. Trusting silence costs the wrong person an account.
  */
 export const DEFAULT_EMAIL_VERIFIED_CLAIM = "https://letterirl.com/email_verified";
 
@@ -97,13 +101,11 @@ function readString(value: unknown): string | null {
 /**
  * Auth0 writes `email_verified` as a boolean, but a custom claim set from a
  * string, and a userinfo document proxied through something helpful, can both
- * arrive as "true". Anything else - absent, null, "1", 1 - is not a yes.
+ * arrive as "true". Anything else - absent, null, "1", 1, "yes" - is not a
+ * yes, and this returns false for all of them.
  */
-function readVerifiedFlag(value: unknown): boolean | null {
-  if (typeof value === "boolean") return value;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  return null;
+function isConfirmed(value: unknown): boolean {
+  return value === true || value === "true";
 }
 
 /**
@@ -111,9 +113,8 @@ function readVerifiedFlag(value: unknown): boolean | null {
  *
  * Order matters. The standard `email` claim comes first: if Auth0 ever does
  * put one on an access token minted for a custom API, that is the one to
- * believe and no Action is needed at all. The namespaced claim is ours. Both
- * are read under the rule above - an explicit `email_verified: false` refuses,
- * anything else is confirmed.
+ * believe and no Action is needed at all. The namespaced claim is ours. Each
+ * needs its own confirmation beside it, under the rule above.
  */
 export function readEmailClaim(
   claims: AuthenticatedUser["claims"],
@@ -123,16 +124,18 @@ export function readEmailClaim(
 
   const standard = readString(bag.email);
   if (standard) {
-    return { address: standard, verified: readVerifiedFlag(bag.email_verified) !== false };
+    return { address: standard, verified: isConfirmed(bag.email_verified) };
   }
 
   const namespaced = readString(bag[env.LETTER_IRL_OAUTH_EMAIL_CLAIM ?? DEFAULT_EMAIL_CLAIM]);
   if (!namespaced) return null;
 
-  const stated = readVerifiedFlag(
-    bag[env.LETTER_IRL_OAUTH_EMAIL_VERIFIED_CLAIM ?? DEFAULT_EMAIL_VERIFIED_CLAIM]
-  );
-  return { address: namespaced, verified: stated ?? true };
+  return {
+    address: namespaced,
+    verified: isConfirmed(
+      bag[env.LETTER_IRL_OAUTH_EMAIL_VERIFIED_CLAIM ?? DEFAULT_EMAIL_VERIFIED_CLAIM]
+    )
+  };
 }
 
 /** The same reading of a `/userinfo` document, where both fields are standard. */
@@ -141,5 +144,5 @@ export function readUserInfoEmail(document: unknown): EmailClaim | null {
   const bag = document as Record<string, unknown>;
   const address = readString(bag.email);
   if (!address) return null;
-  return { address, verified: readVerifiedFlag(bag.email_verified) !== false };
+  return { address, verified: isConfirmed(bag.email_verified) };
 }

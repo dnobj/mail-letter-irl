@@ -56,7 +56,7 @@ import {
   EMAIL_ALREADY_LINKED_MESSAGE
 } from '../../services/userService.js';
 import type { ProductScope } from '../../auth/toolScopes.js';
-import { writeDiagnostic } from '../../utils/diagnosticLog.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../../utils/diagnosticLog.js';
 
 export interface RestAuthInfo {
   userId: string;
@@ -72,6 +72,7 @@ export type RestAuthFailureReason =
   | 'forbidden'
   | 'no_account'
   | 'account_conflict'
+  | 'unavailable'
   | 'insufficient_scope';
 
 export interface RestAuthFailure {
@@ -95,6 +96,7 @@ const MESSAGES: Record<RestAuthFailureReason, string> = {
   forbidden: BETA_ACCESS_MESSAGE,
   no_account: VERIFIED_EMAIL_MESSAGE,
   account_conflict: EMAIL_ALREADY_LINKED_MESSAGE,
+  unavailable: 'The account could not be read. Please try again.',
   insufficient_scope: 'The bearer token does not grant this action'
 };
 
@@ -114,6 +116,11 @@ const STATUS: Record<RestAuthFailureReason, number> = {
   // `forbidden` is. Authorizing again would produce the same token and the
   // same answer; what has to change is the address, at the provider.
   no_account: 403,
+  // A database that will not answer. 503 rather than letting the error escape
+  // this function: every REST handler calls it OUTSIDE its own try, so a throw
+  // here leaves the request boundary to answer text/plain where the dashboard
+  // has always been given JSON.
+  unavailable: 503,
   // 409, because two accounts want one address and only the customer can say
   // which sign-in method is theirs.
   account_conflict: 409,
@@ -233,7 +240,10 @@ export async function authenticateRestRequest(
   } catch (error) {
     if (error instanceof VerifiedEmailRequiredError) return fail('no_account');
     if (error instanceof EmailAlreadyLinkedError) return fail('account_conflict');
-    throw error;
+    writeDiagnostic('error', 'auth.account_preparation_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
+    return fail('unavailable');
   }
   return { ok: true, user: { userId: user.userId, email, scopes: user.scopes } };
 }

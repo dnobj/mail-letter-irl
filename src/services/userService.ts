@@ -18,10 +18,16 @@ import { VerifiedEmailRequiredError } from '../auth/verifiedEmail.js';
  */
 const EMAIL_UNIQUE_CONSTRAINT = 'users_email_key';
 
+/**
+ * No instruction to "sign in the way you did the first time": after Auth0
+ * links two identities, the sign-in they used the first time may no longer
+ * exist as a separate login, so that advice can be impossible to follow. The
+ * only reliable route is an operator joining the two accounts.
+ */
 export const EMAIL_ALREADY_LINKED_MESSAGE =
-  'That email address already belongs to a Letter IRL account that was opened ' +
-  'with a different sign-in method. Sign in the way you did the first time, or ' +
-  'email support@letterirl.com to have the two joined.';
+  'That email address already belongs to a Letter IRL account opened with a ' +
+  'different sign-in method. Email support@letterirl.com from that address and ' +
+  'we will join the two.';
 
 /**
  * One address, two Auth0 subjects.
@@ -34,10 +40,11 @@ export const EMAIL_ALREADY_LINKED_MESSAGE =
  * and a draft that died on a foreign key.
  *
  * 409, not 403: nothing is wrong with the credentials and re-authorizing
- * cannot help, but the state is a conflict the customer can resolve by using
- * their first method. The Auth0 post-login Action is what should prevent this
- * from ever being reached, by linking the two identities before the second one
- * asks for an account; this is what happens when it does not.
+ * cannot help - two accounts want one address, and only an operator can join
+ * them. The Auth0 post-login Action is what should prevent this from ever
+ * being reached, by linking the two identities before the second one asks for
+ * an account; this is what happens when it does not, and it is raised ONLY for
+ * a subject that has no account of its own (src/auth/identity.ts).
  */
 export class EmailAlreadyLinkedError extends Error {
   readonly statusCode = 409;
@@ -174,6 +181,31 @@ export async function ensureAccountRowWithClient(
   const credits = params.credits ?? 0;
   const purchased = params.countAsPurchased ? credits : 0;
   const email = typeof params.email === 'string' ? params.email.trim() : '';
+
+  if (credits === 0 && purchased === 0) {
+    // A gift redemption adds no credits, and this is the statement it used to
+    // run: an INSERT that does nothing when the row is there. Writing an
+    // UPDATE instead would move users.updated_at, which the admin panel reads
+    // as an account's optimistic version - so every gift redemption would
+    // stale an operator's open preview.
+    if (email) {
+      await client
+        .query(
+          `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
+           VALUES ($1, $2, 0, 0, 0)
+           ON CONFLICT (user_id) DO NOTHING`,
+          [params.userId, email]
+        )
+        .catch(rethrowEmailCollision);
+    }
+    const found = await client.query<User>('SELECT * FROM users WHERE user_id = $1', [
+      params.userId
+    ]);
+    if (found.rows.length === 0) {
+      throw new VerifiedEmailRequiredError();
+    }
+    return found.rows[0];
+  }
 
   if (email) {
     const opened = await client

@@ -62,7 +62,12 @@ async function mint(
   expiresIn = "5m",
   claims: Record<string, unknown> = { scope: "mail:read mail:draft mail:send" }
 ): Promise<string> {
-  return new SignJWT({ sub: "auth0|user-1", email: "user@example.invalid", ...claims })
+  return new SignJWT({
+    sub: "auth0|user-1",
+    email: "user@example.invalid",
+    email_verified: true,
+    ...claims
+  })
     .setProtectedHeader({ alg: "RS256" })
     .setIssuer(issuer)
     .setAudience(audience)

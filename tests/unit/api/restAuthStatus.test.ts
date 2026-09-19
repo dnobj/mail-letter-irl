@@ -185,6 +185,20 @@ describe('restAuth failure statuses', () => {
     expect(outcome.ok ? '' : outcome.message).toBe(EMAIL_ALREADY_LINKED_MESSAGE);
   });
 
+  it('maps a database that will not answer to 503, not a rethrow', async () => {
+    // Every REST handler calls authenticateRestRequest OUTSIDE its own try, so
+    // an error escaping here is answered by the request boundary as text/plain
+    // where the dashboard has always been given JSON.
+    vi.mocked(validateJWTToken).mockResolvedValue(validUser);
+    vi.mocked(prepareAuthenticatedUser).mockRejectedValue(new Error('connection terminated'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const outcome = await authenticateRestRequest(request({ authorization: 'Bearer t' }), READ);
+
+    error.mockRestore();
+    expect(outcome).toMatchObject({ ok: false, reason: 'unavailable', status: 503 });
+  });
+
   it('reports the address the account was opened with', async () => {
     // It used to read the standard `email` claim, which Auth0 does not put on
     // an access token minted for a custom API: every route saw undefined.

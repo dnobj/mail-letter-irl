@@ -63,7 +63,14 @@ async function mint(
   claims: Record<string, unknown> = { scope: WEBSITE_SCOPE },
   expiresIn = "5m"
 ): Promise<string> {
-  return new SignJWT({ sub: "auth0|user-1", email: "user@example.invalid", ...claims })
+  // email_verified beside the address: an address the issuer will not vouch
+  // for opens no account (src/auth/verifiedEmail.ts).
+  return new SignJWT({
+    sub: "auth0|user-1",
+    email: "user@example.invalid",
+    email_verified: true,
+    ...claims
+  })
     .setProtectedHeader({ alg: "RS256" })
     .setIssuer(issuer)
     .setAudience(audience)

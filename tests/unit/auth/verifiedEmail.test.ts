@@ -9,58 +9,63 @@ import {
 /**
  * The truth table for "may an account be opened from this?".
  *
- * The rule is asymmetric and that asymmetry is the decision worth pinning: an
- * issuer saying `email_verified: false` refuses, an issuer saying nothing does
- * not. The reasoning is in the module; these are the cases it has to produce.
+ * One rule: the issuer has to SAY the address is confirmed. Silence is not
+ * confirmation, and the case below that pins it - an address claim with no
+ * verdict beside it - is exactly what the Action deployed until 2026-09-19
+ * emitted for an unconfirmed address.
  */
 
 const NONE = {} as NodeJS.ProcessEnv;
 
 describe("reading an address off a token", () => {
-  it("takes the standard claim first, and confirms it", () => {
-    expect(readEmailClaim({ email: "person@example.com" }, NONE)).toEqual({
-      address: "person@example.com",
-      verified: true
-    });
+  it("takes the standard claim first, and confirms it when the issuer does", () => {
+    expect(
+      readEmailClaim({ email: "person@example.com", email_verified: true }, NONE)
+    ).toEqual({ address: "person@example.com", verified: true });
   });
 
-  it("refuses a standard claim the issuer marks unconfirmed", () => {
+  it("does not confirm a standard claim the issuer says nothing about", () => {
+    expect(readEmailClaim({ email: "person@example.com" }, NONE)).toEqual({
+      address: "person@example.com",
+      verified: false
+    });
     expect(
-      readEmailClaim({ email: "person@example.com", email_verified: false }, NONE)
-    ).toEqual({ address: "person@example.com", verified: false });
+      readEmailClaim({ email: "person@example.com", email_verified: false }, NONE)?.verified
+    ).toBe(false);
   });
 
   it("takes the namespaced claim when the standard one is absent", () => {
-    expect(readEmailClaim({ [DEFAULT_EMAIL_CLAIM]: "person@example.com" }, NONE)).toEqual({
-      address: "person@example.com",
-      verified: true
-    });
-  });
-
-  it("believes a namespaced verdict of false over the Action's contract", () => {
     expect(
       readEmailClaim(
         {
           [DEFAULT_EMAIL_CLAIM]: "person@example.com",
-          [DEFAULT_EMAIL_VERIFIED_CLAIM]: false
+          [DEFAULT_EMAIL_VERIFIED_CLAIM]: true
         },
         NONE
       )
-    ).toEqual({ address: "person@example.com", verified: false });
+    ).toEqual({ address: "person@example.com", verified: true });
   });
 
-  it("reads a verdict that arrived as a string, and ignores one that is neither", () => {
-    // A custom claim set from a string, or a document proxied through
-    // something helpful, arrives as "false". Anything else - 0, "no", null -
-    // is not a verdict, and silence is not a refusal.
+  it("does not confirm a namespaced address with no verdict beside it", () => {
+    // THE case. The Action deployed on both tenants until 2026-09-19 set the
+    // address claim for any address, confirmed or not. Reading that silence as
+    // confirmation would let an unconfirmed sign-up take the account slot of
+    // whoever actually owns the address.
+    expect(readEmailClaim({ [DEFAULT_EMAIL_CLAIM]: "person@example.com" }, NONE)).toEqual({
+      address: "person@example.com",
+      verified: false
+    });
+  });
+
+  it("reads a verdict that arrived as a string, and confirms on nothing else", () => {
     const claims = (value: unknown) => ({
       [DEFAULT_EMAIL_CLAIM]: "person@example.com",
       [DEFAULT_EMAIL_VERIFIED_CLAIM]: value
     });
-    expect(readEmailClaim(claims("false"), NONE)?.verified).toBe(false);
     expect(readEmailClaim(claims("true"), NONE)?.verified).toBe(true);
-    expect(readEmailClaim(claims(0), NONE)?.verified).toBe(true);
-    expect(readEmailClaim(claims(null), NONE)?.verified).toBe(true);
+    for (const almost of ["false", "yes", "1", 1, 0, null, undefined, {}]) {
+      expect(readEmailClaim(claims(almost), NONE)?.verified, String(almost)).toBe(false);
+    }
   });
 
   it("honours a configured namespace for both claims", () => {
@@ -76,11 +81,22 @@ describe("reading an address off a token", () => {
       readEmailClaim(
         {
           "https://dev.example/email": "person@example.com",
-          "https://dev.example/email_verified": false
+          "https://dev.example/email_verified": true
         },
         env
       )
-    ).toEqual({ address: "person@example.com", verified: false });
+    ).toEqual({ address: "person@example.com", verified: true });
+    // A verdict left under the DEFAULT key while the address moved is not a
+    // verdict about this address.
+    expect(
+      readEmailClaim(
+        {
+          "https://dev.example/email": "person@example.com",
+          [DEFAULT_EMAIL_VERIFIED_CLAIM]: true
+        },
+        env
+      )?.verified
+    ).toBe(false);
   });
 
   it("finds nothing in a token that carries nothing, or only blank space", () => {
@@ -90,9 +106,9 @@ describe("reading an address off a token", () => {
   });
 
   it("trims what it does find, so no address is stored with an edge of space", () => {
-    expect(readEmailClaim({ email: "  person@example.com  " }, NONE)?.address).toBe(
-      "person@example.com"
-    );
+    expect(
+      readEmailClaim({ email: "  person@example.com  ", email_verified: true }, NONE)?.address
+    ).toBe("person@example.com");
   });
 });
 
@@ -106,6 +122,7 @@ describe("reading a userinfo document", () => {
       address: "person@example.com",
       verified: false
     });
+    expect(readUserInfoEmail({ email: "person@example.com" })?.verified).toBe(false);
   });
 
   it("survives a document that is not one", () => {

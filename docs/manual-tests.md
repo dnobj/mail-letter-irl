@@ -1561,6 +1561,12 @@ production before anyone but the owner signs in there.
 `link-verified-email` **above** the email-claim Action; the API is deployed and
 `/readyz` is green; the connector has been refreshed.
 
+**Do the row-holder check first.** List the tenant's Auth0 users grouped by
+confirmed address; for every group of more than one, the oldest must be the one
+holding the `users` row, or hold no row. Otherwise linking hands the surviving
+subject an account it cannot reach - see
+[auth0-tenant-configuration.md](auth0-tenant-configuration.md).
+
 1. [ ] Sign in to the website with Google. Note the balance and the letter
        count.
 2. [ ] Sign out, then sign in with a password on the same confirmed address.
@@ -1580,10 +1586,14 @@ production before anyone but the owner signs in there.
 9. [ ] Gift rules still hold across the linked methods: a code printed on your
        own letter is refused whichever method you sign in with.
 10. [ ] A token with no confirmed address gets the sentence, not a broken
-       account: every tool answers "Letter IRL needs a confirmed email
-       address...", and the dashboard answers 403 with the same text. (Simulate
-       by removing the email-claim Action from the flow on development only,
-       with a fresh subject, then put it back.)
+       account. Simulate on development with an **unconfirmed** password
+       sign-up while the linking Action is out of the flow: the claim Action
+       then sets nothing and `/userinfo` reports `email_verified: false`, so
+       both surfaces refuse. Every tool answers "Letter IRL needs a confirmed
+       email address...", and the dashboard answers 403 with the same text.
+       (Removing the claim Action alone does not test this on the website: its
+       token carries `openid`, so `/userinfo` answers and the account opens.
+       A ChatGPT token has no `openid` and would be refused.)
 
 ---
 

@@ -804,6 +804,11 @@ export async function registerLetterTools(
   // registration, which reaches ChatGPT as "this connector is broken", and
   // swallowing it (what this did until 2026-09-19) left every tool to fail
   // separately on a foreign key naming whichever table it reached first.
+  //
+  // This server is built per request on the streamable HTTP transport, so the
+  // refusal is re-evaluated on every call there. On the legacy SSE transport
+  // one server serves the whole stream, so a customer who confirms their
+  // address mid-session has to reconnect before it clears.
   let accountRefusal: VerifiedEmailRequiredError | EmailAlreadyLinkedError | null = null;
   if (authInfo) {
     try {
@@ -813,11 +818,16 @@ export async function registerLetterTools(
         error instanceof VerifiedEmailRequiredError ||
         error instanceof EmailAlreadyLinkedError
       ) {
+        // Already reported, by name, where it was decided. Logging it again
+        // here would classify it as `database_error` - it carries no pg code -
+        // and make a refused customer look like a database outage on every
+        // request they make.
         accountRefusal = error;
+      } else {
+        writeDiagnostic("error", "auth.user_preparation_failed", {
+          errorClass: classifyDiagnosticError(error, "database_error")
+        });
       }
-      writeDiagnostic("error", "auth.user_preparation_failed", {
-        errorClass: classifyDiagnosticError(error, "database_error")
-      });
     }
   }
 

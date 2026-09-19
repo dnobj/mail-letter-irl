@@ -178,6 +178,38 @@ describePostgres('one account per address', () => {
     });
   });
 
+  describe('a write that adds no credits', () => {
+    it('leaves updated_at where it was, so an operator preview does not go stale', async () => {
+      // A gift redemption adds nothing to the balance; it only needs the row
+      // to exist. users.updated_at is the admin panel's optimistic version, so
+      // writing the row anyway would stale an operator's open preview on every
+      // redemption. This is the statement origin/dev ran, preserved.
+      const email = address();
+      const userId = await seedAccount(email);
+      const before = await pool.query('SELECT updated_at FROM users WHERE user_id = $1', [userId]);
+
+      const row = await db.transaction(client =>
+        users.ensureAccountRowWithClient(client, { userId, email })
+      );
+
+      const after = await pool.query('SELECT updated_at FROM users WHERE user_id = $1', [userId]);
+      expect(row.user_id).toBe(userId);
+      expect(after.rows[0].updated_at).toEqual(before.rows[0].updated_at);
+    });
+
+    it('still opens the account when it carries an address and there is no row', async () => {
+      const userId = subject('gift-first');
+      const email = address();
+
+      const row = await db.transaction(client =>
+        users.ensureAccountRowWithClient(client, { userId, email })
+      );
+
+      expect(row.email).toBe(email);
+      expect(row.credits).toBe(0);
+    });
+  });
+
   describe('an account that does exist', () => {
     it('is credited by a grant that carries no address, and keeps the address it has', async () => {
       // A Stripe webhook and an operator adjustment both land here with no

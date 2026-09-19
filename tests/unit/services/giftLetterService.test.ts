@@ -200,6 +200,7 @@ describe('redeemChainCode', () => {
 
   it('grants one gift letter with the code budget and marks the code redeemed', async () => {
     on('FROM gift_codes gc', [code({ grants_generations_remaining: 2 })]);
+    on('SELECT * FROM users WHERE user_id = $1', [{ user_id: 'recipient-1' }]);
     on('FOR UPDATE', [code({ grants_generations_remaining: 2 })]);
     on('INSERT INTO gift_letters', params => [gift({ user_id: params[0], generations_remaining: params[1] })]);
     const result = await redeemChainCode({ userId: 'recipient-1', email: 'grandma@example.com', rawCode: 'k7m2-qx9a' });
@@ -239,7 +240,7 @@ describe('redeemChainCode', () => {
 
   it('re-checks under the lock: a code redeemed between the read and the lock is refused', async () => {
     on('FROM gift_codes gc', [code()]);
-    on('UPDATE users', [{ user_id: 'r' }]);
+    on('SELECT * FROM users WHERE user_id = $1', [{ user_id: 'r' }]);
     on('FOR UPDATE', [code({ status: 'redeemed' })]);
     expect(await redeemChainCode({ userId: 'r', rawCode: 'K7M2QX9A' })).toMatchObject({ success: false, reason: 'redeemed' });
     expect(ran('INSERT INTO gift_letters')).toHaveLength(0);

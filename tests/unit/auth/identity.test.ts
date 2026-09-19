@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { prepareAuthenticatedUser } from "../../../src/auth/identity.js";
 import { VerifiedEmailRequiredError } from "../../../src/auth/verifiedEmail.js";
+import { EmailAlreadyLinkedError } from "../../../src/services/userService.js";
 import { AuthenticatedUser } from "../../../src/auth/tokenValidator.js";
 
 function user(authType: "jwt" | "pat"): AuthenticatedUser {
@@ -38,7 +39,7 @@ describe("authenticated identity handling", () => {
     const fetchUserInfo = vi.fn();
     const upsertUser = vi.fn();
     await prepareAuthenticatedUser(
-      { ...user("jwt"), claims: { email: "verified@example.com" } },
+      { ...user("jwt"), claims: { email: "verified@example.com", email_verified: true } },
       {
         fetchUserInfo,
         findExistingUser: vi.fn().mockResolvedValue(null),
@@ -127,13 +128,14 @@ describe("the namespaced email claim", () => {
   // not a hypothetical: it was deployed against production, looked like a
   // fix, and the next tool call failed the same foreign key as before.
   const NS = "https://letterirl.com/email";
+  const NS_VERIFIED = "https://letterirl.com/email_verified";
 
   it("provisions from the namespaced claim without calling userinfo", async () => {
     const fetchUserInfo = vi.fn();
     const upsertUser = vi.fn();
 
     await prepareAuthenticatedUser(
-      { ...user("jwt"), claims: { [NS]: "namespaced@example.com" } },
+      { ...user("jwt"), claims: { [NS]: "namespaced@example.com", [NS_VERIFIED]: true } },
       { fetchUserInfo, findExistingUser: vi.fn().mockResolvedValue(null), upsertUser },
       {} as NodeJS.ProcessEnv
     );
@@ -150,7 +152,12 @@ describe("the namespaced email claim", () => {
     await prepareAuthenticatedUser(
       {
         ...user("jwt"),
-        claims: { email: "standard@example.com", [NS]: "namespaced@example.com" }
+        claims: {
+          email: "standard@example.com",
+          email_verified: true,
+          [NS]: "namespaced@example.com",
+          [NS_VERIFIED]: true
+        }
       },
       { fetchUserInfo: vi.fn(), findExistingUser: vi.fn().mockResolvedValue(null), upsertUser },
       {} as NodeJS.ProcessEnv
@@ -165,9 +172,18 @@ describe("the namespaced email claim", () => {
     const upsertUser = vi.fn();
 
     await prepareAuthenticatedUser(
-      { ...user("jwt"), claims: { "https://dev.example/email": "dev@example.com" } },
+      {
+        ...user("jwt"),
+        claims: {
+          "https://dev.example/email": "dev@example.com",
+          "https://dev.example/email_verified": true
+        }
+      },
       { fetchUserInfo: vi.fn(), findExistingUser: vi.fn().mockResolvedValue(null), upsertUser },
-      { LETTER_IRL_OAUTH_EMAIL_CLAIM: "https://dev.example/email" } as NodeJS.ProcessEnv
+      {
+        LETTER_IRL_OAUTH_EMAIL_CLAIM: "https://dev.example/email",
+        LETTER_IRL_OAUTH_EMAIL_VERIFIED_CLAIM: "https://dev.example/email_verified"
+      } as NodeJS.ProcessEnv
     );
 
     expect(upsertUser).toHaveBeenCalledWith("user-1", "dev@example.com");
@@ -201,7 +217,7 @@ describe("the namespaced email claim", () => {
       {
         fetchUserInfo: vi.fn().mockResolvedValue({
           ok: true,
-          json: async () => ({ email: "fallback@example.com" })
+          json: async () => ({ email: "fallback@example.com", email_verified: true })
         }),
         findExistingUser: vi.fn().mockResolvedValue(null),
         upsertUser
@@ -280,12 +296,67 @@ describe("an address the issuer will not vouch for", () => {
     expect(email).toBe("known@example.com");
   });
 
+  it("keeps an existing account whose confirmed address another subject holds", async () => {
+    // The linking Action has not joined these two identities yet - or there is
+    // a leftover row on that address from before this change. Either way the
+    // person in front of us HAS an account, with credits and letters in it.
+    // Refusing would lock them out of it over a conflict they cannot see.
+    const upsertUser = vi.fn().mockRejectedValue(new EmailAlreadyLinkedError());
+
+    const email = await prepareAuthenticatedUser(
+      { ...user("jwt"), claims: { [NS]: "shared@example.com", [NS_VERIFIED]: true } },
+      {
+        fetchUserInfo: vi.fn(),
+        findExistingUser: vi.fn().mockResolvedValue({ email: "mine@example.com" }),
+        upsertUser
+      },
+      {} as NodeJS.ProcessEnv
+    );
+
+    expect(email).toBe("mine@example.com");
+  });
+
+  it("refuses a caller with no account when the address is another subject's", async () => {
+    // Same collision, no account of their own: this one IS the refusal, and it
+    // is 409 rather than 403 because only an operator can join the two.
+    await expect(
+      prepareAuthenticatedUser(
+        { ...user("jwt"), claims: { [NS]: "shared@example.com", [NS_VERIFIED]: true } },
+        {
+          fetchUserInfo: vi.fn(),
+          findExistingUser: vi.fn().mockResolvedValue(null),
+          upsertUser: vi.fn().mockRejectedValue(new EmailAlreadyLinkedError())
+        },
+        {} as NodeJS.ProcessEnv
+      )
+    ).rejects.toBeInstanceOf(EmailAlreadyLinkedError);
+  });
+
+  it("asks Auth0 nothing when the account already exists", async () => {
+    // /userinfo is rate-limited per user (burst 10, 5 a minute) and sits in
+    // front of every REST request. An existing account needs nothing from it.
+    const fetchUserInfo = vi.fn();
+
+    const email = await prepareAuthenticatedUser(
+      user("jwt"),
+      {
+        fetchUserInfo,
+        findExistingUser: vi.fn().mockResolvedValue({ email: "known@example.com" }),
+        upsertUser: vi.fn()
+      },
+      { LETTER_IRL_OAUTH_ISSUER: "https://tenant.example.com/" } as NodeJS.ProcessEnv
+    );
+
+    expect(email).toBe("known@example.com");
+    expect(fetchUserInfo).not.toHaveBeenCalled();
+  });
+
   it("hands the confirmed address back to its caller", async () => {
     // The REST middleware used to read the standard `email` claim alone, which
     // Auth0 does not put on an access token minted for a custom API, so every
     // route saw `email: undefined`. It takes this return value now.
     const email = await prepareAuthenticatedUser(
-      { ...user("jwt"), claims: { [NS]: "confirmed@example.com" } },
+      { ...user("jwt"), claims: { [NS]: "confirmed@example.com", [NS_VERIFIED]: true } },
       {
         fetchUserInfo: vi.fn(),
         findExistingUser: vi.fn().mockResolvedValue(null),

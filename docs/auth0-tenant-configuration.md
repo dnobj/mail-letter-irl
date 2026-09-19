@@ -420,8 +420,15 @@ address - and `users.email` is `NOT NULL UNIQUE`, so the second one collides,
 is refused, and that person has no account. This Action makes the address the
 identity by joining the identities behind it.
 
-It must run **before** the email-claim Action, so the claim carries the
-surviving account's address. Drag it above in the Post Login trigger flow.
+Put it **above** the email-claim Action in the Post Login trigger flow. Not
+because the claim's value depends on it - both identities carry the same
+address by construction, since the Action looks up by `event.user.email` - but
+because a login this Action denies should be denied before anything else runs.
+
+The ordering that IS load-bearing is inside the Action: the Management API
+link must happen **before** `setPrimaryUser`, which requires the identity that
+authenticated this login to already be a secondary of the primary user. The
+code below does them in that order.
 
 ```javascript
 const { ManagementClient } = require("auth0");
@@ -480,7 +487,11 @@ exactly `read:users` and `update:users` - nothing else, because nothing else is
 needed and this secret lives in an Action. Put the domain, client id and secret
 in the Action's own **Secrets**, never in a repository or an env file.
 
-It also needs the `auth0` npm module added under the Action's **Dependencies**.
+It also needs the `auth0` npm module added under the Action's
+**Dependencies**; the code above is written against v4 (`usersByEmail.getByEmail`
+returning `{ data }`, `users.link({ id }, { provider, user_id })`). Pin the
+version you deploy and note it here, because an Action that throws denies every
+login on the tenant.
 
 **Confirm the connection sends the email.** Authentication -> Database ->
 `Username-Password-Authentication` -> **Requires Username** / email settings,
@@ -489,8 +500,24 @@ the deny above locks every new password account out permanently.
 
 **What linking does not join.** An Apple sign-in that hides the address behind
 a private relay address carries a different address, so it stays a different
-account, as documented in `docs/account-switching-guide.md`. Accounts opened
-before this Action existed are merged by an operator, not by it.
+account, as documented in `docs/account-switching-guide.md`.
+
+**Before enabling this on a tenant, check who holds the row.** The Action makes
+the OLDEST Auth0 user primary, and that is independent of which subject holds
+the Letter IRL `users` row - the REST layer opened no account row at all until
+2026-09-19, so a person whose first visit was the website has an old Auth0 user
+with no row, and their later ChatGPT identity holds the row with the credits in
+it. Link those two and the surviving primary subject arrives with no row,
+presents an address the other subject still holds, and is answered 409 - with
+no way back, because the secondary identity can no longer sign in on its own.
+
+So, per tenant, before the Action goes into the flow: list the Auth0 users
+grouped by confirmed address and, for every group of more than one, confirm the
+OLDEST is the one holding the `users` row (or that no row exists yet). Where it
+is not, the two have to be joined first - which is what the operator
+`account.merge` command is for. `users.user_id` cannot simply be updated: every
+foreign key to it is `ON DELETE CASCADE` with no `ON UPDATE` action, so the
+child rows have to move in the same transaction.
 
 **After anyone is linked, check the subject lists.**
 `LETTER_IRL_BETA_ALLOWED_SUBJECTS` and `LETTER_IRL_ADMIN_USER_IDS` name
