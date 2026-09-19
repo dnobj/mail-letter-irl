@@ -102,6 +102,35 @@ describe("a tool call from a caller with no account", () => {
     expect(result.content[0].text).not.toContain("token");
   });
 
+  it("does not also report itself as a database failure", async () => {
+    // Neither refusal carries a pg code, so classifyDiagnosticError calls both
+    // `database_error`. Logging the refusal a second time here - it is already
+    // reported by name where it was decided - made a refused customer look
+    // like a database outage on every request they made.
+    const logged: string[] = [];
+    const error = vi.spyOn(console, "error").mockImplementation(value => {
+      logged.push(String(value));
+    });
+
+    await registerWithRefusal(new VerifiedEmailRequiredError());
+
+    error.mockRestore();
+    expect(logged.filter(line => line.includes("auth.user_preparation_failed"))).toEqual([]);
+  });
+
+  it("still reports a failure that is not a refusal", async () => {
+    // Guards the assertion above: the log must not have been dropped outright.
+    const logged: string[] = [];
+    const error = vi.spyOn(console, "error").mockImplementation(value => {
+      logged.push(String(value));
+    });
+
+    await registerWithRefusal(new Error("connection terminated"));
+
+    error.mockRestore();
+    expect(logged.some(line => line.includes("auth.user_preparation_failed"))).toBe(true);
+  });
+
   it("lets an ordinary call through when the account is fine", async () => {
     // Guards the assertions above: the refusal must not be the default.
     const { handlers, appServer } = await registerWithRefusal(null);

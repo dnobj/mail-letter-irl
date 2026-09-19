@@ -245,6 +245,35 @@ describePostgres('one account per address', () => {
       expect(result.user.credits_purchased).toBe(4);
     });
 
+    it('moves the lifetime purchased total only for a purchase', async () => {
+      // The promo path credits the balance and leaves credits_purchased where
+      // it is; the credit grants move both. One helper serves all three call
+      // sites now, so the distinction has to be proven rather than assumed -
+      // and only a real database shows what each statement actually wrote.
+      const email = address();
+      const userId = await seedAccount(email, 3);
+
+      await db.transaction(client =>
+        users.ensureAccountRowWithClient(client, { userId, credits: 5 })
+      );
+
+      const promoOnly = await pool.query(
+        'SELECT credits, credits_purchased FROM users WHERE user_id = $1',
+        [userId]
+      );
+      expect(promoOnly.rows[0]).toEqual({ credits: 8, credits_purchased: 3 });
+
+      await db.transaction(client =>
+        users.ensureAccountRowWithClient(client, { userId, credits: 2, countAsPurchased: true })
+      );
+
+      const afterPurchase = await pool.query(
+        'SELECT credits, credits_purchased FROM users WHERE user_id = $1',
+        [userId]
+      );
+      expect(afterPurchase.rows[0]).toEqual({ credits: 10, credits_purchased: 5 });
+    });
+
     it('refuses a grant carrying an address another subject holds', async () => {
       const email = address();
       await seedAccount(email);
