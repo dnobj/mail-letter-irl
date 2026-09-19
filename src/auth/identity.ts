@@ -25,13 +25,17 @@ export { DEFAULT_EMAIL_CLAIM } from "./verifiedEmail.js";
 /**
  * What `/userinfo` says, when the token itself says nothing.
  *
- * Consulted only for a caller with no account yet: it is a network call on the
- * authentication path, Auth0 rate-limits it per user (burst 10, 5/minute
- * sustained), and a REST page load makes several requests. An existing account
- * needs nothing from it, so it never pays for it.
+ * Consulted only for a caller with no account yet, and only when the token
+ * gave no verdict: it is a network call on the authentication path, Auth0
+ * rate-limits it per user (burst 10, 5/minute sustained), and a REST page load
+ * makes several requests. An existing account needs nothing from it, and an
+ * issuer that already said "not confirmed" has nothing left to add.
  *
- * It is also the only place a tenant whose Action has not been updated can
- * still state whether an address is confirmed.
+ * What it is for: a token minted before a tenant's Action was updated carries
+ * an address with no verdict beside it. Asking here is what lets a customer
+ * whose address IS confirmed open an account during that window, instead of
+ * being told to confirm an address they confirmed long ago - for the 24 hours
+ * their token lives.
  */
 async function askUserInfo(
   authInfo: AuthenticatedUser,
@@ -86,7 +90,7 @@ export async function prepareAuthenticatedUser(
 ): Promise<string | null> {
   let claim = readEmailClaim(authInfo.claims, env);
 
-  if (claim?.verified) {
+  if (claim?.verdict === true) {
     try {
       // The stored address is this one once the upsert returns: getOrCreateUser
       // creates with it or updates to it.
@@ -109,7 +113,7 @@ export async function prepareAuthenticatedUser(
 
   const existingUser = await dependencies.findExistingUser(authInfo.userId);
   if (existingUser) {
-    if (claim) {
+    if (claim?.verdict === false) {
       writeDiagnostic("warn", "auth.email_unconfirmed_not_stored", {
         authType: authInfo.authType
       });
@@ -117,12 +121,12 @@ export async function prepareAuthenticatedUser(
     return existingUser.email;
   }
 
-  // No account, and the token said nothing useful. One network call, for the
-  // one case that can still be answered: a tenant whose Action does not set
-  // the claims.
-  if (!claim) {
-    claim = await askUserInfo(authInfo, dependencies, env);
-    if (claim?.verified) {
+  // No account, and no verdict to go on. One network call, to the issuer that
+  // would have set the claim: this is the whole of the rollout window, where
+  // the token predates the Action that states the verdict.
+  if (!claim || claim.verdict === null) {
+    claim = (await askUserInfo(authInfo, dependencies, env)) ?? claim;
+    if (claim?.verdict === true) {
       await dependencies.upsertUser(authInfo.userId, claim.address);
       return claim.address;
     }
@@ -145,7 +149,12 @@ export async function prepareAuthenticatedUser(
   // its name and its level: it is the same state, now reported rather than
   // merely survived.
   writeDiagnostic("error", "auth.account_missing_no_verified_email", {
-    reason: claim ? "email_unconfirmed" : "verified_email_unavailable",
+    reason:
+      claim?.verdict === false
+        ? "email_unconfirmed"
+        : claim
+          ? "email_verdict_unavailable"
+          : "verified_email_unavailable",
     consequence: "account_not_opened",
     authType: authInfo.authType
   });

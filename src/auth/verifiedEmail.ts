@@ -67,31 +67,36 @@ export const DEFAULT_EMAIL_CLAIM = "https://letterirl.com/email";
 /**
  * Where the same Action states whether that address is confirmed.
  *
- * **Silence is not confirmation.** An address opens an account only when the
- * issuer says, in so many words, that it has been confirmed. Absent, null,
- * "yes", 1 - none of those is a verdict, and none of them opens an account.
+ * **Silence is not confirmation, and it is not a refusal either.** The verdict
+ * has three values, and the third one is the useful one:
  *
- * An earlier draft of this file trusted silence, on the argument that the
- * Action only ever sets the address claim for a confirmed address and that
- * refusing on silence risked an outage while a tenant was mid-update. Both
- * halves were wrong. The Action deployed on both tenants until 2026-09-19 set
- * the claim for ANY address, confirmed or not, so silence from it meant
- * nothing - and trusting it would let an unconfirmed sign-up take the account
- * slot of the address's real owner, which is the one thing this whole change
- * exists to prevent. And the outage it was meant to avoid does not exist:
- * an account that ALREADY exists is never refused (see identity.ts), so a
- * tenant mid-update keeps every customer it has and only stops opening new
- * accounts - which is the documented prerequisite anyway.
+ *   - `true`  - the issuer says the address is confirmed. An account opens.
+ *   - `false` - the issuer says it is not. Refused, with no further questions.
+ *   - `null`  - the issuer did not say. Nothing is assumed; identity.ts asks
+ *               `/userinfo`, which is the same issuer, answering directly.
  *
- * Refusing costs a new customer a sentence telling them to confirm their
- * address. Trusting silence costs the wrong person an account.
+ * An earlier draft trusted silence, on the argument that the Action only ever
+ * sets the address claim for a confirmed address. That was wrong: the Action
+ * deployed on both tenants until 2026-09-19 set the claim for ANY address,
+ * confirmed or not, so silence from it meant nothing - and trusting it would
+ * let an unconfirmed sign-up take the account slot of the address's real
+ * owner, which is the one thing this whole change exists to prevent.
+ *
+ * The draft after that collapsed `null` into `false`, and refused every new
+ * customer on a tenant whose Action had not been updated yet - including the
+ * ones whose address was confirmed - telling them to confirm an address they
+ * had already confirmed. Tokens live 24 hours, so that outlives the Action
+ * update itself.
+ *
+ * Three values, because the two questions are different: "did the issuer
+ * vouch for this?" and "will it, if asked?".
  */
 export const DEFAULT_EMAIL_VERIFIED_CLAIM = "https://letterirl.com/email_verified";
 
 export interface EmailClaim {
   address: string;
-  /** Whether the issuer says the address has been confirmed. */
-  verified: boolean;
+  /** true confirmed, false refused, null the issuer did not say. */
+  verdict: boolean | null;
 }
 
 function readString(value: unknown): string | null {
@@ -102,19 +107,21 @@ function readString(value: unknown): string | null {
  * Auth0 writes `email_verified` as a boolean, but a custom claim set from a
  * string, and a userinfo document proxied through something helpful, can both
  * arrive as "true". Anything else - absent, null, "1", 1, "yes" - is not a
- * yes, and this returns false for all of them.
+ * verdict at all, and becomes null rather than a refusal.
  */
-function isConfirmed(value: unknown): boolean {
-  return value === true || value === "true";
+function readVerdict(value: unknown): boolean | null {
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  return null;
 }
 
 /**
- * The address this token carries, and whether it is confirmed.
+ * The address this token carries, and the issuer's verdict on it.
  *
  * Order matters. The standard `email` claim comes first: if Auth0 ever does
  * put one on an access token minted for a custom API, that is the one to
  * believe and no Action is needed at all. The namespaced claim is ours. Each
- * needs its own confirmation beside it, under the rule above.
+ * carries its own verdict, read under the three-valued rule above.
  */
 export function readEmailClaim(
   claims: AuthenticatedUser["claims"],
@@ -124,7 +131,7 @@ export function readEmailClaim(
 
   const standard = readString(bag.email);
   if (standard) {
-    return { address: standard, verified: isConfirmed(bag.email_verified) };
+    return { address: standard, verdict: readVerdict(bag.email_verified) };
   }
 
   const namespaced = readString(bag[env.LETTER_IRL_OAUTH_EMAIL_CLAIM ?? DEFAULT_EMAIL_CLAIM]);
@@ -132,7 +139,7 @@ export function readEmailClaim(
 
   return {
     address: namespaced,
-    verified: isConfirmed(
+    verdict: readVerdict(
       bag[env.LETTER_IRL_OAUTH_EMAIL_VERIFIED_CLAIM ?? DEFAULT_EMAIL_VERIFIED_CLAIM]
     )
   };
@@ -144,5 +151,7 @@ export function readUserInfoEmail(document: unknown): EmailClaim | null {
   const bag = document as Record<string, unknown>;
   const address = readString(bag.email);
   if (!address) return null;
-  return { address, verified: isConfirmed(bag.email_verified) };
+  // Asked directly, and answering nothing is its own answer: this is the
+  // issuer speaking, not a claim shape that might predate an Action update.
+  return { address, verdict: readVerdict(bag.email_verified) };
 }

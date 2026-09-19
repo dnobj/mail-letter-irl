@@ -296,6 +296,69 @@ describe("an address the issuer will not vouch for", () => {
     expect(email).toBe("known@example.com");
   });
 
+  it("asks the issuer when the token carries an address but no verdict", async () => {
+    // The rollout window. A token minted before the tenant's Action was
+    // updated carries the address and says nothing about it, and those tokens
+    // live 24 hours. Treating that as a refusal told customers whose address
+    // was confirmed long ago to go and confirm it.
+    const upsertUser = vi.fn();
+    const fetchUserInfo = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ email: "confirmed@example.com", email_verified: true })
+    });
+
+    const email = await prepareAuthenticatedUser(
+      { ...user("jwt"), claims: { [NS]: "confirmed@example.com" } },
+      { fetchUserInfo, findExistingUser: vi.fn().mockResolvedValue(null), upsertUser },
+      { LETTER_IRL_OAUTH_ISSUER: "https://tenant.example.com/" } as NodeJS.ProcessEnv
+    );
+
+    expect(fetchUserInfo).toHaveBeenCalledOnce();
+    expect(upsertUser).toHaveBeenCalledWith("user-1", "confirmed@example.com");
+    expect(email).toBe("confirmed@example.com");
+  });
+
+  it("refuses when the issuer, asked directly, says the address is not confirmed", async () => {
+    const upsertUser = vi.fn();
+
+    await expect(
+      prepareAuthenticatedUser(
+        { ...user("jwt"), claims: { [NS]: "unconfirmed@example.com" } },
+        {
+          fetchUserInfo: vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ email: "unconfirmed@example.com", email_verified: false })
+          }),
+          findExistingUser: vi.fn().mockResolvedValue(null),
+          upsertUser
+        },
+        { LETTER_IRL_OAUTH_ISSUER: "https://tenant.example.com/" } as NodeJS.ProcessEnv
+      )
+    ).rejects.toBeInstanceOf(VerifiedEmailRequiredError);
+
+    expect(upsertUser).not.toHaveBeenCalled();
+  });
+
+  it("asks nobody when the token's own verdict is a refusal", async () => {
+    // An issuer that has already said "not confirmed" has nothing to add, and
+    // the network call is on the authentication path.
+    const fetchUserInfo = vi.fn();
+
+    await expect(
+      prepareAuthenticatedUser(
+        { ...user("jwt"), claims: { [NS]: "unconfirmed@example.com", [NS_VERIFIED]: false } },
+        {
+          fetchUserInfo,
+          findExistingUser: vi.fn().mockResolvedValue(null),
+          upsertUser: vi.fn()
+        },
+        { LETTER_IRL_OAUTH_ISSUER: "https://tenant.example.com/" } as NodeJS.ProcessEnv
+      )
+    ).rejects.toBeInstanceOf(VerifiedEmailRequiredError);
+
+    expect(fetchUserInfo).not.toHaveBeenCalled();
+  });
+
   it("keeps an existing account whose confirmed address another subject holds", async () => {
     // The linking Action has not joined these two identities yet - or there is
     // a leftover row on that address from before this change. Either way the

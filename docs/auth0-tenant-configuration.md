@@ -387,12 +387,19 @@ exports.onExecutePostLogin = async (event, api) => {
 };
 ```
 
-**Only a confirmed address.** The address is what a Letter IRL account is, and
-what the linking Action below joins identities on, so an unconfirmed one must
-not reach either. The server treats the address claim as confirmed unless a
-verdict claim beside it says otherwise (`src/auth/verifiedEmail.ts`), which is
-only safe while this Action holds to that: set the claim for a confirmed
-address, or set neither.
+**Only a confirmed address, and always both claims.** The address is what a
+Letter IRL account is, and what the linking Action below joins identities on,
+so an unconfirmed one must not reach either.
+
+The server opens an account only when the verdict claim is exactly `true` (the
+boolean, or the string). An address claim with **no** verdict beside it opens
+nothing on its own: the server asks `/userinfo` instead, which is what carries
+a customer whose address is confirmed through the window where their token was
+minted before this Action was updated. An address claim with `false` beside it
+is refused outright. See `src/auth/verifiedEmail.ts`, which has the reasoning.
+
+So: set both claims, or set neither. Setting the address alone costs every new
+customer a `/userinfo` round trip that Auth0 rate-limits per user.
 
 **The namespace is load-bearing.** Auth0 silently drops a non-namespaced custom
 claim that collides with a reserved OIDC name, and `email` is reserved - the
@@ -511,13 +518,37 @@ it. Link those two and the surviving primary subject arrives with no row,
 presents an address the other subject still holds, and is answered 409 - with
 no way back, because the secondary identity can no longer sign in on its own.
 
-So, per tenant, before the Action goes into the flow: list the Auth0 users
-grouped by confirmed address and, for every group of more than one, confirm the
-OLDEST is the one holding the `users` row (or that no row exists yet). Where it
-is not, the two have to be joined first - which is what the operator
-`account.merge` command is for. `users.user_id` cannot simply be updated: every
-foreign key to it is `ON DELETE CASCADE` with no `ON UPDATE` action, so the
-child rows have to move in the same transaction.
+So, per tenant, before the Action goes into the flow:
+
+1. Page `GET /api/v2/users` and group the confirmed addresses yourself - the
+   Management API has no group-by. For every address held by more than one
+   Auth0 user, note the oldest by `created_at`.
+2. For each of those, ask the database which subject holds the row:
+   `SELECT user_id FROM users WHERE lower(email) = lower($1)`. The oldest Auth0
+   user must be that subject, or the address must have no row at all.
+3. Where it is not, the two accounts have to be joined **before** the Action is
+   enabled. There is no tool for this yet - the operator `account.merge`
+   command is planned, not built - so today it is SQL, by hand, in one
+   transaction, and it is not simply `UPDATE users SET user_id`:
+
+   - 13 child tables reference `users(user_id)` `ON DELETE CASCADE` and must be
+     re-pointed (`letters`, `orders`, `letter_drafts`, `credit_ledger`,
+     `credit_transactions`, `promo_redemptions`, `personal_access_tokens`,
+     `feature_requests`, `recent_uploads`, `image_entitlements`,
+     `image_generation_reservations`, `gift_letters`,
+     `gift_codes.issued_to_user_id`);
+   - `commerce_pack_refunds` is `ON DELETE RESTRICT`, so the old row cannot be
+     deleted until that one moves;
+   - `stripe_disputes` and `gift_codes.redeemed_by_user_id` are
+     `ON DELETE SET NULL`, so deleting the old row without moving them first
+     silently detaches dispute and redemption history rather than failing;
+   - `promo_redemptions` is unique per campaign and user, and `recent_uploads`
+     is keyed on the user, so a collision there is a decision, not a move.
+
+4. The check is a snapshot. A row opened under the younger subject between the
+   check and the Action going live recreates the hazard, so re-run step 2
+   immediately before enabling it - or keep new accounts out in between, which
+   on production is what `LETTER_IRL_BETA_ALLOWED_SUBJECTS` already does.
 
 **After anyone is linked, check the subject lists.**
 `LETTER_IRL_BETA_ALLOWED_SUBJECTS` and `LETTER_IRL_ADMIN_USER_IDS` name

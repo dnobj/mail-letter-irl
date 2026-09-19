@@ -1561,10 +1561,12 @@ production before anyone but the owner signs in there.
 `link-verified-email` **above** the email-claim Action; the API is deployed and
 `/readyz` is green; the connector has been refreshed.
 
-**Do the row-holder check first.** List the tenant's Auth0 users grouped by
-confirmed address; for every group of more than one, the oldest must be the one
-holding the `users` row, or hold no row. Otherwise linking hands the surviving
-subject an account it cannot reach - see
+**Do the row-holder check first, and immediately before enabling the Action.**
+For every confirmed address held by more than one Auth0 user, the oldest must
+be the subject holding the `users` row, or the address must have no row.
+Otherwise linking hands the surviving subject an account it cannot reach, with
+no way back. The procedure, and the hand-written SQL that is today's only
+remedy when a pair does not match, are in
 [auth0-tenant-configuration.md](auth0-tenant-configuration.md).
 
 1. [ ] Sign in to the website with Google. Note the balance and the letter

@@ -112,11 +112,20 @@ export async function getUserByEmail(email: string): Promise<User | null> {
 export async function createUser(params: CreateUserParams): Promise<User> {
   const { userId, email } = params;
 
+  // DO NOTHING, because a first arrival is not one request. Authentication
+  // opens the account row, and a dashboard load authenticates several times at
+  // once: a plain INSERT hands every request but one a 23505 on users_pkey,
+  // which is not the email collision below and so reached the customer as
+  // "the account could not be read" on most of the page.
+  //
+  // It conflicts on the primary key only, so an address another subject holds
+  // still raises, and is still named.
   let result;
   try {
     result = await query<User>(
       `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
        VALUES ($1, $2, 0, 0, 0)
+       ON CONFLICT (user_id) DO NOTHING
        RETURNING *`,
       [userId, email]
     );
@@ -124,8 +133,17 @@ export async function createUser(params: CreateUserParams): Promise<User> {
     rethrowEmailCollision(error);
   }
 
-  writeDiagnostic('info', 'identity.user_created');
-  return result.rows[0];
+  if (result.rows.length > 0) {
+    writeDiagnostic('info', 'identity.user_created');
+    return result.rows[0];
+  }
+
+  // The race's loser: the row is there, committed by whoever won.
+  const existing = await findUser(userId);
+  if (!existing) {
+    throw new Error('User not found');
+  }
+  return existing;
 }
 
 /**

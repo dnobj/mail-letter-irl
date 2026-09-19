@@ -139,6 +139,30 @@ describePostgres('one account per address', () => {
     });
   });
 
+  describe('a first arrival that authenticates more than once at a time', () => {
+    it('opens one account, and answers both callers with it', async () => {
+      // Authentication opens the account row now, and a dashboard load
+      // authenticates several times at once. A plain INSERT handed every
+      // request but one a 23505 on users_pkey - not the email collision, so
+      // not named - which the REST layer reported as "the account could not
+      // be read" on most of the page. Only a real database races.
+      const userId = subject('parallel');
+      const email = address();
+
+      const arrivals = await Promise.all([
+        users.getOrCreateUser(userId, email),
+        users.getOrCreateUser(userId, email),
+        users.getOrCreateUser(userId, email)
+      ]);
+
+      for (const arrival of arrivals) {
+        expect(arrival.user_id).toBe(userId);
+        expect(arrival.email).toBe(email);
+      }
+      expect(await countUsers(userId)).toBe(1);
+    });
+  });
+
   describe('an account that cannot be opened', () => {
     it('is refused, and leaves no row behind', async () => {
       const stranger = subject('stranger');
