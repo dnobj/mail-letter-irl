@@ -23,27 +23,41 @@ const defaultDependencies: IdentityDependencies = {
 export { DEFAULT_EMAIL_CLAIM } from "./verifiedEmail.js";
 
 /**
- * What `/userinfo` says, when the token itself says nothing.
+ * What `/userinfo` says, when the token itself gave no verdict.
  *
- * Consulted only for a caller with no account yet, and only when the token
- * gave no verdict: it is a network call on the authentication path, Auth0
- * rate-limits it per user (burst 10, 5/minute sustained), and a REST page load
- * makes several requests. An existing account needs nothing from it, and an
- * issuer that already said "not confirmed" has nothing left to add.
+ * **It cannot answer for a ChatGPT token.** Auth0 requires `openid` on the
+ * access token, and ChatGPT asks for the union of the per-tool
+ * securitySchemes, which is the product scopes plus `offline_access`
+ * (registerTools.ts, SESSION_SCOPES) - no `openid`, deliberately, since the
+ * MCP layer has never needed an identity scope. So this serves the website's
+ * tokens and nothing else, and it is asked only when the token carries the
+ * scope: a call that can only 401 is not worth making on the authentication
+ * path, and Auth0 rate-limits it per user (burst 10, 5/minute).
  *
- * What it is for: a token minted before a tenant's Action was updated carries
- * an address with no verdict beside it. Asking here is what lets a customer
- * whose address IS confirmed open an account during that window, instead of
- * being told to confirm an address they confirmed long ago - for the 24 hours
- * their token lives.
+ * What it is for, then, is narrow: a WEBSITE token minted before a tenant's
+ * Action was updated carries an address with no verdict beside it, and those
+ * tokens live two hours. A ChatGPT customer arriving for the first time on
+ * such a token is refused until they reconnect - which is why the Action goes
+ * into a tenant's flow BEFORE the API is deployed against it, and why the
+ * refusal says which of the two states it is.
  */
+interface UserInfoAnswer {
+  claim: EmailClaim | null;
+  /** Why there is no claim, for the refusal diagnostic. */
+  outcome: string;
+}
+
 async function askUserInfo(
   authInfo: AuthenticatedUser,
   dependencies: IdentityDependencies,
   env: NodeJS.ProcessEnv
-): Promise<EmailClaim | null> {
+): Promise<UserInfoAnswer> {
+  if (authInfo.authType !== "jwt") return { claim: null, outcome: "not_asked_pat" };
+  if (!authInfo.scopes.includes("openid")) {
+    return { claim: null, outcome: "not_asked_no_openid" };
+  }
   const issuer = env.LETTER_IRL_OAUTH_ISSUER;
-  if (!issuer || authInfo.authType !== "jwt") return null;
+  if (!issuer) return { claim: null, outcome: "not_asked_no_issuer" };
 
   try {
     const response = await dependencies.fetchUserInfo(new URL("userinfo", issuer), {
@@ -54,12 +68,14 @@ async function askUserInfo(
     });
     if (!response.ok) {
       writeDiagnostic("warn", "auth.userinfo_failed", { status: response.status });
-      return null;
+      return { claim: null, outcome: `http_${response.status}` };
     }
-    return readUserInfoEmail(await response.json());
+    const claim = readUserInfoEmail(await response.json());
+    if (!claim) return { claim: null, outcome: "no_address" };
+    return { claim, outcome: claim.verdict === null ? "no_verdict" : "answered" };
   } catch {
     writeDiagnostic("warn", "auth.userinfo_failed", { errorClass: "request_failed" });
-    return null;
+    return { claim: null, outcome: "request_failed" };
   }
 }
 
@@ -121,11 +137,14 @@ export async function prepareAuthenticatedUser(
     return existingUser.email;
   }
 
-  // No account, and no verdict to go on. One network call, to the issuer that
-  // would have set the claim: this is the whole of the rollout window, where
-  // the token predates the Action that states the verdict.
+  // No account, and no verdict to go on. Ask the issuer, where the token
+  // allows it: a website token minted before its tenant's Action was updated
+  // carries an address and no verdict, and this is what opens its account.
+  let userInfo = "not_asked";
   if (!claim || claim.verdict === null) {
-    claim = (await askUserInfo(authInfo, dependencies, env)) ?? claim;
+    const answer = await askUserInfo(authInfo, dependencies, env);
+    userInfo = answer.outcome;
+    claim = answer.claim ?? claim;
     if (claim?.verdict === true) {
       await dependencies.upsertUser(authInfo.userId, claim.address);
       return claim.address;
@@ -148,6 +167,11 @@ export async function prepareAuthenticatedUser(
   // instead of three failures that name the wrong thing. The diagnostic keeps
   // its name and its level: it is the same state, now reported rather than
   // merely survived.
+  // `userInfo` is on the same line as the reason on purpose. The rollout case
+  // - a token minted before the tenant's Action was updated - looks identical
+  // to a genuinely unconfirmed address unless you can see whether the issuer
+  // was asked and what it said, and the two lines are otherwise tied together
+  // only by their timestamps.
   writeDiagnostic("error", "auth.account_missing_no_verified_email", {
     reason:
       claim?.verdict === false
@@ -155,6 +179,7 @@ export async function prepareAuthenticatedUser(
         : claim
           ? "email_verdict_unavailable"
           : "verified_email_unavailable",
+    userInfo,
     consequence: "account_not_opened",
     authType: authInfo.authType
   });

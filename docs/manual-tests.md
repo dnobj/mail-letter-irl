@@ -1558,8 +1558,12 @@ Run on development first, after the two Post Login Actions and the
 production before anyone but the owner signs in there.
 
 **Preconditions:** both Actions are in the Post Login trigger flow, with
-`link-verified-email` **above** the email-claim Action; the API is deployed and
-`/readyz` is green; the connector has been refreshed.
+`link-verified-email` **above** the email-claim Action, **before** the API is
+deployed against the tenant. The order is not a formality: a new ChatGPT
+customer arriving between the deploy and the Action update is refused until
+they reconnect, because their token carries no `openid` and Auth0's
+`/userinfo` will not answer for it. Then: the API is deployed, `/readyz` is
+green, and the connector has been refreshed.
 
 **Do the row-holder check first, and immediately before enabling the Action.**
 For every confirmed address held by more than one Auth0 user, the oldest must

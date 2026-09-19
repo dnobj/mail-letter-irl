@@ -392,14 +392,30 @@ Letter IRL account is, and what the linking Action below joins identities on,
 so an unconfirmed one must not reach either.
 
 The server opens an account only when the verdict claim is exactly `true` (the
-boolean, or the string). An address claim with **no** verdict beside it opens
-nothing on its own: the server asks `/userinfo` instead, which is what carries
-a customer whose address is confirmed through the window where their token was
-minted before this Action was updated. An address claim with `false` beside it
-is refused outright. See `src/auth/verifiedEmail.ts`, which has the reasoning.
+boolean, or the string). An address claim with `false` beside it is refused
+outright. An address claim with **no** verdict beside it opens nothing on its
+own: the server asks `/userinfo`, but only for a token carrying `openid`. See
+`src/auth/verifiedEmail.ts`, which has the reasoning.
 
-So: set both claims, or set neither. Setting the address alone costs every new
-customer a `/userinfo` round trip that Auth0 rate-limits per user.
+**Update this Action BEFORE deploying the API against the tenant**, and take
+the order seriously, because the fallback covers less than it looks like it
+does. Auth0's `/userinfo` requires `openid` on the access token; ChatGPT asks
+for the per-tool scopes plus `offline_access` and no identity scope, so a
+ChatGPT token can never be answered there. In the window between the API
+deploying and this Action being updated:
+
+| Who | What happens |
+| --- | --- |
+| Anyone with an account already | Unaffected. An existing account is never refused, whatever the token says. |
+| A new customer on the website | Their token carries `openid`, so `/userinfo` answers and the account opens. Website tokens live 2 hours. |
+| A new customer in ChatGPT | Refused, with the sentence, until they reconnect. Their token lives 24 hours. |
+
+The refusal says which case it is: `auth.account_missing_no_verified_email`
+carries `userInfo: "not_asked_no_openid"` for exactly this state, as against
+`email_unconfirmed` for an address the issuer says is not confirmed.
+
+So: set both claims, or set neither. Setting the address alone leaves every new
+ChatGPT customer refused until the verdict claim appears.
 
 **The namespace is load-bearing.** Auth0 silently drops a non-namespaced custom
 claim that collides with a reserved OIDC name, and `email` is reserved - the

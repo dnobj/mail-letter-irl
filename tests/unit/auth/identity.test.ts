@@ -14,6 +14,16 @@ function user(authType: "jwt" | "pat"): AuthenticatedUser {
   };
 }
 
+/**
+ * A token shaped like the website's, which asks for `openid`. It is the only
+ * shape Auth0's /userinfo will answer for: ChatGPT asks for the product scopes
+ * plus offline_access and nothing else, so its tokens - the ones in `user()`
+ * above - are refused there.
+ */
+function websiteUser(): AuthenticatedUser {
+  return { ...user("jwt"), scopes: ["openid", "profile", "email", "mail:read"] };
+}
+
 describe("authenticated identity handling", () => {
   it("never calls Auth0 userinfo for a PAT", async () => {
     const fetchUserInfo = vi.fn();
@@ -213,7 +223,7 @@ describe("the namespaced email claim", () => {
     const upsertUser = vi.fn();
 
     await prepareAuthenticatedUser(
-      user("jwt"),
+      websiteUser(),
       {
         fetchUserInfo: vi.fn().mockResolvedValue({
           ok: true,
@@ -308,7 +318,7 @@ describe("an address the issuer will not vouch for", () => {
     });
 
     const email = await prepareAuthenticatedUser(
-      { ...user("jwt"), claims: { [NS]: "confirmed@example.com" } },
+      { ...websiteUser(), claims: { [NS]: "confirmed@example.com" } },
       { fetchUserInfo, findExistingUser: vi.fn().mockResolvedValue(null), upsertUser },
       { LETTER_IRL_OAUTH_ISSUER: "https://tenant.example.com/" } as NodeJS.ProcessEnv
     );
@@ -323,7 +333,7 @@ describe("an address the issuer will not vouch for", () => {
 
     await expect(
       prepareAuthenticatedUser(
-        { ...user("jwt"), claims: { [NS]: "unconfirmed@example.com" } },
+        { ...websiteUser(), claims: { [NS]: "unconfirmed@example.com" } },
         {
           fetchUserInfo: vi.fn().mockResolvedValue({
             ok: true,
@@ -339,6 +349,40 @@ describe("an address the issuer will not vouch for", () => {
     expect(upsertUser).not.toHaveBeenCalled();
   });
 
+  it("asks nobody for a ChatGPT token, which Auth0 would refuse anyway", async () => {
+    // ChatGPT asks for the product scopes plus offline_access - the union of
+    // the per-tool securitySchemes - so its tokens carry no `openid` and
+    // /userinfo answers them 401. Making the call anyway would put a
+    // guaranteed failure, with a five-second ceiling, in front of every first
+    // arrival. So this shape is refused without one, and the diagnostic says
+    // which of the two states it is.
+    const fetchUserInfo = vi.fn();
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation(value => {
+      logged.push(String(value));
+    });
+
+    await expect(
+      prepareAuthenticatedUser(
+        { ...user("jwt"), claims: { [NS]: "confirmed@example.com" } },
+        {
+          fetchUserInfo,
+          findExistingUser: vi.fn().mockResolvedValue(null),
+          upsertUser: vi.fn()
+        },
+        { LETTER_IRL_OAUTH_ISSUER: "https://tenant.example.com/" } as NodeJS.ProcessEnv
+      )
+    ).rejects.toBeInstanceOf(VerifiedEmailRequiredError);
+
+    spy.mockRestore();
+    expect(fetchUserInfo).not.toHaveBeenCalled();
+    const refusal = logged
+      .map(line => JSON.parse(line) as Record<string, unknown>)
+      .find(entry => entry.event === "auth.account_missing_no_verified_email");
+    expect(refusal?.userInfo).toBe("not_asked_no_openid");
+    expect(refusal?.reason).toBe("email_verdict_unavailable");
+  });
+
   it("asks nobody when the token's own verdict is a refusal", async () => {
     // An issuer that has already said "not confirmed" has nothing to add, and
     // the network call is on the authentication path.
@@ -346,7 +390,7 @@ describe("an address the issuer will not vouch for", () => {
 
     await expect(
       prepareAuthenticatedUser(
-        { ...user("jwt"), claims: { [NS]: "unconfirmed@example.com", [NS_VERIFIED]: false } },
+        { ...websiteUser(), claims: { [NS]: "unconfirmed@example.com", [NS_VERIFIED]: false } },
         {
           fetchUserInfo,
           findExistingUser: vi.fn().mockResolvedValue(null),
@@ -412,6 +456,51 @@ describe("an address the issuer will not vouch for", () => {
 
     expect(email).toBe("known@example.com");
     expect(fetchUserInfo).not.toHaveBeenCalled();
+  });
+
+  it("says nothing about an existing account whose token simply carries no verdict", async () => {
+    // The rollout window again, from the other side: every existing customer
+    // presents a verdict-less token until theirs expires. Warning once per
+    // request that their address is unconfirmed - when the issuer had merely
+    // not said - is how an operator ends up chasing the wrong fault.
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation(value => {
+      logged.push(String(value));
+    });
+
+    await prepareAuthenticatedUser(
+      { ...user("jwt"), claims: { [NS]: "known@example.com" } },
+      {
+        fetchUserInfo: vi.fn(),
+        findExistingUser: vi.fn().mockResolvedValue({ email: "known@example.com" }),
+        upsertUser: vi.fn()
+      },
+      {} as NodeJS.ProcessEnv
+    );
+
+    spy.mockRestore();
+    expect(logged.filter(line => line.includes("auth.email_unconfirmed_not_stored"))).toEqual([]);
+  });
+
+  it("does say so when the issuer states the address is unconfirmed", async () => {
+    // Guards the assertion above: the warn must not have been dropped.
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation(value => {
+      logged.push(String(value));
+    });
+
+    await prepareAuthenticatedUser(
+      { ...user("jwt"), claims: { [NS]: "other@example.com", [NS_VERIFIED]: false } },
+      {
+        fetchUserInfo: vi.fn(),
+        findExistingUser: vi.fn().mockResolvedValue({ email: "known@example.com" }),
+        upsertUser: vi.fn()
+      },
+      {} as NodeJS.ProcessEnv
+    );
+
+    spy.mockRestore();
+    expect(logged.some(line => line.includes("auth.email_unconfirmed_not_stored"))).toBe(true);
   });
 
   it("hands the confirmed address back to its caller", async () => {

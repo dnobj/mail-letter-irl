@@ -149,16 +149,29 @@ describePostgres('one account per address', () => {
       const userId = subject('parallel');
       const email = address();
 
+      // createUser directly, not getOrCreateUser: that one reads first, so
+      // whenever the first call commits before the others get a connection
+      // they never insert at all and a non-idempotent INSERT would pass too.
+      // Every call here inserts, so the old statement fails even if the three
+      // run one after another.
       const arrivals = await Promise.all([
-        users.getOrCreateUser(userId, email),
-        users.getOrCreateUser(userId, email),
-        users.getOrCreateUser(userId, email)
+        users.createUser({ userId, email }),
+        users.createUser({ userId, email }),
+        users.createUser({ userId, email })
       ]);
 
       for (const arrival of arrivals) {
         expect(arrival.user_id).toBe(userId);
         expect(arrival.email).toBe(email);
       }
+      expect(await countUsers(userId)).toBe(1);
+
+      // And the realistic path, which reads first, agrees.
+      const viaGetOrCreate = await Promise.all([
+        users.getOrCreateUser(userId, email),
+        users.getOrCreateUser(userId, email)
+      ]);
+      expect(viaGetOrCreate.map(row => row.user_id)).toEqual([userId, userId]);
       expect(await countUsers(userId)).toBe(1);
     });
   });
