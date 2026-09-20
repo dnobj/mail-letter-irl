@@ -2,19 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_EMAIL_CLAIM,
   DEFAULT_EMAIL_VERIFIED_CLAIM,
-  readEmailClaim,
-  readUserInfoEmail
+  readEmailClaim
 } from "../../../src/auth/verifiedEmail.js";
 
 /**
  * The truth table for "may an account be opened from this?".
  *
- * Three values, not two. The issuer confirms, refuses, or says nothing - and
- * the case that pins the difference, an address claim with no verdict beside
- * it, is exactly what the Action deployed until 2026-09-19 emitted for every
- * address, confirmed or not. Collapsing it into a refusal locks out the
- * confirmed ones; collapsing it into a confirmation lets the unconfirmed take
- * someone else's account. identity.ts asks the issuer instead.
+ * Three values, not two. The issuer confirms, refuses, or says nothing.
+ * Nothing opens an account but a confirmation - the other two are both
+ * refusals - but they are different faults, and the refusal diagnostic names
+ * which: an address the customer has not confirmed, or a tenant whose Action
+ * is not setting the verdict claim. The case that pins it, an address claim
+ * with no verdict beside it, is exactly what the Action deployed until
+ * 2026-09-19 emitted for every address, confirmed or not.
  */
 
 const NONE = {} as NodeJS.ProcessEnv;
@@ -112,27 +112,5 @@ describe("reading an address off a token", () => {
     expect(
       readEmailClaim({ email: "  person@example.com  ", email_verified: true }, NONE)?.address
     ).toBe("person@example.com");
-  });
-});
-
-describe("reading a userinfo document", () => {
-  it("reads both standard fields", () => {
-    expect(readUserInfoEmail({ email: "person@example.com", email_verified: true })).toEqual({
-      address: "person@example.com",
-      verdict: true
-    });
-    expect(readUserInfoEmail({ email: "person@example.com", email_verified: false })).toEqual({
-      address: "person@example.com",
-      verdict: false
-    });
-    // The issuer asked directly and said nothing: still not a confirmation,
-    // and identity.ts has nowhere further to go.
-    expect(readUserInfoEmail({ email: "person@example.com" })?.verdict).toBeNull();
-  });
-
-  it("survives a document that is not one", () => {
-    expect(readUserInfoEmail(null)).toBeNull();
-    expect(readUserInfoEmail("not json")).toBeNull();
-    expect(readUserInfoEmail({})).toBeNull();
   });
 });

@@ -1559,11 +1559,10 @@ production before anyone but the owner signs in there.
 
 **Preconditions:** both Actions are in the Post Login trigger flow, with
 `link-verified-email` **above** the email-claim Action, **before** the API is
-deployed against the tenant. The order is not a formality: a new ChatGPT
-customer arriving between the deploy and the Action update is refused until
-they reconnect, because their token carries no `openid` and Auth0's
-`/userinfo` will not answer for it. Then: the API is deployed, `/readyz` is
-green, and the connector has been refreshed.
+deployed against the tenant. The order is not a formality and there is no
+fallback: a new customer arriving between the deploy and the Action update is
+refused until their token is re-minted or expires, 24 hours. Then: the API is
+deployed, `/readyz` is green, and the connector has been refreshed.
 
 **Do the row-holder check first, and immediately before enabling the Action.**
 For every confirmed address held by more than one Auth0 user, the oldest must
@@ -1592,14 +1591,11 @@ remedy when a pair does not match, are in
 9. [ ] Gift rules still hold across the linked methods: a code printed on your
        own letter is refused whichever method you sign in with.
 10. [ ] A token with no confirmed address gets the sentence, not a broken
-       account. Simulate on development with an **unconfirmed** password
-       sign-up while the linking Action is out of the flow: the claim Action
-       then sets nothing and `/userinfo` reports `email_verified: false`, so
-       both surfaces refuse. Every tool answers "Letter IRL needs a confirmed
-       email address...", and the dashboard answers 403 with the same text.
-       (Removing the claim Action alone does not test this on the website: its
-       token carries `openid`, so `/userinfo` answers and the account opens.
-       A ChatGPT token has no `openid` and would be refused.)
+       account. Simulate on development by taking the claim Action out of the
+       trigger flow and signing in with a fresh subject: both surfaces then
+       refuse. Every tool answers "Letter IRL needs a confirmed email
+       address...", and the dashboard answers 403 with the same text. Put the
+       Action back afterwards.
 
 ---
 

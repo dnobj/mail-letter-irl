@@ -137,7 +137,6 @@ describe("privacy-safe authentication diagnostics", () => {
 
     await expect(
       prepareAuthenticatedUser(authInfo, {
-        fetchUserInfo: vi.fn(),
         findExistingUser: vi.fn().mockResolvedValue(null),
         upsertUser: vi.fn()
       })

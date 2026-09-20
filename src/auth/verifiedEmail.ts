@@ -25,10 +25,14 @@ import type { AuthenticatedUser } from "./tokenValidator.js";
  * the MCP tool layer and the REST surface, and fixed text with nothing
  * interpolated is what makes it safe to put in an HTTP body.
  * support@letterirl.com is the address already published in manifest.json.
+ *
+ * "Sign in again", not just "try again": a token carries its claims until it
+ * expires, so someone who confirms their address mid-session is refused on
+ * the old token for as long as it lives. Signing in again mints a new one.
  */
 export const VERIFIED_EMAIL_MESSAGE =
   "Letter IRL needs a confirmed email address to open your account. " +
-  "Confirm the address on the account you signed in with, then try again. " +
+  "Confirm the address on the account you signed in with, then sign in again. " +
   "If you have already confirmed it, email support@letterirl.com.";
 
 /**
@@ -71,9 +75,11 @@ export const DEFAULT_EMAIL_CLAIM = "https://letterirl.com/email";
  * has three values, and the third one is the useful one:
  *
  *   - `true`  - the issuer says the address is confirmed. An account opens.
- *   - `false` - the issuer says it is not. Refused, with no further questions.
- *   - `null`  - the issuer did not say. Nothing is assumed; identity.ts asks
- *               `/userinfo`, which is the same issuer, answering directly.
+ *   - `false` - the issuer says it is not. Refused.
+ *   - `null`  - the issuer did not say. Also refused, but it is a different
+ *               fault and the diagnostic says so: `false` is a customer who
+ *               has not confirmed their address, `null` is a tenant whose
+ *               Action is not setting the verdict claim.
  *
  * An earlier draft trusted silence, on the argument that the Action only ever
  * sets the address claim for a confirmed address. That was wrong: the Action
@@ -82,14 +88,15 @@ export const DEFAULT_EMAIL_CLAIM = "https://letterirl.com/email";
  * let an unconfirmed sign-up take the account slot of the address's real
  * owner, which is the one thing this whole change exists to prevent.
  *
- * The draft after that collapsed `null` into `false`, and refused every new
- * customer on a tenant whose Action had not been updated yet - including the
- * ones whose address was confirmed - telling them to confirm an address they
- * had already confirmed. Tokens live 24 hours, so that outlives the Action
- * update itself.
+ * The draft after that answered a missing verdict by asking `/userinfo`. That
+ * is gone (see identity.ts): it could not serve a ChatGPT token at all, and
+ * where it did work it hid a broken Action on the one surface an operator
+ * checks a tenant with.
  *
- * Three values, because the two questions are different: "did the issuer
- * vouch for this?" and "will it, if asked?".
+ * So `null` refuses too. The three values remain because they are three
+ * different faults, and an operator reading a refusal needs to know which one
+ * they are looking at: a customer who has not confirmed their address, or a
+ * tenant that is not saying so.
  */
 export const DEFAULT_EMAIL_VERIFIED_CLAIM = "https://letterirl.com/email_verified";
 
@@ -143,15 +150,4 @@ export function readEmailClaim(
       bag[env.LETTER_IRL_OAUTH_EMAIL_VERIFIED_CLAIM ?? DEFAULT_EMAIL_VERIFIED_CLAIM]
     )
   };
-}
-
-/** The same reading of a `/userinfo` document, where both fields are standard. */
-export function readUserInfoEmail(document: unknown): EmailClaim | null {
-  if (typeof document !== "object" || document === null) return null;
-  const bag = document as Record<string, unknown>;
-  const address = readString(bag.email);
-  if (!address) return null;
-  // Asked directly, and answering nothing is its own answer: this is the
-  // issuer speaking, not a claim shape that might predate an Action update.
-  return { address, verdict: readVerdict(bag.email_verified) };
 }

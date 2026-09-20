@@ -1,83 +1,37 @@
 import { EmailAlreadyLinkedError, findUser, getOrCreateUser } from "../services/userService.js";
 import { AuthenticatedUser } from "./tokenValidator.js";
 import { writeDiagnostic } from "../utils/diagnosticLog.js";
-import {
-  EmailClaim,
-  VerifiedEmailRequiredError,
-  readEmailClaim,
-  readUserInfoEmail
-} from "./verifiedEmail.js";
+import { VerifiedEmailRequiredError, readEmailClaim } from "./verifiedEmail.js";
 
 interface IdentityDependencies {
-  fetchUserInfo: typeof fetch;
   findExistingUser: typeof findUser;
   upsertUser: typeof getOrCreateUser;
 }
 
 const defaultDependencies: IdentityDependencies = {
-  fetchUserInfo: fetch,
   findExistingUser: findUser,
   upsertUser: getOrCreateUser
 };
 
 export { DEFAULT_EMAIL_CLAIM } from "./verifiedEmail.js";
 
-/**
- * What `/userinfo` says, when the token itself gave no verdict.
+/*
+ * Auth0's `/userinfo` used to be consulted here when a token carried an
+ * address but no verdict, as a way through the window between an API deploy
+ * and a tenant's Action being updated. It is gone, after three review rounds
+ * in a row found something wrong with it, and the last of them found the
+ * thing that settles it: `/userinfo` needs `openid` on the access token, and
+ * ChatGPT - the client this product is for - never asks for one. So it served
+ * website first-arrivals only, in a window the mandated order (Action first,
+ * then deploy) is supposed to be empty, while quietly letting the WEBSITE
+ * tolerate a missing or broken claim Action. That is the surface LINK-01 uses
+ * to check a tenant, and a silently no-op Action is exactly what took the
+ * first production account down.
  *
- * **It cannot answer for a ChatGPT token.** Auth0 requires `openid` on the
- * access token, and ChatGPT asks for the union of the per-tool
- * securitySchemes, which is the product scopes plus `offline_access`
- * (registerTools.ts, SESSION_SCOPES) - no `openid`, deliberately, since the
- * MCP layer has never needed an identity scope. So this serves the website's
- * tokens and nothing else, and it is asked only when the token carries the
- * scope: a call that can only 401 is not worth making on the authentication
- * path, and Auth0 rate-limits it per user (burst 10, 5/minute).
- *
- * What it is for, then, is narrow: a WEBSITE token minted before a tenant's
- * Action was updated carries an address with no verdict beside it, and those
- * tokens live two hours. A ChatGPT customer arriving for the first time on
- * such a token is refused until they reconnect - which is why the Action goes
- * into a tenant's flow BEFORE the API is deployed against it, and why the
- * refusal says which of the two states it is.
+ * So the claim Action is now load-bearing on every surface, and its absence
+ * fails the same way everywhere: one sentence, and a diagnostic that says
+ * which state it is.
  */
-interface UserInfoAnswer {
-  claim: EmailClaim | null;
-  /** Why there is no claim, for the refusal diagnostic. */
-  outcome: string;
-}
-
-async function askUserInfo(
-  authInfo: AuthenticatedUser,
-  dependencies: IdentityDependencies,
-  env: NodeJS.ProcessEnv
-): Promise<UserInfoAnswer> {
-  if (authInfo.authType !== "jwt") return { claim: null, outcome: "not_asked_pat" };
-  if (!authInfo.scopes.includes("openid")) {
-    return { claim: null, outcome: "not_asked_no_openid" };
-  }
-  const issuer = env.LETTER_IRL_OAUTH_ISSUER;
-  if (!issuer) return { claim: null, outcome: "not_asked_no_issuer" };
-
-  try {
-    const response = await dependencies.fetchUserInfo(new URL("userinfo", issuer), {
-      headers: { Authorization: `Bearer ${authInfo.token}` },
-      // Authentication is in front of every request; an issuer that hangs must
-      // not hang them all.
-      signal: AbortSignal.timeout(5_000)
-    });
-    if (!response.ok) {
-      writeDiagnostic("warn", "auth.userinfo_failed", { status: response.status });
-      return { claim: null, outcome: `http_${response.status}` };
-    }
-    const claim = readUserInfoEmail(await response.json());
-    if (!claim) return { claim: null, outcome: "no_address" };
-    return { claim, outcome: claim.verdict === null ? "no_verdict" : "answered" };
-  } catch {
-    writeDiagnostic("warn", "auth.userinfo_failed", { errorClass: "request_failed" });
-    return { claim: null, outcome: "request_failed" };
-  }
-}
 
 /**
  * Make sure this caller has an account row, or refuse.
@@ -88,9 +42,10 @@ async function askUserInfo(
  *
  * **An account that already exists is never refused.** A personal access token
  * carries no claims at all and lands here on every call; so does an OAuth
- * token while a tenant's Action is being updated; and an address that another
- * subject already holds means the linking Action has not joined them yet.
- * None of those is a reason to lock someone out of an account that works, and
+ * token minted before a tenant's Action was updated; and an address that
+ * another subject already holds means the linking Action has not joined them
+ * yet. None of those is a reason to lock someone out of an account that
+ * works, and
  * the stored address - which WAS confirmed when it was written - is left
  * exactly as it is.
  *
@@ -104,7 +59,7 @@ export async function prepareAuthenticatedUser(
   dependencies: IdentityDependencies = defaultDependencies,
   env: NodeJS.ProcessEnv = process.env
 ): Promise<string | null> {
-  let claim = readEmailClaim(authInfo.claims, env);
+  const claim = readEmailClaim(authInfo.claims, env);
 
   if (claim?.verdict === true) {
     try {
@@ -137,20 +92,6 @@ export async function prepareAuthenticatedUser(
     return existingUser.email;
   }
 
-  // No account, and no verdict to go on. Ask the issuer, where the token
-  // allows it: a website token minted before its tenant's Action was updated
-  // carries an address and no verdict, and this is what opens its account.
-  let userInfo = "not_asked";
-  if (!claim || claim.verdict === null) {
-    const answer = await askUserInfo(authInfo, dependencies, env);
-    userInfo = answer.outcome;
-    claim = answer.claim ?? claim;
-    if (claim?.verdict === true) {
-      await dependencies.upsertUser(authInfo.userId, claim.address);
-      return claim.address;
-    }
-  }
-
   // NOT a deferral. Nothing retries this, and `users.email` is NOT NULL, so
   // there is no row to create without a confirmed address - the account simply
   // does not exist and every write the customer attempts would fail somewhere
@@ -167,11 +108,11 @@ export async function prepareAuthenticatedUser(
   // instead of three failures that name the wrong thing. The diagnostic keeps
   // its name and its level: it is the same state, now reported rather than
   // merely survived.
-  // `userInfo` is on the same line as the reason on purpose. The rollout case
-  // - a token minted before the tenant's Action was updated - looks identical
-  // to a genuinely unconfirmed address unless you can see whether the issuer
-  // was asked and what it said, and the two lines are otherwise tied together
-  // only by their timestamps.
+  // Three reasons, because they need three different actions. The customer's
+  // address is not confirmed; or the token carried an address the issuer said
+  // nothing about, which on a live tenant means the claim Action is not
+  // setting the verdict; or it carried no address at all, which means the
+  // Action is not running.
   writeDiagnostic("error", "auth.account_missing_no_verified_email", {
     reason:
       claim?.verdict === false
@@ -179,7 +120,6 @@ export async function prepareAuthenticatedUser(
         : claim
           ? "email_verdict_unavailable"
           : "verified_email_unavailable",
-    userInfo,
     consequence: "account_not_opened",
     authType: authInfo.authType
   });

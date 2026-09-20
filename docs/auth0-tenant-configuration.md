@@ -392,30 +392,32 @@ Letter IRL account is, and what the linking Action below joins identities on,
 so an unconfirmed one must not reach either.
 
 The server opens an account only when the verdict claim is exactly `true` (the
-boolean, or the string). An address claim with `false` beside it is refused
-outright. An address claim with **no** verdict beside it opens nothing on its
-own: the server asks `/userinfo`, but only for a token carrying `openid`. See
-`src/auth/verifiedEmail.ts`, which has the reasoning.
+boolean, or the string). Anything else refuses: `false` because the customer
+has not confirmed the address, and a **missing** verdict claim because the
+tenant is not saying. The refusal diagnostic distinguishes them
+(`email_unconfirmed` against `email_verdict_unavailable`), which is how an
+operator tells a customer's problem from a tenant's. See
+`src/auth/verifiedEmail.ts`.
 
-**Update this Action BEFORE deploying the API against the tenant**, and take
-the order seriously, because the fallback covers less than it looks like it
-does. Auth0's `/userinfo` requires `openid` on the access token; ChatGPT asks
-for the per-tool scopes plus `offline_access` and no identity scope, so a
-ChatGPT token can never be answered there. In the window between the API
-deploying and this Action being updated:
+**Update this Action BEFORE deploying the API against the tenant.** There is
+no fallback. An earlier revision of the server asked Auth0's `/userinfo` when
+a token carried an address with no verdict; that is gone, because `/userinfo`
+needs `openid` on the access token and ChatGPT never asks for one - so it
+served the website alone, and quietly let the website tolerate a missing or
+broken Action, which is the one surface LINK-01 uses to check a tenant.
+
+In the window between the API deploying and this Action being updated:
 
 | Who | What happens |
 | --- | --- |
 | Anyone with an account already | Unaffected. An existing account is never refused, whatever the token says. |
-| A new customer on the website | Their token carries `openid`, so `/userinfo` answers and the account opens. Website tokens live 2 hours. |
-| A new customer in ChatGPT | Refused, with the sentence, until they reconnect. Their token lives 24 hours. |
+| A new customer, either surface | Refused with the sentence until their token is re-minted - signing in again on the website, reconnecting in ChatGPT - or it expires. Access tokens live 24 hours. |
 
-The refusal says which case it is: `auth.account_missing_no_verified_email`
-carries `userInfo: "not_asked_no_openid"` for exactly this state, as against
-`email_unconfirmed` for an address the issuer says is not confirmed.
+(The `web 7200` figure recorded further down is the implicit/hybrid-flow
+lifetime. Neither client uses that flow, so both carry the 86400-second one.)
 
 So: set both claims, or set neither. Setting the address alone leaves every new
-ChatGPT customer refused until the verdict claim appears.
+customer refused until the verdict claim appears.
 
 **The namespace is load-bearing.** Auth0 silently drops a non-namespaced custom
 claim that collides with a reserved OIDC name, and `email` is reserved - the
