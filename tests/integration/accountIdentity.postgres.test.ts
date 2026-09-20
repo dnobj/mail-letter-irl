@@ -166,7 +166,9 @@ describePostgres('one account per address', () => {
       }
       expect(await countUsers(userId)).toBe(1);
 
-      // And the realistic path, which reads first, agrees.
+      // And the read path finds the row the race left. This one proves
+      // nothing about the race - getOrCreateUser reads before it writes, so
+      // both calls take the read branch against a row that is already there.
       const viaGetOrCreate = await Promise.all([
         users.getOrCreateUser(userId, email),
         users.getOrCreateUser(userId, email)

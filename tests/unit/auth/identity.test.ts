@@ -240,6 +240,24 @@ describe("the namespaced email claim", () => {
     expect(upsertUser).not.toHaveBeenCalled();
   });
 
+  it("opens no account from an address that arrives without a verdict", async () => {
+    // The sentence this whole change turns on, asserted where the decision is
+    // made rather than through the diagnostic. The Action deployed until
+    // 2026-09-19 emitted exactly this shape for every address it saw,
+    // confirmed or not.
+    const upsertUser = vi.fn();
+
+    await expect(
+      prepareAuthenticatedUser(
+        { ...user("jwt"), claims: { [NS]: "unvouched@example.com" } },
+        { findExistingUser: vi.fn().mockResolvedValue(null), upsertUser },
+        {} as NodeJS.ProcessEnv
+      )
+    ).rejects.toBeInstanceOf(VerifiedEmailRequiredError);
+
+    expect(upsertUser).not.toHaveBeenCalled();
+  });
+
   it("opens no account from an address the Action marks unconfirmed", async () => {
     const upsertUser = vi.fn();
 

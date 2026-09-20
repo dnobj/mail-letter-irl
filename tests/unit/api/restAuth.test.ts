@@ -119,11 +119,9 @@ describe("REST bearer authentication", () => {
 
   it("refuses a token whose address the issuer will not vouch for", async () => {
     // The real rule, end to end, with no seam standing in for it: the issuer
-    // says the address is not confirmed, so there is nothing to ask it and
-    // nothing to open. An explicit false rather than an absent verdict keeps
-    // this test off the network - a verdict-less token would send the
-    // middleware to /userinfo, which is the rollout path and belongs in the
-    // identity unit tests.
+    // says the address is not confirmed, so there is nothing to open. The
+    // case below covers the other refusal, an address with no verdict at
+    // all - the shape the pre-2026-09-19 Action emitted for everyone.
     const { getOrCreateUser } = await import("../../../src/services/userService.js");
     vi.mocked(getOrCreateUser).mockClear();
 
@@ -139,6 +137,25 @@ describe("REST bearer authentication", () => {
 
     expect(outcome).toMatchObject({ ok: false, reason: "no_account", status: 403 });
     expect(outcome.ok ? "" : outcome.message).toBe(VERIFIED_EMAIL_MESSAGE);
+    expect(getOrCreateUser).not.toHaveBeenCalled();
+  });
+
+  it("refuses a token carrying an address the issuer said nothing about", async () => {
+    const { getOrCreateUser } = await import("../../../src/services/userService.js");
+    vi.mocked(getOrCreateUser).mockClear();
+
+    const outcome = await authenticateRestRequest(
+      request({
+        authorization: `Bearer ${await mint(mcpAudience, {
+          scope: WEBSITE_SCOPE,
+          email: undefined,
+          "https://letterirl.com/email": "unvouched@example.invalid"
+        })}`
+      }),
+      ["mail:read"]
+    );
+
+    expect(outcome).toMatchObject({ ok: false, reason: "no_account", status: 403 });
     expect(getOrCreateUser).not.toHaveBeenCalled();
   });
 

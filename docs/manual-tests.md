@@ -163,8 +163,9 @@ user is not an approved test identity.
 - [ ] Link account A, inspect its balance/order identity, then disconnect.
 - [ ] Use the account-switch flow and link account B.
 - [ ] Confirm account A data/email is not shown or overwritten for account B.
-- [ ] Repeat after a userinfo failure and confirm a known email is not replaced
-      by a placeholder.
+- [ ] Confirm a known email is never replaced: an account that exists keeps its
+      stored address whatever a later token says, and no placeholder address
+      exists to replace it with.
 
 ### CIMD-07 — Web and mobile
 
@@ -200,7 +201,8 @@ configured locally (https://github.com/dnobj/mail-letter-irl/issues/160#issuecom
 purpose, pasted into GitHub, or exposed in chat.
 
 - [ ] Connect the supported Claude/non-ChatGPT MCP path with a PAT.
-- [ ] Confirm PAT tool calls work and never call Auth0 userinfo.
+- [ ] Confirm PAT tool calls work on an account that already exists (a PAT
+      carries no address, and no account is opened from one).
 - [ ] Confirm the Claude/PAT path does not use or mutate the ChatGPT CIMD app.
 
 ### CIMD-10 — DEV rollback
@@ -1595,7 +1597,10 @@ remedy when a pair does not match, are in
        trigger flow and signing in with a fresh subject: both surfaces then
        refuse. Every tool answers "Letter IRL needs a confirmed email
        address...", and the dashboard answers 403 with the same text. Put the
-       Action back afterwards.
+       Action back afterwards. Use a fresh subject on a **confirmed** address
+       that no other Auth0 user holds - an unconfirmed one is denied by the
+       linking Action with its own message and never reaches the server, and a
+       shared address is linked into the older account instead.
 
 ---
 

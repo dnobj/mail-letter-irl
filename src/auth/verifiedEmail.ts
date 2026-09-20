@@ -112,9 +112,8 @@ function readString(value: unknown): string | null {
 
 /**
  * Auth0 writes `email_verified` as a boolean, but a custom claim set from a
- * string, and a userinfo document proxied through something helpful, can both
- * arrive as "true". Anything else - absent, null, "1", 1, "yes" - is not a
- * verdict at all, and becomes null rather than a refusal.
+ * string arrives as "true". Anything else - absent, null, "1", 1, "yes" - is
+ * not a verdict at all, and becomes null.
  */
 function readVerdict(value: unknown): boolean | null {
   if (value === true || value === "true") return true;

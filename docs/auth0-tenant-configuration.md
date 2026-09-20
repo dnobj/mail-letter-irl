@@ -394,10 +394,18 @@ so an unconfirmed one must not reach either.
 The server opens an account only when the verdict claim is exactly `true` (the
 boolean, or the string). Anything else refuses: `false` because the customer
 has not confirmed the address, and a **missing** verdict claim because the
-tenant is not saying. The refusal diagnostic distinguishes them
-(`email_unconfirmed` against `email_verdict_unavailable`), which is how an
-operator tells a customer's problem from a tenant's. See
-`src/auth/verifiedEmail.ts`.
+tenant is not saying. The refusal diagnostic distinguishes them (`email_unconfirmed` against
+`email_verdict_unavailable`, and `verified_email_unavailable` for a token
+carrying no address at all). See `src/auth/verifiedEmail.ts`.
+
+Worth knowing when reading those: **on a tenant configured as documented here,
+every one of them is the tenant's fault, not a customer's.** The claim Action
+above sets nothing at all for an unconfirmed address rather than setting the
+verdict to false, and the linking Action denies an unconfirmed login before a
+token exists - so a customer who has not confirmed their address never reaches
+this code. `email_unconfirmed` means some Action is setting the verdict to
+false; the other two mean the claim Action is not setting the verdict, or is
+not running.
 
 **Update this Action BEFORE deploying the API against the tenant.** There is
 no fallback. An earlier revision of the server asked Auth0's `/userinfo` when
@@ -435,7 +443,8 @@ The server reads `LETTER_IRL_OAUTH_EMAIL_CLAIM` (default
 `LETTER_IRL_OAUTH_EMAIL_VERIFIED_CLAIM` (default
 `https://letterirl.com/email_verified`), so the two environments can namespace
 against their own domains. It prefers a standard `email` claim when one is
-present, and still falls back to `/userinfo`.
+present, and with neither claim it opens no account at all - there is nothing
+else to ask.
 
 ### Required Post Login Action: linking one person's sign-in methods
 

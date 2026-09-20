@@ -108,11 +108,13 @@ export async function prepareAuthenticatedUser(
   // instead of three failures that name the wrong thing. The diagnostic keeps
   // its name and its level: it is the same state, now reported rather than
   // merely survived.
-  // Three reasons, because they need three different actions. The customer's
-  // address is not confirmed; or the token carried an address the issuer said
-  // nothing about, which on a live tenant means the claim Action is not
-  // setting the verdict; or it carried no address at all, which means the
-  // Action is not running.
+  // Three reasons, because they need three different answers: an Action that
+  // sets the verdict to false; an Action that sets the address and not the
+  // verdict; and no Action reaching this token at all. On a tenant configured
+  // as docs/auth0-tenant-configuration.md describes, all three are the
+  // tenant's fault - a customer who has not confirmed their address is denied
+  // by the linking Action before a token exists, and the claim Action sets
+  // nothing for one rather than setting false.
   writeDiagnostic("error", "auth.account_missing_no_verified_email", {
     reason:
       claim?.verdict === false
