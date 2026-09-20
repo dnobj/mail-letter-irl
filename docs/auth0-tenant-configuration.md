@@ -467,29 +467,35 @@ code below does them in that order.
 ```javascript
 const { ManagementClient } = require("auth0");
 
+/**
+ * Written against the auth0 SDK v7, pinned in Dependencies. v7 is NOT v4, and
+ * the difference is not cosmetic: there is no usersByEmail manager, no
+ * users.link, and awaiting a call returns the payload itself rather than
+ * { data }. The v4 spelling throws on the first login, and because this Action
+ * denies on any failure, it takes every login on the tenant with it.
+ */
 exports.onExecutePostLogin = async (event, api) => {
-  // An address nobody has proved they own is not an identity. A password
-  // sign-up that has not confirmed its address is refused here, at the source,
-  // rather than being allowed to claim someone else's account.
+  // An address nobody has proved they own is not an identity. A sign-up that
+  // has not confirmed its address is refused here, at the source, rather than
+  // being allowed to claim someone else's account.
   if (!event.user.email || event.user.email_verified !== true) {
     api.access.deny("Confirm your email address, then sign in again.");
     return;
   }
 
-  let management;
   try {
-    management = new ManagementClient({
+    const management = new ManagementClient({
       domain: event.secrets.AUTH0_DOMAIN,
       clientId: event.secrets.LINKING_CLIENT_ID,
       clientSecret: event.secrets.LINKING_CLIENT_SECRET
     });
 
-    const { data: matches } = await management.usersByEmail.getByEmail({
+    const matches = await management.users.listUsersByEmail({
       email: event.user.email
     });
 
     // Only confirmed addresses, and only other accounts.
-    const others = matches.filter(
+    const others = (matches || []).filter(
       user => user.email_verified === true && user.user_id !== event.user.user_id
     );
     if (others.length === 0) return;
@@ -500,20 +506,34 @@ exports.onExecutePostLogin = async (event, api) => {
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
     if (primary.user_id === event.user.user_id) return;
 
-    const [provider, ...rest] = event.user.user_id.split("|");
-    await management.users.link({ id: primary.user_id }, {
-      provider,
-      user_id: rest.join("|")
+    // Link first, THEN setPrimaryUser: the identity that authenticated this
+    // login has to already be a secondary of the primary user.
+    const separator = event.user.user_id.indexOf("|");
+    await management.users.identities.link(primary.user_id, {
+      provider: event.user.user_id.slice(0, separator),
+      user_id: event.user.user_id.slice(separator + 1)
     });
     api.authentication.setPrimaryUser(primary.user_id);
   } catch (error) {
     // Deny rather than let a second account be created. A denied login is
     // recoverable in a minute; a split account is not recoverable at all
     // without an operator merging two histories by hand.
+    console.log("link-verified-email failed: " + (error && error.message));
     api.access.deny("Sign-in is temporarily unavailable. Please try again.");
   }
 };
 ```
+
+**Test it in the Action editor before putting it in the flow.** Set the test
+event's user to a confirmed address that no tenant user holds and Run: the
+result should be an empty `Commands: []`. That one run exercises everything
+that can go wrong at deploy time - the dependency installing, `require`, the
+client constructing, the client-credentials token request, and the response
+shape - and none of it can be checked by reading. Then set
+`email_verified: false` and Run again: the result should be the
+"Confirm your email address" denial. On development, 2026-09-19, the first of
+those two runs is what caught a mistyped secret; the Action would otherwise
+have denied every login on the tenant the moment it entered the flow.
 
 **Its credentials are a machine-to-machine application**, named
 `Account Linking (<environment>)`, authorized for the Management API with
@@ -521,13 +541,21 @@ exactly `read:users` and `update:users` - nothing else, because nothing else is
 needed and this secret lives in an Action. Put the domain, client id and secret
 in the Action's own **Secrets**, never in a repository or an env file.
 
-It also needs the `auth0` npm module added under the Action's
-**Dependencies**; the code above is written against v4 (`usersByEmail.getByEmail`
-returning `{ data }`, `users.link({ id }, { provider, user_id })`). Pin the
-version you deploy and note it here, because an Action that throws denies every
-login on the tenant.
+It also needs the `auth0` npm module under the Action's **Dependencies**,
+pinned - not `latest`. Development runs **7.2.0**, deployed 2026-09-19 and
+verified by the test run above. Pin it, because a new major changes these call
+shapes (v4 used `usersByEmail.getByEmail` returning `{ data }` and
+`users.link({ id }, body)`, none of which exist in v7), and an Action that
+throws denies every login on the tenant.
 
-**Confirm the connection sends the email.** Authentication -> Database ->
+**Confirm the connection sends the email.** Branding -> Email Templates ->
+**Verification Email (Link)** must show *Template enabled*; that is the email
+whose link sets `email_verified`, and without it a new sign-up can never get
+past the deny above. Development is enabled and uses the built-in **Auth0
+Email Provider**, which Auth0 labels development/trial only - **production
+needs a custom email provider before this Action goes into its flow**, or new
+password sign-ups will be unable to confirm and will be denied. Also check
+Authentication -> Database ->
 `Username-Password-Authentication` -> **Requires Username** / email settings,
 and Branding -> Email Templates -> **Verification Email** enabled. Without it
 the deny above locks every new password account out permanently.

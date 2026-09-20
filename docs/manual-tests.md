@@ -1566,6 +1566,16 @@ fallback: a new customer arriving between the deploy and the Action update is
 refused until their token is re-minted or expires, 24 hours. Then: the API is
 deployed, `/readyz` is green, and the connector has been refreshed.
 
+**Tenant state recorded when this was first set up (development, 2026-09-19):**
+all 8 Auth0 users held distinct addresses, so linking had nothing to join and
+could not strand a row holder; exactly one user (`testuser321@…`, one login,
+nine months old) had `email_verified: false` and is denied by the gate, which
+is the intended behaviour. Both facts were read from the Users list with
+**Search by: Lucene Syntax (Advanced)** and `email_verified:true` /
+`email_verified:false` - the plain "User" search silently matches the query as
+literal text and answers "No users found" for both, which reads exactly like a
+clean tenant.
+
 **Do the row-holder check first, and immediately before enabling the Action.**
 For every confirmed address held by more than one Auth0 user, the oldest must
 be the subject holding the `users` row, or the address must have no row.
