@@ -40,6 +40,7 @@ const REQUIRED = [
   'errorTextMinimisation.postgres.test.ts',
   'duplicateMail.postgres.test.ts',
   'giftLetters.postgres.test.ts',
+  'accountIdentity.postgres.test.ts',
 ];
 
 /**

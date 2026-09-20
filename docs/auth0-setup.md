@@ -46,6 +46,23 @@ Each tenant has the same applications configured:
 
 Social login user IDs (Google, GitHub, etc.) are **identical across tenants** because the ID comes from the provider. Only Username-Password users (`auth0|xxx`) have tenant-specific IDs and require sync/import.
 
+A Letter IRL account is still keyed on the Auth0 subject (`users.user_id`), but
+the subject is no longer the identity. Auth0 mints one per sign-in method, and
+a post-login Action links the methods that share a **confirmed** email address
+into a single Auth0 user, whose primary subject is the one Letter IRL sees. The
+identity is therefore the address, which `users.email` holds UNIQUE.
+
+Two consequences worth knowing before touching anything here:
+
+- **A subject list is a list of one method.** `LETTER_IRL_BETA_ALLOWED_SUBJECTS`
+  and `LETTER_IRL_ADMIN_USER_IDS` name subjects, so after a link only the
+  surviving primary subject counts. Check them after linking anyone.
+- **No confirmed address, no account.** A token that carries none is refused
+  with a sentence rather than given an account with an invented address; see
+  [auth0-tenant-configuration.md](auth0-tenant-configuration.md) for the
+  Actions that make this true, and `src/auth/verifiedEmail.ts` for what the
+  server does with what reaches it.
+
 ---
 
 ## Tenant Setup

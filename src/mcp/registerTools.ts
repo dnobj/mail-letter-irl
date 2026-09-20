@@ -62,6 +62,8 @@ import { ToolMeta } from "../contracts/types.js";
 import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
 import { SESSION_SCOPES } from "../auth/oauthConfig.js";
 import { prepareAuthenticatedUser } from "../auth/identity.js";
+import { VerifiedEmailRequiredError } from "../auth/verifiedEmail.js";
+import { EmailAlreadyLinkedError } from "../services/userService.js";
 import {
   classifyDiagnosticError,
   writeDiagnostic
@@ -796,13 +798,36 @@ export async function registerLetterTools(
     authType: authInfo?.authType ?? "disabled"
   });
 
+  // A caller with no account, and no confirmed address to open one from. Held
+  // rather than thrown: the session is fine, and every tool in it now answers
+  // with one sentence the customer can act on. Throwing here would fail
+  // registration, which reaches ChatGPT as "this connector is broken", and
+  // swallowing it (what this did until 2026-09-19) left every tool to fail
+  // separately on a foreign key naming whichever table it reached first.
+  //
+  // This server is built per request on the streamable HTTP transport, so the
+  // refusal is re-evaluated on every call there. On the legacy SSE transport
+  // one server serves the whole stream, so a customer who confirms their
+  // address mid-session has to reconnect before it clears.
+  let accountRefusal: VerifiedEmailRequiredError | EmailAlreadyLinkedError | null = null;
   if (authInfo) {
     try {
       await prepareAuthenticatedUser(authInfo);
     } catch (error) {
-      writeDiagnostic("error", "auth.user_preparation_failed", {
-        errorClass: classifyDiagnosticError(error, "database_error")
-      });
+      if (
+        error instanceof VerifiedEmailRequiredError ||
+        error instanceof EmailAlreadyLinkedError
+      ) {
+        // Already reported, by name, where it was decided. Logging it again
+        // here would classify it as `database_error` - it carries no pg code -
+        // and make a refused customer look like a database outage on every
+        // request they make.
+        accountRefusal = error;
+      } else {
+        writeDiagnostic("error", "auth.user_preparation_failed", {
+          errorClass: classifyDiagnosticError(error, "database_error")
+        });
+      }
     }
   }
 
@@ -841,6 +866,9 @@ export async function registerLetterTools(
             return buildInsufficientScopeToolResult(error);
           }
           throw error;
+        }
+        if (accountRefusal) {
+          return buildAccountRefusalToolResult(accountRefusal);
         }
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
@@ -898,6 +926,23 @@ export async function registerLetterTools(
     );
   }
 
+}
+
+/**
+ * The refusal of a caller who has no account and cannot be given one.
+ *
+ * An error result, so the model reads it as "nothing happened" and repeats the
+ * sentence rather than narrating a success. Nothing from the request reaches
+ * the text - both messages are fixed constants - so it is safe to hand back
+ * whole, the way BETA_ACCESS_MESSAGE is.
+ */
+export function buildAccountRefusalToolResult(
+  error: VerifiedEmailRequiredError | EmailAlreadyLinkedError
+) {
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: error.message }]
+  };
 }
 
 /**

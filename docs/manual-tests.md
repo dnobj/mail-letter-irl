@@ -163,8 +163,9 @@ user is not an approved test identity.
 - [ ] Link account A, inspect its balance/order identity, then disconnect.
 - [ ] Use the account-switch flow and link account B.
 - [ ] Confirm account A data/email is not shown or overwritten for account B.
-- [ ] Repeat after a userinfo failure and confirm a known email is not replaced
-      by a placeholder.
+- [ ] Confirm a known email is never replaced: an account that exists keeps its
+      stored address whatever a later token says, and no placeholder address
+      exists to replace it with.
 
 ### CIMD-07 — Web and mobile
 
@@ -200,7 +201,8 @@ configured locally (https://github.com/dnobj/mail-letter-irl/issues/160#issuecom
 purpose, pasted into GitHub, or exposed in chat.
 
 - [ ] Connect the supported Claude/non-ChatGPT MCP path with a PAT.
-- [ ] Confirm PAT tool calls work and never call Auth0 userinfo.
+- [ ] Confirm PAT tool calls work on an account that already exists (a PAT
+      carries no address, and no account is opened from one).
 - [ ] Confirm the Claude/PAT path does not use or mutate the ChatGPT CIMD app.
 
 ### CIMD-10 — DEV rollback
@@ -1544,11 +1546,71 @@ End-to-end test of complete user experience.
 
 ### Multi-Provider Journey (US-ACCT-02)
 1. [ ] Login with Google
-2. [ ] Note user ID
-3. [ ] Switch account
-4. [ ] Login with GitHub
-5. [ ] Different user ID (separate account)
-6. [ ] Each account has own credits/letters
+2. [ ] Note the email on the balance
+3. [ ] End the Auth0 session
+4. [ ] Login with GitHub **on the same confirmed address**
+5. [ ] Same account: one balance, the same letters
+6. [ ] An address the two methods do NOT share is a different account
+
+### LINK-01 — One account per confirmed address
+
+Run on development first, after the two Post Login Actions and the
+`Account Linking` machine-to-machine application are in place
+([auth0-tenant-configuration.md](auth0-tenant-configuration.md)), and again on
+production before anyone but the owner signs in there.
+
+**Preconditions:** both Actions are in the Post Login trigger flow, with
+`link-verified-email` **above** the email-claim Action, **before** the API is
+deployed against the tenant. The order is not a formality and there is no
+fallback: a new customer arriving between the deploy and the Action update is
+refused until their token is re-minted or expires, 24 hours. Then: the API is
+deployed, `/readyz` is green, and the connector has been refreshed.
+
+**Tenant state recorded when this was first set up (development, 2026-09-19):**
+all 8 Auth0 users held distinct addresses, so linking had nothing to join and
+could not strand a row holder; exactly one user (`testuser321@…`, one login,
+nine months old) had `email_verified: false` and is denied by the gate, which
+is the intended behaviour. Both facts were read from the Users list with
+**Search by: Lucene Syntax (Advanced)** and `email_verified:true` /
+`email_verified:false` - the plain "User" search silently matches the query as
+literal text and answers "No users found" for both, which reads exactly like a
+clean tenant.
+
+**Do the row-holder check first, and immediately before enabling the Action.**
+For every confirmed address held by more than one Auth0 user, the oldest must
+be the subject holding the `users` row, or the address must have no row.
+Otherwise linking hands the surviving subject an account it cannot reach, with
+no way back. The procedure, and the hand-written SQL that is today's only
+remedy when a pair does not match, are in
+[auth0-tenant-configuration.md](auth0-tenant-configuration.md).
+
+1. [ ] Sign in to the website with Google. Note the balance and the letter
+       count.
+2. [ ] Sign out, then sign in with a password on the same confirmed address.
+3. [ ] The dashboard shows **one** account: the same balance, the same letters.
+4. [ ] Auth0 -> User Management shows one user with two identities, and the
+       Action logs show the link.
+5. [ ] A brand-new password sign-up is refused until its address is confirmed,
+       with "Confirm your email address, then sign in again."
+6. [ ] An Apple sign-in with **Hide My Email** on is a separate account, as
+       documented.
+7. [ ] In ChatGPT, connect Letter IRL on an address that already has an account
+       through another method. It connects rather than answering "We couldn't
+       connect this account" - the failure that started this work on
+       2026-09-18.
+8. [ ] `get_account_balance` names the address and no longer names a sign-in
+       provider.
+9. [ ] Gift rules still hold across the linked methods: a code printed on your
+       own letter is refused whichever method you sign in with.
+10. [ ] A token with no confirmed address gets the sentence, not a broken
+       account. Simulate on development by taking the claim Action out of the
+       trigger flow and signing in with a fresh subject: both surfaces then
+       refuse. Every tool answers "Letter IRL needs a confirmed email
+       address...", and the dashboard answers 403 with the same text. Put the
+       Action back afterwards. Use a fresh subject on a **confirmed** address
+       that no other Auth0 user holds - an unconfirmed one is denied by the
+       linking Action with its own message and never reaches the server, and a
+       shared address is linked into the older account instead.
 
 ---
 

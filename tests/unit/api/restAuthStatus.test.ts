@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IncomingMessage } from 'http';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../../src/auth/betaAccess.js';
 import { InsufficientScopeError } from '../../../src/auth/oauthChallenge.js';
+import {
+  VerifiedEmailRequiredError,
+  VERIFIED_EMAIL_MESSAGE
+} from '../../../src/auth/verifiedEmail.js';
+import {
+  EmailAlreadyLinkedError,
+  EMAIL_ALREADY_LINKED_MESSAGE
+} from '../../../src/services/userService.js';
 
 /**
  * Where the HTTP status comes from (#179).
@@ -31,6 +39,13 @@ vi.mock('../../../src/auth/tokenValidator.js', () => ({
   requireScopes: vi.fn()
 }));
 
+// Opening the account row is the one step here that would reach PostgreSQL.
+// This file is about which status each outcome gets, so it is a seam.
+vi.mock('../../../src/auth/identity.js', () => ({
+  prepareAuthenticatedUser: vi.fn(async () => 'user@example.invalid')
+}));
+
+import { prepareAuthenticatedUser } from '../../../src/auth/identity.js';
 import { requireScopes, validateJWTToken } from '../../../src/auth/tokenValidator.js';
 import {
   authenticateRestRequest,
@@ -54,6 +69,8 @@ describe('restAuth failure statuses', () => {
   beforeEach(() => {
     vi.mocked(validateJWTToken).mockReset();
     vi.mocked(requireScopes).mockReset();
+    vi.mocked(prepareAuthenticatedUser).mockReset();
+    vi.mocked(prepareAuthenticatedUser).mockResolvedValue('user@example.invalid');
   });
 
   it('maps a beta refusal to 403, not 401', async () => {
@@ -144,9 +161,58 @@ describe('restAuth failure statuses', () => {
     expect(requireScopes).toHaveBeenCalledWith(validUser, ['mail:draft']);
   });
 
+  it('maps a caller with no confirmed address to 403, with the sentence to act on', async () => {
+    // 403 for the same reason a beta refusal is: the credentials are fine and
+    // authorizing again would produce the same token and the same answer.
+    vi.mocked(validateJWTToken).mockResolvedValue(validUser);
+    vi.mocked(prepareAuthenticatedUser).mockRejectedValue(new VerifiedEmailRequiredError());
+
+    const outcome = await authenticateRestRequest(request({ authorization: 'Bearer t' }), READ);
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'no_account', status: 403 });
+    expect(outcome.ok ? '' : outcome.message).toBe(VERIFIED_EMAIL_MESSAGE);
+  });
+
+  it('maps one address held by another sign-in method to 409', async () => {
+    // Not 403: nothing is refused about this caller, two accounts want one
+    // address, and only they can say which sign-in method is theirs.
+    vi.mocked(validateJWTToken).mockResolvedValue(validUser);
+    vi.mocked(prepareAuthenticatedUser).mockRejectedValue(new EmailAlreadyLinkedError());
+
+    const outcome = await authenticateRestRequest(request({ authorization: 'Bearer t' }), READ);
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'account_conflict', status: 409 });
+    expect(outcome.ok ? '' : outcome.message).toBe(EMAIL_ALREADY_LINKED_MESSAGE);
+  });
+
+  it('maps a database that will not answer to 503, not a rethrow', async () => {
+    // Every REST handler calls authenticateRestRequest OUTSIDE its own try, so
+    // an error escaping here is answered by the request boundary as text/plain
+    // where the dashboard has always been given JSON.
+    vi.mocked(validateJWTToken).mockResolvedValue(validUser);
+    vi.mocked(prepareAuthenticatedUser).mockRejectedValue(new Error('connection terminated'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const outcome = await authenticateRestRequest(request({ authorization: 'Bearer t' }), READ);
+
+    error.mockRestore();
+    expect(outcome).toMatchObject({ ok: false, reason: 'unavailable', status: 503 });
+  });
+
+  it('reports the address the account was opened with', async () => {
+    // It used to read the standard `email` claim, which Auth0 does not put on
+    // an access token minted for a custom API: every route saw undefined.
+    vi.mocked(validateJWTToken).mockResolvedValue(validUser);
+
+    const outcome = await authenticateRestRequest(request({ authorization: 'Bearer t' }), READ);
+
+    expect(outcome).toMatchObject({ ok: true, user: { email: 'user@example.invalid' } });
+  });
+
   it('labels each status honestly', () => {
     expect(restAuthErrorLabel(401)).toBe('Unauthorized');
     expect(restAuthErrorLabel(403)).toBe('Forbidden');
+    expect(restAuthErrorLabel(409)).toBe('Conflict');
     expect(restAuthErrorLabel(503)).toBe('Service Unavailable');
   });
 });

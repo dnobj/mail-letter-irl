@@ -381,11 +381,51 @@ Add a Post Login Action containing:
 
 ```javascript
 exports.onExecutePostLogin = async (event, api) => {
-  if (event.user.email) {
-    api.accessToken.setCustomClaim("https://letterirl.com/email", event.user.email);
-  }
+  if (!event.user.email || event.user.email_verified !== true) return;
+  api.accessToken.setCustomClaim("https://letterirl.com/email", event.user.email);
+  api.accessToken.setCustomClaim("https://letterirl.com/email_verified", true);
 };
 ```
+
+**Only a confirmed address, and always both claims.** The address is what a
+Letter IRL account is, and what the linking Action below joins identities on,
+so an unconfirmed one must not reach either.
+
+The server opens an account only when the verdict claim is exactly `true` (the
+boolean, or the string). Anything else refuses: `false` because the customer
+has not confirmed the address, and a **missing** verdict claim because the
+tenant is not saying. The refusal diagnostic distinguishes them (`email_unconfirmed` against
+`email_verdict_unavailable`, and `verified_email_unavailable` for a token
+carrying no address at all). See `src/auth/verifiedEmail.ts`.
+
+Worth knowing when reading those: **on a tenant configured as documented here,
+every one of them is the tenant's fault, not a customer's.** The claim Action
+above sets nothing at all for an unconfirmed address rather than setting the
+verdict to false, and the linking Action denies an unconfirmed login before a
+token exists - so a customer who has not confirmed their address never reaches
+this code. `email_unconfirmed` means some Action is setting the verdict to
+false; the other two mean the claim Action is not setting the verdict, or is
+not running.
+
+**Update this Action BEFORE deploying the API against the tenant.** There is
+no fallback. An earlier revision of the server asked Auth0's `/userinfo` when
+a token carried an address with no verdict; that is gone, because `/userinfo`
+needs `openid` on the access token and ChatGPT never asks for one - so it
+served the website alone, and quietly let the website tolerate a missing or
+broken Action, which is the one surface LINK-01 uses to check a tenant.
+
+In the window between the API deploying and this Action being updated:
+
+| Who | What happens |
+| --- | --- |
+| Anyone with an account already | Unaffected. An existing account is never refused, whatever the token says. |
+| A new customer, either surface | Refused with the sentence until their token is re-minted - signing in again on the website, reconnecting in ChatGPT - or it expires. Access tokens live 24 hours. |
+
+(The `web 7200` figure recorded further down is the implicit/hybrid-flow
+lifetime. Neither client uses that flow, so both carry the 86400-second one.)
+
+So: set both claims, or set neither. Setting the address alone leaves every new
+customer refused until the verdict claim appears.
 
 **The namespace is load-bearing.** Auth0 silently drops a non-namespaced custom
 claim that collides with a reserved OIDC name, and `email` is reserved - the
@@ -399,9 +439,175 @@ Deploying the Action is not enough on its own - it must also be dragged into
 the **Post Login trigger flow** and applied, or it never runs.
 
 The server reads `LETTER_IRL_OAUTH_EMAIL_CLAIM` (default
-`https://letterirl.com/email`), so the two environments can namespace against
-their own domains. It prefers a standard `email` claim when one is present, and
-still falls back to `/userinfo`.
+`https://letterirl.com/email`) and
+`LETTER_IRL_OAUTH_EMAIL_VERIFIED_CLAIM` (default
+`https://letterirl.com/email_verified`), so the two environments can namespace
+against their own domains. It prefers a standard `email` claim when one is
+present, and with neither claim it opens no account at all - there is nothing
+else to ask.
+
+### Required Post Login Action: linking one person's sign-in methods
+
+**Auth0 mints a subject per sign-in method.** Without this Action, one person
+signing in with Google and with a password is two subjects presenting one
+address - and `users.email` is `NOT NULL UNIQUE`, so the second one collides,
+is refused, and that person has no account. This Action makes the address the
+identity by joining the identities behind it.
+
+Put it **above** the email-claim Action in the Post Login trigger flow. Not
+because the claim's value depends on it - both identities carry the same
+address by construction, since the Action looks up by `event.user.email` - but
+because a login this Action denies should be denied before anything else runs.
+
+The ordering that IS load-bearing is inside the Action: the Management API
+link must happen **before** `setPrimaryUser`, which requires the identity that
+authenticated this login to already be a secondary of the primary user. The
+code below does them in that order.
+
+```javascript
+const { ManagementClient } = require("auth0");
+
+/**
+ * Written against the auth0 SDK v7, pinned in Dependencies. v7 is NOT v4, and
+ * the difference is not cosmetic: there is no usersByEmail manager, no
+ * users.link, and awaiting a call returns the payload itself rather than
+ * { data }. The v4 spelling throws on the first login, and because this Action
+ * denies on any failure, it takes every login on the tenant with it.
+ */
+exports.onExecutePostLogin = async (event, api) => {
+  // An address nobody has proved they own is not an identity. A sign-up that
+  // has not confirmed its address is refused here, at the source, rather than
+  // being allowed to claim someone else's account.
+  if (!event.user.email || event.user.email_verified !== true) {
+    api.access.deny("Confirm your email address, then sign in again.");
+    return;
+  }
+
+  try {
+    const management = new ManagementClient({
+      domain: event.secrets.AUTH0_DOMAIN,
+      clientId: event.secrets.LINKING_CLIENT_ID,
+      clientSecret: event.secrets.LINKING_CLIENT_SECRET
+    });
+
+    const matches = await management.users.listUsersByEmail({
+      email: event.user.email
+    });
+
+    // Only confirmed addresses, and only other accounts.
+    const others = (matches || []).filter(
+      user => user.email_verified === true && user.user_id !== event.user.user_id
+    );
+    if (others.length === 0) return;
+
+    // The oldest account survives: it is the one with the history.
+    const primary = others
+      .concat(event.user)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
+    if (primary.user_id === event.user.user_id) return;
+
+    // Link first, THEN setPrimaryUser: the identity that authenticated this
+    // login has to already be a secondary of the primary user.
+    const separator = event.user.user_id.indexOf("|");
+    await management.users.identities.link(primary.user_id, {
+      provider: event.user.user_id.slice(0, separator),
+      user_id: event.user.user_id.slice(separator + 1)
+    });
+    api.authentication.setPrimaryUser(primary.user_id);
+  } catch (error) {
+    // Deny rather than let a second account be created. A denied login is
+    // recoverable in a minute; a split account is not recoverable at all
+    // without an operator merging two histories by hand.
+    console.log("link-verified-email failed: " + (error && error.message));
+    api.access.deny("Sign-in is temporarily unavailable. Please try again.");
+  }
+};
+```
+
+**Test it in the Action editor before putting it in the flow.** Set the test
+event's user to a confirmed address that no tenant user holds and Run: the
+result should be an empty `Commands: []`. That one run exercises everything
+that can go wrong at deploy time - the dependency installing, `require`, the
+client constructing, the client-credentials token request, and the response
+shape - and none of it can be checked by reading. Then set
+`email_verified: false` and Run again: the result should be the
+"Confirm your email address" denial. On development, 2026-09-19, the first of
+those two runs is what caught a mistyped secret; the Action would otherwise
+have denied every login on the tenant the moment it entered the flow.
+
+**Its credentials are a machine-to-machine application**, named
+`Account Linking (<environment>)`, authorized for the Management API with
+exactly `read:users` and `update:users` - nothing else, because nothing else is
+needed and this secret lives in an Action. Put the domain, client id and secret
+in the Action's own **Secrets**, never in a repository or an env file.
+
+It also needs the `auth0` npm module under the Action's **Dependencies**,
+pinned - not `latest`. Development runs **7.2.0**, deployed 2026-09-19 and
+verified by the test run above. Pin it, because a new major changes these call
+shapes (v4 used `usersByEmail.getByEmail` returning `{ data }` and
+`users.link({ id }, body)`, none of which exist in v7), and an Action that
+throws denies every login on the tenant.
+
+**Confirm the connection sends the email.** Branding -> Email Templates ->
+**Verification Email (Link)** must show *Template enabled*; that is the email
+whose link sets `email_verified`, and without it a new sign-up can never get
+past the deny above. Development is enabled and uses the built-in **Auth0
+Email Provider**, which Auth0 labels development/trial only - **production
+needs a custom email provider before this Action goes into its flow**, or new
+password sign-ups will be unable to confirm and will be denied. Also check
+Authentication -> Database ->
+`Username-Password-Authentication` -> **Requires Username** / email settings,
+and Branding -> Email Templates -> **Verification Email** enabled. Without it
+the deny above locks every new password account out permanently.
+
+**What linking does not join.** An Apple sign-in that hides the address behind
+a private relay address carries a different address, so it stays a different
+account, as documented in `docs/account-switching-guide.md`.
+
+**Before enabling this on a tenant, check who holds the row.** The Action makes
+the OLDEST Auth0 user primary, and that is independent of which subject holds
+the Letter IRL `users` row - the REST layer opened no account row at all until
+2026-09-19, so a person whose first visit was the website has an old Auth0 user
+with no row, and their later ChatGPT identity holds the row with the credits in
+it. Link those two and the surviving primary subject arrives with no row,
+presents an address the other subject still holds, and is answered 409 - with
+no way back, because the secondary identity can no longer sign in on its own.
+
+So, per tenant, before the Action goes into the flow:
+
+1. Page `GET /api/v2/users` and group the confirmed addresses yourself - the
+   Management API has no group-by. For every address held by more than one
+   Auth0 user, note the oldest by `created_at`.
+2. For each of those, ask the database which subject holds the row:
+   `SELECT user_id FROM users WHERE lower(email) = lower($1)`. The oldest Auth0
+   user must be that subject, or the address must have no row at all.
+3. Where it is not, the two accounts have to be joined **before** the Action is
+   enabled. There is no tool for this yet - the operator `account.merge`
+   command is planned, not built - so today it is SQL, by hand, in one
+   transaction, and it is not simply `UPDATE users SET user_id`:
+
+   - 13 child tables reference `users(user_id)` `ON DELETE CASCADE` and must be
+     re-pointed (`letters`, `orders`, `letter_drafts`, `credit_ledger`,
+     `credit_transactions`, `promo_redemptions`, `personal_access_tokens`,
+     `feature_requests`, `recent_uploads`, `image_entitlements`,
+     `image_generation_reservations`, `gift_letters`,
+     `gift_codes.issued_to_user_id`);
+   - `commerce_pack_refunds` is `ON DELETE RESTRICT`, so the old row cannot be
+     deleted until that one moves;
+   - `stripe_disputes` and `gift_codes.redeemed_by_user_id` are
+     `ON DELETE SET NULL`, so deleting the old row without moving them first
+     silently detaches dispute and redemption history rather than failing;
+   - `promo_redemptions` is unique per campaign and user, and `recent_uploads`
+     is keyed on the user, so a collision there is a decision, not a move.
+
+4. The check is a snapshot. A row opened under the younger subject between the
+   check and the Action going live recreates the hazard, so re-run step 2
+   immediately before enabling it - or keep new accounts out in between, which
+   on production is what `LETTER_IRL_BETA_ALLOWED_SUBJECTS` already does.
+
+**After anyone is linked, check the subject lists.**
+`LETTER_IRL_BETA_ALLOWED_SUBJECTS` and `LETTER_IRL_ADMIN_USER_IDS` name
+subjects, and only the surviving primary subject counts afterwards.
 
 ### Required Auth0 CIMD Configuration
 

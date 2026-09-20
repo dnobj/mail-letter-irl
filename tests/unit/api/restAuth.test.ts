@@ -27,6 +27,18 @@ vi.mock("../../../src/services/patService.js", () => ({
   updateLastUsed: vi.fn().mockResolvedValue(undefined)
 }));
 
+// The middleware opens the account row now, so the two functions that would
+// reach PostgreSQL are replaced and everything else - the claim reading, the
+// refusals - runs for real.
+vi.mock("../../../src/services/userService.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("../../../src/services/userService.js")>();
+  return {
+    ...actual,
+    findUser: vi.fn(async () => null),
+    getOrCreateUser: vi.fn(async (userId: string, email: string) => ({ user_id: userId, email }))
+  };
+});
+
 // Resolve the remote JWKS to our local public key. createRemoteJWKSet is the
 // only thing in the path that touches the network, and this is its seam.
 let publicKey: Awaited<ReturnType<typeof generateKeyPair>>["publicKey"];
@@ -40,6 +52,7 @@ vi.mock("jose", async (importOriginal) => {
 });
 
 import { authenticateRestRequest } from "../../../src/api/middleware/restAuth.js";
+import { VERIFIED_EMAIL_MESSAGE } from "../../../src/auth/verifiedEmail.js";
 
 const issuer = "https://dev-test.auth0.com/";
 const mcpAudience = "https://dev-api.example.com/mcp";
@@ -51,7 +64,14 @@ async function mint(
   claims: Record<string, unknown> = { scope: WEBSITE_SCOPE },
   expiresIn = "5m"
 ): Promise<string> {
-  return new SignJWT({ sub: "auth0|user-1", email: "user@example.invalid", ...claims })
+  // email_verified beside the address: an address the issuer will not vouch
+  // for opens no account (src/auth/verifiedEmail.ts).
+  return new SignJWT({
+    sub: "auth0|user-1",
+    email: "user@example.invalid",
+    email_verified: true,
+    ...claims
+  })
     .setProtectedHeader({ alg: "RS256" })
     .setIssuer(issuer)
     .setAudience(audience)
@@ -95,6 +115,48 @@ describe("REST bearer authentication", () => {
         scopes: WEBSITE_SCOPE.split(" ")
       }
     });
+  });
+
+  it("refuses a token whose address the issuer will not vouch for", async () => {
+    // The real rule, end to end, with no seam standing in for it: the issuer
+    // says the address is not confirmed, so there is nothing to open. The
+    // case below covers the other refusal, an address with no verdict at
+    // all - the shape the pre-2026-09-19 Action emitted for everyone.
+    const { getOrCreateUser } = await import("../../../src/services/userService.js");
+    vi.mocked(getOrCreateUser).mockClear();
+
+    const outcome = await authenticateRestRequest(
+      request({
+        authorization: `Bearer ${await mint(mcpAudience, {
+          scope: WEBSITE_SCOPE,
+          email_verified: false
+        })}`
+      }),
+      ["mail:read"]
+    );
+
+    expect(outcome).toMatchObject({ ok: false, reason: "no_account", status: 403 });
+    expect(outcome.ok ? "" : outcome.message).toBe(VERIFIED_EMAIL_MESSAGE);
+    expect(getOrCreateUser).not.toHaveBeenCalled();
+  });
+
+  it("refuses a token carrying an address the issuer said nothing about", async () => {
+    const { getOrCreateUser } = await import("../../../src/services/userService.js");
+    vi.mocked(getOrCreateUser).mockClear();
+
+    const outcome = await authenticateRestRequest(
+      request({
+        authorization: `Bearer ${await mint(mcpAudience, {
+          scope: WEBSITE_SCOPE,
+          email: undefined,
+          "https://letterirl.com/email": "unvouched@example.invalid"
+        })}`
+      }),
+      ["mail:read"]
+    );
+
+    expect(outcome).toMatchObject({ ok: false, reason: "no_account", status: 403 });
+    expect(getOrCreateUser).not.toHaveBeenCalled();
   });
 
   it("rejects a token for another audience, and says so", async () => {

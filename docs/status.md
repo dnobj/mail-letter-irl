@@ -27,7 +27,12 @@ ChatGPT, and manage their account on letterirl.com.
   and `generate_image_for_mail`, which spends the user's Letter IRL image generations or routes the
   request to ChatGPT's free built-in generator.
 - **Account:** saved return address, balance, order and purchase history, purchase status, feature
-  requests.
+  requests. One account per **confirmed email address**: Auth0 mints a subject per sign-in method,
+  and a post-login Action links the methods that share an address, so a person who signs in with
+  Google and with a password has one balance and one history. A sign-in that carries no confirmed
+  address opens no account and says so, rather than opening one under an invented address
+  ([account-switching-guide.md](account-switching-guide.md),
+  [auth0-tenant-configuration.md](auth0-tenant-configuration.md)).
 
 The MCP surface is 22 tools and 6 widgets ([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)).
 Tool names and schemas are treated as stable compatibility contracts. Widget template URIs are
@@ -62,7 +67,12 @@ in production:
 - deletion of feature requests 12 months after submission (#400);
 - error classes instead of message text in the remaining writers, and migration
   `032_error_text_minimisation.sql` (#401);
-- the related documentation (#391, #392, #399).
+- the related documentation (#391, #392, #399);
+- one account per confirmed email address, with the four `@unknown.com` placeholder addresses
+  removed and the account row opened on the REST and checkout paths as well as the MCP one. **Its
+  Auth0 half is manual and per tenant**: the two Post Login Actions and the `Account Linking`
+  machine-to-machine application must be in place in a tenant before the code that depends on them
+  is deployed against it, and LINK-01 run afterwards.
 
 ## Architecture
 

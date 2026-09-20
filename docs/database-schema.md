@@ -38,8 +38,8 @@ User accounts with credit balances and tier information.
 
 | Column | Type | Nullable | Default | Description |
 |--------|------|----------|---------|-------------|
-| user_id | VARCHAR(255) | NO | - | Primary key. Auth0 user ID |
-| email | VARCHAR(255) | NO | - | Unique email address |
+| user_id | VARCHAR(255) | NO | - | Primary key. Auth0 user ID (the linked identity's primary subject) |
+| email | VARCHAR(255) | NO | - | Unique confirmed email address. **This is the account's identity** |
 | credits | INTEGER | NO | 0 | Current credit balance (computed from ledger) |
 | credits_purchased | INTEGER | NO | 0 | Total credits ever purchased |
 | credits_used | INTEGER | NO | 0 | Total credits ever used |
@@ -53,6 +53,14 @@ User accounts with credit balances and tier information.
 - `idx_users_email` on email
 - `idx_users_created_at` on created_at
 - `idx_users_tier` on tier
+
+**The UNIQUE on `email` is load-bearing, and PostgreSQL calls it
+`users_email_key`.** Auth0 mints a subject per sign-in method, so one person
+arriving by a second method presents an address the first already holds; the
+constraint is what stops that becoming two accounts, and the name is what
+`EmailAlreadyLinkedError` matches on a 23505 (`src/services/userService.ts`,
+proven against a real database in `tests/integration/accountIdentity.postgres.test.ts`).
+A migration that renames or replaces it has to update both.
 
 ---
 

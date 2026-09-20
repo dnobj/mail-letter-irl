@@ -33,6 +33,15 @@ import { InsufficientScopeError } from '../../auth/oauthChallenge.js';
 import { OAUTH_NOT_CONFIGURED } from '../../auth/oauthErrors.js';
 import { writeDiagnostic } from '../../utils/diagnosticLog.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../auth/betaAccess.js';
+import {
+  VerifiedEmailRequiredError,
+  VERIFIED_EMAIL_MESSAGE
+} from '../../auth/verifiedEmail.js';
+import { prepareAuthenticatedUser } from '../../auth/identity.js';
+import {
+  EmailAlreadyLinkedError,
+  EMAIL_ALREADY_LINKED_MESSAGE
+} from '../../services/userService.js';
 import type { ProductScope } from '../../auth/toolScopes.js';
 import { insufficientScope } from './restAuth.js';
 
@@ -118,8 +127,23 @@ export async function authenticateHttpRequest(
     throw error;
   }
 
-  return {
-    userId: user.userId,
-    email: typeof user.claims.email === 'string' ? user.claims.email : undefined
-  };
+  // The account row, as in restAuth. This middleware's one caller is the
+  // checkout route, which writes an order keyed on users(user_id): without a
+  // row, a first-time buyer's Buy Now fails on the foreign key and is reported
+  // as a database error. `email` came from the standard claim, which Auth0
+  // does not put on an access token minted for a custom API.
+  try {
+    const email = (await prepareAuthenticatedUser(user)) ?? undefined;
+    return { userId: user.userId, email };
+  } catch (error: unknown) {
+    if (error instanceof VerifiedEmailRequiredError) {
+      respond(res, 403, { error: VERIFIED_EMAIL_MESSAGE });
+      return null;
+    }
+    if (error instanceof EmailAlreadyLinkedError) {
+      respond(res, 409, { error: EMAIL_ALREADY_LINKED_MESSAGE });
+      return null;
+    }
+    throw error;
+  }
 }

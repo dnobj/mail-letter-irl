@@ -32,7 +32,11 @@ vi.mock('../../../src/db/index.js', () => ({
   query: vi.fn(async (sql: string, params?: any[]) => answer(sql, params ?? [])),
   transaction: vi.fn(async (callback: (c: typeof client) => Promise<unknown>) => callback(client))
 }));
-vi.mock('../../../src/services/userService.js', () => ({ findUser: vi.fn(async () => null) }));
+const ensureAccount = vi.hoisted(() => vi.fn(async () => ({ user_id: 'reader-1' })));
+vi.mock('../../../src/services/userService.js', () => ({
+  findUser: vi.fn(async () => null),
+  ensureAccountRowWithClient: ensureAccount
+}));
 const grantGift = vi.hoisted(() => vi.fn());
 vi.mock('../../../src/services/giftLetterService.js', () => ({ grantGiftLettersWithClient: grantGift }));
 
@@ -94,6 +98,22 @@ describe('redeemPromoCode: seed campaigns', () => {
     expect(ran('INSERT INTO credit_transactions')).toHaveLength(0);
     const redemption = ran('INSERT INTO promo_redemptions')[0].params;
     expect(redemption).toEqual(['campaign-1', 'reader-1', null, 'gift-1', 'readerone@gmail.com']);
+  });
+
+  it("opens the account from the redeemer's own address, never a placeholder", async () => {
+    // `${userId}@unknown.com` used to stand in whenever no address reached
+    // this call. That row is a real account with a fake address, and the
+    // per-email rules this file is about - one claim per mailbox, and the
+    // gift own-code check - cannot see it. One walked through the own-code
+    // check on 2026-09-18.
+    await redeemPromoCode({ userId: 'reader-1', email: 'Reader.One+x@gmail.com', promoCode: 'jane-smith' });
+
+    expect(ensureAccount).toHaveBeenCalledWith(client, {
+      userId: 'reader-1',
+      email: 'Reader.One+x@gmail.com',
+      credits: 0
+    });
+    expect(ran('INSERT INTO users')).toHaveLength(0);
   });
 
   it('grants both when the seed also carries letters', async () => {
