@@ -1,6 +1,14 @@
 import { AuthenticatedUser, requireScopes } from "./tokenValidator.js";
+import { PRODUCT_SCOPES } from "./oauthConfig.js";
 
-export type ProductScope = "mail:read" | "mail:draft" | "mail:send";
+/**
+ * Derived, not hand-written. This type is what stops a session or identity
+ * scope being enforced by a tool - putting "openid" in TOOL_SCOPES has to fail
+ * the build, because a personal access token authorizes with no scopes at all
+ * and would then be denied permanently. A hand-maintained union could drift
+ * from PRODUCT_SCOPES and quietly stop guarding that.
+ */
+export type ProductScope = (typeof PRODUCT_SCOPES)[number];
 
 export const TOOL_SCOPES: Record<string, ProductScope> = {
   get_started: "mail:read",

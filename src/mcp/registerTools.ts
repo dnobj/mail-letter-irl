@@ -60,7 +60,7 @@ import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
 import { ToolMeta } from "../contracts/types.js";
 import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
-import { SESSION_SCOPES } from "../auth/oauthConfig.js";
+import { SESSION_SCOPES, IDENTITY_SCOPES } from "../auth/oauthConfig.js";
 import { prepareAuthenticatedUser } from "../auth/identity.js";
 import { VerifiedEmailRequiredError } from "../auth/verifiedEmail.js";
 import { EmailAlreadyLinkedError } from "../services/userService.js";
@@ -377,15 +377,32 @@ export function buildToolSecuritySchemes(
       // tool's securitySchemes. Every grant recorded exactly
       // "mail:draft mail:read mail:send", the union of the enforced scopes.
       //
-      // Session scopes go here and nowhere else. They must never reach
-      // getRequiredToolScopes: PAT callers authorize with no scopes at all, so
-      // a tool demanding one would deny them permanently
+      // Identity scopes are here for the same reason, and were missing for
+      // the same reason (#424).
+      //
+      // OBSERVED, development 2026-09-21: with no identity scope requested,
+      // Auth0 logged a successful login and a successful authorization-code
+      // exchange, our server was never called at all, and ChatGPT's own
+      // callback answered 400 OAUTH_OWNER_PROFILE_ID_MISSING - shown to the
+      // customer as "We couldn't connect this account". The error carried
+      // is_multi_link_eligible and account_position_bucket "first".
+      //
+      // INFERRED: ChatGPT needs an identifier for the account being linked,
+      // and Auth0 issues an ID token only when openid is asked for. OpenAI's
+      // Apps SDK auth guidance asks servers to issue an ID token during the
+      // OAuth flow and to enable openid and email, which fits. Whether
+      // ChatGPT reads that ID token or calls /userinfo is NOT established -
+      // both need openid, so this holds either way.
+      //
+      // Session and identity scopes go here and nowhere else. They must never
+      // reach getRequiredToolScopes: PAT callers authorize with no scopes at
+      // all, so a tool demanding one would deny them permanently
       // (tests/unit/auth/sessionScopes.test.ts pins that).
       //
       // Applied to every tool deliberately. A typed @-mention scopes the turn's
-      // toolset, so a session scope carried by only some tools would be
-      // requested only sometimes.
-      scopes: [...getRequiredToolScopes(toolName), ...SESSION_SCOPES]
+      // toolset, so a scope carried by only some tools would be requested only
+      // sometimes.
+      scopes: [...getRequiredToolScopes(toolName), ...SESSION_SCOPES, ...IDENTITY_SCOPES]
     }
   ];
 }

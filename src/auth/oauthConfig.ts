@@ -6,7 +6,19 @@
  */
 export const PRODUCT_SCOPES = ["mail:read", "mail:draft", "mail:send"] as const;
 
-export const IDENTITY_SCOPES = ["openid", "profile", "email"] as const;
+/**
+ * Identity scopes: requested so Auth0 issues an ID token, never demanded by a
+ * tool (#424). ChatGPT needs an identifier for the account being linked, and
+ * without one its own callback answers 400 OAUTH_OWNER_PROFILE_ID_MISSING
+ * before our server is ever called.
+ *
+ * `profile` is deliberately absent. OpenAI's Apps SDK auth guidance names
+ * `openid` and `email`; `profile` is the widest OIDC scope - name, picture,
+ * locale and more - and is asked for by nothing we know of. Add it only if
+ * ChatGPT is shown to need a display name for its account picker, and say so
+ * here when you do.
+ */
+export const IDENTITY_SCOPES = ["openid", "email"] as const;
 
 /**
  * Grant types this deployment supports, advertised in authorization-server
@@ -167,7 +179,15 @@ export function validateOAuthConfig(
   if (config.algorithms.length !== 1 || config.algorithms[0] !== "RS256") {
     errors.push("LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS must be exactly RS256");
   }
-  for (const scope of PRODUCT_SCOPES) {
+  // Every scope a tool asks the customer to grant must be advertised here
+  // too. These are two separate channels - the per-tool securitySchemes carry
+  // the request, this list is what the metadata documents - and
+  // LETTER_IRL_OAUTH_SCOPES can override the default. Without this a
+  // deployment can request openid and offline_access per tool while
+  // advertising neither, which is the same advertised-versus-requested drift
+  // that caused #160 and #424, just pointing the other way. It bites hardest
+  // in static-DCR mode, where our metadata IS the document ChatGPT reads.
+  for (const scope of [...PRODUCT_SCOPES, ...SESSION_SCOPES, ...IDENTITY_SCOPES]) {
     if (!config.scopes.includes(scope)) {
       errors.push(`LETTER_IRL_OAUTH_SCOPES must include ${scope}`);
     }
