@@ -57,7 +57,7 @@ describe("Submission readiness checks", () => {
         // enforced: ChatGPT unions these per-tool lists to build its
         // authorization request rather than reading scopes_supported
         // (#160, #424).
-        scopes: ["mail:send", "offline_access", "openid", "profile", "email"]
+        scopes: ["mail:send", "offline_access", "openid", "email"]
       }
     ]);
   });
@@ -78,7 +78,7 @@ describe("Submission readiness checks", () => {
     expect(meta.securitySchemes).toEqual([
       {
         type: "oauth2",
-        scopes: ["mail:draft", "offline_access", "openid", "profile", "email"]
+        scopes: ["mail:draft", "offline_access", "openid", "email"]
       }
     ]);
     expect(meta["openai/widgetAccessible"]).toBe(true);

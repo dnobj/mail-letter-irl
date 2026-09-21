@@ -190,9 +190,27 @@ describe('identity scopes (issue #424)', () => {
     }
   });
 
-  it('advertises them as well as requesting them, so metadata and request agree', () => {
-    for (const scope of IDENTITY_SCOPES) {
-      expect(DEFAULT_OAUTH_SCOPES).toContain(scope);
+  it('asks for nothing it does not also advertise', () => {
+    // Not "DEFAULT_OAUTH_SCOPES contains IDENTITY_SCOPES" - that is spread
+    // from it and cannot fail. The real property is that the two channels
+    // agree: the per-tool securitySchemes carry the request, DEFAULT_OAUTH_SCOPES
+    // is what the metadata documents, and a scope in the first and not the
+    // second is the #160/#424 drift pointing the other way.
+    //
+    // The deployment-time half of this lives in oauthConfig.test.ts, because
+    // LETTER_IRL_OAUTH_SCOPES can override the default and validateOAuthConfig
+    // is what refuses a deployment that requests more than it advertises.
+    const advertised = new Set<string>(DEFAULT_OAUTH_SCOPES);
+    for (const toolName of Object.keys(TOOL_SCOPES)) {
+      const requested = (
+        buildToolSecuritySchemes(toolName, true) as Array<{ scopes?: string[] }>
+      ).flatMap(scheme => scheme.scopes ?? []);
+      for (const scope of requested) {
+        expect(
+          advertised.has(scope),
+          `${toolName} requests "${scope}", which is not in the advertised vocabulary`
+        ).toBe(true);
+      }
     }
   });
 });

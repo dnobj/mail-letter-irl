@@ -377,16 +377,22 @@ export function buildToolSecuritySchemes(
       // tool's securitySchemes. Every grant recorded exactly
       // "mail:draft mail:read mail:send", the union of the enforced scopes.
       //
-      // Identity scopes are here for the same reason and were missing for the
-      // same reason (#424). ChatGPT records WHICH account was connected, and
-      // takes that identifier from the ID token - which Auth0 issues only when
-      // openid is requested. Without it ChatGPT's own callback answers 400
-      // OAUTH_OWNER_PROFILE_ID_MISSING and shows "We couldn't connect this
-      // account", after a completely successful Auth0 login and code exchange.
-      // Our server is never called, so nothing here logs it. Observed on
-      // development 2026-09-21; the error carried is_multi_link_eligible, so
-      // ChatGPT's multiple-accounts-per-connector flow is what began requiring
-      // it. profile and email come along so the account can be labelled.
+      // Identity scopes are here for the same reason, and were missing for
+      // the same reason (#424).
+      //
+      // OBSERVED, development 2026-09-21: with no identity scope requested,
+      // Auth0 logged a successful login and a successful authorization-code
+      // exchange, our server was never called at all, and ChatGPT's own
+      // callback answered 400 OAUTH_OWNER_PROFILE_ID_MISSING - shown to the
+      // customer as "We couldn't connect this account". The error carried
+      // is_multi_link_eligible and account_position_bucket "first".
+      //
+      // INFERRED: ChatGPT needs an identifier for the account being linked,
+      // and Auth0 issues an ID token only when openid is asked for. OpenAI's
+      // Apps SDK auth guidance asks servers to issue an ID token during the
+      // OAuth flow and to enable openid and email, which fits. Whether
+      // ChatGPT reads that ID token or calls /userinfo is NOT established -
+      // both need openid, so this holds either way.
       //
       // Session and identity scopes go here and nowhere else. They must never
       // reach getRequiredToolScopes: PAT callers authorize with no scopes at

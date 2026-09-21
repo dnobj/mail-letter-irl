@@ -382,7 +382,7 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
           // because ChatGPT builds its authorization request from the union of
           // these lists, not from scopes_supported (#160, #424). They are
           // requested, never enforced.
-          scopes: ['mail:read', 'offline_access', 'openid', 'profile', 'email']
+          scopes: ['mail:read', 'offline_access', 'openid', 'email']
         }
       ]);
     });
@@ -405,7 +405,7 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
         securitySchemes: [
           {
             type: 'oauth2',
-            scopes: ['mail:draft', 'offline_access', 'openid', 'profile', 'email']
+            scopes: ['mail:draft', 'offline_access', 'openid', 'email']
           }
         ],
         'openai/widgetAccessible': true,

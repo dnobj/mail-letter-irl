@@ -2427,7 +2427,6 @@
         "type": "oauth",
         "scopes": [
           "openid",
-          "profile",
           "email",
           "offline_access",
           "mail:read",
