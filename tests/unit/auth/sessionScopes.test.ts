@@ -109,10 +109,10 @@ describe('session scopes are requested per tool but never enforced', () => {
         expect(sessionScopes.has(scope)).toBe(false);
         expect(requested).toContain(scope);
       }
-      // Requested minus enforced must be exactly the session scopes - nothing
-      // else may sneak into the consent screen.
+      // Requested minus enforced must be exactly the session and identity
+      // scopes - nothing else may sneak into the consent screen.
       const extra = requested.filter(scope => !enforced.includes(scope));
-      expect(new Set(extra)).toEqual(new Set(SESSION_SCOPES));
+      expect(new Set(extra)).toEqual(new Set([...SESSION_SCOPES, ...IDENTITY_SCOPES]));
     }
   });
 
@@ -121,5 +121,78 @@ describe('session scopes are requested per tool but never enforced', () => {
       type: string;
     }>;
     expect(schemes).toEqual([{ type: 'noauth' }]);
+  });
+});
+
+/**
+ * Identity scopes (issue #424).
+ *
+ * ChatGPT records WHICH account was connected, and takes that identifier from
+ * the ID token - which Auth0 issues only when `openid` is requested. These
+ * per-tool lists are the only channel that carries the request, so with no
+ * identity scope among them a connection attempt died at ChatGPT's own
+ * callback: 400 OAUTH_OWNER_PROFILE_ID_MISSING, shown to the customer as "We
+ * couldn't connect this account", after a completely successful Auth0 login
+ * and code exchange. Our server is never reached on that path, so nothing
+ * server-side records the failure - it is invisible from here.
+ *
+ * That is the #160 defect exactly: a scope advertised in the metadata and
+ * requested by nobody. It needs the same two halves, and they must both hold -
+ * asked for on every tool, enforced by none.
+ */
+describe('identity scopes (issue #424)', () => {
+  it('asks for every identity scope on every tool', () => {
+    for (const toolName of Object.keys(TOOL_SCOPES)) {
+      const requested = (
+        buildToolSecuritySchemes(toolName, true) as Array<{ scopes?: string[] }>
+      ).flatMap(scheme => scheme.scopes ?? []);
+      for (const scope of IDENTITY_SCOPES) {
+        expect(
+          requested,
+          `${toolName} does not request the identity scope "${scope}", so a turn ` +
+            `scoped to it would authorize without an ID token and ChatGPT could not ` +
+            `record which account connected`
+        ).toContain(scope);
+      }
+    }
+  });
+
+  it('requests openid, which is the one that makes Auth0 issue an ID token', () => {
+    // Named on its own because it is the scope the failure actually turned on:
+    // profile and email only label the account once it exists.
+    expect(IDENTITY_SCOPES).toContain('openid');
+    const requested = (
+      buildToolSecuritySchemes('get_account_balance', true) as Array<{ scopes?: string[] }>
+    ).flatMap(scheme => scheme.scopes ?? []);
+    expect(requested).toContain('openid');
+  });
+
+  it('lets no tool require an identity scope', () => {
+    // The PAT half, and the reason these may never join PRODUCT_SCOPES or
+    // TOOL_SCOPES: a personal access token authorizes with no scopes at all
+    // (tokenValidator returns early for authType "pat"), so a tool demanding
+    // openid would deny every PAT caller permanently.
+    const identityScopes = new Set<string>(IDENTITY_SCOPES);
+    for (const toolName of Object.keys(TOOL_SCOPES)) {
+      for (const scope of getRequiredToolScopes(toolName)) {
+        expect(
+          identityScopes.has(scope),
+          `${toolName} requires the identity scope "${scope}"; identity scopes are ` +
+            `requested from Auth0, not demanded of callers, and PAT callers carry no scopes at all`
+        ).toBe(false);
+      }
+    }
+  });
+
+  it('keeps the identity scopes out of the product vocabulary', () => {
+    for (const scope of IDENTITY_SCOPES) {
+      expect(PRODUCT_SCOPES).not.toContain(scope);
+    }
+  });
+
+  it('advertises them as well as requesting them, so metadata and request agree', () => {
+    for (const scope of IDENTITY_SCOPES) {
+      expect(DEFAULT_OAUTH_SCOPES).toContain(scope);
+    }
   });
 });

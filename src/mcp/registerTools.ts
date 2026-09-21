@@ -60,7 +60,7 @@ import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
 import { ToolMeta } from "../contracts/types.js";
 import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
-import { SESSION_SCOPES } from "../auth/oauthConfig.js";
+import { SESSION_SCOPES, IDENTITY_SCOPES } from "../auth/oauthConfig.js";
 import { prepareAuthenticatedUser } from "../auth/identity.js";
 import { VerifiedEmailRequiredError } from "../auth/verifiedEmail.js";
 import { EmailAlreadyLinkedError } from "../services/userService.js";
@@ -377,15 +377,26 @@ export function buildToolSecuritySchemes(
       // tool's securitySchemes. Every grant recorded exactly
       // "mail:draft mail:read mail:send", the union of the enforced scopes.
       //
-      // Session scopes go here and nowhere else. They must never reach
-      // getRequiredToolScopes: PAT callers authorize with no scopes at all, so
-      // a tool demanding one would deny them permanently
+      // Identity scopes are here for the same reason and were missing for the
+      // same reason (#424). ChatGPT records WHICH account was connected, and
+      // takes that identifier from the ID token - which Auth0 issues only when
+      // openid is requested. Without it ChatGPT's own callback answers 400
+      // OAUTH_OWNER_PROFILE_ID_MISSING and shows "We couldn't connect this
+      // account", after a completely successful Auth0 login and code exchange.
+      // Our server is never called, so nothing here logs it. Observed on
+      // development 2026-09-21; the error carried is_multi_link_eligible, so
+      // ChatGPT's multiple-accounts-per-connector flow is what began requiring
+      // it. profile and email come along so the account can be labelled.
+      //
+      // Session and identity scopes go here and nowhere else. They must never
+      // reach getRequiredToolScopes: PAT callers authorize with no scopes at
+      // all, so a tool demanding one would deny them permanently
       // (tests/unit/auth/sessionScopes.test.ts pins that).
       //
       // Applied to every tool deliberately. A typed @-mention scopes the turn's
-      // toolset, so a session scope carried by only some tools would be
-      // requested only sometimes.
-      scopes: [...getRequiredToolScopes(toolName), ...SESSION_SCOPES]
+      // toolset, so a scope carried by only some tools would be requested only
+      // sometimes.
+      scopes: [...getRequiredToolScopes(toolName), ...SESSION_SCOPES, ...IDENTITY_SCOPES]
     }
   ];
 }
