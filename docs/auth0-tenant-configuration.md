@@ -409,10 +409,12 @@ not running.
 
 **Update this Action BEFORE deploying the API against the tenant.** There is
 no fallback. An earlier revision of the server asked Auth0's `/userinfo` when
-a token carried an address with no verdict; that is gone, because `/userinfo`
-needs `openid` on the access token and ChatGPT never asks for one - so it
-served the website alone, and quietly let the website tolerate a missing or
-broken Action, which is the one surface LINK-01 uses to check a tenant.
+a token carried an address with no verdict; that is gone. At the time
+`/userinfo` needed `openid` on the access token and ChatGPT asked for no
+identity scope, so the fallback served the website alone - and quietly let the
+website tolerate a missing or broken Action, which is the one surface LINK-01
+uses to check a tenant. ChatGPT requests `openid` as of #424, so that first
+reason has expired; the second has not, and it is the one that decided it.
 
 In the window between the API deploying and this Action being updated:
 

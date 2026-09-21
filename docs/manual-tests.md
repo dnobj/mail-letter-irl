@@ -1596,8 +1596,19 @@ remedy when a pair does not match, are in
        documented.
 7. [ ] In ChatGPT, connect Letter IRL on an address that already has an account
        through another method. It connects rather than answering "We couldn't
-       connect this account" - the failure that started this work on
-       2026-09-18.
+       connect this account".
+
+       **That message was mis-attributed.** It is what started this work on
+       2026-09-18, and it was recorded against the duplicate-address
+       collision - but on 2026-09-21 it still failed after linking
+       demonstrably worked (steps 1-4 passed on the same address). The cause
+       was #424: no tool requested an identity scope, so Auth0 issued no ID
+       token and ChatGPT's own callback answered 400
+       `OAUTH_OWNER_PROFILE_ID_MISSING`. Auth0 succeeds and our API is never
+       called, so **nothing server-side logs this** - read ChatGPT's network
+       response to `/backend-api/aip/connectors/links/oauth/callback` rather
+       than looking for it in the API log. A connector pins its schemas when
+       it is created, so refresh or recreate it before re-running this step.
 8. [ ] `get_account_balance` names the address and no longer names a sign-in
        provider.
 9. [ ] Gift rules still hold across the linked methods: a code printed on your

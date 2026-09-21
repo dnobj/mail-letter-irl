@@ -21,12 +21,18 @@ export { DEFAULT_EMAIL_CLAIM } from "./verifiedEmail.js";
  * and a tenant's Action being updated. It is gone, after three review rounds
  * in a row found something wrong with it, and the last of them found the
  * thing that settles it: `/userinfo` needs `openid` on the access token, and
- * ChatGPT - the client this product is for - never asks for one. So it served
+ * ChatGPT - the client this product is for - did not ask for one. So it served
  * website first-arrivals only, in a window the mandated order (Action first,
  * then deploy) is supposed to be empty, while quietly letting the WEBSITE
  * tolerate a missing or broken claim Action. That is the surface LINK-01 uses
  * to check a tenant, and a silently no-op Action is exactly what took the
  * first production account down.
+ *
+ * ChatGPT DOES request `openid` now (#424 - it needs an ID token to record
+ * which account connected), so the scope half of that reasoning has expired.
+ * The fallback does not come back on the strength of that: what settled it was
+ * never the scope, it was that a fallback which WORKS lets a broken claim
+ * Action ship unnoticed on the very surface used to verify a tenant.
  *
  * So the claim Action is now load-bearing on every surface, and its absence
  * fails the same way everywhere: one sentence, and a diagnostic that says
