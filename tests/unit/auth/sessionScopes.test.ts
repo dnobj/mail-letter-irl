@@ -127,15 +127,15 @@ describe('session scopes are requested per tool but never enforced', () => {
 /**
  * Identity scopes (issue #424).
  *
- * Declared on every tool since #425 so that a client which honours per-tool
- * scope tags gets an ID token. What that did NOT do is worth stating here,
- * because this file is where the next reader will look: ChatGPT went on
- * requesting exactly the product scopes plus offline_access - read from the
- * Auth0 grant on connectors created after the deploy, with and without base
- * scopes set by hand - and its OAUTH_OWNER_PROFILE_ID_MISSING failure is
- * answered by the profile tool (src/tools/getProfile.ts), not by these. They
- * stay because advertising and requesting must agree, and because other
- * clients do honour the tags.
+ * Declared on every tool since #425. What they do NOT do is worth stating
+ * here, because this file is where the next reader will look: ChatGPT asks
+ * for them, but Auth0 grants no OIDC scope to its CIMD client (strict
+ * third-party mode), so they never produce an ID token for ChatGPT. Its
+ * OAUTH_OWNER_PROFILE_ID_MISSING failure was the connector's "OIDC enabled"
+ * setting, and with that off ChatGPT identifies the account through the
+ * profile tool (src/tools/getProfile.ts), not through these. They stay
+ * because advertising and requesting must agree, and because a client
+ * registered outside strict mode can use them.
  *
  * So the two halves still have to hold, as for the session scope in #160 -
  * asked for on every tool, enforced by none - and a PAT caller, who carries no
@@ -196,7 +196,7 @@ describe('identity scopes (issue #424)', () => {
     // from it and cannot fail. The real property is that the two channels
     // agree: the per-tool securitySchemes carry the request, DEFAULT_OAUTH_SCOPES
     // is what the metadata documents, and a scope in the first and not the
-    // second is the #160/#424 drift pointing the other way.
+    // second is the #160 drift pointing the other way.
     //
     // The deployment-time half of this lives in oauthConfig.test.ts, because
     // LETTER_IRL_OAUTH_SCOPES can override the default and validateOAuthConfig

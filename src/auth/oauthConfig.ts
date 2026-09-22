@@ -7,14 +7,15 @@
 export const PRODUCT_SCOPES = ["mail:read", "mail:draft", "mail:send"] as const;
 
 /**
- * Identity scopes: advertised, and since #425 asked for on every tool, so that
- * a client which honours per-tool scope tags gets an ID token. Never demanded
- * by a tool. Note what this did NOT do (#424): ChatGPT went on requesting
- * exactly the product scopes plus offline_access, read from the Auth0 grant
- * on a connector created after the deploy. ChatGPT identifies a connected
- * account through the profile tool (src/tools/getProfile.ts), not through
- * these. They stay because advertising and requesting must agree, and
- * because other MCP clients do honour the tags.
+ * Identity scopes: advertised, and since #425 asked for on every tool. Never
+ * demanded by a tool. ChatGPT does ask for them, but Auth0 grants none of
+ * them to ChatGPT: its CIMD client is a strict third-party client, and strict
+ * mode supports no OIDC scopes and no ID token in Auth0's current release
+ * (#424). ChatGPT identifies a connected account through the profile tool
+ * (src/tools/getProfile.ts) instead, and its connector must be created with
+ * "OIDC enabled" unticked, or the first link fails. These stay because
+ * advertising and requesting must agree, and because a client registered
+ * outside strict mode can use them.
  *
  * `profile` is deliberately absent. OpenAI's Apps SDK auth guidance names
  * `openid` and `email`; `profile` is the widest OIDC scope - name, picture,
@@ -189,7 +190,7 @@ export function validateOAuthConfig(
   // LETTER_IRL_OAUTH_SCOPES can override the default. Without this a
   // deployment can request openid and offline_access per tool while
   // advertising neither, which is the same advertised-versus-requested drift
-  // that caused #160 and #424, just pointing the other way. It bites hardest
+  // that caused #160, just pointing the other way. It bites hardest
   // in static-DCR mode, where our metadata IS the document ChatGPT reads.
   for (const scope of [...PRODUCT_SCOPES, ...SESSION_SCOPES, ...IDENTITY_SCOPES]) {
     if (!config.scopes.includes(scope)) {

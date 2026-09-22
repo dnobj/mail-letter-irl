@@ -21,18 +21,19 @@ export { DEFAULT_EMAIL_CLAIM } from "./verifiedEmail.js";
  * and a tenant's Action being updated. It is gone, after three review rounds
  * in a row found something wrong with it, and the last of them found the
  * thing that settles it: `/userinfo` needs `openid` on the access token, and
- * ChatGPT - the client this product is for - did not ask for one. So it served
+ * ChatGPT's tokens never carry it (see below). So it served
  * website first-arrivals only, in a window the mandated order (Action first,
  * then deploy) is supposed to be empty, while quietly letting the WEBSITE
  * tolerate a missing or broken claim Action. That is the surface LINK-01 uses
  * to check a tenant, and a silently no-op Action is exactly what took the
  * first production account down.
  *
- * #425 then declared `openid` and `email` on every tool; ChatGPT still did
- * not request them - read from the Auth0 grant, not inferred (#424). So a
- * ChatGPT token still carries no `openid`, `/userinfo` still cannot serve it,
- * and account identification for ChatGPT goes through the profile tool
- * (get_profile) instead. The fallback does not come back either way: what
+ * #425 then declared `openid` and `email` on every tool. ChatGPT does ask for
+ * them, but Auth0 grants no OIDC scope to its CIMD client, a strict
+ * third-party client (#424). So a ChatGPT token still carries no `openid`,
+ * `/userinfo` still cannot serve it, and account identification for ChatGPT
+ * goes through the profile tool (get_profile) instead. The fallback does not
+ * come back either way: what
  * settled it was never the scope, it was that a fallback which WORKS lets a
  * broken claim Action ship unnoticed on the very surface used to verify a
  * tenant.

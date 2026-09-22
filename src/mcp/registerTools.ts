@@ -380,25 +380,27 @@ export function buildToolSecuritySchemes(
       // tool's securitySchemes. Every grant recorded exactly
       // "mail:draft mail:read mail:send", the union of the enforced scopes.
       //
-      // Identity scopes are here for the same reason, and were missing for
-      // the same reason (#424).
+      // Identity scopes ride along too (#425), but they are not what ChatGPT
+      // needs to connect, and Auth0 never grants them to it: Auth0 registers
+      // CIMD clients in strict third-party mode, which supports no OIDC
+      // scopes and no ID token in its current release (#424).
       //
-      // OBSERVED, development 2026-09-21: with no identity scope requested,
-      // Auth0 logged a successful login and a successful authorization-code
-      // exchange, our server was never called at all, and ChatGPT's own
-      // callback answered 400 OAUTH_OWNER_PROFILE_ID_MISSING - shown to the
-      // customer as "We couldn't connect this account". The error carried
-      // is_multi_link_eligible and account_position_bucket "first".
+      // OBSERVED, development and production, from ChatGPT's multi-account
+      // rollout on 2026-09-17 until 2026-09-22: Auth0 logged a successful
+      // login and code exchange, this server was never called, and ChatGPT's
+      // own callback answered 400 OAUTH_OWNER_PROFILE_ID_MISSING - shown as
+      // "We couldn't connect this account". The cause was the connector's
+      // "OIDC enabled" Advanced OAuth setting, which ChatGPT pre-ticks when
+      // the authorization server publishes OpenID discovery: with it on,
+      // ChatGPT wants an ID token inside its callback and gets none. With it
+      // off, ChatGPT links, lists the tools and calls the profile tool
+      // (src/tools/getProfile.ts) for the account's identity. Create
+      // connectors with OIDC off.
       //
-      // WHAT FOLLOWED (#424): declaring these changed nothing. A connector
-      // created after this deployed still requested exactly the product
-      // scopes plus offline_access - read from the Auth0 grant, not inferred
-      // - and so did one with openid and email typed into ChatGPT's own
-      // "base scopes". ChatGPT identifies a connected account through the
-      // profile tool (src/tools/getProfile.ts). These stay because a client
-      // that honours per-tool scope tags gets an ID token from them, and
-      // because the advertised and requested sets must agree (validated in
-      // validateOAuthConfig).
+      // These stay because the advertised and requested sets must agree
+      // (validated in validateOAuthConfig), because a client registered
+      // outside strict mode can use them, and because they cost nothing:
+      // tool calls work although Auth0 never grants them.
       //
       // Session and identity scopes go here and nowhere else. They must never
       // reach getRequiredToolScopes: PAT callers authorize with no scopes at

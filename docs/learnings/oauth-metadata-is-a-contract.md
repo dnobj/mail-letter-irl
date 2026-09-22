@@ -137,26 +137,30 @@ usable signal.
 - `docs/auth0-tenant-configuration.md` — the tenant half
 
 
-## Addendum, 2026-09-22: declaring them is not enough either
+## Addendum, 2026-09-22: the grant was the wrong instrument
 
-The sentence above - that `openid`, `profile` and `email` "were advertised
-and never requested either, because no tool declares them" - turned out to be
-half the story. #425 declared `openid` and `email` on every tool. A brand-new
-connector still requested exactly `mail:draft mail:read mail:send
-offline_access`; so did one with those two entered by hand as **base scopes**
-in ChatGPT's own Advanced OAuth settings, and one at a never-seen URL. Each
-was read back from the Auth0 grant (Users -> Authorized Applications), not
-inferred - the website application's grant on the same user lists `email
-openid profile`, so Auth0 does record them when they are asked for.
+An earlier version of this addendum said that declaring `openid` and `email`
+on every tool (#425) changed nothing: a new connector still requested only the
+product scopes plus `offline_access`, read back from the Auth0 grant. The
+reading was wrong, and so was its conclusion that no lever existed.
 
-ChatGPT's own panel states the rule: "if every selected tool defines OAuth
-scope tags, ChatGPT requests those tool scopes plus base scopes." In practice
-it requested neither the new tool tags nor the base scopes. Whatever the
-mechanism, **there is no server-side or connector-setting lever that makes
-ChatGPT request an identity scope for this server**, and the failure it was
-meant to fix - `OAUTH_OWNER_PROFILE_ID_MISSING` at ChatGPT's callback, after a
-successful Auth0 login, with this server never called - is expected to be
-answered by the profile tool instead (`get_profile`,
-`_meta["openai/profile"]`; #424; LINK-01 step 7 records whether it was). The
-#425 change stays because its advertise-versus-request validation is real;
-its stated cause was wrong.
+The Auth0 grant never lists an OIDC scope for the ChatGPT client. Its CIMD
+client is a strict third-party client, and Auth0 grants such clients no OIDC
+scopes in its current release, whatever they ask for. So the grant could never
+have shown the "never requested either" above. That may still hold for a
+linked connector, whose request is the tool union, but the evidence offered for
+it could not show an OIDC scope either way.
+
+ChatGPT's own `links/oauth` start call shows what it really asks for. A new
+connector, which has no tools yet, requests the default scopes from its
+Advanced OAuth settings, and those include `openid profile email`. The rule at
+the top of this document applies to a linked connector; a new one asks for the
+defaults. The general lesson: **read the request the client sends, not a
+record the server kept of it.**
+
+The failure #425 was meant to fix - `OAUTH_OWNER_PROFILE_ID_MISSING` at
+ChatGPT's callback - came from the connector's **OIDC enabled** setting, not
+from the scope request; see [The OIDC Checkbox That Blocked Every First
+ChatGPT Link](chatgpt-connector-oidc-setting.md). The #425 change stays: its
+advertise-versus-request validation is real, and the identity scopes cost
+nothing - tool calls work although Auth0 never grants them.

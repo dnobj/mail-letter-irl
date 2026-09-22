@@ -319,6 +319,9 @@ allowedOrigins: [
 ]
 ```
 
+### Pitfall 8: "We couldn't connect this account" (`OAUTH_OWNER_PROFILE_ID_MISSING`)
+**Solution**: Create the ChatGPT connector with **OIDC enabled** unticked under Advanced OAuth settings. Auth0 issues no ID token to a CIMD client, which is always a strict third-party client, and since 2026-09-17 ChatGPT refuses a first link without one while that box is ticked. See [chatgpt-connector-oidc-setting.md](chatgpt-connector-oidc-setting.md).
+
 ## Debugging Tools & Techniques
 
 ### 1. Comprehensive Logging System

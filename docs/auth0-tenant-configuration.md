@@ -409,13 +409,13 @@ not running.
 
 **Update this Action BEFORE deploying the API against the tenant.** There is
 no fallback. An earlier revision of the server asked Auth0's `/userinfo` when
-a token carried an address with no verdict; that is gone. At the time
-`/userinfo` needed `openid` on the access token and ChatGPT asked for no
-identity scope, so the fallback served the website alone - and quietly let the
-website tolerate a missing or broken Action, which is the one surface LINK-01
-uses to check a tenant. #425 then declared `openid` on every tool and
-ChatGPT still did not request it (#424, read from the Auth0 grant), so the
-first reason still holds; the second is the one that decided it anyway.
+a token carried an address with no verdict; that is gone. `/userinfo` needs
+`openid` on the access token, and a ChatGPT token never carries it - Auth0
+grants no OIDC scope to the strict CIMD client, whatever ChatGPT requests
+(#424) - so the fallback served the website alone, and quietly let the website
+tolerate a missing or broken Action, which is the one surface LINK-01 uses to
+check a tenant. The first reason still holds; the second is the one that
+decided it anyway.
 
 In the window between the API deploying and this Action being updated:
 
@@ -632,6 +632,12 @@ subjects, and only the surviving primary subject counts afterwards.
    - `third_party_security_mode: strict` is forced on every CIMD client
      regardless of the tenant's permissive-by-default setting, and cannot be
      changed afterwards. Strict is satisfied by importing, not by configuring.
+   - Strict also means **no OIDC scopes and no ID token** for this client in
+     Auth0's current release ("Third-party applications with enhanced security
+     controls do not support OIDC scopes"). ChatGPT pre-ticks **OIDC enabled**
+     in a new connector's Advanced OAuth settings and then refuses the first
+     link without an ID token, so every connector must be created with it
+     unticked ([chatgpt-connector-oidc-setting.md](learnings/chatgpt-connector-oidc-setting.md), #424).
    - **The import survives connector recreation.** An earlier revision said that
      deleting and recreating the ChatGPT connector mints a new `client.json`
      URL and orphans the import. Observed three times (development twice on

@@ -289,6 +289,12 @@ Test the full ChatGPT connector flow.
 
 ### OAuth Flow (US-ACCT-01, US-DCR-01)
 
+**Create the connector with OIDC off.** In ChatGPT's New Plugin form, open **Advanced OAuth
+settings** and untick **OIDC enabled** before **Create**; leave everything else at its default.
+With it on, the first link fails with "We couldn't connect this account"
+(`OAUTH_OWNER_PROFILE_ID_MISSING`), because Auth0 issues no ID token to the strict CIMD client
+([chatgpt-connector-oidc-setting.md](learnings/chatgpt-connector-oidc-setting.md), #424).
+
 **Status:** Reconnect executed 2026-09-15 in development, after the Auth0 cleanup (#391):
 - In the current ChatGPT UI, **Disconnect** (Settings → Plugins → the app → **…**) also removes
   the app from the installed plugins. The app's own page under Plugins then offers **Install
@@ -1594,34 +1600,33 @@ remedy when a pair does not match, are in
        with "Confirm your email address, then sign in again."
 6. [ ] An Apple sign-in with **Hide My Email** on is a separate account, as
        documented.
-7. [ ] In ChatGPT, connect Letter IRL on an address that already has an account
+7. [x] In ChatGPT, connect Letter IRL on an address that already has an account
        through another method. It connects rather than answering "We couldn't
        connect this account".
 
-       **That message was mis-attributed, twice.** It is what started this
-       work on 2026-09-18 and was recorded against the duplicate-address
-       collision; on 2026-09-21 it still failed after linking demonstrably
-       worked on the same address (steps 1-4 passed). It was then attributed
-       to a missing `openid` scope (#424, #425), and that was disproved the
-       same day by reading the Auth0 grant: ChatGPT requested no identity
-       scope from any channel - with or without #425, with base scopes set by
-       hand, and from a never-seen URL. What ChatGPT asks for is a profile: its
-       callback answers 400 `OAUTH_OWNER_PROFILE_ID_MISSING`, and
-       `get_profile` (marked `_meta["openai/profile"]`) is expected to
-       answer it - record here whether it did. Auth0 succeeds and our API is
-       never called on the failing path, so **nothing server-side logs it** -
-       read ChatGPT's network response to
-       `/backend-api/aip/connectors/links/oauth/callback`, and the grant on
-       Auth0 -> Users -> Authorized Applications, before theorising.
+       **Passed 2026-09-22 on development**, with the connector created with
+       **OIDC enabled** unticked, as the OAuth Flow section now requires. The
+       link listed all 23 tools, and ChatGPT called `get_profile` during the
+       link and stored its answer - the account id and the confirmed address -
+       as the link's owner profile. `get_account_balance` then ran in a fresh
+       chat with the connector attached.
 
-       **Recreate the connector first.** A connector pins its tool list when
-       it is created, and the Plugins UI's Refresh is not available while a
-       connector is disconnected - which a connector that cannot connect is.
-       Delete the old DEV connector, create a new one against the same URL,
-       and confirm `get_profile` appears in its tool list before clicking
-       Connect. Then, if the connect still fails, the first thing to check in
-       the API log is a `mcp.client_request` for `tools/call get_profile` with
-       no `tool.invocation.start` after it. That signature is shared: with an
+       **The failure was mis-attributed twice before that.** It started this
+       work on 2026-09-18 and was first put down to the duplicate-address
+       collision, then on 2026-09-21 to ChatGPT not requesting `openid` (#424,
+       #425). Both were wrong. ChatGPT does request `openid profile email`, but
+       Auth0 grants no OIDC scope to its strict CIMD client - so the grant that
+       was read as evidence can never show one - and with **OIDC enabled**
+       ticked ChatGPT refuses a link that brings no ID token
+       ([chatgpt-connector-oidc-setting.md](learnings/chatgpt-connector-oidc-setting.md)).
+       When a connect fails, read ChatGPT's own callback response
+       (`/backend-api/aip/connectors/links/oauth/callback`) in the browser tab
+       first: nothing server-side logs a link that fails before this server is
+       called.
+
+       If the link fails after ChatGPT reaches this server, the API log shows a
+       `mcp.client_request` for `tools/call get_profile`. With no
+       `tool.invocation.start` after it, the signature is shared: with an
        `auth.account_missing_no_verified_email` or
        `identity.email_already_linked` line beside it, the wrapper refused the
        account (the row-holder hazard above produces exactly this); with

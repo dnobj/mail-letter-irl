@@ -35,6 +35,10 @@ Remaining:
 - [ ] Close CIMD-06, CIMD-07, CIMD-09 and CIMD-10 in [manual-tests.md](../manual-tests.md).
 - [ ] Decide when to turn off OIDC Dynamic Client Registration in the development tenant, which
       [development.md](../development.md) records as still enabled as rollback inventory.
+- [ ] Wherever the app's OAuth settings are entered for submission, leave **OIDC enabled** off.
+      ChatGPT pre-ticks it because Auth0 publishes OpenID discovery, and with it on nobody can
+      connect: Auth0 issues no ID token to the strict CIMD client
+      ([chatgpt-connector-oidc-setting.md](../learnings/chatgpt-connector-oidc-setting.md), #424).
 
 ### OpenAI Platform Access
 

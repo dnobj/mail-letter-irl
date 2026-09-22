@@ -93,9 +93,9 @@ export const DEFAULT_EMAIL_CLAIM = "https://letterirl.com/email";
  *
  * The draft after that answered a missing verdict by asking `/userinfo`. That
  * is gone (see identity.ts). It could not serve a ChatGPT token at all,
- * because ChatGPT requests no identity scope - declaring them on every tool
- * (#425) did not change that, per the Auth0 grants read for #424 - and the
- * reason it stays gone never was the scope anyway: where it DID work it hid a
+ * because Auth0 grants no identity scope to ChatGPT's CIMD client, a strict
+ * third-party client (#424) - and the reason it stays gone never was the
+ * scope anyway: where it DID work it hid a
  * broken Action on the one surface an operator checks a tenant with.
  *
  * So `null` refuses too. The three values remain because they are three

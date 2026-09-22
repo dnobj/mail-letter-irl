@@ -17,9 +17,12 @@ import { VerifiedEmailRequiredError } from "../auth/verifiedEmail.js";
  * Why this exists (#424): since ChatGPT's multiple-accounts-per-connector
  * rollout on 2026-09-17, connecting failed at ChatGPT's own callback with
  * OAUTH_OWNER_PROFILE_ID_MISSING, after a successful Auth0 login and code
- * exchange and with this server never called. Every scope-side lever was
- * tried and read back from the Auth0 grant: none changed what ChatGPT
- * requested. The docs call this tool optional; the error names a profile id.
+ * exchange and with this server never called. The cause was the connector's
+ * "OIDC enabled" setting: with it on, ChatGPT wants an ID token, which Auth0
+ * never issues to a strict CIMD client. With it off, ChatGPT links, then
+ * calls this tool and stores its answer as the link's owner profile
+ * (development, 2026-09-22). A server without the tool still links, with no
+ * owner profile, so the docs are right to call it optional.
  */
 export interface GetProfileOutput {
   /**
