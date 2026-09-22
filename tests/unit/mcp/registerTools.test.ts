@@ -382,8 +382,9 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
           // offline_access rides along on every tool because ChatGPT builds
           // its authorization request from the union of these lists, not from
           // scopes_supported (#160). The identity scopes ride along for any
-          // client that honours the tags - ChatGPT did not, for these two
-          // (#424). All of them are requested, never enforced.
+          // client registered outside Auth0's strict mode; ChatGPT's CIMD
+          // client is never granted them (#424). All of them are requested,
+          // never enforced.
           scopes: ['mail:read', 'offline_access', 'openid', 'email']
         }
       ]);

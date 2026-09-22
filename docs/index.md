@@ -104,6 +104,7 @@ Debugging notes and decision records.
 - [App Integration Learnings](learnings/app-integration-learnings.md) - integration quirks
 - [ChatGPT Auth0 OAuth Learnings](learnings/chatgpt-auth0-oauth-learnings.md) - OAuth debugging
 - [OAuth Metadata Is a Contract](learnings/oauth-metadata-is-a-contract.md) - where ChatGPT actually reads OAuth scopes
+- [ChatGPT Connector OIDC Setting](learnings/chatgpt-connector-oidc-setting.md) - untick OIDC on every ChatGPT connector, or the first link fails (#424)
 - [DCR Static Client Workaround](learnings/dcr-static-client-workaround.md) - the rollback-only registration shim
 - [Claude Desktop MCP](learnings/claude-desktop-mcp.md) - MCP client setup
 - [Generate Image Removal Decision](learnings/generate-image-removal-decision.md) - image generation history and the hybrid tool

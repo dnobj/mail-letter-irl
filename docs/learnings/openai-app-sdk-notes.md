@@ -37,4 +37,4 @@ npm run manifest:generate
 npm run test:submission
 ```
 
-- In ChatGPT developer mode, verify the connected app shows the expected tools and widget templates after pressing Refresh.
+- In ChatGPT developer mode, create the connector with **OIDC enabled** unticked under Advanced OAuth settings, or the first link fails ([chatgpt-connector-oidc-setting.md](chatgpt-connector-oidc-setting.md)). The current Plugins UI has no Refresh: after the connector links, check its tools and widget templates under Settings → Plugins → the connector → Developer mode → Tools.

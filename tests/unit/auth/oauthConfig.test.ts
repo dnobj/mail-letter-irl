@@ -81,7 +81,7 @@ describe("OAuth startup validation", () => {
   it("rejects a configuration that requests scopes it does not advertise", () => {
     // The per-tool securitySchemes ask every customer for offline_access and
     // the identity scopes. A deployment that advertises neither is the
-    // #160/#424 drift in reverse, and it bites hardest in static-DCR mode
+    // #160 drift in reverse, and it bites hardest in static-DCR mode
     // where this metadata IS the document ChatGPT reads.
     const env = validEnv();
     env.LETTER_IRL_OAUTH_SCOPES = "mail:read mail:draft mail:send";

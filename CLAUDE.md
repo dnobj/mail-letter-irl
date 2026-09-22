@@ -84,6 +84,7 @@ When you need more detail, read these docs:
 Check `docs/learnings/` for debugging notes and integration quirks:
 - `openai-app-sdk-notes.md` - Apps SDK status and action items
 - `chatgpt-auth0-oauth-learnings.md` - OAuth debugging
+- `chatgpt-connector-oidc-setting.md` - untick OIDC on every ChatGPT connector (#424)
 - `claude-desktop-mcp.md` - MCP client setup
 
 ## Common Commands
