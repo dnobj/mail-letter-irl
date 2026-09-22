@@ -94,6 +94,7 @@ export const toolInputSchemas = {
     orderId: z.string().optional()
   }),
   get_account_balance: z.object({}).strict(),
+  get_profile: z.object({}).strict(),
   list_orders: z.object({
     limit: z.number().optional()
   }),

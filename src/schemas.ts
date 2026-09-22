@@ -894,3 +894,22 @@ export const confirmUploadedImageOutputSchema: JsonSchema = {
     }
   }
 };
+
+// The profile ChatGPT records for a connected account (#424). Mirrors
+// getProfileOutputZ in zodSchemas.ts; this copy feeds manifest.json.
+export const getProfileInputSchema: JsonSchema = {
+  type: "object",
+  properties: {}
+};
+
+export const getProfileOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["id"],
+  properties: {
+    id: {
+      type: "string",
+      description: "Stable, opaque account id. Unchanged across token refresh, reconnection and scope upgrades; never reassigned."
+    },
+    email: { type: "string", description: "The confirmed email address the account is opened on" }
+  }
+};

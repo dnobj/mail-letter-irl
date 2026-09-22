@@ -12,6 +12,7 @@ export { getPurchaseStatusTool } from "./getPurchaseStatus.js";
 // Account and order management tools
 export { getOrderStatusTool } from "./getOrderStatus.js";
 export { getAccountBalanceTool } from "./getAccountBalance.js";
+export { getProfileTool } from "./getProfile.js";
 export { listOrdersTool } from "./listOrders.js";
 export { setReturnAddressTool } from "./setReturnAddress.js";
 export { getReturnAddressTool } from "./getReturnAddress.js";

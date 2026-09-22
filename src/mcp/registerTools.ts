@@ -24,6 +24,7 @@ import {
   getPurchaseStatusInputZ,
   getOrderStatusInputZ,
   getAccountBalanceInputZ,
+  getProfileInputZ,
   listOrdersInputZ,
   setReturnAddressInputZ,
   getReturnAddressInputZ,
@@ -44,6 +45,7 @@ import {
   getPurchaseStatusOutputZ,
   getOrderStatusOutputZ,
   getAccountBalanceOutputZ,
+  getProfileOutputZ,
   listOrdersOutputZ,
   setReturnAddressOutputZ,
   getReturnAddressOutputZ,
@@ -101,6 +103,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
   const readOnlyTools = [
     'get_started',
     'get_account_balance',
+    'get_profile',
     'list_orders',
     'get_order_status',
     'get_purchase_status',
@@ -683,6 +686,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Account and order management tools
   get_order_status: getOrderStatusInputZ,
   get_account_balance: getAccountBalanceInputZ,
+  get_profile: getProfileInputZ,
   list_orders: listOrdersInputZ,
   set_return_address: setReturnAddressInputZ,
   get_return_address: getReturnAddressInputZ,
@@ -714,6 +718,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Account and order management tools
   get_order_status: getOrderStatusOutputZ,
   get_account_balance: getAccountBalanceOutputZ,
+  get_profile: getProfileOutputZ,
   list_orders: listOrdersOutputZ,
   set_return_address: setReturnAddressOutputZ,
   get_return_address: getReturnAddressOutputZ,
@@ -989,6 +994,12 @@ export function summarizeToolResult(
   result: Record<string, unknown>
 ): string {
   switch (toolName) {
+    case "get_profile": {
+      // Model-facing narration only; the id travels in structuredContent for
+      // ChatGPT, and the model has no use for it.
+      const email = result.email as string | undefined;
+      return email ? `Account: ${email}` : "Account identified.";
+    }
     case "get_account_balance": {
       const message = result.message as string;
       // Now returns lettersRemaining directly

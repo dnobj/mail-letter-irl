@@ -133,6 +133,14 @@ export const getOrderStatusInputZ = z.object({
 
 export const getAccountBalanceInputZ = z.object({});
 
+// The profile ChatGPT records for a connected account (#424): an id that is
+// stable across refresh, reconnect and scope upgrades, and the address.
+export const getProfileInputZ = z.object({});
+export const getProfileOutputZ = z.object({
+  id: z.string().min(1),
+  email: z.string().optional()
+});
+
 export const listOrdersInputZ = z.object({
   limit: z.number().optional()
 });

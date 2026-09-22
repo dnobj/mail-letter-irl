@@ -25,6 +25,7 @@ import {
   sendPostcardTool,
   // Feedback tools
   submitFeatureRequestTool,
+  getProfileTool,
   getStartedTool,
   // Image upload tool
   uploadImageTool,
@@ -73,6 +74,7 @@ const tools: McpToolDefinition<any, any>[] = [
   clearReturnAddressTool,
   // Feedback tools
   submitFeatureRequestTool,
+  getProfileTool,
   getStartedTool,
   // Image upload tool
   uploadImageTool,

@@ -1598,17 +1598,20 @@ remedy when a pair does not match, are in
        through another method. It connects rather than answering "We couldn't
        connect this account".
 
-       **That message was mis-attributed.** It is what started this work on
-       2026-09-18, and it was recorded against the duplicate-address
-       collision - but on 2026-09-21 it still failed after linking
-       demonstrably worked (steps 1-4 passed on the same address). The cause
-       was #424: no tool requested an identity scope, so Auth0 issued no ID
-       token and ChatGPT's own callback answered 400
-       `OAUTH_OWNER_PROFILE_ID_MISSING`. Auth0 succeeds and our API is never
-       called, so **nothing server-side logs this** - read ChatGPT's network
-       response to `/backend-api/aip/connectors/links/oauth/callback` rather
-       than looking for it in the API log. A connector pins its schemas when
-       it is created, so refresh or recreate it before re-running this step.
+       **That message was mis-attributed, twice.** It is what started this
+       work on 2026-09-18 and was recorded against the duplicate-address
+       collision; on 2026-09-21 it still failed after linking demonstrably
+       worked on the same address (steps 1-4 passed). It was then attributed
+       to a missing `openid` scope (#424, #425), and that was disproved the
+       same day by reading the Auth0 grant: ChatGPT requested no identity
+       scope from any channel - with or without #425, with base scopes set by
+       hand, and from a never-seen URL. What ChatGPT wants is a profile: its
+       callback answers 400 `OAUTH_OWNER_PROFILE_ID_MISSING`, and
+       `get_profile` (marked `_meta["openai/profile"]`) is the answer to it.
+       Auth0 succeeds and our API is never called on the failing path, so
+       **nothing server-side logs it** - read ChatGPT's network response to
+       `/backend-api/aip/connectors/links/oauth/callback`, and the grant on
+       Auth0 -> Users -> Authorized Applications, before theorising.
 8. [ ] `get_account_balance` names the address and no longer names a sign-in
        provider.
 9. [ ] Gift rules still hold across the linked methods: a code printed on your
