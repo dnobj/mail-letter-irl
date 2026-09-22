@@ -1598,17 +1598,36 @@ remedy when a pair does not match, are in
        through another method. It connects rather than answering "We couldn't
        connect this account".
 
-       **That message was mis-attributed.** It is what started this work on
-       2026-09-18, and it was recorded against the duplicate-address
-       collision - but on 2026-09-21 it still failed after linking
-       demonstrably worked (steps 1-4 passed on the same address). The cause
-       was #424: no tool requested an identity scope, so Auth0 issued no ID
-       token and ChatGPT's own callback answered 400
-       `OAUTH_OWNER_PROFILE_ID_MISSING`. Auth0 succeeds and our API is never
-       called, so **nothing server-side logs this** - read ChatGPT's network
-       response to `/backend-api/aip/connectors/links/oauth/callback` rather
-       than looking for it in the API log. A connector pins its schemas when
-       it is created, so refresh or recreate it before re-running this step.
+       **That message was mis-attributed, twice.** It is what started this
+       work on 2026-09-18 and was recorded against the duplicate-address
+       collision; on 2026-09-21 it still failed after linking demonstrably
+       worked on the same address (steps 1-4 passed). It was then attributed
+       to a missing `openid` scope (#424, #425), and that was disproved the
+       same day by reading the Auth0 grant: ChatGPT requested no identity
+       scope from any channel - with or without #425, with base scopes set by
+       hand, and from a never-seen URL. What ChatGPT asks for is a profile: its
+       callback answers 400 `OAUTH_OWNER_PROFILE_ID_MISSING`, and
+       `get_profile` (marked `_meta["openai/profile"]`) is expected to
+       answer it - record here whether it did. Auth0 succeeds and our API is
+       never called on the failing path, so **nothing server-side logs it** -
+       read ChatGPT's network response to
+       `/backend-api/aip/connectors/links/oauth/callback`, and the grant on
+       Auth0 -> Users -> Authorized Applications, before theorising.
+
+       **Recreate the connector first.** A connector pins its tool list when
+       it is created, and the Plugins UI's Refresh is not available while a
+       connector is disconnected - which a connector that cannot connect is.
+       Delete the old DEV connector, create a new one against the same URL,
+       and confirm `get_profile` appears in its tool list before clicking
+       Connect. Then, if the connect still fails, the first thing to check in
+       the API log is a `mcp.client_request` for `tools/call get_profile` with
+       no `tool.invocation.start` after it. That signature is shared: with an
+       `auth.account_missing_no_verified_email` or
+       `identity.email_already_linked` line beside it, the wrapper refused the
+       account (the row-holder hazard above produces exactly this); with
+       nothing beside it, it is either the SDK rejecting a call made without
+       an `arguments` object before our code runs, or a token lacking
+       `mail:read`, which the scope refusal does not log.
 8. [ ] `get_account_balance` names the address and no longer names a sign-in
        provider.
 9. [ ] Gift rules still hold across the linked methods: a code printed on your

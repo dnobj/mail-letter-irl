@@ -42,6 +42,7 @@ const readOnlyTools = [
   { name: 'list_letter_packs', readOnly: true },
   { name: 'get_started', readOnly: true },
   { name: 'get_account_balance', readOnly: true },
+  { name: 'get_profile', readOnly: true },
   { name: 'get_order_status', readOnly: true },
   { name: 'get_purchase_status', readOnly: true },
   { name: 'get_return_address', readOnly: true },
@@ -74,7 +75,7 @@ const otherWriteTools = [
   { name: 'generate_image_for_mail', readOnly: false },
 ];
 
-// Grouping only: this list completes allTools for the 22-tool coverage check.
+// Grouping only: this list completes allTools for the 23-tool coverage check.
 // Which tools are destructive is decided by buildAnnotations and pinned by the
 // exact-set assertion in the classification summary below (six tools).
 const destructiveTools = [
@@ -101,8 +102,8 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       }
     );
 
-    it('should have exactly 6 read-only tools', () => {
-      expect(readOnlyTools.length).toBe(7);
+    it('should have exactly 8 read-only tools', () => {
+      expect(readOnlyTools.length).toBe(8);
     });
   });
 
@@ -275,20 +276,20 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
   });
 
   describe('Tool Classification Summary', () => {
-    it('should cover all 22 registered tools in annotation checks', () => {
+    it('should cover all 23 registered tools in annotation checks', () => {
       const runtimeToolNames = new LetterIrlServer().listTools().map((tool) => tool.name).sort();
       const checkedToolNames = allTools.map((tool) => tool.name).sort();
 
-      expect(allTools.length).toBe(22);
+      expect(allTools.length).toBe(23);
       expect(checkedToolNames).toEqual(runtimeToolNames);
     });
 
-    it('should have 7 read-only tools', () => {
+    it('should have 8 read-only tools', () => {
       const readOnlyCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === true;
       }).length;
-      expect(readOnlyCount).toBe(7);
+      expect(readOnlyCount).toBe(8);
     });
 
     it('should have 15 write tools (non-read-only)', () => {
@@ -378,10 +379,11 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       expect(buildToolSecuritySchemes('get_account_balance', true)).toEqual([
         {
           type: 'oauth2',
-          // offline_access and the identity scopes ride along on every tool
-          // because ChatGPT builds its authorization request from the union of
-          // these lists, not from scopes_supported (#160, #424). They are
-          // requested, never enforced.
+          // offline_access rides along on every tool because ChatGPT builds
+          // its authorization request from the union of these lists, not from
+          // scopes_supported (#160). The identity scopes ride along for any
+          // client that honours the tags - ChatGPT did not, for these two
+          // (#424). All of them are requested, never enforced.
           scopes: ['mail:read', 'offline_access', 'openid', 'email']
         }
       ]);

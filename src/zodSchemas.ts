@@ -133,6 +133,23 @@ export const getOrderStatusInputZ = z.object({
 
 export const getAccountBalanceInputZ = z.object({});
 
+// The profile ChatGPT records for a connected account (#424): an id that is
+// stable across refresh, reconnect and scope upgrades, and the address.
+export const getProfileInputZ = z.object({});
+export const getProfileOutputZ = z.object({
+  // Served in tools/list, so this is the copy ChatGPT reads. "Be a non-empty,
+  // non-whitespace string" - the regex mirrors the pattern in OpenAI's own
+  // profile schema.
+  id: z
+    .string()
+    .min(1)
+    .regex(/\S/)
+    .describe(
+      "Stable, opaque account id. Unchanged across token refresh, reconnection and scope upgrades; never reassigned to another profile."
+    ),
+  email: z.string().optional().describe("The confirmed email address the account is opened on")
+});
+
 export const listOrdersInputZ = z.object({
   limit: z.number().optional()
 });

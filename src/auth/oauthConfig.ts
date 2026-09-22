@@ -7,10 +7,14 @@
 export const PRODUCT_SCOPES = ["mail:read", "mail:draft", "mail:send"] as const;
 
 /**
- * Identity scopes: requested so Auth0 issues an ID token, never demanded by a
- * tool (#424). ChatGPT needs an identifier for the account being linked, and
- * without one its own callback answers 400 OAUTH_OWNER_PROFILE_ID_MISSING
- * before our server is ever called.
+ * Identity scopes: advertised, and since #425 asked for on every tool, so that
+ * a client which honours per-tool scope tags gets an ID token. Never demanded
+ * by a tool. Note what this did NOT do (#424): ChatGPT went on requesting
+ * exactly the product scopes plus offline_access, read from the Auth0 grant
+ * on a connector created after the deploy. ChatGPT identifies a connected
+ * account through the profile tool (src/tools/getProfile.ts), not through
+ * these. They stay because advertising and requesting must agree, and
+ * because other MCP clients do honour the tags.
  *
  * `profile` is deliberately absent. OpenAI's Apps SDK auth guidance names
  * `openid` and `email`; `profile` is the widest OIDC scope - name, picture,

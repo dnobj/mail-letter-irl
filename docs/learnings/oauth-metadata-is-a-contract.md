@@ -135,3 +135,28 @@ usable signal.
 - `docs/learnings/dcr-static-client-workaround.md` — why DEV is in static-DCR mode
 - `docs/learnings/chatgpt-auth0-oauth-learnings.md`
 - `docs/auth0-tenant-configuration.md` — the tenant half
+
+
+## Addendum, 2026-09-22: declaring them is not enough either
+
+The sentence above - that `openid`, `profile` and `email` "were advertised
+and never requested either, because no tool declares them" - turned out to be
+half the story. #425 declared `openid` and `email` on every tool. A brand-new
+connector still requested exactly `mail:draft mail:read mail:send
+offline_access`; so did one with those two entered by hand as **base scopes**
+in ChatGPT's own Advanced OAuth settings, and one at a never-seen URL. Each
+was read back from the Auth0 grant (Users -> Authorized Applications), not
+inferred - the website application's grant on the same user lists `email
+openid profile`, so Auth0 does record them when they are asked for.
+
+ChatGPT's own panel states the rule: "if every selected tool defines OAuth
+scope tags, ChatGPT requests those tool scopes plus base scopes." In practice
+it requested neither the new tool tags nor the base scopes. Whatever the
+mechanism, **there is no server-side or connector-setting lever that makes
+ChatGPT request an identity scope for this server**, and the failure it was
+meant to fix - `OAUTH_OWNER_PROFILE_ID_MISSING` at ChatGPT's callback, after a
+successful Auth0 login, with this server never called - is expected to be
+answered by the profile tool instead (`get_profile`,
+`_meta["openai/profile"]`; #424; LINK-01 step 7 records whether it was). The
+#425 change stays because its advertise-versus-request validation is real;
+its stated cause was wrong.

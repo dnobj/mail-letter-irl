@@ -39,6 +39,7 @@ omitted, a gift letter is used only when the balance cannot pay. A gift preview 
 
 ## Account, Orders, and Return Address
 
+- `get_profile`: The profile ChatGPT records for a connected account - a stable account id and the confirmed email address. Marked `_meta["openai/profile"]`, which is how ChatGPT finds it; called by ChatGPT with the connection's credentials when it links an account; the model can call it too; the narration carries only the address, while the id travels in `structuredContent` (#424). Read-only.
 - `get_account_balance`: Check remaining pre-paid letter sends plus image-generation quota metadata, and `giftLettersRemaining` when the account holds gift letters (not counted in `lettersRemaining`). Read-only.
 - `list_orders`: List recent mailed letters and postcards (recipient, delivery status; ids for `get_order_status`) and letter pack purchases (payment status, letters, amount; ids for `get_purchase_status`). Read-only.
 - `get_order_status`: Retrieve the latest timeline for a specific order, or the most recent order when `orderId` is omitted. Read-only.

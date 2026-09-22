@@ -24,6 +24,7 @@ import {
   getPurchaseStatusInputZ,
   getOrderStatusInputZ,
   getAccountBalanceInputZ,
+  getProfileInputZ,
   listOrdersInputZ,
   setReturnAddressInputZ,
   getReturnAddressInputZ,
@@ -44,6 +45,7 @@ import {
   getPurchaseStatusOutputZ,
   getOrderStatusOutputZ,
   getAccountBalanceOutputZ,
+  getProfileOutputZ,
   listOrdersOutputZ,
   setReturnAddressOutputZ,
   getReturnAddressOutputZ,
@@ -101,6 +103,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
   const readOnlyTools = [
     'get_started',
     'get_account_balance',
+    'get_profile',
     'list_orders',
     'get_order_status',
     'get_purchase_status',
@@ -387,12 +390,15 @@ export function buildToolSecuritySchemes(
       // customer as "We couldn't connect this account". The error carried
       // is_multi_link_eligible and account_position_bucket "first".
       //
-      // INFERRED: ChatGPT needs an identifier for the account being linked,
-      // and Auth0 issues an ID token only when openid is asked for. OpenAI's
-      // Apps SDK auth guidance asks servers to issue an ID token during the
-      // OAuth flow and to enable openid and email, which fits. Whether
-      // ChatGPT reads that ID token or calls /userinfo is NOT established -
-      // both need openid, so this holds either way.
+      // WHAT FOLLOWED (#424): declaring these changed nothing. A connector
+      // created after this deployed still requested exactly the product
+      // scopes plus offline_access - read from the Auth0 grant, not inferred
+      // - and so did one with openid and email typed into ChatGPT's own
+      // "base scopes". ChatGPT identifies a connected account through the
+      // profile tool (src/tools/getProfile.ts). These stay because a client
+      // that honours per-tool scope tags gets an ID token from them, and
+      // because the advertised and requested sets must agree (validated in
+      // validateOAuthConfig).
       //
       // Session and identity scopes go here and nowhere else. They must never
       // reach getRequiredToolScopes: PAT callers authorize with no scopes at
@@ -683,6 +689,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Account and order management tools
   get_order_status: getOrderStatusInputZ,
   get_account_balance: getAccountBalanceInputZ,
+  get_profile: getProfileInputZ,
   list_orders: listOrdersInputZ,
   set_return_address: setReturnAddressInputZ,
   get_return_address: getReturnAddressInputZ,
@@ -714,6 +721,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Account and order management tools
   get_order_status: getOrderStatusOutputZ,
   get_account_balance: getAccountBalanceOutputZ,
+  get_profile: getProfileOutputZ,
   list_orders: listOrdersOutputZ,
   set_return_address: setReturnAddressOutputZ,
   get_return_address: getReturnAddressOutputZ,
@@ -989,6 +997,12 @@ export function summarizeToolResult(
   result: Record<string, unknown>
 ): string {
   switch (toolName) {
+    case "get_profile": {
+      // Model-facing narration only; the id travels in structuredContent for
+      // ChatGPT, and the model has no use for it.
+      const email = result.email as string | undefined;
+      return email ? `Account: ${email}` : "Account identified.";
+    }
     case "get_account_balance": {
       const message = result.message as string;
       // Now returns lettersRemaining directly

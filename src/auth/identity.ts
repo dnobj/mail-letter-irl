@@ -28,11 +28,14 @@ export { DEFAULT_EMAIL_CLAIM } from "./verifiedEmail.js";
  * to check a tenant, and a silently no-op Action is exactly what took the
  * first production account down.
  *
- * ChatGPT DOES request `openid` now (#424 - it needs an ID token to record
- * which account connected), so the scope half of that reasoning has expired.
- * The fallback does not come back on the strength of that: what settled it was
- * never the scope, it was that a fallback which WORKS lets a broken claim
- * Action ship unnoticed on the very surface used to verify a tenant.
+ * #425 then declared `openid` and `email` on every tool; ChatGPT still did
+ * not request them - read from the Auth0 grant, not inferred (#424). So a
+ * ChatGPT token still carries no `openid`, `/userinfo` still cannot serve it,
+ * and account identification for ChatGPT goes through the profile tool
+ * (get_profile) instead. The fallback does not come back either way: what
+ * settled it was never the scope, it was that a fallback which WORKS lets a
+ * broken claim Action ship unnoticed on the very surface used to verify a
+ * tenant.
  *
  * So the claim Action is now load-bearing on every surface, and its absence
  * fails the same way everywhere: one sentence, and a diagnostic that says

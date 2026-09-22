@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  VerifiedEmailRequiredError,
   DEFAULT_EMAIL_CLAIM,
   DEFAULT_EMAIL_VERIFIED_CLAIM,
   readEmailClaim
@@ -112,5 +113,15 @@ describe("reading an address off a token", () => {
     expect(
       readEmailClaim({ email: "  person@example.com  ", email_verified: true }, NONE)?.address
     ).toBe("person@example.com");
+  });
+});
+
+
+describe("the refusal errors carry a diagnostic class", () => {
+  // carriedDiagnosticClass reads it, so a tool that throws one of these logs
+  // authorization_error rather than unknown_error (found by review on the
+  // profile tool, #424, where the comment claimed it before it was true).
+  it("VerifiedEmailRequiredError is an authorization_error", () => {
+    expect(new VerifiedEmailRequiredError().diagnosticClass).toBe("authorization_error");
   });
 });

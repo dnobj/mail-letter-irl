@@ -25,6 +25,7 @@ import {
   sendPostcardTool,
   // Feedback tools
   submitFeatureRequestTool,
+  getProfileTool,
   getStartedTool,
   // Image upload tool
   uploadImageTool,
@@ -43,9 +44,12 @@ import { createLogger } from "./logging/index.js";
 import { carriedDiagnosticClass, classifyDiagnosticError } from "./utils/diagnosticLog.js";
 
 const tools: McpToolDefinition<any, any>[] = [
-  // ChatGPT currently appears to expose only the first 12 registered actions
-  // for this dev app. Keep core preview/send/status inside that first page of
-  // tools; place auxiliary/internal tools later.
+  // An early observation was that ChatGPT exposed only the first 12
+  // registered actions. It ingests the whole list now - the #160 learning
+  // shows the 18th tool on the connector page with its security schemes, and
+  // get_profile is found by its _meta marker wherever it sits - but the order
+  // still reads as priority, so core preview/send/status stay first and
+  // auxiliary tools follow.
   // Letter tools - three separate tools for different layouts
   quoteAndPreviewLetterTextOnlyTool,
   quoteAndPreviewLetterWithHeaderImageTool,
@@ -73,6 +77,7 @@ const tools: McpToolDefinition<any, any>[] = [
   clearReturnAddressTool,
   // Feedback tools
   submitFeatureRequestTool,
+  getProfileTool,
   getStartedTool,
   // Image upload tool
   uploadImageTool,

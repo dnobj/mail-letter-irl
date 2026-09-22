@@ -14,6 +14,9 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   get_started: "mail:read",
   generate_image_for_mail: "mail:draft",
   get_account_balance: "mail:read",
+  // Read-only identity lookup; ChatGPT calls it with the connection's own
+  // credentials at link time, so it gates on the lightest product scope.
+  get_profile: "mail:read",
   get_purchase_status: "mail:read",
   get_order_status: "mail:read",
   list_orders: "mail:read",
