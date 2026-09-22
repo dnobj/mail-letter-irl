@@ -413,8 +413,9 @@ a token carried an address with no verdict; that is gone. At the time
 `/userinfo` needed `openid` on the access token and ChatGPT asked for no
 identity scope, so the fallback served the website alone - and quietly let the
 website tolerate a missing or broken Action, which is the one surface LINK-01
-uses to check a tenant. ChatGPT requests `openid` as of #424, so that first
-reason has expired; the second has not, and it is the one that decided it.
+uses to check a tenant. #425 then declared `openid` on every tool and
+ChatGPT still did not request it (#424, read from the Auth0 grant), so the
+first reason still holds; the second is the one that decided it anyway.
 
 In the window between the API deploying and this Action being updated:
 
@@ -606,6 +607,13 @@ So, per tenant, before the Action goes into the flow:
    check and the Action going live recreates the hazard, so re-run step 2
    immediately before enabling it - or keep new accounts out in between, which
    on production is what `LETTER_IRL_BETA_ALLOWED_SUBJECTS` already does.
+
+5. Since `get_profile` (#424), this hazard fails the **connect itself**:
+   ChatGPT calls the profile tool with the new connection's token, the
+   wrapper refuses the mismatched address with the 409, and ChatGPT shows
+   "We couldn't connect this account" - where before it was a per-tool
+   refusal after a successful connect. The pre-check is load-bearing for
+   connecting at all.
 
 **After anyone is linked, check the subject lists.**
 `LETTER_IRL_BETA_ALLOWED_SUBJECTS` and `LETTER_IRL_ADMIN_USER_IDS` name

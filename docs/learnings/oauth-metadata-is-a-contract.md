@@ -155,7 +155,8 @@ it requested neither the new tool tags nor the base scopes. Whatever the
 mechanism, **there is no server-side or connector-setting lever that makes
 ChatGPT request an identity scope for this server**, and the failure it was
 meant to fix - `OAUTH_OWNER_PROFILE_ID_MISSING` at ChatGPT's callback, after a
-successful Auth0 login, with this server never called - is answered by the
-profile tool instead (`get_profile`, `_meta["openai/profile"]`; #424). The
+successful Auth0 login, with this server never called - is expected to be
+answered by the profile tool instead (`get_profile`,
+`_meta["openai/profile"]`; #424; LINK-01 step 7 records whether it was). The
 #425 change stays because its advertise-versus-request validation is real;
 its stated cause was wrong.

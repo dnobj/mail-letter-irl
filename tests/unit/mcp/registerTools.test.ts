@@ -75,7 +75,7 @@ const otherWriteTools = [
   { name: 'generate_image_for_mail', readOnly: false },
 ];
 
-// Grouping only: this list completes allTools for the 22-tool coverage check.
+// Grouping only: this list completes allTools for the 23-tool coverage check.
 // Which tools are destructive is decided by buildAnnotations and pinned by the
 // exact-set assertion in the classification summary below (six tools).
 const destructiveTools = [
@@ -102,7 +102,7 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       }
     );
 
-    it('should have exactly 6 read-only tools', () => {
+    it('should have exactly 8 read-only tools', () => {
       expect(readOnlyTools.length).toBe(8);
     });
   });

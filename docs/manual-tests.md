@@ -1605,13 +1605,24 @@ remedy when a pair does not match, are in
        to a missing `openid` scope (#424, #425), and that was disproved the
        same day by reading the Auth0 grant: ChatGPT requested no identity
        scope from any channel - with or without #425, with base scopes set by
-       hand, and from a never-seen URL. What ChatGPT wants is a profile: its
+       hand, and from a never-seen URL. What ChatGPT asks for is a profile: its
        callback answers 400 `OAUTH_OWNER_PROFILE_ID_MISSING`, and
-       `get_profile` (marked `_meta["openai/profile"]`) is the answer to it.
-       Auth0 succeeds and our API is never called on the failing path, so
-       **nothing server-side logs it** - read ChatGPT's network response to
+       `get_profile` (marked `_meta["openai/profile"]`) is expected to
+       answer it - record here whether it did. Auth0 succeeds and our API is
+       never called on the failing path, so **nothing server-side logs it** -
+       read ChatGPT's network response to
        `/backend-api/aip/connectors/links/oauth/callback`, and the grant on
        Auth0 -> Users -> Authorized Applications, before theorising.
+
+       **Recreate the connector first.** A connector pins its tool list when
+       it is created, and the Plugins UI's Refresh is not available while a
+       connector is disconnected - which a connector that cannot connect is.
+       Delete the old DEV connector, create a new one against the same URL,
+       and confirm `get_profile` appears in its tool list before clicking
+       Connect. Then, if the connect still fails, the first thing to check in
+       the API log is a `mcp.client_request` for `tools/call get_profile` with
+       no `tool.invocation.start` after it: that is the SDK rejecting a call
+       made without an `arguments` object, before our code runs.
 8. [ ] `get_account_balance` names the address and no longer names a sign-in
        provider.
 9. [ ] Gift rules still hold across the linked methods: a code printed on your

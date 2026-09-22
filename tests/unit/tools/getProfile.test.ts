@@ -68,7 +68,7 @@ describe("get_profile", () => {
   it("never returns a placeholder or another account's profile when the row is missing", async () => {
     mockFindUser.mockResolvedValue(null);
     await expect(getProfileTool.handler({}, context("auth0|missing"))).rejects.toThrow(
-      /No account is open/
+      /confirmed email address/
     );
   });
 

@@ -1,6 +1,7 @@
 import { McpToolDefinition, ToolContext } from "../contracts/types.js";
 import { getProfileInputSchema, getProfileOutputSchema } from "../schemas.js";
 import { findUser } from "../services/userService.js";
+import { VerifiedEmailRequiredError } from "../auth/verifiedEmail.js";
 
 /**
  * The profile ChatGPT records for a connected account.
@@ -24,8 +25,16 @@ export interface GetProfileOutput {
   /**
    * The account's own key: `users.user_id`. It is the surviving primary
    * subject once sign-in methods are linked (docs/auth0-tenant-configuration.md),
-   * so it does not change when a second method is added, and it is never
-   * reassigned - a deleted account's subject is not reused by Auth0.
+   * so it does not change when a second method is added. A deleted database
+   * user gets a fresh `auth0|` subject; a social subject is deterministic, so
+   * the same Google account signing up again gets the same id - which is the
+   * same external identity, and so the same profile, as the contract wants.
+   *
+   * It is the raw subject, provider prefix and all, rather than a hash. The
+   * contract puts `id` in structuredContent, so it is model-visible either
+   * way; a keyed hash would hide the provider at the cost of a secret that
+   * can never rotate, because rotating it turns every connection into a
+   * "different account". Stability wins.
    */
   id: string;
   /** The confirmed address the account is opened on. */
@@ -42,10 +51,14 @@ async function handler(
   // in registerTools), so a missing row here is a fault, and the guidance is
   // explicit about what to do with one: "return the appropriate auth error
   // instead of a placeholder ID or another account's profile". No invented
-  // identity, no fallback.
+  // identity, no fallback. The refusal is the same typed one the wrapper
+  // uses, so the customer gets the actionable sentence and the log a real
+  // class rather than unknown_error. (Under LETTER_IRL_REQUIRE_AUTH=false no
+  // row is ever opened for the local "mcp-user", so this always refuses
+  // there; that is local development, not a deployment.)
   const user = await findUser(userId);
   if (!user) {
-    throw new Error("No account is open for this sign-in.");
+    throw new VerifiedEmailRequiredError();
   }
 
   context.logger.info(

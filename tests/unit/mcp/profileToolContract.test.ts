@@ -33,8 +33,9 @@ describe("get_profile: what the runtime output schema admits", () => {
   // The MCP SDK validates structuredContent against this before it leaves
   // the server, and ChatGPT validates the profile again on arrival: "Be a
   // non-empty, non-whitespace string". An empty id must fail here, not there.
-  it("refuses an empty id", () => {
+  it("refuses an empty or whitespace-only id", () => {
     expect(getProfileOutputZ.safeParse({ id: "" }).success).toBe(false);
+    expect(getProfileOutputZ.safeParse({ id: "   " }).success).toBe(false);
   });
 
   it("accepts an id alone, and an id with an address", () => {
