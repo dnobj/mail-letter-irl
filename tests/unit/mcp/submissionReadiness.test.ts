@@ -54,9 +54,9 @@ describe("Submission readiness checks", () => {
       {
         type: "oauth2",
         // offline_access and the identity scopes are requested here, never
-        // enforced: ChatGPT unions these per-tool lists to build its
-        // authorization request rather than reading scopes_supported
-        // (#160, #424).
+        // enforced. ChatGPT unions these per-tool lists for offline_access
+        // (#160); it did not for the identity scopes (#424), which stay for
+        // clients that honour the tags.
         scopes: ["mail:send", "offline_access", "openid", "email"]
       }
     ]);

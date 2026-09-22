@@ -23,6 +23,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { prepareAuthenticatedUser } from "../../../src/auth/identity.js";
 import { VerifiedEmailRequiredError } from "../../../src/auth/verifiedEmail.js";
 import { registerLetterTools } from "../../../src/mcp/registerTools.js";
+import { LetterIrlServer } from "../../../src/server.js";
 import { getProfileTool } from "../../../src/tools/getProfile.js";
 
 const authInfo = {
@@ -50,6 +51,16 @@ async function connectedClient(execute: (...args: unknown[]) => Promise<unknown>
 
 describe("get_profile on the wire", () => {
   afterEach(() => vi.unstubAllEnvs());
+
+  it("is the only tool in the real registry that carries the marker", () => {
+    // The one-tool stub below cannot see a second tool marked by mistake;
+    // ChatGPT would have two candidates and no rule for choosing.
+    const marked = new LetterIrlServer()
+      .listTools()
+      .filter((tool) => tool.meta["openai/profile"] === true)
+      .map((tool) => tool.name);
+    expect(marked).toEqual(["get_profile"]);
+  });
 
   it("is listed with the openai/profile marker, an empty input, and an output that requires id", async () => {
     const client = await connectedClient(async () => ({ result: { id: "auth0|test" }, meta: {} }));

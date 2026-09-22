@@ -127,18 +127,19 @@ describe('session scopes are requested per tool but never enforced', () => {
 /**
  * Identity scopes (issue #424).
  *
- * ChatGPT records WHICH account was connected, and takes that identifier from
- * the ID token - which Auth0 issues only when `openid` is requested. These
- * per-tool lists are the only channel that carries the request, so with no
- * identity scope among them a connection attempt died at ChatGPT's own
- * callback: 400 OAUTH_OWNER_PROFILE_ID_MISSING, shown to the customer as "We
- * couldn't connect this account", after a completely successful Auth0 login
- * and code exchange. Our server is never reached on that path, so nothing
- * server-side records the failure - it is invisible from here.
+ * Declared on every tool since #425 so that a client which honours per-tool
+ * scope tags gets an ID token. What that did NOT do is worth stating here,
+ * because this file is where the next reader will look: ChatGPT went on
+ * requesting exactly the product scopes plus offline_access - read from the
+ * Auth0 grant on connectors created after the deploy, with and without base
+ * scopes set by hand - and its OAUTH_OWNER_PROFILE_ID_MISSING failure is
+ * answered by the profile tool (src/tools/getProfile.ts), not by these. They
+ * stay because advertising and requesting must agree, and because other
+ * clients do honour the tags.
  *
- * That is the #160 defect exactly: a scope advertised in the metadata and
- * requested by nobody. It needs the same two halves, and they must both hold -
- * asked for on every tool, enforced by none.
+ * So the two halves still have to hold, as for the session scope in #160 -
+ * asked for on every tool, enforced by none - and a PAT caller, who carries no
+ * scopes at all, must never be denied by one.
  */
 describe('identity scopes (issue #424)', () => {
   it('asks for every identity scope on every tool', () => {
@@ -150,16 +151,16 @@ describe('identity scopes (issue #424)', () => {
         expect(
           requested,
           `${toolName} does not request the identity scope "${scope}", so a turn ` +
-            `scoped to it would authorize without an ID token and ChatGPT could not ` +
-            `record which account connected`
+            `scoped to it would ask a client that honours tool scope tags for less ` +
+            `than the others do`
         ).toContain(scope);
       }
     }
   });
 
   it('requests openid, which is the one that makes Auth0 issue an ID token', () => {
-    // Named on its own because it is the scope the failure actually turned on:
-    // profile and email only label the account once it exists.
+    // Named on its own because it is the one with a consequence at the
+    // authorization server; email only labels the account once it exists.
     expect(IDENTITY_SCOPES).toContain('openid');
     const requested = (
       buildToolSecuritySchemes('get_account_balance', true) as Array<{ scopes?: string[] }>

@@ -379,10 +379,11 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       expect(buildToolSecuritySchemes('get_account_balance', true)).toEqual([
         {
           type: 'oauth2',
-          // offline_access and the identity scopes ride along on every tool
-          // because ChatGPT builds its authorization request from the union of
-          // these lists, not from scopes_supported (#160, #424). They are
-          // requested, never enforced.
+          // offline_access rides along on every tool because ChatGPT builds
+          // its authorization request from the union of these lists, not from
+          // scopes_supported (#160). The identity scopes ride along for any
+          // client that honours the tags - ChatGPT did not, for these two
+          // (#424). All of them are requested, never enforced.
           scopes: ['mail:read', 'offline_access', 'openid', 'email']
         }
       ]);

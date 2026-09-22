@@ -608,12 +608,14 @@ So, per tenant, before the Action goes into the flow:
    immediately before enabling it - or keep new accounts out in between, which
    on production is what `LETTER_IRL_BETA_ALLOWED_SUBJECTS` already does.
 
-5. Since `get_profile` (#424), this hazard fails the **connect itself**:
-   ChatGPT calls the profile tool with the new connection's token, the
-   wrapper refuses the mismatched address with the 409, and ChatGPT shows
-   "We couldn't connect this account" - where before it was a per-tool
-   refusal after a successful connect. The pre-check is load-bearing for
-   connecting at all.
+5. Since `get_profile` (#424), this hazard is expected to fail the
+   **connect itself**: ChatGPT calls the profile tool with the new
+   connection's token, the wrapper answers with an error result carrying
+   the "already belongs to an account opened with a different sign-in
+   method" sentence (the REST layer's 409, on the MCP path), and ChatGPT
+   would show "We couldn't connect this account" - where before it was a
+   per-tool refusal after a successful connect. The pre-check is
+   load-bearing for connecting at all.
 
 **After anyone is linked, check the subject lists.**
 `LETTER_IRL_BETA_ALLOWED_SUBJECTS` and `LETTER_IRL_ADMIN_USER_IDS` name

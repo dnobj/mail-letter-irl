@@ -52,8 +52,9 @@ async function handler(
   // explicit about what to do with one: "return the appropriate auth error
   // instead of a placeholder ID or another account's profile". No invented
   // identity, no fallback. The refusal is the same typed one the wrapper
-  // uses, so the customer gets the actionable sentence and the log a real
-  // class rather than unknown_error. (Under LETTER_IRL_REQUIRE_AUTH=false no
+  // uses, so the customer gets the actionable sentence and the log carries
+  // its diagnosticClass, authorization_error, rather than unknown_error.
+  // (Under LETTER_IRL_REQUIRE_AUTH=false no
   // row is ever opened for the local "mcp-user", so this always refuses
   // there; that is local development, not a deployment.)
   const user = await findUser(userId);

@@ -48,6 +48,8 @@ export const EMAIL_ALREADY_LINKED_MESSAGE =
  */
 export class EmailAlreadyLinkedError extends Error {
   readonly statusCode = 409;
+  // As on VerifiedEmailRequiredError: the log class a thrown refusal carries.
+  readonly diagnosticClass = "authorization_error";
 
   constructor() {
     super(EMAIL_ALREADY_LINKED_MESSAGE);

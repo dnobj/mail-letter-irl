@@ -895,8 +895,9 @@ export const confirmUploadedImageOutputSchema: JsonSchema = {
   }
 };
 
-// The profile ChatGPT records for a connected account (#424). Mirrors
-// getProfileOutputZ in zodSchemas.ts; this copy feeds manifest.json.
+// The profile ChatGPT records for a connected account (#424). This copy feeds
+// manifest.json only; the served one is getProfileOutputZ in zodSchemas.ts,
+// which also carries the non-empty, non-whitespace rule on id.
 export const getProfileInputSchema: JsonSchema = {
   type: "object",
   properties: {}

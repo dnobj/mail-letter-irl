@@ -44,6 +44,9 @@ export const VERIFIED_EMAIL_MESSAGE =
  */
 export class VerifiedEmailRequiredError extends Error {
   readonly statusCode = 403;
+  // Picked up by carriedDiagnosticClass (src/utils/diagnosticLog.ts), so a
+  // tool that throws this logs authorization_error rather than unknown_error.
+  readonly diagnosticClass = "authorization_error";
 
   constructor() {
     super(VERIFIED_EMAIL_MESSAGE);

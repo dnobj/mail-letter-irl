@@ -1621,8 +1621,13 @@ remedy when a pair does not match, are in
        and confirm `get_profile` appears in its tool list before clicking
        Connect. Then, if the connect still fails, the first thing to check in
        the API log is a `mcp.client_request` for `tools/call get_profile` with
-       no `tool.invocation.start` after it: that is the SDK rejecting a call
-       made without an `arguments` object, before our code runs.
+       no `tool.invocation.start` after it. That signature is shared: with an
+       `auth.account_missing_no_verified_email` or
+       `identity.email_already_linked` line beside it, the wrapper refused the
+       account (the row-holder hazard above produces exactly this); with
+       nothing beside it, it is either the SDK rejecting a call made without
+       an `arguments` object before our code runs, or a token lacking
+       `mail:read`, which the scope refusal does not log.
 8. [ ] `get_account_balance` names the address and no longer names a sign-in
        provider.
 9. [ ] Gift rules still hold across the linked methods: a code printed on your
