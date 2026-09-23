@@ -1,8 +1,8 @@
 # Gift Letters
 
-**Last Updated:** 2026-09-17
+**Last Updated:** 2026-09-23
 **Purpose:** How gift letters work: the entitlement, the printed card, the codes, the cost bound, and how to run the programme
-**Status:** Built behind `LETTER_IRL_GIFT_LETTERS_ENABLED` (off by default); not yet enabled in any environment
+**Status:** Built behind `LETTER_IRL_GIFT_LETTERS_ENABLED` (off by default); on in development, where GIFT-01 passed on 2026-09-23 but for the iPhone scan; not yet enabled in production
 
 ---
 
@@ -141,7 +141,7 @@ The most a single pack grant can cost is its own letter plus one child: about $2
 
 ## Before switching it on
 
-See **GIFT-01** in [Manual Tests](manual-tests.md). The test print is the gate: whether PostGrid's renderer keeps inline SVG, whether the QR scans on an iPhone and an Android phone, and whether the card clears PostGrid's own integrity QR can only be answered by a real page.
+See **GIFT-01** in [Manual Tests](manual-tests.md). The test print is the gate: whether PostGrid's renderer keeps inline SVG, whether the QR scans on an iPhone and an Android phone, and whether the card clears PostGrid's own integrity QR can only be answered by a real page. On development the renderer kept the SVG, the card cleared the integrity QR and the S25 Ultra scanned it (2026-09-23); the iPhone scan is still open.
 
 ## Related
 
