@@ -198,6 +198,13 @@ describe('consumeGiftLetterForSendWithClient', () => {
     on('FROM promo_campaigns WHERE campaign_id', [{ ...capped, current_redemptions: 1 }]);
     const open = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1' });
     expect(open?.card).toMatchObject({ code: 'JANE-SMITH', multiUse: true });
+
+    // A campaign with no cap (NULL) never reaches one.
+    state.handlers = [];
+    on('SELECT * FROM gift_letters', [gift({ generations_remaining: 0, card_campaign_id: 'campaign-1' })]);
+    on('FROM promo_campaigns WHERE campaign_id', [{ ...capped, max_total_redemptions: null, current_redemptions: 5000 }]);
+    const uncapped = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1' });
+    expect(uncapped?.card).toMatchObject({ code: 'JANE-SMITH', multiUse: true });
   });
 
   it('falls back to its own budget when its seed campaign has ended', async () => {
