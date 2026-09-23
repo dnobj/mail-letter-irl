@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { copyFile, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { migrate } from '../../src/cli/migrate.js';
@@ -59,6 +62,7 @@ const SENDER = {
 describePostgres('gift letters (033)', () => {
   let adminPool: pg.Pool;
   let pool: pg.Pool;
+  let baseUrl: string;
   let schema: string;
   let gifts: typeof import('../../src/services/giftLetterService.js');
   let mailSend: typeof import('../../src/services/mailSendService.js');
@@ -82,7 +86,7 @@ describePostgres('gift letters (033)', () => {
       saved[name] = process.env[name];
       process.env[name] = value;
     }
-    const baseUrl = validateDisposableDatabaseUrl(process.env.LIRL_TEST_DATABASE_URL);
+    baseUrl = validateDisposableDatabaseUrl(process.env.LIRL_TEST_DATABASE_URL);
     adminPool = new Pool({ connectionString: baseUrl });
     schema = schemaName('lirl_gifts');
     await adminPool.query(`CREATE SCHEMA ${schema}`);
@@ -229,7 +233,9 @@ describePostgres('gift letters (033)', () => {
   });
 
   describe('migration 034', () => {
-    it('ended the zero-letter preview codes 007 seeded, and nothing that grants letters or a gift letter', async () => {
+    const MIGRATION_034 = '034_end_zero_letter_promos.sql';
+
+    it('ended the zero-letter preview codes 007 seeded', async () => {
       // Redeeming one used to raise 23514 on credit_ledger.initial_amount (#420).
       const seeded = await pool.query<{ code: string; status: string }>(
         `SELECT code, status FROM promo_campaigns WHERE code = ANY($1::text[]) ORDER BY code`,
@@ -240,12 +246,57 @@ describePostgres('gift letters (033)', () => {
         { code: 'LETTERIRL2024', status: 'ended' },
         { code: 'PREVIEW', status: 'ended' }
       ]);
-      const collateral = await pool.query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM promo_campaigns
-          WHERE status = 'ended' AND (credits_amount > 0 OR gift_generations_remaining IS NOT NULL)`
-      );
-      expect(collateral.rows[0].n).toBe(0);
     });
+
+    it('ends only the ordinary campaigns that grant no letters', async () => {
+      // The suite's own schema holds no seed campaign when 034 runs, so apply
+      // 034 in a schema of its own, over rows it has to tell apart.
+      const staged = schemaName('lirl_gifts_034');
+      await adminPool.query(`CREATE SCHEMA ${staged}`);
+      const url = databaseUrlForSchema(baseUrl, staged);
+      const stagedPool = new Pool({ connectionString: url, max: 1 });
+      const root = await mkdtemp(path.join(os.tmpdir(), 'lirl-034-'));
+      try {
+        const directory = path.join(root, 'db', 'migrations');
+        await mkdir(directory, { recursive: true });
+        const files = (await readdir(repositoryMigrations)).filter(file => file.endsWith('.sql'));
+        expect(files).toContain(MIGRATION_034);
+        for (const file of files.filter(name => name < MIGRATION_034)) {
+          await copyFile(path.join(repositoryMigrations, file), path.join(directory, file));
+        }
+        await migrate({ connectionString: url, migrationsDirectory: directory });
+        await stagedPool.query(
+          `INSERT INTO promo_campaigns (code, name, credits_amount, status, gift_generations_remaining) VALUES
+             ('ZERO-ACTIVE', 'Access code', 0, 'active', NULL),
+             ('ZERO-PAUSED', 'Paused access code', 0, 'paused', NULL),
+             ('ZERO-DRAFT', 'Draft access code', 0, 'draft', NULL),
+             ('SEED-ZERO', 'Seed campaign', 0, 'active', 2),
+             ('SEED-PAUSED', 'Paused seed campaign', 0, 'paused', 0),
+             ('GRANTS-ONE', 'One letter', 1, 'active', NULL)`
+        );
+
+        await copyFile(path.join(repositoryMigrations, MIGRATION_034), path.join(directory, MIGRATION_034));
+        await migrate({ connectionString: url, migrationsDirectory: directory });
+
+        const rows = await stagedPool.query<{ code: string; status: string }>(
+          `SELECT code, status FROM promo_campaigns
+            WHERE code = ANY($1::text[]) ORDER BY code`,
+          [['ZERO-ACTIVE', 'ZERO-PAUSED', 'ZERO-DRAFT', 'SEED-ZERO', 'SEED-PAUSED', 'GRANTS-ONE']]
+        );
+        expect(rows.rows).toEqual([
+          { code: 'GRANTS-ONE', status: 'active' },
+          { code: 'SEED-PAUSED', status: 'paused' },
+          { code: 'SEED-ZERO', status: 'active' },
+          { code: 'ZERO-ACTIVE', status: 'ended' },
+          { code: 'ZERO-DRAFT', status: 'ended' },
+          { code: 'ZERO-PAUSED', status: 'ended' }
+        ]);
+      } finally {
+        await stagedPool.end();
+        await adminPool.query(`DROP SCHEMA IF EXISTS ${staged} CASCADE`);
+        await rm(root, { recursive: true, force: true });
+      }
+    }, 180_000);
   });
 
   describe('sending', () => {
@@ -401,7 +452,7 @@ describePostgres('gift letters (033)', () => {
       expect(await redemption.redeemCode({ userId: one, email: 'Reader.One@gmail.com', code })).toMatchObject({ success: true });
       expect(await redemption.redeemCode({ userId: two, email: 'readerone+2@gmail.com', code })).toMatchObject({
         success: false,
-        error: 'This code has already been redeemed with this email address.'
+        error: 'This gift code has already been claimed with this email address.'
       });
     });
   });

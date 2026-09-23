@@ -8,7 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
 import { getBalance, getTransactions, getDetailedBalance } from '../services/creditService.js';
 import { getUser } from '../services/userService.js';
-import { validatePromoCode, getUserRedemptions } from '../services/promoService.js';
+import { validatePromoCode, getUserRedemptions, isSeedCampaign, refusalText } from '../services/promoService.js';
 import { redeemCode } from '../services/codeRedemptionService.js';
 import { getGiftBalance } from '../services/giftLetterService.js';
 import { getLedgerEntries } from '../services/creditLedgerService.js';
@@ -375,18 +375,25 @@ async function handleValidatePromo(
   const result = await validatePromoCode(code, authInfo.userId);
 
   if (result.valid && result.campaign) {
+    // A seed campaign's code is a gift code: it grants a gift letter, with or
+    // without credits (docs/gift-letters.md), and says so as redeem does.
+    const credits = result.campaign.credits_amount;
     sendJson(res, 200, {
       valid: true,
       code: result.campaign.code,
       name: result.campaign.name,
-      credits: result.campaign.credits_amount,
+      credits,
       expirationDays: result.campaign.expiration_days,
-      message: `This code gives you ${result.campaign.credits_amount} credits!`
+      message: !isSeedCampaign(result.campaign)
+        ? `This code gives you ${credits} credits!`
+        : credits > 0
+          ? `This gift code gives you a gift letter and ${credits} credits.`
+          : 'This gift code gives you a gift letter.'
     });
   } else {
     sendJson(res, 200, {
       valid: false,
-      reason: result.reason
+      reason: refusalText(result)
     });
   }
 }

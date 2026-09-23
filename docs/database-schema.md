@@ -1,6 +1,6 @@
 # Database Schema
 
-**Last Updated:** September 8, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
 This document describes the Letter IRL database schema as defined by `db/migrations` at the head of `dev` (Neon
@@ -330,7 +330,7 @@ Promotional credit campaigns with redeemable codes.
 | code | VARCHAR(50) | NO | - | Unique promo code (case-insensitive) |
 | name | VARCHAR(255) | NO | - | Campaign name |
 | description | TEXT | YES | - | Description |
-| credits_amount | INTEGER | NO | - | Credits per redemption (> 0) |
+| credits_amount | INTEGER | NO | - | Credits per redemption (>= 0 since 007). Only a seed campaign may carry 0; 034 ended the ordinary ones that did |
 | expiration_policy | VARCHAR(50) | NO | 'days_from_activation' | Expiration policy |
 | expiration_days | INTEGER | YES | 90 | Days until credits expire |
 | fixed_expiration_date | TIMESTAMPTZ | YES | - | For fixed_date policy |

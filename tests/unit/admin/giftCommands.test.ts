@@ -94,7 +94,12 @@ describe("gift.grant", () => {
     ).rejects.toMatchObject({ code: "ADMIN_INVALID_STATE" });
     const preview = await grant.preview(scripted({ campaign: [SEED_ROW] }), "influencer-1", input);
     expect(preview.display).toContainEqual(["Card", "seed code JANE-SMITH"]);
-    expect(preview.display.find(([label]) => label === "Cost bound")?.[1]).toContain("capped by that campaign (200 claims)");
+    expect(preview.display).toContainEqual([
+      "Cost bound",
+      "each letter prints JANE-SMITH, capped by that campaign (200 claims), or its own card while that code does not print (at most 0 further free letters each)",
+    ]);
+    const uncapped = await grant.preview(scripted({ campaign: [{ ...SEED_ROW, max_total_redemptions: null }] }), "influencer-1", input);
+    expect(uncapped.display.find(([label]) => label === "Cost bound")?.[1]).toContain("capped by that campaign (no cap)");
   });
 
   it("warns before binding letters to a campaign at its cap, which no longer prints its code (#435)", async () => {
@@ -106,14 +111,18 @@ describe("gift.grant", () => {
       cardCampaignCode: "JANE-SMITH",
     });
     const warning = plain.warnings.find((w) => w.includes("claimed as many times as it allows"));
-    expect(warning).toContain("JANE-SMITH has been claimed as many times as it allows (2 of 2)");
-    expect(warning).toContain("the plain Letter IRL card");
+    expect(warning).toBe(
+      "JANE-SMITH has been claimed as many times as it allows (2 of 2), so a letter bound to it and sent now prints its own card instead: the plain Letter IRL card.",
+    );
+    // The Card line agrees with the warning.
+    expect(plain.display).toContainEqual(["Card", "seed code JANE-SMITH, not printing now: the plain Letter IRL card instead"]);
     const funded = await grant.preview(scripted({ campaign: [atCap] }), "influencer-1", {
       quantity: 1,
       generationsRemaining: 2,
       cardCampaignCode: "JANE-SMITH",
     });
     expect(funded.warnings.find((w) => w.includes("claimed as many times"))).toContain("a new single-use code");
+    expect(funded.display).toContainEqual(["Card", "seed code JANE-SMITH, not printing now: a new single-use code instead"]);
 
     // Below the cap, and with no cap at all, there is nothing to warn about.
     for (const row of [{ ...SEED_ROW, current_redemptions: 1, max_total_redemptions: 2 }, { ...SEED_ROW, max_total_redemptions: null }]) {
@@ -122,7 +131,28 @@ describe("gift.grant", () => {
         generationsRemaining: 0,
         cardCampaignCode: "JANE-SMITH",
       });
-      expect(preview.warnings.some((w) => w.includes("claimed as many times"))).toBe(false);
+      expect(preview.warnings.some((w) => w.includes("JANE-SMITH"))).toBe(false);
+      expect(preview.display).toContainEqual(["Card", "seed code JANE-SMITH"]);
+    }
+  });
+
+  it("warns the same way for a campaign that is not live, since the send decides by the same rule", async () => {
+    const { grant } = createGiftCommands();
+    const input = { quantity: 1, generationsRemaining: 0, cardCampaignCode: "JANE-SMITH" };
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ status: "paused" }, "JANE-SMITH is paused"],
+      [{ status: "draft" }, "JANE-SMITH is still a draft"],
+      [{ status: "ended" }, "JANE-SMITH has ended"],
+      [{ status: "expired" }, "JANE-SMITH has expired"],
+      [{ starts_at: new Date(Date.now() + 86_400_000) }, "JANE-SMITH has not started yet"],
+      [{ ends_at: new Date(Date.now() - 1_000) }, "JANE-SMITH is past its end date"],
+    ];
+    for (const [change, reason] of cases) {
+      const preview = await grant.preview(scripted({ campaign: [{ ...SEED_ROW, ...change }] }), "influencer-1", input);
+      expect(preview.warnings).toContain(
+        `${reason}, so a letter bound to it and sent now prints its own card instead: the plain Letter IRL card.`,
+      );
+      expect(preview.display).toContainEqual(["Card", "seed code JANE-SMITH, not printing now: the plain Letter IRL card instead"]);
     }
   });
 

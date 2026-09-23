@@ -89,7 +89,7 @@ export interface GiftCodeRow {
   redeemed_at: Date | null;
 }
 
-interface SeedCampaignRow {
+export interface SeedCampaignRow {
   campaign_id: string;
   code: string;
   status: string;
@@ -179,26 +179,34 @@ export interface GiftBalance {
   next?: { giftId: string; cardState: GiftCardState; seed?: GiftBalanceSeed };
 }
 
-function activeSeedCampaign(row: SeedCampaignRow | undefined): boolean {
-  if (!row || row.status !== 'active' || row.gift_generations_remaining === null) return false;
-  const now = Date.now();
-  if (new Date(row.starts_at).getTime() > now) return false;
-  if (row.ends_at && new Date(row.ends_at).getTime() <= now) return false;
-  return true;
-}
+/** Why a gift letter bound to a campaign would not print the campaign's code. */
+export type SeedCodeHold = 'not_seed' | 'not_live' | 'not_started' | 'ended' | 'at_cap';
 
 /**
- * Whether a gift letter bound to this campaign prints the campaign's code: the
- * campaign is live and still has claims to give. At its cap every claim is
- * refused, so a letter sent then prints its own card instead of a code nobody
- * can use (#435). The public lookup asks activeSeedCampaign and the cap
- * separately, because it has to tell "ended" apart from "claimed as many
- * times as it allows".
+ * Whether a gift letter bound to this campaign prints the campaign's code if
+ * it is sent now: null when it does, otherwise why not. The campaign must be a
+ * live seed campaign with claims to give. At its cap every claim is refused,
+ * so a letter sent then prints its own card instead of a code nobody can use
+ * (#435).
+ *
+ * The send, the preview, the public lookup and the admin grant preview all
+ * decide with this. A row read without the cap columns counts as at its cap:
+ * a letter that misses the campaign's code still prints a card that works,
+ * while a capped code on paper is one nobody can claim.
  */
+export function seedCodeHold(row: SeedCampaignRow): SeedCodeHold | null {
+  if (row.gift_generations_remaining === null || row.gift_generations_remaining === undefined) return 'not_seed';
+  if (row.status !== 'active') return 'not_live';
+  const now = Date.now();
+  if (new Date(row.starts_at).getTime() > now) return 'not_started';
+  if (row.ends_at && new Date(row.ends_at).getTime() <= now) return 'ended';
+  const cap = row.max_total_redemptions;
+  if (cap !== null && !(Number(row.current_redemptions) < Number(cap))) return 'at_cap';
+  return null;
+}
+
 function seedCodePrints(row: SeedCampaignRow | undefined): boolean {
-  if (!activeSeedCampaign(row)) return false;
-  const cap = row!.max_total_redemptions;
-  return cap === null || cap === undefined || Number(row!.current_redemptions ?? 0) < cap;
+  return row !== undefined && seedCodeHold(row) === null;
 }
 
 /**
@@ -232,8 +240,9 @@ export async function getGiftBalance(userId: string, db: Queryable = { query }):
       status: first.campaign_status ?? '',
       starts_at: first.starts_at as Date,
       ends_at: (first.ends_at as Date | null) ?? null,
-      max_total_redemptions: (first.max_total_redemptions as number | null) ?? null,
-      current_redemptions: Number(first.current_redemptions ?? 0),
+      // Passed as read: a missing cap column holds the code back (seedCodeHold).
+      max_total_redemptions: first.max_total_redemptions as number | null,
+      current_redemptions: first.current_redemptions as number,
       gift_generations_remaining: (first.gift_generations_remaining as number | null) ?? null
     });
   return {
@@ -571,11 +580,11 @@ export async function lookupGiftCodePublic(rawCode: string): Promise<PublicGiftC
     [trimmed]
   );
   const row = campaign.rows[0];
-  if (!row || row.gift_generations_remaining === null) return { valid: false, reason: 'not_found' };
-  if (!activeSeedCampaign(row)) return { valid: false, kind: 'seed', reason: 'expired' };
-  if (row.max_total_redemptions !== null && row.current_redemptions >= row.max_total_redemptions) {
-    return { valid: false, kind: 'seed', reason: 'limit_reached' };
-  }
+  const hold = row ? seedCodeHold(row) : 'not_seed';
+  if (hold === 'not_seed') return { valid: false, reason: 'not_found' };
+  // The claim page tells "claimed as many times as it allows" apart from over.
+  if (hold === 'at_cap') return { valid: false, kind: 'seed', reason: 'limit_reached' };
+  if (hold !== null) return { valid: false, kind: 'seed', reason: 'expired' };
   return {
     valid: true,
     kind: 'seed',

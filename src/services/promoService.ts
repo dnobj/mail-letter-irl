@@ -36,7 +36,8 @@ const SEED_EMAIL_ALREADY_USED = 'This gift code has already been claimed with th
  * A seed campaign's code is a gift code (docs/gift-letters.md): it is printed
  * on a gift letter's card and grants a gift letter. Its refusals therefore say
  * "gift code", as a chain code's do, and never "promo code" (#432). The cap's
- * sentence is the claim page's own, so both surfaces say the same thing.
+ * sentence follows the claim page's ("This code has been claimed as many times
+ * as it allows."), naming the gift code.
  */
 const SEED_REFUSALS: Partial<Record<PromoRefusalCode, string>> = {
   inactive: 'This gift code is no longer valid.',
@@ -50,11 +51,12 @@ const GIFTS_UNAVAILABLE = "Gift codes can't be claimed right now. Please try aga
 /** #420: an ordinary campaign that grants no letters has nothing to give. */
 const NO_LETTERS = "This code doesn't include any letters.";
 
-function isSeedCampaign(campaign: PromoCampaign | undefined): boolean {
+export function isSeedCampaign(campaign: PromoCampaign | undefined): boolean {
   return campaign?.gift_generations_remaining !== null && campaign?.gift_generations_remaining !== undefined;
 }
 
-function refusalText(validation: ValidatePromoResult): string | undefined {
+/** A refusal as the customer reads it: a seed campaign's in gift-code words. */
+export function refusalText(validation: ValidatePromoResult): string | undefined {
   if (isSeedCampaign(validation.campaign) && validation.reasonCode) {
     return SEED_REFUSALS[validation.reasonCode] ?? validation.reason;
   }
