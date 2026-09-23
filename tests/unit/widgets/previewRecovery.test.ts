@@ -1915,17 +1915,19 @@ describe.each([LETTER, POSTCARD])("$file shows a refused call's sentence, not th
   });
 
   it('decodes the other escapes Python writes', async () => {
+    // Python writes these only for characters that do not print: a tab, a
+    // carriage return, a no-break space, a zero-width space, a tag character.
     const harness = mount(spec, {
       toolOutput: spec.output('draft_host_0001'),
       sendResponse: () => {
-        throw rejection(`'Tab\\there,\\r\\nno\\xa0break \\u2014 done \\U0001f48c \\\\ ok'`);
+        throw rejection(`'Tab\\there,\\r\\nno\\xa0break \\u200b done \\U000e0001 \\\\ ok'`);
       }
     });
     await flush();
 
     await harness.click('send-button');
 
-    expect(harness.text('error-message')).toBe('Failed to send: Tab here, no\u00a0break \u2014 done \u{1f48c} \\ ok');
+    expect(harness.text('error-message')).toBe('Failed to send: Tab here, no\u00a0break \u200b done \u{e0001} \\ ok');
   });
 
   it('drops an escape outside Unicode rather than failing to show the message', async () => {

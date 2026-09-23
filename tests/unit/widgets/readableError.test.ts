@@ -17,7 +17,7 @@ const CARDS = ['LetterPreviewCard', 'PostcardPreviewCard', 'PackCheckoutCard'];
 function readableErrorSource(card: string): string {
   const html = fs.readFileSync(path.join(WIDGET_DIR, `${card}.html`), 'utf-8').replace(/\r\n/g, '\n');
   // From the declaration to the first closing brace at the same indentation.
-  const found = html.match(/\n( *)function readableError\(error\) \{\n[\s\S]*?\n\1\}\n/);
+  const found = html.match(/\n( *)function readableError\(error\) \{\n[\s\S]*?\n\1\}[ \t]*\n/);
   expect(found, `${card} declares readableError`).not.toBeNull();
   return found![0].replace(/\n */g, '\n');
 }
