@@ -35,6 +35,12 @@ export interface GiftCardContent {
    * campaign's cap. The card must not tell them it works once.
    */
   multiUse?: boolean;
+  /**
+   * A seed campaign limited to new accounts (requires_new_user). The card says
+   * so: otherwise an existing customer who finds a shared letter is promised a
+   * claim the redeem path refuses.
+   */
+  newAccountsOnly?: boolean;
   /** Preview only: draw a placeholder where the recipient's code will print. */
   sample?: boolean;
 }
@@ -146,7 +152,10 @@ function redeemByText(card: GiftCardContent): string {
 /** How many times the code works, in the letter page's and the strip's words. */
 function usesText(card: GiftCardContent, length: 'letter' | 'postcard'): string {
   if (card.multiUse) {
-    return length === 'letter' ? 'Each person can use the code once, while it lasts.' : 'One use per person, while it lasts.';
+    if (length === 'letter') {
+      return `${card.newAccountsOnly ? 'For new Letter IRL accounts. ' : ''}Each person can use the code once, while it lasts.`;
+    }
+    return `${card.newAccountsOnly ? 'New accounts only. ' : ''}One use per person, while it lasts.`;
   }
   return length === 'letter' ? 'The code works once.' : 'One use.';
 }

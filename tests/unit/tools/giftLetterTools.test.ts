@@ -121,6 +121,22 @@ describe('letter preview: the gift decision', () => {
     expect(mocks.createDraft).toHaveBeenCalledWith(expect.objectContaining({ isGiftSend: true }));
   });
 
+  it('previews the wording that will print when the next gift letter carries a seed code', async () => {
+    // The print says a seed code works once per person (#431); a preview that
+    // still said "works once" would show something other than what prints.
+    mocks.getGiftBalance.mockResolvedValue({
+      available: 1,
+      next: { giftId: 'gift-1', cardState: 'funded', seed: { newAccountsOnly: true } }
+    });
+    const seeded = await preview(0);
+    expect(seeded.previewHtml).toContain('For new Letter IRL accounts. Each person can use the code once, while it lasts.');
+    expect(seeded.previewHtml).not.toContain('The code works once.');
+
+    mocks.getGiftBalance.mockResolvedValue({ available: 1, next: { giftId: 'gift-1', cardState: 'funded' } });
+    const chained = await preview(0);
+    expect(chained.previewHtml).toContain('The code works once.');
+  });
+
   it('shows the plain card when the next gift letter has no budget', async () => {
     mocks.getGiftBalance.mockResolvedValue({ available: 1, next: { giftId: 'gift-1', cardState: 'unfunded' } });
     const output = await preview(0);

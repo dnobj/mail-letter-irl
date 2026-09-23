@@ -185,6 +185,7 @@ describe("seed campaign admin routes", () => {
   });
 
   it("renders the account of someone who claimed a gift-only seed campaign", async () => {
+    queries.length = 0;
     const reply = await send(port, "/accounts/auth0%7Cuser1");
     expect(reply.status).toBe(200);
     // The redemption row was actually read and drawn, not skipped.

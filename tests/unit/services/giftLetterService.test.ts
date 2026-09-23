@@ -138,7 +138,28 @@ describe('consumeGiftLetterForSendWithClient', () => {
     const result = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1' });
     // Many people may claim a seed code, so its card must not say it works once.
     expect(result?.card).toMatchObject({ state: 'funded', code: 'JANE-SMITH', url: 'https://letterirl.com/g/JANE-SMITH', multiUse: true });
+    // Open to every account: nothing on the card says otherwise.
+    expect(result?.card.newAccountsOnly).toBeUndefined();
     expect(ran('INSERT INTO gift_codes')).toHaveLength(0);
+  });
+
+  it("says on the card when a seed campaign is for new accounts only", async () => {
+    on('SELECT * FROM gift_letters', [gift({ generations_remaining: 0, card_campaign_id: 'campaign-1' })]);
+    on('FROM promo_campaigns WHERE campaign_id', [
+      {
+        campaign_id: 'campaign-1',
+        code: 'JANE-SMITH',
+        status: 'active',
+        starts_at: PAST,
+        ends_at: null,
+        gift_generations_remaining: 1,
+        requires_new_user: true
+      }
+    ]);
+    const result = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1' });
+    expect(result?.card).toMatchObject({ code: 'JANE-SMITH', multiUse: true, newAccountsOnly: true });
+    // The flag has to be read where the card is decided.
+    expect(ran('FROM promo_campaigns WHERE campaign_id')[0].sql).toContain('requires_new_user');
   });
 
   it('falls back to its own budget when its seed campaign has ended', async () => {
@@ -395,6 +416,31 @@ describe('grant, balance and reversal', () => {
   it('reports the card the next gift send would print', async () => {
     on('FROM gift_letters g', [gift({ generations_remaining: 0 }), gift({ gift_id: 'gift-2' })]);
     expect(await getGiftBalance('user-1')).toEqual({ available: 2, next: { giftId: 'gift-1', cardState: 'unfunded' } });
+  });
+
+  it('reports when the next gift letter prints a live seed campaign, so the preview can say so', async () => {
+    const seedBound = {
+      card_campaign_id: 'campaign-1',
+      campaign_status: 'active',
+      starts_at: PAST,
+      ends_at: null,
+      gift_generations_remaining: 1
+    };
+    on('FROM gift_letters g', [gift({ generations_remaining: 0, ...seedBound, requires_new_user: true })]);
+    expect(await getGiftBalance('user-1')).toEqual({
+      available: 1,
+      next: { giftId: 'gift-1', cardState: 'funded', seed: { newAccountsOnly: true } }
+    });
+    expect(ran('FROM gift_letters g')[0].sql).toContain('c.requires_new_user');
+
+    state.handlers = [];
+    on('FROM gift_letters g', [gift({ generations_remaining: 0, ...seedBound, requires_new_user: false })]);
+    expect((await getGiftBalance('user-1')).next?.seed).toEqual({ newAccountsOnly: false });
+
+    // An ended campaign funds nothing, and the card falls back to the letter's own budget.
+    state.handlers = [];
+    on('FROM gift_letters g', [gift({ generations_remaining: 0, ...seedBound, campaign_status: 'ended' })]);
+    expect((await getGiftBalance('user-1')).next).toEqual({ giftId: 'gift-1', cardState: 'unfunded' });
   });
 
   it('revokes unsent gifts on a refund and leaves printed codes alone', async () => {

@@ -98,6 +98,8 @@ interface SeedCampaignRow {
   max_total_redemptions: number | null;
   current_redemptions: number;
   gift_generations_remaining: number | null;
+  /** Read where the card is decided: a new-accounts-only seed prints so. */
+  requires_new_user?: boolean | null;
 }
 
 function daysFromNow(days: number): Date {
@@ -126,10 +128,11 @@ export function fundedCard(code: string, redeemBy?: Date | null): GiftCardConten
 
 /**
  * The card a gift letter bound to a live seed campaign prints: the campaign's
- * own code, which many people may claim, so the card says so.
+ * own code, which many people may claim, so the card says so, and says when
+ * only new accounts may.
  */
-export function seedCard(code: string, endsAt?: Date | null): GiftCardContent {
-  return { ...fundedCard(code, endsAt), multiUse: true };
+export function seedCard(code: string, endsAt?: Date | null, newAccountsOnly = false): GiftCardContent {
+  return { ...fundedCard(code, endsAt), multiUse: true, ...(newAccountsOnly ? { newAccountsOnly: true } : {}) };
 }
 
 /**
@@ -137,13 +140,16 @@ export function seedCard(code: string, endsAt?: Date | null): GiftCardContent {
  * send, so the preview draws a placeholder and its QR opens the claim page's
  * entry form rather than a code that would not resolve.
  */
-export function sampleFundedCard(): GiftCardContent {
+export function sampleFundedCard(seed?: GiftBalanceSeed): GiftCardContent {
   const base = giftLandingBaseUrl();
   return {
     state: 'funded',
     url: `${base}/g`,
     displayUrl: `${landingHost(base)}/g`,
     redeemBy: isoDay(daysFromNow(giftCodeTtlDays())),
+    // A seed-bound gift letter prints the multi-use wording (seedCard); the
+    // preview says the same. Its code and date still show as placeholders.
+    ...(seed ? { multiUse: true, ...(seed.newAccountsOnly ? { newAccountsOnly: true } : {}) } : {}),
     sample: true
   };
 }
@@ -158,10 +164,15 @@ export function unfundedCard(): GiftCardContent {
 // Balance
 // ============================================================================
 
+/** The next gift letter is bound to a live seed campaign: its card is multi-use. */
+export interface GiftBalanceSeed {
+  newAccountsOnly: boolean;
+}
+
 export interface GiftBalance {
   available: number;
   /** The gift letter the next gift send would use, and the card it would print. */
-  next?: { giftId: string; cardState: GiftCardState };
+  next?: { giftId: string; cardState: GiftCardState; seed?: GiftBalanceSeed };
 }
 
 function activeSeedCampaign(row: SeedCampaignRow | undefined): boolean {
@@ -178,7 +189,8 @@ function activeSeedCampaign(row: SeedCampaignRow | undefined): boolean {
  */
 export async function getGiftBalance(userId: string, db: Queryable = { query }): Promise<GiftBalance> {
   const result = await db.query<GiftLetterRow & { campaign_status: string | null } & Partial<SeedCampaignRow>>(
-    `SELECT g.*, c.status AS campaign_status, c.starts_at, c.ends_at, c.gift_generations_remaining
+    `SELECT g.*, c.status AS campaign_status, c.starts_at, c.ends_at, c.gift_generations_remaining,
+            c.requires_new_user
        FROM gift_letters g
        LEFT JOIN promo_campaigns c ON c.campaign_id = g.card_campaign_id
       WHERE g.user_id = $1
@@ -206,7 +218,8 @@ export async function getGiftBalance(userId: string, db: Queryable = { query }):
     available: rows.length,
     next: {
       giftId: first.gift_id,
-      cardState: campaignFunds || first.generations_remaining > 0 ? 'funded' : 'unfunded'
+      cardState: campaignFunds || first.generations_remaining > 0 ? 'funded' : 'unfunded',
+      ...(campaignFunds ? { seed: { newAccountsOnly: first.requires_new_user === true } } : {})
     }
   };
 }
@@ -355,13 +368,13 @@ export async function consumeGiftLetterForSendWithClient(
   if (gift.card_campaign_id) {
     const campaign = await client.query<SeedCampaignRow>(
       `SELECT campaign_id, code, status, starts_at, ends_at, max_total_redemptions,
-              current_redemptions, gift_generations_remaining
+              current_redemptions, gift_generations_remaining, requires_new_user
          FROM promo_campaigns WHERE campaign_id = $1`,
       [gift.card_campaign_id]
     );
     const row = campaign.rows[0];
     if (activeSeedCampaign(row)) {
-      return { gift, card: seedCard(row!.code, row!.ends_at) };
+      return { gift, card: seedCard(row!.code, row!.ends_at, row!.requires_new_user === true) };
     }
   }
 
