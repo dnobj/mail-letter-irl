@@ -228,6 +228,26 @@ describePostgres('gift letters (033)', () => {
     });
   });
 
+  describe('migration 034', () => {
+    it('ended the zero-letter preview codes 007 seeded, and nothing that grants letters or a gift letter', async () => {
+      // Redeeming one used to raise 23514 on credit_ledger.initial_amount (#420).
+      const seeded = await pool.query<{ code: string; status: string }>(
+        `SELECT code, status FROM promo_campaigns WHERE code = ANY($1::text[]) ORDER BY code`,
+        [['EARLYBIRD', 'LETTERIRL2024', 'PREVIEW']]
+      );
+      expect(seeded.rows).toEqual([
+        { code: 'EARLYBIRD', status: 'ended' },
+        { code: 'LETTERIRL2024', status: 'ended' },
+        { code: 'PREVIEW', status: 'ended' }
+      ]);
+      const collateral = await pool.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM promo_campaigns
+          WHERE status = 'ended' AND (credits_amount > 0 OR gift_generations_remaining IS NOT NULL)`
+      );
+      expect(collateral.rows[0].n).toBe(0);
+    });
+  });
+
   describe('sending', () => {
     it('spends one gift letter, never the balance, and mints a code worth one less', async () => {
       const userId = await seedUser();

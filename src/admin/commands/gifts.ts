@@ -88,6 +88,12 @@ export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
       if (!account) throw new AdminFoundationError("ADMIN_NOT_FOUND");
       const campaign = input.cardCampaignCode ? await seedCampaign(client, input.cardCampaignCode) : null;
       const available = await countAvailable(client, userId);
+      // #435: at its cap a seed campaign stops printing its code, so a letter
+      // bound to it prints its own card instead; say so before granting.
+      const atCap =
+        campaign !== null &&
+        campaign.maxTotalRedemptions !== null &&
+        campaign.currentRedemptions >= campaign.maxTotalRedemptions;
       const bound = campaign
         ? `each letter prints ${campaign.code}, capped by that campaign (${campaign.maxTotalRedemptions ?? "no cap"} claims)`
         : `at most ${input.quantity * input.generationsRemaining} further free letters descend from these`;
@@ -105,6 +111,11 @@ export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
         ],
         warnings: [
           "Each gift letter is a free send that Letter IRL pays postage for. Recorded as an operator grant with the command id; replaying the command cannot grant twice.",
+          ...(atCap && campaign
+            ? [
+                `${campaign.code} has been claimed as many times as it allows (${campaign.currentRedemptions} of ${campaign.maxTotalRedemptions}), so letters bound to it no longer print its code. Each prints its own card instead: ${input.generationsRemaining > 0 ? "a new single-use code" : "the plain Letter IRL card"}.`,
+              ]
+            : []),
         ],
       };
     },

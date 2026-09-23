@@ -97,6 +97,35 @@ describe("gift.grant", () => {
     expect(preview.display.find(([label]) => label === "Cost bound")?.[1]).toContain("capped by that campaign (200 claims)");
   });
 
+  it("warns before binding letters to a campaign at its cap, which no longer prints its code (#435)", async () => {
+    const { grant } = createGiftCommands();
+    const atCap = { ...SEED_ROW, max_total_redemptions: 2, current_redemptions: 2 };
+    const plain = await grant.preview(scripted({ campaign: [atCap] }), "influencer-1", {
+      quantity: 1,
+      generationsRemaining: 0,
+      cardCampaignCode: "JANE-SMITH",
+    });
+    const warning = plain.warnings.find((w) => w.includes("claimed as many times as it allows"));
+    expect(warning).toContain("JANE-SMITH has been claimed as many times as it allows (2 of 2)");
+    expect(warning).toContain("the plain Letter IRL card");
+    const funded = await grant.preview(scripted({ campaign: [atCap] }), "influencer-1", {
+      quantity: 1,
+      generationsRemaining: 2,
+      cardCampaignCode: "JANE-SMITH",
+    });
+    expect(funded.warnings.find((w) => w.includes("claimed as many times"))).toContain("a new single-use code");
+
+    // Below the cap, and with no cap at all, there is nothing to warn about.
+    for (const row of [{ ...SEED_ROW, current_redemptions: 1, max_total_redemptions: 2 }, { ...SEED_ROW, max_total_redemptions: null }]) {
+      const preview = await grant.preview(scripted({ campaign: [row] }), "influencer-1", {
+        quantity: 1,
+        generationsRemaining: 0,
+        cardCampaignCode: "JANE-SMITH",
+      });
+      expect(preview.warnings.some((w) => w.includes("claimed as many times"))).toBe(false);
+    }
+  });
+
   it("refuses an unknown account", async () => {
     const { grant } = createGiftCommands();
     await expect(grant.preview(scripted({ account: [] }), "nobody", { quantity: 1, generationsRemaining: 1, cardCampaignCode: null })).rejects.toMatchObject({

@@ -89,7 +89,11 @@ export function createPromoCommands(overrides: Partial<PromoCommandSeams> = {}) 
         (maxTotalRaw !== "" && maxTotalRedemptions === null) ||
         maxPerUser === null ||
         endsAt === undefined ||
-        (giftRaw !== "" && giftGenerationsRemaining === null)
+        (giftRaw !== "" && giftGenerationsRemaining === null) ||
+        // #420: an ordinary campaign must grant letters; redeeming one with
+        // none used to fail on the ledger's initial_amount > 0 check. Only a
+        // seed, which grants a gift letter instead, may carry 0.
+        (creditsAmount === 0 && giftGenerationsRemaining === null)
       ) {
         throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
       }

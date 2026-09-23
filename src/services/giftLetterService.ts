@@ -136,20 +136,18 @@ export function seedCard(code: string, endsAt?: Date | null, newAccountsOnly = f
 }
 
 /**
- * A funded card for previews. The recipient's code does not exist until the
- * send, so the preview draws a placeholder and its QR opens the claim page's
- * entry form rather than a code that would not resolve.
+ * A funded card for the preview of a chain-code gift letter. That code does
+ * not exist until the send, so the preview draws a placeholder and its QR
+ * opens the claim page's entry form rather than a code that would not resolve.
+ * A seed campaign's code does exist, so its preview uses seedCard itself.
  */
-export function sampleFundedCard(seed?: GiftBalanceSeed): GiftCardContent {
+export function sampleFundedCard(): GiftCardContent {
   const base = giftLandingBaseUrl();
   return {
     state: 'funded',
     url: `${base}/g`,
     displayUrl: `${landingHost(base)}/g`,
     redeemBy: isoDay(daysFromNow(giftCodeTtlDays())),
-    // A seed-bound gift letter prints the multi-use wording (seedCard); the
-    // preview says the same. Its code and date still show as placeholders.
-    ...(seed ? { multiUse: true, ...(seed.newAccountsOnly ? { newAccountsOnly: true } : {}) } : {}),
     sample: true
   };
 }
@@ -164,8 +162,14 @@ export function unfundedCard(): GiftCardContent {
 // Balance
 // ============================================================================
 
-/** The next gift letter is bound to a live seed campaign: its card is multi-use. */
+/**
+ * The next gift letter prints its seed campaign's code. The preview draws the
+ * same card the print will (seedCard): the code, the campaign's end date and
+ * the multi-use wording (#433).
+ */
 export interface GiftBalanceSeed {
+  code: string;
+  endsAt: Date | null;
   newAccountsOnly: boolean;
 }
 
@@ -184,12 +188,29 @@ function activeSeedCampaign(row: SeedCampaignRow | undefined): boolean {
 }
 
 /**
+ * Whether a gift letter bound to this campaign prints the campaign's code: the
+ * campaign is live and still has claims to give. At its cap every claim is
+ * refused, so a letter sent then prints its own card instead of a code nobody
+ * can use (#435). The public lookup asks activeSeedCampaign and the cap
+ * separately, because it has to tell "ended" apart from "claimed as many
+ * times as it allows".
+ */
+function seedCodePrints(row: SeedCampaignRow | undefined): boolean {
+  if (!activeSeedCampaign(row)) return false;
+  const cap = row!.max_total_redemptions;
+  return cap === null || cap === undefined || Number(row!.current_redemptions ?? 0) < cap;
+}
+
+/**
  * Unsent, unexpired gift letters, oldest expiry first: the order a send uses
  * them in. Read without locks, for previews and balances.
  */
 export async function getGiftBalance(userId: string, db: Queryable = { query }): Promise<GiftBalance> {
-  const result = await db.query<GiftLetterRow & { campaign_status: string | null } & Partial<SeedCampaignRow>>(
-    `SELECT g.*, c.status AS campaign_status, c.starts_at, c.ends_at, c.gift_generations_remaining,
+  const result = await db.query<
+    GiftLetterRow & { campaign_status: string | null; campaign_code: string | null } & Partial<SeedCampaignRow>
+  >(
+    `SELECT g.*, c.code AS campaign_code, c.status AS campaign_status, c.starts_at, c.ends_at,
+            c.gift_generations_remaining, c.max_total_redemptions, c.current_redemptions,
             c.requires_new_user
        FROM gift_letters g
        LEFT JOIN promo_campaigns c ON c.campaign_id = g.card_campaign_id
@@ -204,14 +225,15 @@ export async function getGiftBalance(userId: string, db: Queryable = { query }):
   if (!first) return { available: 0 };
   const campaignFunds =
     first.card_campaign_id !== null &&
-    activeSeedCampaign({
+    typeof first.campaign_code === 'string' &&
+    seedCodePrints({
       campaign_id: first.card_campaign_id,
-      code: '',
+      code: first.campaign_code,
       status: first.campaign_status ?? '',
       starts_at: first.starts_at as Date,
       ends_at: (first.ends_at as Date | null) ?? null,
-      max_total_redemptions: null,
-      current_redemptions: 0,
+      max_total_redemptions: (first.max_total_redemptions as number | null) ?? null,
+      current_redemptions: Number(first.current_redemptions ?? 0),
       gift_generations_remaining: (first.gift_generations_remaining as number | null) ?? null
     });
   return {
@@ -219,7 +241,15 @@ export async function getGiftBalance(userId: string, db: Queryable = { query }):
     next: {
       giftId: first.gift_id,
       cardState: campaignFunds || first.generations_remaining > 0 ? 'funded' : 'unfunded',
-      ...(campaignFunds ? { seed: { newAccountsOnly: first.requires_new_user === true } } : {})
+      ...(campaignFunds
+        ? {
+            seed: {
+              code: first.campaign_code as string,
+              endsAt: (first.ends_at as Date | null) ?? null,
+              newAccountsOnly: first.requires_new_user === true
+            }
+          }
+        : {})
     }
   };
 }
@@ -333,9 +363,9 @@ async function mintChainCode(
  * caller refuses the send.
  *
  * The card, in order: a gift letter an operator bound to a live seed campaign
- * prints that campaign's multi-use code; one with budget left mints a
- * single-use chain code worth one gift letter with one less budget; one with
- * no budget left prints the plain card.
+ * that still has claims to give prints that campaign's multi-use code; one
+ * with budget left mints a single-use chain code worth one gift letter with
+ * one less budget; one with no budget left prints the plain card.
  */
 export async function consumeGiftLetterForSendWithClient(
   client: TxClient,
@@ -373,7 +403,7 @@ export async function consumeGiftLetterForSendWithClient(
       [gift.card_campaign_id]
     );
     const row = campaign.rows[0];
-    if (activeSeedCampaign(row)) {
+    if (seedCodePrints(row)) {
       return { gift, card: seedCard(row!.code, row!.ends_at, row!.requires_new_user === true) };
     }
   }
@@ -508,6 +538,8 @@ export interface PublicGiftCodeLookup {
   kind?: 'chain' | 'seed';
   reason?: GiftRedemptionReason | 'not_found' | 'limit_reached';
   redeemBy?: string;
+  /** A seed campaign limited to new customers: the claim page can say so before sign-in. */
+  newCustomersOnly?: boolean;
 }
 
 /**
@@ -534,7 +566,7 @@ export async function lookupGiftCodePublic(rawCode: string): Promise<PublicGiftC
   if (!trimmed) return { valid: false, reason: 'not_found' };
   const campaign = await query<SeedCampaignRow>(
     `SELECT campaign_id, code, status, starts_at, ends_at, max_total_redemptions,
-            current_redemptions, gift_generations_remaining
+            current_redemptions, gift_generations_remaining, requires_new_user
        FROM promo_campaigns WHERE UPPER(code) = $1`,
     [trimmed]
   );
@@ -547,7 +579,8 @@ export async function lookupGiftCodePublic(rawCode: string): Promise<PublicGiftC
   return {
     valid: true,
     kind: 'seed',
-    ...(row.ends_at ? { redeemBy: isoDay(new Date(row.ends_at)) } : {})
+    ...(row.ends_at ? { redeemBy: isoDay(new Date(row.ends_at)) } : {}),
+    ...(row.requires_new_user === true ? { newCustomersOnly: true } : {})
   };
 }
 

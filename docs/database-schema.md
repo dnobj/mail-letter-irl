@@ -669,6 +669,7 @@ Production provisioning and the first production connection remain separate owne
 | 31 | 031_provider_error_minimisation.sql | Provider message text rewritten out of the job, order and order-event error columns (#162) |
 | 32 | 032_error_text_minimisation.sql | Raw error text and operator reasons rewritten out of the order, event, outbox, pack-refund and maintenance columns (#394) |
 | 33 | 033_gift_letters.sql | Gift letters: gift_letters, gift_codes, the gift_letter funding type, gift drafts, seed campaigns and gift-only redemptions |
+| 34 | 034_end_zero_letter_promos.sql | Ends the ordinary promo campaigns that grant no letters (the preview-gate codes 007 seeded), which could never be redeemed (#420) |
 
 ---
 

@@ -15,7 +15,7 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * exist yet fails the whole transaction.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "033_gift_letters.sql";
+  "034_end_zero_letter_promos.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";
