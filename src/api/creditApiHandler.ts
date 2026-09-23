@@ -20,6 +20,7 @@ import {
 } from './middleware/restAuth.js';
 import { rateLimitAccount } from './middleware/rateLimit.js';
 import { requiredRestScopes } from '../auth/restScopes.js';
+import { CREDITS_PER_LETTER } from '../config/products.js';
 
 /**
  * Send JSON response
@@ -376,8 +377,10 @@ async function handleValidatePromo(
 
   if (result.valid && result.campaign) {
     // A seed campaign's code is a gift code: it grants a gift letter, with or
-    // without credits (docs/gift-letters.md), and says so as redeem does.
+    // without letters (docs/gift-letters.md), and says so in letters, the only
+    // unit a customer sees, as redeem does.
     const credits = result.campaign.credits_amount;
+    const letters = Math.floor(credits / CREDITS_PER_LETTER);
     sendJson(res, 200, {
       valid: true,
       code: result.campaign.code,
@@ -386,8 +389,8 @@ async function handleValidatePromo(
       expirationDays: result.campaign.expiration_days,
       message: !isSeedCampaign(result.campaign)
         ? `This code gives you ${credits} credits!`
-        : credits > 0
-          ? `This gift code gives you a gift letter and ${credits} credits.`
+        : letters > 0
+          ? `This gift code gives you ${letters} ${letters === 1 ? 'letter' : 'letters'} and a gift letter.`
           : 'This gift code gives you a gift letter.'
     });
   } else {

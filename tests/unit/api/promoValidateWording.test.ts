@@ -87,12 +87,15 @@ describe('GET /api/promo/validate/:code', () => {
     expect(await ask('WELCOME5')).toEqual({ valid: false, reason: 'Promo code redemption limit reached' });
   });
 
-  it('names the gift letter a valid seed code grants, and any credits with it', async () => {
+  it('names the gift letter a valid seed code grants, and any letters with it', async () => {
     validate.mockResolvedValue({ valid: true, campaign: campaign() });
     expect((await ask('JANE-SMITH')).message).toBe('This gift code gives you a gift letter.');
 
+    // Credits are counted in letters, the only unit a customer sees.
     validate.mockResolvedValue({ valid: true, campaign: campaign({ credits_amount: 2 }) });
-    expect((await ask('JANE-SMITH')).message).toBe('This gift code gives you a gift letter and 2 credits.');
+    expect((await ask('JANE-SMITH')).message).toBe('This gift code gives you 1 letter and a gift letter.');
+    validate.mockResolvedValue({ valid: true, campaign: campaign({ credits_amount: 4 }) });
+    expect((await ask('JANE-SMITH')).message).toBe('This gift code gives you 2 letters and a gift letter.');
 
     validate.mockResolvedValue({
       valid: true,

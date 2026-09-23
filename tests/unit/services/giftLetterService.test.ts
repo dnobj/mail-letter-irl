@@ -257,6 +257,9 @@ describe('consumeGiftLetterForSendWithClient', () => {
     expect(seedCodeHold({ ...live, ends_at: new Date(Date.now() - 1_000) })).toBe('ended');
     expect(seedCodeHold({ ...live, ends_at: new Date(Date.now() + 86_400_000) })).toBeNull();
     expect(seedCodeHold({ ...live, current_redemptions: 2 })).toBe('at_cap');
+    // Either cap column left unread holds the code back on its own.
+    expect(seedCodeHold({ ...live, max_total_redemptions: undefined as never })).toBe('at_cap');
+    expect(seedCodeHold({ ...live, current_redemptions: undefined as never })).toBe('at_cap');
     expect(seedCodeHold({ ...live, max_total_redemptions: null, current_redemptions: 5000 })).toBeNull();
     // A paused campaign at its cap is held back as not live: the claim page
     // calls that over, not claimed out.
