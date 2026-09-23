@@ -1649,7 +1649,12 @@ describe.each([LETTER, POSTCARD])('$file and the same mail twice (#412)', spec =
 
   it.each([
     ['as it is', 'Possible duplicate: This same mail was already sent.'],
-    ['behind words of its own', 'Tool call failed: Possible duplicate: This same mail was already sent.']
+    ['behind words of its own', 'Tool call failed: Possible duplicate: This same mail was already sent.'],
+    [
+      "wrapped the way ChatGPT wraps a refusal (#434)",
+      'Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: ' +
+        "[TextContent(type='text', text='Possible duplicate: This same mail was already sent.', annotations=None, meta=None)]"
+    ]
   ])('recognises a refusal the host turns into a rejection, %s', async (_label, message) => {
     const harness = await ready({
       sendResponse: () => {
@@ -1907,6 +1912,35 @@ describe.each([LETTER, POSTCARD])("$file shows a refused call's sentence, not th
     await harness.click('send-button');
 
     expect(harness.text('error-message')).toBe('Failed to send: This draft has expired.');
+  });
+
+  it('decodes the other escapes Python writes', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: () => {
+        throw rejection(`'Tab\\there,\\r\\nno\\xa0break \\u2014 done \\U0001f48c \\\\ ok'`);
+      }
+    });
+    await flush();
+
+    await harness.click('send-button');
+
+    expect(harness.text('error-message')).toBe('Failed to send: Tab here, no\u00a0break \u2014 done \u{1f48c} \\ ok');
+  });
+
+  it('drops an escape outside Unicode rather than failing to show the message', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: () => {
+        throw rejection(`'Not a character: \\U00110000.'`);
+      }
+    });
+    await flush();
+
+    await harness.click('send-button');
+
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('error-message')).toBe('Failed to send: Not a character: .');
   });
 
   it('shows a line break in the sentence as a space', async () => {
