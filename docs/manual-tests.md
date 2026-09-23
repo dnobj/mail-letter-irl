@@ -227,7 +227,7 @@ the only rehearsal of the rollback path.
 - [ ] Confirm production was unchanged throughout.
 
 **Purpose:** Integration and end-to-end tests that require manual verification
-**Last Updated:** July 16, 2026
+**Last Updated:** September 23, 2026
 
 ---
 
@@ -888,6 +888,9 @@ gives a card no `_meta` for a refused call; see
 - [ ] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200)
 - [x] Same building with no unit given → draft IS created with an "add the unit if you have it" note
 - [x] Garbage street (123 Fake Street, Nowhere) → still refused, message says what to check
+- Expected refusals like these, and an over-long gift postcard, log `tool.invocation.failure`
+  with `errorClass=unknown_error` (seen 2026-09-22 and 23): the class is a mislabel, so read the
+  stage line logged just before it.
 
 ### Send (US-LETTER-02)
 - [x] Use draft ID from preview
@@ -983,38 +986,100 @@ Test promotional code redemption.
 
 ### GIFT-01 — Gift letter end to end, and the test print
 
-**Status:** Not run. Gates switching `LETTER_IRL_GIFT_LETTERS_ENABLED` on in production
-([gift-letters.md](gift-letters.md)).
+**Status:** Run on development on 2026-09-22 and 23. Steps 1 to 9 passed, step 9 with two workarounds
+that #431 fixes. Step 4 was checked on screen rather than on paper, and its iPhone scan is still open.
+Gates switching `LETTER_IRL_GIFT_LETTERS_ENABLED` on in production ([gift-letters.md](gift-letters.md)).
 
 Development, with `LETTER_IRL_GIFT_LETTERS_ENABLED=true`,
 `LETTER_IRL_GIFT_LANDING_BASE_URL` set to the development website, and the DEV connector refreshed
 after deploy (widget v36).
 
-1. [ ] Buy a Starter pack in test mode. `get_account_balance` reports `giftLettersRemaining: 1`.
-2. [ ] Preview a letter with `sendAsGift: true`. The card shows "Free (gift letter)", a second
+1. [x] Buy a Starter pack in test mode. `get_account_balance` reports `giftLettersRemaining: 1`.
+2. [x] Preview a letter with `sendAsGift: true`. The card shows "Free (gift letter)", a second
        page, "Send Gift Letter", and no Pay & Send.
-3. [ ] Send it. The admin **Gifts** page lists a new chain code issued to the account.
+3. [x] Send it. The admin **Gifts** page lists a new chain code issued to the account.
 4. [ ] **The test print.** Open the letter in the PostGrid test dashboard and download its PDF.
        Print it at 100% on plain paper and check:
-       - [ ] page 2 holds the card in its upper half, clear of PostGrid's integrity QR and
+       - [x] page 2 holds the card in its upper half, clear of PostGrid's integrity QR and
              sequence ids at the bottom left;
        - [ ] the QR scans on an iPhone and on the S25 Ultra, in ordinary indoor light, and opens
              `<website>/g/<code>`;
-       - [ ] the printed code, typed at `<website>/g`, is accepted;
-       - [ ] the QR rendered at all. If it is missing or blurred, set
+       - [x] the printed code, typed at `<website>/g`, is accepted;
+       - [x] the QR rendered at all. If it is missing or blurred, set
              `LETTER_IRL_GIFT_QR_FORMAT=png` and repeat from step 2;
-       - [ ] PostGrid's cost for the letter shows the extra B&W page and no colour.
-5. [ ] On a second Auth0 account, redeem the code (`redeem_promo_code`, or the website). It
+       - [x] PostGrid's cost for the letter shows the extra B&W page and no colour.
+
+       **2026-09-23:** checked on the PDF on screen, not printed. The S25 Ultra scanned the QR
+       from the screen and opened the development claim page; the iPhone scan is still to do. The
+       inline SVG rendered, so the PNG fallback is not needed. PostGrid's order records two pages,
+       `color: false` and single-sided; test mode shows no price. The QR carries the code
+       without its hyphen, which the claim page accepts. On the S25 the claim page showed **Claim
+       my letter** for a code already used and refused it only after sign-in. On the desktop the
+       check before sign-in shows its notice (checked on a used-up seed code). Not investigated.
+5. [x] On a second Auth0 account, redeem the code (`redeem_promo_code`, or the website). It
        reports one gift letter; the admin page shows the code redeemed.
-6. [ ] Redeem it again from a third account: refused as already used. Redeem it from the sender's
+
+       **2026-09-23:** claimed on the website at `/g/<code>`. The dashboard showed the gift
+       letter only after a reload (Findings, below).
+6. [x] Redeem it again from a third account: refused as already used. Redeem it from the sender's
        account: refused as their own code.
-7. [ ] From the second account, preview and send. Its budget is 0, so the preview and the print
+
+       **2026-09-23:** both in ChatGPT: the third account was told the code had already been used,
+       and the sender that it was printed on a letter they sent.
+7. [x] From the second account, preview and send. Its budget is 0, so the preview and the print
        show the plain "Sent with Letter IRL" card and no new code is issued.
-8. [ ] Repeat 2 to 4 with a postcard: the strip sits at the foot of the message half and a message
+
+       **2026-09-23:** the rule was checked on the sender's own budget-0 gift letter, from an
+       earlier claim: the plain card printed and no code was minted. The second account's send
+       itself was not run.
+8. [x] Repeat 2 to 4 with a postcard: the strip sits at the foot of the message half and a message
        over 350 characters is refused.
-9. [ ] Create a seed campaign (credits 0, budget 1, cap 2, new accounts only), activate it, grant
+
+       **2026-09-23:** a 398-character message was refused ("398/350 ... leaves room for the gift
+       card"). The strip sits at the foot of the message half, under a rule, with the code, the
+       claim address and the redeem-by date, and its QR matched the encoder's output for
+       `<website>/g/<code>` byte for byte. PostGrid prints the back in one sans-serif face,
+       though the card preview shows a serif.
+9. [x] Create a seed campaign (credits 0, budget 1, cap 2, new accounts only), activate it, grant
        an account one gift letter bound to it, send, and confirm the card prints the campaign
        code. Claim it from two accounts; the third claim is refused at the cap.
+
+       **2026-09-23, with two workarounds that #431 fixes.** The create form sends no `target`,
+       so the campaign was created by adding `target=<code>` to the preview address. After a
+       claim, the claiming account's admin page answered 500, so its gift letter was granted through
+       the grant preview's address. Two new accounts claimed on the website; the third claim, from
+       ChatGPT, was refused with "Promo code redemption limit reached" (#432), and the public
+       lookup then answered `limit_reached`.
+
+       The first sender had already sent three pieces that UTC day, so the per-account cap refused
+       its seeded send (gift sends count; the gift letter was rolled back). A claiming account sent
+       instead. The gift letter from its claim expired sooner, so its first send used that one and
+       minted a chain code with budget 0: a seed claim carries the campaign's budget one hop down.
+       Its second send used the bound gift letter and printed the campaign's code, and that QR
+       matched the encoder's output too. The card said "The code works once." (#431 changes that
+       for seed codes) and the preview showed a placeholder code (#433). A bound gift letter sent
+       after the cap would still print the used-up code (#435); ending the campaign avoids that.
+
+**Findings, 2026-09-23 (development):**
+
+- Fixed by #431: the create-campaign form, the account page after a gift-only seed claim, and
+  the seed card's "works once" wording.
+- Filed: #432 (seed refusals use promo-code wording), #433 (a seed-bound preview shows a
+  placeholder), #434 (a refused send shows the host's raw exception on the card), #435 (a bound
+  gift letter sent after the cap prints the used-up code).
+- Website: right after a claim the dashboard shows the gift-letter count from before it, until a
+  reload. Its gift copy promises "a card for your recipient" even for a budget-0 gift letter,
+  which prints the plain card.
+- The per-account daily mail cap (3) counts gift sends, so seeding a batch of letters on one
+  account takes days.
+- An admin elevation lasts 60 minutes only while its session is in use: the session's
+  15-minute idle timeout ends both, and the banner's "elevated until" does not say so.
+- Auth0's sign-in page expires when left open: after about two hours it answered "Oops!,
+  something went wrong" (`invalid_request`, "we couldn't find your session"). Start the
+  claim again from `/g/<code>`.
+- After the Starter pack bought from the checkout card (step 1), the return page logged
+  `cookiePresent=false` and offered a plain ChatGPT link, not the way back to the conversation
+  (PAY-05).
 
 ---
 
@@ -1460,6 +1525,10 @@ audit.
 
 ### ADMIN-ACCT-04 — Promo campaigns and ambiguous image reservations
 
+**Status:** Not run. Step 1 fails on development until #431: the create form sends no `target`
+and the preview refuses it (found by GIFT-01 step 9, 2026-09-23). Running this step would have
+caught it when the panel shipped.
+
 **Steps:**
 
 1. [ ] `/promos/new`: preview and create a draft campaign; verify it appears as `draft`.
@@ -1596,8 +1665,12 @@ remedy when a pair does not match, are in
 3. [ ] The dashboard shows **one** account: the same balance, the same letters.
 4. [ ] Auth0 -> User Management shows one user with two identities, and the
        Action logs show the link.
-5. [ ] A brand-new password sign-up is refused until its address is confirmed,
+5. [x] A brand-new password sign-up is refused until its address is confirmed,
        with "Confirm your email address, then sign in again."
+
+       **Passed 2026-09-23 on development,** but with the live Action's own words ("We've sent a
+       confirmation link..."), not the sentence above, and every refused attempt sends another
+       confirmation email (#428).
 6. [ ] An Apple sign-in with **Hide My Email** on is a separate account, as
        documented.
 7. [x] In ChatGPT, connect Letter IRL on an address that already has an account
@@ -1633,10 +1706,17 @@ remedy when a pair does not match, are in
        nothing beside it, it is either the SDK rejecting a call made without
        an `arguments` object before our code runs, or a token lacking
        `mail:read`, which the scope refusal does not log.
-8. [ ] `get_account_balance` names the address and no longer names a sign-in
+8. [x] `get_account_balance` names the address and no longer names a sign-in
        provider.
+
+       **Passed 2026-09-22 on development:** "Account: <address>", and no provider.
 9. [ ] Gift rules still hold across the linked methods: a code printed on your
        own letter is refused whichever method you sign in with.
+
+       **2026-09-23, development:** passed for the Google sign-in. Not yet run for the password
+       sign-in, and it needs a fresh, unused code: a used code is refused to everyone before the
+       own-code rule runs. The own-code rule also matches the issuer's normalised address, so any
+       sign-in on the same address is refused, linked or not.
 10. [ ] A token with no confirmed address gets the sentence, not a broken
        account. Simulate on development by taking the claim Action out of the
        trigger flow and signing in with a fresh subject: both surfaces then
@@ -1646,6 +1726,14 @@ remedy when a pair does not match, are in
        that no other Auth0 user holds - an unconfirmed one is denied by the
        linking Action with its own message and never reaches the server, and a
        shared address is linked into the older account instead.
+
+       **2026-09-23, development: the server passed, the surfaces did not.** With
+       the claim Action out of the flow, a fresh subject's REST calls answered 403
+       with the sentence (`auth.account_missing_no_verified_email`), but the
+       dashboard drew an empty account (dnobj/mail-letter-irl-website#34), and in
+       ChatGPT the refused `get_profile` failed the link as
+       `OAUTH_OWNER_PROFILE_ID_MISSING`, so the sentence never reached the
+       person (#429). The Action was put back and checked live.
 
 ---
 
@@ -1748,14 +1836,19 @@ deletion (#391):
 | `4000 0000 0000 9995` | Insufficient funds |
 
 ### Test Addresses (US)
-```
-Sender:
-123 Test Street
-San Francisco, CA 94102
 
-Recipient:
-456 Sample Ave
-New York, NY 10001
+PostGrid's address verification rejects made-up addresses, even in test mode: the pair this
+section used to list failed on 2026-09-22. These two pass, in **test mode only**; in live mode they
+would really be mailed.
+
+```
+Sender (verified, after PostGrid's correction):
+1600 Pennsylvania Avenue NW
+Washington, DC 20500
+
+Recipient (accepted with the missing-unit note, issue #200):
+350 Fifth Avenue
+New York, NY 10118
 ```
 
 ### Test Promo Codes
