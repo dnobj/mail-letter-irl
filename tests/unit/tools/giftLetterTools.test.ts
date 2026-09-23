@@ -129,7 +129,7 @@ describe('letter preview: the gift decision', () => {
       next: { giftId: 'gift-1', cardState: 'funded', seed: { newAccountsOnly: true } }
     });
     const seeded = await preview(0);
-    expect(seeded.previewHtml).toContain('For new Letter IRL accounts. Each person can use the code once, while it lasts.');
+    expect(seeded.previewHtml).toContain('For new Letter IRL customers. Each person can use the code once, while it lasts.');
     expect(seeded.previewHtml).not.toContain('The code works once.');
 
     mocks.getGiftBalance.mockResolvedValue({ available: 1, next: { giftId: 'gift-1', cardState: 'funded' } });

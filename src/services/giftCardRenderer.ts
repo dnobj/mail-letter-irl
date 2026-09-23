@@ -152,10 +152,15 @@ function redeemByText(card: GiftCardContent): string {
 /** How many times the code works, in the letter page's and the strip's words. */
 function usesText(card: GiftCardContent, length: 'letter' | 'postcard'): string {
   if (card.multiUse) {
+    // "Customers", not "accounts": the redeem rule refuses anyone with a
+    // purchase or spend on record (credit_transactions), however new the
+    // account, and admits an old account that never had one.
     if (length === 'letter') {
-      return `${card.newAccountsOnly ? 'For new Letter IRL accounts. ' : ''}Each person can use the code once, while it lasts.`;
+      return `${card.newAccountsOnly ? 'For new Letter IRL customers. ' : ''}Each person can use the code once, while it lasts.`;
     }
-    return `${card.newAccountsOnly ? 'New accounts only. ' : ''}One use per person, while it lasts.`;
+    // The strip is about 40 characters wide: the new-customers line replaces
+    // "while it lasts" rather than adding a third line of fine print.
+    return card.newAccountsOnly ? 'New customers only. One use per person.' : 'One use per person, while it lasts.';
   }
   return length === 'letter' ? 'The code works once.' : 'One use.';
 }
