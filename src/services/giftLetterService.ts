@@ -125,6 +125,14 @@ export function fundedCard(code: string, redeemBy?: Date | null): GiftCardConten
 }
 
 /**
+ * The card a gift letter bound to a live seed campaign prints: the campaign's
+ * own code, which many people may claim, so the card says so.
+ */
+export function seedCard(code: string, endsAt?: Date | null): GiftCardContent {
+  return { ...fundedCard(code, endsAt), multiUse: true };
+}
+
+/**
  * A funded card for previews. The recipient's code does not exist until the
  * send, so the preview draws a placeholder and its QR opens the claim page's
  * entry form rather than a code that would not resolve.
@@ -353,7 +361,7 @@ export async function consumeGiftLetterForSendWithClient(
     );
     const row = campaign.rows[0];
     if (activeSeedCampaign(row)) {
-      return { gift, card: fundedCard(row!.code, row!.ends_at) };
+      return { gift, card: seedCard(row!.code, row!.ends_at) };
     }
   }
 

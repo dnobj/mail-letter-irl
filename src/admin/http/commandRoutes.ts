@@ -56,8 +56,12 @@ function backHrefFor(command: CommandDefinition<any>, targetId: string): string 
   }
 }
 
-function targetIdFrom(context: RequestContext): string {
-  const target = (context.form?.get("target") ?? context.url.searchParams.get("target") ?? "").trim();
+function targetIdFrom(context: RequestContext, command: CommandDefinition<any>): string {
+  const explicit = (context.form?.get("target") ?? context.url.searchParams.get("target") ?? "").trim();
+  // Only a command that names its target from its own fields may omit it
+  // (promo.create: the typed code). Before this, the create form had no way to
+  // send one and every campaign creation was refused.
+  const target = explicit || (command.targetFromFields?.(fieldsFrom(context)) ?? "").trim();
   if (!target || target.length > 255) throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
   return target;
 }
@@ -173,7 +177,7 @@ export function registerCommandRoutes(
   router.add("GET", "/commands/:name/preview", async (context) => {
     const command = byName.get(context.params.name);
     if (!command) throw new AdminFoundationError("ADMIN_NOT_FOUND");
-    const targetId = targetIdFrom(context);
+    const targetId = targetIdFrom(context, command);
     const fields = fieldsFrom(context);
     const prepared = await context.read((client) =>
       prepareCommandPreview(command, client, context.config.environment, targetId, fields),
@@ -202,7 +206,7 @@ export function registerCommandRoutes(
   router.add("POST", "/commands/:name", async (context) => {
     const command = byName.get(context.params.name);
     if (!command) throw new AdminFoundationError("ADMIN_NOT_FOUND");
-    const targetId = targetIdFrom(context);
+    const targetId = targetIdFrom(context, command);
     const fields = fieldsFrom(context);
     const outcome = await runAdminCommand(
       {

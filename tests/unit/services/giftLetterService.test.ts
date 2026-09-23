@@ -111,6 +111,8 @@ describe('consumeGiftLetterForSendWithClient', () => {
     expect(result?.card.url).toBe(`https://letterirl.com/g/${insert.params[0]}`);
     expect(result?.card.displayUrl).toBe('letterirl.com/g');
     expect(result?.card.redeemBy).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // A chain code is single-use, and its card says so.
+    expect(result?.card.multiUse).toBeUndefined();
     expect(ran("SET status = 'consumed'")[0].params).toEqual(['gift-1', 'letter-1']);
   });
 
@@ -134,7 +136,8 @@ describe('consumeGiftLetterForSendWithClient', () => {
       }
     ]);
     const result = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1' });
-    expect(result?.card).toMatchObject({ state: 'funded', code: 'JANE-SMITH', url: 'https://letterirl.com/g/JANE-SMITH' });
+    // Many people may claim a seed code, so its card must not say it works once.
+    expect(result?.card).toMatchObject({ state: 'funded', code: 'JANE-SMITH', url: 'https://letterirl.com/g/JANE-SMITH', multiUse: true });
     expect(ran('INSERT INTO gift_codes')).toHaveLength(0);
   });
 
