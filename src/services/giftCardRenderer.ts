@@ -29,6 +29,18 @@ export interface GiftCardContent {
   displayUrl: string;
   /** YYYY-MM-DD. */
   redeemBy?: string;
+  /**
+   * A seed campaign's code: shared on purpose (a press or influencer letter is
+   * photographed), so many people may claim it, one claim each, up to the
+   * campaign's cap. The card must not tell them it works once.
+   */
+  multiUse?: boolean;
+  /**
+   * A seed campaign limited to new accounts (requires_new_user). The card says
+   * so: otherwise an existing customer who finds a shared letter is promised a
+   * claim the redeem path refuses.
+   */
+  newAccountsOnly?: boolean;
   /** Preview only: draw a placeholder where the recipient's code will print. */
   sample?: boolean;
 }
@@ -137,6 +149,22 @@ function redeemByText(card: GiftCardContent): string {
   return `Redeem by ${formatted}. `;
 }
 
+/** How many times the code works, in the letter page's and the strip's words. */
+function usesText(card: GiftCardContent, length: 'letter' | 'postcard'): string {
+  if (card.multiUse) {
+    // "Customers", not "accounts": the redeem rule refuses anyone with a
+    // purchase or spend on record (credit_transactions), however new the
+    // account, and admits an old account that never had one.
+    if (length === 'letter') {
+      return `${card.newAccountsOnly ? 'For new Letter IRL customers. ' : ''}Each person can use the code once, while it lasts.`;
+    }
+    // The strip is about 40 characters wide: the new-customers line replaces
+    // "while it lasts" rather than adding a third line of fine print.
+    return card.newAccountsOnly ? 'New customers only. One use per person.' : 'One use per person, while it lasts.';
+  }
+  return length === 'letter' ? 'The code works once.' : 'One use.';
+}
+
 export interface CardFragment {
   /**
    * Goes in <head>. Selectors are prefixed gift- so they cannot restyle the
@@ -213,7 +241,7 @@ export function renderGiftCardLetterPage(
           <p class="gift-code">${escapeHtml(printedCode(card))}</p>
         </div>
       </div>
-      <p class="gift-fine">${escapeHtml(redeemByText(card))}The code works once. You write your letter with Letter IRL in ChatGPT, and we print and mail it.</p>
+      <p class="gift-fine">${escapeHtml(redeemByText(card))}${usesText(card, 'letter')} You write your letter with Letter IRL in ChatGPT, and we print and mail it.</p>
     </div>
   </section>`
   };
@@ -256,7 +284,7 @@ export function renderGiftCardPostcardBlock(
     html: `
       <div class="gift-block">
         <div class="gift-block-qr">${qr}</div>
-        <div class="gift-block-text"><strong>A gift from ${sender}:</strong> a letter of your own, printed and mailed free. Scan, or visit ${escapeHtml(card.displayUrl)} and enter<br><span class="gift-block-code">${escapeHtml(printedCode(card))}</span><br>${escapeHtml(redeemByText(card))}One use.</div>
+        <div class="gift-block-text"><strong>A gift from ${sender}:</strong> a letter of your own, printed and mailed free. Scan, or visit ${escapeHtml(card.displayUrl)} and enter<br><span class="gift-block-code">${escapeHtml(printedCode(card))}</span><br>${escapeHtml(redeemByText(card))}${usesText(card, 'postcard')}</div>
       </div>`
   };
 }

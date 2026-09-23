@@ -40,6 +40,8 @@ Every gift letter prints a card. Which one depends on the gift letter being sent
 
 The code is minted **inside the send transaction**, never at preview time, so abandoned drafts leave no redeemable codes behind. The preview draws a placeholder where the code will print.
 
+The fine print follows the code. A chain code's card says "The code works once." ("One use." on a postcard). A seed code is shared on purpose, so its card says "Each person can use the code once, while it lasts." ("One use per person, while it lasts."). When the campaign is limited to new accounts, it adds "For new Letter IRL customers." On a postcard the strip says "New customers only. One use per person.", so its fine print stays at two lines. The redeem rule counts anyone with a purchase or spend on record as not new, however recent the account, so the card says customers, not accounts. The preview shows the same wording as the print.
+
 ### Chain codes
 
 8 characters of Crockford base32 (no I, L, O or U), printed as `XXXX-XXXX`. When read back, `O` is taken as `0` and `I` and `L` as `1`. 32^8 is about 1.1e12, and the public lookup shares the promo rate limit, so guessing one is not practical. The code is also the redeem link: `https://letterirl.com/g/K7M2QX9A`.

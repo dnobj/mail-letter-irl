@@ -65,6 +65,13 @@ export interface CommandDefinition<I> {
   targetType: string;
   verb(input: I): string;
   parseInput(fields: ReadonlyMap<string, string>): I;
+  /**
+   * For a command whose target does not exist until it runs, so that its form
+   * cannot carry a hidden `target` (promo.create: the code the operator
+   * types). Read only when the request has no `target`; the confirmation form
+   * that follows the preview always carries one.
+   */
+  targetFromFields?(fields: ReadonlyMap<string, string>): string;
   preview(client: AdminSqlClient, targetId: string, input: I): Promise<CommandPreview>;
   execute(execution: CommandExecution, targetId: string, input: I, preview: CommandPreview): Promise<AdminJsonObject>;
   /** True when execute() writes through `execution.client` only. */

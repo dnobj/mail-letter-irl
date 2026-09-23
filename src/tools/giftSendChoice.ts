@@ -43,7 +43,7 @@ export async function resolveGiftSendChoice(params: {
   const state = balance.next?.cardState ?? 'funded';
   return {
     isGift: true,
-    card: state === 'funded' ? sampleFundedCard() : unfundedCard(),
+    card: state === 'funded' ? sampleFundedCard(balance.next?.seed) : unfundedCard(),
     giftLettersAvailable: balance.available
   };
 }

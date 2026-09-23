@@ -100,6 +100,39 @@ describe('gift card markup', () => {
     expect(page.html).toContain('>JANE-SMITH<');
   });
 
+  it('tells the readers of a shared seed code it works once each, never once in all', () => {
+    // A seed letter is photographed and shared on purpose (GIFT-01 step 9
+    // printed "The code works once." on one, 2026-09-23).
+    const seed: GiftCardContent = { ...funded, code: 'JANE-SMITH', url: 'https://letterirl.com/g/JANE-SMITH', multiUse: true };
+    const page = giftLetterPageSvg(seed, 'Jane');
+    expect(page.html).toContain('Each person can use the code once, while it lasts.');
+    expect(page.html).not.toContain('The code works once.');
+    const block = giftPostcardBlockSvg(seed, 'Jane');
+    expect(block.html).toContain('One use per person, while it lasts.');
+    expect(block.html).not.toContain('One use.');
+  });
+
+  it('says when a shared seed code is for new customers only, and only then', () => {
+    // Otherwise an existing customer who finds the letter is promised a claim
+    // the redeem path refuses (review rounds 1 and 2 on #431).
+    const seed: GiftCardContent = { ...funded, code: 'JANE-SMITH', url: 'https://letterirl.com/g/JANE-SMITH', multiUse: true };
+    const page = giftLetterPageSvg({ ...seed, newAccountsOnly: true }, 'Jane');
+    expect(page.html).toContain('For new Letter IRL customers. Each person can use the code once, while it lasts.');
+    const block = giftPostcardBlockSvg({ ...seed, newAccountsOnly: true }, 'Jane');
+    // The strip trades "while it lasts" for the new-customers line, so it
+    // stays at two lines of fine print.
+    expect(block.html).toContain('New customers only. One use per person.<');
+    expect(block.html).not.toContain('while it lasts');
+    expect(giftLetterPageSvg(seed, 'Jane').html).not.toContain('new Letter IRL customers');
+    expect(giftPostcardBlockSvg(seed, 'Jane').html).not.toContain('New customers only.');
+  });
+
+  it('keeps the single-use wording on a chain code', () => {
+    expect(giftLetterPageSvg(funded, 'Sarah').html).toContain('The code works once.');
+    expect(giftPostcardBlockSvg(funded, 'Sarah').html).toContain('One use.');
+    expect(giftLetterPageSvg(funded, 'Sarah').html).not.toContain('Each person');
+  });
+
   it('prints the plain card with no code and no gift promise', () => {
     const page = giftLetterPageSvg(unfunded, 'Sarah');
     expect(page.html).toContain('Sent with Letter IRL');

@@ -98,7 +98,8 @@ export interface RedemptionView {
   campaignCode: string;
   campaignName: string;
   redeemedAt: Date;
-  ledgerId: string;
+  /** Null when a seed campaign granted only a gift letter (migration 033). */
+  ledgerId: string | null;
 }
 
 export interface TokenView {
@@ -407,7 +408,7 @@ export async function readAccountDetail(
     code: string;
     name: string;
     redeemed_at: Date;
-    ledger_id: string;
+    ledger_id: string | null;
   }>(
     `SELECT c.code, c.name, r.redeemed_at, r.ledger_id
      FROM promo_redemptions r JOIN promo_campaigns c ON c.campaign_id = r.campaign_id
