@@ -454,6 +454,43 @@ function productSnapshot(product: CommerceProductConfig): Record<string, unknown
   };
 }
 
+/**
+ * The parts of a Pay & Send checkout request that follow configuration, and so
+ * can change between two attempts on one order (#279): the Stripe Price and
+ * the return URLs. Everything else Stripe receives - the order id, its
+ * metadata, the expiry - is fixed by the order row.
+ *
+ * Recorded on the order when it is inserted. A retry re-sends the order's
+ * idempotency key, and Stripe answers a key it has seen with different
+ * parameters by refusing, not by replaying; that refusal is not terminal, so
+ * the order stayed checkout_pending and blocked the draft until its window
+ * ran out.
+ */
+interface JitStripeRequest {
+  priceId: string;
+  successUrl: string;
+  cancelUrl: string;
+}
+
+function jitStripeRequest(orderId: string, product: CommerceProductConfig): JitStripeRequest {
+  const urls = checkoutReturnUrls(orderId);
+  return { priceId: product.priceId ?? '', successUrl: urls.successUrl, cancelUrl: urls.cancelUrl };
+}
+
+/** The request an order recorded at insert, or null for an order from before #279. */
+function recordedStripeRequest(order: Order): JitStripeRequest | null {
+  const recorded = (order.product_snapshot as { stripeRequest?: Partial<JitStripeRequest> } | null)?.stripeRequest;
+  if (
+    !recorded ||
+    typeof recorded.priceId !== 'string' ||
+    typeof recorded.successUrl !== 'string' ||
+    typeof recorded.cancelUrl !== 'string'
+  ) {
+    return null;
+  }
+  return { priceId: recorded.priceId, successUrl: recorded.successUrl, cancelUrl: recorded.cancelUrl };
+}
+
 function asCheckoutResult(order: Order, reused: boolean): CommerceCheckoutResult {
   return {
     success: true,
@@ -842,33 +879,66 @@ async function prepareJitOrder(
         // the refund lane (#278 round 7). Nothing was ever paid on this row,
         // so cancelling it is free; a fresh order is inserted below at the
         // current price.
-        if (
+        //
+        // The retry also re-sends this row's idempotency key, and Stripe
+        // refuses a key it has seen with different parameters (#279). So the
+        // row is reused only when the retry would send the same request: the
+        // same Price, not just the same amount (a Price repointed at the same
+        // amount passed the amount check), and the same return URLs. A row
+        // from before the request was recorded is judged on amount and
+        // currency alone, as it always was.
+        const recorded = recordedStripeRequest(existing);
+        const current = jitStripeRequest(existing.order_id, product);
+        const samePrice =
           existing.amount_cents === product.amountCents &&
           // The same normalizer on BOTH sides: a legacy row's padded currency
           // must not fail a comparison its paid-amount sibling passes (#278
           // round 8).
-          normalizedCurrency(existing.currency, '') === normalizedCurrency(product.currency, '')
-        ) {
+          normalizedCurrency(existing.currency, '') === normalizedCurrency(product.currency, '') &&
+          (recorded === null || recorded.priceId === current.priceId);
+        const sameReturn =
+          recorded === null ||
+          (recorded.successUrl === current.successUrl && recorded.cancelUrl === current.cancelUrl);
+        if (samePrice && sameReturn) {
           return { order: existing, reused: true };
         }
-        await client.query(
-          `UPDATE orders SET status = 'cancelled',
-             last_error_code = 'PRICE_CHANGED_BEFORE_SESSION',
-             last_error = $2, updated_at = NOW()
-           WHERE order_id = $1 AND status = 'checkout_pending'`,
-          // The PAIR. This branch is reached only from a row whose session
-          // creation already failed, so last_error always holds that older,
-          // unrelated message - round 12 fixed the sibling 60 lines above
-          // and left this one (#278 round 13).
-          [existing.order_id, 'Configured price changed before a session was opened']
-        );
-        await recordOrderEvent(
-          client,
-          existing.order_id,
-          'checkout.repriced_locally',
-          existing.status,
-          'cancelled'
-        );
+        if (samePrice) {
+          // Only the return URLs moved, with their configuration. Nothing was
+          // paid on this row either, so it cancels as free as a repriced one.
+          await client.query(
+            `UPDATE orders SET status = 'cancelled',
+               last_error_code = 'CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION',
+               last_error = $2, updated_at = NOW()
+             WHERE order_id = $1 AND status = 'checkout_pending'`,
+            [existing.order_id, 'Checkout return address changed before a session was opened']
+          );
+          await recordOrderEvent(
+            client,
+            existing.order_id,
+            'checkout.request_changed_locally',
+            existing.status,
+            'cancelled'
+          );
+        } else {
+          await client.query(
+            `UPDATE orders SET status = 'cancelled',
+               last_error_code = 'PRICE_CHANGED_BEFORE_SESSION',
+               last_error = $2, updated_at = NOW()
+             WHERE order_id = $1 AND status = 'checkout_pending'`,
+            // The PAIR. This branch is reached only from a row whose session
+            // creation already failed, so last_error always holds that older,
+            // unrelated message - round 12 fixed the sibling 60 lines above
+            // and left this one (#278 round 13).
+            [existing.order_id, 'Configured price changed before a session was opened']
+          );
+          await recordOrderEvent(
+            client,
+            existing.order_id,
+            'checkout.repriced_locally',
+            existing.status,
+            'cancelled'
+          );
+        }
       }
     }
 
@@ -925,7 +995,7 @@ async function prepareJitOrder(
         params.userId,
         params.draftId,
         product.productCode,
-        JSON.stringify(productSnapshot(product)),
+        JSON.stringify({ ...productSnapshot(product), stripeRequest: jitStripeRequest(orderId, product) }),
         product.amountCents,
         product.currency,
         `jit-checkout:${orderId}`,
@@ -1031,9 +1101,9 @@ export async function createJitCheckout(
   // never does.
   //
   // #279's OTHER suggestion - give the reuse branch the price-id comparison its
-  // comment assumes - is sound and still open. The reprice gate can only
-  // compare amount and currency because productSnapshot persists no price id,
-  // so a repoint at the same amount passes it unnoticed.
+  // comment assumes - is done: a JIT order records the Price and return URLs
+  // it sends Stripe (jitStripeRequest), and prepareJitOrder reuses a
+  // sessionless order only when a retry would send the same request.
   if (prepared.order.status !== 'checkout_pending' || prepared.order.checkout_url) {
     return asCheckoutResult(prepared.order, true);
   }

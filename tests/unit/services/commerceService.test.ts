@@ -3163,6 +3163,187 @@ describe('commerceService', () => {
       expect(claim![1]).toEqual(['order-1', 5, 300]);
     });
   });
+  describe('a retry that would send Stripe a different request (#279)', () => {
+    // A retry of a sessionless order re-sends that order's idempotency key,
+    // and Stripe refuses a key it has seen with different parameters rather
+    // than replaying it. The refusal is not terminal, so the order stayed
+    // checkout_pending and blocked the draft until its window ran out. The
+    // order now records the request it depends on, and is reused only when a
+    // retry would send the same one.
+    const RETURN_BASE = 'https://return.test/purchase/return';
+    const request = (orderId: string, extra: Record<string, string> = {}) => ({
+      priceId: 'price-jit-letter',
+      successUrl: `${RETURN_BASE}?outcome=success&order_id=${orderId}&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${RETURN_BASE}?outcome=cancelled&order_id=${orderId}`,
+      ...extra
+    });
+    /** The draft's sessionless order, recorded with `stripeRequest` (none for an order from before #279). */
+    const sessionless = (stripeRequest?: Record<string, string>) => ({
+      ...baseOrder,
+      product_snapshot: { ...baseOrder.product_snapshot, ...(stripeRequest ? { stripeRequest } : {}) },
+      stripe_checkout_session_id: null,
+      checkout_url: null,
+      checkout_expires_at: new Date(Date.now() + 45 * 60_000)
+    });
+    const cancels = (code: string) =>
+      mocks.query.mock.calls.filter(([sql]) => String(sql).includes(`last_error_code = '${code}'`));
+    const inserts = () => mocks.query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO orders'));
+
+    let active: Record<string, unknown>[];
+    beforeEach(() => {
+      vi.stubEnv('JIT_CHECKOUT_RETURN_URL', RETURN_BASE);
+      active = [];
+      mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+        if (sql.includes('sends_blocked_reason')) return { rows: [{ sends_blocked_reason: null }] };
+        if (sql.includes('SELECT mail_type FROM letter_drafts')) return { rows: [{ mail_type: 'letter' }] };
+        if (sql.includes('SELECT * FROM letter_drafts')) {
+          return {
+            rows: [{
+              draft_id: 'draft-1', user_id: 'user-1', mail_type: 'letter', required_credits: 2,
+              status: 'pending', expires_at: new Date(Date.now() + 6 * 60 * 60_000)
+            }]
+          };
+        }
+        if (sql.includes('status = ANY($2::varchar[])')) return { rows: active };
+        if (sql.includes('SELECT credits FROM users')) return { rows: [{ credits: 0 }] };
+        if (sql.includes('INSERT INTO orders')) {
+          return {
+            rows: [{
+              ...baseOrder, order_id: params[0], product_snapshot: JSON.parse(String(params[4])),
+              idempotency_key: params[7], checkout_expires_at: params[8]
+            }]
+          };
+        }
+        if (sql.includes('SET stripe_checkout_session_id = $2')) {
+          return {
+            rows: [{ ...baseOrder, order_id: params[0], stripe_checkout_session_id: params[1], checkout_url: params[2] }]
+          };
+        }
+        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+          return { rows: [{ ...baseOrder, order_id: params[0] }] };
+        }
+        return { rows: [] };
+      });
+      mocks.createJitSession.mockResolvedValue({
+        success: true,
+        sessionId: 'cs-new',
+        sessionUrl: 'https://checkout.stripe.test/cs-new',
+        expiresAt: new Date(Date.now() + 40 * 60_000)
+      });
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('records the Price and return URLs a new order sends Stripe', async () => {
+      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+
+      expect(inserts()).toHaveLength(1);
+      const [orderId, , , , snapshot, , , key] = inserts()[0][1] as unknown[];
+      expect(JSON.parse(String(snapshot)).stripeRequest).toEqual(request(String(orderId)));
+      // What was recorded is what was sent, under the new order's own key.
+      expect(mocks.createJitSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderId,
+          successUrl: request(String(orderId)).successUrl,
+          cancelUrl: request(String(orderId)).cancelUrl,
+          idempotencyKey: key
+        })
+      );
+      expect(mocks.createJitSession.mock.calls[0][0].product.priceId).toBe('price-jit-letter');
+    });
+
+    it('reuses a sessionless order, and its key, when the retry sends the same request', async () => {
+      active = [sessionless(request('order-1'))];
+
+      const result = await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+
+      expect(result).toMatchObject({ orderId: 'order-1', reused: true });
+      expect(inserts()).toHaveLength(0);
+      expect(cancels('PRICE_CHANGED_BEFORE_SESSION')).toHaveLength(0);
+      expect(cancels('CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION')).toHaveLength(0);
+      expect(mocks.createJitSession).toHaveBeenCalledWith(
+        expect.objectContaining({ orderId: 'order-1', idempotencyKey: 'jit-checkout:order-1' })
+      );
+    });
+
+    it('cancels a sessionless order whose Price was repointed at the same amount, and opens a fresh one', async () => {
+      active = [sessionless(request('order-1', { priceId: 'price-jit-letter-old' }))];
+
+      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+
+      const [cancel] = cancels('PRICE_CHANGED_BEFORE_SESSION');
+      expect(cancel?.[1]).toEqual(['order-1', 'Configured price changed before a session was opened']);
+      expect(cancels('CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION')).toHaveLength(0);
+      expect(inserts()).toHaveLength(1);
+      const [orderId, , , , , , , key] = inserts()[0][1] as unknown[];
+      expect(orderId).not.toBe('order-1');
+      // A fresh key: the spent one is never sent with the new Price.
+      expect(key).toBe(`jit-checkout:${String(orderId)}`);
+      expect(mocks.createJitSession).toHaveBeenCalledTimes(1);
+      expect(mocks.createJitSession.mock.calls[0][0].idempotencyKey).toBe(key);
+    });
+
+    it('cancels a sessionless order whose return URLs moved with their configuration', async () => {
+      active = [
+        sessionless(
+          request('order-1', {
+            successUrl: 'https://old.test/purchase/return?outcome=success&order_id=order-1&session_id={CHECKOUT_SESSION_ID}'
+          })
+        )
+      ];
+
+      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+
+      const [cancel] = cancels('CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION');
+      expect(cancel?.[1]).toEqual(['order-1', 'Checkout return address changed before a session was opened']);
+      expect(cancels('PRICE_CHANGED_BEFORE_SESSION')).toHaveLength(0);
+      expect(inserts()).toHaveLength(1);
+      expect(mocks.createJitSession.mock.calls[0][0].idempotencyKey).not.toBe('jit-checkout:order-1');
+
+      // The cancel URL alone moving counts the same.
+      vi.clearAllMocks();
+      active = [
+        sessionless(request('order-1', { cancelUrl: 'https://old.test/purchase/return?outcome=cancelled&order_id=order-1' }))
+      ];
+      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+      expect(cancels('CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION')).toHaveLength(1);
+    });
+
+    it('names a changed Price over changed URLs when both moved', async () => {
+      active = [
+        sessionless(request('order-1', { priceId: 'price-jit-letter-old', successUrl: 'https://old.test/x' }))
+      ];
+
+      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+
+      expect(cancels('PRICE_CHANGED_BEFORE_SESSION')).toHaveLength(1);
+      expect(cancels('CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION')).toHaveLength(0);
+    });
+
+    it('judges an order from before the request was recorded on amount and currency, as before', async () => {
+      active = [sessionless()];
+
+      const result = await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+
+      expect(result).toMatchObject({ orderId: 'order-1', reused: true });
+      expect(inserts()).toHaveLength(0);
+    });
+
+    it('records the change in the order history', async () => {
+      active = [sessionless(request('order-1', { successUrl: 'https://old.test/x' }))];
+
+      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+
+      const event = mocks.query.mock.calls.find(
+        ([sql, params]) => String(sql).includes('INSERT INTO commerce_order_events') &&
+          (params as unknown[])?.[0] === 'order-1' &&
+          (params as unknown[])?.[1] === 'checkout.request_changed_locally'
+      );
+      expect(event).toBeDefined();
+    });
+  });
+
   describe('the duplicate check before a new checkout (#412)', () => {
     const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e';
     const mail = (extra: Record<string, unknown> = {}) => ({
