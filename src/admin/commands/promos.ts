@@ -62,6 +62,10 @@ export function createPromoCommands(overrides: Partial<PromoCommandSeams> = {}) 
     targetType: "promo_campaign",
     transactional: true,
     verb: () => "CREATE-PROMO",
+    // The campaign does not exist yet, so its form has no hidden target: the
+    // target is the code being typed, normalised as parseInput normalises it
+    // so that the preview's targetId === input.code check holds.
+    targetFromFields: (fields) => (fields.get("code") ?? "").trim().toUpperCase(),
     parseInput(fields) {
       const code = (fields.get("code") ?? "").trim().toUpperCase();
       const name = (fields.get("name") ?? "").trim();

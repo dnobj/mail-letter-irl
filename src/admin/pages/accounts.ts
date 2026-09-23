@@ -164,7 +164,9 @@ ${table(
     html`<code>${redemption.campaignCode}</code>`,
     html`${redemption.campaignName}`,
     when(redemption.redeemedAt),
-    html`<span class="mono">${redemption.ledgerId.slice(0, 8)}…</span>`,
+    redemption.ledgerId
+      ? html`<span class="mono">${redemption.ledgerId.slice(0, 8)}…</span>`
+      : html`<span class="muted">gift only</span>`,
   ]),
 )}
 
