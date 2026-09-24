@@ -292,6 +292,13 @@ an error class only: `provider_rejected http_<status>` (migration 031), the draf
 rewrote earlier text (#394). The checkout and amount-mismatch codes store fixed server-authored
 sentences (amounts and product codes, never message text). The refund claim no longer writes it.
 
+For `jit_mail`, `product_snapshot.stripeRequest` records the Stripe Price and the return URLs the
+order's checkout sends (#279). A retry of an order whose session creation failed reuses the order,
+and its idempotency key, only when it would send the same request; otherwise it cancels the order
+(`PRICE_CHANGED_BEFORE_SESSION` or `CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION`) and opens a fresh one
+with a fresh key, because Stripe refuses a key it has seen with different parameters. Orders from
+before the field are compared on amount and currency alone.
+
 ### stripe_disputes
 
 Chargeback tracking for admin monitoring.
