@@ -104,6 +104,15 @@ describe("processing queued erasures", () => {
     expect(db.transaction).toHaveBeenCalledTimes(2);
   });
 
+  it("claims only this database's own environment, one operation at a time, past any another run holds", async () => {
+    const client = scriptedClient({ queue: [] });
+    await processAccountErasures();
+    const claim = client.statements.find((s) => s.text.includes("FROM admin_operations o"))!.text.replace(/\s+/g, " ");
+    expect(claim).toContain("AND o.environment = (SELECT m.environment FROM admin_environment_marker m)");
+    expect(claim).toContain("AND o.status = 'pending' AND o.available_at <= NOW()");
+    expect(claim).toContain("LIMIT 1 FOR UPDATE OF o SKIP LOCKED");
+  });
+
   it("deletes the saved copies before the drafts they are found through", async () => {
     const client = scriptedClient({ queue: [OPERATION()] });
     await processAccountErasures();
