@@ -28,7 +28,7 @@ Railway project ID: `b31314d8-fd09-4582-9c0d-52a36f879228`
 - Development environment ID: `37c9dbe4-696f-422c-866e-470010ca8949`
 - API service: `letter-irl-api`
 - Website service: `mail-letter-irl-website`
-- Maintenance service: `letter-irl-maintenance`
+- Maintenance services: `letter-irl-maintenance` (production) and `letter-irl-maintenance-dev` (development), hourly cron
 - Admin panel services: `letter-irl-admin` (development) and `letter-irl-admin-prod` (production), both tailnet-only
 - Private temporary-image bucket: `letter-irl-images`
 

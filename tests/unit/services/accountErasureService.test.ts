@@ -160,6 +160,23 @@ describe("processing queued erasures", () => {
     expect(JSON.parse(String(done.values?.[1]))).toEqual({ alreadyErased: true });
   });
 
+  it("says in the completed diagnostic whether the erasure found anything left to do (#450 review)", async () => {
+    const completed = () =>
+      vi
+        .mocked(console.log)
+        .mock.calls.map(([line]) => JSON.parse(String(line)))
+        .filter((line) => line.event === "account_erasure.completed");
+
+    scriptedClient({ queue: [OPERATION()] });
+    await processAccountErasures();
+    expect(completed()).toEqual([expect.objectContaining({ alreadyErased: false })]);
+
+    vi.mocked(console.log).mockClear();
+    scriptedClient({ queue: [OPERATION()], account: { erased_at: new Date() } });
+    await processAccountErasures();
+    expect(completed()).toEqual([expect.objectContaining({ alreadyErased: true })]);
+  });
+
   it("takes a failure back to the savepoint and retries it an hour later", async () => {
     const client = scriptedClient({ queue: [OPERATION(0)], failOn: /^\s*UPDATE letters\b/ });
 

@@ -657,11 +657,35 @@ describe('queued restores (#153)', () => {
 
     expect(await handleRetentionRestore(fake, { quarantineId: COPY })).toEqual({
       outcome: 'done',
-      result: { sourceTable: 'letters' }
+      result: { sourceTable: 'letters' },
+      diagnostic: { sourceTable: 'letters', alreadyRestored: false }
     });
     expect(fake.query.mock.calls[0][1]).toEqual([COPY]);
+    // Locked where it is looked up, so nothing takes it before the restore does
+    // and the outcome is recorded under the right reason (#450 review).
+    expect(sqlFrom(fake.query.mock.calls[0])).toContain('WHERE quarantine_id = $1::uuid FOR UPDATE');
     // The restore itself works by the source the copy names.
     expect(fake.query.mock.calls[1][1]).toEqual(['letters', 'letter-1']);
+  });
+
+  it('counts a copy an earlier restore already put back as done (#450 review)', async () => {
+    const fake = client([
+      { rows: [], rowCount: 0 },
+      { rows: [{ '?column?': 1 }], rowCount: 1 }
+    ]);
+
+    expect(await handleRetentionRestore(fake, { quarantineId: COPY })).toEqual({
+      outcome: 'done',
+      result: { alreadyRestored: true },
+      diagnostic: { alreadyRestored: true }
+    });
+    const earlier = sqlFrom(fake.query.mock.calls[1]);
+    expect(earlier).toContain('FROM admin_operations');
+    expect(earlier).toContain("status = 'succeeded'");
+    expect(earlier).toContain("lower(payload_json->>'quarantineId') = lower($2::text)");
+    expect(fake.query.mock.calls[1][1]).toEqual(['retention.restore', COPY]);
+    // Nothing was written.
+    expect(fake.query).toHaveBeenCalledTimes(2);
   });
 
   it('refuses, without a query, a payload that names no copy', async () => {
@@ -677,12 +701,17 @@ describe('queued restores (#153)', () => {
   });
 
   it('refuses when the window has closed and the copy is gone', async () => {
-    const fake = client([{ rows: [], rowCount: 0 }]);
+    const fake = client([
+      { rows: [], rowCount: 0 },
+      { rows: [], rowCount: 0 }
+    ]);
     expect(await handleRetentionRestore(fake, { quarantineId: COPY })).toEqual({
       outcome: 'refused',
       code: 'RETENTION_RESTORE_UNAVAILABLE',
       result: { reason: 'window_closed' }
     });
+    // It looked for an earlier restore of the copy before calling it purged.
+    expect(sqlFrom(fake.query.mock.calls[1])).toContain('FROM admin_operations');
   });
 
   it('refuses when the live row is no longer redacted, keeping the copy', async () => {

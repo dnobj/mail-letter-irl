@@ -2,7 +2,8 @@ import {
   MAX_OPERATION_ATTEMPTS,
   enqueueAdminOperation,
   processAdminOperations,
-  type OperationResult
+  type OperationResult,
+  type SqlClient
 } from './adminOperationsQueue.js';
 import {
   DRAFT_REDACTION_SET,
@@ -71,10 +72,6 @@ export const MAX_ERASURE_ATTEMPTS = MAX_OPERATION_ATTEMPTS;
 
 /** Operations handled per maintenance run. */
 const DEFAULT_ERASURE_BATCH = 5;
-
-interface SqlClient {
-  query(text: string, values?: unknown[]): Promise<{ rows: any[]; rowCount?: number | null }>;
-}
 
 export interface ErasureBlockers {
   ordersInFlight: number;
@@ -530,9 +527,9 @@ export async function handleAccountErasure(client: SqlClient, payload: unknown):
     userId !== null ? await eraseAccountWithClient(client, userId) : { outcome: 'not_found' };
   switch (outcome.outcome) {
     case 'erased':
-      return { outcome: 'done', result: { ...outcome.counts } };
+      return { outcome: 'done', result: { ...outcome.counts }, diagnostic: { alreadyErased: false } };
     case 'already_erased':
-      return { outcome: 'done', result: { alreadyErased: true } };
+      return { outcome: 'done', result: { alreadyErased: true }, diagnostic: { alreadyErased: true } };
     case 'blocked':
       return { outcome: 'refused', code: 'ACCOUNT_ERASURE_BLOCKED', result: { ...outcome.blockers } };
     default:

@@ -1,3 +1,4 @@
+import { RETENTION_RESTORE_OPERATION } from "../../services/retentionService.js";
 import type { AdminSqlClient } from "../database.js";
 
 /** Read models for the retention, routing and support pages (slice 5). */
@@ -6,6 +7,8 @@ export interface QuarantineView {
   quarantineId: string;
   sourceTable: string;
   sourceId: string;
+  /** The account the letter or draft belongs to; null when the row is gone. */
+  userId: string | null;
   quarantinedAt: Date;
   purgeAfter: Date;
 }
@@ -40,25 +43,92 @@ export async function readRetentionCounts(client: AdminSqlClient): Promise<Reten
   };
 }
 
-/** Metadata only: the quarantined content column is not selectable by the reader. */
-export async function listQuarantine(client: AdminSqlClient, limit: number): Promise<QuarantineView[]> {
+/**
+ * Metadata only: the quarantined content column is not selectable by the
+ * reader. Newest first; with a search, only the copies of that letter or
+ * draft, or of every letter and draft on that account, so a copy older than
+ * the newest page can still be found and restored (#450 review).
+ */
+export async function listQuarantine(
+  client: AdminSqlClient,
+  limit: number,
+  search: string | null = null,
+): Promise<QuarantineView[]> {
   const result = await client.query<{
     quarantine_id: string;
     source_table: string;
     source_id: string;
+    user_id: string | null;
     quarantined_at: Date;
     purge_after: Date;
   }>(
-    `SELECT quarantine_id, source_table, source_id, quarantined_at, purge_after
-     FROM redacted_content_quarantine ORDER BY quarantined_at DESC LIMIT $1`,
-    [limit],
+    `SELECT q.quarantine_id, q.source_table, q.source_id, COALESCE(l.user_id, d.user_id) AS user_id,
+            q.quarantined_at, q.purge_after
+     FROM redacted_content_quarantine q
+     LEFT JOIN letters l ON q.source_table = 'letters' AND l.letter_id = q.source_id
+     LEFT JOIN letter_drafts d ON q.source_table = 'letter_drafts' AND d.draft_id::text = q.source_id
+     WHERE $2::varchar IS NULL
+        OR q.source_id = $2::varchar
+        OR l.user_id = $2::varchar
+        OR d.user_id = $2::varchar
+     ORDER BY q.quarantined_at DESC LIMIT $1::int`,
+    [limit, search],
   );
   return result.rows.map((row) => ({
     quarantineId: row.quarantine_id,
     sourceTable: row.source_table,
     sourceId: row.source_id,
+    userId: row.user_id,
     quarantinedAt: row.quarantined_at,
     purgeAfter: row.purge_after,
+  }));
+}
+
+export interface RestoreOperationView {
+  operationId: string;
+  status: string;
+  sourceTable: string | null;
+  sourceId: string | null;
+  requestedAt: Date;
+  completedAt: Date | null;
+  errorCode: string | null;
+  result: Record<string, unknown> | null;
+}
+
+/**
+ * The newest restores the panel queued, with how each ended: the only place a
+ * restore's outcome shows, since a copy that went back leaves the quarantine
+ * (#450 review). Codes, reasons and counts only.
+ */
+export async function listRecentRestores(client: AdminSqlClient, limit: number): Promise<RestoreOperationView[]> {
+  const result = await client.query<{
+    id: string;
+    status: string;
+    source_table: string | null;
+    source_id: string | null;
+    requested_at: Date;
+    completed_at: Date | null;
+    error_code: string | null;
+    sanitized_result_json: Record<string, unknown> | null;
+  }>(
+    `SELECT o.id, o.status, o.payload_json->>'sourceTable' AS source_table,
+            o.payload_json->>'sourceId' AS source_id, r.requested_at, o.completed_at,
+            o.error_code, o.sanitized_result_json
+     FROM admin_operations o
+     JOIN admin_command_runs r ON r.id = o.command_id
+     WHERE o.operation_type = $1::varchar
+     ORDER BY r.requested_at DESC, o.id DESC LIMIT $2::int`,
+    [RETENTION_RESTORE_OPERATION, limit],
+  );
+  return result.rows.map((row) => ({
+    operationId: String(row.id),
+    status: row.status,
+    sourceTable: row.source_table,
+    sourceId: row.source_id,
+    requestedAt: row.requested_at,
+    completedAt: row.completed_at,
+    errorCode: row.error_code,
+    result: row.sanitized_result_json,
   }));
 }
 

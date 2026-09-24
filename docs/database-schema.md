@@ -582,6 +582,16 @@ Where the content-retention sweep (migration 026) puts what it clears from `lett
 write-back, with a `purge_after` deadline. One live row per source row. The admin reader role has
 column-level `SELECT` on this table that omits `content`.
 
+The first copy wins. A sweep saves a row's content only when no copy of it exists
+(`ON CONFLICT DO NOTHING`), and a copy is never updated, so a sweep re-run over a row whose `redacted_at`
+was cleared by hand keeps the copy that holds the content. Migration 026's comment on
+`uniq_quarantine_source` says a re-redaction replaces the copy; that stopped being true with #153's
+enforce-path fixes, and applied migrations are not edited. Do not edit a redacted row's content by hand
+while its copy exists: the next sweep empties it without saving it. Restore it instead.
+
+`purge_after` is the row's own clock plus its published period, or one day after the sweep when that is
+later: a row swept after its period (the backlog an enforcing run starts with) keeps its copy for a day.
+
 ### admin_environment_marker
 
 Singleton database identity used to fail closed when a development/production selection does not match

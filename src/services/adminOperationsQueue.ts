@@ -29,9 +29,12 @@ export interface SqlClient {
   query(text: string, values?: unknown[]): Promise<{ rows: any[]; rowCount?: number | null }>;
 }
 
-/** What a handler reports: the work is done, or it was refused and why. */
+/**
+ * What a handler reports: the work is done, or it was refused and why. A done
+ * operation may name safe fields for its `.completed` diagnostic.
+ */
 export type OperationResult =
-  | { outcome: 'done'; result: Record<string, unknown> }
+  | { outcome: 'done'; result: Record<string, unknown>; diagnostic?: Record<string, string | number | boolean> }
   | { outcome: 'refused'; code: string; result: Record<string, unknown> };
 
 export interface OperationRunSummary {
@@ -229,7 +232,7 @@ async function handleNextOperation(
         WHERE id = $1`,
       [operation.id, JSON.stringify(result.result)]
     );
-    writeDiagnostic('info', `${kind.event}.completed`);
+    writeDiagnostic('info', `${kind.event}.completed`, result.diagnostic);
     return 'done';
   }
 

@@ -54,6 +54,8 @@ describePostgres('retention restore through the admin panel', () => {
   let runner: typeof import('../../src/admin/commands/runner.js');
   let retention: typeof import('../../src/services/retentionService.js');
   let db: typeof import('../../src/db/index.js');
+  let opsQueries: typeof import('../../src/admin/queries/ops.js');
+  let accountQueries: typeof import('../../src/admin/queries/accounts.js');
 
   beforeAll(async () => {
     const baseUrl = validateDisposableDatabaseUrl(process.env.LIRL_TEST_DATABASE_URL);
@@ -91,6 +93,8 @@ describePostgres('retention restore through the admin panel', () => {
     runner = await import('../../src/admin/commands/runner.js');
     retention = await import('../../src/services/retentionService.js');
     db = await import('../../src/db/index.js');
+    opsQueries = await import('../../src/admin/queries/ops.js');
+    accountQueries = await import('../../src/admin/queries/accounts.js');
 
     config = parseAdminRuntimeConfig({
       LETTER_IRL_DEPLOYMENT_ENVIRONMENT: 'development',
@@ -202,6 +206,8 @@ describePostgres('retention restore through the admin panel', () => {
       [operationId]
     );
     expect(operation.rows[0]).toEqual({ status: 'succeeded', error_code: null, sanitized_result_json: { sourceTable: 'letters' } });
+    const payload = await owner.query(`SELECT payload_json FROM admin_operations WHERE id = $1`, [operationId]);
+    expect(payload.rows[0].payload_json).toEqual({ quarantineId, sourceTable: 'letters', sourceId: letterId });
     // The copy is gone, so there is nothing left to preview.
     await expect(preview(quarantineId)).rejects.toMatchObject({ code: 'ADMIN_NOT_FOUND' });
   }, 60_000);
@@ -237,6 +243,43 @@ describePostgres('retention restore through the admin panel', () => {
       error_code: 'RETENTION_RESTORE_UNAVAILABLE',
       sanitized_result_json: { reason: 'window_closed' }
     });
+  }, 60_000);
+
+  it('finds a copy by its letter or its account, and shows the restore, through the reader (#450 review)', async () => {
+    const { letterId, quarantineId } = await sweptLetter();
+    const userId = (await owner.query(`SELECT user_id FROM letters WHERE letter_id = $1`, [letterId])).rows[0].user_id;
+
+    // Older copies than the newest page are still reachable: by account, and by the letter.
+    const byAccount = await withReadOnlyTransaction(reader, (client) => opsQueries.listQuarantine(client, 100, userId));
+    expect(byAccount).toEqual([expect.objectContaining({ quarantineId, sourceTable: 'letters', sourceId: letterId, userId })]);
+    const byLetter = await withReadOnlyTransaction(reader, (client) => opsQueries.listQuarantine(client, 100, letterId));
+    expect(byLetter.map((row) => row.quarantineId)).toEqual([quarantineId]);
+    expect(await withReadOnlyTransaction(reader, (client) => opsQueries.listQuarantine(client, 100, `auth0|nobody-${randomUUID()}`))).toEqual([]);
+    // And from the letter's own page.
+    const detail = await withReadOnlyTransaction(reader, (client) => accountQueries.readLetterDetail(client, letterId));
+    expect(detail?.savedCopy).toEqual({ quarantineId, purgeAfter: expect.any(Date) });
+
+    const outcome = await confirm(quarantineId);
+    const operationId = String(outcome.result.operationId);
+    const queued = await withReadOnlyTransaction(reader, (client) => opsQueries.listRecentRestores(client, 20));
+    expect(queued.find((row) => row.operationId === operationId)).toMatchObject({
+      status: 'pending',
+      sourceTable: 'letters',
+      sourceId: letterId
+    });
+
+    expect(await retention.processRetentionRestores()).toEqual({ done: 1, refused: 0, retrying: 0, failed: 0 });
+    const finished = await withReadOnlyTransaction(reader, (client) => opsQueries.listRecentRestores(client, 20));
+    expect(finished.find((row) => row.operationId === operationId)).toMatchObject({
+      status: 'succeeded',
+      result: { sourceTable: 'letters' }
+    });
+    expect((await withReadOnlyTransaction(reader, (client) => accountQueries.readLetterDetail(client, letterId)))?.savedCopy).toBeNull();
+
+    // A second restore of the same copy - the panel's check and its enqueue are
+    // separate transactions - finds the first one's success and counts as done.
+    const again = await db.transaction((client) => retention.handleRetentionRestore(client, { quarantineId: quarantineId.toUpperCase() }));
+    expect(again).toEqual({ outcome: 'done', result: { alreadyRestored: true }, diagnostic: { alreadyRestored: true } });
   }, 60_000);
 
   it('cannot restore through the operator role directly', async () => {

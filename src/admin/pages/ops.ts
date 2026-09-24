@@ -1,12 +1,45 @@
 import type { RetentionPreviewResult } from "../../services/retentionService.js";
-import type { FeatureRequestView, QuarantineView, RetentionCounts, RoutingRow, StuckLetterView, TokenStatsView } from "../queries/ops.js";
+import type {
+  FeatureRequestView,
+  QuarantineView,
+  RestoreOperationView,
+  RetentionCounts,
+  RoutingRow,
+  StuckLetterView,
+  TokenStatsView,
+} from "../queries/ops.js";
 import { html, join, type SafeHtml } from "../ui/html.js";
 import { statusBadge } from "../ui/format.js";
 import { accountLink, card, definitionList, letterLink, table, when } from "./common.js";
 
+/** Why the maintenance run refused a restore (retentionService.handleRetentionRestore). */
+const RESTORE_REFUSALS: Record<string, string> = {
+  window_closed: "the copy was purged before the run",
+  not_redacted: "the content was already live",
+  no_such_copy: "the request named no copy",
+};
+
+function sourceRow(sourceTable: string | null, sourceId: string | null): SafeHtml {
+  if (sourceTable === "letters") return letterLink(sourceId);
+  return sourceId ? html`<span class="mono">${sourceId}</span>` : html`—`;
+}
+
+function restoreOutcome(restore: RestoreOperationView): SafeHtml {
+  if (restore.status === "pending") return html`queued`;
+  if (restore.status === "processing") return html`running`;
+  if (restore.status === "succeeded") {
+    return restore.result?.alreadyRestored === true ? html`restored by an earlier request` : html`restored`;
+  }
+  const reason = restore.result?.reason ?? restore.result?.errorClass;
+  const label = typeof reason === "string" ? (RESTORE_REFUSALS[reason] ?? reason) : null;
+  return html`<span class="bad-text">${restore.errorCode ?? "failed"}</span>${label ? html`: ${label}` : ""}`;
+}
+
 export function renderRetention(input: {
   counts: RetentionCounts;
   quarantine: QuarantineView[];
+  restores: RestoreOperationView[];
+  search: string | null;
   report: RetentionPreviewResult | null;
   reportError: string | null;
 }): SafeHtml {
@@ -32,12 +65,19 @@ ${
     : html`<p class="bad-text">The report could not run${input.reportError ? html` (<code>${input.reportError}</code>)` : ""}.</p>`
 }
 <h2>Quarantine (metadata only)</h2>
+<form method="get" action="/retention" class="stack" role="search">
+  <label for="q">Find the copies of one letter or draft, or of every letter and draft on an account: a letter id, draft id or Auth0 subject</label>
+  <input type="search" id="q" name="q" value="${input.search ?? ""}" maxlength="255" autocomplete="off">
+  <div><button type="submit">Find</button>${input.search ? html` <a href="/retention">Show the newest</a>` : ""}</div>
+</form>
+<p class="muted">${input.search ? html`Copies matching <code>${input.search}</code>, newest first.` : "The newest 100 copies. Search to find an older one."}</p>
 ${table(
   "redacted_content_quarantine",
-  ["Source", "Row", "Quarantined", "Purge after", "Restore"],
+  ["Source", "Row", "Account", "Quarantined", "Purge after", "Restore"],
   input.quarantine.map((row) => [
     html`${row.sourceTable}`,
-    row.sourceTable === "letters" ? letterLink(row.sourceId) : html`<span class="mono">${row.sourceId}</span>`,
+    sourceRow(row.sourceTable, row.sourceId),
+    accountLink(row.userId),
     when(row.quarantinedAt),
     when(row.purgeAfter),
     html`<form method="get" action="/commands/retention.restore/preview" class="inline">
@@ -45,7 +85,21 @@ ${table(
   <button type="submit">Preview restore…</button>
 </form>`,
   ]),
-  "empty.",
+  input.search ? "no copy matches." : "empty.",
+)}
+<h2>Recent restores</h2>
+<p class="muted">A restore is queued on confirmation and carried out by the next hourly maintenance run. A copy that went back leaves the quarantine, so this is where its outcome shows.</p>
+${table(
+  "Restores",
+  ["Requested", "Source", "Row", "Outcome", "Finished"],
+  input.restores.map((restore) => [
+    when(restore.requestedAt),
+    html`${restore.sourceTable ?? "—"}`,
+    sourceRow(restore.sourceTable, restore.sourceId),
+    restoreOutcome(restore),
+    when(restore.completedAt),
+  ]),
+  "none yet.",
 )}`;
 }
 

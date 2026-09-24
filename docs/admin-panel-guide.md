@@ -369,7 +369,10 @@ Commands available:
 Read-only pages beyond the P0 set: **Gifts** (unsent gift letters, gift sends today, outstanding and
 redeemed chain codes, the newest codes with a void action; an account page adds that account's gift
 letters, the codes it printed or redeemed, and the grant form), **Retention** (the sweep's counts, the quarantine's metadata, and a restore per
-row, queued for the next hourly run), **Routing** (the routing table, the
+row, queued for the next hourly run; a search by letter, draft or account id for copies older than the newest
+100; and **Recent restores**, where each queued restore's outcome shows, since a copy that went back leaves
+the quarantine; a redacted letter's own page also shows its copy and the restore, and an account page links to
+its copies), **Routing** (the routing table, the
 registry, stuck letters), **Support** (token counts, feature requests without contact emails). Manual
 cases: `ADMIN-OPS-01` to `ADMIN-OPS-03` and `ADMIN-LEGACY-01`.
 

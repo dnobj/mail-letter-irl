@@ -37,10 +37,21 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  * splitRetentionWindow divides it so content leaves the live tables at
  * (total - quarantine) days: 90 becomes 83 live + 7 quarantine, 7 becomes 4 + 3.
  * The quarantine then ends on the row's OWN clock plus the published total, so
- * content swept on time is gone when the period ends, however late in its
- * window the daily sweep reached it. A row swept after its period (a backlog)
- * cannot end in the past - valid_quarantine_window would abort the batch - so
- * it gets RECOVERY_FLOOR instead (#153 review round 3).
+ * content swept on time is gone when the period ends. A row the sweep reaches
+ * with less than RECOVERY_FLOOR of its period left - the backlog on the first
+ * enforcing run, or rows that waited while the sweep was stopped - gets the
+ * floor instead, and outlives its period by up to that much. Its own clock
+ * would leave no time to recover it, or put purge_after in the past, which
+ * valid_quarantine_window refuses and which would abort the batch (#153 review
+ * round 3, #450 review).
+ *
+ * THE FIRST COPY WINS
+ * A sweep saves a row's content only if no copy of it exists yet (ON CONFLICT
+ * DO NOTHING), and a copy is never updated. A re-run over the same row - its
+ * redacted_at cleared by hand - keeps the copy the first sweep saved, which is
+ * the one with the content in it. The flip side: content written into a row
+ * that still has a copy is not saved again, so a redacted row's content is
+ * never edited by hand while its copy exists; restore it instead.
  *
  * EVERY GUARD IS AN ALLOW-LIST
  * A deny-list fails OPEN: the day a migration adds a status, every row sitting
@@ -132,6 +143,12 @@ const MAX_QUARANTINE_DAYS = 7;
  * refuses (purge_after > quarantined_at) and which would abort the whole batch.
  * It gets this floor instead: long enough for an operator to notice a bad
  * sweep and restore through the panel before the content is gone.
+ *
+ * One day and not the full quarantine, because every day of it is kept past
+ * the published period, and the owner kept the published schedule (#153). The
+ * rows it applies to are the backlog an enforcing run starts with, so each
+ * environment's first enforcing run is watched and its quarantine checked the
+ * same day (RETENTION-01 in docs/manual-tests.md).
  */
 const RECOVERY_FLOOR = `NOW() + INTERVAL '1 day'`;
 
@@ -645,8 +662,14 @@ export async function restoreQuarantinedContent(
   sourceTable: 'letters' | 'letter_drafts',
   sourceId: string
 ): Promise<boolean> {
-  return transaction(client => restoreQuarantinedContentWithClient(client, sourceTable, sourceId));
+  const outcome = await transaction(client =>
+    restoreQuarantinedContentWithClient(client, sourceTable, sourceId)
+  );
+  return outcome === 'restored';
 }
+
+/** What a restore found: it put the content back, or why it could not. */
+export type RestoreOutcome = 'restored' | 'no_copy' | 'not_redacted';
 
 /**
  * The restore, inside the caller's transaction. The saved copy is locked first,
@@ -658,14 +681,14 @@ export async function restoreQuarantinedContentWithClient(
   client: SqlClient,
   sourceTable: 'letters' | 'letter_drafts',
   sourceId: string
-): Promise<boolean> {
+): Promise<RestoreOutcome> {
   const saved = await client.query(
     `SELECT quarantine_id FROM redacted_content_quarantine
       WHERE source_table = $1 AND source_id = $2
       FOR UPDATE`,
     [sourceTable, sourceId]
   );
-  if (saved.rows.length === 0) return false;
+  if (saved.rows.length === 0) return 'no_copy';
 
   let restored: number;
   if (sourceTable === 'letters') {
@@ -705,12 +728,12 @@ export async function restoreQuarantinedContentWithClient(
     );
     restored = result.rowCount ?? 0;
   }
-  if (restored === 0) return false;
+  if (restored === 0) return 'not_redacted';
   await client.query(
     `DELETE FROM redacted_content_quarantine WHERE source_table = $1 AND source_id = $2`,
     [sourceTable, sourceId]
   );
-  return true;
+  return 'restored';
 }
 
 /** admin_operations.operation_type for a restore the panel queued (#153). */
@@ -738,28 +761,56 @@ export async function processRetentionRestores(batchLimit = 20): Promise<Operati
   );
 }
 
+function restoreRefused(reason: 'no_such_copy' | 'window_closed' | 'not_redacted'): OperationResult {
+  return { outcome: 'refused', code: 'RETENTION_RESTORE_UNAVAILABLE', result: { reason } };
+}
+
 /**
  * One queued restore, by the quarantine row the operator previewed. Refused,
  * not retried, when there is nothing to put back: the window has closed, or
  * the live row is no longer redacted.
+ *
+ * The copy is locked where it is looked up (#450 review). Looked up unlocked,
+ * it could go between the lookup and the restore's own lock - to a second
+ * restore of the same copy, or to the purge - and the outcome was recorded
+ * under the wrong reason. The panel can queue two restores of one copy, since
+ * its check and its enqueue are separate transactions, so a copy that is gone
+ * because an earlier restore put it back counts as done.
  */
 export async function handleRetentionRestore(client: SqlClient, payload: unknown): Promise<OperationResult> {
   const quarantineId = (payload as { quarantineId?: unknown } | null)?.quarantineId;
   if (typeof quarantineId !== 'string' || !QUARANTINE_ID_PATTERN.test(quarantineId)) {
-    return { outcome: 'refused', code: 'RETENTION_RESTORE_UNAVAILABLE', result: { reason: 'no_such_copy' } };
+    return restoreRefused('no_such_copy');
   }
   const saved = await client.query(
-    `SELECT source_table, source_id FROM redacted_content_quarantine WHERE quarantine_id = $1`,
+    `SELECT source_table, source_id FROM redacted_content_quarantine
+      WHERE quarantine_id = $1::uuid
+      FOR UPDATE`,
     [quarantineId]
   );
   const row = saved.rows[0] as { source_table: 'letters' | 'letter_drafts'; source_id: string } | undefined;
   if (!row) {
-    return { outcome: 'refused', code: 'RETENTION_RESTORE_UNAVAILABLE', result: { reason: 'window_closed' } };
+    const earlier = await client.query(
+      `SELECT 1 FROM admin_operations
+        WHERE operation_type = $1::varchar
+          AND status = 'succeeded'
+          AND lower(payload_json->>'quarantineId') = lower($2::text)
+        LIMIT 1`,
+      [RETENTION_RESTORE_OPERATION, quarantineId]
+    );
+    return earlier.rows.length > 0
+      ? { outcome: 'done', result: { alreadyRestored: true }, diagnostic: { alreadyRestored: true } }
+      : restoreRefused('window_closed');
   }
-  const restored = await restoreQuarantinedContentWithClient(client, row.source_table, row.source_id);
-  return restored
-    ? { outcome: 'done', result: { sourceTable: row.source_table } }
-    : { outcome: 'refused', code: 'RETENTION_RESTORE_UNAVAILABLE', result: { reason: 'not_redacted' } };
+  const outcome = await restoreQuarantinedContentWithClient(client, row.source_table, row.source_id);
+  if (outcome === 'restored') {
+    return {
+      outcome: 'done',
+      result: { sourceTable: row.source_table },
+      diagnostic: { sourceTable: row.source_table, alreadyRestored: false }
+    };
+  }
+  return restoreRefused(outcome === 'no_copy' ? 'window_closed' : 'not_redacted');
 }
 
 export interface RetentionPreviewResult {

@@ -60,7 +60,7 @@ describe("retention.restore (#153)", () => {
       commandId: "22222222-2222-4222-8222-222222222222",
       environment: "development",
       operationType: "retention.restore",
-      payload: { quarantineId: COPY, sourceTable: "letters" },
+      payload: { quarantineId: COPY, sourceTable: "letters", sourceId: "letter_1" },
     });
     // The command itself writes nothing but the queue row.
     expect(client.query).not.toHaveBeenCalled();

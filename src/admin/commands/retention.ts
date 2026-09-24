@@ -132,7 +132,13 @@ export function createRetentionCommands(overrides: Partial<RetentionCommandSeams
         commandId: execution.commandId,
         environment: execution.environment,
         operationType: RETENTION_RESTORE_OPERATION,
-        payload: { quarantineId, sourceTable: String(preview.summary.sourceTable) },
+        // The source is named so the Retention page can link each restore to
+        // its letter or draft after the copy is gone.
+        payload: {
+          quarantineId,
+          sourceTable: String(preview.summary.sourceTable),
+          sourceId: String(preview.summary.sourceId),
+        },
       });
       return { operationId, status: "queued" };
     },

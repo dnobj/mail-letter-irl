@@ -297,13 +297,16 @@ async function runAccountErasures(): Promise<void> {
  * Put back the quarantined content the admin panel queued for restore (#153).
  * Runs BEFORE the retention pass, so a restore queued before this run is never
  * beaten to its copy by the purge in the same run. Same wrapper as the others:
- * it never throws, and a failure inside it is rethrown as its class.
+ * it never throws, and a failure inside it is rethrown as its class. Every run,
+ * so a queued restore waits an hour at most.
  */
+const RETENTION_RESTORE_INTERVAL_MS = 30 * 60 * 1000;
+
 async function runRetentionRestores(): Promise<void> {
   try {
     const run = await runMaintenanceTaskIfDue(
       'retention-restores',
-      ACCOUNT_ERASURE_INTERVAL_MS,
+      RETENTION_RESTORE_INTERVAL_MS,
       async () => {
         try {
           return await processRetentionRestores();
