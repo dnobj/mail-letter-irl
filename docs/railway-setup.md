@@ -84,8 +84,8 @@ STRIPE_WEBHOOK_SECRET=<whsec_ for that environment's webhook endpoint>
 STRIPE_PRICE_STARTER=<price_ id>
 LETTER_IRL_MAIL_SENDING_ENABLED=<true to allow sending; refuses new sends when false>
 # The outbox switch (#444): false pauses everything going to the printer, queued mail included.
-# Set it on the API AND the maintenance service; unset means on.
-LETTER_IRL_OUTBOX_DISPATCH_ENABLED=
+# Set it on the API AND the maintenance service. Unset or blank means on; write false to pause.
+LETTER_IRL_OUTBOX_DISPATCH_ENABLED=<true; false pauses the outbox>
 LETTER_IRL_BETA_GATE_ENABLED=<true to restrict access to the invited cohort>
 LETTER_IRL_BETA_DAILY_MAIL_CAP=<global letters per day>
 LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP=<letters per account per day>

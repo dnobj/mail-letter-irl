@@ -157,6 +157,40 @@ describe('maintenance deployment validation', () => {
     expect(services.closePool).toHaveBeenCalledTimes(1);
   });
 
+  it('withholds the heartbeat while the outbox is paused with letters waiting, so a pause left on alarms (#451 review)', async () => {
+    const output = captureOutput();
+    stubValidDevelopment();
+    services.processDueLetterJobs.mockResolvedValueOnce({ processed: 0, paused: true, waiting: 2 });
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(services.sendMaintenanceHeartbeat).not.toHaveBeenCalled();
+    expect(output()).toContain('Heartbeat withheld: the outbox is paused with 2 waiting');
+    expect(output()).toContain('"event":"maintenance.heartbeat_withheld"');
+    // The rest of the run went ahead, and the pool still closes.
+    expect(services.runCommerceMaintenance).toHaveBeenCalledTimes(1);
+    expect(services.closePool).toHaveBeenCalledTimes(1);
+  });
+
+  it('still sends the heartbeat when the outbox is paused with nothing waiting', async () => {
+    stubValidDevelopment();
+    services.processDueLetterJobs.mockResolvedValueOnce({ processed: 0, paused: true, waiting: 0 });
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(services.sendMaintenanceHeartbeat).toHaveBeenCalledTimes(1);
+  });
+
+  it('says in the maintenance log, every run, that the outbox is paused (#451 review)', async () => {
+    const output = captureOutput();
+    stubValidDevelopment();
+    vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(output()).toContain('[config] LETTER_IRL_OUTBOX_DISPATCH_ENABLED pauses the outbox');
+  });
+
   it('labels a configuration failure configuration_error in the maintenance diagnostic', async () => {
     // The #213 trap, maintenance edition: without the carried class this
     // logged unknown_error and pointed the investigation anywhere but config.

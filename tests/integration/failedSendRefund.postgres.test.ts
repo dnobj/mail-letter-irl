@@ -1146,6 +1146,59 @@ describePostgres('failed send returns the pack', () => {
       const sent = await pool.query<{ status: string }>('SELECT status FROM letter_jobs WHERE job_id = $1', [jobId]);
       expect(sent.rows[0].status).toBe('completed');
     }, 60_000);
+
+    /**
+     * What a pause does to the jobs a crash left behind (#451 review) - the
+     * redeploy that sets the switch is such a crash. The one on its last
+     * attempt is settled by the sweep as ever; the one with attempts left is
+     * counted as waiting and goes out once resumed.
+     */
+    it('while paused, settles a crash on its last attempt and counts one with attempts left as waiting', async () => {
+      resetStubProvider();
+      const exhausted = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const exhaustedJob = await queueJob(exhausted.letterId, 1);
+      const reclaimable = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const reclaimableJob = await queueJob(reclaimable.letterId, 3);
+      const crash = (jobId: string, attempts: string) =>
+        pool.query(
+          `UPDATE letter_jobs
+              SET status = 'processing', provider_outcome = 'not_dispatched',
+                  attempts = ${attempts}, locked_at = NOW() - INTERVAL '30 minutes'
+            WHERE job_id = $1`,
+          [jobId]
+        );
+      await crash(exhaustedJob, 'max_attempts');
+      await crash(reclaimableJob, '1');
+
+      process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = 'false';
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const stale = await jobs.processDueLetterJobs(10);
+        expect(stale).toMatchObject({ processed: 0, paused: true });
+        // The same count with that claim's lock still fresh: the difference is
+        // the one job, whatever else the schema holds.
+        await pool.query(`UPDATE letter_jobs SET locked_at = NOW() WHERE job_id = $1`, [reclaimableJob]);
+        const fresh = await jobs.processDueLetterJobs(10);
+        expect(fresh.waiting).toBe((stale.waiting ?? 0) - 1);
+        await pool.query(
+          `UPDATE letter_jobs SET locked_at = NOW() - INTERVAL '30 minutes' WHERE job_id = $1`,
+          [reclaimableJob]
+        );
+      } finally {
+        delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
+        warn.mockRestore();
+      }
+
+      // Settled while paused: terminal and compensated, and never sent.
+      const settled = await pool.query<{ status: string }>('SELECT status FROM letter_jobs WHERE job_id = $1', [exhaustedJob]);
+      expect(settled.rows[0].status).toBe('failed');
+      expect(await credits(exhausted.userId)).toBe(6);
+      expect(stubProvider.calls).toHaveLength(0);
+
+      stubProvider.nextResult = providerSuccess('stub-tracking-after-pause');
+      expect(await jobs.processLetterJob(reclaimableJob)).toMatchObject({ claimed: true, completed: true });
+      expect(await credits(reclaimable.userId)).toBe(4);
+    }, 60_000);
   });
 
   it('records only a stable failure code, never provider text', async () => {

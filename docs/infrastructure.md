@@ -68,8 +68,7 @@ In order, it:
   fixed. `CONTENT_RETENTION_ENABLED=false` skips the pass entirely;
 - deletes the link to a user's uploaded image 24 hours after their last upload (`recent-uploads-sweep`, #282);
 - deletes feature requests 12 months after they were submitted (`feature-requests-sweep`, #393);
-- retries due or stale outbox rows, unless `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` pauses the outbox, which
-  then only logs how many letters are waiting (#444, [operational-acceptance.md](operational-acceptance.md));
+- retries due or stale outbox rows;
 - reconciles commerce: fulfils paid Pay & Send orders that were not fulfilled, settles pending checkouts
   against Stripe (paid or expired), cancels orphaned checkouts, and retries `refund_pending` refunds;
 - reconciles proportional pack refunds whose Stripe outcome is unknown or still pending (#323);
@@ -81,6 +80,14 @@ In order, it:
 - closes S3 and PostgreSQL clients, then exits.
 
 The first three passes are wrapped so that a failure in one cannot skip mail dispatch.
+
+While `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` pauses the outbox (#444,
+[operational-acceptance.md](operational-acceptance.md)), the outbox pass claims nothing and logs
+`outbox.dispatch_paused` with the number of letters waiting. Its two crash sweeps still run, so a send
+interrupted mid-dispatch, the redeploy that sets the switch included, is still settled: held for an
+operator if the provider may have it, or failed and refunded if it never reached the provider on its last
+attempt. While letters are waiting, the run withholds its heartbeat, so the external monitor alerts until
+the outbox is switched back on.
 
 Generated images are stored in a private Railway bucket for 15 minutes. Production must not fall back to process memory. Development may use memory only for local execution; deployed development uses the bucket so restart behavior matches production.
 

@@ -249,7 +249,13 @@ async function runFeatureRequestsSweep(): Promise<void> {
   }
 }
 
-export async function runMaintenance(): Promise<void> {
+/** What a run tells its entry wrapper beyond having finished. */
+export interface MaintenanceRunResult {
+  /** Letters a paused outbox is holding back (#444); 0 when it is not paused. */
+  outboxWaiting: number;
+}
+
+export async function runMaintenance(): Promise<MaintenanceRunResult> {
   // Was Math.max(1, Number.parseInt(...)), the shape envSettings exists to
   // replace: '1e3' parses to 1, so a request for 1000 dispatched ONE letter a
   // run, and a non-numeric value yielded NaN, which reached
@@ -293,6 +299,8 @@ export async function runMaintenance(): Promise<void> {
     runDailyMaintenance
   );
   console.log(`[Maintenance] Daily cleanup ${daily.ran ? 'completed' : 'not due'}`);
+
+  return { outboxWaiting: outbox.paused ? (outbox.waiting ?? 0) : 0 };
 }
 
 /**
@@ -328,12 +336,22 @@ export async function maintenanceEntry(): Promise<void> {
     }
   }
   try {
-    await runMaintenance();
+    const run = await runMaintenance();
     console.log(`[Maintenance] Finished at ${new Date().toISOString()}`);
     // Only after a run that finished: a monitor stops hearing from a run that
     // never happens and from one that keeps failing alike (#408).
-    const heartbeat = await sendMaintenanceHeartbeat();
-    if (heartbeat !== 'skipped') console.log(`[Maintenance] Heartbeat ${heartbeat}`);
+    //
+    // Nor while the outbox is paused with letters waiting (#444). The run is
+    // fine but no mail is moving, and a pause left on after an incident would
+    // otherwise show in this log and nowhere the owner is told: the monitor
+    // alerts until the outbox is switched back on (#451 review).
+    if (run.outboxWaiting > 0) {
+      writeDiagnostic('warn', 'maintenance.heartbeat_withheld', { outboxWaiting: run.outboxWaiting });
+      console.log(`[Maintenance] Heartbeat withheld: the outbox is paused with ${run.outboxWaiting} waiting`);
+    } else {
+      const heartbeat = await sendMaintenanceHeartbeat();
+      if (heartbeat !== 'skipped') console.log(`[Maintenance] Heartbeat ${heartbeat}`);
+    }
   } finally {
     closeTempImageStore();
     await closePool();

@@ -21,6 +21,7 @@
  */
 
 import { maintenanceHeartbeatUrlInvalid } from '../services/maintenanceHeartbeat.js';
+import { enabledUnlessDisabled } from '../utils/envSettings.js';
 import {
   JIT_PRICE_ENV_VARS,
   PACK_PRICE_ENV_VARS,
@@ -1064,6 +1065,19 @@ export function validateDeploymentConfig(
       severity: 'warning',
       rule: 'maintenance.heartbeat_url_invalid',
       message: 'MAINTENANCE_HEARTBEAT_URL must be an https URL, such as a healthchecks.io ping URL'
+    });
+  }
+
+  // #444: the outbox's stop, the same reading as letterJobService's
+  // outboxDispatchEnabled. A pause is set on purpose, so a warning and never a
+  // boot error; but a pause left on holds every letter, so the API says so at
+  // every boot and maintenance at every run (#451 review).
+  if (!enabledUnlessDisabled('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', env)) {
+    findings.push({
+      severity: 'warning',
+      rule: 'outbox.dispatch_paused',
+      message:
+        'LETTER_IRL_OUTBOX_DISPATCH_ENABLED pauses the outbox: nothing goes to the print provider until it is set to true'
     });
   }
 

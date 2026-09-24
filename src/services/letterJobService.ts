@@ -879,7 +879,14 @@ export async function processLetterJob(
 export async function processDueLetterJobs(
   limit = 25,
   options: ProcessLetterJobOptions = {}
-): Promise<{ processed: number; completed: number; retryScheduled: number; failed: number; paused?: true }> {
+): Promise<{
+  processed: number;
+  completed: number;
+  retryScheduled: number;
+  failed: number;
+  paused?: true;
+  waiting?: number;
+}> {
   const summary = { processed: 0, completed: 0, retryScheduled: 0, failed: 0 };
 
   const staleDispatched = await query<LetterJob>(
@@ -933,15 +940,27 @@ export async function processDueLetterJobs(
   // Paused (#444): claim nothing, and say how much is waiting, once a run. The
   // two sweeps above still ran: they settle jobs a crash left in 'processing'
   // and never call the provider.
+  //
+  // Waiting is everything claimJob would take once switched back on, due now or
+  // later: its own predicate without the next_attempt_at clause, so a claim a
+  // crash left behind counts too - the redeploy that sets the switch is one such
+  // crash (#451 review).
   if (!outboxDispatchEnabled()) {
     const waiting = await query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM letter_jobs
-        WHERE status IN ('pending', 'failed')
+        WHERE attempts < max_attempts
           AND provider_outcome = 'not_dispatched'
-          AND attempts < max_attempts`
+          AND (
+            status IN ('pending', 'failed')
+            OR (
+              status = 'processing'
+              AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
+            )
+          )`
     );
-    writeDiagnostic('warn', 'outbox.dispatch_paused', { waiting: Number(waiting.rows[0]?.count ?? 0) });
-    return { ...summary, paused: true };
+    const count = Number(waiting.rows[0]?.count ?? 0);
+    writeDiagnostic('warn', 'outbox.dispatch_paused', { waiting: count });
+    return { ...summary, paused: true, waiting: count };
   }
 
   while (summary.processed < limit) {

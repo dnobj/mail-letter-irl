@@ -639,13 +639,26 @@ describe("the outbox's stop (#444)", () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ count: '3' }] });
 
-    expect(await processDueLetterJobs(25)).toEqual({ processed: 0, completed: 0, retryScheduled: 0, failed: 0, paused: true });
+    expect(await processDueLetterJobs(25)).toEqual({
+      processed: 0,
+      completed: 0,
+      retryScheduled: 0,
+      failed: 0,
+      paused: true,
+      waiting: 3
+    });
 
     const statements = query.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' '));
     expect(statements).toHaveLength(3);
     expect(statements[0]).toContain("provider_outcome = 'dispatching'");
     expect(statements[1]).toContain("provider_outcome = 'not_dispatched'");
     expect(statements[2]).toContain('SELECT COUNT(*)::text AS count FROM letter_jobs');
+    // What claimJob would take once resumed, a claim a crash left behind
+    // included (#451 review).
+    expect(statements[2]).toContain("status IN ('pending', 'failed')");
+    expect(statements[2]).toContain("status = 'processing' AND locked_at < NOW() - INTERVAL '15 minutes'");
+    expect(statements[2]).toContain('attempts < max_attempts');
+    expect(statements[2]).not.toContain('next_attempt_at');
     expect(statements.some((sql) => sql.includes("SET status = 'processing'"))).toBe(false);
     const logged = warn.mock.calls.flat().map(String).join('\n');
     expect(logged).toContain('"event":"outbox.dispatch_paused"');

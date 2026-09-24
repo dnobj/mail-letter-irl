@@ -246,6 +246,12 @@ at `src/db/index.ts:32-37`. A `?sslmode=require` URL satisfies all three rules.
 |---|---|---|---|
 | `maintenance.heartbeat_url_invalid` | warning | `MAINTENANCE_HEARTBEAT_URL` is set but is not an https URL | Set the monitor's https ping URL, or unset it. The maintenance service prints it at every run (#408) |
 
+### Mail dispatch
+
+| Rule | Severity | Raised when | Fix |
+|---|---|---|---|
+| `outbox.dispatch_paused` | warning | `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` holds anything but an affirmative, so the outbox is paused and nothing goes to the print provider (#444) | Intended during a printing incident. Otherwise set it to `true` on the API and the maintenance service ([operational-acceptance.md](operational-acceptance.md)). The API prints it at boot, maintenance at every run |
+
 ## Development Release Procedure
 
 1. Merge backend and website feature PRs into their `dev` branches.

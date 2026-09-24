@@ -243,6 +243,18 @@ describe('validateDeploymentConfig in production', () => {
     );
   });
 
+  it('warns, never fails, while the outbox switch pauses dispatch (#451 review)', () => {
+    for (const value of ['false', '0', 'fasle']) {
+      const paused = env({ LETTER_IRL_OUTBOX_DISPATCH_ENABLED: value });
+      expect(ruleIds(paused, 'error')).not.toContain('outbox.dispatch_paused');
+      expect(ruleIds(paused, 'warning')).toContain('outbox.dispatch_paused');
+    }
+    // Unset, blank and on all dispatch, so none of them warns.
+    for (const value of [undefined, '', '  ', 'true', 'on']) {
+      expect(ruleIds(env({ LETTER_IRL_OUTBOX_DISPATCH_ENABLED: value }))).not.toContain('outbox.dispatch_paused');
+    }
+  });
+
   it('warns on an unrecognized provider key prefix instead of failing', () => {
     const unrecognized = env({ LETTER_PROVIDER_API_KEY: 'pg_opaque_unit_fixture' });
     expect(ruleIds(unrecognized, 'error')).toEqual([]);
