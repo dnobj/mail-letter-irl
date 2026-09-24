@@ -242,14 +242,27 @@ describe("what a failure costs (#446 review)", () => {
     const [sql, values] = db.query.mock.calls[0] as [string, unknown[]];
     expect(sql).toMatch(/attempts = attempts \+ 1/);
     expect(sql).toMatch(/WHERE id = \$1 AND status = 'pending'/);
-    expect(values).toEqual(["op-1", false]);
+    // The cap is decided from the row, and the class is kept either way.
+    expect(sql).toContain("status = CASE WHEN attempts + 1 >= $2::int THEN 'failed'");
+    expect(values).toEqual(["op-1", MAX_ERASURE_ATTEMPTS, expect.any(String), expect.any(String)]);
+    expect(JSON.parse(String(values[2]))).toEqual({ lastErrorClass: expect.any(String) });
+    expect(JSON.parse(String(values[3]))).toEqual({ errorClass: expect.any(String) });
+    expect(String(values[2])).not.toContain("relation is locked");
   });
 
   it("fails the operation outright when that was its last attempt", async () => {
     scriptedClient({ queue: [OPERATION(MAX_ERASURE_ATTEMPTS - 1)], failOn: /status = 'succeeded'/ });
 
     expect(await processAccountErasures()).toEqual({ erased: 0, refused: 0, retrying: 0, failed: 1 });
-    expect((db.query.mock.calls[0] as [string, unknown[]])[1]).toEqual(["op-1", true]);
+  });
+
+  it("believes the row over the count read at the claim", async () => {
+    // A concurrent run spent an attempt after this one claimed: the row says
+    // this was the last.
+    scriptedClient({ queue: [OPERATION(0)], failOn: /status = 'succeeded'/ });
+    db.query.mockResolvedValueOnce({ rows: [{ status: "failed" }], rowCount: 1 });
+
+    expect(await processAccountErasures()).toEqual({ erased: 0, refused: 0, retrying: 0, failed: 1 });
   });
 
   it("still ends the run cleanly when recording the attempt fails too", async () => {

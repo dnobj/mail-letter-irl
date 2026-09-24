@@ -40,7 +40,9 @@ The unspent balance and unused gift letters are forfeited. If the customer wants
    - a refund in progress;
    - an image generation in flight.
 
-   Wait for it to settle, or settle it deliberately, then preview again.
+   Wait for it to settle, or settle it deliberately, then preview again. The preview also warns about open
+   operational alerts on the account's orders, such as compensation still owed after a dispute. Settle
+   those first, because nothing owed can reach the account after it is erased.
 3. Elevate, then type the phrase (`CONFIRM <id>` in development, `PRODUCTION ERASE <id>` in production)
    and a reason. **Keep the customer's name and email out of the reason:** the audit trail keeps it for
    two years.
@@ -87,8 +89,12 @@ the gate is not retried: an open dispute can take months, and the operator queue
   a token issued before the erasure stays valid for up to a day. The dashboard shows the sentence from
   website #36 on; before that it shows an empty account.
 - **Sessions already open are refused too.** A legacy SSE session opened before the erasure is refused on
-  its next tool call. One tool call already past sign-in at the moment the erasure commits can still write
-  a draft; nothing reads it, and the daily draft cleanup deletes it.
+  its next tool call. Two things can still slip through in the moment the erasure commits:
+  - A tool call already past sign-in can write one draft. Nothing reads it, and the draft cleanup deletes
+    it within about eight days.
+  - A pack checkout already past its block check can open an order on the tombstone. If the customer
+    pays, refund the payment in the Stripe dashboard: the panel's pack refund refuses a blocked account.
+    #449 closes this window.
 - **A new account is possible.** The customer can open one with a different sign-in method on the same
   address, because the tombstone no longer holds it.
 - **The upload link may linger briefly.** The API process can hold it in memory for up to six hours.

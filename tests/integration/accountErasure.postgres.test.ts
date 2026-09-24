@@ -558,7 +558,8 @@ describePostgres('account erasure', () => {
         seedCodeEmails: 1,
         failedJobsToCancel: 1,
         ordersKept: 2,
-        unusedGiftLetters: 3
+        unusedGiftLetters: 3,
+        openAlerts: 0
       },
       creditsForfeited: 4
     });

@@ -172,6 +172,8 @@ export interface ErasureScope {
   failedJobsToCancel: number;
   ordersKept: number;
   unusedGiftLetters: number;
+  /** Open operational alerts on the account's orders, such as compensation still owed after a dispute. */
+  openAlerts: number;
 }
 
 /**
@@ -205,7 +207,10 @@ export async function readErasureScope(client: SqlClient, userId: string): Promi
          WHERE l.user_id = $1 AND j.status = 'failed')::int AS failed_jobs_to_cancel,
        (SELECT COUNT(o.order_id) FROM orders o WHERE o.user_id = $1)::int AS orders_kept,
        (SELECT COUNT(g.gift_id) FROM gift_letters g
-         WHERE g.user_id = $1 AND g.status = 'available')::int AS unused_gift_letters`,
+         WHERE g.user_id = $1 AND g.status = 'available')::int AS unused_gift_letters,
+       (SELECT COUNT(a.alert_id) FROM commerce_operational_alerts a
+          JOIN orders o ON o.order_id = a.order_id
+         WHERE o.user_id = $1 AND a.status <> 'resolved')::int AS open_alerts`,
     [userId]
   );
   const row = result.rows[0] ?? {};
@@ -220,7 +225,8 @@ export async function readErasureScope(client: SqlClient, userId: string): Promi
     seedCodeEmails: Number(row.seed_code_emails ?? 0),
     failedJobsToCancel: Number(row.failed_jobs_to_cancel ?? 0),
     ordersKept: Number(row.orders_kept ?? 0),
-    unusedGiftLetters: Number(row.unused_gift_letters ?? 0)
+    unusedGiftLetters: Number(row.unused_gift_letters ?? 0),
+    openAlerts: Number(row.open_alerts ?? 0)
   };
 }
 
@@ -319,17 +325,22 @@ export type ErasureOutcome =
  * letters, letter_jobs, image_generation_reservations, then the account row,
  * and the gate is read after the account row is locked. What that guarantees,
  * and what it does not (#446 review):
- *   - a send, checkout or fulfilment that reaches the account row after this
- *     took it waits, and then finds the account blocked (the tombstone sets a
- *     send block) or its caller refused at sign-in;
+ *   - a send or fulfilment that reaches the account row after this took it
+ *     waits, and then finds the account blocked (the tombstone sets a send
+ *     block) or its caller refused at sign-in;
+ *   - a checkout reads the block before it takes any lock, so a pack checkout
+ *     already past that read opens its order on the tombstone once this
+ *     commits. Rare, and it moves money: #449 has the fix, the runbook the
+ *     remedy;
  *   - one that already holds its draft when this runs can deadlock with it
  *     instead, because the send paths take the draft first and no order
  *     serves both. PostgreSQL aborts one side. If it is this one, the worker
  *     rolls back to its savepoint and tries again at the next run without
  *     spending an attempt; the gate then sees whatever the send left behind.
  *   - a tool call already past sign-in when this commits can still write one
- *     draft to the tombstone. Nothing reads it, and the daily draft cleanup
- *     deletes it.
+ *     draft to the tombstone. Nothing reads it, and the draft cleanup deletes
+ *     it within about eight days (expired a day after its expiry, deleted a
+ *     week after that).
  *
  * Order within the writes matters in one place: the saved copies are found
  * through the drafts, so they are deleted before the drafts are.
@@ -532,10 +543,9 @@ export async function processAccountErasures(
       // whole and wrote nothing. Count the attempt outside it, so the cap still
       // applies, and stop this run: the rest of the queue waits for the next
       // one rather than for a database that is not answering (#446 review).
-      writeDiagnostic('error', 'account_erasure.bookkeeping_failed', {
-        errorClass: classifyDiagnosticError(error, 'database_error')
-      });
-      if (claim.operation) summary[await recordAttemptOutside(claim.operation)] += 1;
+      const errorClass = classifyDiagnosticError(error, 'database_error');
+      writeDiagnostic('error', 'account_erasure.bookkeeping_failed', { errorClass });
+      if (claim.operation) summary[await recordAttemptOutside(claim.operation, errorClass)] += 1;
       break;
     }
     if (outcome === null) break;
@@ -546,26 +556,40 @@ export async function processAccountErasures(
 
 /**
  * The attempt, in a statement of its own, after the operation's transaction
- * rolled back. Best effort: if this fails too, the next run claims the
- * operation again with its count unchanged.
+ * rolled back. Whether it was the last is decided from the row as it stands,
+ * not the count read at the claim, so a concurrent run's attempt is counted
+ * too. Best effort: if this fails as well, the next run claims the operation
+ * again with its count unchanged.
  */
-async function recordAttemptOutside(operation: ClaimedOperation): Promise<'retrying' | 'failed'> {
-  const exhausted = operation.attempts + 1 >= MAX_ERASURE_ATTEMPTS;
+async function recordAttemptOutside(
+  operation: ClaimedOperation,
+  errorClass: string
+): Promise<'retrying' | 'failed'> {
   try {
-    await query(
+    const recorded = await query<{ status: string }>(
       `UPDATE admin_operations
           SET attempts = attempts + 1,
               available_at = NOW() + INTERVAL '1 hour',
-              status = CASE WHEN $2::boolean THEN 'failed' ELSE status END,
-              completed_at = CASE WHEN $2::boolean THEN NOW() ELSE completed_at END,
-              error_code = CASE WHEN $2::boolean THEN 'ACCOUNT_ERASURE_ERROR' ELSE error_code END
-        WHERE id = $1 AND status = 'pending'`,
-      [operation.id, exhausted]
+              status = CASE WHEN attempts + 1 >= $2::int THEN 'failed' ELSE status END,
+              completed_at = CASE WHEN attempts + 1 >= $2::int THEN NOW() ELSE completed_at END,
+              error_code = CASE WHEN attempts + 1 >= $2::int THEN 'ACCOUNT_ERASURE_ERROR' ELSE error_code END,
+              sanitized_result_json = CASE WHEN attempts + 1 >= $2::int THEN $4::jsonb ELSE $3::jsonb END
+        WHERE id = $1 AND status = 'pending'
+        RETURNING status`,
+      [
+        operation.id,
+        MAX_ERASURE_ATTEMPTS,
+        JSON.stringify({ lastErrorClass: errorClass }),
+        JSON.stringify({ errorClass })
+      ]
     );
+    const status = recorded.rows[0]?.status;
+    if (status) return status === 'failed' ? 'failed' : 'retrying';
   } catch {
     // Not answering either; the next run claims it again.
   }
-  return exhausted ? 'failed' : 'retrying';
+  // Nothing recorded: report what the count read at the claim implies.
+  return operation.attempts + 1 >= MAX_ERASURE_ATTEMPTS ? 'failed' : 'retrying';
 }
 
 async function handleNextErasure(
