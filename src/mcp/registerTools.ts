@@ -885,8 +885,9 @@ export async function registerLetterTools(
   });
 
   // A caller with no account, and no confirmed address to open one from. When
-  // the account cannot be read here the tools still register and run, as they
-  // always have on a per-request server: the call fails where it next reads.
+  // the account cannot be read the tools still register - failing
+  // registration reads as a broken connector - but a call answers "try again"
+  // rather than run against an account nobody could check (#446 review).
   const initialCheck: AccountCheck = authInfo ? await checkAccount(authInfo) : { status: "ok" };
   const accountRefusal: AccountRefusal | null = initialCheck.status === "refused" ? initialCheck.refusal : null;
 
@@ -933,6 +934,8 @@ export async function registerLetterTools(
           if (now.status === "unavailable") return buildAccountUnavailableToolResult();
         } else if (accountRefusal) {
           return buildAccountRefusalToolResult(accountRefusal);
+        } else if (initialCheck.status === "unavailable") {
+          return buildAccountUnavailableToolResult();
         }
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
