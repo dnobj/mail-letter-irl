@@ -100,13 +100,27 @@ export function erasureBlocked(blockers: ErasureBlockers): boolean {
  * has attempts left (src/services/letterJobService.ts). Any other failed job is
  * finished unless an operator retries it, and the erasure cancels it so that
  * nobody can: a retry after the scrub would mail an empty letter.
+ *
+ * A DISPUTED order never leaves that status: charge.dispute.closed writes it
+ * again rather than restoring the order's earlier one (commerceService). So a
+ * disputed order counts as settled once every dispute on its payment is closed,
+ * won or lost. One with no dispute record at all still holds: that is a state
+ * this cannot explain, and holding is the recoverable mistake (#446 review).
  */
 export async function readErasureBlockers(client: SqlClient, userId: string): Promise<ErasureBlockers> {
   const result = await client.query(
     `SELECT
        (SELECT COUNT(o.order_id) FROM orders o
          WHERE o.user_id = $1
-           AND NOT (o.status = ANY($2::varchar[])))::int AS orders_in_flight,
+           AND NOT (o.status = ANY($2::varchar[]))
+           AND NOT (
+                 o.status = 'disputed'
+             AND EXISTS (SELECT 1 FROM stripe_disputes d
+                          WHERE d.payment_intent_id = o.stripe_payment_intent_id)
+             AND NOT EXISTS (SELECT 1 FROM stripe_disputes d
+                              WHERE d.payment_intent_id = o.stripe_payment_intent_id
+                                AND d.resolved_at IS NULL)
+               ))::int AS orders_in_flight,
        (SELECT COUNT(l.letter_id) FROM letters l
          WHERE l.user_id = $1
            AND NOT (l.status = ANY($3::varchar[])))::int AS letters_in_flight,
@@ -306,11 +320,20 @@ export type ErasureOutcome =
  * Erase one account, inside the caller's transaction, as the database owner.
  *
  * Locks first, in the canonical order (src/services/accountLock.ts): orders,
- * letters, letter_jobs, image_generation_reservations, then the account row.
- * The gate is read after the account row is locked, and a send or checkout
- * locks that row before it writes, so nothing the gate passed can start
- * before this commits. One that was already waiting on the row finds the
- * account blocked when it gets it: the tombstone sets a send block.
+ * letters, letter_jobs, image_generation_reservations, then the account row,
+ * and the gate is read after the account row is locked. What that guarantees,
+ * and what it does not (#446 review):
+ *   - a send, checkout or fulfilment that reaches the account row after this
+ *     took it waits, and then finds the account blocked (the tombstone sets a
+ *     send block) or its caller refused at sign-in;
+ *   - one that already holds its draft when this runs can deadlock with it
+ *     instead, because the send paths take the draft first and no order
+ *     serves both. PostgreSQL aborts one side. If it is this one, the worker
+ *     rolls back to its savepoint and tries again at the next run without
+ *     spending an attempt; the gate then sees whatever the send left behind.
+ *   - a tool call already past sign-in when this commits can still write one
+ *     draft to the tombstone. Nothing reads it, and the daily draft cleanup
+ *     deletes it.
  *
  * Order within the writes matters in one place: the saved copies are found
  * through the drafts, so they are deleted before the drafts are.
@@ -387,6 +410,12 @@ export async function eraseAccountWithClient(client: SqlClient, userId: string):
     `DELETE FROM letter_drafts d
       WHERE d.user_id = $1
         AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.draft_id = d.draft_id)`,
+    [userId]
+  );
+  // A dead link once the gate has passed (no checkout is left open), but a
+  // link into a Stripe session all the same, and readable by the panel.
+  await client.query(
+    `UPDATE orders SET checkout_url = NULL WHERE user_id = $1 AND checkout_url IS NOT NULL`,
     [userId]
   );
   const tokens = await client.query(`DELETE FROM personal_access_tokens WHERE user_id = $1`, [userId]);

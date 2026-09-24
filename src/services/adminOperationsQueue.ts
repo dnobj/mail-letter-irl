@@ -1,4 +1,4 @@
-import { transaction } from '../db/index.js';
+import { query, transaction } from '../db/index.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 /**
@@ -48,6 +48,20 @@ export interface OperationRunSummary {
  */
 export const MAX_OPERATION_ATTEMPTS = 3;
 
+/**
+ * Lock conflicts, not failures of the work: another transaction held a row it
+ * needed (deadlock_detected, lock_not_available, serialization_failure). The
+ * send paths take their locks in an order no single order serves, so an
+ * erasure can meet one (#446 review). Tried again at the next run without
+ * spending an attempt.
+ */
+const LOCK_CONFLICTS = new Set(['40P01', '55P03', '40001']);
+
+interface ClaimedOperation {
+  id: string;
+  attempts: number;
+}
+
 export interface OperationKind {
   /** admin_operations.operation_type, which is also the command's action. */
   operationType: string;
@@ -85,16 +99,59 @@ export async function processAdminOperations(
 ): Promise<OperationRunSummary> {
   const summary: OperationRunSummary = { done: 0, refused: 0, retrying: 0, failed: 0 };
   for (let handled = 0; handled < batchLimit; handled += 1) {
-    const outcome = await transaction(async (client) => handleNextOperation(client, kind));
+    const claim: { operation: ClaimedOperation | null } = { operation: null };
+    let outcome: keyof OperationRunSummary | null;
+    try {
+      outcome = await transaction(async (client) => handleNextOperation(client, kind, claim));
+    } catch (error) {
+      // The bookkeeping itself failed - the claim, the rollback to the
+      // savepoint, or the outcome's own UPDATE - so the transaction rolled back
+      // whole and wrote nothing. Count the attempt outside it, so the cap still
+      // applies, and stop this run: the rest of the queue waits for the next
+      // one rather than for a database that is not answering (#446 review).
+      writeDiagnostic('error', `${kind.event}.bookkeeping_failed`, {
+        errorClass: classifyDiagnosticError(error, 'database_error')
+      });
+      if (claim.operation) summary[await recordAttemptOutside(claim.operation, kind)] += 1;
+      break;
+    }
     if (outcome === null) break;
     summary[outcome] += 1;
   }
   return summary;
 }
 
+/**
+ * The attempt, in a statement of its own, after the operation's transaction
+ * rolled back. Best effort: if this fails too, the next run claims the
+ * operation again with its count unchanged.
+ */
+async function recordAttemptOutside(
+  operation: ClaimedOperation,
+  kind: OperationKind
+): Promise<'retrying' | 'failed'> {
+  const exhausted = operation.attempts + 1 >= MAX_OPERATION_ATTEMPTS;
+  try {
+    await query(
+      `UPDATE admin_operations
+          SET attempts = attempts + 1,
+              available_at = NOW() + INTERVAL '1 hour',
+              status = CASE WHEN $2::boolean THEN 'failed' ELSE status END,
+              completed_at = CASE WHEN $2::boolean THEN NOW() ELSE completed_at END,
+              error_code = CASE WHEN $2::boolean THEN $3::varchar ELSE error_code END
+        WHERE id = $1 AND status = 'pending'`,
+      [operation.id, exhausted, kind.errorCode]
+    );
+  } catch {
+    // Not answering either; the next run claims it again.
+  }
+  return exhausted ? 'failed' : 'retrying';
+}
+
 async function handleNextOperation(
   client: SqlClient,
-  kind: OperationKind
+  kind: OperationKind,
+  claim: { operation: ClaimedOperation | null }
 ): Promise<keyof OperationRunSummary | null> {
   const claimed = await client.query(
     `SELECT o.id, o.payload_json, o.attempts
@@ -110,6 +167,7 @@ async function handleNextOperation(
   );
   const operation = claimed.rows[0];
   if (!operation) return null;
+  claim.operation = { id: String(operation.id), attempts: Number(operation.attempts) };
 
   await client.query('SAVEPOINT admin_operation');
   let result: OperationResult;
@@ -118,6 +176,17 @@ async function handleNextOperation(
   } catch (error) {
     await client.query('ROLLBACK TO SAVEPOINT admin_operation');
     const errorClass = classifyDiagnosticError(error, 'database_error');
+    const sqlState = (error as { code?: unknown } | null)?.code;
+    if (typeof sqlState === 'string' && LOCK_CONFLICTS.has(sqlState)) {
+      await client.query(
+        `UPDATE admin_operations
+            SET available_at = NOW() + INTERVAL '1 hour', sanitized_result_json = $2::jsonb
+          WHERE id = $1`,
+        [operation.id, JSON.stringify({ lastErrorClass: errorClass })]
+      );
+      writeDiagnostic('warn', `${kind.event}.lock_conflict`, { errorClass });
+      return 'retrying';
+    }
     const exhausted = Number(operation.attempts) + 1 >= MAX_OPERATION_ATTEMPTS;
     if (exhausted) {
       await client.query(

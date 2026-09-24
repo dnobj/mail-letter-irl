@@ -108,6 +108,46 @@ describe("a tool call from a caller with no account", () => {
     expect(logged.filter(line => line.includes("auth.user_preparation_failed"))).toEqual([]);
   });
 
+  it("on a long-lived session, refuses an account erased after the connection opened (#446 review)", async () => {
+    vi.stubEnv("LETTER_IRL_REQUIRE_AUTH", "true");
+    vi.stubEnv("LETTER_IRL_OAUTH_SCOPES", "openid profile email mail:read mail:draft mail:send");
+    identity.prepareAuthenticatedUser.mockReset();
+    // Fine when the stream opened, erased before the call.
+    identity.prepareAuthenticatedUser
+      .mockResolvedValueOnce("person@example.com")
+      .mockRejectedValue(new AccountErasedError());
+    const handlers = new Map<string, (args: Record<string, unknown>, extra: any) => Promise<any>>();
+    const mcpServer = {
+      registerResource: vi.fn(),
+      registerTool: vi.fn((name: string, _config: unknown, handler: any) => handlers.set(name, handler))
+    };
+    const appServer = { listTools: () => TOOLS, execute: vi.fn() };
+
+    await registerLetterTools(
+      mcpServer as never,
+      appServer as never,
+      {
+        userId: "auth0|erased-mid-session",
+        claims: {},
+        token: "token",
+        authType: "jwt" as const,
+        scopes: ["mail:read", "mail:draft", "mail:send"]
+      },
+      { recheckAccountPerCall: true }
+    );
+    const result = await handlers.get("send_letter")!({}, { _meta: {} });
+
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: ACCOUNT_ERASED_MESSAGE }] });
+    expect(appServer.execute).not.toHaveBeenCalled();
+  });
+
+  it("decides the account once per server when not asked to recheck", async () => {
+    const { handlers } = await registerWithRefusal(null);
+    await handlers.get("get_account_balance")!({}, { _meta: {} });
+    await handlers.get("get_account_balance")!({}, { _meta: {} });
+    expect(identity.prepareAuthenticatedUser).toHaveBeenCalledTimes(1);
+  });
+
   it("says nothing about the caller in what it answers", async () => {
     // Both messages are fixed constants. This is what keeps them safe to hand
     // back whole, as BETA_ACCESS_MESSAGE is.

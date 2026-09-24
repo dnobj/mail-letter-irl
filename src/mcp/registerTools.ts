@@ -819,49 +819,64 @@ export function partitionToolResult(
   };
 }
 
+/**
+ * The refusal this caller gets instead of an account, or null when there is
+ * an account to act on.
+ *
+ * A refusal is held rather than thrown: the session is fine, and every tool in
+ * it answers with one sentence the customer can act on. Throwing would fail
+ * registration, which reaches ChatGPT as "this connector is broken", and
+ * swallowing it (what this did until 2026-09-19) left every tool to fail
+ * separately on a foreign key naming whichever table it reached first.
+ */
+async function accountRefusalFor(authInfo: AuthenticatedUser): Promise<AccountRefusal | null> {
+  try {
+    await prepareAuthenticatedUser(authInfo);
+    return null;
+  } catch (error) {
+    if (
+      error instanceof VerifiedEmailRequiredError ||
+      error instanceof EmailAlreadyLinkedError ||
+      error instanceof AccountErasedError
+    ) {
+      // Already reported, by name, where it was decided. Logging it again
+      // here would classify it as `database_error` - it carries no pg code -
+      // and make a refused customer look like a database outage on every
+      // request they make.
+      return error;
+    }
+    writeDiagnostic("error", "auth.user_preparation_failed", {
+      errorClass: classifyDiagnosticError(error, "database_error")
+    });
+    return null;
+  }
+}
+
+export interface RegisterToolsOptions {
+  /**
+   * Decide the account again on every tool call. For the legacy SSE transport,
+   * where one server serves the whole stream: without it, an account erased
+   * mid-session (#289) kept every tool until the connection closed, and a
+   * customer who confirms their address mid-session still has to reconnect
+   * (#446 review). The streamable HTTP transport builds a server per request,
+   * so it decides per call already.
+   */
+  recheckAccountPerCall?: boolean;
+}
+
 export async function registerLetterTools(
   mcpServer: McpServer,
   appServer: LetterIrlServer,
-  authInfo: AuthenticatedUser | null = null
+  authInfo: AuthenticatedUser | null = null,
+  options: RegisterToolsOptions = {}
 ) {
   const userId = resolveToolUserId(authInfo);
   writeDiagnostic("info", "mcp.tools_registering", {
     authType: authInfo?.authType ?? "disabled"
   });
 
-  // A caller with no account, and no confirmed address to open one from. Held
-  // rather than thrown: the session is fine, and every tool in it now answers
-  // with one sentence the customer can act on. Throwing here would fail
-  // registration, which reaches ChatGPT as "this connector is broken", and
-  // swallowing it (what this did until 2026-09-19) left every tool to fail
-  // separately on a foreign key naming whichever table it reached first.
-  //
-  // This server is built per request on the streamable HTTP transport, so the
-  // refusal is re-evaluated on every call there. On the legacy SSE transport
-  // one server serves the whole stream, so a customer who confirms their
-  // address mid-session has to reconnect before it clears.
-  let accountRefusal: AccountRefusal | null = null;
-  if (authInfo) {
-    try {
-      await prepareAuthenticatedUser(authInfo);
-    } catch (error) {
-      if (
-        error instanceof VerifiedEmailRequiredError ||
-        error instanceof EmailAlreadyLinkedError ||
-        error instanceof AccountErasedError
-      ) {
-        // Already reported, by name, where it was decided. Logging it again
-        // here would classify it as `database_error` - it carries no pg code -
-        // and make a refused customer look like a database outage on every
-        // request they make.
-        accountRefusal = error;
-      } else {
-        writeDiagnostic("error", "auth.user_preparation_failed", {
-          errorClass: classifyDiagnosticError(error, "database_error")
-        });
-      }
-    }
-  }
+  // A caller with no account, and no confirmed address to open one from.
+  const accountRefusal: AccountRefusal | null = authInfo ? await accountRefusalFor(authInfo) : null;
 
   // Register widget resources for ChatGPT UI rendering
   await registerWidgetResources(mcpServer);
@@ -901,6 +916,10 @@ export async function registerLetterTools(
         }
         if (accountRefusal) {
           return buildAccountRefusalToolResult(accountRefusal);
+        }
+        if (options.recheckAccountPerCall && authInfo) {
+          const refusalNow = await accountRefusalFor(authInfo);
+          if (refusalNow) return buildAccountRefusalToolResult(refusalNow);
         }
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;

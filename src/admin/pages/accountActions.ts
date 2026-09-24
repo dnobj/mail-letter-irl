@@ -84,8 +84,17 @@ export function accountErasurePanel(input: {
 </form>`;
   let body: SafeHtml;
   if (input.erased) {
+    // Two operators confirming at once queue two erasures; the second finds
+    // the account already erased, and the counts are on the first.
+    const byEarlier = erasure?.result?.alreadyErased === true;
     body = html`<p>Erased${erasure?.completedAt ? html` ${when(erasure.completedAt)}` : ""}. The Auth0 user with this id is deleted by hand, in the tenant (docs/account-erasure.md).</p>
-${erasure?.result ? html`<p class="muted mono">${JSON.stringify(erasure.result)}</p>` : ""}`;
+${
+  byEarlier
+    ? html`<p class="muted">The newest erasure found the account already erased; the counts are on the one before it.</p>`
+    : erasure?.result
+      ? html`<p class="muted mono">${JSON.stringify(erasure.result)}</p>`
+      : ""
+}`;
   } else if (erasure && (erasure.status === "pending" || erasure.status === "processing")) {
     body = html`<p>Erasure queued ${when(erasure.requestedAt)}. The next hourly maintenance run carries it out${erasure.attempts > 0 ? html`; ${erasure.attempts} attempts so far` : ""}.</p>`;
   } else if (erasure?.status === "failed") {

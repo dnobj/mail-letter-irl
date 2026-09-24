@@ -463,3 +463,27 @@ describe("account.erase (#289)", () => {
     expect(preview.warnings.join("\n")).toMatch(/reason/);
   });
 });
+
+describe("an erased account takes nothing (#446 review)", () => {
+  const erased = { readAccountErased: vi.fn().mockResolvedValue(true) };
+
+  it("refuses a balance adjustment, an image grant and an unblock", async () => {
+    const commands = createAccountCommands(erased as never);
+    await expect(commands.adjustBalance.preview(scripted(), "auth0|u1", { letters: 1, direction: "add" })).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+    await expect(commands.grantImages.preview(scripted(), "auth0|u1", { quantity: 1 })).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+    await expect(commands.unblockSends.preview(scripted(), "auth0|u1", {})).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+  });
+
+  it("still previews all three for an account that is not erased", async () => {
+    const commands = createAccountCommands({ readAccountErased: vi.fn().mockResolvedValue(false) } as never);
+    await expect(commands.adjustBalance.preview(scripted(), "auth0|u1", { letters: 1, direction: "add" })).resolves.toBeTruthy();
+    await expect(commands.grantImages.preview(scripted(), "auth0|u1", { quantity: 1 })).resolves.toBeTruthy();
+    await expect(commands.unblockSends.preview(scripted(), "auth0|u1", {})).resolves.toBeTruthy();
+  });
+});

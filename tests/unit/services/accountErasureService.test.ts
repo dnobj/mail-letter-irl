@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * tests/integration/accountErasure.postgres.test.ts.
  */
 
-const db = vi.hoisted(() => ({ transaction: vi.fn() }));
+const db = vi.hoisted(() => ({ transaction: vi.fn(), query: vi.fn() }));
 vi.mock("../../../src/db/index.js", () => db);
 
 import {
@@ -29,6 +29,8 @@ interface Script {
   account?: { erased_at: Date | null } | null;
   blockers?: Record<string, number>;
   failOn?: RegExp;
+  /** The SQLSTATE the scripted failure carries; a check violation unless a test says otherwise. */
+  failCode?: string;
 }
 
 const CLEAR = {
@@ -46,7 +48,7 @@ function scriptedClient(script: Script) {
     statements,
     async query(text: string, values?: unknown[]) {
       statements.push({ text, values });
-      if (script.failOn?.test(text)) throw Object.assign(new Error("relation is locked"), { code: "55P03" });
+      if (script.failOn?.test(text)) throw Object.assign(new Error("relation is locked"), { code: script.failCode ?? "23514" });
       if (text.includes("FROM admin_operations o")) {
         const next = script.queue.shift();
         return { rows: next ? [next] : [], rowCount: next ? 1 : 0 };
@@ -73,6 +75,7 @@ const OPERATION = (attempts = 0): Operation => ({ id: "op-1", payload_json: { us
 
 beforeEach(() => {
   db.transaction.mockReset();
+  db.query.mockReset().mockResolvedValue({ rows: [], rowCount: 1 });
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -197,5 +200,62 @@ describe("the gate", () => {
     for (const key of Object.keys(clear) as Array<keyof typeof clear>) {
       expect(erasureBlocked({ ...clear, [key]: 1 }), key).toBe(true);
     }
+  });
+});
+
+describe("what a failure costs (#446 review)", () => {
+  it.each(["40P01", "55P03", "40001"])(
+    "retries a lock conflict (%s) at the next run without spending an attempt, even on the last one",
+    async (failCode) => {
+      const client = scriptedClient({
+        queue: [OPERATION(MAX_ERASURE_ATTEMPTS - 1)],
+        failOn: /^\s*UPDATE letters\b/,
+        failCode
+      });
+
+      expect(await processAccountErasures()).toEqual({ erased: 0, refused: 0, retrying: 1, failed: 0 });
+
+      const texts = client.statements.map((s) => s.text);
+      expect(texts.indexOf("ROLLBACK TO SAVEPOINT admin_operation")).toBeGreaterThan(-1);
+      const [retry] = operationUpdates(client);
+      expect(retry.text).toMatch(/available_at = NOW\(\) \+ INTERVAL '1 hour'/);
+      expect(retry.text).not.toMatch(/attempts = attempts \+ 1/);
+      expect(retry.text).not.toMatch(/status = 'failed'/);
+      // A class, never the driver's words.
+      expect(JSON.parse(String(retry.values?.[1]))).toEqual({ lastErrorClass: expect.any(String) });
+      expect(String(retry.values?.[1])).not.toContain("relation is locked");
+    }
+  );
+
+  it("counts an attempt whose own bookkeeping failed, outside the rolled-back transaction, and stops the run", async () => {
+    // The outcome's UPDATE fails: the real transaction helper rolls back
+    // everything, the erasure included, and rethrows - as this one does by
+    // passing the callback's rejection through. So the attempt is recorded in
+    // a statement of its own.
+    const fake = scriptedClient({ queue: [OPERATION(0), { ...OPERATION(0), id: "op-2" }], failOn: /status = 'succeeded'/ });
+
+    expect(await processAccountErasures()).toEqual({ erased: 0, refused: 0, retrying: 1, failed: 0 });
+
+    // One claim only: the run stopped rather than take the next operation.
+    expect(fake.statements.filter((s) => s.text.includes("FROM admin_operations o"))).toHaveLength(1);
+    expect(db.query).toHaveBeenCalledTimes(1);
+    const [sql, values] = db.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/attempts = attempts \+ 1/);
+    expect(sql).toMatch(/WHERE id = \$1 AND status = 'pending'/);
+    expect(values).toEqual(["op-1", false, "ACCOUNT_ERASURE_ERROR"]);
+  });
+
+  it("fails the operation outright when that was its last attempt", async () => {
+    scriptedClient({ queue: [OPERATION(MAX_ERASURE_ATTEMPTS - 1)], failOn: /status = 'succeeded'/ });
+
+    expect(await processAccountErasures()).toEqual({ erased: 0, refused: 0, retrying: 0, failed: 1 });
+    expect((db.query.mock.calls[0] as [string, unknown[]])[1]).toEqual(["op-1", true, "ACCOUNT_ERASURE_ERROR"]);
+  });
+
+  it("still ends the run cleanly when recording the attempt fails too", async () => {
+    scriptedClient({ queue: [OPERATION(0)], failOn: /status = 'succeeded'/ });
+    db.query.mockRejectedValueOnce(new Error("connection terminated"));
+
+    await expect(processAccountErasures()).resolves.toEqual({ erased: 0, refused: 0, retrying: 1, failed: 0 });
   });
 });

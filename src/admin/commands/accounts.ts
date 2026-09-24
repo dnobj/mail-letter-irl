@@ -116,6 +116,14 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
     ...overrides,
   };
 
+  /**
+   * An erased account (#289) is a tombstone kept for the money records: nothing
+   * is granted to it, and its send block stays (#446 review).
+   */
+  async function refuseErased(client: Parameters<typeof readAccountErased>[0], userId: string): Promise<void> {
+    if (await seams.readAccountErased(client, userId)) throw new AdminFoundationError("ADMIN_INVALID_STATE");
+  }
+
   const unblockSends: CommandDefinition<Record<string, never>> = {
     name: "account.unblock_sends",
     title: "Lift send block",
@@ -127,6 +135,7 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
     async preview(client, userId) {
       const account = await readAccountVersion(client, userId);
       if (!account) throw new AdminFoundationError("ADMIN_NOT_FOUND");
+      await refuseErased(client, userId);
       if (!account.sendsBlockedAt) throw new AdminFoundationError("ADMIN_INVALID_STATE");
       const standing = await seams.countStandingDisputes(client, userId);
       return {
@@ -175,6 +184,7 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
     async preview(client, userId, input) {
       const account = await readAccountVersion(client, userId);
       if (!account) throw new AdminFoundationError("ADMIN_NOT_FOUND");
+      await refuseErased(client, userId);
       const credits = input.letters * CREDITS_PER_LETTER;
       if (input.direction === "remove" && (account.ledgerAvailable < credits || account.credits < credits)) {
         throw new AdminFoundationError("ADMIN_INVALID_STATE");
@@ -236,6 +246,7 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
     async preview(client, userId, input) {
       const account = await readAccountVersion(client, userId);
       if (!account) throw new AdminFoundationError("ADMIN_NOT_FOUND");
+      await refuseErased(client, userId);
       const quota = await readImageQuota(client, userId);
       return {
         targetId: account.userId,
@@ -320,7 +331,7 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
       if (!account) throw new AdminFoundationError("ADMIN_NOT_FOUND");
       // One erasure at a time, and none for an account that is already a
       // tombstone. A refused or failed erasure can be queued again.
-      if (await seams.readAccountErased(client, userId)) throw new AdminFoundationError("ADMIN_INVALID_STATE");
+      await refuseErased(client, userId);
       const latest = await seams.readLatestErasure(client, userId);
       if (latest && (latest.status === "pending" || latest.status === "processing")) {
         throw new AdminFoundationError("ADMIN_INVALID_STATE");

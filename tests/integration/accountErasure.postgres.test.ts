@@ -275,14 +275,14 @@ describePostgres('account erasure', () => {
     return orderId;
   }
 
-  async function seedPackOrder(userId: string): Promise<{ orderId: string; paymentIntent: string }> {
+  async function seedPackOrder(userId: string, status = 'fulfilled'): Promise<{ orderId: string; paymentIntent: string }> {
     const orderId = `order_${randomUUID()}`;
     const paymentIntent = `pi_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
     await owner.query(
       `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
          idempotency_key, stripe_payment_intent_id)
-       VALUES ($1, $2, 10, 1000, 'USD', 'fulfilled', 'letter_pack', 'credit-pack-10', $3, $4)`,
-      [orderId, userId, `idem_${orderId}`, paymentIntent]
+       VALUES ($1, $2, 10, 1000, 'USD', $5, 'letter_pack', 'credit-pack-10', $3, $4)`,
+      [orderId, userId, `idem_${orderId}`, paymentIntent, status]
     );
     return { orderId, paymentIntent };
   }
@@ -423,6 +423,26 @@ describePostgres('account erasure', () => {
     }
   }, 120_000);
 
+  it('treats a disputed order as settled once every dispute on its payment has closed, and holds one it cannot explain', async () => {
+    // Won: the order stays disputed for good, because charge.dispute.closed
+    // writes that status again (#446 review).
+    const won = await seedUser();
+    const wonOrder = await seedPackOrder(won.userId, 'disputed');
+    await seedDispute({ userId: won.userId, paymentIntent: wonOrder.paymentIntent, resolved: true });
+    expect(await blockersOf(won.userId)).toEqual(NO_BLOCKERS);
+
+    // Still open: held twice over.
+    const open = await seedUser();
+    const openOrder = await seedPackOrder(open.userId, 'disputed');
+    await seedDispute({ userId: open.userId, paymentIntent: openOrder.paymentIntent, resolved: false });
+    expect(await blockersOf(open.userId)).toEqual({ ...NO_BLOCKERS, ordersInFlight: 1, disputesOpen: 1 });
+
+    // Disputed with no record of any dispute: nothing explains it, so it holds.
+    const unexplained = await seedUser();
+    await seedPackOrder(unexplained.userId, 'disputed');
+    expect(await blockersOf(unexplained.userId)).toEqual({ ...NO_BLOCKERS, ordersInFlight: 1 });
+  }, 60_000);
+
   it('queues through the operator role and erases as the owner: content and identity go, money records stay', async () => {
     const { userId, email } = await seedUser({ returnAddress: true });
     const other = await seedUser();
@@ -436,6 +456,10 @@ describePostgres('account erasure', () => {
     const freeDraft = await seedDraft(userId);
     const boundDraft = await seedDraft(userId);
     const jitOrder = await seedJitOrder(userId, 'fulfilled', boundDraft, delivered);
+    await owner.query(
+      `UPDATE orders SET checkout_url = 'https://checkout.stripe.com/c/pay/cs_test_erasure' WHERE order_id = $1`,
+      [jitOrder]
+    );
 
     // Retention copies of both kinds.
     for (const [table, id] of [['letters', delivered], ['letter_drafts', boundDraft]]) {
@@ -622,6 +646,8 @@ describePostgres('account erasure', () => {
     expect(bound.rows[0]).toMatchObject({ body_text: '', sign_off: '', preview_html: null });
     expect(bound.rows[0].redacted_at).toBeInstanceOf(Date);
     expect((await owner.query(`SELECT 1 FROM orders WHERE order_id = $1 AND draft_id = $2`, [jitOrder, boundDraft])).rowCount).toBe(1);
+    // The kept order no longer carries a link into its Stripe session.
+    expect((await owner.query(`SELECT checkout_url FROM orders WHERE order_id = $1`, [jitOrder])).rows[0].checkout_url).toBeNull();
 
     expect(
       (await owner.query(`SELECT 1 FROM redacted_content_quarantine WHERE source_id IN ($1, $2)`, [delivered, boundDraft])).rowCount

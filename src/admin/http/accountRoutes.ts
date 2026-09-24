@@ -58,6 +58,10 @@ export function registerAccountRoutes(router: AdminRouter<RouteHandler>): Pick<R
         erased: (await readAccountErased(client, userId)) === true,
         erasure: await readLatestErasure(client, userId),
       }));
+      const erasure = accountErasurePanel({ userId, erased: data.erased, erasure: data.erasure, mode: context.config.mode });
+      // A tombstone (#289) takes no grants, gifts or unblocks: its page shows
+      // the erasure's record and nothing to act on (#446 review).
+      if (data.erased) return erasure;
       return join([
         accountActionPanel({ detail, entitlements: data.entitlements, mode: context.config.mode }),
         accountGiftPanel({
@@ -67,7 +71,7 @@ export function registerAccountRoutes(router: AdminRouter<RouteHandler>): Pick<R
           defaultGenerations: giftOperatorGenerationsRemaining(),
           mode: context.config.mode,
         }),
-        accountErasurePanel({ userId, erased: data.erased, erasure: data.erasure, mode: context.config.mode }),
+        erasure,
       ]);
     },
     orderActions: async (context, detail) => orderQuarantinePanel({ detail, mode: context.config.mode }),
