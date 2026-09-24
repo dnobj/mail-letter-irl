@@ -255,13 +255,19 @@ describe("a tool call from a caller with no account", () => {
     expect(appServer.execute).toHaveBeenCalledTimes(1);
   });
 
-  it("does not hold a failure that is not a refusal", async () => {
-    // A database that will not answer is not "you have no account": the tools
-    // must still run, and fail on their own terms.
+  it("does not call a database failure a refusal, and does not run the tool on an account nobody could read", async () => {
+    // A database that will not answer is not "you have no account", so the
+    // sentence says to try again. It does not run the tool either: the account
+    // could be a tombstone (#289), and the call would fail a query later anyway
+    // (#446 review).
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { handlers, appServer } = await registerWithRefusal(new Error("connection terminated"));
+    error.mockRestore();
 
-    await handlers.get("get_account_balance")!({}, { _meta: {} });
+    const result = await handlers.get("get_account_balance")!({}, { _meta: {} });
 
-    expect(appServer.execute).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: ACCOUNT_UNAVAILABLE_MESSAGE }] });
+    expect(result.content[0].text).not.toBe(VERIFIED_EMAIL_MESSAGE);
+    expect(appServer.execute).not.toHaveBeenCalled();
   });
 });
