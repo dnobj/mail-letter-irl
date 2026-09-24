@@ -242,6 +242,15 @@ describe('validateDeploymentConfig in production', () => {
     expect(validateDeploymentConfig(aliased, 'server').errors).toEqual([]);
   });
 
+  it('warns, never fails, on a maintenance heartbeat URL that is not https (#408)', () => {
+    const bad = env({ MAINTENANCE_HEARTBEAT_URL: 'http://hc-ping.com/abc' });
+    expect(ruleIds(bad, 'error')).not.toContain('maintenance.heartbeat_url_invalid');
+    expect(ruleIds(bad, 'warning')).toContain('maintenance.heartbeat_url_invalid');
+    expect(ruleIds(env({ MAINTENANCE_HEARTBEAT_URL: 'https://hc-ping.com/abc' }))).not.toContain(
+      'maintenance.heartbeat_url_invalid'
+    );
+  });
+
   it('warns on an unrecognized provider key prefix instead of failing', () => {
     const unrecognized = env({ LETTER_PROVIDER_API_KEY: 'pg_opaque_unit_fixture' });
     expect(ruleIds(unrecognized, 'error')).toEqual([]);

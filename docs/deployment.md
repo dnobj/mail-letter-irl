@@ -241,6 +241,12 @@ at `src/db/index.ts:32-37`. A `?sslmode=require` URL satisfies all three rules.
 | `bucket.region_defaulted` | warning | No bucket region configured | Set it rather than relying on the `auto` default |
 | `config.placeholder_value` | error | A manifest variable holds a placeholder rather than a credential | Replace it with the real value |
 
+### Maintenance
+
+| Rule | Severity | Raised when | Fix |
+|---|---|---|---|
+| `maintenance.heartbeat_url_invalid` | warning | `MAINTENANCE_HEARTBEAT_URL` is set but is not an https URL | Set the monitor's https ping URL, or unset it. The maintenance service prints it at every run (#408) |
+
 ## Development Release Procedure
 
 1. Merge backend and website feature PRs into their `dev` branches.

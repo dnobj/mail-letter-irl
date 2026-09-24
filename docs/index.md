@@ -63,6 +63,7 @@ maintenance job.
 - [Railway Setup](railway-setup.md) - services, commands, variables, Serverless policy
 - [Idle-Cost Operations](idle-cost-operations.md) - cost controls and rollback runbook
 - [Admin Panel Guide](admin-panel-guide.md) - the tailnet-only operator panel in both environments
+- [Operational Acceptance](operational-acceptance.md) - watching, stopping and restoring the service before launch (#408)
 - [Manual Tests](manual-tests.md) - manual acceptance cases and their run records
 - [Testing with the Dummy Provider](testing-dummy-provider.md) - local sends without mailing anything
 - [Testing PostGrid](testing-postgrid.md) - PostGrid in test mode

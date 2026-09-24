@@ -19,6 +19,7 @@ import {
   writeDiagnostic
 } from '../utils/diagnosticLog.js';
 import { assertValidDeploymentConfig } from '../config/deploymentConfig.js';
+import { sendMaintenanceHeartbeat } from '../services/maintenanceHeartbeat.js';
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -306,8 +307,9 @@ export async function runMaintenance(): Promise<void> {
  * validation gate without executing a real maintenance pass.
  */
 export async function maintenanceEntry(): Promise<void> {
+  let validation: ReturnType<typeof assertValidDeploymentConfig>;
   try {
-    assertValidDeploymentConfig(process.env, 'maintenance');
+    validation = assertValidDeploymentConfig(process.env, 'maintenance');
   } catch (error) {
     // Print the validator's message here, where the failure is known to be
     // configuration and the message is value-free by construction.
@@ -318,9 +320,20 @@ export async function maintenanceEntry(): Promise<void> {
     console.error(error instanceof Error ? error.message : String(error));
     throw error;
   }
+  // The warnings the API prints at boot, printed here too: this service owns
+  // settings of its own, such as the heartbeat URL (#408).
+  if (validation.mode !== 'test') {
+    for (const warning of validation.warnings) {
+      console.warn(`[config] ${warning}`);
+    }
+  }
   try {
     await runMaintenance();
     console.log(`[Maintenance] Finished at ${new Date().toISOString()}`);
+    // Only after a run that finished: a monitor stops hearing from a run that
+    // never happens and from one that keeps failing alike (#408).
+    const heartbeat = await sendMaintenanceHeartbeat();
+    if (heartbeat !== 'skipped') console.log(`[Maintenance] Heartbeat ${heartbeat}`);
   } finally {
     closeTempImageStore();
     await closePool();
