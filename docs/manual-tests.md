@@ -1566,7 +1566,7 @@ saved return address. Nothing on it is in flight.
    - the email shows as `e***@erased.invalid`;
    - the letters keep their statuses.
 5. [ ] Call any tool from the (DEV) connector: verify the erased-account sentence, and that nothing ran.
-   Reload the website dashboard: verify the same sentence.
+   Reload the website dashboard: verify the same sentence (needs website #36 on development).
 6. [ ] Delete the Auth0 user in the development tenant. Sign in again with the same method: verify the
    same sentence.
 7. [ ] Preview an erasure of the account again: verify it is refused.

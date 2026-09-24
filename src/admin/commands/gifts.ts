@@ -1,5 +1,6 @@
 import { giftOperatorGenerationsRemaining } from "../../config/giftLetters.js";
 import { normalizeGiftCode } from "../../services/giftCodes.js";
+import { readAccountErased } from "../../services/accountErasureService.js";
 import { grantGiftLettersWithClient } from "../../services/giftLetterService.js";
 import type { AdminSqlClient } from "../database.js";
 import { AdminFoundationError } from "../errors.js";
@@ -16,6 +17,7 @@ import { type CommandDefinition } from "./runner.js";
 
 export interface GiftCommandSeams {
   grantGiftLettersWithClient: typeof grantGiftLettersWithClient;
+  readAccountErased: typeof readAccountErased;
 }
 
 export interface GrantGiftsInput {
@@ -59,7 +61,7 @@ function integerIn(value: string | undefined, min: number, max: number): number 
 }
 
 export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
-  const seams: GiftCommandSeams = { grantGiftLettersWithClient, ...overrides };
+  const seams: GiftCommandSeams = { grantGiftLettersWithClient, readAccountErased, ...overrides };
 
   const grant: CommandDefinition<GrantGiftsInput> = {
     name: "gift.grant",
@@ -86,6 +88,8 @@ export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
     async preview(client, userId, input) {
       const account = await readAccount(client, userId);
       if (!account) throw new AdminFoundationError("ADMIN_NOT_FOUND");
+      // A tombstone (#289) is given nothing (#446 review).
+      if (await seams.readAccountErased(client, userId)) throw new AdminFoundationError("ADMIN_INVALID_STATE");
       const campaign = input.cardCampaignCode ? await seedCampaign(client, input.cardCampaignCode) : null;
       const available = await countAvailable(client, userId);
       const bound = campaign

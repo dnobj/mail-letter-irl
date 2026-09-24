@@ -240,9 +240,24 @@ export async function authenticateRestRequest(
   // answer. It also settles `email`, which this function used to read from the
   // standard `email` claim alone - a claim Auth0 does not put on an access
   // token minted for a custom API, so it was undefined on every request.
-  let email: string | undefined;
+  const account = await prepareRestAccount(user);
+  if (!account.ok) return account;
+  return { ok: true, user: { userId: user.userId, email: account.email, scopes: user.scopes } };
+}
+
+/**
+ * The account behind an authenticated caller, or the refusal to send.
+ *
+ * Shared by authenticateRestRequest and the routes that authenticate without
+ * it (token management), so every REST surface refuses the same callers the
+ * same way. The token routes skipped it until #446's review: an access token
+ * issued before an erasure could still create a named token on the tombstone.
+ */
+export async function prepareRestAccount(
+  user: AuthenticatedUser
+): Promise<{ ok: true; email?: string } | RestAuthFailure> {
   try {
-    email = (await prepareAuthenticatedUser(user)) ?? undefined;
+    return { ok: true, email: (await prepareAuthenticatedUser(user)) ?? undefined };
   } catch (error) {
     if (error instanceof VerifiedEmailRequiredError) return fail('no_account');
     if (error instanceof EmailAlreadyLinkedError) return fail('account_conflict');
@@ -252,5 +267,4 @@ export async function authenticateRestRequest(
     });
     return fail('unavailable');
   }
-  return { ok: true, user: { userId: user.userId, email, scopes: user.scopes } };
 }

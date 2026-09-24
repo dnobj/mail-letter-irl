@@ -9,7 +9,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { LetterIrlServer } from "../server.js";
-import { registerLetterTools } from "./registerTools.js";
+import { registerLetterTools, type RegisterToolsOptions } from "./registerTools.js";
 import { logMcpClientRequests } from "./clientRequestLog.js";
 import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
 import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
@@ -274,14 +274,18 @@ async function serveWidget(
   }
 }
 
-async function createMcpServer(letterServer: LetterIrlServer, authInfo: AuthenticatedUser | null) {
+async function createMcpServer(
+  letterServer: LetterIrlServer,
+  authInfo: AuthenticatedUser | null,
+  options: RegisterToolsOptions = {}
+) {
   const mcpServer = new McpServer({
     name: "letter-irl",
     version: "0.1.0"
   }, {
     instructions: LETTER_IRL_SERVER_INSTRUCTIONS
   });
-  await registerLetterTools(mcpServer, letterServer, authInfo);
+  await registerLetterTools(mcpServer, letterServer, authInfo, options);
   return mcpServer;
 }
 
@@ -336,7 +340,9 @@ export async function startHttpServer() {
       return;
     }
 
-    const sessionServer = await createMcpServer(letterServer, authInfo);
+    // One server for the whole stream, so the account is decided per call
+    // rather than once at connection (#446 review).
+    const sessionServer = await createMcpServer(letterServer, authInfo, { recheckAccountPerCall: true });
 
     const sseTransport = new SSEServerTransport(SSE_MESSAGES_PATH, res, {
       allowedHosts,

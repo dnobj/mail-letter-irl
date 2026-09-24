@@ -1,4 +1,4 @@
-import { transaction } from '../db/index.js';
+import { query, transaction } from '../db/index.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import {
   DRAFT_REDACTION_SET,
@@ -95,13 +95,27 @@ export function erasureBlocked(blockers: ErasureBlockers): boolean {
  * has attempts left (src/services/letterJobService.ts). Any other failed job is
  * finished unless an operator retries it, and the erasure cancels it so that
  * nobody can: a retry after the scrub would mail an empty letter.
+ *
+ * A DISPUTED order never leaves that status: charge.dispute.closed writes it
+ * again rather than restoring the order's earlier one (commerceService). So a
+ * disputed order counts as settled once every dispute on its payment is closed,
+ * won or lost. One with no dispute record at all still holds: that is a state
+ * this cannot explain, and holding is the recoverable mistake (#446 review).
  */
 export async function readErasureBlockers(client: SqlClient, userId: string): Promise<ErasureBlockers> {
   const result = await client.query(
     `SELECT
        (SELECT COUNT(o.order_id) FROM orders o
          WHERE o.user_id = $1
-           AND NOT (o.status = ANY($2::varchar[])))::int AS orders_in_flight,
+           AND NOT (o.status = ANY($2::varchar[]))
+           AND NOT (
+                 o.status = 'disputed'
+             AND EXISTS (SELECT 1 FROM stripe_disputes d
+                          WHERE d.payment_intent_id = o.stripe_payment_intent_id)
+             AND NOT EXISTS (SELECT 1 FROM stripe_disputes d
+                              WHERE d.payment_intent_id = o.stripe_payment_intent_id
+                                AND d.resolved_at IS NULL)
+               ))::int AS orders_in_flight,
        (SELECT COUNT(l.letter_id) FROM letters l
          WHERE l.user_id = $1
            AND NOT (l.status = ANY($3::varchar[])))::int AS letters_in_flight,
@@ -302,11 +316,20 @@ export type ErasureOutcome =
  * Erase one account, inside the caller's transaction, as the database owner.
  *
  * Locks first, in the canonical order (src/services/accountLock.ts): orders,
- * letters, letter_jobs, image_generation_reservations, then the account row.
- * The gate is read after the account row is locked, and a send or checkout
- * locks that row before it writes, so nothing the gate passed can start
- * before this commits. One that was already waiting on the row finds the
- * account blocked when it gets it: the tombstone sets a send block.
+ * letters, letter_jobs, image_generation_reservations, then the account row,
+ * and the gate is read after the account row is locked. What that guarantees,
+ * and what it does not (#446 review):
+ *   - a send, checkout or fulfilment that reaches the account row after this
+ *     took it waits, and then finds the account blocked (the tombstone sets a
+ *     send block) or its caller refused at sign-in;
+ *   - one that already holds its draft when this runs can deadlock with it
+ *     instead, because the send paths take the draft first and no order
+ *     serves both. PostgreSQL aborts one side. If it is this one, the worker
+ *     rolls back to its savepoint and tries again at the next run without
+ *     spending an attempt; the gate then sees whatever the send left behind.
+ *   - a tool call already past sign-in when this commits can still write one
+ *     draft to the tombstone. Nothing reads it, and the daily draft cleanup
+ *     deletes it.
  *
  * Order within the writes matters in one place: the saved copies are found
  * through the drafts, so they are deleted before the drafts are.
@@ -385,6 +408,12 @@ export async function eraseAccountWithClient(client: SqlClient, userId: string):
         AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.draft_id = d.draft_id)`,
     [userId]
   );
+  // A dead link once the gate has passed (no checkout is left open), but a
+  // link into a Stripe session all the same, and readable by the panel.
+  await client.query(
+    `UPDATE orders SET checkout_url = NULL WHERE user_id = $1 AND checkout_url IS NOT NULL`,
+    [userId]
+  );
   const tokens = await client.query(`DELETE FROM personal_access_tokens WHERE user_id = $1`, [userId]);
   const uploads = await client.query(`DELETE FROM recent_uploads WHERE user_id = $1`, [userId]);
   const requests = await client.query(`DELETE FROM feature_requests WHERE user_id = $1`, [userId]);
@@ -460,6 +489,18 @@ export interface AccountErasureRunSummary {
 
 type HandledOperation = keyof AccountErasureRunSummary;
 
+interface ClaimedOperation {
+  id: string;
+  attempts: number;
+}
+
+/**
+ * Lock conflicts, not failures of the erasure: a send or checkout held a row
+ * it needed (deadlock_detected, lock_not_available, serialization_failure).
+ * Tried again at the next run without spending an attempt (#446 review).
+ */
+const LOCK_CONFLICTS = new Set(['40P01', '55P03', '40001']);
+
 /**
  * Carry out queued erasures: the maintenance half.
  *
@@ -481,14 +522,56 @@ export async function processAccountErasures(
 ): Promise<AccountErasureRunSummary> {
   const summary: AccountErasureRunSummary = { erased: 0, refused: 0, retrying: 0, failed: 0 };
   for (let handled = 0; handled < batchLimit; handled += 1) {
-    const outcome = await transaction(async (client) => handleNextErasure(client));
+    const claim: { operation: ClaimedOperation | null } = { operation: null };
+    let outcome: HandledOperation | null;
+    try {
+      outcome = await transaction(async (client) => handleNextErasure(client, claim));
+    } catch (error) {
+      // The bookkeeping itself failed - the claim, the rollback to the
+      // savepoint, or the outcome's own UPDATE - so the transaction rolled back
+      // whole and wrote nothing. Count the attempt outside it, so the cap still
+      // applies, and stop this run: the rest of the queue waits for the next
+      // one rather than for a database that is not answering (#446 review).
+      writeDiagnostic('error', 'account_erasure.bookkeeping_failed', {
+        errorClass: classifyDiagnosticError(error, 'database_error')
+      });
+      if (claim.operation) summary[await recordAttemptOutside(claim.operation)] += 1;
+      break;
+    }
     if (outcome === null) break;
     summary[outcome] += 1;
   }
   return summary;
 }
 
-async function handleNextErasure(client: SqlClient): Promise<HandledOperation | null> {
+/**
+ * The attempt, in a statement of its own, after the operation's transaction
+ * rolled back. Best effort: if this fails too, the next run claims the
+ * operation again with its count unchanged.
+ */
+async function recordAttemptOutside(operation: ClaimedOperation): Promise<'retrying' | 'failed'> {
+  const exhausted = operation.attempts + 1 >= MAX_ERASURE_ATTEMPTS;
+  try {
+    await query(
+      `UPDATE admin_operations
+          SET attempts = attempts + 1,
+              available_at = NOW() + INTERVAL '1 hour',
+              status = CASE WHEN $2::boolean THEN 'failed' ELSE status END,
+              completed_at = CASE WHEN $2::boolean THEN NOW() ELSE completed_at END,
+              error_code = CASE WHEN $2::boolean THEN 'ACCOUNT_ERASURE_ERROR' ELSE error_code END
+        WHERE id = $1 AND status = 'pending'`,
+      [operation.id, exhausted]
+    );
+  } catch {
+    // Not answering either; the next run claims it again.
+  }
+  return exhausted ? 'failed' : 'retrying';
+}
+
+async function handleNextErasure(
+  client: SqlClient,
+  claim: { operation: ClaimedOperation | null }
+): Promise<HandledOperation | null> {
   const claimed = await client.query(
     `SELECT o.id, o.payload_json, o.attempts
        FROM admin_operations o
@@ -503,16 +586,28 @@ async function handleNextErasure(client: SqlClient): Promise<HandledOperation | 
   );
   const operation = claimed.rows[0];
   if (!operation) return null;
+  claim.operation = { id: String(operation.id), attempts: Number(operation.attempts) };
   const payloadUser = operation.payload_json?.userId;
   const userId = typeof payloadUser === 'string' && payloadUser.length > 0 ? payloadUser : null;
 
   await client.query('SAVEPOINT account_erasure');
   let outcome: ErasureOutcome;
   try {
-    outcome = userId ? await eraseAccountWithClient(client, userId) : { outcome: 'not_found' };
+    outcome = userId !== null ? await eraseAccountWithClient(client, userId) : { outcome: 'not_found' };
   } catch (error) {
     await client.query('ROLLBACK TO SAVEPOINT account_erasure');
     const errorClass = classifyDiagnosticError(error, 'database_error');
+    const sqlState = (error as { code?: unknown } | null)?.code;
+    if (typeof sqlState === 'string' && LOCK_CONFLICTS.has(sqlState)) {
+      await client.query(
+        `UPDATE admin_operations
+            SET available_at = NOW() + INTERVAL '1 hour', sanitized_result_json = $2::jsonb
+          WHERE id = $1`,
+        [operation.id, JSON.stringify({ lastErrorClass: errorClass })]
+      );
+      writeDiagnostic('warn', 'account_erasure.lock_conflict', { errorClass });
+      return 'retrying';
+    }
     const exhausted = Number(operation.attempts) + 1 >= MAX_ERASURE_ATTEMPTS;
     if (exhausted) {
       await client.query(

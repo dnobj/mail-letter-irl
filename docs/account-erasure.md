@@ -35,7 +35,8 @@ The unspent balance and unused gift letters are forfeited. If the customer wants
    flight, what will be removed and what will be kept. The command refuses while any of these holds:
    - an open checkout, or a paid order not yet mailed;
    - a letter or mail job still on its way;
-   - an open dispute;
+   - an open dispute (a disputed order counts as settled once every dispute on its payment has closed,
+     won or lost);
    - a refund in progress;
    - an image generation in flight.
 
@@ -72,7 +73,8 @@ an `admin_operations` row. The maintenance service carries it out as the databas
 retention sweep already scrubs content with (`src/services/accountErasureService.ts`). It reads the gate
 again under the account's locks first, because the account can change in the hour between.
 
-An unexpected failure is taken back whole and retried an hour later, three attempts in all. A refusal by
+An unexpected failure is taken back whole and retried an hour later, three attempts in all. A lock
+conflict with a send in progress is retried at the next run without counting against them. A refusal by
 the gate is not retried: an open dispute can take months, and the operator queues again when it settles.
 
 ---
@@ -80,9 +82,13 @@ the gate is not retried: an open dispute can take months, and the operator queue
 ## After erasure
 
 - **Sign-in is refused.** Every sign-in to the erased account gets one sentence pointing at support: in
-  ChatGPT, on the website dashboard and through the API (`AccountErasedError`). This does not wait for the
-  Auth0 deletion: a Google or Apple sign-in brings back the same subject, and a token issued before the
-  erasure stays valid for up to a day.
+  ChatGPT, on the website dashboard and through the API, token management included (`AccountErasedError`).
+  This does not wait for the Auth0 deletion: a Google or Apple sign-in brings back the same subject, and
+  a token issued before the erasure stays valid for up to a day. The dashboard shows the sentence from
+  website #36 on; before that it shows an empty account.
+- **Sessions already open are refused too.** A legacy SSE session opened before the erasure is refused on
+  its next tool call. One tool call already past sign-in at the moment the erasure commits can still write
+  a draft; nothing reads it, and the daily draft cleanup deletes it.
 - **A new account is possible.** The customer can open one with a different sign-in method on the same
   address, because the tombstone no longer holds it.
 - **The upload link may linger briefly.** The API process can hold it in memory for up to six hours.
