@@ -1,6 +1,6 @@
 # Railway Setup Guide
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Exact Railway services, commands, branches, variables, and Serverless policy
 
 Letter IRL uses one Railway project with `production` and `development` environments. Environment isolation is achieved with per-environment variables and branch deployment settings, not separate Railway projects.
@@ -86,7 +86,7 @@ LETTER_IRL_MAIL_SENDING_ENABLED=<true to allow sending; the kill switch>
 LETTER_IRL_BETA_GATE_ENABLED=<true to restrict access to the invited cohort>
 LETTER_IRL_BETA_DAILY_MAIL_CAP=<global letters per day>
 LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP=<letters per account per day>
-LETTER_IRL_BETA_ACCOUNT_DAILY_SPEND_CAP_CENTS=<spend per account per day>
+LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS=<spend per account per day, in cents>
 # Gift letters (docs/gift-letters.md): off unless explicitly true. API service only.
 LETTER_IRL_GIFT_LETTERS_ENABLED=<true to turn the programme on; unset keeps it off>
 LETTER_IRL_GIFT_DAILY_SEND_CAP=<gift sends per UTC day, all accounts; default 20; 0 stops them>
@@ -94,6 +94,8 @@ LETTER_IRL_GIFT_LANDING_BASE_URL=<the website the printed QR opens; default http
 STRIPE_PRICE_REGULAR=<price_ id>
 STRIPE_PRICE_POWER=<price_ id>
 STRIPE_CURRENCY=usd
+# At launch, in both environments: the custom Checkout host (docs/stripe-custom-domain.md, #373).
+STRIPE_CHECKOUT_DOMAIN=<bare host such as pay.letterirl.com; unset keeps checkout.stripe.com only>
 # Amounts are read from these Prices at startup - do not mirror them here (#275).
 ```
 
@@ -107,6 +109,11 @@ and the letters, because nothing but the webhook revokes them. The list is:
   `checkout.session.async_payment_failed`, `checkout.session.expired`
 - `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`
 - `charge.dispute.created`, `charge.dispute.closed`
+
+`OPENAI_APPS_CHALLENGE_TOKEN` holds the ChatGPT plugin portal's domain-verification token (#407).
+The API serves it at `/.well-known/openai-apps-challenge` and answers 404 while it is unset. Set
+it on the production API service when the portal issues a token at submission. The token is
+served publicly, so it is not a secret, but it belongs to the portal's record, not to Git.
 
 Confirm it in the Stripe Dashboard under Developers, Webhooks, for each
 environment's endpoint, and again after any endpoint is recreated.
@@ -186,6 +193,8 @@ Public domain: none
 ```
 
 Reference the same backend variables used by the API, including the environment-specific database and bucket references. The command closes all clients and exits. Investigate any run that is still active near the next hour.
+
+`MAINTENANCE_HEARTBEAT_URL` is the maintenance service's own: an external monitor's ping URL (for example a healthchecks.io check), called after every run that finishes. The monitor alerts when the calls stop, which covers a run that never happens and one that keeps failing ([operational-acceptance.md](operational-acceptance.md), #408). Unset, nothing is called. It must be https; anything else only warns (`maintenance.heartbeat_url_invalid`). It is a capability, so keep it in Railway only.
 
 ## Website Settings
 

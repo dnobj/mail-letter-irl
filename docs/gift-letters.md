@@ -34,11 +34,11 @@ Every gift letter prints a card. Which one depends on the gift letter being sent
 
 | Condition | Card | Code |
 |-----------|------|------|
-| Bound by an operator to a live seed campaign | Funded | The campaign's own code, multi-use |
+| Bound by an operator to a live seed campaign that still has claims to give | Funded | The campaign's own code, multi-use |
 | Budget above zero | Funded | A new chain code, single-use, worth one gift letter with budget less one |
 | Budget zero | Plain ("Sent with Letter IRL") | None |
 
-The code is minted **inside the send transaction**, never at preview time, so abandoned drafts leave no redeemable codes behind. The preview draws a placeholder where the code will print.
+A chain code is minted **inside the send transaction**, never at preview time, so abandoned drafts leave no redeemable codes behind; its preview draws a placeholder where the code will print. A seed campaign's code exists before the send, so a seed-bound letter's preview shows it, with the campaign's end date as its redeem-by date (#433). The send decides the card again by the same rule. If a claim fills the campaign's cap, or an operator pauses or ends the campaign, between the preview and the send, the letter prints its own card from the rows below. The preview the customer approved, which the dashboard keeps as the letter's preview, still shows the campaign's code; `letters.content.giftCard` records the card that printed, and the send's status line says whether it carries a gift code.
 
 The fine print follows the code. A chain code's card says "The code works once." ("One use." on a postcard). A seed code is shared on purpose, so its card says "Each person can use the code once, while it lasts." ("One use per person, while it lasts."). When the campaign is limited to new accounts, it adds "For new Letter IRL customers." On a postcard the strip says "New customers only. One use per person.", so its fine print stays at two lines. The redeem rule counts anyone with a purchase or spend on record as not new, however recent the account, so the card says customers, not accounts. The preview shows the same wording as the print.
 
@@ -53,6 +53,10 @@ A chain code is never minted if a promo campaign's code reads as it once normali
 ### Seed codes
 
 A seed code is an ordinary promo campaign with `gift_generations_remaining` set. It is multi-use by design: a press or influencer letter is photographed and shared, and a single-use code would turn away everyone after the first reader. Its bound is the campaign's `max_total_redemptions`. An operator makes seeded letters print it by granting gift letters with the campaign code filled in.
+
+At its cap every claim is refused, so a campaign that has reached it stops printing its code: a bound letter sent then prints its own card instead, a new chain code if it has budget and the plain card if not (#435). The claim page still says the code has been claimed as many times as it allows. The send, the preview, the claim page's lookup and the admin panel's grant preview all decide by one rule (`seedCodeHold`): a campaign that is not active, has not started, is past its end date or is at its cap does not print its code, and the grant preview says which before binding letters to it. Refusals of a seed code speak of a gift code, as a chain code's do, whether the code is redeemed or only checked (`GET /api/promo/validate/:code`): for example "This gift code has been claimed as many times as it allows." and "This gift code is for new Letter IRL customers." (#432).
+
+An ordinary campaign must grant letters. A campaign with 0 credits used to be a preview-gate access code; redeeming one failed on the ledger, so redemption now refuses it, the admin panel will not create one, and migration 034 ended the three that 007 seeded (#420). Only a seed campaign may carry 0 credits, because it grants a gift letter instead.
 
 ### Print
 
@@ -84,7 +88,7 @@ One entry point, [codeRedemptionService.ts](../src/services/codeRedemptionServic
 
 Chain codes are tried first (one primary-key read); anything else goes to promo campaigns, which covers seed codes and ordinary codes. Nothing depends on ChatGPT: a person can claim on the website and the entitlement waits in the account. A web composer, if one is built, is a new route over the same send service.
 
-The claim page is `letterirl.com/g/<code>` (the QR) or `letterirl.com/g` with the code typed in. It stores the code in a cookie across sign-in and redeems it on the first dashboard load, the same pattern as the preview gate's pending promo code.
+The claim page is `letterirl.com/g/<code>` (the QR) or `letterirl.com/g` with the code typed in. It stores the code in a cookie across sign-in and redeems it on the first dashboard load.
 
 ## Rules
 
@@ -130,7 +134,7 @@ The most a single pack grant can cost is its own letter plus one child: about $2
 **Seeding a press or influencer letter** (admin panel):
 
 1. Optionally create a seed campaign on **Promos**: credits 0, a budget in the seed field, a total cap, and "New accounts only". Activate it.
-2. On the person's account page, **Grant gift letters**: a quantity, a budget, and the seed campaign's code if their letters should print it.
+2. On the person's account page, **Grant gift letters**: a quantity, a budget, and the seed campaign's code if their letters should print it. The budget is what a bound letter falls back to once the campaign is at its cap.
 3. Their gift sends print the card. **Gifts** shows the totals and the newest codes; any issued code can be voided there.
 
 ## Platform policy

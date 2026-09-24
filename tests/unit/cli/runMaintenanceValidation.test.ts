@@ -22,6 +22,7 @@ const services = vi.hoisted(() => ({
   runStatusSync: vi.fn().mockResolvedValue(undefined),
   purgeExpiredRecentUploads: vi.fn().mockResolvedValue(0),
   purgeExpiredFeatureRequests: vi.fn().mockResolvedValue(0),
+  sendMaintenanceHeartbeat: vi.fn().mockResolvedValue('sent'),
   closePool: vi.fn().mockResolvedValue(undefined)
 }));
 
@@ -65,6 +66,10 @@ vi.mock('../../../src/services/featureRequestService.js', () => ({
 }));
 vi.mock('../../../src/db/index.js', () => ({
   closePool: services.closePool
+}));
+vi.mock('../../../src/services/maintenanceHeartbeat.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/maintenanceHeartbeat.js')>()),
+  sendMaintenanceHeartbeat: services.sendMaintenanceHeartbeat
 }));
 
 import { maintenanceEntry, writeMaintenanceFailure } from '../../../src/cli/runMaintenance.js';
@@ -114,6 +119,7 @@ describe('maintenance deployment validation', () => {
     expect(services.runMaintenanceTaskIfDue).not.toHaveBeenCalled();
     expect(services.purgeExpiredRecentUploads).not.toHaveBeenCalled();
     expect(services.purgeExpiredFeatureRequests).not.toHaveBeenCalled();
+    expect(services.sendMaintenanceHeartbeat).not.toHaveBeenCalled();
 
     // Review round 1: the class-only failure diagnostic left the operator
     // with one word. The config failure itself must name its variables on
@@ -132,6 +138,32 @@ describe('maintenance deployment validation', () => {
     expect(services.runCommerceMaintenance).toHaveBeenCalledTimes(1);
     expect(services.closePool).toHaveBeenCalledTimes(1);
     expect(services.closeTempImageStore).toHaveBeenCalledTimes(1);
+    // The heartbeat follows a finished run, and only then (#408).
+    expect(services.sendMaintenanceHeartbeat).toHaveBeenCalledTimes(1);
+    expect(services.sendMaintenanceHeartbeat.mock.invocationCallOrder[0]).toBeGreaterThan(
+      services.processDueLetterJobs.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('prints the validator\'s warnings, so an unusable heartbeat URL shows in the maintenance log (#408)', async () => {
+    const output = captureOutput();
+    stubValidDevelopment();
+    vi.stubEnv('MAINTENANCE_HEARTBEAT_URL', 'http://hc-ping.com/abc');
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(output()).toContain('[config] MAINTENANCE_HEARTBEAT_URL must be an https URL');
+  });
+
+  it('sends no heartbeat after a run that failed, so the monitor raises the alarm (#408)', async () => {
+    stubValidDevelopment();
+    services.runCommerceMaintenance.mockRejectedValueOnce(new Error('stripe down'));
+
+    await expect(maintenanceEntry()).rejects.toThrow('stripe down');
+
+    expect(services.sendMaintenanceHeartbeat).not.toHaveBeenCalled();
+    // The pool still closes.
+    expect(services.closePool).toHaveBeenCalledTimes(1);
   });
 
   it('labels a configuration failure configuration_error in the maintenance diagnostic', async () => {

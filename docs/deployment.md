@@ -1,6 +1,6 @@
 # Deployment Guide
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Release process, environment checks, boot validation rules, and migration safety
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
@@ -206,6 +206,7 @@ development state in another.
 | `stripe.live_key_required` | error | `STRIPE_SECRET_KEY` is not `sk_live_`/`rk_live_` in production | Use the live key |
 | `stripe.live_key_outside_production` | error | A live Stripe key outside production | Use the test key — this one charges real cards |
 | `stripe.webhook_secret_malformed` | error in production, else warning | `STRIPE_WEBHOOK_SECRET` does not begin `whsec_` | Copy it again from the Stripe endpoint |
+| `stripe.checkout_domain_invalid` | error in production, else warning | `STRIPE_CHECKOUT_DOMAIN` is set but is not a bare host name | Set the host alone, such as `pay.letterirl.com` (#373) |
 | `stripe.pack_price_incomplete` | error in production, else warning | A `STRIPE_PRICE_*` is missing or is not a `price_…` id | Set every pack price id. Amounts come from the Price itself (#275), never from an env var |
 | `stripe.jit_config_incomplete` | error in production, else warning | `JIT_PURCHASE_ENABLED=true` with a missing or malformed `STRIPE_JIT_*_PRICE_ID` | Set the price ids, or turn Pay & Send off |
 | `stripe.currency_unset` | warning | `STRIPE_CURRENCY` is unset | Set it to match the currency the Prices are denominated in |
@@ -240,6 +241,12 @@ at `src/db/index.ts:32-37`. A `?sslmode=require` URL satisfies all three rules.
 | `bucket.config_required` | error | `TEMP_IMAGE_STORE=memory` in production | Configure the bucket credentials; memory storage loses images on restart |
 | `bucket.region_defaulted` | warning | No bucket region configured | Set it rather than relying on the `auto` default |
 | `config.placeholder_value` | error | A manifest variable holds a placeholder rather than a credential | Replace it with the real value |
+
+### Maintenance
+
+| Rule | Severity | Raised when | Fix |
+|---|---|---|---|
+| `maintenance.heartbeat_url_invalid` | warning | `MAINTENANCE_HEARTBEAT_URL` is set but is not an https URL | Set the monitor's https ping URL, or unset it. The maintenance service prints it at every run (#408) |
 
 ## Development Release Procedure
 

@@ -188,6 +188,7 @@ describe('validateDeploymentConfig in production', () => {
     ['missing STRIPE_WEBHOOK_SECRET', { STRIPE_WEBHOOK_SECRET: undefined }, 'presence.stripe_webhook_secret'],
     ['test-mode Stripe key', { STRIPE_SECRET_KEY: 'sk_test_unit_fixture' }, 'stripe.live_key_required'],
     ['malformed webhook secret', { STRIPE_WEBHOOK_SECRET: 'not_a_webhook_secret' }, 'stripe.webhook_secret_malformed'],
+    ['checkout domain with a scheme (#373)', { STRIPE_CHECKOUT_DOMAIN: 'https://pay.letterirl.com' }, 'stripe.checkout_domain_invalid'],
     ['missing pack price', { STRIPE_PRICE_STARTER: undefined }, 'stripe.pack_price_incomplete'],
     ['pack price without price_ prefix', { STRIPE_PRICE_REGULAR: 'prod_something' }, 'stripe.pack_price_incomplete'],
     // NOT here: a padded price id. The catalog trims before resolving, so it
@@ -224,6 +225,13 @@ describe('validateDeploymentConfig in production', () => {
     expect(ruleIds(env(overrides), 'error')).toContain(expectedRule);
   });
 
+  it('accepts a bare custom checkout domain, and only warns about a bad one outside production (#373)', () => {
+    expect(ruleIds(env({ STRIPE_CHECKOUT_DOMAIN: 'pay.letterirl.com' }))).not.toContain('stripe.checkout_domain_invalid');
+    const dev = env({ STRIPE_CHECKOUT_DOMAIN: 'pay.letterirl.com/' }, VALID_DEV);
+    expect(ruleIds(dev, 'error')).not.toContain('stripe.checkout_domain_invalid');
+    expect(ruleIds(dev, 'warning')).toContain('stripe.checkout_domain_invalid');
+  });
+
   it('accepts bucket configuration through the alias chains', () => {
     const aliased = env({
       TEMP_IMAGE_BUCKET_NAME: undefined,
@@ -232,6 +240,15 @@ describe('validateDeploymentConfig in production', () => {
       AWS_ACCESS_KEY_ID: 'unit-fixture-access-key'
     });
     expect(validateDeploymentConfig(aliased, 'server').errors).toEqual([]);
+  });
+
+  it('warns, never fails, on a maintenance heartbeat URL that is not https (#408)', () => {
+    const bad = env({ MAINTENANCE_HEARTBEAT_URL: 'http://hc-ping.com/abc' });
+    expect(ruleIds(bad, 'error')).not.toContain('maintenance.heartbeat_url_invalid');
+    expect(ruleIds(bad, 'warning')).toContain('maintenance.heartbeat_url_invalid');
+    expect(ruleIds(env({ MAINTENANCE_HEARTBEAT_URL: 'https://hc-ping.com/abc' }))).not.toContain(
+      'maintenance.heartbeat_url_invalid'
+    );
   });
 
   it('warns on an unrecognized provider key prefix instead of failing', () => {

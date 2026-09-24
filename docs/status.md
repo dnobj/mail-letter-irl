@@ -1,6 +1,6 @@
 # Letter IRL Project Status
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Current product scope, architecture, environment state, and open work
 
 ---
@@ -36,14 +36,16 @@ ChatGPT, and manage their account on letterirl.com.
   is carried out as an erasure. The operator queues it from the admin panel, and maintenance removes
   the content and identity and keeps the money records, anonymised ([account-erasure.md](account-erasure.md)).
 
-The MCP surface is 22 tools and 6 widgets ([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)).
+The MCP surface is 23 tools and 6 widgets ([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)).
 Tool names and schemas are treated as stable compatibility contracts. Widget template URIs are
-versioned (`WIDGET_TEMPLATE_VERSION`, 35 on `dev`). Since v32 the two image letter tools each have
+versioned (`WIDGET_TEMPLATE_VERSION`, 37 on `dev`). Since v32 the two image letter tools each have
 their own template name, served from the letter card (#411). Since v33 every card shows the
 website's mark, and an empty preview or pack card suggests a higher thinking effort to Instant users.
 Since v34 an empty image letter or postcard card lets the person choose or upload an image that the
 card cannot pass back, and previews it by link (#414). Since v35 a send or checkout refused because the same
-mail went out in the last 24 hours offers **Send another copy** or **Pay for another copy** (#412).
+mail went out in the last 24 hours offers **Send another copy** or **Pay for another copy** (#412). Since v36 a gift
+letter preview shows the card the recipient receives ([gift-letters.md](gift-letters.md)). Since v37 a refused call
+shows the server's sentence rather than the host's wrapper around it (#434).
 
 ## Environments
 
@@ -61,20 +63,19 @@ See [infrastructure.md](infrastructure.md) for identifiers and URLs.
 
 ### What is promoted
 
-Production (`master`) was last promoted on 2026-09-14 and carries migrations through
-`031_provider_error_minimisation.sql`. `dev` is ahead with the retention follow-ups that are not yet
-in production:
+Production (`master`) was last promoted on 2026-09-16 (#416, `27e160a`) and carries migrations
+through `032_error_text_minimisation.sql`. The next promotion is the launch version (#158). `dev` is
+ahead with:
 
-- deletion of stale upload links 24 hours after the last upload (#397);
-- deletion of feature requests 12 months after submission (#400);
-- error classes instead of message text in the remaining writers, and migration
-  `032_error_text_minimisation.sql` (#401);
-- the related documentation (#391, #392, #399);
-- one account per confirmed email address, with the four `@unknown.com` placeholder addresses
-  removed and the account row opened on the REST and checkout paths as well as the MCP one. **Its
-  Auth0 half is manual and per tenant**: the two Post Login Actions and the `Account Linking`
-  machine-to-machine application must be in place in a tenant before the code that depends on them
-  is deployed against it, and LINK-01 run afterwards.
+- the website's logo on every card and the Instant tip (#417), and chat-image recovery (#418);
+- the same-mail check before a second send or checkout (#419);
+- gift letters and migration `033_gift_letters.sql` (#422), with the admin fixes from GIFT-01 (#431);
+- one account per confirmed email address (#423), with the four `@unknown.com` placeholder
+  addresses removed and the account row opened on the REST and checkout paths as well as the MCP
+  one. **Its Auth0 half is manual and per tenant**: the two Post Login Actions and the
+  `Account Linking` machine-to-machine application must be in place in a tenant before the code that
+  depends on them is deployed against it, and LINK-01 run afterwards;
+- the identity scopes and the profile tool ChatGPT identifies a connected account with (#425, #426).
 
 ## Architecture
 
