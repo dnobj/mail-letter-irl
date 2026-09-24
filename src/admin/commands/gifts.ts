@@ -1,6 +1,6 @@
+import { readAccountErased } from "../../services/accountErasureService.js";
 import { giftOperatorGenerationsRemaining } from "../../config/giftLetters.js";
 import { normalizeGiftCode } from "../../services/giftCodes.js";
-import { readAccountErased } from "../../services/accountErasureService.js";
 import { grantGiftLettersWithClient } from "../../services/giftLetterService.js";
 import type { AdminSqlClient } from "../database.js";
 import { AdminFoundationError } from "../errors.js";
