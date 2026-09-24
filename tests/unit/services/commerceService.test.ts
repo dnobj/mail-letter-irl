@@ -509,6 +509,26 @@ describe('commerceService', () => {
     );
   });
 
+  it('names the pack in the purchase line the customer reads, never its internal code (#460)', async () => {
+    const pendingPackOrder = {
+      ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4',
+      credits: 4, amount_cents: 500, draft_id: undefined, status: 'checkout_pending'
+    };
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+      if (sql.includes('SELECT * FROM orders')) return { rows: [pendingPackOrder] };
+      return { rows: [] };
+    });
+
+    await expect(processStripeWebhookEvent(checkoutEvent({ amount_total: 500 }) as any))
+      .resolves.toMatchObject({ status: 'fulfilled' });
+
+    expect(mocks.addCredits).toHaveBeenCalledTimes(1);
+    const grant = mocks.addCredits.mock.calls[0][1] as { description: string };
+    expect(grant.description).toBe('Purchased Starter Pack - 2 Letters');
+    expect(grant.description).not.toContain('credit-pack');
+  });
+
   describe('gift letters with a pack (docs/gift-letters.md)', () => {
     const pendingPackOrder = {
       ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4',

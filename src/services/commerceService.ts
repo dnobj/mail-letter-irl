@@ -1514,6 +1514,7 @@ async function transitionPaidCheckout(
 
   if (order.order_type === 'letter_pack') {
     const credits = order.credits || 0;
+    const packProduct = PACK_PRODUCTS.find(product => product.productCode === order.product_code);
     await addCreditsToLedgerWithClient(client, {
       userId: order.user_id,
       email: session.customer_email || session.customer_details?.email || undefined,
@@ -1529,7 +1530,10 @@ async function transitionPaidCheckout(
         currency: order.currency
       },
       expirationDays: PURCHASE_CREDIT_EXPIRY_DAYS,
-      description: `Purchased ${order.product_code} via Stripe Checkout`
+      // The customer reads this line in their history (the website's Letter
+      // Packs page), so it names the pack as the shop does, never by its
+      // internal product code (#460).
+      description: `Purchased ${packProduct?.name ?? 'a letter pack'}`
     });
     await grantImageEntitlementWithClient(client, {
       userId: order.user_id,
@@ -1541,7 +1545,6 @@ async function transitionPaidCheckout(
     // docs/gift-letters.md. Only while the programme is on: a pack bought
     // with it off grants none, and turning it on later does not backfill.
     // Idempotent per order, like the two grants above.
-    const packProduct = PACK_PRODUCTS.find(product => product.productCode === order.product_code);
     if (packProduct && packProduct.giftLetters > 0 && isGiftLettersEnabled()) {
       await grantGiftLettersWithClient(client, {
         userId: order.user_id,
