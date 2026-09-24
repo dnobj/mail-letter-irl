@@ -1,6 +1,6 @@
 # Letter IRL Project Status
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Current product scope, architecture, environment state, and open work
 
 ---
@@ -34,7 +34,7 @@ ChatGPT, and manage their account on letterirl.com.
   ([account-switching-guide.md](account-switching-guide.md),
   [auth0-tenant-configuration.md](auth0-tenant-configuration.md)).
 
-The MCP surface is 22 tools and 6 widgets ([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)).
+The MCP surface is 23 tools and 6 widgets ([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)).
 Tool names and schemas are treated as stable compatibility contracts. Widget template URIs are
 versioned (`WIDGET_TEMPLATE_VERSION`, 35 on `dev`). Since v32 the two image letter tools each have
 their own template name, served from the letter card (#411). Since v33 every card shows the

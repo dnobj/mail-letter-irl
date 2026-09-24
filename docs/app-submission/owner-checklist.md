@@ -1,6 +1,6 @@
 # OpenAI Apps SDK Owner Checklist
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Owner-managed submission tasks, assets, and the final readiness gate
 
 This checklist tracks the non-code items the project owner needs to gather, verify, or decide before submitting Letter IRL for OpenAI Apps SDK review. Keep secrets, private billing details, private tax IDs, and passwords out of this file.
@@ -65,28 +65,36 @@ Remaining:
 - [ ] Use user-facing language: `Letter Packs`, `pre-paid letter sends`, or `letters remaining`.
 - [ ] Avoid user-facing submission language that frames the product as generic digital `credits`, `tokens`, or a subscription.
 - [ ] Confirm submission materials explain that Letter Packs are prepaid physical mail sends for real USPS letters/postcards.
-- [ ] Confirm checkout occurs externally on `letterirl.com`, not embedded inside the ChatGPT app experience.
-- [ ] Confirm reviewer materials describe purchases as simulated/test-mode when using development, or provide a reviewer account with preloaded letter sends.
+- [ ] Describe checkout as it runs: a card opens Letter IRL's own start page
+      (`https://api.letterirl.com/purchase/start`), which hands off to Stripe-hosted Checkout, and
+      nothing is paid inside the widget. Never claim embedded payment. If Stripe's custom domain is
+      adopted (#373), update this line.
+- [ ] The listing sells physical mail only: no digital generation credits, and no upsell of
+      image-generation capacity.
+- [ ] Reviewers use production and the prepared reviewer account, with letters preloaded; nothing in
+      the reviewer materials points at development.
 
 ### Submission Assets
 
 - [ ] Confirm final app name: `Letter IRL`.
 - [ ] Confirm final app icon/logo URL: `https://letterirl.com/logo.jpg`.
-- [ ] Capture final screenshots from production-ready flows.
-- [ ] Locate previously recorded demo videos.
-- [ ] Review demo videos against `docs/app-submission/demo-scenarios.md`.
-- [ ] Decide whether existing demo videos are final, need edits, or should be re-recorded.
-- [ ] Store or link final demo asset locations in this checklist.
+- [ ] Screenshots and demo videos are optional in the current review guide. Capture them if they
+      help reviewers follow a flow, against `docs/app-submission/demo-scenarios.md`, and link them
+      here; they do not block submission.
 - [ ] Confirm app description and short metadata match `docs/chatgpt-app-submission.md`.
 - [ ] Confirm localization fields, if required by the submission portal.
 
 ### Reviewer Materials
 
 - [ ] Finalize reviewer test prompts and expected responses in `docs/app-submission/openai-test-cases.md`.
-- [ ] Prepare a reviewer test account or reviewer-friendly login path, if OpenAI requests one.
-- [ ] Prepare a reviewer Letter Pack, promo code, or preloaded letter-send path so reviewers can test send flows without paying.
+- [ ] Prepare the reviewer account in [Reviewer Setup](./openai-test-cases.md#reviewer-setup): email
+      and password, a confirmed address, no multi-factor step, prepaid letters for every case, a
+      saved return address and one earlier letter. Its credentials go in the portal's reviewer
+      notes, never in Git.
+- [ ] Give reviewers a controlled mail address that Letter IRL receives, in the reviewer notes.
 - [ ] Confirm reviewer instructions clearly state that Letter IRL sends real physical USPS mail.
-- [ ] Confirm reviewer instructions explain that users must buy pre-paid letter sends before mailing.
+- [ ] Confirm reviewer instructions explain that sending needs payment: prepaid letters, or Pay &
+      Send for a single letter.
 - [ ] Confirm reviewer instructions explain preview-before-send and explicit confirmation behavior.
 - [ ] Document any known limitations or mitigations, especially mobile image handoff limitations.
 
@@ -99,9 +107,63 @@ Remaining:
 - [ ] Test upload fallback path.
 - [ ] Test insufficient letter balance flow.
 - [ ] Test explicit send confirmation in a controlled environment.
+- [ ] Run the [commerce and safeguard cases](./openai-test-cases.md#commerce-and-safeguard-cases):
+      pack checkout, Pay & Send, pending and failed payment, duplicate confirmation, image
+      generations used up, and the upload fallback.
 - [ ] Test account balance and order status.
 - [ ] Test OAuth linking with a fresh account.
 - [x] Verify production MCP endpoint and OAuth endpoints are live. May 31, 2026 check: `api.letterirl.com` manifest, OAuth metadata, MCP CORS preflight, and unauthenticated auth challenge all advertise the canonical production domain.
+
+## Plugin Portal Gates
+
+The portal's submission steps as of September 2026 (With MCP, Universal endpoint;
+`https://developers.openai.com/plugins/deploy/submission`). Record each gate's outcome in the
+[release record](#release-record) below.
+
+- [ ] **Access.** The submitting account has Apps Management write access in `Objective Works` /
+      `Mail Letter IRL`.
+- [ ] **Listing.** Name, descriptions, logo, category, website, support, privacy and terms URLs,
+      and release notes, matching `docs/chatgpt-app-submission.md`.
+- [ ] **Domain verification.** In MCP configuration the portal issues a token for
+      `https://api.letterirl.com/mcp`; the challenge host is the MCP host. Set
+      `OPENAI_APPS_CHALLENGE_TOKEN` on the production API service, wait for the redeploy, and check
+      that `curl -si -A 'OpenAI-Domain-Verification' https://api.letterirl.com/.well-known/openai-apps-challenge`
+      answers 200 with the token as the whole body. Then press Verify. The path answers 404 while the
+      variable is unset.
+- [ ] **Scan Tools.** The portal discovers all 23 tools with their annotations. Record any warning.
+- [ ] **Starter prompts.** Prompts a reviewer can run as written, from `openai-test-cases.md`.
+- [ ] **Test cases.** Five positive and three negative, from `openai-test-cases.md` (#406).
+- [ ] **Availability.** United States only.
+- [ ] **Attestations and submit.**
+- [ ] **Publish.** A separate step after approval. Publish, refresh the production connector, and
+      repeat the final manual pass.
+
+### Guidance changes to re-check before submitting
+
+- [ ] **Configurable permission prompts (June 2026).** A fresh end-to-end test in ChatGPT that each
+      destructive tool's annotation still brings the host's prompt, and that the app's own
+      confirmation (the preview and the explicit send) still stands on top of it.
+- [x] **`openai/visibility` deprecated for `_meta.ui.visibility` (July 2026).** Neither key is used
+      in `src/`, so nothing needs migrating (checked 2026-09-23).
+- [ ] **Stable OAuth callback and CIMD id (August 2026).** They rely on RFC 9207 issuer
+      identification, which the production Auth0 discovery did not advertise on 2026-09-16. Keep
+      the imported CIMD client; do not swap it for the stable URL without testing the swap.
+
+## Release Record
+
+One row per gate for the submitted version. Evidence is sanitised: status codes, commit ids,
+timestamps and screenshot names, never tokens, cookies or personal data.
+
+| Gate | Date | Commit | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Domain verification | | | production | | |
+| Scan Tools | | | production | | |
+| Starter prompts | | | production | | |
+| Test cases (5 positive, 3 negative) | | | production | | |
+| Permission prompts, end to end | | | production | | |
+| Final manual pass | | | production | | |
+| Submitted | | | production | | |
+| Approved and published | | | production | | |
 
 ## Demo Video Tracking
 
@@ -121,7 +183,7 @@ Do not submit until all are true:
 - [x] OpenAI organization verification is approved.
 - [x] Owner role and project eligibility are confirmed.
 - [ ] Production app, MCP server, OAuth, widget CSP, privacy policy, and terms are verified. MCP server and OAuth endpoints passed canonical-domain checks on May 31, 2026.
-- [ ] Final screenshots and demo/video assets are ready.
+- [ ] Every plugin portal gate above has passed and is recorded in the release record.
 - [ ] Reviewer prompts and instructions are final.
 - [ ] Submission language consistently uses Letter Packs / pre-paid letter sends for user-facing commerce.
 - [ ] Known limitations are documented honestly.
