@@ -1,3 +1,4 @@
+import type { ErasureOperationView } from "../../services/accountErasureService.js";
 import type { AccountDetail } from "../queries/accounts.js";
 import type { EntitlementView } from "../queries/images.js";
 import type { OrderDetail } from "../queries/orders.js";
@@ -63,6 +64,50 @@ ${table(
   ]),
   "none.",
 )}`;
+}
+
+/**
+ * Erasure, last on the account page (#289): where the account stands, and the
+ * entry point to the preview when it can be erased. The result shown is the
+ * worker's own record, counts and codes only.
+ */
+export function accountErasurePanel(input: {
+  userId: string;
+  erased: boolean;
+  erasure: ErasureOperationView | null;
+  mode: string;
+}): SafeHtml {
+  const { erasure } = input;
+  const form = html`<form method="get" action="/commands/account.erase/preview" class="inline">
+  <input type="hidden" name="target" value="${input.userId}">
+  <button type="submit">Preview erasing this account…</button>
+</form>`;
+  let body: SafeHtml;
+  if (input.erased) {
+    // Two operators confirming at once queue two erasures; the second finds
+    // the account already erased, and the counts are on the first.
+    const byEarlier = erasure?.result?.alreadyErased === true;
+    body = html`<p>Erased${erasure?.completedAt ? html` ${when(erasure.completedAt)}` : ""}. The Auth0 user with this id is deleted by hand, in the tenant (docs/account-erasure.md).</p>
+${
+  byEarlier
+    ? html`<p class="muted">The newest erasure found the account already erased; the counts are on the one before it.</p>`
+    : erasure?.result
+      ? html`<p class="muted mono">${JSON.stringify(erasure.result)}</p>`
+      : ""
+}`;
+  } else if (erasure && (erasure.status === "pending" || erasure.status === "processing")) {
+    body = html`<p>Erasure queued ${when(erasure.requestedAt)}. The next hourly maintenance run carries it out${erasure.attempts > 0 ? html`; ${erasure.attempts} attempts so far` : ""}.</p>`;
+  } else if (erasure?.status === "failed") {
+    body = html`<p>The last erasure did not run: <span class="mono">${erasure.errorCode ?? "unknown"}</span>${erasure.completedAt ? html`, ${when(erasure.completedAt)}` : ""}.</p>
+${erasure.result ? html`<p class="muted mono">${JSON.stringify(erasure.result)}</p>` : ""}
+${form}`;
+  } else {
+    body = html`<p class="muted">Removes the email, the saved address, letter content and addresses, drafts, uploads, access tokens, feature requests and unredeemed gift codes. Orders, the ledger, disputes and refunds are kept, without personal details.</p>
+${form}`;
+  }
+  return html`<h2>Erase account</h2>
+${body}
+${input.mode !== "full" ? html`<p class="muted">Read-only mode: the preview works, queuing is refused.</p>` : ""}`;
 }
 
 /** The quarantine release on the order page, shown only while quarantined. */

@@ -266,6 +266,35 @@
         return result?.structuredContent || result || {};
       }
 
+      // A refusal reaches this card's own callTool as a rejection whose
+      // message wraps the server's sentence in the host's Python-style repr
+      // (#434), for example:
+      //   Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling
+      //   MCP tool: [TextContent(type='text', text='<sentence>', annotations=None, meta=None)]
+      // Show the first sentence alone, read as Python writes a string: in
+      // double quotes when it holds a ' and no ", otherwise in single quotes
+      // with a backslash before each '; with \\, \n, \t and \r escaped, and
+      // \x, \u or \U hex for a character that does not print. Anything else
+      // shows as it came.
+      function readableError(error) {
+        const message =
+          typeof error === "string" ? error : typeof error?.message === "string" ? error.message : "";
+        const wrapped = message.match(/TextContent\(type=['"]text['"], text=(['"])((?:\\[\s\S]|(?!\1)[^\\])*)\1/);
+        if (wrapped) {
+          const sentence = wrapped[2]
+            .replace(/\\(x[0-9a-f]{2}|u[0-9a-f]{4}|U[0-9a-f]{8}|[\s\S])/g, (_, escape) => {
+              if (escape.length > 1) {
+                const point = parseInt(escape.slice(1), 16);
+                return point <= 0x10ffff ? String.fromCodePoint(point) : "";
+              }
+              return escape === "n" || escape === "t" ? " " : escape === "r" ? "" : escape;
+            })
+            .trim();
+          if (sentence) return sentence;
+        }
+        return message || "Unknown error";
+      }
+
       function canCallTools() {
         return typeof window.openai?.callTool === "function";
       }
@@ -358,7 +387,7 @@
         } catch (error) {
           // Not a fallback to the smallest pack: after a click that means
           // "show me the options", a surprise purchase is the worst outcome.
-          showRetryError(`Unable to load letter packs: ${error?.message || "Unknown error"}`);
+          showRetryError(`Unable to load letter packs: ${readableError(error)}`);
           button.textContent = "Choose a pack";
         } finally {
           retryBusy = false;
@@ -414,7 +443,7 @@
         } catch (error) {
           // The button stays: the customer can try again, and the message the
           // tool returns is already written for them.
-          showRetryError(`Unable to create the checkout: ${error?.message || "Unknown error"}`);
+          showRetryError(`Unable to create the checkout: ${readableError(error)}`);
           button.textContent = label;
         } finally {
           retryBusy = false;
@@ -442,7 +471,7 @@
           retryResult = result;
           render();
         } catch (error) {
-          el("err").textContent = `Unable to create the checkout: ${error?.message || "Unknown error"}`;
+          el("err").textContent = `Unable to create the checkout: ${readableError(error)}`;
           el("err").classList.remove("hidden");
         } finally {
           retryBusy = false;

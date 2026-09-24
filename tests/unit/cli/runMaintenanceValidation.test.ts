@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const services = vi.hoisted(() => ({
   processDueLetterJobs: vi.fn().mockResolvedValue({ processed: 0 }),
+  processAccountErasures: vi.fn().mockResolvedValue({ erased: 0, refused: 0, retrying: 0, failed: 0 }),
   runCommerceMaintenance: vi.fn().mockResolvedValue({}),
   reconcileGenerationReservations: vi.fn().mockResolvedValue({}),
   cleanupExpiredImages: vi.fn().mockResolvedValue(0),
@@ -20,11 +21,15 @@ const services = vi.hoisted(() => ({
   runStatusSync: vi.fn().mockResolvedValue(undefined),
   purgeExpiredRecentUploads: vi.fn().mockResolvedValue(0),
   purgeExpiredFeatureRequests: vi.fn().mockResolvedValue(0),
+  sendMaintenanceHeartbeat: vi.fn().mockResolvedValue('sent'),
   closePool: vi.fn().mockResolvedValue(undefined)
 }));
 
 vi.mock('../../../src/services/letterJobService.js', () => ({
   processDueLetterJobs: services.processDueLetterJobs
+}));
+vi.mock('../../../src/services/accountErasureService.js', () => ({
+  processAccountErasures: services.processAccountErasures
 }));
 vi.mock('../../../src/services/packRefundService.js', () => ({
   reconcilePackRefunds: async () => ({ retried: 0, adopted: 0, settled: 0, compensated: 0 })
@@ -56,6 +61,10 @@ vi.mock('../../../src/services/featureRequestService.js', () => ({
 }));
 vi.mock('../../../src/db/index.js', () => ({
   closePool: services.closePool
+}));
+vi.mock('../../../src/services/maintenanceHeartbeat.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/maintenanceHeartbeat.js')>()),
+  sendMaintenanceHeartbeat: services.sendMaintenanceHeartbeat
 }));
 
 import { maintenanceEntry, writeMaintenanceFailure } from '../../../src/cli/runMaintenance.js';
@@ -105,6 +114,7 @@ describe('maintenance deployment validation', () => {
     expect(services.runMaintenanceTaskIfDue).not.toHaveBeenCalled();
     expect(services.purgeExpiredRecentUploads).not.toHaveBeenCalled();
     expect(services.purgeExpiredFeatureRequests).not.toHaveBeenCalled();
+    expect(services.sendMaintenanceHeartbeat).not.toHaveBeenCalled();
 
     // Review round 1: the class-only failure diagnostic left the operator
     // with one word. The config failure itself must name its variables on
@@ -123,6 +133,32 @@ describe('maintenance deployment validation', () => {
     expect(services.runCommerceMaintenance).toHaveBeenCalledTimes(1);
     expect(services.closePool).toHaveBeenCalledTimes(1);
     expect(services.closeTempImageStore).toHaveBeenCalledTimes(1);
+    // The heartbeat follows a finished run, and only then (#408).
+    expect(services.sendMaintenanceHeartbeat).toHaveBeenCalledTimes(1);
+    expect(services.sendMaintenanceHeartbeat.mock.invocationCallOrder[0]).toBeGreaterThan(
+      services.processDueLetterJobs.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('prints the validator\'s warnings, so an unusable heartbeat URL shows in the maintenance log (#408)', async () => {
+    const output = captureOutput();
+    stubValidDevelopment();
+    vi.stubEnv('MAINTENANCE_HEARTBEAT_URL', 'http://hc-ping.com/abc');
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(output()).toContain('[config] MAINTENANCE_HEARTBEAT_URL must be an https URL');
+  });
+
+  it('sends no heartbeat after a run that failed, so the monitor raises the alarm (#408)', async () => {
+    stubValidDevelopment();
+    services.runCommerceMaintenance.mockRejectedValueOnce(new Error('stripe down'));
+
+    await expect(maintenanceEntry()).rejects.toThrow('stripe down');
+
+    expect(services.sendMaintenanceHeartbeat).not.toHaveBeenCalled();
+    // The pool still closes.
+    expect(services.closePool).toHaveBeenCalledTimes(1);
   });
 
   it('labels a configuration failure configuration_error in the maintenance diagnostic', async () => {
@@ -379,6 +415,88 @@ describe('maintenance deployment validation', () => {
       releaseSweep?.();
       await expect(entry).resolves.toBeUndefined();
       expect(services.processDueLetterJobs).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * Issue #289. The admin panel queues erasures it cannot perform itself; this
+   * task carries them out. Wrapped like the sweeps: a failure must not stop
+   * mail, and what reaches maintenance_tasks.last_error is a class.
+   */
+  describe('account erasures', () => {
+    afterEach(() => {
+      services.runMaintenanceTaskIfDue.mockReset().mockResolvedValue({ ran: false });
+      services.processAccountErasures.mockReset().mockResolvedValue({ erased: 0, refused: 0, retrying: 0, failed: 0 });
+    });
+
+    it('is scheduled on every hourly run, under its own task name, after the sweeps', async () => {
+      stubValidDevelopment();
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      const names = services.runMaintenanceTaskIfDue.mock.calls.map(([name]) => name);
+      const call = services.runMaintenanceTaskIfDue.mock.calls.find(([name]) => name === 'account-erasures');
+      expect(call).toBeDefined();
+      expect(call?.[1]).toBeGreaterThan(0);
+      expect(call?.[1]).toBeLessThan(60 * 60 * 1000);
+      expect(names.indexOf('account-erasures')).toBeGreaterThan(names.indexOf('feature-requests-sweep'));
+      expect(names.indexOf('account-erasures')).toBeLessThan(names.indexOf('provider-status-sync'));
+    });
+
+    it('logs the counts when it runs, and nothing else', async () => {
+      stubValidDevelopment();
+      const output = captureOutput();
+      services.processAccountErasures.mockResolvedValueOnce({ erased: 1, refused: 2, retrying: 0, failed: 0 });
+      services.runMaintenanceTaskIfDue.mockImplementation((async (name, _interval, task) =>
+        name === 'account-erasures' ? { ran: true, result: await task() } : { ran: false }) as TaskRunner);
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      expect(services.processAccountErasures).toHaveBeenCalledTimes(1);
+      const logged = output();
+      expect(logged).toContain('Account erasures completed');
+      expect(logged).toContain('"event":"account_erasure.run"');
+      expect(logged).toContain('"erased":1');
+      expect(logged).toContain('"refused":2');
+      expect(logged).not.toContain('account_erasure.task_failed');
+    });
+
+    it('cannot stop mail or the rest of maintenance, or leak what the driver said, when it fails', async () => {
+      stubValidDevelopment();
+      const output = captureOutput();
+      const driverError = Object.assign(
+        new Error('connect ETIMEDOUT while erasing auth0|secret-subject for person@example.invalid'),
+        { code: 'ETIMEDOUT' }
+      );
+      services.processAccountErasures.mockRejectedValueOnce(driverError);
+      let rethrown: unknown;
+      services.runMaintenanceTaskIfDue.mockImplementation((async (name, _interval, task) => {
+        if (name !== 'account-erasures') return { ran: false };
+        try {
+          return { ran: true, result: await task() };
+        } catch (error) {
+          rethrown = error;
+          throw error;
+        }
+      }) as TaskRunner);
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      expect(services.processDueLetterJobs).toHaveBeenCalledTimes(1);
+      expect(services.runCommerceMaintenance).toHaveBeenCalledTimes(1);
+      const names = services.runMaintenanceTaskIfDue.mock.calls.map(([name]) => name);
+      expect(names).toContain('provider-status-sync');
+      expect(names).toContain('daily-credit-and-draft-cleanup');
+
+      expect((rethrown as Error).message).toContain('ETIMEDOUT');
+      expect((rethrown as Error).message).not.toContain('secret-subject');
+      expect((rethrown as { diagnosticClass?: string }).diagnosticClass).toBe('ETIMEDOUT');
+
+      const logged = output();
+      expect(logged).toContain('"event":"account_erasure.task_failed"');
+      expect(logged).toContain('"errorClass":"ETIMEDOUT"');
+      expect(logged).not.toContain('secret-subject');
+      expect(logged).not.toContain('example.invalid');
     });
   });
 });

@@ -24,6 +24,11 @@ vi.mock('../../../src/services/patService.js', async importOriginal => ({
   revokeToken: vi.fn()
 }));
 
+// The account behind the caller (#446 review): opened or found, unless a test refuses it.
+vi.mock('../../../src/auth/identity.js', () => ({
+  prepareAuthenticatedUser: vi.fn().mockResolvedValue('person@example.com')
+}));
+
 vi.mock('../../../src/api/middleware/rateLimit.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/api/middleware/rateLimit.js')>()),
   rateLimitAccount: vi.fn()
@@ -41,6 +46,8 @@ import {
 } from '../../../src/services/patService.js';
 import { rateLimitAccount } from '../../../src/api/middleware/rateLimit.js';
 import { handlePATApiRequest } from '../../../src/api/patApiHandler.js';
+import { prepareAuthenticatedUser } from '../../../src/auth/identity.js';
+import { AccountErasedError, ACCOUNT_ERASED_MESSAGE } from '../../../src/auth/accountErased.js';
 
 const ALL = ['mail:read', 'mail:draft', 'mail:send'];
 
@@ -204,5 +211,18 @@ describe('personal access token routes', () => {
 
     expect(rateLimitAccount).toHaveBeenCalledWith(req, res, 'auth0|user-1', 'api_account');
     expect(listTokens).not.toHaveBeenCalled();
+  });
+  it('refuses an erased account before any route runs (#446 review)', async () => {
+    // An access token issued before the erasure is valid for up to a day; it
+    // must not create a named token on the tombstone.
+    vi.mocked(validateAuthorizationHeader).mockResolvedValue(jwt(ALL));
+    vi.mocked(prepareAuthenticatedUser).mockRejectedValueOnce(new AccountErasedError());
+    const { res, state } = response();
+
+    await handlePATApiRequest(request('POST', { name: 'Laptop' }), res, '/api/tokens');
+
+    expect(state.status).toBe(403);
+    expect(JSON.parse(state.body)).toEqual({ error: 'Forbidden', message: ACCOUNT_ERASED_MESSAGE });
+    expect(createToken).not.toHaveBeenCalled();
   });
 });

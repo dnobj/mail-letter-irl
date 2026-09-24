@@ -1,10 +1,11 @@
+import { readAccountErased } from "../../services/accountErasureService.js";
 import { giftOperatorGenerationsRemaining } from "../../config/giftLetters.js";
 import { normalizeGiftCode } from "../../services/giftCodes.js";
-import { grantGiftLettersWithClient } from "../../services/giftLetterService.js";
+import { grantGiftLettersWithClient, seedCodeHold, type SeedCodeHold } from "../../services/giftLetterService.js";
 import type { AdminSqlClient } from "../database.js";
 import { AdminFoundationError } from "../errors.js";
 import { readGiftCode } from "../queries/gifts.js";
-import { readCampaignByCode } from "../queries/promos.js";
+import { readCampaignByCode, type CampaignView } from "../queries/promos.js";
 import { type CommandDefinition } from "./runner.js";
 
 /**
@@ -16,6 +17,7 @@ import { type CommandDefinition } from "./runner.js";
 
 export interface GiftCommandSeams {
   grantGiftLettersWithClient: typeof grantGiftLettersWithClient;
+  readAccountErased: typeof readAccountErased;
 }
 
 export interface GrantGiftsInput {
@@ -52,6 +54,41 @@ async function seedCampaign(client: AdminSqlClient, code: string) {
   return campaign;
 }
 
+const NOT_LIVE: Record<string, string> = {
+  draft: "is still a draft",
+  paused: "is paused",
+  ended: "has ended",
+  expired: "has expired",
+};
+
+const HELD_BACK: Record<SeedCodeHold, (campaign: CampaignView) => string> = {
+  not_seed: () => "is not a seed campaign",
+  not_live: (campaign) => NOT_LIVE[campaign.status] ?? `is ${campaign.status}`,
+  not_started: () => "has not started yet",
+  ended: () => "is past its end date",
+  at_cap: (campaign) =>
+    `has been claimed as many times as it allows (${campaign.currentRedemptions} of ${campaign.maxTotalRedemptions})`,
+};
+
+/**
+ * Why a letter bound to this campaign and sent now would not print its code,
+ * or null when it would. The send decides with the same rule, so the preview
+ * cannot promise a card the print does not draw.
+ */
+function codeHeldBack(campaign: CampaignView): string | null {
+  const hold = seedCodeHold({
+    campaign_id: campaign.campaignId,
+    code: campaign.code,
+    status: campaign.status,
+    starts_at: campaign.startsAt,
+    ends_at: campaign.endsAt,
+    max_total_redemptions: campaign.maxTotalRedemptions,
+    current_redemptions: campaign.currentRedemptions,
+    gift_generations_remaining: campaign.giftGenerationsRemaining,
+  });
+  return hold === null ? null : HELD_BACK[hold](campaign);
+}
+
 function integerIn(value: string | undefined, min: number, max: number): number | null {
   if (value === undefined || !/^\d{1,4}$/.test(value.trim())) return null;
   const parsed = Number(value.trim());
@@ -59,7 +96,7 @@ function integerIn(value: string | undefined, min: number, max: number): number 
 }
 
 export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
-  const seams: GiftCommandSeams = { grantGiftLettersWithClient, ...overrides };
+  const seams: GiftCommandSeams = { grantGiftLettersWithClient, readAccountErased, ...overrides };
 
   const grant: CommandDefinition<GrantGiftsInput> = {
     name: "gift.grant",
@@ -86,10 +123,26 @@ export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
     async preview(client, userId, input) {
       const account = await readAccount(client, userId);
       if (!account) throw new AdminFoundationError("ADMIN_NOT_FOUND");
+      // A tombstone (#289) is given nothing (#446 review).
+      if (await seams.readAccountErased(client, userId)) throw new AdminFoundationError("ADMIN_INVALID_STATE");
       const campaign = input.cardCampaignCode ? await seedCampaign(client, input.cardCampaignCode) : null;
       const available = await countAvailable(client, userId);
+      // Each letter's card is decided when it is sent. A campaign that is not
+      // live, or is at its cap (#435), does not print its code, so a letter
+      // sent then prints its own card; say so before granting.
+      const heldBack = campaign ? codeHeldBack(campaign) : null;
+      const ownCard = input.generationsRemaining > 0 ? "a new single-use code" : "the plain Letter IRL card";
+      const card = campaign
+        ? heldBack === null
+          ? `seed code ${campaign.code}`
+          : `seed code ${campaign.code}, not printing now: ${ownCard} instead`
+        : input.generationsRemaining > 0
+          ? "single-use chain code"
+          : "plain Letter IRL card";
+      const cap =
+        campaign === null || campaign.maxTotalRedemptions === null ? "no cap" : `${campaign.maxTotalRedemptions} claims`;
       const bound = campaign
-        ? `each letter prints ${campaign.code}, capped by that campaign (${campaign.maxTotalRedemptions ?? "no cap"} claims)`
+        ? `each letter prints ${campaign.code}, capped by that campaign (${cap}), or its own card while that code does not print (at most ${input.generationsRemaining} further free letters each)`
         : `at most ${input.quantity * input.generationsRemaining} further free letters descend from these`;
       return {
         targetId: account.userId,
@@ -99,12 +152,15 @@ export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
           ["Account", account.userId],
           ["Gift letters now", String(available)],
           ["Grant", `${input.quantity} gift ${input.quantity === 1 ? "letter" : "letters"}`],
-          ["Card", campaign ? `seed code ${campaign.code}` : input.generationsRemaining > 0 ? "single-use chain code" : "plain Letter IRL card"],
+          ["Card", card],
           ["Budget per letter", String(input.generationsRemaining)],
           ["Cost bound", bound],
         ],
         warnings: [
           "Each gift letter is a free send that Letter IRL pays postage for. Recorded as an operator grant with the command id; replaying the command cannot grant twice.",
+          ...(campaign && heldBack !== null
+            ? [`${campaign.code} ${heldBack}, so a letter bound to it and sent now prints its own card instead: ${ownCard}.`]
+            : []),
         ],
       };
     },

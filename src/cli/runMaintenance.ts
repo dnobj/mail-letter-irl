@@ -11,6 +11,7 @@ import { reconcilePackRefunds } from '../services/packRefundService.js';
 import { runRetentionPreview, runRetentionSweep } from '../services/retentionService.js';
 import { purgeExpiredRecentUploads } from '../services/recentUploadStore.js';
 import { purgeExpiredFeatureRequests } from '../services/featureRequestService.js';
+import { processAccountErasures } from '../services/accountErasureService.js';
 import { enabledUnlessDisabled, positiveIntegerSetting } from '../utils/envSettings.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
 import {
@@ -19,6 +20,7 @@ import {
   writeDiagnostic
 } from '../utils/diagnosticLog.js';
 import { assertValidDeploymentConfig } from '../config/deploymentConfig.js';
+import { sendMaintenanceHeartbeat } from '../services/maintenanceHeartbeat.js';
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -248,6 +250,46 @@ async function runFeatureRequestsSweep(): Promise<void> {
   }
 }
 
+/**
+ * Carry out the erasures the admin panel has queued (#289). The panel's role
+ * cannot scrub an account and is not meant to; this run, as the database
+ * owner, does (src/services/accountErasureService.ts).
+ *
+ * Same wrapper as the sweeps above, for the same reasons: it never throws, so
+ * a failure here cannot skip mail dispatch, and inside the task a failure is
+ * rethrown as its class. Every run, so a queued erasure waits an hour at most.
+ */
+const ACCOUNT_ERASURE_INTERVAL_MS = 30 * 60 * 1000;
+
+async function runAccountErasures(): Promise<void> {
+  try {
+    const run = await runMaintenanceTaskIfDue(
+      'account-erasures',
+      ACCOUNT_ERASURE_INTERVAL_MS,
+      async () => {
+        try {
+          return await processAccountErasures();
+        } catch (error) {
+          const errorClass =
+            carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+          throw Object.assign(new Error(`account erasures failed: ${errorClass}`), {
+            diagnosticClass: errorClass
+          });
+        }
+      }
+    );
+    console.log(`[Maintenance] Account erasures ${run.ran ? 'completed' : 'not due'}`);
+    if (run.ran && run.result) {
+      // Counts only - never an account id.
+      writeDiagnostic('info', 'account_erasure.run', { ...run.result });
+    }
+  } catch (error) {
+    writeDiagnostic('error', 'account_erasure.task_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
 export async function runMaintenance(): Promise<void> {
   // Was Math.max(1, Number.parseInt(...)), the shape envSettings exists to
   // replace: '1e3' parses to 1, so a request for 1000 dispatched ONE letter a
@@ -266,6 +308,9 @@ export async function runMaintenance(): Promise<void> {
   await runRecentUploadsSweep();
   // Same wrapper, same reason; it runs after the uploads sweep (#393).
   await runFeatureRequestsSweep();
+  // Also wrapped. Its gate holds back any account with mail still queued, so
+  // running before the outbox cannot race a send (#289).
+  await runAccountErasures();
 
   const outbox = await processDueLetterJobs(batchLimit);
   console.log('[Maintenance] Outbox summary:', outbox);
@@ -306,8 +351,9 @@ export async function runMaintenance(): Promise<void> {
  * validation gate without executing a real maintenance pass.
  */
 export async function maintenanceEntry(): Promise<void> {
+  let validation: ReturnType<typeof assertValidDeploymentConfig>;
   try {
-    assertValidDeploymentConfig(process.env, 'maintenance');
+    validation = assertValidDeploymentConfig(process.env, 'maintenance');
   } catch (error) {
     // Print the validator's message here, where the failure is known to be
     // configuration and the message is value-free by construction.
@@ -318,9 +364,20 @@ export async function maintenanceEntry(): Promise<void> {
     console.error(error instanceof Error ? error.message : String(error));
     throw error;
   }
+  // The warnings the API prints at boot, printed here too: this service owns
+  // settings of its own, such as the heartbeat URL (#408).
+  if (validation.mode !== 'test') {
+    for (const warning of validation.warnings) {
+      console.warn(`[config] ${warning}`);
+    }
+  }
   try {
     await runMaintenance();
     console.log(`[Maintenance] Finished at ${new Date().toISOString()}`);
+    // Only after a run that finished: a monitor stops hearing from a run that
+    // never happens and from one that keeps failing alike (#408).
+    const heartbeat = await sendMaintenanceHeartbeat();
+    if (heartbeat !== 'skipped') console.log(`[Maintenance] Heartbeat ${heartbeat}`);
   } finally {
     closeTempImageStore();
     await closePool();

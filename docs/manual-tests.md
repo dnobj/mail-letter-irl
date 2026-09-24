@@ -1544,6 +1544,38 @@ caught it when the panel shipped.
 **Pass criteria:** Promo status follows the documented machine with version checks; image recovery is
 reachable and audited.
 
+### ERASE-01 — Account erasure (development)
+
+**Status:** Not run.
+
+**Preconditions:** A disposable development test account that has signed in on the website and in the
+(DEV) ChatGPT connector, has sent a letter that is now `delivered` or `failed`, and holds a draft and a
+saved return address. Nothing on it is in flight.
+
+**Steps:**
+
+1. [ ] Open the account in the panel. Under **Erase account**, preview. Verify that "Still in flight" says
+   nothing, that the counts match the account, and that no email appears anywhere in the preview.
+2. [ ] Start a Pay & Send checkout on the account and leave it open. Preview again: verify it names one
+   order not settled and that confirming is refused. Let the checkout expire (or cancel it), then preview again.
+3. [ ] Confirm with the development phrase and a reason with no personal details. Verify the account page
+   says the erasure is queued, and that `/audit` shows `account.erase` with counts only.
+4. [ ] After the next hourly maintenance run (the `account-erasures` task on `/maintenance`), verify on
+   the account page:
+   - erased, with counts;
+   - the email shows as `e***@erased.invalid`;
+   - the letters keep their statuses.
+5. [ ] Call any tool from the (DEV) connector: verify the erased-account sentence, and that nothing ran.
+   Reload the website dashboard: verify the same sentence (needs website #36 on development).
+6. [ ] Delete the Auth0 user in the development tenant. Sign in again with the same method: verify the
+   same sentence.
+7. [ ] Preview an erasure of the account again: verify it is refused.
+
+**Pass criteria:**
+- Nothing is queued while money or mail is moving.
+- The erased account keeps its money records and loses its content and identity.
+- Every sign-in path refuses it with one sentence.
+
 ### ADMIN-OPS-01 — Retention report and quarantine listing
 
 **Steps:**

@@ -1,6 +1,6 @@
 # ChatGPT App Submission
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** How the codebase lines up with OpenAI's submission requirements
 
 This document is a derived checklist for Letter IRL's OpenAI submission. Official OpenAI and MCP docs are the source of truth; this file tracks how the current codebase lines up with them.
@@ -39,6 +39,9 @@ For owner-managed submission tasks such as organization verification, screenshot
 - [x] Read/write and destructive annotations align with actual side effects: the two send tools, `set_return_address` and both checkouts are marked destructive because their outcomes cannot be undone ([learnings/tool-annotation-decision.md](learnings/tool-annotation-decision.md), September 2026 addendum)
 - [x] Runtime-derived manifest and widget inventory
 - [x] First-run onboarding surface (`get_started`)
+- [x] Domain verification: `/.well-known/openai-apps-challenge` serves the portal's token from
+      `OPENAI_APPS_CHALLENGE_TOKEN`, as plain text and never cached, and answers 404 while it is
+      unset (`src/mcp/appsChallenge.ts`, #407)
 
 ## Pre-submission commands
 
@@ -80,7 +83,8 @@ npm run build
 - [x] Review the production widget CSP and confirm it allows only the exact required domains (issue #228; one deliberate exclusion - the Azure blob host behind Library picks - recorded in `docs/learnings/widget-csp-enforcement.md`)
 - [ ] After the app leaves dev mode, confirm the widget header no longer shows the "CSP off" pill. This cannot be checked on a dev-mode connector, where enforcement is off regardless of what we declare.
 - [ ] Review submission copy for Letter Packs / pre-paid letter sends wording and remove generic credit/token framing from user-facing materials
-- [ ] Capture final submission assets: logo, screenshots, app description, company URL, privacy policy URL, support contact, and localization fields
+- [ ] Capture final submission assets: logo, app description, company URL, privacy policy URL, support contact, and localization fields; screenshots and demo videos are optional
+- [ ] Pass the plugin portal gates in `docs/app-submission/owner-checklist.md` (domain verification, Scan Tools, starter prompts, five positive and three negative test cases, publish after approval) and record each in its release record
 - [ ] Locate and review final demo videos using `docs/app-submission/owner-checklist.md`
 - [ ] Finalize reviewer test prompts and expected responses using `docs/app-submission/openai-test-cases.md`
 - [ ] Run the full pre-submission command checklist against production-ready code
@@ -91,11 +95,14 @@ npm run build
 
 - All submissions must come from a verified individual or organization.
 - Only users with the `Owner` role can submit apps for review.
-- Submission currently requires a publicly accessible MCP server, a defined widget CSP, screenshots, test prompts/responses, company and privacy policy URLs, and localization information.
+- Submission requires a publicly accessible MCP server, a defined widget CSP, company, support and privacy policy URLs, starter prompts, and five positive plus three negative test cases (checked 2026-09-23).
+- The portal verifies the MCP domain by fetching its token from `/.well-known/openai-apps-challenge` on the MCP host or a parent host, runs Scan Tools over the MCP server, and after approval leaves publishing to the developer.
+- Screenshots are optional in the current review guide.
 - Review is tied to the exact submitted version. If you need to change it while under review, withdraw and resubmit the draft.
 
 ## Source links
 
+- OpenAI plugin submission: `https://developers.openai.com/plugins/deploy/submission`
 - OpenAI Apps SDK submission guidelines: `https://developers.openai.com/apps-sdk/app-submission-guidelines/`
 - OpenAI metadata guidance: `https://developers.openai.com/apps-sdk/build/optimize-metadata/`
 - OpenAI auth guidance: `https://developers.openai.com/apps-sdk/build/auth/`

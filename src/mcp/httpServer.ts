@@ -9,7 +9,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { LetterIrlServer } from "../server.js";
-import { registerLetterTools } from "./registerTools.js";
+import { registerLetterTools, type RegisterToolsOptions } from "./registerTools.js";
 import { logMcpClientRequests } from "./clientRequestLog.js";
 import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
 import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
@@ -66,6 +66,7 @@ import { kickPriceCatalog } from "../services/priceCatalog.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 import { resolveCorsOriginFor } from "./corsOrigin.js";
 import { installProcessGuards, withRequestBoundary } from "./requestBoundary.js";
+import { APPS_CHALLENGE_PATH, appsChallengeResponse } from "./appsChallenge.js";
 import { logRestRequestOnFinish } from "../api/restRequestLog.js";
 import { OAUTH_NOT_CONFIGURED } from "../auth/oauthErrors.js";
 
@@ -274,14 +275,18 @@ async function serveWidget(
   }
 }
 
-async function createMcpServer(letterServer: LetterIrlServer, authInfo: AuthenticatedUser | null) {
+async function createMcpServer(
+  letterServer: LetterIrlServer,
+  authInfo: AuthenticatedUser | null,
+  options: RegisterToolsOptions = {}
+) {
   const mcpServer = new McpServer({
     name: "letter-irl",
     version: "0.1.0"
   }, {
     instructions: LETTER_IRL_SERVER_INSTRUCTIONS
   });
-  await registerLetterTools(mcpServer, letterServer, authInfo);
+  await registerLetterTools(mcpServer, letterServer, authInfo, options);
   return mcpServer;
 }
 
@@ -336,7 +341,9 @@ export async function startHttpServer() {
       return;
     }
 
-    const sessionServer = await createMcpServer(letterServer, authInfo);
+    // One server for the whole stream, so the account is decided per call
+    // rather than once at connection (#446 review).
+    const sessionServer = await createMcpServer(letterServer, authInfo, { recheckAccountPerCall: true });
 
     const sseTransport = new SSEServerTransport(SSE_MESSAGES_PATH, res, {
       allowedHosts,
@@ -449,6 +456,14 @@ export async function startHttpServer() {
       res.setHeader("X-Build-Branch", BUILD_BRANCH);
       res.setHeader("Cache-Control", "no-store");
       res.end("ok");
+      return;
+    }
+
+    if (url.pathname === APPS_CHALLENGE_PATH) {
+      // The plugin portal's domain verification (src/mcp/appsChallenge.ts).
+      const answer = appsChallengeResponse(req.method);
+      res.writeHead(answer.status, answer.headers);
+      res.end(answer.body);
       return;
     }
 

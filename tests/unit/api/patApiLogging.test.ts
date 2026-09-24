@@ -19,6 +19,10 @@ vi.mock("../../../src/services/patService.js", async (importOriginal) => ({
   revokeToken: vi.fn()
 }));
 
+vi.mock("../../../src/auth/identity.js", () => ({
+  prepareAuthenticatedUser: vi.fn().mockResolvedValue("person@example.com")
+}));
+
 vi.mock("../../../src/api/middleware/rateLimit.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../src/api/middleware/rateLimit.js")>()),
   rateLimitAccount: vi.fn().mockResolvedValue(false)

@@ -42,6 +42,7 @@ import {
   EmailAlreadyLinkedError,
   EMAIL_ALREADY_LINKED_MESSAGE
 } from '../../services/userService.js';
+import { AccountErasedError, ACCOUNT_ERASED_MESSAGE } from '../../auth/accountErased.js';
 import type { ProductScope } from '../../auth/toolScopes.js';
 import { insufficientScope } from './restAuth.js';
 
@@ -142,6 +143,10 @@ export async function authenticateHttpRequest(
     }
     if (error instanceof EmailAlreadyLinkedError) {
       respond(res, 409, { error: EMAIL_ALREADY_LINKED_MESSAGE });
+      return null;
+    }
+    if (error instanceof AccountErasedError) {
+      respond(res, 403, { error: ACCOUNT_ERASED_MESSAGE });
       return null;
     }
     throw error;

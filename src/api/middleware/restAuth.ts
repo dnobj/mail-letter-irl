@@ -55,6 +55,7 @@ import {
   EmailAlreadyLinkedError,
   EMAIL_ALREADY_LINKED_MESSAGE
 } from '../../services/userService.js';
+import { AccountErasedError, ACCOUNT_ERASED_MESSAGE } from '../../auth/accountErased.js';
 import type { ProductScope } from '../../auth/toolScopes.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../../utils/diagnosticLog.js';
 
@@ -72,6 +73,7 @@ export type RestAuthFailureReason =
   | 'forbidden'
   | 'no_account'
   | 'account_conflict'
+  | 'account_erased'
   | 'unavailable'
   | 'insufficient_scope';
 
@@ -96,6 +98,7 @@ const MESSAGES: Record<RestAuthFailureReason, string> = {
   forbidden: BETA_ACCESS_MESSAGE,
   no_account: VERIFIED_EMAIL_MESSAGE,
   account_conflict: EMAIL_ALREADY_LINKED_MESSAGE,
+  account_erased: ACCOUNT_ERASED_MESSAGE,
   unavailable: 'The account could not be read. Please try again.',
   insufficient_scope: 'The bearer token does not grant this action'
 };
@@ -124,6 +127,9 @@ const STATUS: Record<RestAuthFailureReason, number> = {
   // 409, because two accounts want one address and only the customer can say
   // which sign-in method is theirs.
   account_conflict: 409,
+  // The account was erased at the customer's request (#289). Nothing a new
+  // token could change.
+  account_erased: 403,
   insufficient_scope: 403
 };
 
@@ -234,16 +240,31 @@ export async function authenticateRestRequest(
   // answer. It also settles `email`, which this function used to read from the
   // standard `email` claim alone - a claim Auth0 does not put on an access
   // token minted for a custom API, so it was undefined on every request.
-  let email: string | undefined;
+  const account = await prepareRestAccount(user);
+  if (!account.ok) return account;
+  return { ok: true, user: { userId: user.userId, email: account.email, scopes: user.scopes } };
+}
+
+/**
+ * The account behind an authenticated caller, or the refusal to send.
+ *
+ * Shared by authenticateRestRequest and the routes that authenticate without
+ * it (token management), so every REST surface refuses the same callers the
+ * same way. The token routes skipped it until #446's review: an access token
+ * issued before an erasure could still create a named token on the tombstone.
+ */
+export async function prepareRestAccount(
+  user: AuthenticatedUser
+): Promise<{ ok: true; email?: string } | RestAuthFailure> {
   try {
-    email = (await prepareAuthenticatedUser(user)) ?? undefined;
+    return { ok: true, email: (await prepareAuthenticatedUser(user)) ?? undefined };
   } catch (error) {
     if (error instanceof VerifiedEmailRequiredError) return fail('no_account');
     if (error instanceof EmailAlreadyLinkedError) return fail('account_conflict');
+    if (error instanceof AccountErasedError) return fail('account_erased');
     writeDiagnostic('error', 'auth.account_preparation_failed', {
       errorClass: classifyDiagnosticError(error, 'database_error')
     });
     return fail('unavailable');
   }
-  return { ok: true, user: { userId: user.userId, email, scopes: user.scopes } };
 }

@@ -17,6 +17,7 @@ vi.mock("../../../src/services/userService.js", () => ({
 
 import { findUser } from "../../../src/services/userService.js";
 import { getProfileTool } from "../../../src/tools/getProfile.js";
+import { AccountErasedError } from "../../../src/auth/accountErased.js";
 
 const mockFindUser = findUser as ReturnType<typeof vi.fn>;
 
@@ -70,6 +71,15 @@ describe("get_profile", () => {
     await expect(getProfileTool.handler({}, context("auth0|missing"))).rejects.toThrow(
       /confirmed email address/
     );
+  });
+
+  it("refuses an erased account rather than handing out its placeholder address (#289)", async () => {
+    mockFindUser.mockResolvedValue({
+      user_id: "google-oauth2|100",
+      email: "erased-1b9d6bcd@erased.invalid",
+      erased_at: new Date("2026-09-24T00:00:00Z")
+    });
+    await expect(getProfileTool.handler({}, context("google-oauth2|100"))).rejects.toBeInstanceOf(AccountErasedError);
   });
 
   it("omits email rather than inventing one when the row has none", async () => {

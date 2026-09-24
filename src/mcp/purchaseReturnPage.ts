@@ -1,3 +1,5 @@
+import { checkoutHosts } from '../config/checkoutDomain.js';
+
 /**
  * The Stripe return trip: the start page a ChatGPT card opens, and the page
  * a customer lands on after paying or cancelling a Checkout Session.
@@ -41,7 +43,6 @@ export const RETURN_COOKIE_MAX_AGE_SECONDS = 24 * 60 * 60;
 export const IOS_RETURN_LINK_VERIFIED = false;
 
 const CHATGPT_HOSTS = new Set(['chatgpt.com', 'www.chatgpt.com', 'chat.openai.com']);
-const CHECKOUT_HOSTS = new Set(['checkout.stripe.com']);
 
 export function isApplePhoneOrTablet(userAgent: string | undefined): boolean {
   return /\b(iPhone|iPad|iPod)\b/i.test(userAgent ?? '');
@@ -73,14 +74,21 @@ export function parseChatgptReturnUrl(value: string | null | undefined): string 
   return httpsUrlOnHosts(value, CHATGPT_HOSTS);
 }
 
-/** The checkout the start page may forward to: Stripe's hosted page only. */
+/**
+ * The checkout the start page may forward to: Stripe's hosted page only, on
+ * checkout.stripe.com or on our custom checkout domain when one is set
+ * (src/config/checkoutDomain.ts, #373). Read per request, like the rest of
+ * the configuration this page depends on.
+ */
 export function parseCheckoutTarget(value: string | null | undefined): string | null {
-  return httpsUrlOnHosts(value, CHECKOUT_HOSTS);
+  return httpsUrlOnHosts(value, checkoutHosts());
 }
 
 export function returnCookieHeader(chatgptUrl: string): string {
   // Lax, not Strict: the customer comes back from checkout.stripe.com by a
   // top-level navigation, and Strict cookies are withheld on exactly that.
+  // From our own checkout domain (#373) the return is same-site, and Lax
+  // still holds.
   return `${RETURN_COOKIE_NAME}=${encodeURIComponent(chatgptUrl)}; Max-Age=${RETURN_COOKIE_MAX_AGE_SECONDS}; Path=/purchase; Secure; HttpOnly; SameSite=Lax`;
 }
 

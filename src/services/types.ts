@@ -22,6 +22,8 @@ export interface User {
   tier_calculated_at: Date;
   created_at: Date;
   updated_at: Date;
+  /** Set when the account was erased (#289); sign-in refuses such an account. */
+  erased_at?: Date | null;
 }
 
 export interface CreateUserParams {
@@ -444,9 +446,24 @@ export interface RedeemPromoResult {
   error?: string;
 }
 
+/**
+ * Why a promo campaign's code was refused, as a stable code beside the
+ * English `reason`. A seed campaign's code is a gift code, so its refusals are
+ * worded from this code instead of from the promo sentence (#432).
+ */
+export type PromoRefusalCode =
+  | 'not_found'
+  | 'inactive'
+  | 'not_started'
+  | 'expired'
+  | 'limit_reached'
+  | 'already_redeemed'
+  | 'new_users_only';
+
 export interface ValidatePromoResult {
   valid: boolean;
   reason?: string;
+  reasonCode?: PromoRefusalCode;
   campaign?: PromoCampaign;
 }
 

@@ -1,6 +1,6 @@
 # Database Schema
 
-**Last Updated:** September 8, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
 This document describes the Letter IRL database schema as defined by `db/migrations` at the head of `dev` (Neon
@@ -48,6 +48,14 @@ User accounts with credit balances and tier information.
 | tier_calculated_at | TIMESTAMPTZ | YES | NOW() | Last tier calculation |
 | created_at | TIMESTAMPTZ | NO | NOW() | Account creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update (auto-trigger) |
+| erased_at | TIMESTAMPTZ | YES | NULL | Set by the account erasure (#289); sign-in refuses an erased account |
+
+**Erased accounts (migration 035).** An erasure keeps the row as a tombstone, because orders, ledger
+lots, disputes and refunds keep foreign keys to it ([account-erasure.md](account-erasure.md)). The
+`users_erased_tombstone` check requires an erased row to have no return address and an
+`erased-<uuid>@erased.invalid` email, so no later write can put a real address back unless the same
+statement clears `erased_at`. The admin panel reads an account as erased from that placeholder, since
+neither admin role is granted `erased_at`.
 
 **Indexes:**
 - `idx_users_email` on email
@@ -292,6 +300,13 @@ an error class only: `provider_rejected http_<status>` (migration 031), the draf
 rewrote earlier text (#394). The checkout and amount-mismatch codes store fixed server-authored
 sentences (amounts and product codes, never message text). The refund claim no longer writes it.
 
+For `jit_mail`, `product_snapshot.stripeRequest` records the Stripe Price and the return URLs the
+order's checkout sends (#279). A retry of an order whose session creation failed reuses the order,
+and its idempotency key, only when it would send the same request; otherwise it cancels the order
+(`PRICE_CHANGED_BEFORE_SESSION` or `CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION`) and opens a fresh one
+with a fresh key, because Stripe refuses a key it has seen with different parameters. Orders from
+before the field are compared on amount and currency alone.
+
 ### stripe_disputes
 
 Chargeback tracking for admin monitoring.
@@ -330,7 +345,7 @@ Promotional credit campaigns with redeemable codes.
 | code | VARCHAR(50) | NO | - | Unique promo code (case-insensitive) |
 | name | VARCHAR(255) | NO | - | Campaign name |
 | description | TEXT | YES | - | Description |
-| credits_amount | INTEGER | NO | - | Credits per redemption (> 0) |
+| credits_amount | INTEGER | NO | - | Credits per redemption (>= 0 since 007). Only a seed campaign may carry 0; 034 ended the ordinary ones that did |
 | expiration_policy | VARCHAR(50) | NO | 'days_from_activation' | Expiration policy |
 | expiration_days | INTEGER | YES | 90 | Days until credits expire |
 | fixed_expiration_date | TIMESTAMPTZ | YES | - | For fixed_date policy |
@@ -601,15 +616,23 @@ Status and timing constraints reject inconsistent outcomes.
 
 ### admin_operations
 
-Environment-scoped provider-operation queue for a later deployed worker. Each command can enqueue one
-operation. Payload/result size, status, attempts, lock, and completion constraints support deterministic
-claim/retry behavior; a partial index covers claimable pending rows.
+Environment-scoped queue of work a command asks for and a deployed worker performs. Each command can
+enqueue one operation. Payload/result size, status, attempts, lock, and completion constraints support
+deterministic claim/retry behavior; a partial index covers claimable pending rows.
+
+Its one consumer today is the account erasure (#289): `account.erase` queues an `account.erase`
+operation with `{ userId }`. The hourly maintenance run claims operations for its own database's
+environment (the admin marker) with `SKIP LOCKED` and erases each account in one transaction as the owner
+role. It records `succeeded` with counts, or `failed` with `ACCOUNT_ERASURE_BLOCKED`,
+`ACCOUNT_ERASURE_NOT_FOUND` or, after three attempts an hour apart, `ACCOUNT_ERASURE_ERROR`
+(`src/services/accountErasureService.ts`).
 
 ### Admin grants and provisioning
 
 Migration 022 revokes `PUBLIC` privileges but creates no role or credential. The explicit provisioning
 script (`npm run admin:provision-access`) requires pre-existing, environment-specific reader/operator
-login roles, verifies migrations 021, 022 and the latest migration the grants depend on (032) plus the
+login roles, verifies migrations 021, 022 and the latest migration the grants depend on
+(`ADMIN_LATEST_REQUIRED_MIGRATION` in `src/admin/provisioning.ts`) plus the
 database marker, rejects privileged roles, and reapplies the grant set in `src/admin/provisioning.ts`:
 
 - **Reader** (`letter_irl_admin_reader_<env>`): `SELECT` on the commerce, ledger, outbox, alert, audit
@@ -669,6 +692,8 @@ Production provisioning and the first production connection remain separate owne
 | 31 | 031_provider_error_minimisation.sql | Provider message text rewritten out of the job, order and order-event error columns (#162) |
 | 32 | 032_error_text_minimisation.sql | Raw error text and operator reasons rewritten out of the order, event, outbox, pack-refund and maintenance columns (#394) |
 | 33 | 033_gift_letters.sql | Gift letters: gift_letters, gift_codes, the gift_letter funding type, gift drafts, seed campaigns and gift-only redemptions |
+| 34 | 034_end_zero_letter_promos.sql | Ends the ordinary promo campaigns that grant no letters (the preview-gate codes 007 seeded), which could never be redeemed (#420) |
+| 35 | 035_account_erasure.sql | Account erasure: `users.erased_at`, and the `users_erased_tombstone` CHECK that holds an erased row to its placeholder email and no return address (#289) |
 
 ---
 

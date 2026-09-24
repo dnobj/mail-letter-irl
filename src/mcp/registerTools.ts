@@ -64,8 +64,10 @@ import { ToolMeta } from "../contracts/types.js";
 import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
 import { SESSION_SCOPES, IDENTITY_SCOPES } from "../auth/oauthConfig.js";
 import { prepareAuthenticatedUser } from "../auth/identity.js";
+import { AccountErasedError } from "../auth/accountErased.js";
 import { VerifiedEmailRequiredError } from "../auth/verifiedEmail.js";
 import { EmailAlreadyLinkedError } from "../services/userService.js";
+import { widgetRedirectOrigins } from "../config/checkoutDomain.js";
 import {
   classifyDiagnosticError,
   writeDiagnostic
@@ -74,6 +76,9 @@ import {
   buildInsufficientScopeToolResult,
   InsufficientScopeError
 } from "../auth/oauthChallenge.js";
+
+/** What every tool answers with, instead of running, when the caller has no usable account. */
+type AccountRefusal = VerifiedEmailRequiredError | EmailAlreadyLinkedError | AccountErasedError;
 
 /**
  * Build MCP tool annotations from tool definition.
@@ -322,9 +327,9 @@ const WIDGET_PACKS_ORIGIN = normalizeHttpsOrigin(
 // /purchase/start there through openExternal, and only for an allowlisted
 // origin does ChatGPT skip the safe-link modal and append the redirectUrl
 // that the start page keeps as the way back into the conversation (#372).
-const WIDGET_REDIRECT_ORIGINS = Array.from(
-  new Set(["https://checkout.stripe.com", WIDGET_PACKS_ORIGIN, WIDGET_API_ORIGIN])
-);
+// The checkout hosts lead: checkout.stripe.com, and our custom checkout
+// domain when STRIPE_CHECKOUT_DOMAIN names one (#373).
+const WIDGET_REDIRECT_ORIGINS = widgetRedirectOrigins(WIDGET_PACKS_ORIGIN, WIDGET_API_ORIGIN);
 
 /**
  * Content Security Policy for widgets.
@@ -815,48 +820,77 @@ export function partitionToolResult(
   };
 }
 
+/**
+ * What an account check found: an account to act on, a refusal, or no answer
+ * because reading the account failed.
+ *
+ * A refusal is held rather than thrown: the session is fine, and every tool in
+ * it answers with one sentence the customer can act on. Throwing would fail
+ * registration, which reaches ChatGPT as "this connector is broken", and
+ * swallowing it (what this did until 2026-09-19) left every tool to fail
+ * separately on a foreign key naming whichever table it reached first.
+ */
+type AccountCheck =
+  | { status: "ok" }
+  | { status: "refused"; refusal: AccountRefusal }
+  | { status: "unavailable" };
+
+async function checkAccount(authInfo: AuthenticatedUser): Promise<AccountCheck> {
+  try {
+    await prepareAuthenticatedUser(authInfo);
+    return { status: "ok" };
+  } catch (error) {
+    if (
+      error instanceof VerifiedEmailRequiredError ||
+      error instanceof EmailAlreadyLinkedError ||
+      error instanceof AccountErasedError
+    ) {
+      // Already reported, by name, where it was decided. Logging it again
+      // here would classify it as `database_error` - it carries no pg code -
+      // and make a refused customer look like a database outage on every
+      // request they make.
+      return { status: "refused", refusal: error };
+    }
+    writeDiagnostic("error", "auth.user_preparation_failed", {
+      errorClass: classifyDiagnosticError(error, "database_error")
+    });
+    return { status: "unavailable" };
+  }
+}
+
+/** Fixed text: nothing from the request or the failure reaches it. */
+export const ACCOUNT_UNAVAILABLE_MESSAGE = "Letter IRL could not read your account just now. Please try again.";
+
+export interface RegisterToolsOptions {
+  /**
+   * Decide the account on every tool call, from that call alone. For the
+   * legacy SSE transport, where one server serves the whole stream: without it
+   * an account erased mid-session (#289) kept every tool until the connection
+   * closed. A call whose check cannot read the account is refused rather than
+   * run, since a tombstone is exactly what it may be about to write to (#446
+   * review). The streamable HTTP transport builds a server per request, so it
+   * decides per call already.
+   */
+  recheckAccountPerCall?: boolean;
+}
+
 export async function registerLetterTools(
   mcpServer: McpServer,
   appServer: LetterIrlServer,
-  authInfo: AuthenticatedUser | null = null
+  authInfo: AuthenticatedUser | null = null,
+  options: RegisterToolsOptions = {}
 ) {
   const userId = resolveToolUserId(authInfo);
   writeDiagnostic("info", "mcp.tools_registering", {
     authType: authInfo?.authType ?? "disabled"
   });
 
-  // A caller with no account, and no confirmed address to open one from. Held
-  // rather than thrown: the session is fine, and every tool in it now answers
-  // with one sentence the customer can act on. Throwing here would fail
-  // registration, which reaches ChatGPT as "this connector is broken", and
-  // swallowing it (what this did until 2026-09-19) left every tool to fail
-  // separately on a foreign key naming whichever table it reached first.
-  //
-  // This server is built per request on the streamable HTTP transport, so the
-  // refusal is re-evaluated on every call there. On the legacy SSE transport
-  // one server serves the whole stream, so a customer who confirms their
-  // address mid-session has to reconnect before it clears.
-  let accountRefusal: VerifiedEmailRequiredError | EmailAlreadyLinkedError | null = null;
-  if (authInfo) {
-    try {
-      await prepareAuthenticatedUser(authInfo);
-    } catch (error) {
-      if (
-        error instanceof VerifiedEmailRequiredError ||
-        error instanceof EmailAlreadyLinkedError
-      ) {
-        // Already reported, by name, where it was decided. Logging it again
-        // here would classify it as `database_error` - it carries no pg code -
-        // and make a refused customer look like a database outage on every
-        // request they make.
-        accountRefusal = error;
-      } else {
-        writeDiagnostic("error", "auth.user_preparation_failed", {
-          errorClass: classifyDiagnosticError(error, "database_error")
-        });
-      }
-    }
-  }
+  // A caller with no account, and no confirmed address to open one from. When
+  // the account cannot be read the tools still register - failing
+  // registration reads as a broken connector - but a call answers "try again"
+  // rather than run against an account nobody could check (#446 review).
+  const initialCheck: AccountCheck = authInfo ? await checkAccount(authInfo) : { status: "ok" };
+  const accountRefusal: AccountRefusal | null = initialCheck.status === "refused" ? initialCheck.refusal : null;
 
   // Register widget resources for ChatGPT UI rendering
   await registerWidgetResources(mcpServer);
@@ -894,8 +928,15 @@ export async function registerLetterTools(
           }
           throw error;
         }
-        if (accountRefusal) {
+        if (options.recheckAccountPerCall && authInfo) {
+          // This call's own answer, not the one from when the stream opened.
+          const now = await checkAccount(authInfo);
+          if (now.status === "refused") return buildAccountRefusalToolResult(now.refusal);
+          if (now.status === "unavailable") return buildAccountUnavailableToolResult();
+        } else if (accountRefusal) {
           return buildAccountRefusalToolResult(accountRefusal);
+        } else if (initialCheck.status === "unavailable") {
+          return buildAccountUnavailableToolResult();
         }
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
@@ -963,9 +1004,15 @@ export async function registerLetterTools(
  * the text - both messages are fixed constants - so it is safe to hand back
  * whole, the way BETA_ACCESS_MESSAGE is.
  */
-export function buildAccountRefusalToolResult(
-  error: VerifiedEmailRequiredError | EmailAlreadyLinkedError
-) {
+/** A call refused because its account could not be read (recheck mode only). */
+export function buildAccountUnavailableToolResult() {
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: ACCOUNT_UNAVAILABLE_MESSAGE }]
+  };
+}
+
+export function buildAccountRefusalToolResult(error: AccountRefusal) {
   return {
     isError: true,
     content: [{ type: "text" as const, text: error.message }]
