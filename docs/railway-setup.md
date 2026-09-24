@@ -110,6 +110,11 @@ and the letters, because nothing but the webhook revokes them. The list is:
 - `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`
 - `charge.dispute.created`, `charge.dispute.closed`
 
+`OPENAI_APPS_CHALLENGE_TOKEN` holds the ChatGPT plugin portal's domain-verification token (#407).
+The API serves it at `/.well-known/openai-apps-challenge` and answers 404 while it is unset. Set
+it on the production API service when the portal issues a token at submission. The token is
+served publicly, so it is not a secret, but it belongs to the portal's record, not to Git.
+
 Confirm it in the Stripe Dashboard under Developers, Webhooks, for each
 environment's endpoint, and again after any endpoint is recreated.
 

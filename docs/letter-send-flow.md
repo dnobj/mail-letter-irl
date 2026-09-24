@@ -1,6 +1,6 @@
 # Letter and Postcard Send Flow
 
-**Last Updated:** September 18, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Draft, payment, outbox, and provider workflow for letters and postcards
 
 This document describes the current draft, payment, outbox, and provider workflow for letters and postcards.
@@ -54,8 +54,8 @@ So a send from balance, and a new Pay & Send checkout, is refused when the accou
 - **Where it runs.**
   - For a send from balance, the check runs after the deduction, beside the daily caps. The account row is already locked there, so two sends from one account cannot both pass. A refusal rolls the send back.
   - For Pay & Send, it runs in `prepareJitOrder` as the last step before a new order is inserted, before any Stripe session exists.
-    - An order handed back for the same draft is not checked again, because nothing new is bought: it is the same order at the same price. That covers an order with a Stripe session, and a sessionless one still at today's price, which gets a fresh session for the same order. It also covers an order past checkout: paid, being refunded, disputed or held.
-    - A sessionless order being replaced is checked. That happens when it is too near expiry for Stripe or was priced before a price change. A refusal also rolls back that order's cancellation.
+    - An order handed back for the same draft is not checked again, because nothing new is bought: it is the same order at the same price. That covers an order with a Stripe session, and a sessionless one whose retry would send Stripe the same request, which gets a fresh session for the same order. It also covers an order past checkout: paid, being refunded, disputed or held.
+    - A sessionless order being replaced is checked. That happens when it is too near expiry for Stripe, when it was priced before a price change (a different amount, or a different Stripe Price at the same amount), or when its return URLs have moved with their configuration (#279). A refusal also rolls back that order's cancellation.
     - This check is a best-effort net. Checkouts for two identical drafts lock different rows, so two made at the same moment can both pass.
   - Pay & Send fulfilment, which runs after the customer has paid, is never checked.
 - **The refusal.** It is an MCP error result whose text starts with `Possible duplicate:`. The text tells the model what went out, when, and to ask the user before repeating the call with `sendAnotherCopy: true`. `_meta["letterirl/duplicateMail"]` carries `{kind, mailType, recipientName, ageMinutes}` for the preview cards, which say what went out and turn the button into **Send another copy** or **Pay for another copy**. On ChatGPT web a refused call reaches the card without `_meta`, so the cards recognise the refusal by its text and show a shorter notice ([ui-widgets.md](ui-widgets.md)).
