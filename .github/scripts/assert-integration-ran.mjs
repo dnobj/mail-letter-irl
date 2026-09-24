@@ -43,6 +43,7 @@ const REQUIRED = [
   'accountIdentity.postgres.test.ts',
   'accountErasure.postgres.test.ts',
   'retentionRestore.postgres.test.ts',
+  'checkoutErasureRace.postgres.test.ts',
 ];
 
 /**

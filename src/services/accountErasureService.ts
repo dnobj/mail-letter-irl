@@ -329,10 +329,13 @@ export type ErasureOutcome =
  *   - a send or fulfilment that reaches the account row after this took it
  *     waits, and then finds the account blocked (the tombstone sets a send
  *     block) or its caller refused at sign-in;
- *   - a checkout reads the block before it takes any lock, so a pack checkout
- *     already past that read opens its order on the tombstone once this
- *     commits. Rare, and it moves money: #449 has the fix, the runbook the
- *     remedy;
+ *   - a checkout's order insert waits for the account row this holds FOR
+ *     UPDATE, and the checkout reads the account again after it
+ *     (commerceService's assertAccountMayPurchase), so a checkout caught in
+ *     this window is refused and opens no order (#449). That depends on the
+ *     row being locked FOR UPDATE BEFORE the gate is read: with a weaker lock
+ *     there (FOR NO KEY UPDATE, or none), a checkout could insert and commit
+ *     between the gate and the tombstone, and the window would reopen;
  *   - one that already holds its draft when this runs can deadlock with it
  *     instead, because the send paths take the draft first and no order
  *     serves both. PostgreSQL aborts one side. If it is this one, the worker

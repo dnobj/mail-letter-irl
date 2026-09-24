@@ -89,12 +89,12 @@ the gate is not retried: an open dispute can take months, and the operator queue
   a token issued before the erasure stays valid for up to a day. The dashboard shows the sentence from
   website #36 on; before that it shows an empty account.
 - **Sessions already open are refused too.** A legacy SSE session opened before the erasure is refused on
-  its next tool call. Two things can still slip through in the moment the erasure commits:
-  - A tool call already past sign-in can write one draft. Nothing reads it, and the draft cleanup deletes
-    it within about eight days.
-  - A pack checkout already past its block check can open an order on the tombstone. If the customer
-    pays, refund the payment in the Stripe dashboard: the panel's pack refund refuses a blocked account.
-    #449 closes this window.
+  its next tool call. One thing can still slip through in the moment the erasure commits: a tool call
+  already past sign-in can write one draft. Nothing reads it, and the draft cleanup deletes it within
+  about eight days.
+- **A checkout caught mid-way is refused.** Both checkouts read the account again after inserting their
+  order, in the same transaction. The insert waits for an erasure that holds the account row, so that
+  read sees the erasure, and the rollback leaves no order and no Stripe session (#449).
 - **A new account is possible.** The customer can open one with a different sign-in method on the same
   address, because the tombstone no longer holds it.
 - **The upload link may linger briefly.** The API process can hold it in memory for up to six hours.

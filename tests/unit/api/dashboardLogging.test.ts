@@ -133,6 +133,33 @@ describe("dashboard runtime logging privacy", () => {
     }
   });
 
+  it("answers 403 with a fixed sentence when purchasing is disabled on the account (#449)", async () => {
+    createPackCheckout.mockRejectedValue(
+      Object.assign(new Error("Purchasing is disabled on this account"), {
+        code: "ACCOUNT_SENDS_BLOCKED",
+        diagnosticClass: "authorization_error"
+      })
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const req = {
+      headers: {},
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+    };
+    const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
+
+    await handleCreateCheckoutSession(req as never, res as never);
+
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(String(res.end.mock.calls[0][0]));
+    expect(body).toEqual({
+      error: "purchasing_disabled",
+      message: "Purchasing is disabled on this account. Please contact support."
+    });
+    // Logged as the refusal it is, not as a database fault.
+    expect(error.mock.calls.flat().map(String).join("\n")).toContain('"errorClass":"authorization_error"');
+    error.mockRestore();
+  });
+
   it("maps a carried-only terminal class to 503, like the config fault it is", async () => {
     // The session-create rethrow carries diagnosticClass but not always a
     // code. Matching only the literal 'configuration_error' sent

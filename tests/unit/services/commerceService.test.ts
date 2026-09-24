@@ -14,6 +14,31 @@ const capState = vi.hoisted(() => ({
 }));
 
 /**
+ * The account a checkout re-reads after its order insert (#449), answered
+ * ahead of mocks.query for the same reason as the caps: the tests below queue
+ * mocks.query responses in order, and this read must not consume one. Neither
+ * erased nor blocked by default, so every older test runs as before.
+ */
+const accountState = vi.hoisted(() => {
+  const state = {
+    erasedAt: null as Date | null,
+    blockedReason: null as string | null,
+    reads: 0,
+    answer(sql: unknown) {
+      if (typeof sql !== 'string' || !sql.includes('SELECT erased_at, sends_blocked_reason FROM users')) {
+        return undefined;
+      }
+      state.reads += 1;
+      return Promise.resolve({
+        rows: [{ erased_at: state.erasedAt, sends_blocked_reason: state.blockedReason }],
+        rowCount: 1
+      });
+    }
+  };
+  return state;
+});
+
+/**
  * The duplicate check (#412), answered ahead of mocks.query for the same
  * reason as the caps: the tests below queue mocks.query responses in order,
  * and the check's queries must not consume them. The check runs on the order
@@ -241,11 +266,15 @@ describe('commerceService', () => {
     dupState.orders = [];
     dupState.calls = [];
     dupState.trail = null;
+    accountState.erasedAt = null;
+    accountState.blockedReason = null;
+    accountState.reads = 0;
     vi.stubEnv('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', '1');
     // Rest arguments keep each call's arity, which toHaveBeenCalledWith compares.
     mocks.transaction.mockImplementation(async callback =>
       callback({
-        query: (...args: [string, unknown[]?]) => dupState.answer(...args) ?? mocks.query(...args)
+        query: (...args: [string, unknown[]?]) =>
+          dupState.answer(...args) ?? accountState.answer(args[0]) ?? mocks.query(...args)
       })
     );
     mocks.jitEnabled.mockReturnValue(true);
@@ -3567,6 +3596,91 @@ describe('commerceService', () => {
         code: 'ACCOUNT_SENDS_BLOCKED'
       });
       expect(dupState.calls).toEqual([]);
+    });
+
+    it('refuses an account erased while the checkout waited, after the insert and inside its transaction (#449)', async () => {
+      accountState.erasedAt = new Date();
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+        code: 'ACCOUNT_SENDS_BLOCKED',
+        diagnosticClass: 'authorization_error'
+      });
+
+      // After the insert, whose wait on the account row it depends on, and
+      // thrown out of the order transaction, which the real one rolls back.
+      expect(position('SELECT erased_at, sends_blocked_reason FROM users')).toBeGreaterThan(position(INSERT));
+      await expect(mocks.transaction.mock.results[0].value).rejects.toMatchObject({ code: 'ACCOUNT_SENDS_BLOCKED' });
+      expect(mocks.createJitSession).not.toHaveBeenCalled();
+    });
+
+    it('refuses an account blocked after the first check, without naming the block (#449)', async () => {
+      accountState.blockedReason = 'payment_disputed';
+
+      const error = await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(caught => caught);
+
+      expect(error).toMatchObject({ code: 'ACCOUNT_SENDS_BLOCKED' });
+      expect(String(error.message)).not.toContain('payment_disputed');
+      expect(mocks.createJitSession).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a pack checkout for an account erased or blocked (#449)', () => {
+    const PACK = { userId: 'user-1', userEmail: 'person@example.com', productId: 'credit-pack-4' as const };
+    let trail: string[];
+    const at = (fragment: string) => trail.findIndex(sql => sql.includes(fragment));
+
+    beforeEach(() => {
+      trail = [];
+      dupState.trail = trail;
+      mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+        if (sql.includes('INSERT INTO orders')) {
+          return { rows: [{ ...baseOrder, order_id: params[0], order_type: 'letter_pack', draft_id: undefined }] };
+        }
+        if (sql.includes('SET stripe_checkout_session_id = $2')) {
+          return { rows: [{ ...baseOrder, order_id: params[0], order_type: 'letter_pack', stripe_checkout_session_id: params[1] }] };
+        }
+        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+          return { rows: [{ ...baseOrder, order_id: params[0], order_type: 'letter_pack' }] };
+        }
+        return { rows: [] };
+      });
+      mocks.createPackSession.mockResolvedValue({
+        success: true,
+        sessionId: 'cs-pack',
+        sessionUrl: 'https://checkout.stripe.test/cs-pack'
+      });
+    });
+
+    it('refuses an erased account after the order insert, inside its transaction, before any session', async () => {
+      accountState.erasedAt = new Date();
+
+      await expect(createPackCheckout(PACK)).rejects.toMatchObject({
+        code: 'ACCOUNT_SENDS_BLOCKED',
+        diagnosticClass: 'authorization_error'
+      });
+
+      expect(at('INSERT INTO orders')).toBeGreaterThanOrEqual(0);
+      expect(at('SELECT erased_at, sends_blocked_reason FROM users')).toBeGreaterThan(at('INSERT INTO orders'));
+      expect(mocks.transaction).toHaveBeenCalledTimes(1);
+      await expect(mocks.transaction.mock.results[0].value).rejects.toMatchObject({ code: 'ACCOUNT_SENDS_BLOCKED' });
+      expect(mocks.createPackSession).not.toHaveBeenCalled();
+    });
+
+    it('refuses a blocked account without naming the block', async () => {
+      accountState.blockedReason = 'payment_disputed';
+
+      const error = await createPackCheckout(PACK).catch(caught => caught);
+
+      expect(error).toMatchObject({ code: 'ACCOUNT_SENDS_BLOCKED' });
+      expect(String(error.message)).not.toContain('payment_disputed');
+      expect(mocks.createPackSession).not.toHaveBeenCalled();
+    });
+
+    it('opens the checkout for an account that is neither', async () => {
+      await expect(createPackCheckout(PACK)).resolves.toMatchObject({ success: true, sessionId: 'cs-pack' });
+
+      expect(accountState.reads).toBe(1);
+      expect(mocks.createPackSession).toHaveBeenCalledTimes(1);
     });
   });
 });

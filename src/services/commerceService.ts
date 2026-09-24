@@ -677,6 +677,40 @@ export function assertConfiguredAmount(
   }
 }
 
+/**
+ * Refuse a checkout for an account that is erased or has sends blocked, read
+ * AFTER the order insert and inside the same transaction (#449).
+ *
+ * The insert's foreign key takes a KEY SHARE lock on the account row, so when
+ * an erasure holds that row the insert waits for it. Under READ COMMITTED this
+ * read then sees the erasure's commit, and the throw rolls the insert back: no
+ * order, and no Stripe session, because the session is created after this
+ * transaction. A read before the insert cannot close that window, since it
+ * runs before the erasure starts.
+ *
+ * A pack purchase is refused for a blocked account as well, which the pack
+ * tool's "Purchasing is disabled" answer already assumed and nothing enforced:
+ * the panel's pack refund refuses a blocked account, so a pack bought while
+ * blocked could only be refunded by hand in Stripe.
+ */
+async function assertAccountMayPurchase(
+  client: Pick<pg.PoolClient, 'query'>,
+  userId: string
+): Promise<void> {
+  const account = await client.query<{ erased_at: Date | null; sends_blocked_reason: string | null }>(
+    'SELECT erased_at, sends_blocked_reason FROM users WHERE user_id = $1',
+    [userId]
+  );
+  const row = account.rows[0];
+  if (!row || row.erased_at || row.sends_blocked_reason) {
+    // Never the block's label: it is an internal moderation reason (#278 r12).
+    throw Object.assign(new Error('Purchasing is disabled on this account'), {
+      code: 'ACCOUNT_SENDS_BLOCKED',
+      diagnosticClass: 'authorization_error'
+    });
+  }
+}
+
 export async function createPackCheckout(
   params: CreatePackCheckoutParams
 ): Promise<CommerceCheckoutResult> {
@@ -712,23 +746,29 @@ export async function createPackCheckout(
 
   const orderId = randomUUID();
   const idempotencyKey = `pack-checkout:${orderId}`;
-  const inserted = await query<Order>(
-    `INSERT INTO orders (
-       order_id, user_id, order_type, product_code, product_snapshot, credits,
-       amount_cents, currency, payment_provider, idempotency_key, status
-     ) VALUES ($1, $2, 'letter_pack', $3, $4, $5, $6, $7, 'stripe', $8, 'checkout_pending')
-     RETURNING *`,
-    [
-      orderId,
-      params.userId,
-      product.productCode,
-      JSON.stringify(productSnapshot(product)),
-      product.credits,
-      product.amountCents,
-      product.currency,
-      idempotencyKey
-    ]
-  );
+  // One transaction with the account check, which reads after the insert has
+  // waited out any erasure holding the account row (#449).
+  const inserted = await transaction(async client => {
+    const row = await client.query<Order>(
+      `INSERT INTO orders (
+         order_id, user_id, order_type, product_code, product_snapshot, credits,
+         amount_cents, currency, payment_provider, idempotency_key, status
+       ) VALUES ($1, $2, 'letter_pack', $3, $4, $5, $6, $7, 'stripe', $8, 'checkout_pending')
+       RETURNING *`,
+      [
+        orderId,
+        params.userId,
+        product.productCode,
+        JSON.stringify(productSnapshot(product)),
+        product.credits,
+        product.amountCents,
+        product.currency,
+        idempotencyKey
+      ]
+    );
+    await assertAccountMayPurchase(client, params.userId);
+    return row;
+  });
 
   const returnUrls = checkoutReturnUrls(orderId);
   const checkout = await createPackCheckoutSession({
@@ -1002,6 +1042,9 @@ async function prepareJitOrder(
         expiresAt
       ]
     );
+    // The send block read before this transaction ran before any erasure that
+    // held the account row; this one runs after the insert waited it out (#449).
+    await assertAccountMayPurchase(client, params.userId);
     await recordOrderEvent(client, orderId, 'order.created', null, 'checkout_pending');
     return { order: inserted.rows[0], reused: false };
   });
