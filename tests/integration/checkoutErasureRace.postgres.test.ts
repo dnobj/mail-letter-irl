@@ -182,10 +182,16 @@ describePostgres('a checkout that meets an account erasure (#449)', () => {
         resume = resolve;
       });
       let paused = false;
+      let gateReadBeforeLock = false;
       const client = {
         async query(text: string, values?: unknown[]) {
+          // The gate's own alias: read before the lock, a checkout could
+          // commit between the two.
+          if (!paused && text.includes('orders_in_flight')) gateReadBeforeLock = true;
           const result = await holder.query(text, values);
-          if (!paused && /FROM users\b[\s\S]*FOR UPDATE/.test(text)) {
+          // Keyed on the statement, not on its lock clause, so a weakened lock
+          // still pauses here and the checkout shows what the weakening does.
+          if (!paused && /SELECT erased_at FROM users\b/.test(text)) {
             paused = true;
             lockTaken();
             await resumed;
@@ -205,6 +211,7 @@ describePostgres('a checkout that meets an account erasure (#449)', () => {
         if (first !== 'locked') {
           throw new Error(`the erasure ended before it locked the account row: ${describeOutcome(first.endedEarly)}`);
         }
+        if (gateReadBeforeLock) throw new Error('the erasure read its gate before it locked the account row');
       })();
       return {
         ready,
