@@ -244,6 +244,8 @@ describe("what a failure costs (#446 review)", () => {
     expect(sql).toMatch(/WHERE id = \$1 AND status = 'pending'/);
     // The cap is decided from the row, and the class is kept either way.
     expect(sql).toContain("status = CASE WHEN attempts + 1 >= $2::int THEN 'failed'");
+    // The final attempt keeps {errorClass}, a retry {lastErrorClass}, as inside the transaction.
+    expect(sql).toContain("sanitized_result_json = CASE WHEN attempts + 1 >= $2::int THEN $4::jsonb ELSE $3::jsonb END");
     expect(values).toEqual(["op-1", MAX_ERASURE_ATTEMPTS, expect.any(String), expect.any(String)]);
     expect(JSON.parse(String(values[2]))).toEqual({ lastErrorClass: expect.any(String) });
     expect(JSON.parse(String(values[3]))).toEqual({ errorClass: expect.any(String) });
