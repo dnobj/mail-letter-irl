@@ -1,6 +1,6 @@
 # ACID Transaction Standard
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Required transaction, idempotency, outbox, recovery, and review rules for durable mutations
 
 ACID—**Atomicity, Consistency, Isolation, and Durability**—is the guiding principle for every Letter IRL operation that changes durable business state. This standard applies to financial balances and ledger entries, purchases and orders, drafts, letters and postcards, fulfillment jobs, refunds, promotions, image quota reservations, and administrative mutations.
@@ -56,7 +56,7 @@ An external vendor call **cannot be part of a single PostgreSQL ACID transaction
 Use a resumable state machine instead:
 
 - Commit the local intent and a transactional outbox record together.
-- Give each logical operation a stable, persisted idempotency key and reuse it for every retry. Never generate the key inside a retry loop.
+- Give each logical operation a stable, persisted idempotency key and reuse it for every retry. Never generate the key inside a retry loop. A retry must send the same request under that key: Stripe refuses a key it has seen with different parameters. When the request has to change, the operation is a new one with its own key, as a Pay & Send order whose Price or return URLs moved is cancelled and replaced (#279).
 - Call the vendor only after the local transaction commits.
 - Record vendor identifiers and state transitions with uniqueness and transition guards.
 - Make Stripe webhook processing idempotent by provider event and business object identifiers.

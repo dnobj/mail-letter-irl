@@ -188,6 +188,7 @@ describe('validateDeploymentConfig in production', () => {
     ['missing STRIPE_WEBHOOK_SECRET', { STRIPE_WEBHOOK_SECRET: undefined }, 'presence.stripe_webhook_secret'],
     ['test-mode Stripe key', { STRIPE_SECRET_KEY: 'sk_test_unit_fixture' }, 'stripe.live_key_required'],
     ['malformed webhook secret', { STRIPE_WEBHOOK_SECRET: 'not_a_webhook_secret' }, 'stripe.webhook_secret_malformed'],
+    ['checkout domain with a scheme (#373)', { STRIPE_CHECKOUT_DOMAIN: 'https://pay.letterirl.com' }, 'stripe.checkout_domain_invalid'],
     ['missing pack price', { STRIPE_PRICE_STARTER: undefined }, 'stripe.pack_price_incomplete'],
     ['pack price without price_ prefix', { STRIPE_PRICE_REGULAR: 'prod_something' }, 'stripe.pack_price_incomplete'],
     // NOT here: a padded price id. The catalog trims before resolving, so it
@@ -222,6 +223,13 @@ describe('validateDeploymentConfig in production', () => {
     ['test-prefixed address-verification key', { POSTGRID_ADDRESS_VERIFICATION_API_KEY: 'test_sk_unit_fixture' }, 'provider.test_key_in_production']
   ])('%s is an error', (_description, overrides, expectedRule) => {
     expect(ruleIds(env(overrides), 'error')).toContain(expectedRule);
+  });
+
+  it('accepts a bare custom checkout domain, and only warns about a bad one outside production (#373)', () => {
+    expect(ruleIds(env({ STRIPE_CHECKOUT_DOMAIN: 'pay.letterirl.com' }))).not.toContain('stripe.checkout_domain_invalid');
+    const dev = env({ STRIPE_CHECKOUT_DOMAIN: 'pay.letterirl.com/' }, VALID_DEV);
+    expect(ruleIds(dev, 'error')).not.toContain('stripe.checkout_domain_invalid');
+    expect(ruleIds(dev, 'warning')).toContain('stripe.checkout_domain_invalid');
   });
 
   it('accepts bucket configuration through the alias chains', () => {

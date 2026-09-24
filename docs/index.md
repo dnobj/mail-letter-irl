@@ -39,7 +39,7 @@ maintenance job.
 
 ## MCP Tools, Widgets and the Apps SDK
 
-- [MCP Tool APIs](tool-apis.md) - the 22 tools, schemas, and how to add one
+- [MCP Tool APIs](tool-apis.md) - the 23 tools, schemas, and how to add one
 - [UI Widgets](ui-widgets.md) - the 6 widgets, bridge notes, CSP
 - [Status Labels](status-labels.md) - letter status values across database, API, dashboard, PostGrid
 - [OpenAI Apps SDK Guidelines](apps-sdk-guidelines.md) - Apps SDK guidance that affects Letter IRL
@@ -58,6 +58,7 @@ maintenance job.
 - [Environment Files](env-files.md) - every `.env` file and what reads it
 - [Database Setup](database-setup.md) - creating and connecting to Neon
 - [Infrastructure](infrastructure.md) - cloud topology, runtime architecture, maintenance tasks
+- [Stripe custom checkout domain](stripe-custom-domain.md) - serving Checkout on pay.letterirl.com, and the order to set it up in (#373)
 - [Deployment](deployment.md) - release process and boot validation rules
 - [Railway Setup](railway-setup.md) - services, commands, variables, Serverless policy
 - [Idle-Cost Operations](idle-cost-operations.md) - cost controls and rollback runbook

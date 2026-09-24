@@ -94,6 +94,8 @@ LETTER_IRL_GIFT_LANDING_BASE_URL=<the website the printed QR opens; default http
 STRIPE_PRICE_REGULAR=<price_ id>
 STRIPE_PRICE_POWER=<price_ id>
 STRIPE_CURRENCY=usd
+# At launch, in both environments: the custom Checkout host (docs/stripe-custom-domain.md, #373).
+STRIPE_CHECKOUT_DOMAIN=<bare host such as pay.letterirl.com; unset keeps checkout.stripe.com only>
 # Amounts are read from these Prices at startup - do not mirror them here (#275).
 ```
 
@@ -107,6 +109,11 @@ and the letters, because nothing but the webhook revokes them. The list is:
   `checkout.session.async_payment_failed`, `checkout.session.expired`
 - `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`
 - `charge.dispute.created`, `charge.dispute.closed`
+
+`OPENAI_APPS_CHALLENGE_TOKEN` holds the ChatGPT plugin portal's domain-verification token (#407).
+The API serves it at `/.well-known/openai-apps-challenge` and answers 404 while it is unset. Set
+it on the production API service when the portal issues a token at submission. The token is
+served publicly, so it is not a secret, but it belongs to the portal's record, not to Git.
 
 Confirm it in the Stripe Dashboard under Developers, Webhooks, for each
 environment's endpoint, and again after any endpoint is recreated.

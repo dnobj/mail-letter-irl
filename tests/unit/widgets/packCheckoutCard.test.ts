@@ -47,6 +47,9 @@ interface MountOptions {
   packCheckoutFails?: boolean;
   packCheckoutOmitsUrl?: boolean;
   packListEmpty?: boolean;
+  /** What create_pack_checkout and list_letter_packs reject with, if anything. */
+  packCheckoutError?: Error;
+  packListError?: Error;
 }
 
 interface Harness {
@@ -134,6 +137,7 @@ function mount(options: MountOptions = {}): Harness {
     bridge.callTool = async (name: string, args: Record<string, unknown>) => {
       calls.push({ name, args });
       if (name === 'list_letter_packs') {
+        if (options.packListError) throw options.packListError;
         return {
           structuredContent: options.packListEmpty
             ? { packs: [], message: 'Letter packs are temporarily unavailable.' }
@@ -148,6 +152,7 @@ function mount(options: MountOptions = {}): Harness {
         };
       }
       if (name === 'create_pack_checkout') {
+        if (options.packCheckoutError) throw options.packCheckoutError;
         if (options.packCheckoutFails) throw new Error('Purchasing is disabled on this account. Please contact support.');
         const letters = args.pack === 'regular' ? 5 : args.pack === 'power' ? 50 : 2;
         return {
@@ -454,6 +459,49 @@ describe('PackCheckoutCard rendered without a tool result', () => {
 
     await card.click('retry-button');
     expect(card.calls).toHaveLength(2);
+  });
+
+  describe("shows a refused call's sentence, not the host's wrapper (#434)", () => {
+    // ChatGPT rejects a card's own callTool when the result is an error, and
+    // the rejection's message wraps the result's text in a Python-style repr.
+    const SENTENCE = 'Purchasing is disabled on this account. Please contact support.';
+    const wrapped = () =>
+      new Error(
+        'Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: ' +
+          `[TextContent(type='text', text='${SENTENCE}', annotations=None, meta=None)]`
+      );
+
+    it('when the packs cannot be listed', async () => {
+      const card = mount({ packListError: wrapped() });
+      await card.runNextTimer();
+
+      await card.click('retry-button');
+
+      expect(card.calls.map(call => call.name)).toEqual(['list_letter_packs']);
+      expect(card.text('retry-error')).toBe(`Unable to load letter packs: ${SENTENCE}`);
+    });
+
+    it('when the checkout is refused', async () => {
+      const card = mount({ toolInput: { pack: 'starter' }, packCheckoutError: wrapped() });
+      await card.runNextTimer();
+
+      await card.click('retry-button');
+
+      expect(card.calls.map(call => call.name)).toEqual(['create_pack_checkout']);
+      expect(card.text('retry-error')).toBe(`Unable to create the checkout: ${SENTENCE}`);
+    });
+
+    it('when a new checkout for an expired one is refused', async () => {
+      const card = mount({ toolOutput: pendingCheckout(), toolInput: { pack: 'starter' }, packCheckoutError: wrapped() });
+      card.setStatus({ purchaseStatus: 'cancelled' });
+      await card.runNextTimer();
+
+      await card.click('new-checkout-button');
+
+      expect(card.calls.at(-1)?.name).toBe('create_pack_checkout');
+      expect(card.visible('err')).toBe(true);
+      expect(card.text('err')).toBe(`Unable to create the checkout: ${SENTENCE}`);
+    });
   });
 
   it('renders an already-paid result as done, without a link', async () => {
