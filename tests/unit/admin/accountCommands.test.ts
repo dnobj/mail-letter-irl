@@ -343,6 +343,7 @@ describe("account.erase (#289)", () => {
     failedJobsToCancel: 0,
     ordersKept: 2,
     unusedGiftLetters: 2,
+    openAlerts: 0,
   };
   const COMMAND_ID = "22222222-2222-4222-8222-222222222222";
 
@@ -454,6 +455,17 @@ describe("account.erase (#289)", () => {
       {},
     );
     expect(nothing.warnings.some((warning) => forfeit.test(warning))).toBe(false);
+  });
+
+  it("warns about open alerts on the account's orders only when there are some", async () => {
+    const quiet = await erasure().command.preview(scripted(), "auth0|u1", {});
+    expect(quiet.warnings.some((warning) => /alerts/.test(warning))).toBe(false);
+    const owed = await erasure({ readErasureScope: vi.fn().mockResolvedValue({ ...SCOPE, openAlerts: 2 }) }).command.preview(
+      scripted(),
+      "auth0|u1",
+      {},
+    );
+    expect(owed.warnings).toContainEqual(expect.stringMatching(/^2 operational alerts/));
   });
 
   it("always warns that it is irreversible, and what the operator does by hand afterwards", async () => {

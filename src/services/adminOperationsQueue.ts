@@ -109,10 +109,9 @@ export async function processAdminOperations(
       // whole and wrote nothing. Count the attempt outside it, so the cap still
       // applies, and stop this run: the rest of the queue waits for the next
       // one rather than for a database that is not answering (#446 review).
-      writeDiagnostic('error', `${kind.event}.bookkeeping_failed`, {
-        errorClass: classifyDiagnosticError(error, 'database_error')
-      });
-      if (claim.operation) summary[await recordAttemptOutside(claim.operation, kind)] += 1;
+      const errorClass = classifyDiagnosticError(error, 'database_error');
+      writeDiagnostic('error', `${kind.event}.bookkeeping_failed`, { errorClass });
+      if (claim.operation) summary[await recordAttemptOutside(claim.operation, kind, errorClass)] += 1;
       break;
     }
     if (outcome === null) break;
@@ -123,29 +122,42 @@ export async function processAdminOperations(
 
 /**
  * The attempt, in a statement of its own, after the operation's transaction
- * rolled back. Best effort: if this fails too, the next run claims the
- * operation again with its count unchanged.
+ * rolled back. Whether it was the last is decided from the row as it stands,
+ * not the count read at the claim, so a concurrent run's attempt is counted
+ * too (#446 review). Best effort: if this fails as well, the next run claims
+ * the operation again with its count unchanged.
  */
 async function recordAttemptOutside(
   operation: ClaimedOperation,
-  kind: OperationKind
+  kind: OperationKind,
+  errorClass: string
 ): Promise<'retrying' | 'failed'> {
-  const exhausted = operation.attempts + 1 >= MAX_OPERATION_ATTEMPTS;
   try {
-    await query(
+    const recorded = await query<{ status: string }>(
       `UPDATE admin_operations
           SET attempts = attempts + 1,
               available_at = NOW() + INTERVAL '1 hour',
-              status = CASE WHEN $2::boolean THEN 'failed' ELSE status END,
-              completed_at = CASE WHEN $2::boolean THEN NOW() ELSE completed_at END,
-              error_code = CASE WHEN $2::boolean THEN $3::varchar ELSE error_code END
-        WHERE id = $1 AND status = 'pending'`,
-      [operation.id, exhausted, kind.errorCode]
+              status = CASE WHEN attempts + 1 >= $2::int THEN 'failed' ELSE status END,
+              completed_at = CASE WHEN attempts + 1 >= $2::int THEN NOW() ELSE completed_at END,
+              error_code = CASE WHEN attempts + 1 >= $2::int THEN $5::varchar ELSE error_code END,
+              sanitized_result_json = CASE WHEN attempts + 1 >= $2::int THEN $4::jsonb ELSE $3::jsonb END
+        WHERE id = $1 AND status = 'pending'
+        RETURNING status`,
+      [
+        operation.id,
+        MAX_OPERATION_ATTEMPTS,
+        JSON.stringify({ lastErrorClass: errorClass }),
+        JSON.stringify({ errorClass }),
+        kind.errorCode
+      ]
     );
+    const status = recorded.rows[0]?.status;
+    if (status) return status === 'failed' ? 'failed' : 'retrying';
   } catch {
     // Not answering either; the next run claims it again.
   }
-  return exhausted ? 'failed' : 'retrying';
+  // Nothing recorded: report what the count read at the claim implies.
+  return operation.attempts + 1 >= MAX_OPERATION_ATTEMPTS ? 'failed' : 'retrying';
 }
 
 async function handleNextOperation(

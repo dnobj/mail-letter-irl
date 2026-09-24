@@ -177,6 +177,8 @@ export interface ErasureScope {
   failedJobsToCancel: number;
   ordersKept: number;
   unusedGiftLetters: number;
+  /** Open operational alerts on the account's orders, such as compensation still owed after a dispute. */
+  openAlerts: number;
 }
 
 /**
@@ -210,7 +212,10 @@ export async function readErasureScope(client: SqlClient, userId: string): Promi
          WHERE l.user_id = $1 AND j.status = 'failed')::int AS failed_jobs_to_cancel,
        (SELECT COUNT(o.order_id) FROM orders o WHERE o.user_id = $1)::int AS orders_kept,
        (SELECT COUNT(g.gift_id) FROM gift_letters g
-         WHERE g.user_id = $1 AND g.status = 'available')::int AS unused_gift_letters`,
+         WHERE g.user_id = $1 AND g.status = 'available')::int AS unused_gift_letters,
+       (SELECT COUNT(a.alert_id) FROM commerce_operational_alerts a
+          JOIN orders o ON o.order_id = a.order_id
+         WHERE o.user_id = $1 AND a.status <> 'resolved')::int AS open_alerts`,
     [userId]
   );
   const row = result.rows[0] ?? {};
@@ -225,7 +230,8 @@ export async function readErasureScope(client: SqlClient, userId: string): Promi
     seedCodeEmails: Number(row.seed_code_emails ?? 0),
     failedJobsToCancel: Number(row.failed_jobs_to_cancel ?? 0),
     ordersKept: Number(row.orders_kept ?? 0),
-    unusedGiftLetters: Number(row.unused_gift_letters ?? 0)
+    unusedGiftLetters: Number(row.unused_gift_letters ?? 0),
+    openAlerts: Number(row.open_alerts ?? 0)
   };
 }
 
@@ -323,17 +329,22 @@ export type ErasureOutcome =
  * letters, letter_jobs, image_generation_reservations, then the account row,
  * and the gate is read after the account row is locked. What that guarantees,
  * and what it does not (#446 review):
- *   - a send, checkout or fulfilment that reaches the account row after this
- *     took it waits, and then finds the account blocked (the tombstone sets a
- *     send block) or its caller refused at sign-in;
+ *   - a send or fulfilment that reaches the account row after this took it
+ *     waits, and then finds the account blocked (the tombstone sets a send
+ *     block) or its caller refused at sign-in;
+ *   - a checkout reads the block before it takes any lock, so a pack checkout
+ *     already past that read opens its order on the tombstone once this
+ *     commits. Rare, and it moves money: #449 has the fix, the runbook the
+ *     remedy;
  *   - one that already holds its draft when this runs can deadlock with it
  *     instead, because the send paths take the draft first and no order
  *     serves both. PostgreSQL aborts one side. If it is this one, the worker
  *     rolls back to its savepoint and tries again at the next run without
  *     spending an attempt; the gate then sees whatever the send left behind.
  *   - a tool call already past sign-in when this commits can still write one
- *     draft to the tombstone. Nothing reads it, and the daily draft cleanup
- *     deletes it.
+ *     draft to the tombstone. Nothing reads it, and the draft cleanup deletes
+ *     it within about eight days (expired a day after its expiry, deleted a
+ *     week after that).
  *
  * Order within the writes matters in one place: the saved copies are found
  * through the drafts, so they are deleted before the drafts are.

@@ -377,6 +377,9 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
           ...(forfeits
             ? ["The balance and unused gift letters are forfeited. If the customer wants money back, refund first and preview again: the erasure blocks the account, and a pack refund refuses a blocked account."]
             : []),
+          ...(scope.openAlerts > 0
+            ? [`${scope.openAlerts} operational alerts on this account's orders are still open, such as compensation owed after a dispute. Settle them first: the erasure keeps the orders, but nothing owed can reach the account afterwards.`]
+            : []),
           "After it runs, delete the Auth0 user with this id in the tenant, and take the id out of LETTER_IRL_BETA_ALLOWED_SUBJECTS and LETTER_IRL_ADMIN_USER_IDS if it is listed (docs/account-erasure.md).",
           "Keep the customer's name and email out of the reason: the audit trail keeps it for two years.",
         ],

@@ -820,8 +820,8 @@ export function partitionToolResult(
 }
 
 /**
- * The refusal this caller gets instead of an account, or null when there is
- * an account to act on.
+ * What an account check found: an account to act on, a refusal, or no answer
+ * because reading the account failed.
  *
  * A refusal is held rather than thrown: the session is fine, and every tool in
  * it answers with one sentence the customer can act on. Throwing would fail
@@ -829,10 +829,15 @@ export function partitionToolResult(
  * swallowing it (what this did until 2026-09-19) left every tool to fail
  * separately on a foreign key naming whichever table it reached first.
  */
-async function accountRefusalFor(authInfo: AuthenticatedUser): Promise<AccountRefusal | null> {
+type AccountCheck =
+  | { status: "ok" }
+  | { status: "refused"; refusal: AccountRefusal }
+  | { status: "unavailable" };
+
+async function checkAccount(authInfo: AuthenticatedUser): Promise<AccountCheck> {
   try {
     await prepareAuthenticatedUser(authInfo);
-    return null;
+    return { status: "ok" };
   } catch (error) {
     if (
       error instanceof VerifiedEmailRequiredError ||
@@ -843,23 +848,27 @@ async function accountRefusalFor(authInfo: AuthenticatedUser): Promise<AccountRe
       // here would classify it as `database_error` - it carries no pg code -
       // and make a refused customer look like a database outage on every
       // request they make.
-      return error;
+      return { status: "refused", refusal: error };
     }
     writeDiagnostic("error", "auth.user_preparation_failed", {
       errorClass: classifyDiagnosticError(error, "database_error")
     });
-    return null;
+    return { status: "unavailable" };
   }
 }
 
+/** Fixed text: nothing from the request or the failure reaches it. */
+export const ACCOUNT_UNAVAILABLE_MESSAGE = "Letter IRL could not read your account just now. Please try again.";
+
 export interface RegisterToolsOptions {
   /**
-   * Decide the account again on every tool call. For the legacy SSE transport,
-   * where one server serves the whole stream: without it, an account erased
-   * mid-session (#289) kept every tool until the connection closed, and a
-   * customer who confirms their address mid-session still has to reconnect
-   * (#446 review). The streamable HTTP transport builds a server per request,
-   * so it decides per call already.
+   * Decide the account on every tool call, from that call alone. For the
+   * legacy SSE transport, where one server serves the whole stream: without it
+   * an account erased mid-session (#289) kept every tool until the connection
+   * closed. A call whose check cannot read the account is refused rather than
+   * run, since a tombstone is exactly what it may be about to write to (#446
+   * review). The streamable HTTP transport builds a server per request, so it
+   * decides per call already.
    */
   recheckAccountPerCall?: boolean;
 }
@@ -875,8 +884,11 @@ export async function registerLetterTools(
     authType: authInfo?.authType ?? "disabled"
   });
 
-  // A caller with no account, and no confirmed address to open one from.
-  const accountRefusal: AccountRefusal | null = authInfo ? await accountRefusalFor(authInfo) : null;
+  // A caller with no account, and no confirmed address to open one from. When
+  // the account cannot be read here the tools still register and run, as they
+  // always have on a per-request server: the call fails where it next reads.
+  const initialCheck: AccountCheck = authInfo ? await checkAccount(authInfo) : { status: "ok" };
+  const accountRefusal: AccountRefusal | null = initialCheck.status === "refused" ? initialCheck.refusal : null;
 
   // Register widget resources for ChatGPT UI rendering
   await registerWidgetResources(mcpServer);
@@ -914,12 +926,13 @@ export async function registerLetterTools(
           }
           throw error;
         }
-        if (accountRefusal) {
-          return buildAccountRefusalToolResult(accountRefusal);
-        }
         if (options.recheckAccountPerCall && authInfo) {
-          const refusalNow = await accountRefusalFor(authInfo);
-          if (refusalNow) return buildAccountRefusalToolResult(refusalNow);
+          // This call's own answer, not the one from when the stream opened.
+          const now = await checkAccount(authInfo);
+          if (now.status === "refused") return buildAccountRefusalToolResult(now.refusal);
+          if (now.status === "unavailable") return buildAccountUnavailableToolResult();
+        } else if (accountRefusal) {
+          return buildAccountRefusalToolResult(accountRefusal);
         }
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
@@ -987,6 +1000,14 @@ export async function registerLetterTools(
  * the text - both messages are fixed constants - so it is safe to hand back
  * whole, the way BETA_ACCESS_MESSAGE is.
  */
+/** A call refused because its account could not be read (recheck mode only). */
+export function buildAccountUnavailableToolResult() {
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: ACCOUNT_UNAVAILABLE_MESSAGE }]
+  };
+}
+
 export function buildAccountRefusalToolResult(error: AccountRefusal) {
   return {
     isError: true,
