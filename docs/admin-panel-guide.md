@@ -355,6 +355,7 @@ Commands available:
 | Lift send block | a blocked account | `liftSendBlock` (refused while any dispute that justifies a block stands) |
 | Adjust letter balance | an account | `adjustCreditsWithClient` (letters in the UI, credits in the ledger; removal FIFO; atomic with the run and audit rows) |
 | Grant image generations | an account | `grantOperatorImageEntitlement` (one grant per command id, one-year expiry) |
+| Restore quarantined content | a `redacted_content_quarantine` row whose window is open, over a live row that is still redacted | queues an `admin_operations` row; the next hourly maintenance run puts the content back as the database owner, before that run's sweep and purge (#153) |
 | Erase account | an account with nothing in flight | `enqueueAccountErasure`: queues an `admin_operations` row, which the next hourly maintenance run carries out as the database owner, re-checking the gate first. The panel's role gains no access to content ([account-erasure.md](account-erasure.md)) |
 | Release amount-mismatch quarantine | an order carrying `PAYMENT_AMOUNT_MISMATCH` | clears the code and records `operator.quarantine_released`; the hourly sweep then acts |
 | Create / change status / delete promo | `promo_campaigns` | client-taking promo service functions with a validated status machine and an `updated_at` version; delete refused once redeemed. The create form's gift budget makes a seed campaign ([gift-letters.md](gift-letters.md)); a code that reads as a printed gift code is refused |
@@ -367,8 +368,11 @@ Commands available:
 
 Read-only pages beyond the P0 set: **Gifts** (unsent gift letters, gift sends today, outstanding and
 redeemed chain codes, the newest codes with a void action; an account page adds that account's gift
-letters, the codes it printed or redeemed, and the grant form), **Retention** (report mode counts and the quarantine's metadata; no
-restore until `retentionService`'s restore defects are fixed), **Routing** (the routing table, the
+letters, the codes it printed or redeemed, and the grant form), **Retention** (the sweep's counts, the quarantine's metadata, and a restore per
+row, queued for the next hourly run; a search by letter, draft or account id for copies older than the newest
+100; and **Recent restores**, where each queued restore's outcome shows, since a copy that went back leaves
+the quarantine; a redacted letter's own page also shows its copy and the restore, and an account page links to
+its copies), **Routing** (the routing table, the
 registry, stuck letters), **Support** (token counts, feature requests without contact emails). Manual
 cases: `ADMIN-OPS-01` to `ADMIN-OPS-03` and `ADMIN-LEGACY-01`.
 

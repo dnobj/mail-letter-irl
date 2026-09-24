@@ -155,6 +155,7 @@ ${table(
     when(letter.sentAt),
   ]),
 )}
+<p class="muted">Content the retention sweep removed from this account's letters and drafts: <a href="/retention?q=${encodeURIComponent(account.userId)}">its quarantined copies</a>.</p>
 
 <h2>Promo redemptions</h2>
 ${table(
@@ -199,6 +200,22 @@ ${table(
 )}`;
 }
 
+/**
+ * A redacted letter's quarantined copy, and its restore while the window is
+ * open, so a customer's letter is restorable from its own page however old the
+ * copy is (#450 review).
+ */
+function savedCopyCell(savedCopy: LetterDetail["savedCopy"] | undefined): SafeHtml {
+  if (!savedCopy) {
+    return html`<span class="muted">none left: the recovery window closed, or the account was erased</span>`;
+  }
+  return html`in quarantine, purged ${when(savedCopy.purgeAfter)}
+<form method="get" action="/commands/retention.restore/preview" class="inline">
+  <input type="hidden" name="target" value="${savedCopy.quarantineId}">
+  <button type="submit">Preview restore…</button>
+</form>`;
+}
+
 export function renderLetter(input: { detail: LetterDetail }): SafeHtml {
   const { letter, job } = input.detail;
   return html`<h1>Letter <span class="mono">${letter.letterId}</span> ${copyButton(letter.letterId)}</h1>
@@ -215,6 +232,7 @@ ${definitionList([
   ["sent", when(letter.sentAt)],
   ["status updated", when(letter.statusUpdatedAt)],
   ["content redacted", when(letter.redactedAt)],
+  ...(letter.redactedAt ? [["saved copy", savedCopyCell(input.detail.savedCopy)] as [string, SafeHtml]] : []),
 ])}
 
 <h2>Outbox job</h2>

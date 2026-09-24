@@ -543,6 +543,8 @@ export interface LetterDetail {
     changedAt: Date;
   }>;
   job: JobDetailForLetter | null;
+  /** The quarantined copy of a redacted letter's content, while its window is open (#450 review). */
+  savedCopy: { quarantineId: string; purgeAfter: Date } | null;
 }
 
 export interface JobDetailForLetter {
@@ -645,6 +647,12 @@ export async function readLetterDetail(
     `SELECT ${JOB_COLUMNS} FROM letter_jobs j WHERE j.letter_id = $1`,
     [letterId],
   );
+  // Metadata only; the reader cannot select the saved content.
+  const saved = await client.query<{ quarantine_id: string; purge_after: Date }>(
+    `SELECT quarantine_id, purge_after FROM redacted_content_quarantine
+     WHERE source_table = 'letters' AND source_id = $1`,
+    [letterId],
+  );
   return {
     letter: toLetterView(row),
     userId: row.user_id,
@@ -656,5 +664,8 @@ export async function readLetterDetail(
       changedAt: h.changed_at,
     })),
     job: job.rows[0] ? toJobDetail(job.rows[0]) : null,
+    savedCopy: saved.rows[0]
+      ? { quarantineId: saved.rows[0].quarantine_id, purgeAfter: saved.rows[0].purge_after }
+      : null,
   };
 }

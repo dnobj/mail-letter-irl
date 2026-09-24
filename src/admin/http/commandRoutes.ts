@@ -48,6 +48,8 @@ function backHrefFor(command: CommandDefinition<any>, targetId: string): string 
       return "/images";
     case "gift_code":
       return "/gifts";
+    case "quarantine":
+      return "/retention";
     case "provider_routing":
     case "provider":
       return "/routing";

@@ -1582,10 +1582,44 @@ saved return address. Nothing on it is in flight.
 
 1. [ ] Open `/retention`; verify the counts (redacted letters and drafts, quarantine rows, purge due) and
    the report of what the next enforcing run would touch, matching `npm run maintenance` in report mode.
-2. [ ] Verify the quarantine table shows source table, row id and dates only: no content anywhere on the
-   page, and no restore control.
+2. [ ] Verify the quarantine table shows source table, row id, account and dates only, with a restore
+   control per row and no content anywhere on the page.
+3. [ ] Search the quarantine by a letter id, then by the account it belongs to: verify each finds that
+   letter's copy, and a search for an unknown id finds none. On the account page, verify the link to its
+   quarantined copies opens the same search.
 
-**Pass criteria:** Report mode only, metadata only.
+**Pass criteria:** Metadata only; any copy can be found, however old; a restore is a queued command
+(`RETENTION-01`).
+
+### RETENTION-01 — The first enforcing sweep (development)
+
+**Status:** Not run.
+
+Run on development before `CONTENT_RETENTION_MODE=enforce` is set anywhere else (#153).
+
+**Steps:**
+
+1. [ ] Before switching: note the counts on `/retention` (letters, paid drafts and abandoned drafts due,
+   and held back).
+2. [ ] Set `CONTENT_RETENTION_MODE=enforce` on `letter-irl-maintenance-dev`. After the next daily
+   `content-retention-sweep` (`/maintenance`), verify each redacted count rose by its due count from
+   step 1 or by the batch size (`CONTENT_RETENTION_BATCH_SIZE`, 500 by default), whichever is smaller,
+   give or take rows that came due in between. Verify the maintenance log carries counts only, and
+   `retention.backlog_remaining` when a batch was full.
+3. [ ] The same day, verify on the quarantine table:
+   - a row swept on time purges when its published period ends;
+   - a row swept after its period (the backlog) purges about a day after it was quarantined. That day is
+     all the time there is to restore a backlog row the sweep should not have taken, so check the swept
+     rows now, not after the next run.
+4. [ ] Verify letters that were still in flight (queued, held, or with an unsettled order) were not
+   touched.
+5. [ ] On a quarantined letter's own page (`/letters/<id>`), verify the saved copy shows with its purge
+   time, preview its restore and confirm it. After the next hourly run, verify under **Recent restores**
+   on `/retention` that it says `restored`, and that the letter page no longer shows the content as
+   redacted. The next daily sweep quarantines it again, because nothing about it changed.
+
+**Pass criteria:** The sweep cleared what the report said it would and nothing in flight, and a restore
+put a copy back.
 
 ### ADMIN-OPS-02 — Tier override
 

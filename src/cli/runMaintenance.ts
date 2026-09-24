@@ -8,7 +8,11 @@ import { runDailyMaintenance } from '../workers/creditExpirationWorker.js';
 import { runStatusSync } from '../workers/statusSyncWorker.js';
 import { runCommerceMaintenance } from '../services/commerceService.js';
 import { reconcilePackRefunds } from '../services/packRefundService.js';
-import { runRetentionPreview, runRetentionSweep } from '../services/retentionService.js';
+import {
+  processRetentionRestores,
+  runRetentionPreview,
+  runRetentionSweep
+} from '../services/retentionService.js';
 import { purgeExpiredRecentUploads } from '../services/recentUploadStore.js';
 import { purgeExpiredFeatureRequests } from '../services/featureRequestService.js';
 import { processAccountErasures } from '../services/accountErasureService.js';
@@ -170,8 +174,8 @@ const RECENT_UPLOADS_SWEEP_INTERVAL_MS = 30 * 60 * 1000;
  * Delete upload references past their window (#282).
  *
  * Separate from content retention on purpose. That sweep acts only in enforce
- * mode and carries #153's open defects; this is a plain time rule on a table of
- * pointers, and nothing about it should wait on those.
+ * mode and judges holds across orders, jobs and the ledger; this is a plain
+ * time rule on a table of pointers, and nothing about it should wait on those.
  *
  * NEVER THROWS, for the same reason as runContentRetention: runMaintenanceTaskIfDue
  * rethrows, and a housekeeping failure must not skip mail dispatch.
@@ -290,6 +294,44 @@ async function runAccountErasures(): Promise<void> {
   }
 }
 
+/**
+ * Put back the quarantined content the admin panel queued for restore (#153).
+ * Runs BEFORE the retention pass, so a restore queued before this run is never
+ * beaten to its copy by the purge in the same run. Same wrapper as the others:
+ * it never throws, and a failure inside it is rethrown as its class. Every run,
+ * so a queued restore waits an hour at most.
+ */
+const RETENTION_RESTORE_INTERVAL_MS = 30 * 60 * 1000;
+
+async function runRetentionRestores(): Promise<void> {
+  try {
+    const run = await runMaintenanceTaskIfDue(
+      'retention-restores',
+      RETENTION_RESTORE_INTERVAL_MS,
+      async () => {
+        try {
+          return await processRetentionRestores();
+        } catch (error) {
+          const errorClass =
+            carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+          throw Object.assign(new Error(`retention restores failed: ${errorClass}`), {
+            diagnosticClass: errorClass
+          });
+        }
+      }
+    );
+    console.log(`[Maintenance] Retention restores ${run.ran ? 'completed' : 'not due'}`);
+    if (run.ran && run.result) {
+      // Counts only - never a letter or draft id.
+      writeDiagnostic('info', 'retention_restore.run', { ...run.result });
+    }
+  } catch (error) {
+    writeDiagnostic('error', 'retention_restore.task_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
 export async function runMaintenance(): Promise<void> {
   // Was Math.max(1, Number.parseInt(...)), the shape envSettings exists to
   // replace: '1e3' parses to 1, so a request for 1000 dispatched ONE letter a
@@ -303,6 +345,9 @@ export async function runMaintenance(): Promise<void> {
   // of the tasks below is wrapped and runMaintenanceTaskIfDue rethrows, so
   // anything scheduled after them is silently skipped whenever one fails.
   // runContentRetention never throws, so it cannot skip them either (#153).
+  // Restores come first of all: a copy queued for restore must not be purged
+  // by the same run (#153).
+  await runRetentionRestores();
   await runContentRetention();
   // Also wrapped, and also never throws, for the same reason (#282).
   await runRecentUploadsSweep();
