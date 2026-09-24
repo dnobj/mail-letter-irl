@@ -1,6 +1,6 @@
 # Letter IRL Project Status
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Current product scope, architecture, environment state, and open work
 
 ---
@@ -36,12 +36,14 @@ ChatGPT, and manage their account on letterirl.com.
 
 The MCP surface is 22 tools and 6 widgets ([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)).
 Tool names and schemas are treated as stable compatibility contracts. Widget template URIs are
-versioned (`WIDGET_TEMPLATE_VERSION`, 35 on `dev`). Since v32 the two image letter tools each have
+versioned (`WIDGET_TEMPLATE_VERSION`, 37 on `dev`). Since v32 the two image letter tools each have
 their own template name, served from the letter card (#411). Since v33 every card shows the
 website's mark, and an empty preview or pack card suggests a higher thinking effort to Instant users.
 Since v34 an empty image letter or postcard card lets the person choose or upload an image that the
 card cannot pass back, and previews it by link (#414). Since v35 a send or checkout refused because the same
-mail went out in the last 24 hours offers **Send another copy** or **Pay for another copy** (#412).
+mail went out in the last 24 hours offers **Send another copy** or **Pay for another copy** (#412). Since v36 a gift
+letter preview shows the card the recipient receives ([gift-letters.md](gift-letters.md)). Since v37 a refused call
+shows the server's sentence rather than the host's wrapper around it (#434).
 
 ## Environments
 

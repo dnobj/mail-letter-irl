@@ -1649,7 +1649,12 @@ describe.each([LETTER, POSTCARD])('$file and the same mail twice (#412)', spec =
 
   it.each([
     ['as it is', 'Possible duplicate: This same mail was already sent.'],
-    ['behind words of its own', 'Tool call failed: Possible duplicate: This same mail was already sent.']
+    ['behind words of its own', 'Tool call failed: Possible duplicate: This same mail was already sent.'],
+    [
+      "wrapped the way ChatGPT wraps a refusal (#434)",
+      'Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: ' +
+        "[TextContent(type='text', text='Possible duplicate: This same mail was already sent.', annotations=None, meta=None)]"
+    ]
   ])('recognises a refusal the host turns into a rejection, %s', async (_label, message) => {
     const harness = await ready({
       sendResponse: () => {
@@ -1744,6 +1749,257 @@ describe.each([LETTER, POSTCARD])('$file and the same mail twice (#412)', spec =
     expect(harness.text('error-message')).toBe('Unable to open checkout: Pay & Send is not currently available.');
     expect(harness.text('pay-send-button')).toBe('Retry Pay & Send');
     expect(harness.visible('checkout-link')).toBe(false);
+  });
+});
+
+describe.each([LETTER, POSTCARD])("$file shows a refused call's sentence, not the host's wrapper (#434)", spec => {
+  // ChatGPT rejects a card's own callTool when the result is an error, and the
+  // rejection's message wraps the result's text in a Python-style repr. This
+  // is the message GIFT-01 step 9 showed whole under "Send Gift Letter" on
+  // development (2026-09-23).
+  const DAILY_CAP = 'This account has reached its daily limit of 3 items. Please try again tomorrow.';
+  const GIFT01_REJECTION =
+    "Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: [TextContent(type='text', text='This account has reached its daily limit of 3 items. Please try again tomorrow.', annotations=None, meta=None)]";
+  /** The same rejection around another text, quoted as Python quoted it. */
+  const rejection = (quoted: string) =>
+    new Error(
+      'Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: ' +
+        `[TextContent(type='text', text=${quoted}, annotations=None, meta=None)]`
+    );
+
+  /** Calls to `tool` reject with `error`; every other call answers as usual. */
+  const refuseCalls = (harness: Harness, tool: string, error: Error, answers: Record<string, unknown> = {}) => {
+    const usual = harness.openai.callTool as (name: string, args: Json) => Promise<unknown>;
+    harness.openai.callTool = async (name: string, args: Json) => {
+      if (name === tool) {
+        harness.calls.push({ name, args });
+        throw error;
+      }
+      if (name in answers) {
+        harness.calls.push({ name, args });
+        return answers[name];
+      }
+      return usual(name, args);
+    };
+  };
+
+  /** A card showing the host's draft with no letters to send it. */
+  const unpaid = async () => {
+    const harness = mount(spec, { toolOutput: spec.output('draft_host_0001', eligibility(false)) });
+    await flush();
+    expect(harness.visible('buy-pack-button')).toBe(true);
+    return harness;
+  };
+
+  it('shows the daily limit sentence alone after a refused send', async () => {
+    expect(GIFT01_REJECTION).toBe(rejection(`'${DAILY_CAP}'`).message);
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: () => {
+        throw new Error(GIFT01_REJECTION);
+      }
+    });
+    await flush();
+
+    await harness.click('send-button');
+
+    expect(harness.text('error-message')).toBe(`Failed to send: ${DAILY_CAP}`);
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.disabled('send-button')).toBe(false);
+  });
+
+  it('shows the sentence after a refused checkout', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001', eligibility(false)),
+      checkoutResponse: () => {
+        throw rejection("'Pay & Send is not currently available.'");
+      }
+    });
+    await flush();
+
+    await harness.click('pay-send-button');
+
+    expect(harness.text('error-message')).toBe('Unable to open checkout: Pay & Send is not currently available.');
+  });
+
+  it('shows the sentence after a refused preview', async () => {
+    const harness = await lostCall(spec, {
+      previewResponse: () => {
+        throw rejection("'Image is too small for print quality.'");
+      }
+    });
+
+    await harness.click('retry-button');
+
+    expect(harness.text('error-message')).toBe('Unable to create the preview: Image is too small for print quality.');
+  });
+
+  it('shows the sentence when the letter packs cannot be listed', async () => {
+    const harness = await unpaid();
+    refuseCalls(harness, 'list_letter_packs', rejection("'Letter packs are not on sale right now.'"));
+
+    await harness.click('buy-pack-button');
+
+    expect(harness.callsTo('list_letter_packs')).toHaveLength(1);
+    expect(harness.text('error-message')).toBe('Unable to load letter packs: Letter packs are not on sale right now.');
+  });
+
+  it('shows the sentence when a letter pack checkout is refused', async () => {
+    const harness = await unpaid();
+    refuseCalls(harness, 'create_pack_checkout', rejection("'Letter packs are not on sale right now.'"), {
+      list_letter_packs: {
+        structuredContent: {
+          packs: [{ pack: 'starter', letters: 5, currency: 'usd', displayAmount: '19.99' }]
+        }
+      }
+    });
+    await harness.click('buy-pack-button');
+    const choice = harness.document.querySelector('#pack-options button[data-pack="starter"]');
+    expect(choice).not.toBeNull();
+
+    choice!.dispatchEvent(new harness.document.defaultView!.Event('click'));
+    await flush();
+
+    expect(harness.callsTo('create_pack_checkout')).toHaveLength(1);
+    expect(harness.text('error-message')).toBe(
+      'Unable to start the letter pack checkout: Letter packs are not on sale right now.'
+    );
+  });
+
+  it('keeps an apostrophe in a sentence Python quoted with double quotes', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: () => {
+        throw rejection(`"This draft isn't ready to send yet."`);
+      }
+    });
+    await flush();
+
+    await harness.click('send-button');
+
+    expect(harness.text('error-message')).toBe("Failed to send: This draft isn't ready to send yet.");
+  });
+
+  it('unescapes a quote in a sentence that holds both kinds', async () => {
+    // Python keeps single quotes when the text holds both, and escapes the
+    // single ones.
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: () => {
+        throw rejection(`'The name "Sam" doesn\\'t match the draft.'`);
+      }
+    });
+    await flush();
+
+    await harness.click('send-button');
+
+    expect(harness.text('error-message')).toBe(`Failed to send: The name "Sam" doesn't match the draft.`);
+  });
+
+  it('shows only the first sentence of a result with two', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: () => {
+        throw new Error(
+          'Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: ' +
+            "[TextContent(type='text', text='This draft has expired.', annotations=None, meta=None), " +
+            "TextContent(type='text', text='Ask for a new preview.', annotations=None, meta=None)]"
+        );
+      }
+    });
+    await flush();
+
+    await harness.click('send-button');
+
+    expect(harness.text('error-message')).toBe('Failed to send: This draft has expired.');
+  });
+
+  it('decodes the other escapes Python writes', async () => {
+    // Python writes these only for characters that do not print: a tab, a
+    // carriage return, a no-break space, a zero-width space, a tag character.
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: () => {
+        throw rejection(`'Tab\\there,\\r\\nno\\xa0break \\u200b done \\U000e0001 \\\\ ok'`);
+      }
+    });
+    await flush();
+
+    await harness.click('send-button');
+
+    expect(harness.text('error-message')).toBe('Failed to send: Tab here, no\u00a0break \u200b done \u{e0001} \\ ok');
+  });
+
+  it('drops an escape outside Unicode rather than failing to show the message', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: () => {
+        throw rejection(`'Not a character: \\U00110000.'`);
+      }
+    });
+    await flush();
+
+    await harness.click('send-button');
+
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('error-message')).toBe('Failed to send: Not a character: .');
+  });
+
+  it('shows a line break in the sentence as a space', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: () => {
+        throw rejection(`'This draft has expired.\\nAsk for a new preview.'`);
+      }
+    });
+    await flush();
+
+    await harness.click('send-button');
+
+    expect(harness.text('error-message')).toBe('Failed to send: This draft has expired. Ask for a new preview.');
+  });
+
+  it('reads a rejection that is a bare string', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: () => {
+        throw GIFT01_REJECTION;
+      }
+    });
+    await flush();
+
+    await harness.click('send-button');
+
+    expect(harness.text('error-message')).toBe(`Failed to send: ${DAILY_CAP}`);
+  });
+
+  it('says Unknown error for a rejection with no message', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: () => {
+        throw new Error('');
+      }
+    });
+    await flush();
+
+    await harness.click('send-button');
+
+    expect(harness.text('error-message')).toBe('Failed to send: Unknown error');
+  });
+
+  it('shows a wrapper with no sentence in it as it came', async () => {
+    const empty = rejection("''");
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: () => {
+        throw empty;
+      }
+    });
+    await flush();
+
+    await harness.click('send-button');
+
+    expect(harness.text('error-message')).toBe(`Failed to send: ${empty.message}`);
   });
 });
 
