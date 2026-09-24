@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { pathToFileURL } from 'node:url';
 import { closePool } from '../db/index.js';
-import { processDueLetterJobs } from '../services/letterJobService.js';
+import { lettersWaitingBehindPause, processDueLetterJobs } from '../services/letterJobService.js';
 import { runMaintenanceTaskIfDue } from '../services/maintenanceTaskService.js';
 import { cleanupExpiredImages, closeTempImageStore } from '../services/tempImageStore.js';
 import { runDailyMaintenance } from '../workers/creditExpirationWorker.js';
@@ -24,7 +24,7 @@ import {
   writeDiagnostic
 } from '../utils/diagnosticLog.js';
 import { assertValidDeploymentConfig } from '../config/deploymentConfig.js';
-import { sendMaintenanceHeartbeat } from '../services/maintenanceHeartbeat.js';
+import { maintenanceHeartbeatUrl, sendMaintenanceHeartbeat } from '../services/maintenanceHeartbeat.js';
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -421,8 +421,28 @@ export async function maintenanceEntry(): Promise<void> {
     console.log(`[Maintenance] Finished at ${new Date().toISOString()}`);
     // Only after a run that finished: a monitor stops hearing from a run that
     // never happens and from one that keeps failing alike (#408).
-    const heartbeat = await sendMaintenanceHeartbeat();
-    if (heartbeat !== 'skipped') console.log(`[Maintenance] Heartbeat ${heartbeat}`);
+    //
+    // Nor while the outbox is paused with letters waiting (#444). The run is
+    // fine but no mail is moving, and a pause left on after an incident would
+    // otherwise show in this log and nowhere the owner is told: the monitor
+    // alerts until the outbox is switched back on (#451 review). A count that
+    // failed withholds too: paused, it cannot say nothing waits.
+    const waiting = await lettersWaitingBehindPause();
+    if (waiting !== 0) {
+      const monitored = maintenanceHeartbeatUrl() !== null;
+      writeDiagnostic('warn', 'maintenance.heartbeat_withheld', { outboxWaiting: waiting, monitored });
+      const held =
+        waiting === 'unknown'
+          ? 'the outbox is paused and the letters waiting could not be counted'
+          : `the outbox is paused with ${waiting} waiting`;
+      console.log(
+        `[Maintenance] Heartbeat withheld: ${held}` +
+          (monitored ? '' : '. MAINTENANCE_HEARTBEAT_URL is not set, so no monitor will alert')
+      );
+    } else {
+      const heartbeat = await sendMaintenanceHeartbeat();
+      if (heartbeat !== 'skipped') console.log(`[Maintenance] Heartbeat ${heartbeat}`);
+    }
   } finally {
     closeTempImageStore();
     await closePool();

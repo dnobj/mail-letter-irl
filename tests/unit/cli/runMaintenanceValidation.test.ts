@@ -23,11 +23,13 @@ const services = vi.hoisted(() => ({
   purgeExpiredRecentUploads: vi.fn().mockResolvedValue(0),
   purgeExpiredFeatureRequests: vi.fn().mockResolvedValue(0),
   sendMaintenanceHeartbeat: vi.fn().mockResolvedValue('sent'),
+  lettersWaitingBehindPause: vi.fn().mockResolvedValue(0),
   closePool: vi.fn().mockResolvedValue(undefined)
 }));
 
 vi.mock('../../../src/services/letterJobService.js', () => ({
-  processDueLetterJobs: services.processDueLetterJobs
+  processDueLetterJobs: services.processDueLetterJobs,
+  lettersWaitingBehindPause: services.lettersWaitingBehindPause
 }));
 vi.mock('../../../src/services/accountErasureService.js', () => ({
   processAccountErasures: services.processAccountErasures
@@ -164,6 +166,70 @@ describe('maintenance deployment validation', () => {
     expect(services.sendMaintenanceHeartbeat).not.toHaveBeenCalled();
     // The pool still closes.
     expect(services.closePool).toHaveBeenCalledTimes(1);
+  });
+
+  it('withholds the heartbeat while the outbox is paused with letters waiting, so a pause left on alarms (#451 review)', async () => {
+    const output = captureOutput();
+    stubValidDevelopment();
+    services.lettersWaitingBehindPause.mockResolvedValueOnce(2);
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(services.sendMaintenanceHeartbeat).not.toHaveBeenCalled();
+    expect(output()).toContain('Heartbeat withheld: the outbox is paused with 2 waiting');
+    expect(output()).toContain('"event":"maintenance.heartbeat_withheld"');
+    // Asked after the run, which went ahead in full; the pool still closes.
+    expect(services.lettersWaitingBehindPause.mock.invocationCallOrder[0]).toBeGreaterThan(
+      services.runCommerceMaintenance.mock.invocationCallOrder[0]
+    );
+    expect(services.closePool).toHaveBeenCalledTimes(1);
+  });
+
+  it('withholds the heartbeat, and still finishes the run, when the count behind a pause failed (#451 delta review)', async () => {
+    const output = captureOutput();
+    stubValidDevelopment();
+    services.lettersWaitingBehindPause.mockResolvedValueOnce('unknown');
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(services.sendMaintenanceHeartbeat).not.toHaveBeenCalled();
+    expect(output()).toContain('Heartbeat withheld: the outbox is paused and the letters waiting could not be counted');
+    expect(output()).not.toContain('maintenance.run_failed');
+  });
+
+  it('says when a withheld heartbeat reaches no monitor, and not when one is set', async () => {
+    const unmonitored = captureOutput();
+    stubValidDevelopment();
+    services.lettersWaitingBehindPause.mockResolvedValueOnce(1);
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+    expect(unmonitored()).toContain('MAINTENANCE_HEARTBEAT_URL is not set, so no monitor will alert');
+
+    vi.restoreAllMocks();
+    const monitored = captureOutput();
+    vi.stubEnv('MAINTENANCE_HEARTBEAT_URL', 'https://hc-ping.com/abc');
+    services.lettersWaitingBehindPause.mockResolvedValueOnce(1);
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+    expect(monitored()).toContain('Heartbeat withheld: the outbox is paused with 1 waiting');
+    expect(monitored()).not.toContain('no monitor will alert');
+  });
+
+  it('sends the heartbeat when nothing waits behind a pause', async () => {
+    stubValidDevelopment();
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(services.lettersWaitingBehindPause).toHaveBeenCalledTimes(1);
+    expect(services.sendMaintenanceHeartbeat).toHaveBeenCalledTimes(1);
+  });
+
+  it('says in the maintenance log, every run, that the outbox is paused (#451 review)', async () => {
+    const output = captureOutput();
+    stubValidDevelopment();
+    vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(output()).toContain('[config] LETTER_IRL_OUTBOX_DISPATCH_ENABLED pauses the outbox');
   });
 
   it('labels a configuration failure configuration_error in the maintenance diagnostic', async () => {

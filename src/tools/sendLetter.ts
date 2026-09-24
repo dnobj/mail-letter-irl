@@ -128,16 +128,20 @@ async function handler(
   await context.persist(context.user);
 
   const submission = await processLetterJob(created.job.job_id);
+  // Not claimed means queued, not failed: the outbox is paused (#444), or
+  // another process took the job first. Either way it goes out from the queue.
   const currentStatus: PublicStatus = submission.completed
     ? 'accepted'
-    : submission.retryScheduled
+    : submission.retryScheduled || !submission.claimed
       ? 'pending'
       : 'failed';
   const submissionText = submission.completed
     ? 'Accepted by print provider'
-    : submission.retryScheduled
-      ? 'Provider temporarily unavailable; retry scheduled'
-      : 'Provider submission failed';
+    : !submission.claimed
+      ? 'Queued for the print provider'
+      : submission.retryScheduled
+        ? 'Provider temporarily unavailable; retry scheduled'
+        : 'Provider submission failed';
 
   let suggestSaveReturnAddress: boolean | undefined;
   let saveReturnAddressNote: string | undefined;
@@ -154,6 +158,7 @@ async function handler(
       event: 'send.letter.committed',
       submissionCompleted: submission.completed,
       retryScheduled: submission.retryScheduled,
+      claimed: submission.claimed,
     },
     'Letter transaction committed and provider submission attempted'
   );

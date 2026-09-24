@@ -21,6 +21,7 @@
  */
 
 import { maintenanceHeartbeatUrlInvalid } from '../services/maintenanceHeartbeat.js';
+import { enabledUnlessDisabled } from '../utils/envSettings.js';
 import {
   JIT_PRICE_ENV_VARS,
   PACK_PRICE_ENV_VARS,
@@ -434,6 +435,18 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     advisory: true,
     secret: false,
     services: ['api']
+  },
+  /**
+   * The outbox's stop (#444): pauses handing queued letters to the printer,
+   * which the sending switch above does not. Both processes dispatch - the API
+   * right after a send, maintenance for the rest - so a pause is set on both.
+   */
+  {
+    name: 'LETTER_IRL_OUTBOX_DISPATCH_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api', 'maintenance']
   },
   /**
    * Image generation, which is NOT new - and that is the point.
@@ -1077,6 +1090,19 @@ export function validateDeploymentConfig(
       severity: 'warning',
       rule: 'maintenance.heartbeat_url_invalid',
       message: 'MAINTENANCE_HEARTBEAT_URL must be an https URL, such as a healthchecks.io ping URL'
+    });
+  }
+
+  // #444: the outbox's stop, the same reading as letterJobService's
+  // outboxDispatchEnabled. A pause is set on purpose, so a warning and never a
+  // boot error; but a pause left on holds every letter, so the API says so at
+  // every boot and maintenance at every run (#451 review).
+  if (!enabledUnlessDisabled('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', env)) {
+    findings.push({
+      severity: 'warning',
+      rule: 'outbox.dispatch_paused',
+      message:
+        'LETTER_IRL_OUTBOX_DISPATCH_ENABLED pauses the outbox: nothing goes to the print provider until it is set to true'
     });
   }
 

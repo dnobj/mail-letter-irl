@@ -69,7 +69,8 @@ This is the main flow for composing and sending a letter.
     `expected_delivery`, and the job `completed`
 16. Server returns confirmation:
     - `orderId` (letter ID)
-    - `currentStatus`: `accepted`, `pending` (retry scheduled) or `failed`
+    - `currentStatus`: `accepted`, `pending` (retry scheduled, or queued because the outbox is paused:
+      "Queued for the print provider", #444) or `failed`
     - `lettersRemaining`
     - `isRetry: true` when the draft had already been consumed
 17. ChatGPT confirms the order in chat and may continue with status follow-up

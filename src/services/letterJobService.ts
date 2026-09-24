@@ -26,6 +26,7 @@ import {
 import { returnGiftLetterForFailedSendWithClient } from './giftLetterService.js';
 import { carriedDiagnosticClass, classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { summarizeProviderRejection } from './providerFailureSummary.js';
+import { enabledUnlessDisabled } from '../utils/envSettings.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const STALE_LOCK_MINUTES = 15;
@@ -150,7 +151,27 @@ export async function createLetterJob(letter: Letter): Promise<LetterJob> {
   return transaction((client) => createLetterJobWithClient(client, letter));
 }
 
+/**
+ * The outbox's own stop (#444).
+ *
+ * LETTER_IRL_MAIL_SENDING_ENABLED refuses NEW work, and deliberately lets paid
+ * Pay & Send fulfilment through. Neither it nor anything else stopped what the
+ * outbox had already queued: its letters, their retries and paid orders being
+ * fulfilled all went to the printer on the next run, which is the wrong answer
+ * during a printing incident. Off, this claims nothing, so every queued job
+ * keeps its status, attempts and backoff and goes out when it is switched back
+ * on. Both processes dispatch - the API right after a send, maintenance for
+ * everything else - so it is set on BOTH services to pause
+ * (docs/operational-acceptance.md). On when unset; any value other than an
+ * affirmative, a typo included, pauses, which is the failure that mails
+ * nothing wrong.
+ */
+export function outboxDispatchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return enabledUnlessDisabled('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', env);
+}
+
 async function claimJob(jobId?: string): Promise<LetterJob | null> {
+  if (!outboxDispatchEnabled()) return null;
   const params: unknown[] = [];
   const specificJobClause = jobId ? `AND job_id = $1` : '';
   if (jobId) params.push(jobId);
@@ -854,11 +875,59 @@ export async function processLetterJob(
   return processClaimedJob(job, options);
 }
 
+/**
+ * The jobs a paused outbox holds back: everything claimJob would take once
+ * switched back on, due now or later. Its own predicate without the
+ * next_attempt_at clause, so a claim a crash left behind counts too - the
+ * redeploy that sets the switch is one such crash (#451 review).
+ */
+async function countWaitingLetterJobs(): Promise<number> {
+  const waiting = await query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM letter_jobs
+      WHERE attempts < max_attempts
+        AND provider_outcome = 'not_dispatched'
+        AND (
+          status IN ('pending', 'failed')
+          OR (
+            status = 'processing'
+            AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
+          )
+        )`
+  );
+  return Number(waiting.rows[0]?.count ?? 0);
+}
+
+/**
+ * How many letters a paused outbox is holding back: 0 without a query while it
+ * dispatches, and 'unknown' when the count itself failed. Maintenance withholds
+ * its heartbeat unless this is 0, so a pause left on reaches the monitor
+ * (#451 review). Never throws: it runs after a run that finished, and a failed
+ * count must not relabel that run as failed.
+ */
+export async function lettersWaitingBehindPause(): Promise<number | 'unknown'> {
+  if (outboxDispatchEnabled()) return 0;
+  try {
+    return await countWaitingLetterJobs();
+  } catch (error) {
+    writeDiagnostic('warn', 'outbox.waiting_count_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
+    return 'unknown';
+  }
+}
+
 /** Claim and process due jobs until the batch is empty or reaches its limit. */
 export async function processDueLetterJobs(
   limit = 25,
   options: ProcessLetterJobOptions = {}
-): Promise<{ processed: number; completed: number; retryScheduled: number; failed: number }> {
+): Promise<{
+  processed: number;
+  completed: number;
+  retryScheduled: number;
+  failed: number;
+  paused?: true;
+  waiting?: number;
+}> {
   const summary = { processed: 0, completed: 0, retryScheduled: 0, failed: 0 };
 
   const staleDispatched = await query<LetterJob>(
@@ -907,6 +976,15 @@ export async function processDueLetterJobs(
       new Error('process_interrupted_before_provider_dispatch'),
       options.random ?? Math.random
     );
+  }
+
+  // Paused (#444): claim nothing, and say how much is waiting, once a run. The
+  // two sweeps above still ran: they settle jobs a crash left in 'processing'
+  // and never call the provider.
+  if (!outboxDispatchEnabled()) {
+    const count = await countWaitingLetterJobs();
+    writeDiagnostic('warn', 'outbox.dispatch_paused', { waiting: count });
+    return { ...summary, paused: true, waiting: count };
   }
 
   while (summary.processed < limit) {

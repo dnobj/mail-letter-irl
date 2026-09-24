@@ -83,7 +83,15 @@ In order, it:
   the last 7 days of Stripe payments, and recalculates user tiers;
 - closes S3 and PostgreSQL clients, then exits.
 
-The first three passes are wrapped so that a failure in one cannot skip mail dispatch.
+Every pass before the outbox is wrapped, so a failure in one cannot skip mail dispatch.
+
+While `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` pauses the outbox (#444,
+[operational-acceptance.md](operational-acceptance.md)), the outbox pass claims nothing and logs
+`outbox.dispatch_paused` with the number of letters waiting. Its two crash sweeps still run, so a send
+interrupted mid-dispatch, the redeploy that sets the switch included, is still settled: held for an
+operator if the provider may have it, or failed and refunded if it never reached the provider on its last
+attempt. While letters are waiting, the run withholds its heartbeat, so the external monitor alerts until
+the outbox is switched back on.
 
 Generated images are stored in a private Railway bucket for 15 minutes. Production must not fall back to process memory. Development may use memory only for local execution; deployed development uses the bucket so restart behavior matches production.
 

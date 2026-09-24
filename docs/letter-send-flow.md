@@ -101,6 +101,8 @@ Railway runs `npm run maintenance` once per hour. Outbox recovery atomically cla
 
 The same stable provider idempotency key is reused after timeout or process restart. This protects against a provider order succeeding while the application loses the response.
 
+**Paused outbox (#444).** With `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` on the API and the maintenance service, neither claims a job, so nothing reaches the provider. A send still commits and queues its job, and the tool answers `currentStatus: pending`, "Queued for the print provider". Every waiting job keeps its attempts and backoff and goes out on the first maintenance run after the switch is back on. The crash sweeps still run; how a pause shows and how to rehearse it is in [operational-acceptance.md](operational-acceptance.md).
+
 Maintenance also performs image cleanup and conditionally runs six-hour provider status synchronization and daily credit/draft/payment maintenance. It closes all database and bucket clients before exit.
 
 ## Status Retrieval
