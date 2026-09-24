@@ -10,6 +10,7 @@ import {
   EmailAlreadyLinkedError,
   EMAIL_ALREADY_LINKED_MESSAGE
 } from '../../../src/services/userService.js';
+import { AccountErasedError, ACCOUNT_ERASED_MESSAGE } from '../../../src/auth/accountErased.js';
 
 /**
  * Where the HTTP status comes from (#179).
@@ -183,6 +184,22 @@ describe('restAuth failure statuses', () => {
 
     expect(outcome).toMatchObject({ ok: false, reason: 'account_conflict', status: 409 });
     expect(outcome.ok ? '' : outcome.message).toBe(EMAIL_ALREADY_LINKED_MESSAGE);
+  });
+
+  it('maps an erased account to 403, with the sentence that points at support (#289)', async () => {
+    // A token issued before the erasure is still valid for up to a day; the
+    // dashboard shows this sentence instead of reading the tombstone.
+    vi.mocked(validateJWTToken).mockResolvedValue(validUser);
+    vi.mocked(prepareAuthenticatedUser).mockRejectedValue(new AccountErasedError());
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const outcome = await authenticateRestRequest(request({ authorization: 'Bearer t' }), READ);
+
+    // A refusal decided and logged where it happened, not a database fault.
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+    expect(outcome).toMatchObject({ ok: false, reason: 'account_erased', status: 403 });
+    expect(outcome.ok ? '' : outcome.message).toBe(ACCOUNT_ERASED_MESSAGE);
   });
 
   it('maps a database that will not answer to 503, not a rethrow', async () => {

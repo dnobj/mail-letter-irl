@@ -13,9 +13,13 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * The newest migration the grant statements depend on. Provisioning refuses a
  * database that has not reached it, because a GRANT on a table that does not
  * exist yet fails the whole transaction.
+ *
+ * 035 adds users.erased_at, which neither role is granted: the panel tells an
+ * erased account by its placeholder email (src/services/accountErasureService.ts),
+ * so the grants are unchanged and provisioning need not be re-run for it.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "034_end_zero_letter_promos.sql";
+  "035_account_erasure.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

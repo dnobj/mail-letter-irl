@@ -9,6 +9,7 @@ import { query } from '../db/index.js';
 import { User, CreateUserParams } from './types.js';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import { VerifiedEmailRequiredError } from '../auth/verifiedEmail.js';
+import { AccountErasedError } from '../auth/accountErased.js';
 
 /**
  * The name PostgreSQL gives the inline UNIQUE on users.email
@@ -157,6 +158,12 @@ export async function getOrCreateUser(userId: string, email: string): Promise<Us
   // Try to find existing user
   const existing = await findUser(userId);
   if (existing) {
+    // Before the email update below, which would write the real address back
+    // onto the tombstone (#289).
+    if (existing.erased_at) {
+      writeDiagnostic('warn', 'identity.account_erased_refused');
+      throw new AccountErasedError();
+    }
     // Update email if it changed
     if (existing.email !== email) {
       return await updateUserEmail(userId, email);

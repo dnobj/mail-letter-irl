@@ -26,6 +26,7 @@ export const ADMIN_COMMANDS: ReadonlyArray<CommandDefinition<any>> = [
   accounts.adjustBalance,
   accounts.grantImages,
   accounts.releaseQuarantine,
+  accounts.erase,
   promos.create,
   promos.transition,
   promos.remove,

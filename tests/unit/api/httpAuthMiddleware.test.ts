@@ -51,6 +51,7 @@ import {
   EmailAlreadyLinkedError,
   EMAIL_ALREADY_LINKED_MESSAGE
 } from "../../../src/services/userService.js";
+import { AccountErasedError, ACCOUNT_ERASED_MESSAGE } from "../../../src/auth/accountErased.js";
 
 const issuer = "https://dev-test.auth0.com/";
 const mcpAudience = "https://dev-api.example.com/mcp";
@@ -153,6 +154,22 @@ describe("HTTP auth middleware (checkout route)", () => {
     expect(user).toBeNull();
     expect(state.statusCode).toBe(409);
     expect(JSON.parse(state.body)).toEqual({ error: EMAIL_ALREADY_LINKED_MESSAGE });
+  });
+
+  it("answers 403 for an erased account, with the sentence that points at support (#289)", async () => {
+    const { getOrCreateUser } = await import("../../../src/services/userService.js");
+    vi.mocked(getOrCreateUser).mockRejectedValueOnce(new AccountErasedError());
+
+    const { res, state } = response();
+    const user = await authenticateHttpRequest(
+      request({ authorization: `Bearer ${await mint(mcpAudience)}` }),
+      res,
+      SEND
+    );
+
+    expect(user).toBeNull();
+    expect(state.statusCode).toBe(403);
+    expect(JSON.parse(state.body)).toEqual({ error: ACCOUNT_ERASED_MESSAGE });
   });
 
   it("rejects the retired website audience, even with the old rollback settings, in the checkout route's own wording", async () => {

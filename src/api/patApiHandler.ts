@@ -21,7 +21,7 @@ import {
 import { InsufficientScopeError } from '../auth/oauthChallenge.js';
 import { OAUTH_NOT_CONFIGURED } from '../auth/oauthErrors.js';
 import { requiredRestScopes } from '../auth/restScopes.js';
-import { insufficientScope, sendRestAuthFailure } from './middleware/restAuth.js';
+import { insufficientScope, prepareRestAccount, sendRestAuthFailure } from './middleware/restAuth.js';
 import { rateLimitAccount } from './middleware/rateLimit.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
 import { createToken, listTokens, revokeToken, TokenExpiryError } from '../services/patService.js';
@@ -115,6 +115,13 @@ export async function handlePATApiRequest(
   }
   if (await rateLimitAccount(req, res, authInfo.userId, 'api_account')) {
     return true; // Rate limited
+  }
+  // The account, refused the way every other REST route refuses it: an erased
+  // one (#289), or one that has no confirmed address to open from.
+  const account = await prepareRestAccount(authInfo);
+  if (!account.ok) {
+    sendRestAuthFailure(res, account);
+    return true;
   }
 
   // Route handlers

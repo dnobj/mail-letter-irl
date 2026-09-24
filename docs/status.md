@@ -32,7 +32,9 @@ ChatGPT, and manage their account on letterirl.com.
   Google and with a password has one balance and one history. A sign-in that carries no confirmed
   address opens no account and says so, rather than opening one under an invented address
   ([account-switching-guide.md](account-switching-guide.md),
-  [auth0-tenant-configuration.md](auth0-tenant-configuration.md)).
+  [auth0-tenant-configuration.md](auth0-tenant-configuration.md)). A request to delete an account
+  is carried out as an erasure. The operator queues it from the admin panel, and maintenance removes
+  the content and identity and keeps the money records, anonymised ([account-erasure.md](account-erasure.md)).
 
 The MCP surface is 23 tools and 6 widgets ([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)).
 Tool names and schemas are treated as stable compatibility contracts. Widget template URIs are
