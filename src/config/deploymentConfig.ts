@@ -20,6 +20,7 @@
  * disagree about what production requires.
  */
 
+import { maintenanceHeartbeatUrlInvalid } from '../services/maintenanceHeartbeat.js';
 import {
   JIT_PRICE_ENV_VARS,
   PACK_PRICE_ENV_VARS,
@@ -27,6 +28,7 @@ import {
   packCurrency
 } from './products.js';
 import { isDebugEnabled } from '../utils/debug.js';
+import { stripeCheckoutDomainInvalid } from './checkoutDomain.js';
 
 export type DeploymentMode = 'production' | 'development' | 'test';
 
@@ -206,6 +208,18 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     secret: false,
     services: ['api', 'maintenance'],
     checkedBy: 'stripe.currency_unset'
+  },
+  /**
+   * Stripe's custom Checkout host (#373, docs/stripe-custom-domain.md). Listed
+   * so the preflight shows production and development disagreeing on it.
+   */
+  {
+    name: 'STRIPE_CHECKOUT_DOMAIN',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api'],
+    checkedBy: 'stripe.checkout_domain_invalid'
   },
   {
     name: 'JIT_CURRENCY',
@@ -474,6 +488,18 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     advisory: true,
     secret: false,
     services: ['api']
+  },
+  /**
+   * The maintenance cron's dead man's switch (#408). A capability: anyone
+   * holding it can report the job alive, so the preflight treats it as secret.
+   */
+  {
+    name: 'MAINTENANCE_HEARTBEAT_URL',
+    requiredIn: 'production',
+    advisory: true,
+    secret: true,
+    services: ['maintenance'],
+    checkedBy: 'maintenance.heartbeat_url_invalid'
   }
 ];
 
@@ -684,6 +710,18 @@ function validateStripe(
       severity: production ? 'error' : 'warning',
       rule: 'stripe.webhook_secret_malformed',
       message: 'STRIPE_WEBHOOK_SECRET does not look like a Stripe webhook secret (whsec_...)'
+    });
+  }
+
+  // #373: once the custom domain is active in Stripe, every Checkout URL is
+  // on it, and the start page forwards only to hosts it can parse from this
+  // setting. A value it cannot use would strand every checkout on our page.
+  if (stripeCheckoutDomainInvalid(env)) {
+    findings.push({
+      severity: production ? 'error' : 'warning',
+      rule: 'stripe.checkout_domain_invalid',
+      message:
+        'STRIPE_CHECKOUT_DOMAIN must be a bare host name such as pay.letterirl.com, with no scheme, port or path'
     });
   }
 
@@ -1029,6 +1067,18 @@ export function validateDeploymentConfig(
   validateStripe(env, mode, findings);
   validateBucket(env, mode, findings);
   validatePlaceholders(env, findings);
+
+  // #408: the maintenance service's heartbeat (src/services/maintenanceHeartbeat.ts).
+  // A URL maintenance cannot call leaves its monitor alerting every hour for a
+  // job that is running fine. A warning, never a boot error: the heartbeat is an
+  // alarm, not part of the work.
+  if (maintenanceHeartbeatUrlInvalid(env)) {
+    findings.push({
+      severity: 'warning',
+      rule: 'maintenance.heartbeat_url_invalid',
+      message: 'MAINTENANCE_HEARTBEAT_URL must be an https URL, such as a healthchecks.io ping URL'
+    });
+  }
 
   if (production && surface === 'server') {
     // The origin/host allowlists have LOCALHOST fallbacks, and an unset one is

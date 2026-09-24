@@ -1,6 +1,6 @@
 # User Stories
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Test coverage and acceptance criteria for Letter IRL
 
 ---
@@ -1283,7 +1283,7 @@ macOS/Linux:
 
 **Technical Details:**
 - MCP SDK expects annotations in separate `annotations` parameter
-- The authoritative values are the `annotations` block that `buildAnnotations()` in `src/mcp/registerTools.ts` builds; the tool files' inline `meta` objects mirror the hints and are spread into `_meta` beside the OpenAI display keys. The table for all 22 tools is in [app-submission/openai-test-cases.md](app-submission/openai-test-cases.md#tool-annotations-verification)
+- The authoritative values are the `annotations` block that `buildAnnotations()` in `src/mcp/registerTools.ts` builds; the tool files' inline `meta` objects mirror the hints and are spread into `_meta` beside the OpenAI display keys. The table for all 23 tools is in [app-submission/openai-test-cases.md](app-submission/openai-test-cases.md#tool-annotations-verification)
 - Annotations: `readOnlyHint`, `destructiveHint`, `openWorldHint`, `idempotentHint`
 
 **Related:**

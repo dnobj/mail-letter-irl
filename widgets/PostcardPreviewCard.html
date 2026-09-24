@@ -573,6 +573,35 @@
         return part ? part.text : "";
       }
 
+      // A refusal reaches this card's own callTool as a rejection whose
+      // message wraps the server's sentence in the host's Python-style repr
+      // (#434), for example:
+      //   Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling
+      //   MCP tool: [TextContent(type='text', text='<sentence>', annotations=None, meta=None)]
+      // Show the first sentence alone, read as Python writes a string: in
+      // double quotes when it holds a ' and no ", otherwise in single quotes
+      // with a backslash before each '; with \\, \n, \t and \r escaped, and
+      // \x, \u or \U hex for a character that does not print. Anything else
+      // shows as it came.
+      function readableError(error) {
+        const message =
+          typeof error === "string" ? error : typeof error?.message === "string" ? error.message : "";
+        const wrapped = message.match(/TextContent\(type=['"]text['"], text=(['"])((?:\\[\s\S]|(?!\1)[^\\])*)\1/);
+        if (wrapped) {
+          const sentence = wrapped[2]
+            .replace(/\\(x[0-9a-f]{2}|u[0-9a-f]{4}|U[0-9a-f]{8}|[\s\S])/g, (_, escape) => {
+              if (escape.length > 1) {
+                const point = parseInt(escape.slice(1), 16);
+                return point <= 0x10ffff ? String.fromCodePoint(point) : "";
+              }
+              return escape === "n" || escape === "t" ? " " : escape === "r" ? "" : escape;
+            })
+            .trim();
+          if (sentence) return sentence;
+        }
+        return message || "Unknown error";
+      }
+
       // ---- The same mail twice (#412) ------------------------------------
       //
       // The server refuses a send or a checkout for mail that went out, was
@@ -700,7 +729,7 @@
           }
         } catch (error) {
           if (!dataLoaded) {
-            errorMessage.textContent = `Unable to create the preview: ${error?.message || "Unknown error"}`;
+            errorMessage.textContent = `Unable to create the preview: ${readableError(error)}`;
             errorMessage.style.display = "block";
           }
         } finally {
@@ -1350,7 +1379,7 @@
             return;
           }
           // Show error message
-          errorMessage.textContent = `Failed to send: ${error.message || "Unknown error"}`;
+          errorMessage.textContent = `Failed to send: ${readableError(error)}`;
           errorMessage.style.display = "block";
 
           // Reset button for retry
@@ -1685,7 +1714,7 @@
             showDuplicate(duplicate, "pay");
             return;
           }
-          errorMessage.textContent = `Unable to open checkout: ${error.message || "Unknown error"}`;
+          errorMessage.textContent = `Unable to open checkout: ${readableError(error)}`;
           errorMessage.style.display = "block";
           button.classList.remove("loading");
           button.disabled = false;
@@ -1722,7 +1751,7 @@
           // Deliberately NOT a fallback to buying the smallest pack. After a
           // click that now means "show me the options", a surprise purchase is
           // the worst outcome available.
-          errorMessage.textContent = `Unable to load letter packs: ${error.message || "Unknown error"}`;
+          errorMessage.textContent = `Unable to load letter packs: ${readableError(error)}`;
           errorMessage.style.display = "block";
         } finally {
           button.disabled = false;
@@ -1790,7 +1819,7 @@
             // Nothing to do: the link is already on screen.
           }
         } catch (error) {
-          errorMessage.textContent = `Unable to start the letter pack checkout: ${error.message || "Unknown error"}`;
+          errorMessage.textContent = `Unable to start the letter pack checkout: ${readableError(error)}`;
           errorMessage.style.display = "block";
           // Put the sizes back rather than stranding the customer on a card
           // with no way to retry.
