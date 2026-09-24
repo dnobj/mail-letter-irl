@@ -87,6 +87,7 @@ export async function listQuarantine(
 export interface RestoreOperationView {
   operationId: string;
   status: string;
+  attempts: number;
   sourceTable: string | null;
   sourceId: string | null;
   requestedAt: Date;
@@ -104,6 +105,7 @@ export async function listRecentRestores(client: AdminSqlClient, limit: number):
   const result = await client.query<{
     id: string;
     status: string;
+    attempts: number;
     source_table: string | null;
     source_id: string | null;
     requested_at: Date;
@@ -111,7 +113,7 @@ export async function listRecentRestores(client: AdminSqlClient, limit: number):
     error_code: string | null;
     sanitized_result_json: Record<string, unknown> | null;
   }>(
-    `SELECT o.id, o.status, o.payload_json->>'sourceTable' AS source_table,
+    `SELECT o.id, o.status, o.attempts, o.payload_json->>'sourceTable' AS source_table,
             o.payload_json->>'sourceId' AS source_id, r.requested_at, o.completed_at,
             o.error_code, o.sanitized_result_json
      FROM admin_operations o
@@ -123,6 +125,7 @@ export async function listRecentRestores(client: AdminSqlClient, limit: number):
   return result.rows.map((row) => ({
     operationId: String(row.id),
     status: row.status,
+    attempts: Number(row.attempts),
     sourceTable: row.source_table,
     sourceId: row.source_id,
     requestedAt: row.requested_at,

@@ -13,11 +13,12 @@ import { statusBadge } from "../ui/format.js";
 import { accountLink, card, definitionList, letterLink, table, when } from "./common.js";
 
 /** Why the maintenance run refused a restore (retentionService.handleRetentionRestore). */
-const RESTORE_REFUSALS: Record<string, string> = {
-  window_closed: "the copy was purged before the run",
-  not_redacted: "the content was already live",
-  no_such_copy: "the request named no copy",
-};
+const RESTORE_REFUSALS = new Map<string, string>([
+  // Purged when its window closed, or deleted by an account erasure.
+  ["window_closed", "the copy was removed before the run"],
+  ["not_redacted", "the content was already live"],
+  ["no_such_copy", "the request named no copy"],
+]);
 
 function sourceRow(sourceTable: string | null, sourceId: string | null): SafeHtml {
   if (sourceTable === "letters") return letterLink(sourceId);
@@ -25,13 +26,19 @@ function sourceRow(sourceTable: string | null, sourceId: string | null): SafeHtm
 }
 
 function restoreOutcome(restore: RestoreOperationView): SafeHtml {
-  if (restore.status === "pending") return html`queued`;
+  if (restore.status === "pending") {
+    // A failed attempt is retried at the next run, up to three in all.
+    const lastError = restore.result?.lastErrorClass;
+    return restore.attempts > 0
+      ? html`<span class="warn-text">retrying</span> after ${restore.attempts} failed ${restore.attempts === 1 ? "attempt" : "attempts"}${typeof lastError === "string" ? html` (<code>${lastError}</code>)` : ""}`
+      : html`queued`;
+  }
   if (restore.status === "processing") return html`running`;
   if (restore.status === "succeeded") {
     return restore.result?.alreadyRestored === true ? html`restored by an earlier request` : html`restored`;
   }
   const reason = restore.result?.reason ?? restore.result?.errorClass;
-  const label = typeof reason === "string" ? (RESTORE_REFUSALS[reason] ?? reason) : null;
+  const label = typeof reason === "string" ? (RESTORE_REFUSALS.get(reason) ?? reason) : null;
   return html`<span class="bad-text">${restore.errorCode ?? "failed"}</span>${label ? html`: ${label}` : ""}`;
 }
 
@@ -40,6 +47,8 @@ export function renderRetention(input: {
   quarantine: QuarantineView[];
   restores: RestoreOperationView[];
   search: string | null;
+  /** A search too long to be any id, which was ignored. */
+  searchIgnored?: boolean;
   report: RetentionPreviewResult | null;
   reportError: string | null;
 }): SafeHtml {
@@ -66,10 +75,11 @@ ${
 }
 <h2>Quarantine (metadata only)</h2>
 <form method="get" action="/retention" class="stack" role="search">
-  <label for="q">Find the copies of one letter or draft, or of every letter and draft on an account: a letter id, draft id or Auth0 subject</label>
+  <label for="q">Find the copies of one letter or draft, or of every letter and draft on an account: its exact letter id, draft id or Auth0 subject</label>
   <input type="search" id="q" name="q" value="${input.search ?? ""}" maxlength="255" autocomplete="off">
   <div><button type="submit">Find</button>${input.search ? html` <a href="/retention">Show the newest</a>` : ""}</div>
 </form>
+${input.searchIgnored ? html`<p class="bad-text" role="alert">That search is longer than any id, so it was ignored.</p>` : ""}
 <p class="muted">${input.search ? html`Copies matching <code>${input.search}</code>, newest first.` : "The newest 100 copies. Search to find an older one."}</p>
 ${table(
   "redacted_content_quarantine",

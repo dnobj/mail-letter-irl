@@ -28,6 +28,7 @@ export function registerOpsRoutes(
     // A letter, draft or account id; anything longer is not one.
     const typed = (context.url.searchParams.get("q") ?? "").trim();
     const search = typed.length > 0 && typed.length <= 255 ? typed : null;
+    const searchIgnored = typed.length > 255;
     const data = await context.read(async (client) => ({
       counts: await readRetentionCounts(client),
       quarantine: await listQuarantine(client, 100, search),
@@ -40,7 +41,7 @@ export function registerOpsRoutes(
     } catch (error) {
       reportError = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, "database_error");
     }
-    return context.render("Retention", renderRetention({ ...data, search, report, reportError }));
+    return context.render("Retention", renderRetention({ ...data, search, searchIgnored, report, reportError }));
   }, { name: "retention" });
 
   router.add("GET", "/routing", async (context) => {

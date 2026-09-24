@@ -37,6 +37,7 @@ function retentionPage(input: Partial<Parameters<typeof renderRetention>[0]> = {
 const restore = (status: string, extra: Partial<RestoreOperationView> = {}): RestoreOperationView => ({
   operationId: "op-1",
   status,
+  attempts: 0,
   sourceTable: "letters",
   sourceId: "letter_1",
   requestedAt: AT,
@@ -69,9 +70,18 @@ describe("the Retention page", () => {
     expect(page).toContain("no copy matches.");
   });
 
-  it("escapes the search term", () => {
+  it("escapes the search term, in the attribute as well as the text", () => {
     const page = retentionPage({ search: '"><script>x</script>' });
     expect(page).not.toContain("<script>x</script>");
+    // A quote alone would break out of value="..."; it must arrive escaped.
+    const quoted = retentionPage({ search: 'x" autofocus onfocus="alert(1)' });
+    expect(quoted).not.toContain('value="x" autofocus');
+    expect(quoted).toContain("x&quot; autofocus onfocus=&quot;alert(1)");
+  });
+
+  it("says when a search was too long to be an id, instead of silently ignoring it", () => {
+    expect(retentionPage({ searchIgnored: true })).toContain("That search is longer than any id, so it was ignored.");
+    expect(retentionPage()).not.toContain("so it was ignored");
   });
 
   it("shows how each recent restore ended, in words", () => {
@@ -89,9 +99,26 @@ describe("the Retention page", () => {
     expect(page).toContain(">queued<");
     expect(page).toContain(">restored<");
     expect(page).toContain("restored by an earlier request");
-    expect(page).toContain("RETENTION_RESTORE_UNAVAILABLE</span>: the copy was purged before the run");
+    expect(page).toContain("RETENTION_RESTORE_UNAVAILABLE</span>: the copy was removed before the run");
     expect(page).toContain("RETENTION_RESTORE_UNAVAILABLE</span>: the content was already live");
     expect(page).toContain("RETENTION_RESTORE_ERROR</span>: database_error");
+  });
+
+  it("says a queued restore that already failed once is retrying, and why", () => {
+    const page = retentionPage({
+      restores: [restore("pending", { attempts: 1, result: { lastErrorClass: "database_error" } })],
+    });
+    expect(page).toContain("retrying</span> after 1 failed attempt");
+    expect(page).toContain("<code>database_error</code>");
+    expect(retentionPage({ restores: [restore("pending", { attempts: 2 })] })).toContain("after 2 failed attempts");
+  });
+
+  it("shows an unknown reason as it is, never a property of the lookup table", () => {
+    const page = retentionPage({
+      restores: [restore("failed", { errorCode: "RETENTION_RESTORE_UNAVAILABLE", result: { reason: "constructor" } })],
+    });
+    expect(page).toContain("RETENTION_RESTORE_UNAVAILABLE</span>: constructor");
+    expect(page).not.toContain("native code");
   });
 
   it("says when nothing has been restored yet", () => {
