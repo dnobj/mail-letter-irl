@@ -21,6 +21,7 @@ vi.mock('../../../src/services/providers/index.js', () => ({
 }));
 
 import {
+  lettersWaitingBehindPause,
   processDueLetterJobs,
   processLetterJob,
   resolveAmbiguousLetterJobAsAdmin,
@@ -664,6 +665,20 @@ describe("the outbox's stop (#444)", () => {
     expect(logged).toContain('"event":"outbox.dispatch_paused"');
     expect(logged).toContain('"waiting":3');
     warn.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it('says how many letters wait behind a pause, for the heartbeat, and asks nothing while dispatching (#451 review)', async () => {
+    query.mockResolvedValue({ rows: [{ count: '2' }] });
+    expect(await lettersWaitingBehindPause()).toBe(0);
+    expect(query).not.toHaveBeenCalled();
+
+    vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
+    expect(await lettersWaitingBehindPause()).toBe(2);
+    const sql = String(query.mock.calls[0]?.[0]).replace(/\s+/g, ' ');
+    // The same count the paused batch logs.
+    expect(sql).toContain("status = 'processing' AND locked_at < NOW() - INTERVAL '15 minutes'");
+    expect(sql).not.toContain('next_attempt_at');
     vi.unstubAllEnvs();
   });
 

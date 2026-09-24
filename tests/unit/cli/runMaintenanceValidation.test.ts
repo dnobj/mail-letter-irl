@@ -21,11 +21,13 @@ const services = vi.hoisted(() => ({
   purgeExpiredRecentUploads: vi.fn().mockResolvedValue(0),
   purgeExpiredFeatureRequests: vi.fn().mockResolvedValue(0),
   sendMaintenanceHeartbeat: vi.fn().mockResolvedValue('sent'),
+  lettersWaitingBehindPause: vi.fn().mockResolvedValue(0),
   closePool: vi.fn().mockResolvedValue(undefined)
 }));
 
 vi.mock('../../../src/services/letterJobService.js', () => ({
-  processDueLetterJobs: services.processDueLetterJobs
+  processDueLetterJobs: services.processDueLetterJobs,
+  lettersWaitingBehindPause: services.lettersWaitingBehindPause
 }));
 vi.mock('../../../src/services/packRefundService.js', () => ({
   reconcilePackRefunds: async () => ({ retried: 0, adopted: 0, settled: 0, compensated: 0 })
@@ -160,24 +162,26 @@ describe('maintenance deployment validation', () => {
   it('withholds the heartbeat while the outbox is paused with letters waiting, so a pause left on alarms (#451 review)', async () => {
     const output = captureOutput();
     stubValidDevelopment();
-    services.processDueLetterJobs.mockResolvedValueOnce({ processed: 0, paused: true, waiting: 2 });
+    services.lettersWaitingBehindPause.mockResolvedValueOnce(2);
 
     await expect(maintenanceEntry()).resolves.toBeUndefined();
 
     expect(services.sendMaintenanceHeartbeat).not.toHaveBeenCalled();
     expect(output()).toContain('Heartbeat withheld: the outbox is paused with 2 waiting');
     expect(output()).toContain('"event":"maintenance.heartbeat_withheld"');
-    // The rest of the run went ahead, and the pool still closes.
-    expect(services.runCommerceMaintenance).toHaveBeenCalledTimes(1);
+    // Asked after the run, which went ahead in full; the pool still closes.
+    expect(services.lettersWaitingBehindPause.mock.invocationCallOrder[0]).toBeGreaterThan(
+      services.runCommerceMaintenance.mock.invocationCallOrder[0]
+    );
     expect(services.closePool).toHaveBeenCalledTimes(1);
   });
 
-  it('still sends the heartbeat when the outbox is paused with nothing waiting', async () => {
+  it('sends the heartbeat when nothing waits behind a pause', async () => {
     stubValidDevelopment();
-    services.processDueLetterJobs.mockResolvedValueOnce({ processed: 0, paused: true, waiting: 0 });
 
     await expect(maintenanceEntry()).resolves.toBeUndefined();
 
+    expect(services.lettersWaitingBehindPause).toHaveBeenCalledTimes(1);
     expect(services.sendMaintenanceHeartbeat).toHaveBeenCalledTimes(1);
   });
 

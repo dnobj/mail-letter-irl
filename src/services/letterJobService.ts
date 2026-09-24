@@ -875,6 +875,37 @@ export async function processLetterJob(
   return processClaimedJob(job, options);
 }
 
+/**
+ * The jobs a paused outbox holds back: everything claimJob would take once
+ * switched back on, due now or later. Its own predicate without the
+ * next_attempt_at clause, so a claim a crash left behind counts too - the
+ * redeploy that sets the switch is one such crash (#451 review).
+ */
+async function countWaitingLetterJobs(): Promise<number> {
+  const waiting = await query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM letter_jobs
+      WHERE attempts < max_attempts
+        AND provider_outcome = 'not_dispatched'
+        AND (
+          status IN ('pending', 'failed')
+          OR (
+            status = 'processing'
+            AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
+          )
+        )`
+  );
+  return Number(waiting.rows[0]?.count ?? 0);
+}
+
+/**
+ * How many letters a paused outbox is holding back, and 0 without a query
+ * while it dispatches. Maintenance withholds its heartbeat while this is above
+ * zero, so a pause left on reaches the monitor (#451 review).
+ */
+export async function lettersWaitingBehindPause(): Promise<number> {
+  return outboxDispatchEnabled() ? 0 : countWaitingLetterJobs();
+}
+
 /** Claim and process due jobs until the batch is empty or reaches its limit. */
 export async function processDueLetterJobs(
   limit = 25,
@@ -940,25 +971,8 @@ export async function processDueLetterJobs(
   // Paused (#444): claim nothing, and say how much is waiting, once a run. The
   // two sweeps above still ran: they settle jobs a crash left in 'processing'
   // and never call the provider.
-  //
-  // Waiting is everything claimJob would take once switched back on, due now or
-  // later: its own predicate without the next_attempt_at clause, so a claim a
-  // crash left behind counts too - the redeploy that sets the switch is one such
-  // crash (#451 review).
   if (!outboxDispatchEnabled()) {
-    const waiting = await query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM letter_jobs
-        WHERE attempts < max_attempts
-          AND provider_outcome = 'not_dispatched'
-          AND (
-            status IN ('pending', 'failed')
-            OR (
-              status = 'processing'
-              AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
-            )
-          )`
-    );
-    const count = Number(waiting.rows[0]?.count ?? 0);
+    const count = await countWaitingLetterJobs();
     writeDiagnostic('warn', 'outbox.dispatch_paused', { waiting: count });
     return { ...summary, paused: true, waiting: count };
   }

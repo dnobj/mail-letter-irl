@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { pathToFileURL } from 'node:url';
 import { closePool } from '../db/index.js';
-import { processDueLetterJobs } from '../services/letterJobService.js';
+import { lettersWaitingBehindPause, processDueLetterJobs } from '../services/letterJobService.js';
 import { runMaintenanceTaskIfDue } from '../services/maintenanceTaskService.js';
 import { cleanupExpiredImages, closeTempImageStore } from '../services/tempImageStore.js';
 import { runDailyMaintenance } from '../workers/creditExpirationWorker.js';
@@ -249,13 +249,7 @@ async function runFeatureRequestsSweep(): Promise<void> {
   }
 }
 
-/** What a run tells its entry wrapper beyond having finished. */
-export interface MaintenanceRunResult {
-  /** Letters a paused outbox is holding back (#444); 0 when it is not paused. */
-  outboxWaiting: number;
-}
-
-export async function runMaintenance(): Promise<MaintenanceRunResult> {
+export async function runMaintenance(): Promise<void> {
   // Was Math.max(1, Number.parseInt(...)), the shape envSettings exists to
   // replace: '1e3' parses to 1, so a request for 1000 dispatched ONE letter a
   // run, and a non-numeric value yielded NaN, which reached
@@ -299,8 +293,6 @@ export async function runMaintenance(): Promise<MaintenanceRunResult> {
     runDailyMaintenance
   );
   console.log(`[Maintenance] Daily cleanup ${daily.ran ? 'completed' : 'not due'}`);
-
-  return { outboxWaiting: outbox.paused ? (outbox.waiting ?? 0) : 0 };
 }
 
 /**
@@ -336,7 +328,7 @@ export async function maintenanceEntry(): Promise<void> {
     }
   }
   try {
-    const run = await runMaintenance();
+    await runMaintenance();
     console.log(`[Maintenance] Finished at ${new Date().toISOString()}`);
     // Only after a run that finished: a monitor stops hearing from a run that
     // never happens and from one that keeps failing alike (#408).
@@ -345,9 +337,10 @@ export async function maintenanceEntry(): Promise<void> {
     // fine but no mail is moving, and a pause left on after an incident would
     // otherwise show in this log and nowhere the owner is told: the monitor
     // alerts until the outbox is switched back on (#451 review).
-    if (run.outboxWaiting > 0) {
-      writeDiagnostic('warn', 'maintenance.heartbeat_withheld', { outboxWaiting: run.outboxWaiting });
-      console.log(`[Maintenance] Heartbeat withheld: the outbox is paused with ${run.outboxWaiting} waiting`);
+    const waiting = await lettersWaitingBehindPause();
+    if (waiting > 0) {
+      writeDiagnostic('warn', 'maintenance.heartbeat_withheld', { outboxWaiting: waiting });
+      console.log(`[Maintenance] Heartbeat withheld: the outbox is paused with ${waiting} waiting`);
     } else {
       const heartbeat = await sendMaintenanceHeartbeat();
       if (heartbeat !== 'skipped') console.log(`[Maintenance] Heartbeat ${heartbeat}`);
