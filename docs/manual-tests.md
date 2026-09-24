@@ -1767,6 +1767,47 @@ remedy when a pair does not match, are in
        `OAUTH_OWNER_PROFILE_ID_MISSING`, so the sentence never reached the
        person (#429). The Action was put back and checked live.
 
+### LINK-02 — Every launch sign-in method yields a confirmed address
+
+**Status:** Not run.
+
+The owner kept the refusal of a sign-in that carries no confirmed address (#429, 2026-09-23). In
+ChatGPT that refusal surfaces only as "We couldn't connect this account", so a launch sign-in method
+must always vouch for the address. A method that fails here comes off the launch list: disable its
+connection for the Letter IRL applications before launch. The rule does not change.
+
+**Launch methods:** Google, GitHub, Microsoft (personal accounts only, per
+[auth0-tenant-configuration.md](auth0-tenant-configuration.md)), and email with a password. Apple is
+not in the launch (#437).
+
+**Preconditions:**
+- A test identity for each method that has never signed in to the tenant, so each run is a first
+  sign-in.
+- The GitHub connection requests the account's email address.
+
+Run on development, then on production before launch. The sign-ins are the owner's.
+
+**Steps, for each method:**
+
+1. [ ] Sign in to the website with the method. For email with a password, sign up and confirm the
+   address from the email first; LINK-01 step 5 covers the refusal before confirming.
+2. [ ] The dashboard shows a new account. The API log shows `identity.user_created`, and no
+   `auth.account_missing_no_verified_email`.
+3. [ ] In Auth0 → User Management → Users, the user's email shows as verified (Raw JSON:
+   `"email_verified": true`).
+4. [ ] In ChatGPT, connect the environment's Letter IRL connector with the same method: the link
+   succeeds and `get_account_balance` answers.
+
+| Method | Development | Production |
+|--------|-------------|------------|
+| Google | | |
+| GitHub | | |
+| Microsoft | | |
+| Email and password | | |
+
+**Pass criteria:** every launch method gives `email_verified: true` on a first sign-in and opens an
+account in both environments. Any method that does not is disabled before launch and recorded on #158.
+
 ---
 
 ## Idle and Recovery Verification
