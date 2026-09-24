@@ -124,8 +124,10 @@ in production:
 - **Apps SDK submission:** pre-submission; owner tasks in
   [app-submission/owner-checklist.md](app-submission/owner-checklist.md).
 - **Content retention enforcement:** the letter and draft content sweep runs in report mode
-  (`CONTENT_RETENTION_MODE` unset) until the enforce-path defects tracked in #153 are fixed. The
-  upload-link and feature-request sweeps are separate and always enforce.
+  (`CONTENT_RETENTION_MODE` unset). The enforce-path defects tracked in #153 are fixed, and a
+  quarantined copy can be restored from the admin panel; switching the mode on, development first
+  (`RETENTION-01`), is the remaining step. The upload-link and feature-request sweeps are separate
+  and always enforce.
 - **Operator audit purge:** the 2-year purge of operator audit rows is tracked in #398.
 - **Gift letters:** GIFT-01 in [manual-tests.md](manual-tests.md), including a physical test
   print, before the programme is switched on; the website's claim page ships separately.

@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  query: vi.fn()
+  query: vi.fn(),
+  transaction: vi.fn()
 }));
 
 vi.mock('../../../src/db/index.js', () => ({
-  query: mocks.query
+  query: mocks.query,
+  transaction: mocks.transaction
 }));
 
 const {
@@ -19,7 +21,9 @@ const {
   previewExpiredLetterContent,
   previewPaidDraftContent,
   previewAbandonedDraftContent,
-  runRetentionPreview
+  runRetentionPreview,
+  handleRetentionRestore,
+  processRetentionRestores
 } = await import('../../../src/services/retentionService.js');
 
 /**
@@ -62,6 +66,11 @@ describe('retention sweep guards (#153)', () => {
   beforeEach(() => {
     mocks.query.mockReset();
     mocks.query.mockResolvedValue({ rows: [], rowCount: 0 });
+    // A restore runs its statements on one transaction's client.
+    mocks.transaction.mockReset();
+    mocks.transaction.mockImplementation(async (callback: (client: unknown) => unknown) =>
+      callback({ query: mocks.query })
+    );
   });
 
   describe('purgeExpiredLetterContent', () => {
@@ -78,11 +87,17 @@ describe('retention sweep guards (#153)', () => {
         "jsonb_build_object( 'content', l.content, 'recipient', l.recipient, " +
           "'preview_html', to_jsonb(l.preview_html) )"
       );
-      // The recovery window itself. Collapsing this to NOW() would make the
-      // quarantine purge on its first pass, i.e. destruction with extra steps.
-      expect(sql).toContain('NOW() + make_interval(days => $7::int)');
-      // Re-redacting after a restore replaces the row rather than failing.
-      expect(sql).toContain('ON CONFLICT (source_table, source_id) DO UPDATE');
+      // The recovery window ends where the published period does, on the
+      // letter's own clock, with a floor for a row swept late. Collapsing it to
+      // NOW() would make the quarantine purge on its first pass, i.e.
+      // destruction with extra steps (#153 review round 3).
+      expect(sql).toContain(
+        "GREATEST(COALESCE(l.sent_at, l.created_at) + make_interval(days => $7::int), NOW() + INTERVAL '1 day')"
+      );
+      // A copy already saved is never replaced: re-sweeping a row whose marker
+      // was cleared used to overwrite the good copy with the emptied row.
+      expect(sql).toContain('ON CONFLICT (source_table, source_id) DO NOTHING');
+      expect(sql).not.toContain('DO UPDATE');
     });
 
     it('bounds the UPDATE to the due CTE and to the content columns', async () => {
@@ -102,9 +117,10 @@ describe('retention sweep guards (#153)', () => {
       expect(sqlFrom([sql])).toContain(
         'AND COALESCE(l.sent_at, l.created_at) < NOW() - make_interval(days => $1::int)'
       );
-      // 83 live, not 90: the quarantine carries the remaining 7.
+      // 83 live, not 90: the quarantine carries the rest, and it ends on day 90
+      // of the letter's own clock.
       expect(params[0]).toBe(83);
-      expect(params[6]).toBe(7);
+      expect(params[6]).toBe(90);
     });
 
     it('HOLDS a letter whose mail is still in flight', async () => {
@@ -203,7 +219,9 @@ describe('retention sweep guards (#153)', () => {
         'INSERT INTO redacted_content_quarantine (source_table, source_id, content, purge_after)'
       );
       expect(sql).toContain("SELECT 'letter_drafts', d.draft_id::text,");
-      expect(sql).toMatch(/NOW\(\) \+ make_interval\(days => \$\d::int\)/);
+      expect(sql).toMatch(/GREATEST\(.+ \+ make_interval\(days => \$\d::int\), NOW\(\) \+ INTERVAL '1 day'\)/);
+      expect(sql).toContain('ON CONFLICT (source_table, source_id) DO NOTHING');
+      expect(sql).not.toContain('DO UPDATE');
       // Every cleared column is saved, including the layout images an earlier
       // version never cleared at all.
       for (const column of [
@@ -295,6 +313,11 @@ describe('retention sweep guards (#153)', () => {
       expect(sql).toContain(
         'AND COALESCE(d.consumed_at, d.created_at) < NOW() - make_interval(days => $1::int)'
       );
+      // The recovery window runs on the same clock, to the published 90.
+      expect(sql).toContain(
+        "GREATEST(COALESCE(d.consumed_at, d.created_at) + make_interval(days => $6::int), NOW() + INTERVAL '1 day')"
+      );
+      expect((mocks.query.mock.calls[0][1] as unknown[])[5]).toBe(90);
       expect(sql).not.toContain('d.updated_at');
     });
   });
@@ -330,9 +353,13 @@ describe('retention sweep guards (#153)', () => {
       expect(sqlFrom([sql])).toContain(
         'AND d.created_at < NOW() - make_interval(days => $1::int)'
       );
-      // 7 published = 4 live + 3 quarantine.
+      // 7 published = 4 live + the rest in quarantine, ending on day 7 of the
+      // draft's own clock.
       expect(params[0]).toBe(4);
-      expect(params[4]).toBe(3);
+      expect(params[4]).toBe(7);
+      expect(sqlFrom([sql])).toContain(
+        "GREATEST(d.created_at + make_interval(days => $5::int), NOW() + INTERVAL '1 day')"
+      );
     });
   });
 
@@ -361,39 +388,60 @@ describe('retention sweep guards (#153)', () => {
   });
 
   describe('restoreQuarantinedContent', () => {
-    it('puts a letter back and re-opens it to a future sweep', async () => {
-      mocks.query.mockResolvedValue({ rows: [], rowCount: 1 });
+    const SAVED = { rows: [{ quarantine_id: 'q-1' }], rowCount: 1 };
+
+    it('puts a letter back and re-opens it to a future sweep, in one transaction', async () => {
+      mocks.query.mockResolvedValueOnce(SAVED).mockResolvedValue({ rows: [], rowCount: 1 });
 
       expect(await restoreQuarantinedContent('letters', 'letter-1')).toBe(true);
 
-      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      // The saved copy is locked first, so the purge and a second restore wait.
+      expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
+        'FROM redacted_content_quarantine WHERE source_table = $1 AND source_id = $2 FOR UPDATE'
+      );
+      const sql = sqlFrom(mocks.query.mock.calls[1]);
       expect(sql).toContain("content = (SELECT content->'content' FROM saved)");
       expect(sql).toContain("recipient = (SELECT content->'recipient' FROM saved)");
       // Clearing redacted_at is what makes the row eligible again, so a fixed
       // predicate can re-sweep it instead of needing a hand-written backfill.
       expect(sql).toContain('redacted_at = NULL');
+      // Never over content that is live.
+      expect(sql).toContain('WHERE l.letter_id = $1 AND l.redacted_at IS NOT NULL');
+      expect(sqlFrom(mocks.query.mock.calls[2])).toContain('DELETE FROM redacted_content_quarantine');
+      // Write-back and delete commit together (#153 review round 3).
+      expect(mocks.transaction).toHaveBeenCalledTimes(1);
+      expect(mocks.query).toHaveBeenCalledTimes(3);
     });
 
-    it('restores every draft content column it cleared', async () => {
-      mocks.query.mockResolvedValue({ rows: [], rowCount: 1 });
+    it('restores every draft content column it cleared, onto a redacted draft only', async () => {
+      mocks.query.mockResolvedValueOnce(SAVED).mockResolvedValue({ rows: [], rowCount: 1 });
 
       await restoreQuarantinedContent('letter_drafts', 'draft-1');
 
-      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      const sql = sqlFrom(mocks.query.mock.calls[1]);
       for (const jsonColumn of ['sender', 'recipient']) {
         expect(sql).toContain(`${jsonColumn} = (SELECT content->'${jsonColumn}' FROM saved)`);
       }
       for (const textColumn of ['body_text', 'header_image_data', 'inline_image_url']) {
         expect(sql).toContain(`${textColumn} = (SELECT content->>'${textColumn}' FROM saved)`);
       }
+      expect(sql).toContain('WHERE d.draft_id = $1::uuid AND d.redacted_at IS NOT NULL');
     });
 
     it('reports false when the recovery window has already expired', async () => {
       mocks.query.mockResolvedValue({ rows: [], rowCount: 0 });
 
       expect(await restoreQuarantinedContent('letters', 'gone')).toBe(false);
-      // No delete is attempted when nothing was restored.
+      // Nothing is written when there is nothing to put back.
       expect(mocks.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the copy when the live row is not redacted', async () => {
+      mocks.query.mockResolvedValueOnce(SAVED).mockResolvedValue({ rows: [], rowCount: 0 });
+
+      expect(await restoreQuarantinedContent('letters', 'letter-live')).toBe(false);
+      // The write-back matched nothing, so the saved copy is not deleted.
+      expect(mocks.query).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -588,5 +636,77 @@ describe('retention sweep guards (#153)', () => {
       // The other two still ran.
       expect(mocks.query).toHaveBeenCalledTimes(3);
     });
+  });
+});
+
+describe('queued restores (#153)', () => {
+  const COPY = '8f14e45f-ceea-467a-9575-9c2d1f7c0a11';
+
+  function client(script: Array<{ rows: unknown[]; rowCount: number }>) {
+    const query = vi.fn(async () => script.shift() ?? { rows: [], rowCount: 0 });
+    return { query };
+  }
+
+  it('puts back the copy the operator previewed, by its id', async () => {
+    const fake = client([
+      { rows: [{ source_table: 'letters', source_id: 'letter-1' }], rowCount: 1 },
+      { rows: [{ quarantine_id: COPY }], rowCount: 1 },
+      { rows: [], rowCount: 1 },
+      { rows: [], rowCount: 1 }
+    ]);
+
+    expect(await handleRetentionRestore(fake, { quarantineId: COPY })).toEqual({
+      outcome: 'done',
+      result: { sourceTable: 'letters' }
+    });
+    expect(fake.query.mock.calls[0][1]).toEqual([COPY]);
+    // The restore itself works by the source the copy names.
+    expect(fake.query.mock.calls[1][1]).toEqual(['letters', 'letter-1']);
+  });
+
+  it('refuses, without a query, a payload that names no copy', async () => {
+    for (const payload of [null, {}, { quarantineId: 'not-a-uuid' }, { quarantineId: 42 }]) {
+      const fake = client([]);
+      expect(await handleRetentionRestore(fake, payload)).toEqual({
+        outcome: 'refused',
+        code: 'RETENTION_RESTORE_UNAVAILABLE',
+        result: { reason: 'no_such_copy' }
+      });
+      expect(fake.query).not.toHaveBeenCalled();
+    }
+  });
+
+  it('refuses when the window has closed and the copy is gone', async () => {
+    const fake = client([{ rows: [], rowCount: 0 }]);
+    expect(await handleRetentionRestore(fake, { quarantineId: COPY })).toEqual({
+      outcome: 'refused',
+      code: 'RETENTION_RESTORE_UNAVAILABLE',
+      result: { reason: 'window_closed' }
+    });
+  });
+
+  it('refuses when the live row is no longer redacted, keeping the copy', async () => {
+    const fake = client([
+      { rows: [{ source_table: 'letter_drafts', source_id: COPY }], rowCount: 1 },
+      { rows: [{ quarantine_id: COPY }], rowCount: 1 },
+      { rows: [], rowCount: 0 }
+    ]);
+    expect(await handleRetentionRestore(fake, { quarantineId: COPY })).toEqual({
+      outcome: 'refused',
+      code: 'RETENTION_RESTORE_UNAVAILABLE',
+      result: { reason: 'not_redacted' }
+    });
+    expect(fake.query.mock.calls.some(([sql]) => String(sql).includes('DELETE'))).toBe(false);
+  });
+
+  it('claims only restore operations, and reports an empty queue as nothing done', async () => {
+    mocks.query.mockReset().mockResolvedValue({ rows: [], rowCount: 0 });
+    mocks.transaction.mockReset().mockImplementation(async (callback: (c: unknown) => unknown) =>
+      callback({ query: mocks.query })
+    );
+
+    expect(await processRetentionRestores()).toEqual({ done: 0, refused: 0, retrying: 0, failed: 0 });
+    expect(sqlFrom(mocks.query.mock.calls[0])).toContain('FROM admin_operations o');
+    expect(mocks.query.mock.calls[0][1]).toEqual(['retention.restore']);
   });
 });

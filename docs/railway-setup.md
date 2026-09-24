@@ -149,9 +149,9 @@ an explicit service **Redeploy** to reach the running instance (issue #213).
 Content retention variables, read only by the maintenance service (`src/cli/runMaintenance.ts`):
 
 ```env
-# Leave unset. Only the exact word `enforce` makes the sweep clear content; anything
-# else, including unset, runs the daily report. Unset in both environments until the
-# enforce-path defects in #153 are fixed.
+# Only the exact word `enforce` makes the sweep clear content; anything else,
+# including unset, runs the daily report. Set on development first, then on
+# production after RETENTION-01 passes there (#153).
 CONTENT_RETENTION_MODE=
 # On when unset. Any value other than true/1/yes/on/enabled - including a typo -
 # skips the retention pass entirely, report included.

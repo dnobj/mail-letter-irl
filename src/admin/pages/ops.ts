@@ -12,7 +12,7 @@ export function renderRetention(input: {
 }): SafeHtml {
   const { counts, report } = input;
   return html`<h1>Content retention</h1>
-<p class="muted">Report mode only. The hourly maintenance run redacts content past the published window; the restore path stays closed until its known defects are fixed, so there is no restore button here.</p>
+<p class="muted">Once a day the maintenance run counts what is past the published window, and with <code>CONTENT_RETENTION_MODE=enforce</code> on the maintenance service it moves that content into the quarantine below. A copy can be put back while its window is open; the restore is queued and the next hourly run carries it out.</p>
 <div class="cards">
   ${card("letters redacted", counts.lettersRedacted)}
   ${card("drafts redacted", counts.draftsRedacted)}
@@ -34,12 +34,16 @@ ${
 <h2>Quarantine (metadata only)</h2>
 ${table(
   "redacted_content_quarantine",
-  ["Source", "Row", "Quarantined", "Purge after"],
+  ["Source", "Row", "Quarantined", "Purge after", "Restore"],
   input.quarantine.map((row) => [
     html`${row.sourceTable}`,
     row.sourceTable === "letters" ? letterLink(row.sourceId) : html`<span class="mono">${row.sourceId}</span>`,
     when(row.quarantinedAt),
     when(row.purgeAfter),
+    html`<form method="get" action="/commands/retention.restore/preview" class="inline">
+  <input type="hidden" name="target" value="${row.quarantineId}">
+  <button type="submit">Preview restore…</button>
+</form>`,
   ]),
   "empty.",
 )}`;

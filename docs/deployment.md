@@ -161,9 +161,10 @@ Still verified by a human, without printing secret values:
 transactional-outbox rollout. Nothing in `src/` reads them. Both environments run the outbox release,
 so delete either variable wherever it is still set.
 
-`CONTENT_RETENTION_MODE` is deliberately unset in both environments: the letter and draft retention
-sweep reports what it would clear and clears nothing until the enforce-path defects in #153 are
-fixed. Do not set it to `enforce` as part of a release. See the variable list in
+`CONTENT_RETENTION_MODE` switches the letter and draft retention sweep from reporting what it would
+clear to clearing it (#153). Unset, it reports. It is set to `enforce` on development first, and on
+production only after a development run has been checked (`RETENTION-01` in
+[manual-tests.md](manual-tests.md)); never as a side effect of a release. See the variable list in
 [railway-setup.md](railway-setup.md).
 
 ## Boot validation rules

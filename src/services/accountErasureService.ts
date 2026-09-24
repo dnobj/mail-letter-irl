@@ -1,5 +1,9 @@
-import { transaction } from '../db/index.js';
-import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import {
+  MAX_OPERATION_ATTEMPTS,
+  enqueueAdminOperation,
+  processAdminOperations,
+  type OperationResult
+} from './adminOperationsQueue.js';
 import {
   DRAFT_REDACTION_SET,
   REDACTABLE_LETTER_STATUSES,
@@ -59,10 +63,11 @@ const SETTLED_RESERVATION_STATUSES = ['consumed', 'released'];
 
 /**
  * An unexpected failure is retried on the next runs, up to this many attempts
- * in all, an hour apart. A refusal by the gate is not retried: an open dispute
- * can take months, and the operator re-queues when it settles.
+ * in all, an hour apart (src/services/adminOperationsQueue.ts). A refusal by
+ * the gate is not retried: an open dispute can take months, and the operator
+ * re-queues when it settles.
  */
-export const MAX_ERASURE_ATTEMPTS = 3;
+export const MAX_ERASURE_ATTEMPTS = MAX_OPERATION_ATTEMPTS;
 
 /** Operations handled per maintenance run. */
 const DEFAULT_ERASURE_BATCH = 5;
@@ -219,13 +224,12 @@ export async function enqueueAccountErasure(
   client: SqlClient,
   params: { commandId: string; environment: string; userId: string }
 ): Promise<string> {
-  const inserted = await client.query(
-    `INSERT INTO admin_operations (command_id, operation_type, environment, payload_json)
-     VALUES ($1, $2, $3, $4::jsonb)
-     RETURNING id`,
-    [params.commandId, ACCOUNT_ERASE_OPERATION, params.environment, JSON.stringify({ userId: params.userId })]
-  );
-  return String(inserted.rows[0].id);
+  return enqueueAdminOperation(client, {
+    commandId: params.commandId,
+    environment: params.environment,
+    operationType: ACCOUNT_ERASE_OPERATION,
+    payload: { userId: params.userId }
+  });
 }
 
 /**
@@ -458,107 +462,40 @@ export interface AccountErasureRunSummary {
   failed: number;
 }
 
-type HandledOperation = keyof AccountErasureRunSummary;
-
 /**
- * Carry out queued erasures: the maintenance half.
- *
- * One transaction per operation. The operation row is claimed with SKIP
- * LOCKED and held until commit, so two runs cannot erase the same account
- * twice, and the outcome is written in the same transaction as the erasure:
- * an operation marked done is an account that is erased, and the reverse.
- * The erasure runs under a savepoint, so a failure halfway rolls back every
- * write it made and still leaves the transaction able to record the attempt.
- *
- * Only this database's own environment is claimed, by its admin marker. A
- * database the panel was never provisioned on has no marker and no queue.
- *
- * The result is counts, codes and classes only: admin_operations is readable
- * by the reader role, and the maintenance log keeps what it is given.
+ * Carry out queued erasures: the maintenance half, through the shared runner
+ * (src/services/adminOperationsQueue.ts), which claims each operation, runs
+ * the erasure under a savepoint and records the outcome in one transaction.
  */
 export async function processAccountErasures(
   batchLimit = DEFAULT_ERASURE_BATCH
 ): Promise<AccountErasureRunSummary> {
-  const summary: AccountErasureRunSummary = { erased: 0, refused: 0, retrying: 0, failed: 0 };
-  for (let handled = 0; handled < batchLimit; handled += 1) {
-    const outcome = await transaction(async (client) => handleNextErasure(client));
-    if (outcome === null) break;
-    summary[outcome] += 1;
-  }
-  return summary;
+  const summary = await processAdminOperations(
+    {
+      operationType: ACCOUNT_ERASE_OPERATION,
+      errorCode: 'ACCOUNT_ERASURE_ERROR',
+      event: 'account_erasure',
+      handle: handleAccountErasure
+    },
+    batchLimit
+  );
+  return { erased: summary.done, refused: summary.refused, retrying: summary.retrying, failed: summary.failed };
 }
 
-async function handleNextErasure(client: SqlClient): Promise<HandledOperation | null> {
-  const claimed = await client.query(
-    `SELECT o.id, o.payload_json, o.attempts
-       FROM admin_operations o
-      WHERE o.operation_type = $1
-        AND o.status = 'pending'
-        AND o.available_at <= NOW()
-        AND o.environment = (SELECT m.environment FROM admin_environment_marker m)
-      ORDER BY o.available_at, o.id
-      LIMIT 1
-      FOR UPDATE OF o SKIP LOCKED`,
-    [ACCOUNT_ERASE_OPERATION]
-  );
-  const operation = claimed.rows[0];
-  if (!operation) return null;
-  const payloadUser = operation.payload_json?.userId;
+/** One queued erasure, as the database owner, inside the runner's savepoint. */
+export async function handleAccountErasure(client: SqlClient, payload: unknown): Promise<OperationResult> {
+  const payloadUser = (payload as { userId?: unknown } | null)?.userId;
   const userId = typeof payloadUser === 'string' && payloadUser.length > 0 ? payloadUser : null;
-
-  await client.query('SAVEPOINT account_erasure');
-  let outcome: ErasureOutcome;
-  try {
-    outcome = userId ? await eraseAccountWithClient(client, userId) : { outcome: 'not_found' };
-  } catch (error) {
-    await client.query('ROLLBACK TO SAVEPOINT account_erasure');
-    const errorClass = classifyDiagnosticError(error, 'database_error');
-    const exhausted = Number(operation.attempts) + 1 >= MAX_ERASURE_ATTEMPTS;
-    if (exhausted) {
-      await client.query(
-        `UPDATE admin_operations
-            SET status = 'failed', attempts = attempts + 1, completed_at = NOW(),
-                error_code = 'ACCOUNT_ERASURE_ERROR', sanitized_result_json = $2::jsonb
-          WHERE id = $1`,
-        [operation.id, JSON.stringify({ errorClass })]
-      );
-    } else {
-      await client.query(
-        `UPDATE admin_operations
-            SET attempts = attempts + 1, available_at = NOW() + INTERVAL '1 hour',
-                sanitized_result_json = $2::jsonb
-          WHERE id = $1`,
-        [operation.id, JSON.stringify({ lastErrorClass: errorClass })]
-      );
-    }
-    writeDiagnostic('error', 'account_erasure.attempt_failed', { errorClass, final: exhausted });
-    return exhausted ? 'failed' : 'retrying';
+  const outcome: ErasureOutcome =
+    userId !== null ? await eraseAccountWithClient(client, userId) : { outcome: 'not_found' };
+  switch (outcome.outcome) {
+    case 'erased':
+      return { outcome: 'done', result: { ...outcome.counts } };
+    case 'already_erased':
+      return { outcome: 'done', result: { alreadyErased: true } };
+    case 'blocked':
+      return { outcome: 'refused', code: 'ACCOUNT_ERASURE_BLOCKED', result: { ...outcome.blockers } };
+    default:
+      return { outcome: 'refused', code: 'ACCOUNT_ERASURE_NOT_FOUND', result: {} };
   }
-
-  if (outcome.outcome === 'erased' || outcome.outcome === 'already_erased') {
-    const result = outcome.outcome === 'erased' ? outcome.counts : { alreadyErased: true };
-    await client.query(
-      `UPDATE admin_operations
-          SET status = 'succeeded', attempts = attempts + 1, completed_at = NOW(),
-              error_code = NULL, sanitized_result_json = $2::jsonb
-        WHERE id = $1`,
-      [operation.id, JSON.stringify(result)]
-    );
-    writeDiagnostic('info', 'account_erasure.completed', { alreadyErased: outcome.outcome === 'already_erased' });
-    return 'erased';
-  }
-
-  const refusal =
-    outcome.outcome === 'blocked'
-      ? { code: 'ACCOUNT_ERASURE_BLOCKED', result: outcome.blockers }
-      : { code: 'ACCOUNT_ERASURE_NOT_FOUND', result: {} };
-  await client.query(
-    `UPDATE admin_operations
-        SET status = 'failed', attempts = attempts + 1, completed_at = NOW(),
-            error_code = $2, sanitized_result_json = $3::jsonb
-      WHERE id = $1`,
-    [operation.id, refusal.code, JSON.stringify(refusal.result)]
-  );
-  writeDiagnostic('warn', 'account_erasure.refused', { errorCode: refusal.code });
-  return 'refused';
 }

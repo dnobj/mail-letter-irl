@@ -1582,10 +1582,35 @@ saved return address. Nothing on it is in flight.
 
 1. [ ] Open `/retention`; verify the counts (redacted letters and drafts, quarantine rows, purge due) and
    the report of what the next enforcing run would touch, matching `npm run maintenance` in report mode.
-2. [ ] Verify the quarantine table shows source table, row id and dates only: no content anywhere on the
-   page, and no restore control.
+2. [ ] Verify the quarantine table shows source table, row id and dates only, with a restore control per
+   row and no content anywhere on the page.
 
-**Pass criteria:** Report mode only, metadata only.
+**Pass criteria:** Metadata only; a restore is a queued command (`RETENTION-01`).
+
+### RETENTION-01 — The first enforcing sweep (development)
+
+**Status:** Not run.
+
+Run on development before `CONTENT_RETENTION_MODE=enforce` is set anywhere else (#153).
+
+**Steps:**
+
+1. [ ] Before switching: note the counts on `/retention` (letters, paid drafts and abandoned drafts due,
+   and held back).
+2. [ ] Set `CONTENT_RETENTION_MODE=enforce` on `letter-irl-maintenance-dev`. After the next daily
+   `content-retention-sweep` (`/maintenance`), verify the redacted counts rose by the due counts from
+   step 1, give or take rows that came due in between, and that the maintenance log carries counts only.
+3. [ ] Verify on the quarantine table:
+   - a row swept on time purges when its published period ends;
+   - a row swept after its period purges about a day after it was quarantined.
+4. [ ] Verify letters that were still in flight (queued, held, or with an unsettled order) were not
+   touched.
+5. [ ] Preview a restore of one quarantined letter and confirm it. After the next hourly run, verify the
+   operation succeeded and the letter's `redacted_at` is clear. The next daily sweep quarantines it again,
+   because nothing about it changed.
+
+**Pass criteria:** The sweep cleared what the report said it would and nothing in flight, and a restore
+put a copy back.
 
 ### ADMIN-OPS-02 — Tier override
 

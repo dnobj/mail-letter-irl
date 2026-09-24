@@ -5,6 +5,7 @@ import { createImageCommands } from "./images.js";
 import { jobResolveCommand, jobRetryCommand } from "./jobs.js";
 import { createOpsCommands } from "./ops.js";
 import { createPromoCommands } from "./promos.js";
+import { createRetentionCommands } from "./retention.js";
 import type { CommandDefinition } from "./runner.js";
 import { createStripeCommands } from "./stripe.js";
 
@@ -14,6 +15,7 @@ const promos = createPromoCommands();
 const images = createImageCommands();
 const ops = createOpsCommands();
 const gifts = createGiftCommands();
+const retention = createRetentionCommands();
 
 /** Every command the panel can run, keyed by route name. */
 export const ADMIN_COMMANDS: ReadonlyArray<CommandDefinition<any>> = [
@@ -33,6 +35,7 @@ export const ADMIN_COMMANDS: ReadonlyArray<CommandDefinition<any>> = [
   gifts.grant,
   gifts.voidCode,
   images.resolve,
+  retention.restore,
   ops.setTier,
   ops.routing,
   ops.statusSync,

@@ -45,9 +45,11 @@
   `recent-uploads-sweep` meets by deleting them at 24 hours; feature requests 12 months). The maintenance retention sweep (`src/services/retentionService.ts`,
   migration 026) clears the content columns and quarantines what it clears in
   `redacted_content_quarantine` for a bounded restore window. Rows, status, timestamps and
-  identifiers remain. The sweep runs in report mode until the enforce-path defects in #153 are
-  fixed, so the letter and draft periods are the design target the sweep reports against, not yet
-  a measurement.
+  identifiers remain. A copy leaves the quarantine when the published period ends, counted on the
+  row's own clock; a row swept late gets a day. An operator restores a copy through the admin panel
+  while its window is open. The enforce-path defects review round 3 found are fixed (#153), but the
+  sweep reports until `CONTENT_RETENTION_MODE=enforce` is set, development first. Until then the
+  letter and draft periods are the design target the sweep reports against, not yet a measurement.
 - A customer's request to delete their account is an erasure (#289, [account-erasure.md](account-erasure.md)):
   - **Removed:** letter content and addresses, drafts, uploads, the saved return address, access
     tokens, feature requests and unredeemed gift codes. The email is replaced by a placeholder.

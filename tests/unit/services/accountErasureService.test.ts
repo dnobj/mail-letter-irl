@@ -90,7 +90,7 @@ describe("processing queued erasures", () => {
     const counts = JSON.parse(String(done.values?.[1]));
     expect(counts).toMatchObject({ lettersScrubbed: 2, accessTokensDeleted: 2, descriptionsCleared: 4 });
     // Every write ran under the savepoint, and nothing was rolled back.
-    expect(client.statements.some((s) => s.text === "SAVEPOINT account_erasure")).toBe(true);
+    expect(client.statements.some((s) => s.text === "SAVEPOINT admin_operation")).toBe(true);
     expect(client.statements.some((s) => s.text.startsWith("ROLLBACK TO SAVEPOINT"))).toBe(false);
     // The tombstone is written last, after every scrub that finds the account.
     const writes = client.statements.map((s) => s.text);
@@ -155,7 +155,7 @@ describe("processing queued erasures", () => {
 
     const texts = client.statements.map((s) => s.text);
     const failedAt = texts.findIndex((t) => /^\s*UPDATE letters\b/.test(t));
-    const rollback = texts.indexOf("ROLLBACK TO SAVEPOINT account_erasure");
+    const rollback = texts.indexOf("ROLLBACK TO SAVEPOINT admin_operation");
     expect(rollback).toBeGreaterThan(failedAt);
     const [retry] = operationUpdates(client);
     expect(texts.indexOf(retry.text)).toBeGreaterThan(rollback);
@@ -173,7 +173,7 @@ describe("processing queued erasures", () => {
 
     const [final] = operationUpdates(client);
     expect(final.text).toMatch(/status = 'failed'/);
-    expect(final.text).toMatch(/error_code = 'ACCOUNT_ERASURE_ERROR'/);
+    expect(final.values?.[1]).toBe('ACCOUNT_ERASURE_ERROR');
     expect(MAX_ERASURE_ATTEMPTS).toBe(3);
   });
 

@@ -305,17 +305,62 @@ describePostgres('content retention sweep', () => {
       expect((await readLetter(letterId)).content).toEqual({});
     });
 
-    it('sets the recovery window so the PUBLISHED total is met exactly', async () => {
+    it('ends the recovery window when the PUBLISHED period ends, counted from the letter', async () => {
+      // Swept on day 85: the copy goes on day 90 of the letter's own clock, not
+      // 7 days after the sweep ran (#153 review round 3).
+      const { letterId } = await seedSentLetter({ daysAgo: 85 });
+
+      await retention.purgeExpiredLetterContent(90);
+
+      const saved = await readQuarantine('letters', letterId);
+      const { rows } = await pool.query(`SELECT sent_at FROM letters WHERE letter_id = $1`, [letterId]);
+      const totalDays =
+        (new Date(saved.purge_after).getTime() - new Date(rows[0].sent_at).getTime()) / 86_400_000;
+      expect(Math.round(totalDays)).toBe(90);
+    });
+
+    it('gives a letter swept after its period a day to be restored, not a window in the past', async () => {
+      // Its own clock says day 90 was a month ago, which valid_quarantine_window
+      // would refuse for the whole batch.
       const { letterId } = await seedSentLetter({ daysAgo: 120 });
 
       await retention.purgeExpiredLetterContent(90);
 
       const saved = await readQuarantine('letters', letterId);
-      const windowDays =
-        (new Date(saved.purge_after).getTime() - new Date(saved.quarantined_at).getTime()) /
-        86_400_000;
-      // 83 live + 7 quarantine = the published 90. Not 97.
-      expect(Math.round(windowDays)).toBe(7);
+      const windowHours =
+        (new Date(saved.purge_after).getTime() - new Date(saved.quarantined_at).getTime()) / 3_600_000;
+      expect(Math.round(windowHours)).toBe(24);
+    });
+
+    it('never overwrites a saved copy with an emptied live row', async () => {
+      // The documented re-run - clear redacted_at, sweep again - used to replace
+      // the good copy with the '{}' left in the live row (#153 review round 3).
+      const { letterId } = await seedSentLetter({ daysAgo: 200 });
+      await retention.purgeExpiredLetterContent();
+      await pool.query(`UPDATE letters SET redacted_at = NULL WHERE letter_id = $1`, [letterId]);
+
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+
+      const saved = await readQuarantine('letters', letterId);
+      expect(saved.content.content.bodyText).toBe(SECRET_BODY);
+      expect(saved.content.recipient.addressLine1).toBe(SECRET_STREET);
+      expect(await retention.restoreQuarantinedContent('letters', letterId)).toBe(true);
+      expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
+    });
+
+    it('will not restore over content that is live, and keeps the copy', async () => {
+      const { letterId } = await seedSentLetter({ daysAgo: 120 });
+      await retention.purgeExpiredLetterContent();
+      // Someone put different content back by hand and cleared the marker.
+      await pool.query(
+        `UPDATE letters SET content = '{"bodyText":"newer"}'::jsonb, redacted_at = NULL WHERE letter_id = $1`,
+        [letterId]
+      );
+
+      expect(await retention.restoreQuarantinedContent('letters', letterId)).toBe(false);
+
+      expect((await readLetter(letterId)).content.bodyText).toBe('newer');
+      expect(await readQuarantine('letters', letterId)).toBeDefined();
     });
 
     it('restores a letter and re-opens it to a future sweep', async () => {
@@ -568,6 +613,20 @@ describePostgres('content retention sweep', () => {
       expect(JSON.stringify(row)).not.toContain(SECRET_STREET);
     });
 
+    it("ends a paid draft's recovery window on day 90 of its own clock", async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 86, userId });
+      await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+      expect(await retention.purgePaidDraftContent()).toBe(1);
+
+      const saved = await readQuarantine('letter_drafts', draftId);
+      const { rows } = await pool.query(`SELECT consumed_at FROM letter_drafts WHERE draft_id = $1`, [draftId]);
+      const totalDays =
+        (new Date(saved.purge_after).getTime() - new Date(rows[0].consumed_at).getTime()) / 86_400_000;
+      expect(Math.round(totalDays)).toBe(90);
+    });
+
     it('HOLDS a paid draft whose order is still unsettled', async () => {
       const userId = await seedUser();
       const draftId = await seedContentDraft({ daysAgo: 120, userId });
@@ -635,6 +694,21 @@ describePostgres('content retention sweep', () => {
       const row = await readDraft(draftId);
       expect(row.body_text).toBe('');
       expect(JSON.stringify(row)).not.toContain(SECRET_STREET);
+    });
+
+    it('ends an abandoned draft\'s recovery window on day 7 of its own clock', async () => {
+      // 4 days live + 3 in quarantine: swept on day 5, the copy goes on day 7.
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 5, userId });
+      await seedJitOrder({ userId, status: 'cancelled', draftId });
+
+      expect(await retention.purgeAbandonedDraftContent()).toBe(1);
+
+      const saved = await readQuarantine('letter_drafts', draftId);
+      const { rows } = await pool.query(`SELECT created_at FROM letter_drafts WHERE draft_id = $1`, [draftId]);
+      const totalDays =
+        (new Date(saved.purge_after).getTime() - new Date(rows[0].created_at).getTime()) / 86_400_000;
+      expect(Math.round(totalDays)).toBe(7);
     });
 
     it('leaves an abandoned draft inside the 7-day window alone', async () => {
