@@ -528,7 +528,7 @@ describe('commerceService', () => {
       return (mocks.addCredits.mock.calls[0][1] as { description: string }).description;
     }
 
-    it('names the pack as the order recorded it at checkout, never by its internal code', async () => {
+    it('never names the pack by its internal code', async () => {
       const line = await purchaseLine(packSnapshot);
       expect(line).toBe('Purchased Starter Pack - 2 Letters');
       expect(line).not.toContain('credit-pack');
@@ -542,9 +542,42 @@ describe('commerceService', () => {
       expect(await purchaseLine(null)).toBe('Purchased Starter Pack - 2 Letters');
     });
 
+    // The column's default is '{}', and a malformed name must not print as
+    // "Purchased [object Object]", "Purchased 42" or a bare "Purchased".
+    it.each([
+      ['an empty snapshot', {}],
+      ['a blank name', { name: '   ' }],
+      ['a name that is not text', { name: 42 }]
+    ])('uses the catalogue\'s name for %s', async (_label, snapshot) => {
+      expect(await purchaseLine(snapshot)).toBe('Purchased Starter Pack - 2 Letters');
+    });
+
+    it('says "a letter pack" when neither the order nor the catalogue has a name', async () => {
+      const unknownPackOrder = {
+        ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-999', product_snapshot: {},
+        draft_id: undefined, credits: 4, amount_cents: 500, currency: 'usd',
+        status: 'fulfilled', stripe_checkout_session_id: 'cs-unknown', stripe_payment_intent_id: 'pi-unknown'
+      };
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM orders')) return { rows: [unknownPackOrder] };
+        return { rows: [] };
+      });
+
+      await expect(repairFulfilledPackGrant({
+        orderId: 'order-1', stripeSessionId: 'cs-unknown', expectedCredits: 4,
+        paidAmountCents: 500, paidCurrency: 'usd'
+      })).resolves.toBe('repaired');
+
+      expect(mocks.addCredits).toHaveBeenCalledTimes(1);
+      expect((mocks.addCredits.mock.calls[0][1] as { description: string }).description).toBe('Purchased a letter pack');
+    });
+
     it('writes the same line when a missed webhook is repaired from Stripe', async () => {
+      // A recorded name the catalogue does not hold, so the repair is shown to
+      // take the order's name, as the webhook does, and not the catalogue's.
       const fulfilledPackOrder = {
-        ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4', product_snapshot: packSnapshot,
+        ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4',
+        product_snapshot: { name: 'Starter Pack - Launch Offer' },
         draft_id: undefined, credits: 4, amount_cents: 500, currency: 'usd',
         status: 'fulfilled', stripe_checkout_session_id: 'cs-repair', stripe_payment_intent_id: 'pi-repair'
       };
@@ -558,8 +591,9 @@ describe('commerceService', () => {
         paidAmountCents: 500, paidCurrency: 'usd'
       })).resolves.toBe('repaired');
 
+      expect(mocks.addCredits).toHaveBeenCalledTimes(1);
       const line = (mocks.addCredits.mock.calls[0][1] as { description: string }).description;
-      expect(line).toBe('Purchased Starter Pack - 2 Letters');
+      expect(line).toBe('Purchased Starter Pack - Launch Offer');
       expect(line).not.toContain('credit-pack');
     });
   });
