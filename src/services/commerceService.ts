@@ -474,7 +474,7 @@ interface JitStripeRequest {
 
 function jitStripeRequest(orderId: string, product: CommerceProductConfig): JitStripeRequest {
   const urls = checkoutReturnUrls(orderId);
-  return { priceId: product.priceId ?? '', successUrl: urls.successUrl, cancelUrl: urls.cancelUrl };
+  return { priceId: product.priceId, successUrl: urls.successUrl, cancelUrl: urls.cancelUrl };
 }
 
 /** The request an order recorded at insert, or null for an order from before #279. */
