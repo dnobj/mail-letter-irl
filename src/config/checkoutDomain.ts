@@ -6,8 +6,10 @@
  * checkout.stripe.com. Two things here forward only to hosts they know: the
  * start page (/purchase/start, #372), which refuses any other target, and the
  * widgets' redirect list. STRIPE_CHECKOUT_DOMAIN names the custom host for
- * both, beside checkout.stripe.com, which always stays: sandboxes cannot use
- * a custom domain, and a session opened before the switch keeps its URL.
+ * both, beside checkout.stripe.com, which always stays: a session opened
+ * before the switch keeps its URL. The domain is added once, in live mode,
+ * but Stripe's docs suggest test-mode sessions of the same account may use it
+ * too, so development sets the variable as well.
  *
  * Set it BEFORE adding the domain in Stripe. The domain activates by itself
  * once its DNS records verify, and every session created after that carries

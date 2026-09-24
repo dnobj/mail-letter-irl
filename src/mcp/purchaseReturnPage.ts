@@ -87,6 +87,8 @@ export function parseCheckoutTarget(value: string | null | undefined): string | 
 export function returnCookieHeader(chatgptUrl: string): string {
   // Lax, not Strict: the customer comes back from checkout.stripe.com by a
   // top-level navigation, and Strict cookies are withheld on exactly that.
+  // From our own checkout domain (#373) the return is same-site, and Lax
+  // still holds.
   return `${RETURN_COOKIE_NAME}=${encodeURIComponent(chatgptUrl)}; Max-Age=${RETURN_COOKIE_MAX_AGE_SECONDS}; Path=/purchase; Secure; HttpOnly; SameSite=Lax`;
 }
 

@@ -78,9 +78,11 @@ describe('parseCheckoutTarget', () => {
 
   it('forwards to the custom checkout domain once it is configured, and to Stripe\'s own host still (#373)', () => {
     const custom = 'https://pay.letterirl.com/c/pay/cs_live_abc#fid';
-    expect(parseCheckoutTarget(custom)).toBeNull();
-    vi.stubEnv('STRIPE_CHECKOUT_DOMAIN', 'pay.letterirl.com');
     try {
+      // Unset first, whatever the developer's shell or .env.test holds.
+      vi.stubEnv('STRIPE_CHECKOUT_DOMAIN', '');
+      expect(parseCheckoutTarget(custom)).toBeNull();
+      vi.stubEnv('STRIPE_CHECKOUT_DOMAIN', 'pay.letterirl.com');
       expect(parseCheckoutTarget(custom)).toBe(custom);
       expect(parseCheckoutTarget(CHECKOUT)).toBe(CHECKOUT);
       expect(parseCheckoutTarget('https://evil.example/pay')).toBeNull();

@@ -41,8 +41,9 @@ Every card's header shows the website's mark, the logo in its navbar. `scripts/b
 The declared policy (`WIDGET_CSP_CANONICAL` in `src/mcp/registerTools.ts`) allows
 only what a widget genuinely loads: our API origin (the upload widget's
 diagnostic beacon, and the temp-image URL the image card can fall back to),
-OpenAI's static and user-content hosts, and Stripe plus the letter-pack origin as
-redirect targets. Everything else a widget displays is a `data:` URI produced
+OpenAI's static and user-content hosts, and as redirect targets: Stripe's checkout
+host (plus our own checkout domain when `STRIPE_CHECKOUT_DOMAIN` names one, #373),
+the letter-pack origin, and the API origin, which serves the purchase start page (#372). Everything else a widget displays is a `data:` URI produced
 server-side, so it needs no host at all.
 
 One host is **deliberately excluded**: the Azure blob host behind ChatGPT Library

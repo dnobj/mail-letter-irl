@@ -208,6 +208,18 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api', 'maintenance'],
     checkedBy: 'stripe.currency_unset'
   },
+  /**
+   * Stripe's custom Checkout host (#373, docs/stripe-custom-domain.md). Listed
+   * so the preflight shows production and development disagreeing on it.
+   */
+  {
+    name: 'STRIPE_CHECKOUT_DOMAIN',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api'],
+    checkedBy: 'stripe.checkout_domain_invalid'
+  },
   {
     name: 'JIT_CURRENCY',
     requiredIn: 'production',
