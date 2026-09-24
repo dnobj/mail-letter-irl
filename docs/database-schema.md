@@ -1,6 +1,6 @@
 # Database Schema
 
-**Last Updated:** September 8, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
 This document describes the Letter IRL database schema as defined by `db/migrations` at the head of `dev` (Neon
@@ -330,7 +330,7 @@ Promotional credit campaigns with redeemable codes.
 | code | VARCHAR(50) | NO | - | Unique promo code (case-insensitive) |
 | name | VARCHAR(255) | NO | - | Campaign name |
 | description | TEXT | YES | - | Description |
-| credits_amount | INTEGER | NO | - | Credits per redemption (> 0) |
+| credits_amount | INTEGER | NO | - | Credits per redemption (>= 0 since 007). Only a seed campaign may carry 0; 034 ended the ordinary ones that did |
 | expiration_policy | VARCHAR(50) | NO | 'days_from_activation' | Expiration policy |
 | expiration_days | INTEGER | YES | 90 | Days until credits expire |
 | fixed_expiration_date | TIMESTAMPTZ | YES | - | For fixed_date policy |
@@ -669,6 +669,7 @@ Production provisioning and the first production connection remain separate owne
 | 31 | 031_provider_error_minimisation.sql | Provider message text rewritten out of the job, order and order-event error columns (#162) |
 | 32 | 032_error_text_minimisation.sql | Raw error text and operator reasons rewritten out of the order, event, outbox, pack-refund and maintenance columns (#394) |
 | 33 | 033_gift_letters.sql | Gift letters: gift_letters, gift_codes, the gift_letter funding type, gift drafts, seed campaigns and gift-only redemptions |
+| 34 | 034_end_zero_letter_promos.sql | Ends the ordinary promo campaigns that grant no letters (the preview-gate codes 007 seeded), which could never be redeemed (#420) |
 
 ---
 

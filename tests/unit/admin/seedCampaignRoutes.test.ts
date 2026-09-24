@@ -178,6 +178,21 @@ describe("seed campaign admin routes", () => {
     expect(reply.body).toContain("ADMIN_INVALID_REQUEST");
   });
 
+  it("refuses an ordinary campaign that grants no letters, and still takes one that does (#420)", async () => {
+    const ordinary = (credits: string) => {
+      const params = new URLSearchParams(createFormQuery("ZERO-TEST"));
+      params.set("giftGenerationsRemaining", "");
+      params.set("creditsAmount", credits);
+      return params.toString();
+    };
+    const none = await send(port, `/commands/promo.create/preview?${ordinary("0")}`);
+    expect(none.status).toBe(400);
+    expect(none.body).toContain("ADMIN_INVALID_REQUEST");
+    const some = await send(port, `/commands/promo.create/preview?${ordinary("2")}`);
+    expect(some.status).toBe(200);
+    expect(some.body).toContain("none (ordinary promo)");
+  });
+
   it("still refuses a missing target for a command that does not name its own", async () => {
     const reply = await send(port, "/commands/promo.transition/preview?status=active");
     expect(reply.status).toBe(400);

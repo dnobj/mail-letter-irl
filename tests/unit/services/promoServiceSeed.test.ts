@@ -11,16 +11,22 @@ const state = vi.hoisted(() => ({
   log: [] as Array<{ sql: string; params: any[] }>,
   campaign: null as Record<string, any> | null,
   emailClaimed: false,
-  failRedemptionInsert: null as Error | null
+  failRedemptionInsert: null as Error | null,
+  alreadyRedeemed: false,
+  txCount: '0',
+  capRace: false
 }));
 
 function answer(sql: string, params: any[] = []) {
   state.log.push({ sql, params });
   if (sql.includes('FROM promo_campaigns WHERE UPPER(code)')) return { rows: state.campaign ? [state.campaign] : [] };
-  if (sql.includes('FROM promo_redemptions WHERE campaign_id = $1 AND user_id')) return { rows: [] };
+  if (sql.includes('FROM promo_redemptions WHERE campaign_id = $1 AND user_id')) {
+    return { rows: state.alreadyRedeemed ? [{ redemption_id: 'earlier' }] : [] };
+  }
   if (sql.includes('email_normalized = $2')) return { rows: [{ exists: state.emailClaimed }] };
-  if (sql.includes('COUNT(*) as count FROM credit_transactions')) return { rows: [{ count: '0' }] };
-  if (sql.includes('UPDATE promo_campaigns')) return { rows: [state.campaign] };
+  if (sql.includes('COUNT(*) as count FROM credit_transactions')) return { rows: [{ count: state.txCount }] };
+  // Another claim took the last slot between validation and this UPDATE.
+  if (sql.includes('UPDATE promo_campaigns')) return { rows: state.capRace ? [] : [state.campaign] };
   if (sql.includes('INSERT INTO credit_ledger')) return { rows: [{ ledger_id: 'ledger-1' }] };
   if (sql.includes('INSERT INTO promo_redemptions') && state.failRedemptionInsert) throw state.failRedemptionInsert;
   return { rows: [] };
@@ -33,8 +39,9 @@ vi.mock('../../../src/db/index.js', () => ({
   transaction: vi.fn(async (callback: (c: typeof client) => Promise<unknown>) => callback(client))
 }));
 const ensureAccount = vi.hoisted(() => vi.fn(async () => ({ user_id: 'reader-1' })));
+const findUserMock = vi.hoisted(() => vi.fn(async (): Promise<Record<string, unknown> | null> => null));
 vi.mock('../../../src/services/userService.js', () => ({
-  findUser: vi.fn(async () => null),
+  findUser: findUserMock,
   ensureAccountRowWithClient: ensureAccount
 }));
 const grantGift = vi.hoisted(() => vi.fn());
@@ -73,6 +80,10 @@ describe('redeemPromoCode: seed campaigns', () => {
     state.campaign = campaign();
     state.emailClaimed = false;
     state.failRedemptionInsert = null;
+    state.alreadyRedeemed = false;
+    state.txCount = '0';
+    state.capRace = false;
+    findUserMock.mockResolvedValue(null);
     process.env.LETTER_IRL_GIFT_LETTERS_ENABLED = 'true';
     grantGift.mockResolvedValue([{ gift_id: 'gift-1' }]);
   });
@@ -126,7 +137,7 @@ describe('redeemPromoCode: seed campaigns', () => {
   it('refuses a second claim from the same person under another spelling of their email', async () => {
     state.emailClaimed = true;
     const result = await redeemPromoCode({ userId: 'alt-account', email: 'r.e.a.d.e.r.o.n.e@gmail.com', promoCode: 'JANE-SMITH' });
-    expect(result).toEqual({ success: false, error: 'This code has already been redeemed with this email address.' });
+    expect(result).toEqual({ success: false, error: 'This gift code has already been claimed with this email address.' });
     expect(ran('email_normalized = $2')[0].params).toEqual(['campaign-1', 'readerone@gmail.com']);
     expect(grantGift).not.toHaveBeenCalled();
   });
@@ -138,7 +149,7 @@ describe('redeemPromoCode: seed campaigns', () => {
     });
     expect(await redeemPromoCode({ userId: 'r', email: 'r@example.com', promoCode: 'JANE-SMITH' })).toEqual({
       success: false,
-      error: 'This code has already been redeemed with this email address.'
+      error: 'This gift code has already been claimed with this email address.'
     });
 
     state.failRedemptionInsert = Object.assign(new Error('other'), { code: '23505', constraint: 'promo_redemptions_campaign_id_user_id_key' });
@@ -148,8 +159,77 @@ describe('redeemPromoCode: seed campaigns', () => {
   it('refuses a seed while gift letters are off, before touching anything', async () => {
     process.env.LETTER_IRL_GIFT_LETTERS_ENABLED = 'false';
     const result = await redeemPromoCode({ userId: 'r', email: 'r@example.com', promoCode: 'JANE-SMITH' });
-    expect(result).toEqual({ success: false, error: 'This code is not available right now.' });
+    expect(result).toEqual({ success: false, error: "Gift codes can't be claimed right now. Please try again later." });
     expect(ran('UPDATE promo_campaigns')).toHaveLength(0);
+  });
+
+  it('words every refusal of a seed code as a gift code, never a promo code (#432)', async () => {
+    const future = new Date(Date.now() + 86_400_000);
+    const past = new Date(Date.now() - 86_400_000);
+    const cases: Array<[() => void, string]> = [
+      [() => { state.campaign = campaign({ status: 'paused' }); }, 'This gift code is no longer valid.'],
+      [() => { state.campaign = campaign({ starts_at: future }); }, "This gift code isn't active yet."],
+      [() => { state.campaign = campaign({ ends_at: past }); }, 'This gift code has expired.'],
+      [() => { state.campaign = campaign({ current_redemptions: 200 }); }, 'This gift code has been claimed as many times as it allows.'],
+      [() => { state.alreadyRedeemed = true; }, 'You have already claimed this gift code.'],
+      [() => { findUserMock.mockResolvedValue({ user_id: 'r' }); state.txCount = '2'; }, 'This gift code is for new Letter IRL customers.'],
+    ];
+    for (const [arrange, expected] of cases) {
+      state.campaign = campaign();
+      state.alreadyRedeemed = false;
+      state.txCount = '0';
+      findUserMock.mockResolvedValue(null);
+      arrange();
+      const result = await redeemPromoCode({ userId: 'r', email: 'r@example.com', promoCode: 'JANE-SMITH' });
+      expect(result).toEqual({ success: false, error: expected });
+    }
+    expect(grantGift).not.toHaveBeenCalled();
+  });
+
+  it('keeps the promo wording for an ordinary campaign', async () => {
+    state.campaign = campaign({ code: 'WELCOME5', credits_amount: 10, gift_generations_remaining: null, current_redemptions: 200 });
+    expect(await redeemPromoCode({ userId: 'r', email: 'r@example.com', promoCode: 'WELCOME5' })).toEqual({
+      success: false,
+      error: 'Promo code redemption limit reached'
+    });
+    state.campaign = campaign({ code: 'WELCOME5', credits_amount: 10, gift_generations_remaining: null });
+    findUserMock.mockResolvedValue({ user_id: 'r' });
+    state.txCount = '2';
+    expect(await redeemPromoCode({ userId: 'r', email: 'r@example.com', promoCode: 'WELCOME5' })).toEqual({
+      success: false,
+      error: 'This promo code is for new users only'
+    });
+  });
+
+  it('answers a claim that loses the last slot to a race in the same words as the cap', async () => {
+    state.capRace = true;
+    expect(await redeemPromoCode({ userId: 'r', email: 'r@example.com', promoCode: 'JANE-SMITH' })).toEqual({
+      success: false,
+      error: 'This gift code has been claimed as many times as it allows.'
+    });
+    state.campaign = campaign({ code: 'WELCOME5', credits_amount: 10, gift_generations_remaining: null });
+    expect(await redeemPromoCode({ userId: 'r', email: 'r@example.com', promoCode: 'WELCOME5' })).toEqual({
+      success: false,
+      error: 'Promo code redemption limit reached'
+    });
+    expect(grantGift).not.toHaveBeenCalled();
+  });
+
+  it('refuses an ordinary campaign that grants no letters, before touching anything (#420)', async () => {
+    state.campaign = campaign({
+      code: 'EARLYBIRD',
+      credits_amount: 0,
+      gift_generations_remaining: null,
+      requires_new_user: false,
+      max_total_redemptions: null
+    });
+    expect(await redeemPromoCode({ userId: 'r', email: 'r@example.com', promoCode: 'EARLYBIRD' })).toEqual({
+      success: false,
+      error: "This code doesn't include any letters."
+    });
+    // Before #420 the ledger insert raised 23514 inside the transaction.
+    expect(ran('UPDATE promo_campaigns')).toHaveLength(0);
+    expect(ran('INSERT INTO credit_ledger')).toHaveLength(0);
   });
 
   it('leaves an ordinary campaign exactly as it was: a lot, no gift, no email recorded', async () => {
