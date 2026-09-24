@@ -1,6 +1,6 @@
 # MCP Debugging Notes
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Transport-level troubleshooting for the MCP endpoint
 
 This document captures lessons learned while wiring the Letter IRL MCP server into ChatGPT Apps (November 2025). Refer here when troubleshooting connector issues. For widget problems see [learnings/widget-debugging-notes.md](learnings/widget-debugging-notes.md); for OAuth see [learnings/chatgpt-auth0-oauth-learnings.md](learnings/chatgpt-auth0-oauth-learnings.md).
@@ -8,7 +8,7 @@ This document captures lessons learned while wiring the Letter IRL MCP server in
 ## 1. HTTP Transport Requirements
 - **Use the Streamable HTTP transport** (`StreamableHTTPServerTransport`). The Apps SDK expects HTTPS and SSE support; stdio is limited to local tests.
 - **Allowed hosts/origins:** configure `LETTER_IRL_ALLOWED_HOSTS`, `LETTER_IRL_ALLOWED_ORIGINS`, and `LETTER_IRL_DEFAULT_ORIGIN` so both `localhost`/`127.0.0.1` (dev) and your tunnel domain (e.g., ngrok) are permitted.
-- **Endpoint paths:** the MCP endpoint is `/mcp` (with `/mcp/sse` for the SSE fallback). The same process serves `/healthz`, `/readyz`, `/manifest.json`, the `/.well-known/*` OAuth metadata, `/widgets/<name>.html`, `/webhooks/stripe`, `/purchase/start` and `/purchase/return`, and the dashboard's `/api/*` routes. The dispatch in `src/mcp/httpServer.ts` is the complete list.
+- **Endpoint paths:** the MCP endpoint is `/mcp` (with `/mcp/sse` for the SSE fallback). The same process serves `/healthz`, `/readyz`, `/manifest.json`, the `/.well-known/*` OAuth metadata and the plugin portal's `/.well-known/openai-apps-challenge`, `/widgets/<name>.html`, `/webhooks/stripe`, `/purchase/start` and `/purchase/return`, and the dashboard's `/api/*` routes. The dispatch in `src/mcp/httpServer.ts` is the complete list.
 
 ## 2. Tunneling Tips
 - `ngrok http 8090` (or `cloudflared tunnel --url http://localhost:8090`) exposes the local server with a valid TLS cert that ChatGPT accepts.
