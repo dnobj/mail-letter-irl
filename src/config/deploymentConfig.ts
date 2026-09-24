@@ -27,6 +27,7 @@ import {
   packCurrency
 } from './products.js';
 import { isDebugEnabled } from '../utils/debug.js';
+import { stripeCheckoutDomainInvalid } from './checkoutDomain.js';
 
 export type DeploymentMode = 'production' | 'development' | 'test';
 
@@ -684,6 +685,18 @@ function validateStripe(
       severity: production ? 'error' : 'warning',
       rule: 'stripe.webhook_secret_malformed',
       message: 'STRIPE_WEBHOOK_SECRET does not look like a Stripe webhook secret (whsec_...)'
+    });
+  }
+
+  // #373: once the custom domain is active in Stripe, every Checkout URL is
+  // on it, and the start page forwards only to hosts it can parse from this
+  // setting. A value it cannot use would strand every checkout on our page.
+  if (stripeCheckoutDomainInvalid(env)) {
+    findings.push({
+      severity: production ? 'error' : 'warning',
+      rule: 'stripe.checkout_domain_invalid',
+      message:
+        'STRIPE_CHECKOUT_DOMAIN must be a bare host name such as pay.letterirl.com, with no scheme, port or path'
     });
   }
 

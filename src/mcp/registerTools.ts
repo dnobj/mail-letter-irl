@@ -66,6 +66,7 @@ import { SESSION_SCOPES, IDENTITY_SCOPES } from "../auth/oauthConfig.js";
 import { prepareAuthenticatedUser } from "../auth/identity.js";
 import { VerifiedEmailRequiredError } from "../auth/verifiedEmail.js";
 import { EmailAlreadyLinkedError } from "../services/userService.js";
+import { widgetRedirectOrigins } from "../config/checkoutDomain.js";
 import {
   classifyDiagnosticError,
   writeDiagnostic
@@ -322,9 +323,9 @@ const WIDGET_PACKS_ORIGIN = normalizeHttpsOrigin(
 // /purchase/start there through openExternal, and only for an allowlisted
 // origin does ChatGPT skip the safe-link modal and append the redirectUrl
 // that the start page keeps as the way back into the conversation (#372).
-const WIDGET_REDIRECT_ORIGINS = Array.from(
-  new Set(["https://checkout.stripe.com", WIDGET_PACKS_ORIGIN, WIDGET_API_ORIGIN])
-);
+// The checkout hosts lead: checkout.stripe.com, and our custom checkout
+// domain when STRIPE_CHECKOUT_DOMAIN names one (#373).
+const WIDGET_REDIRECT_ORIGINS = widgetRedirectOrigins(WIDGET_PACKS_ORIGIN, WIDGET_API_ORIGIN);
 
 /**
  * Content Security Policy for widgets.

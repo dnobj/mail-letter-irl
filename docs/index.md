@@ -1,6 +1,6 @@
 # Letter IRL Documentation Index
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Central navigation hub for all Letter IRL documentation
 
 Letter IRL prints and mails real US letters and postcards composed in ChatGPT. This repository is the
@@ -58,6 +58,7 @@ maintenance job.
 - [Environment Files](env-files.md) - every `.env` file and what reads it
 - [Database Setup](database-setup.md) - creating and connecting to Neon
 - [Infrastructure](infrastructure.md) - cloud topology, runtime architecture, maintenance tasks
+- [Stripe custom checkout domain](stripe-custom-domain.md) - serving Checkout on pay.letterirl.com, and the order to set it up in (#373)
 - [Deployment](deployment.md) - release process and boot validation rules
 - [Railway Setup](railway-setup.md) - services, commands, variables, Serverless policy
 - [Idle-Cost Operations](idle-cost-operations.md) - cost controls and rollback runbook
