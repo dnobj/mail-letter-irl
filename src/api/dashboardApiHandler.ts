@@ -162,6 +162,16 @@ export async function handleCreateCheckoutSession(
     // branch that used to sit in this chain had zero real coverage and its
     // test asserted a 400 that actually came from the pre-validation (#278
     // round 6).
+    if (code === 'ACCOUNT_SENDS_BLOCKED') {
+      // The pack tool's fixed sentence; never the block's label, which is an
+      // internal moderation reason (#449).
+      res.statusCode = 403;
+      res.json({
+        error: 'purchasing_disabled',
+        message: 'Purchasing is disabled on this account. Please contact support.'
+      });
+      return;
+    }
     if (
       // PACK_AMOUNT_NOT_CONFIGURED stays: its carried class is legitimately
       // transient (a Stripe blip mid-resolution), so the terminal test below
