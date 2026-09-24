@@ -19,6 +19,7 @@ import {
   writeDiagnostic
 } from '../utils/diagnosticLog.js';
 import { assertValidDeploymentConfig } from '../config/deploymentConfig.js';
+import { sendMaintenanceHeartbeat } from '../services/maintenanceHeartbeat.js';
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -321,6 +322,10 @@ export async function maintenanceEntry(): Promise<void> {
   try {
     await runMaintenance();
     console.log(`[Maintenance] Finished at ${new Date().toISOString()}`);
+    // Only after a run that finished: a monitor stops hearing from a run that
+    // never happens and from one that keeps failing alike (#408).
+    const heartbeat = await sendMaintenanceHeartbeat();
+    if (heartbeat !== 'skipped') console.log(`[Maintenance] Heartbeat ${heartbeat}`);
   } finally {
     closeTempImageStore();
     await closePool();

@@ -20,6 +20,7 @@
  * disagree about what production requires.
  */
 
+import { maintenanceHeartbeatUrlInvalid } from '../services/maintenanceHeartbeat.js';
 import {
   JIT_PRICE_ENV_VARS,
   PACK_PRICE_ENV_VARS,
@@ -1029,6 +1030,18 @@ export function validateDeploymentConfig(
   validateStripe(env, mode, findings);
   validateBucket(env, mode, findings);
   validatePlaceholders(env, findings);
+
+  // #408: the maintenance service's heartbeat (src/services/maintenanceHeartbeat.ts).
+  // A URL maintenance cannot call leaves its monitor alerting every hour for a
+  // job that is running fine. A warning, never a boot error: the heartbeat is an
+  // alarm, not part of the work.
+  if (maintenanceHeartbeatUrlInvalid(env)) {
+    findings.push({
+      severity: 'warning',
+      rule: 'maintenance.heartbeat_url_invalid',
+      message: 'MAINTENANCE_HEARTBEAT_URL must be an https URL, such as a healthchecks.io ping URL'
+    });
+  }
 
   if (production && surface === 'server') {
     // The origin/host allowlists have LOCALHOST fallbacks, and an unset one is

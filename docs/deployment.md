@@ -1,6 +1,6 @@
 # Deployment Guide
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Release process, environment checks, boot validation rules, and migration safety
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
@@ -216,6 +216,7 @@ development state in another.
 | `http.allowed_hosts_required` | error | `LETTER_IRL_ALLOWED_HOSTS` unset in production | Set it. The fallback allowlists localhost, which leaves DNS-rebinding protection open |
 | `http.allowed_origins_required` | error | `LETTER_IRL_ALLOWED_ORIGINS` unset in production | Set it. The fallback allowlists localhost origins |
 | `debug.enabled_in_production` | error | `DEBUG` is enabled in production | Unset it. It serves the unauthenticated `/debug/widgets` route and discloses container paths |
+| `maintenance.heartbeat_url_invalid` | warning | `MAINTENANCE_HEARTBEAT_URL` is set but is not an https URL | Set the monitor's https ping URL, or unset it (#408) |
 | `debug.verbose_logging_in_production` | warning | `DEBUG_CONTENT` or `DEBUG_IMAGE` in production | Unset it — it widens what reaches the logs |
 | `auth.enforcement_disabled_in_production` | error | `LETTER_IRL_REQUIRE_AUTH=false` in production | Re-enable authentication. Callers admitted with no subject would share one account, and the cohort gate that once bounded that is switched off |
 | `auth.oauth_validation_not_enforced` | error | `LETTER_IRL_OAUTH_CIMD_ENFORCEMENT` is not `true` in production | Set it. Without it the issuer, audience, algorithm and JWKS configuration is never validated at boot, so a mis-set value fails at the first token instead of at deploy |

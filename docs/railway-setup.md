@@ -1,6 +1,6 @@
 # Railway Setup Guide
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Exact Railway services, commands, branches, variables, and Serverless policy
 
 Letter IRL uses one Railway project with `production` and `development` environments. Environment isolation is achieved with per-environment variables and branch deployment settings, not separate Railway projects.
@@ -185,6 +185,8 @@ Public domain: none
 ```
 
 Reference the same backend variables used by the API, including the environment-specific database and bucket references. The command closes all clients and exits. Investigate any run that is still active near the next hour.
+
+`MAINTENANCE_HEARTBEAT_URL` is the maintenance service's own: an external monitor's ping URL (for example a healthchecks.io check), called after every run that finishes. The monitor alerts when the calls stop, which covers a run that never happens and one that keeps failing ([operational-acceptance.md](operational-acceptance.md), #408). Unset, nothing is called. It must be https; anything else only warns (`maintenance.heartbeat_url_invalid`). It is a capability, so keep it in Railway only.
 
 ## Website Settings
 
