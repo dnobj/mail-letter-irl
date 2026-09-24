@@ -682,6 +682,20 @@ describe("the outbox's stop (#444)", () => {
     vi.unstubAllEnvs();
   });
 
+  it('answers unknown, and never throws, when the count behind a pause fails (#451 delta review)', async () => {
+    vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    query.mockRejectedValueOnce(Object.assign(new Error('connection terminated: 221B Baker Street'), { code: '57P01' }));
+
+    expect(await lettersWaitingBehindPause()).toBe('unknown');
+
+    const logged = warn.mock.calls.flat().map(String).join('\n');
+    expect(logged).toContain('"event":"outbox.waiting_count_failed"');
+    expect(logged).not.toContain('Baker Street');
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
   it('claims as before when the switch is unset or on', async () => {
     for (const value of [undefined, 'true', 'on']) {
       query.mockReset().mockResolvedValue({ rows: [] });

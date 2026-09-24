@@ -898,12 +898,22 @@ async function countWaitingLetterJobs(): Promise<number> {
 }
 
 /**
- * How many letters a paused outbox is holding back, and 0 without a query
- * while it dispatches. Maintenance withholds its heartbeat while this is above
- * zero, so a pause left on reaches the monitor (#451 review).
+ * How many letters a paused outbox is holding back: 0 without a query while it
+ * dispatches, and 'unknown' when the count itself failed. Maintenance withholds
+ * its heartbeat unless this is 0, so a pause left on reaches the monitor
+ * (#451 review). Never throws: it runs after a run that finished, and a failed
+ * count must not relabel that run as failed.
  */
-export async function lettersWaitingBehindPause(): Promise<number> {
-  return outboxDispatchEnabled() ? 0 : countWaitingLetterJobs();
+export async function lettersWaitingBehindPause(): Promise<number | 'unknown'> {
+  if (outboxDispatchEnabled()) return 0;
+  try {
+    return await countWaitingLetterJobs();
+  } catch (error) {
+    writeDiagnostic('warn', 'outbox.waiting_count_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
+    return 'unknown';
+  }
 }
 
 /** Claim and process due jobs until the batch is empty or reaches its limit. */

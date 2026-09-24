@@ -25,6 +25,7 @@ The daily ceilings (`LETTER_IRL_BETA_DAILY_MAIL_CAP`, `LETTER_IRL_BETA_ACCOUNT_D
   1. At [healthchecks.io](https://healthchecks.io), create one check per environment: period 1 hour, grace 1 hour, email alerts to the owner.
   2. Set each check's ping URL as `MAINTENANCE_HEARTBEAT_URL` on the maintenance service in each environment: `letter-irl-maintenance` in production, `letter-irl-maintenance-dev` in development (the names in Railway's service list on 2026-09-23). The URL is a capability, so it lives only in Railway.
   3. After the next hourly run, each check shows a ping. The maintenance log says `Heartbeat sent`. An unusable value logs `[config]` and `Heartbeat invalid` on every run instead.
+- **On a heartbeat alarm**, read the maintenance log first. `Heartbeat withheld` means the outbox is paused with letters waiting, or that they could not be counted. While that alarm stands, a run that stops happening raises nothing new, so check the last run times on the panel's `/maintenance` page as well.
 - **Who watches:** the owner, for held mail, refunds and disputes, through the admin panel: `/alerts`, and an order or account found through Lookup.
 
 ## Stopping and recovering
@@ -42,7 +43,7 @@ The first three refuse new work only. The outbox switch is the one that stops th
 - **When it pauses:** neither dispatcher hands anything to the provider: not the API right after a send, not maintenance. A new send is queued, and the customer is told `pending`, "Queued for the print provider". The hand-run `scripts/test-postgrid*` scripts call PostGrid directly and are not covered.
 - **What waits:** every waiting letter keeps its place, attempts and backoff.
 - **What still runs:** maintenance's two crash sweeps, which never call the provider. Setting the switch redeploys the API, and a send that redeploy catches mid-dispatch is settled by them 15 minutes later like any crash: held for an operator, with a critical alert, if the provider may have it, or failed and refunded if it had not reached the provider on its last attempt. So a held job can appear right after the switch is set.
-- **What shows:** each maintenance run logs `outbox.dispatch_paused` with the count waiting, and both services print a `[config]` warning while the switch is off: the API at boot, maintenance at every run. While letters are waiting, maintenance withholds its heartbeat, so the external monitor alerts and stays alerting until the switch is back on.
+- **What shows:** each maintenance run logs `outbox.dispatch_paused` with the count waiting, and both services print a `[config]` warning while the switch is off: the API at boot, maintenance at every run. While letters are waiting, maintenance withholds its heartbeat, so the external monitor alerts and stays alerting until the switch is back on. The alarm arrives two to three hours after the first letter queues behind the pause (the next hourly run, then the check's period and grace), and only once the heartbeat is set up (the first Evidence row below); until then a pause shows only in the maintenance log and the panel's outbox count.
 - **When it resumes:** the next maintenance run sends the queue and the heartbeat, and sends from the API go out immediately again.
 
 For a printing incident, set the outbox switch first; add the first switch too if new sends should be refused rather than queued.
