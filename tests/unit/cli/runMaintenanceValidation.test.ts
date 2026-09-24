@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const services = vi.hoisted(() => ({
   processDueLetterJobs: vi.fn().mockResolvedValue({ processed: 0 }),
+  processAccountErasures: vi.fn().mockResolvedValue({ erased: 0, refused: 0, retrying: 0, failed: 0 }),
   runCommerceMaintenance: vi.fn().mockResolvedValue({}),
   reconcileGenerationReservations: vi.fn().mockResolvedValue({}),
   cleanupExpiredImages: vi.fn().mockResolvedValue(0),
@@ -25,6 +26,9 @@ const services = vi.hoisted(() => ({
 
 vi.mock('../../../src/services/letterJobService.js', () => ({
   processDueLetterJobs: services.processDueLetterJobs
+}));
+vi.mock('../../../src/services/accountErasureService.js', () => ({
+  processAccountErasures: services.processAccountErasures
 }));
 vi.mock('../../../src/services/packRefundService.js', () => ({
   reconcilePackRefunds: async () => ({ retried: 0, adopted: 0, settled: 0, compensated: 0 })
@@ -379,6 +383,88 @@ describe('maintenance deployment validation', () => {
       releaseSweep?.();
       await expect(entry).resolves.toBeUndefined();
       expect(services.processDueLetterJobs).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * Issue #289. The admin panel queues erasures it cannot perform itself; this
+   * task carries them out. Wrapped like the sweeps: a failure must not stop
+   * mail, and what reaches maintenance_tasks.last_error is a class.
+   */
+  describe('account erasures', () => {
+    afterEach(() => {
+      services.runMaintenanceTaskIfDue.mockReset().mockResolvedValue({ ran: false });
+      services.processAccountErasures.mockReset().mockResolvedValue({ erased: 0, refused: 0, retrying: 0, failed: 0 });
+    });
+
+    it('is scheduled on every hourly run, under its own task name, after the sweeps', async () => {
+      stubValidDevelopment();
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      const names = services.runMaintenanceTaskIfDue.mock.calls.map(([name]) => name);
+      const call = services.runMaintenanceTaskIfDue.mock.calls.find(([name]) => name === 'account-erasures');
+      expect(call).toBeDefined();
+      expect(call?.[1]).toBeGreaterThan(0);
+      expect(call?.[1]).toBeLessThan(60 * 60 * 1000);
+      expect(names.indexOf('account-erasures')).toBeGreaterThan(names.indexOf('feature-requests-sweep'));
+      expect(names.indexOf('account-erasures')).toBeLessThan(names.indexOf('provider-status-sync'));
+    });
+
+    it('logs the counts when it runs, and nothing else', async () => {
+      stubValidDevelopment();
+      const output = captureOutput();
+      services.processAccountErasures.mockResolvedValueOnce({ erased: 1, refused: 2, retrying: 0, failed: 0 });
+      services.runMaintenanceTaskIfDue.mockImplementation((async (name, _interval, task) =>
+        name === 'account-erasures' ? { ran: true, result: await task() } : { ran: false }) as TaskRunner);
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      expect(services.processAccountErasures).toHaveBeenCalledTimes(1);
+      const logged = output();
+      expect(logged).toContain('Account erasures completed');
+      expect(logged).toContain('"event":"account_erasure.run"');
+      expect(logged).toContain('"erased":1');
+      expect(logged).toContain('"refused":2');
+      expect(logged).not.toContain('account_erasure.task_failed');
+    });
+
+    it('cannot stop mail or the rest of maintenance, or leak what the driver said, when it fails', async () => {
+      stubValidDevelopment();
+      const output = captureOutput();
+      const driverError = Object.assign(
+        new Error('connect ETIMEDOUT while erasing auth0|secret-subject for person@example.invalid'),
+        { code: 'ETIMEDOUT' }
+      );
+      services.processAccountErasures.mockRejectedValueOnce(driverError);
+      let rethrown: unknown;
+      services.runMaintenanceTaskIfDue.mockImplementation((async (name, _interval, task) => {
+        if (name !== 'account-erasures') return { ran: false };
+        try {
+          return { ran: true, result: await task() };
+        } catch (error) {
+          rethrown = error;
+          throw error;
+        }
+      }) as TaskRunner);
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      expect(services.processDueLetterJobs).toHaveBeenCalledTimes(1);
+      expect(services.runCommerceMaintenance).toHaveBeenCalledTimes(1);
+      const names = services.runMaintenanceTaskIfDue.mock.calls.map(([name]) => name);
+      expect(names).toContain('provider-status-sync');
+      expect(names).toContain('daily-credit-and-draft-cleanup');
+
+      expect((rethrown as Error).message).toContain('ETIMEDOUT');
+      expect((rethrown as Error).message).not.toContain('secret-subject');
+      expect((rethrown as { diagnosticClass?: string }).diagnosticClass).toBe('ETIMEDOUT');
+
+      const logged = output();
+      expect(logged).toContain('"event":"account_erasure.task_failed"');
+      expect(logged).toContain('"errorClass":"ETIMEDOUT"');
+      expect(logged).not.toContain('secret-subject');
+      expect(logged).not.toContain('example.invalid');
     });
   });
 });

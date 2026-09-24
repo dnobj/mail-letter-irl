@@ -277,8 +277,11 @@ async function runAccountErasures(): Promise<void> {
         }
       }
     );
-    // Counts only - never an account id.
-    console.log(`[Maintenance] Account erasures ${run.ran ? 'completed' : 'not due'}`, run.result ?? '');
+    console.log(`[Maintenance] Account erasures ${run.ran ? 'completed' : 'not due'}`);
+    if (run.ran && run.result) {
+      // Counts only - never an account id.
+      writeDiagnostic('info', 'account_erasure.run', { ...run.result });
+    }
   } catch (error) {
     writeDiagnostic('error', 'account_erasure.task_failed', {
       errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
