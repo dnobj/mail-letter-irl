@@ -29,15 +29,26 @@ The daily ceilings (`LETTER_IRL_BETA_DAILY_MAIL_CAP`, `LETTER_IRL_BETA_ACCOUNT_D
 
 ## Stopping and recovering
 
-| To stop | Set, on the API service | Undo |
-|---------|-------------------------|------|
-| New sends, and new Pay & Send checkouts | `LETTER_IRL_MAIL_SENDING_ENABLED=false` | Set it back to `true` |
-| New Pay & Send checkouts | `JIT_PURCHASE_ENABLED=false` | Set it back to `true` |
-| Gift sends | `LETTER_IRL_GIFT_DAILY_SEND_CAP=0` | Restore the cap |
+| To stop | Set | Undo |
+|---------|-----|------|
+| New sends, and new Pay & Send checkouts | `LETTER_IRL_MAIL_SENDING_ENABLED=false` on the API service | Set it back to `true` |
+| New Pay & Send checkouts | `JIT_PURCHASE_ENABLED=false` on the API service | Set it back to `true` |
+| Gift sends | `LETTER_IRL_GIFT_DAILY_SEND_CAP=0` on the API service | Restore the cap |
+| **Everything going to the printer**, including letters already queued, their retries and paid Pay & Send orders being fulfilled | `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` on **both** the API and the maintenance service | Set it back to `true` on both (#444) |
 
-Each change redeploys the service. None of them stops mail already on its way: letters queued in the outbox, their retries, and paid Pay & Send orders being fulfilled still go to the printer on the next maintenance run. Stopping those needs a switch in the outbox dispatcher, which does not exist yet (#444).
+Each change redeploys the service it is set on.
 
-Rehearse the first on development, with nothing queued: set it, confirm a new send is refused and nothing reaches PostGrid, set it back, confirm a send works.
+The first three refuse new work only. The outbox switch is the one that stops the printer:
+- **When it pauses:** nothing is handed to the provider; a new send is queued and the customer is told it is queued.
+- **What waits:** every waiting letter keeps its place, attempts and backoff.
+- **What the log shows:** each maintenance run logs `outbox.dispatch_paused` with the count waiting.
+- **When it resumes:** the next maintenance run sends the queue. Sends from the API go out immediately again.
+
+For a printing incident, set the outbox switch first; add the first switch too if new sends should be refused rather than queued.
+
+Rehearse both on development:
+1. **Outbox switch:** with it off on both services, send a letter and confirm it stays `queued` with nothing at PostGrid. Wait for a maintenance run and confirm `outbox.dispatch_paused` with a count of one. Switch it back on and confirm the next maintenance run sends the letter.
+2. **Sending switch:** with nothing queued, set it, confirm a new send is refused and nothing reaches PostGrid, then set it back and confirm a send works.
 
 ## Restore drill
 

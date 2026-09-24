@@ -423,6 +423,18 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * The outbox's stop (#444): pauses handing queued letters to the printer,
+   * which the sending switch above does not. Both processes dispatch - the API
+   * right after a send, maintenance for the rest - so a pause is set on both.
+   */
+  {
+    name: 'LETTER_IRL_OUTBOX_DISPATCH_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api', 'maintenance']
+  },
+  /**
    * Image generation, which is NOT new - and that is the point.
    *
    * LETTER_IRL_IMAGE_GEN_MODE defaults to "on", but generateImageForMail.ts

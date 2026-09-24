@@ -68,7 +68,8 @@ In order, it:
   fixed. `CONTENT_RETENTION_ENABLED=false` skips the pass entirely;
 - deletes the link to a user's uploaded image 24 hours after their last upload (`recent-uploads-sweep`, #282);
 - deletes feature requests 12 months after they were submitted (`feature-requests-sweep`, #393);
-- retries due or stale outbox rows;
+- retries due or stale outbox rows, unless `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` pauses the outbox, which
+  then only logs how many letters are waiting (#444, [operational-acceptance.md](operational-acceptance.md));
 - reconciles commerce: fulfils paid Pay & Send orders that were not fulfilled, settles pending checkouts
   against Stripe (paid or expired), cancels orphaned checkouts, and retries `refund_pending` refunds;
 - reconciles proportional pack refunds whose Stripe outcome is unknown or still pending (#323);

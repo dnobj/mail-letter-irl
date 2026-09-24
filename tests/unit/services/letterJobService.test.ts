@@ -611,3 +611,59 @@ describe('mail outbox retries', () => {
     );
   });
 });
+
+describe("the outbox's stop (#444)", () => {
+  beforeEach(() => {
+    query.mockReset();
+    clientQuery.mockReset();
+    sendLetter.mockReset();
+    vi.unstubAllEnvs();
+  });
+
+  it.each(['false', '0', 'off', 'fasle'])('claims nothing while LETTER_IRL_OUTBOX_DISPATCH_ENABLED is %j', async (value) => {
+    vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', value);
+
+    expect(await processLetterJob('job-1')).toEqual({ claimed: false, completed: false, retryScheduled: false });
+
+    // Not even the claim: the job keeps its status, attempts and backoff.
+    expect(query).not.toHaveBeenCalled();
+    expect(sendLetter).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+
+  it('still settles what a crash left behind, then says how much is waiting and claims nothing', async () => {
+    vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ count: '3' }] });
+
+    expect(await processDueLetterJobs(25)).toEqual({ processed: 0, completed: 0, retryScheduled: 0, failed: 0, paused: true });
+
+    const statements = query.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' '));
+    expect(statements).toHaveLength(3);
+    expect(statements[0]).toContain("provider_outcome = 'dispatching'");
+    expect(statements[1]).toContain("provider_outcome = 'not_dispatched'");
+    expect(statements[2]).toContain('SELECT COUNT(*)::text AS count FROM letter_jobs');
+    expect(statements.some((sql) => sql.includes("SET status = 'processing'"))).toBe(false);
+    const logged = warn.mock.calls.flat().map(String).join('\n');
+    expect(logged).toContain('"event":"outbox.dispatch_paused"');
+    expect(logged).toContain('"waiting":3');
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it('claims as before when the switch is unset or on', async () => {
+    for (const value of [undefined, 'true', 'on']) {
+      query.mockReset().mockResolvedValue({ rows: [] });
+      if (value === undefined) vi.unstubAllEnvs();
+      else vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', value);
+
+      await processLetterJob('job-1');
+
+      expect(String(query.mock.calls[0]?.[0])).toContain("SET status = 'processing'");
+    }
+    vi.unstubAllEnvs();
+  });
+});

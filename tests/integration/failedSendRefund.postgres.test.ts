@@ -1109,6 +1109,43 @@ describePostgres('failed send returns the pack', () => {
       })).rejects.toMatchObject({ code: 'invalid_state' });
       expect(stubProvider.calls.length).toBe(1);
     }, 60_000);
+
+    it('holds a queued letter untouched while the outbox is paused, and sends it once resumed (#444)', async () => {
+      resetStubProvider();
+      stubProvider.nextResult = providerSuccess('stub-tracking-resumed');
+      const { letterId } = await seedSpentLetter({ lotA: 4, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId);
+      const before = await pool.query<{ status: string; attempts: number; next_attempt_at: Date }>(
+        'SELECT status, attempts, next_attempt_at FROM letter_jobs WHERE job_id = $1',
+        [jobId]
+      );
+
+      process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = 'false';
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(await jobs.processLetterJob(jobId)).toMatchObject({ claimed: false, completed: false });
+        // The maintenance batch counts what waits - this job among them - with
+        // the real statement, and claims nothing.
+        expect(await jobs.processDueLetterJobs(10)).toMatchObject({ processed: 0, paused: true });
+        const paused = warn.mock.calls.flat().map(String).find((line) => line.includes('outbox.dispatch_paused'));
+        expect(JSON.parse(paused!).waiting).toBeGreaterThanOrEqual(1);
+      } finally {
+        delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
+        warn.mockRestore();
+      }
+      expect(stubProvider.calls).toHaveLength(0);
+      const waiting = await pool.query<{ status: string; attempts: number; next_attempt_at: Date }>(
+        'SELECT status, attempts, next_attempt_at FROM letter_jobs WHERE job_id = $1',
+        [jobId]
+      );
+      // Its place, attempts and backoff are exactly as they were.
+      expect(waiting.rows[0]).toEqual(before.rows[0]);
+
+      expect(await jobs.processLetterJob(jobId)).toMatchObject({ claimed: true, completed: true });
+      expect(stubProvider.calls).toHaveLength(1);
+      const sent = await pool.query<{ status: string }>('SELECT status FROM letter_jobs WHERE job_id = $1', [jobId]);
+      expect(sent.rows[0].status).toBe('completed');
+    }, 60_000);
   });
 
   it('records only a stable failure code, never provider text', async () => {
