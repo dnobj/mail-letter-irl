@@ -1546,21 +1546,38 @@ reachable and audited.
 
 ### ERASE-01 — Account erasure (development)
 
-**Status:** Not run.
+**Status:** Passed on development, 2026-09-24. Build 7e92ba0 for steps 1 to 5 and 7; the step 6 sign-ins ran on c25f86d. The account was a throwaway password account, `testlirl_erase01`.
+
+- **Not yet run:** the follow-up alert checks in steps 4 and 6 (#453). They came after this run, and the account was erased before migration 036.
+- **Reworded after the run**, to match the code:
+  - the precondition: the letter was `accepted`, that is with the printer, and the erasure counts that as finished;
+  - step 2: the account still had a letter, so Pay & Send was not offered and a pack checkout stood in;
+  - step 6: it now covers a password account.
+
+What each step showed:
+1. The preview named nothing in flight: one letter, two drafts and the upload link to erase; one order kept; two credits and one gift letter forfeited. No email appeared.
+2. With a pack checkout open, the preview named "1 orders not settled", and Execute was refused with `ADMIN_INVALID_STATE`. A pack checkout stays open for 24 hours and Back does not settle it (#461), so it was settled by paying. The preview then showed nothing in flight.
+3. The erasure was queued, and `/audit` showed `account.erase` with the reason and no email. A form left open past the 15-minute idle answered a bare `forbidden` and needed a fresh elevation (#462).
+4. The 18:00 UTC run erased the account: one letter scrubbed, two drafts deleted, five descriptions cleared. The page showed `e***@erased.invalid` and the send block `account_erased`, and the letter stayed `accepted`.
+5. In ChatGPT, the balance call answered "Account closed" with the sentence, and `get_account_balance` never started (`identity.account_erased_refused`). The dashboard showed the sentence, and its calls answered 403.
+6. A fresh password sign-in (`prompt=login`) got the sentence. After the Auth0 user was deleted, signing up again with the same address opened a new, empty account (`auth0|6ab589d1…`). The stub stayed erased.
+7. A new preview was refused (`ADMIN_INVALID_STATE`).
 
 **Preconditions:** A disposable development test account that has signed in on the website and in the
-(DEV) ChatGPT connector, has sent a letter that is now `delivered` or `failed`, and holds a draft and a
-saved return address. Nothing on it is in flight.
+(DEV) ChatGPT connector, has sent a letter that is now with the printer or finished (`sent`, `accepted`,
+`delivered` or `failed`), and holds a draft and a saved return address. Nothing on it is in flight.
 
 **Steps:**
 
-1. [ ] Open the account in the panel. Under **Erase account**, preview. Verify that "Still in flight" says
+1. [x] Open the account in the panel. Under **Erase account**, preview. Verify that "Still in flight" says
    nothing, that the counts match the account, and that no email appears anywhere in the preview.
-2. [ ] Start a Pay & Send checkout on the account and leave it open. Preview again: verify it names one
-   order not settled and that confirming is refused. Let the checkout expire (or cancel it), then preview again.
-3. [ ] Confirm with the development phrase and a reason with no personal details. Verify the account page
+2. [x] Start a checkout on the account and leave it open: Pay & Send if the account has no letters,
+   otherwise a letter pack. Preview again: verify it names one order not settled and that confirming is
+   refused. Settle it, then preview again. A Pay & Send checkout expires after about 40 minutes. A pack
+   checkout stays open for 24 hours and Back does not settle it (#461), so pay it.
+3. [x] Confirm with the development phrase and a reason with no personal details. Verify the account page
    says the erasure is queued, and that `/audit` shows `account.erase` with counts only.
-4. [ ] After the next hourly maintenance run (the `account-erasures` task on `/maintenance`), verify on
+4. [x] After the next hourly maintenance run (the `account-erasures` task on `/maintenance`), verify on
    the account page:
    - erased, with counts;
    - the email shows as `e***@erased.invalid`;
@@ -1568,12 +1585,16 @@ saved return address. Nothing on it is in flight.
    - "Still to do by hand", linking an open `account_erasure_followup` alert. The alert is also listed
      on `/alerts`, with the account in its "Order or account" column. Its page lists the steps, and its
      details hold the account id and nothing else (#453).
-5. [ ] Call any tool from the (DEV) connector: verify the erased-account sentence, and that nothing ran.
+5. [x] Call any tool from the (DEV) connector: verify the erased-account sentence, and that nothing ran.
    Reload the website dashboard: verify the same sentence (needs website #36 on development).
-6. [ ] Delete the Auth0 user in the development tenant. Resolve the follow-up alert with the code its
-   form fills in, `auth0_user_deleted`: verify the account page then says the follow-up is done. Sign in
-   again with the same method: verify the same sentence.
-7. [ ] Preview an erasure of the account again: verify it is refused.
+6. [x] Sign in again with the same method, forcing a fresh sign-in (`/auth/login?prompt=login`): verify
+   the same sentence. Delete the Auth0 user in the development tenant. Resolve the follow-up alert with
+   the code its form fills in, `auth0_user_deleted`: verify the account page then says the follow-up is
+   done. Then sign in once more:
+   - a Google or Apple sign-in brings back the same subject: verify the same sentence;
+   - a password account cannot sign in once its Auth0 user is gone. Sign up again with the same address:
+     verify a new, empty account, because the erasure released the address.
+7. [x] Preview an erasure of the account again: verify it is refused.
 
 **Pass criteria:**
 - Nothing is queued while money or mail is moving.
