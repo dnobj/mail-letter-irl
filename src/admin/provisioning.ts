@@ -17,9 +17,12 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * 035 adds users.erased_at, which neither role is granted: the panel tells an
  * erased account by its placeholder email (src/services/accountErasureService.ts),
  * so the grants are unchanged and provisioning need not be re-run for it.
+ *
+ * 036 adds an alert type to a table the reader already reads, so the same
+ * holds for it.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "035_account_erasure.sql";
+  "036_account_erasure_followup_alert.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

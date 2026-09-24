@@ -100,6 +100,14 @@ describe("processing queued erasures", () => {
     expect(writes.findIndex((t) => t.includes("SET email = 'erased-'"))).toBeGreaterThan(
       writes.findIndex((t) => t.includes("DELETE FROM gift_codes"))
     );
+    // The operator's follow-up comes after the tombstone, inside the same
+    // savepoint, and names the account by its id alone (#453).
+    const alerts = client.statements.filter((s) => s.text.includes("INSERT INTO commerce_operational_alerts"));
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].values).toEqual(["account_erasure_followup", "auth0|gone"]);
+    expect(writes.findIndex((t) => t.includes("INSERT INTO commerce_operational_alerts"))).toBeGreaterThan(
+      writes.findIndex((t) => t.includes("SET email = 'erased-'"))
+    );
     // Two transactions: the operation, then the empty claim that ends the run.
     expect(db.transaction).toHaveBeenCalledTimes(2);
   });
@@ -138,6 +146,7 @@ describe("processing queued erasures", () => {
     expect(refused.values?.[1]).toBe("ACCOUNT_ERASURE_BLOCKED");
     expect(JSON.parse(String(refused.values?.[2]))).toMatchObject({ ordersInFlight: 1 });
     expect(client.statements.some((s) => /^\s*(UPDATE letters|DELETE|UPDATE users)/.test(s.text))).toBe(false);
+    expect(client.statements.some((s) => s.text.includes("INSERT INTO commerce_operational_alerts"))).toBe(false);
   });
 
   it("refuses an operation whose account is gone, or whose payload names none", async () => {
@@ -158,6 +167,8 @@ describe("processing queued erasures", () => {
     const [done] = operationUpdates(client);
     expect(done.text).toMatch(/status = 'succeeded'/);
     expect(JSON.parse(String(done.values?.[1]))).toEqual({ alreadyErased: true });
+    // The earlier run opened the follow-up; this one opens no second.
+    expect(client.statements.some((s) => s.text.includes("INSERT INTO commerce_operational_alerts"))).toBe(false);
   });
 
   it("says in the completed diagnostic whether the erasure found anything left to do (#450 review)", async () => {

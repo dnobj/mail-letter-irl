@@ -43,10 +43,27 @@ import {
  * between the two. Every list is an allow-list of FINISHED states, shared with
  * the retention sweep, so a status added by a later migration holds an account
  * back rather than letting it through.
+ *
+ * WHAT IS LEFT BY HAND
+ * The Auth0 user with the account's id, and the id in the beta and admin
+ * lists, are an operator's to remove (docs/account-erasure.md): no service
+ * holds a credential that can delete Auth0 users (#453, #454). So the erasure
+ * opens an operator alert in the transaction that writes the tombstone, and
+ * it stays open until someone has done them and resolves it.
  */
 
 /** admin_operations.operation_type for an erasure. */
 export const ACCOUNT_ERASE_OPERATION = 'account.erase';
+
+/**
+ * commerce_operational_alerts.alert_type of the alert an erasure leaves for
+ * the operator (migration 036). Its details carry the account id and nothing
+ * else.
+ */
+export const ERASURE_FOLLOWUP_ALERT = 'account_erasure_followup';
+
+/** The resolution code the panel offers for that alert. */
+export const ERASURE_FOLLOWUP_RESOLUTION = 'auth0_user_deleted';
 
 /**
  * The tombstone's placeholder address, as a LIKE pattern. Migration 035's
@@ -299,6 +316,37 @@ export async function readLatestErasure(client: SqlClient, userId: string): Prom
   };
 }
 
+export interface ErasureFollowupView {
+  alertId: string;
+  status: string;
+  resolvedAt: Date | null;
+  resolutionCode: string | null;
+}
+
+/**
+ * The newest follow-up alert an erasure of this account opened, or null: none
+ * for an account erased before migration 036. Reader-safe.
+ */
+export async function readErasureFollowup(client: SqlClient, userId: string): Promise<ErasureFollowupView | null> {
+  const result = await client.query(
+    `SELECT alert_id, status, resolved_at, resolution_code
+       FROM commerce_operational_alerts
+      WHERE alert_type = $1
+        AND details->>'userId' = $2
+      ORDER BY created_at DESC, alert_id DESC
+      LIMIT 1`,
+    [ERASURE_FOLLOWUP_ALERT, userId]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    alertId: String(row.alert_id),
+    status: String(row.status),
+    resolvedAt: row.resolved_at ?? null,
+    resolutionCode: row.resolution_code ?? null
+  };
+}
+
 export interface ErasureCounts {
   lettersScrubbed: number;
   jobsCancelled: number;
@@ -475,6 +523,15 @@ export async function eraseAccountWithClient(client: SqlClient, userId: string):
             updated_at = NOW()
       WHERE user_id = $1`,
     [userId]
+  );
+  // In this transaction, so the alert exists exactly when the erasure
+  // committed: a refusal, a rollback to the savepoint or an account erased by
+  // an earlier run raises none. The id is all it carries; the steps are on its
+  // page (#453).
+  await client.query(
+    `INSERT INTO commerce_operational_alerts (alert_type, severity, details)
+     VALUES ($1, 'warning', jsonb_build_object('userId', $2::text))`,
+    [ERASURE_FOLLOWUP_ALERT, userId]
   );
 
   return {

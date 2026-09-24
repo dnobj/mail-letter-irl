@@ -1,6 +1,6 @@
 import { AdminFoundationError } from "../errors.js";
 import { giftOperatorGenerationsRemaining } from "../../config/giftLetters.js";
-import { readAccountErased, readLatestErasure } from "../../services/accountErasureService.js";
+import { readAccountErased, readErasureFollowup, readLatestErasure } from "../../services/accountErasureService.js";
 import { accountActionPanel, accountErasurePanel, orderQuarantinePanel } from "../pages/accountActions.js";
 import { accountGiftPanel, renderGifts } from "../pages/gifts.js";
 import { renderImages } from "../pages/images.js";
@@ -57,8 +57,15 @@ export function registerAccountRoutes(router: AdminRouter<RouteHandler>): Pick<R
         giftCodes: await listGiftCodes(client, { userId, limit: 50 }),
         erased: (await readAccountErased(client, userId)) === true,
         erasure: await readLatestErasure(client, userId),
+        followup: await readErasureFollowup(client, userId),
       }));
-      const erasure = accountErasurePanel({ userId, erased: data.erased, erasure: data.erasure, mode: context.config.mode });
+      const erasure = accountErasurePanel({
+        userId,
+        erased: data.erased,
+        erasure: data.erasure,
+        followup: data.followup,
+        mode: context.config.mode,
+      });
       // A tombstone (#289) takes no grants, gifts or unblocks: its page shows
       // the erasure's record and nothing to act on (#446 review).
       if (data.erased) return erasure;

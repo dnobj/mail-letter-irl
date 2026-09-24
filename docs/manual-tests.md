@@ -1564,17 +1564,22 @@ saved return address. Nothing on it is in flight.
    the account page:
    - erased, with counts;
    - the email shows as `e***@erased.invalid`;
-   - the letters keep their statuses.
+   - the letters keep their statuses;
+   - "Still to do by hand", linking an open `account_erasure_followup` alert. The alert is also listed
+     on `/alerts` and the Overview, with the account in its "Order or account" column. Its page lists the
+     steps, and its details hold the account id and nothing else (#453).
 5. [ ] Call any tool from the (DEV) connector: verify the erased-account sentence, and that nothing ran.
    Reload the website dashboard: verify the same sentence (needs website #36 on development).
-6. [ ] Delete the Auth0 user in the development tenant. Sign in again with the same method: verify the
-   same sentence.
+6. [ ] Delete the Auth0 user in the development tenant. Resolve the follow-up alert with the code its
+   form fills in, `auth0_user_deleted`: verify the account page then says the follow-up is done. Sign in
+   again with the same method: verify the same sentence.
 7. [ ] Preview an erasure of the account again: verify it is refused.
 
 **Pass criteria:**
 - Nothing is queued while money or mail is moving.
 - The erased account keeps its money records and loses its content and identity.
 - Every sign-in path refuses it with one sentence.
+- The steps done by hand stay on an open alert until an operator resolves it.
 
 ### ADMIN-OPS-01 — Retention report and quarantine listing
 

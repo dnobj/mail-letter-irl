@@ -1,6 +1,6 @@
 # Letter IRL Admin Panel
 
-**Last updated:** September 7, 2026
+**Last updated:** September 24, 2026
 
 The admin panel is a separate Railway service in each environment, built from this repository with
 `Dockerfile.admin`, which the service selects through its `RAILWAY_DOCKERFILE_PATH` variable (Railway has
@@ -356,7 +356,7 @@ Commands available:
 | Adjust letter balance | an account | `adjustCreditsWithClient` (letters in the UI, credits in the ledger; removal FIFO; atomic with the run and audit rows) |
 | Grant image generations | an account | `grantOperatorImageEntitlement` (one grant per command id, one-year expiry) |
 | Restore quarantined content | a `redacted_content_quarantine` row whose window is open, over a live row that is still redacted | queues an `admin_operations` row; the next hourly maintenance run puts the content back as the database owner, before that run's sweep and purge (#153) |
-| Erase account | an account with nothing in flight | `enqueueAccountErasure`: queues an `admin_operations` row, which the next hourly maintenance run carries out as the database owner, re-checking the gate first. The panel's role gains no access to content ([account-erasure.md](account-erasure.md)) |
+| Erase account | an account with nothing in flight | `enqueueAccountErasure`: queues an `admin_operations` row, which the next hourly maintenance run carries out as the database owner, re-checking the gate first. The panel's role gains no access to content. The run opens an `account_erasure_followup` alert for the steps done by hand: the Auth0 user and the two id lists. Resolve it with `auth0_user_deleted` once they are done ([account-erasure.md](account-erasure.md)) |
 | Release amount-mismatch quarantine | an order carrying `PAYMENT_AMOUNT_MISMATCH` | clears the code and records `operator.quarantine_released`; the hourly sweep then acts |
 | Create / change status / delete promo | `promo_campaigns` | client-taking promo service functions with a validated status machine and an `updated_at` version; delete refused once redeemed. The create form's gift budget makes a seed campaign ([gift-letters.md](gift-letters.md)); a code that reads as a printed gift code is refused |
 | Grant gift letters | an account | `grantGiftLettersWithClient` (source `operator`, keyed by the command id so a replay grants nothing; optionally bound to a seed campaign whose code the letters then print). The preview states the cost bound |
