@@ -509,24 +509,59 @@ describe('commerceService', () => {
     );
   });
 
-  it('names the pack in the purchase line the customer reads, never its internal code (#460)', async () => {
-    const pendingPackOrder = {
-      ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4',
-      credits: 4, amount_cents: 500, draft_id: undefined, status: 'checkout_pending'
-    };
-    mocks.query.mockImplementation(async (sql: string) => {
-      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
-      if (sql.includes('SELECT * FROM orders')) return { rows: [pendingPackOrder] };
-      return { rows: [] };
+  describe('the purchase line the customer reads in their history (#460)', () => {
+    const packSnapshot = { name: 'Starter Pack - 2 Letters', description: 'Two prepaid physical letters or postcards' };
+
+    async function purchaseLine(productSnapshot: unknown): Promise<string> {
+      const pendingPackOrder = {
+        ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4', product_snapshot: productSnapshot,
+        credits: 4, amount_cents: 500, draft_id: undefined, status: 'checkout_pending'
+      };
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+        if (sql.includes('SELECT * FROM orders')) return { rows: [pendingPackOrder] };
+        return { rows: [] };
+      });
+      await expect(processStripeWebhookEvent(checkoutEvent({ amount_total: 500 }) as any))
+        .resolves.toMatchObject({ status: 'fulfilled' });
+      expect(mocks.addCredits).toHaveBeenCalledTimes(1);
+      return (mocks.addCredits.mock.calls[0][1] as { description: string }).description;
+    }
+
+    it('names the pack as the order recorded it at checkout, never by its internal code', async () => {
+      const line = await purchaseLine(packSnapshot);
+      expect(line).toBe('Purchased Starter Pack - 2 Letters');
+      expect(line).not.toContain('credit-pack');
     });
 
-    await expect(processStripeWebhookEvent(checkoutEvent({ amount_total: 500 }) as any))
-      .resolves.toMatchObject({ status: 'fulfilled' });
+    it('prefers the name recorded at checkout over the catalogue\'s', async () => {
+      expect(await purchaseLine({ name: 'Starter Pack - Launch Offer' })).toBe('Purchased Starter Pack - Launch Offer');
+    });
 
-    expect(mocks.addCredits).toHaveBeenCalledTimes(1);
-    const grant = mocks.addCredits.mock.calls[0][1] as { description: string };
-    expect(grant.description).toBe('Purchased Starter Pack - 2 Letters');
-    expect(grant.description).not.toContain('credit-pack');
+    it('falls back to the catalogue\'s name when the order recorded none', async () => {
+      expect(await purchaseLine(null)).toBe('Purchased Starter Pack - 2 Letters');
+    });
+
+    it('writes the same line when a missed webhook is repaired from Stripe', async () => {
+      const fulfilledPackOrder = {
+        ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4', product_snapshot: packSnapshot,
+        draft_id: undefined, credits: 4, amount_cents: 500, currency: 'usd',
+        status: 'fulfilled', stripe_checkout_session_id: 'cs-repair', stripe_payment_intent_id: 'pi-repair'
+      };
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM orders')) return { rows: [fulfilledPackOrder] };
+        return { rows: [] };
+      });
+
+      await expect(repairFulfilledPackGrant({
+        orderId: 'order-1', stripeSessionId: 'cs-repair', expectedCredits: 4,
+        paidAmountCents: 500, paidCurrency: 'usd'
+      })).resolves.toBe('repaired');
+
+      const line = (mocks.addCredits.mock.calls[0][1] as { description: string }).description;
+      expect(line).toBe('Purchased Starter Pack - 2 Letters');
+      expect(line).not.toContain('credit-pack');
+    });
   });
 
   describe('gift letters with a pack (docs/gift-letters.md)', () => {

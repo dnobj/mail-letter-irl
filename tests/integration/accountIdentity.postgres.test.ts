@@ -11,12 +11,14 @@ import { VerifiedEmailRequiredError } from '../../src/auth/verifiedEmail.js';
  * Two of the three things here cannot be proven against a database double at
  * all, and the third was wrong in production for a month:
  *
- *   - **The constraint name.** `EmailAlreadyLinkedError` is raised by matching
- *     `users_email_key` on a 23505. A mocked client agrees with whatever name
- *     the code writes; only PostgreSQL knows what it actually called the
- *     inline UNIQUE in 001_initial_schema.sql. If a future migration renames
- *     or replaces it, this is what goes red instead of a customer getting
- *     "database error" and no account.
+ *   - **The constraint name.** Moving an account onto an address, and opening
+ *     one inside a grant, raise `EmailAlreadyLinkedError` by matching
+ *     `users_email_key` on a 23505. (`createUser` no longer does: since #457
+ *     it skips the conflict and looks the address up.) A mocked client agrees
+ *     with whatever name the code writes; only PostgreSQL knows what it
+ *     actually called the inline UNIQUE in 001_initial_schema.sql. If a
+ *     future migration renames or replaces it, this is what goes red instead
+ *     of a customer getting "database error" and no account.
  *   - **The rollback.** A grant refused for want of an address must leave
  *     nothing behind - no account, no ledger lot, no transaction row. That is
  *     a property of the enclosing transaction, which a double does not have.
@@ -183,8 +185,15 @@ describePostgres('one account per address', () => {
       // conflict target, the loser raised a 23505 on users_email_key and was
       // taken for another account holding the address: harmless to the
       // customer, whom identity.ts carried on, but logged as the collision
-      // for every new account's first dashboard load. Where a round meets is
-      // timing, so run many; every arrival in every round must succeed.
+      // for every new account's first dashboard load.
+      //
+      // A net, not a pin. The old failure needs two inserts to pass the
+      // primary key's pre-check before either has entered it, a window of
+      // microseconds, so these rounds may never have hit it on the old
+      // statement. What pins the fix is the unit test on the statement's
+      // shape (userServiceLogging.test.ts). What this adds is real
+      // PostgreSQL: under the fix every unique index is arbitrated, so no
+      // round can fail here, and a failure names what was raised.
       for (let round = 0; round < 25; round++) {
         const userId = subject(`race-${round}`);
         const email = address();
@@ -192,7 +201,8 @@ describePostgres('one account per address', () => {
           Array.from({ length: 4 }, () => users.createUser({ userId, email }))
         );
         for (const arrival of arrivals) {
-          expect(arrival.status, `round ${round}`).toBe('fulfilled');
+          const reason = arrival.status === 'rejected' ? String(arrival.reason) : '';
+          expect(arrival.status, `round ${round}: ${reason}`).toBe('fulfilled');
         }
         expect(await countUsers(userId)).toBe(1);
       }
