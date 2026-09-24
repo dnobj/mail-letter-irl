@@ -176,6 +176,27 @@ describePostgres('one account per address', () => {
       expect(viaGetOrCreate.map(row => row.user_id)).toEqual([userId, userId]);
       expect(await countUsers(userId)).toBe(1);
     });
+
+    it('never mistakes its own race for another account holding the address (#457)', async () => {
+      // Two inserts of one subject with one address can meet on the email
+      // index before the primary key. While the primary key was the only
+      // conflict target, the loser raised a 23505 on users_email_key and was
+      // taken for another account holding the address: harmless to the
+      // customer, whom identity.ts carried on, but logged as the collision
+      // for every new account's first dashboard load. Where a round meets is
+      // timing, so run many; every arrival in every round must succeed.
+      for (let round = 0; round < 25; round++) {
+        const userId = subject(`race-${round}`);
+        const email = address();
+        const arrivals = await Promise.allSettled(
+          Array.from({ length: 4 }, () => users.createUser({ userId, email }))
+        );
+        for (const arrival of arrivals) {
+          expect(arrival.status, `round ${round}`).toBe('fulfilled');
+        }
+        expect(await countUsers(userId)).toBe(1);
+      }
+    });
   });
 
   describe('an account that cannot be opened', () => {

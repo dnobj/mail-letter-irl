@@ -58,12 +58,17 @@ export class EmailAlreadyLinkedError extends Error {
   }
 }
 
+/** The collision, named and logged. */
+function emailAlreadyLinked(): EmailAlreadyLinkedError {
+  writeDiagnostic('warn', 'identity.email_already_linked');
+  return new EmailAlreadyLinkedError();
+}
+
 /** Name the collision, or pass the failure along untouched. */
 function rethrowEmailCollision(error: unknown): never {
   const pgError = error as { code?: string; constraint?: string };
   if (pgError?.code === '23505' && pgError.constraint === EMAIL_UNIQUE_CONSTRAINT) {
-    writeDiagnostic('warn', 'identity.email_already_linked');
-    throw new EmailAlreadyLinkedError();
+    throw emailAlreadyLinked();
   }
   throw error;
 }
@@ -121,20 +126,19 @@ export async function createUser(params: CreateUserParams): Promise<User> {
   // which is not the email collision below and so reached the customer as
   // "the account could not be read" on most of the page.
   //
-  // It conflicts on the primary key only, so an address another subject holds
-  // still raises, and is still named.
-  let result;
-  try {
-    result = await query<User>(
-      `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
-       VALUES ($1, $2, 0, 0, 0)
-       ON CONFLICT (user_id) DO NOTHING
-       RETURNING *`,
-      [userId, email]
-    );
-  } catch (error) {
-    rethrowEmailCollision(error);
-  }
+  // DO NOTHING on EVERY unique index, not just the primary key (#457). Only a
+  // conflict target is arbitrated; a unique index outside it still raises. Two
+  // inserts of one subject with one address could meet on the email index
+  // first, and the loser then read as the collision below: a false
+  // "address already linked", logged for every new account's first dashboard
+  // load. So nothing raises here, and what the conflict was is read after.
+  const result = await query<User>(
+    `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
+     VALUES ($1, $2, 0, 0, 0)
+     ON CONFLICT DO NOTHING
+     RETURNING *`,
+    [userId, email]
+  );
 
   if (result.rows.length > 0) {
     writeDiagnostic('info', 'identity.user_created');
@@ -143,10 +147,13 @@ export async function createUser(params: CreateUserParams): Promise<User> {
 
   // The race's loser: the row is there, committed by whoever won.
   const existing = await findUser(userId);
-  if (!existing) {
-    throw new Error('User not found');
-  }
-  return existing;
+  if (existing) return existing;
+
+  // No row for this subject, so the conflict was the address: another subject
+  // holds it, and that is the collision to name.
+  if (await getUserByEmail(email)) throw emailAlreadyLinked();
+
+  throw new Error('User not found');
 }
 
 /**
