@@ -1,6 +1,6 @@
 # Account Erasure
 
-**Last Updated:** September 23, 2026
+**Last Updated:** September 24, 2026
 **Purpose:** How a customer's request to delete their account is carried out (#289), and what the operator does by hand
 
 The privacy policy promises deletion on request. Erasure **anonymises** the account: the customer's
@@ -53,12 +53,20 @@ The unspent balance and unused gift letters are forfeited. If the customer wants
    - refused or failed, with the reason.
 
    A refused or failed erasure can be queued again.
-5. Once it has run, do these by hand:
+5. Once it has run, some steps are done by hand. The erasure opens an `account_erasure_followup` alert
+   (#453) in the same transaction that erases the account. The alert is on **Alerts**, and on the
+   Overview while it is among the ten newest active alerts. The account page links it and says the
+   follow-up is still to do. It carries the account id and
+   nothing else, and it stays open until you resolve it. No service can delete Auth0 users; doing it
+   from the panel is #454. Do these steps:
    - **Auth0:** in the environment's tenant (see [Auth0 Tenant Configuration](auth0-tenant-configuration.md)),
      open User Management → Users, search for the account id, and delete the user. That removes the name
-     and email Auth0 holds. Sign-in is already refused without it (see below).
+     and email Auth0 holds, and every sign-in method linked into that user. Sign-in is already refused
+     without it (see below).
    - Remove the id from `LETTER_IRL_BETA_ALLOWED_SUBJECTS` and `LETTER_IRL_ADMIN_USER_IDS` on the API
      service, if it is listed in either.
+   - Resolve the alert with the code `auth0_user_deleted`, which its resolve form fills in. It needs
+     elevation, like any command.
    - **Stripe** keeps its own payment records under its own obligations; nothing is deleted there.
      **PostGrid** keeps the letters it printed. If the request covers them, ask PostGrid support to delete
      the letters with the tracking ids shown on the account page.
@@ -113,6 +121,10 @@ UPDATE users SET erased_at = NULL, email = '<their confirmed address>' WHERE use
 Then lift the send block from the panel (**Lift send block**) if nothing else justifies it. Erased content
 stays erased. The balance and history are as they were.
 
+If the erasure's follow-up alert is still open, **do not delete the Auth0 user**: the person is signing back
+in with it. Resolve the alert with `account_reopened` instead. The account page no longer shows the erasure
+once the account is reopened, so find the alert on `/alerts`.
+
 ---
 
 ## Evidence
@@ -122,4 +134,5 @@ Manual case `ERASE-01` in [Manual Tests](manual-tests.md). The PostgreSQL suite
 - the gate;
 - every scrub, and what is kept;
 - the retry and savepoint behaviour;
+- the follow-up alert, which commits with the tombstone or not at all;
 - the sign-in refusal.

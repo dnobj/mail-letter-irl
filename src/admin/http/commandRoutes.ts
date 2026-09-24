@@ -1,3 +1,4 @@
+import { ERASURE_FOLLOWUP_ALERT, ERASURE_FOLLOWUP_RESOLUTION } from "../../services/accountErasureService.js";
 import { AdminFoundationError } from "../errors.js";
 import { prepareCommandPreview, runAdminCommand, type CommandDefinition } from "../commands/runner.js";
 import {
@@ -234,7 +235,13 @@ export function registerCommandRoutes(
   }, { name: "command.execute", write: true });
 
   return {
-    alertActions: (context, alertId, status) => alertActionPanel({ alertId, status, mode: context.config.mode }),
+    alertActions: (context, alertId, status, alertType) =>
+      alertActionPanel({
+        alertId,
+        status,
+        mode: context.config.mode,
+        suggestedResolution: alertType === ERASURE_FOLLOWUP_ALERT ? ERASURE_FOLLOWUP_RESOLUTION : "",
+      }),
     jobActions: (context, jobId, status, providerOutcome) =>
       jobActionPanel({ jobId, status, providerOutcome, mode: context.config.mode }),
   };

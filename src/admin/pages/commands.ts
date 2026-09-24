@@ -112,8 +112,17 @@ ${input.message ? html`<div class="flash flash-warn" role="alert">${input.messag
 </form>`;
 }
 
-/** Forms on the alert detail page that lead to previews. */
-export function alertActionPanel(input: { alertId: string; status: string; mode: string }): SafeHtml {
+/**
+ * Forms on the alert detail page that lead to previews. A suggested resolution
+ * code fills the resolve field for an alert type whose resolution is known (an
+ * erasure's follow-up, #453); the preview and the typed phrase still decide.
+ */
+export function alertActionPanel(input: {
+  alertId: string;
+  status: string;
+  mode: string;
+  suggestedResolution?: string;
+}): SafeHtml {
   if (input.status === "resolved") return html`<p class="muted">Resolved; no further transition.</p>`;
   const previewBase = `/commands/alert.transition/preview`;
   return html`<h2>Actions</h2>
@@ -132,7 +141,7 @@ ${
   <input type="hidden" name="target" value="${input.alertId}">
   <input type="hidden" name="status" value="resolved">
   <label for="resolutionCode">Resolution code (lowercase, 3 to 80 characters, e.g. <code>refund_issued_in_dashboard</code>)</label>
-  <input type="text" id="resolutionCode" name="resolutionCode" pattern="[a-z][a-z0-9_]{2,79}" required autocomplete="off">
+  <input type="text" id="resolutionCode" name="resolutionCode" pattern="[a-z][a-z0-9_]{2,79}" required autocomplete="off" value="${input.suggestedResolution ?? ""}">
   <div><button type="submit">Preview resolve…</button></div>
 </form>
 ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;

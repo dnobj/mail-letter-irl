@@ -1,4 +1,4 @@
-import type { ErasureOperationView } from "../../services/accountErasureService.js";
+import type { ErasureFollowupView, ErasureOperationView } from "../../services/accountErasureService.js";
 import type { AccountDetail } from "../queries/accounts.js";
 import type { EntitlementView } from "../queries/images.js";
 import type { OrderDetail } from "../queries/orders.js";
@@ -75,6 +75,8 @@ export function accountErasurePanel(input: {
   userId: string;
   erased: boolean;
   erasure: ErasureOperationView | null;
+  /** The follow-up alert the erasure opened (#453); null for none, as before migration 036. */
+  followup: ErasureFollowupView | null;
   mode: string;
 }): SafeHtml {
   const { erasure } = input;
@@ -87,7 +89,7 @@ export function accountErasurePanel(input: {
     // Two operators confirming at once queue two erasures; the second finds
     // the account already erased, and the counts are on the first.
     const byEarlier = erasure?.result?.alreadyErased === true;
-    body = html`<p>Erased${erasure?.completedAt ? html` ${when(erasure.completedAt)}` : ""}. The Auth0 user with this id is deleted by hand, in the tenant (docs/account-erasure.md).</p>
+    body = html`<p>Erased${erasure?.completedAt ? html` ${when(erasure.completedAt)}` : ""}. ${erasureFollowup(input.followup)}</p>
 ${
   byEarlier
     ? html`<p class="muted">The newest erasure found the account already erased; the counts are on the one before it.</p>`
@@ -108,6 +110,22 @@ ${form}`;
   return html`<h2>Erase account</h2>
 ${body}
 ${input.mode !== "full" ? html`<p class="muted">Read-only mode: the preview works, queuing is refused.</p>` : ""}`;
+}
+
+/**
+ * Where the work an erasure leaves by hand stands: the Auth0 user and the two
+ * id lists (docs/account-erasure.md). An account erased before migration 036
+ * has no alert, and gets the plain reminder.
+ */
+function erasureFollowup(followup: ErasureFollowupView | null): SafeHtml {
+  if (!followup) {
+    return html`The Auth0 user with this id is deleted by hand, in the tenant (docs/account-erasure.md).`;
+  }
+  const link = html`<a href="/alerts/${encodeURIComponent(followup.alertId)}">follow-up alert</a>`;
+  if (followup.status === "resolved") {
+    return html`Follow-up done: the ${link} was resolved${followup.resolvedAt ? html` ${when(followup.resolvedAt)}` : ""}${followup.resolutionCode ? html` (<code>${followup.resolutionCode}</code>)` : ""}.`;
+  }
+  return html`<strong>Still to do by hand:</strong> delete the Auth0 user with this id in the tenant, and take the id out of the beta and admin lists if it is there. The ${link} has the steps; resolve it when they are done.`;
 }
 
 /** The quarantine release on the order page, shown only while quarantined. */

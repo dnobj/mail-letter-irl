@@ -27,7 +27,7 @@ import { AdminRouter } from "./router.js";
 
 export interface RouteExtensions {
   /** Per-target action panels supplied by the command slices. */
-  alertActions?: (context: RequestContext, alertId: string, status: string) => SafeHtml;
+  alertActions?: (context: RequestContext, alertId: string, status: string, alertType: string) => SafeHtml;
   jobActions?: (context: RequestContext, jobId: string, status: string, providerOutcome: string) => SafeHtml;
   orderActions?: (context: RequestContext, detail: OrderDetail) => SafeHtml | Promise<SafeHtml>;
   accountActions?: (context: RequestContext, detail: AccountDetail) => SafeHtml | Promise<SafeHtml>;
@@ -175,7 +175,7 @@ export function registerReadRoutes(
     const alert = await context.read((client) => readAlert(client, context.params.alertId));
     if (!alert) notFound();
     const actions = extensions.alertActions
-      ? extensions.alertActions(context, alert.alertId, alert.status)
+      ? extensions.alertActions(context, alert.alertId, alert.status, alert.alertType)
       : EMPTY_ACTIONS;
     return context.render(`Alert ${alert.alertType}`, renderAlertDetail({ alert, actions }));
   }, { name: "alert" });

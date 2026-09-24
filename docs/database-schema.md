@@ -1,6 +1,6 @@
 # Database Schema
 
-**Last Updated:** September 23, 2026
+**Last Updated:** September 24, 2026
 **Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
 This document describes the Letter IRL database schema as defined by `db/migrations` at the head of `dev` (Neon
@@ -501,11 +501,13 @@ operator's typed reason lives in `admin_audit_events` alone (#394).
 ### commerce_operational_alerts
 
 The operator alert queue: dispute created or closed, ambiguous mail-provider outcome, refunded mail
-already dispatched, unmatched money event. Each alert has a severity and a three-state lifecycle
+already dispatched, unmatched money event, and the steps an account erasure leaves an operator to do by
+hand (`account_erasure_followup`, migration 036, #453). That last one has no order or source event; its
+`details` hold the account id and nothing else. Each alert has a severity and a three-state lifecycle
 (`open`, `acknowledged`, `resolved`) whose timestamps and resolution code the constraints keep
 consistent, and the acknowledging or resolving actor is stored as a hash. One alert per source event
-and type. The panel's acknowledge and resolve commands are the only writers besides the sweeps that
-raise them.
+and type. The panel's acknowledge and resolve commands are the only writers besides the sweeps and the
+account erasure that raise them.
 
 ### commerce_operator_audit_events
 
@@ -704,6 +706,7 @@ Production provisioning and the first production connection remain separate owne
 | 33 | 033_gift_letters.sql | Gift letters: gift_letters, gift_codes, the gift_letter funding type, gift drafts, seed campaigns and gift-only redemptions |
 | 34 | 034_end_zero_letter_promos.sql | Ends the ordinary promo campaigns that grant no letters (the preview-gate codes 007 seeded), which could never be redeemed (#420) |
 | 35 | 035_account_erasure.sql | Account erasure: `users.erased_at`, and the `users_erased_tombstone` CHECK that holds an erased row to its placeholder email and no return address (#289) |
+| 36 | 036_account_erasure_followup_alert.sql | The `account_erasure_followup` alert type, which an erasure opens for the steps done by hand (#453) |
 
 ---
 
@@ -824,5 +827,6 @@ reservation/entitlement mutation share one transaction.
 `commerce_operational_alerts` stores sanitized Stripe dispute work in the same
 transaction as `stripe_webhook_events`. Its unique source-event/type key makes
 replay safe, while open/acknowledged/resolved states survive process restarts.
-The same table surfaces ambiguous mail dispatch and refund-after-dispatch work;
+The same table surfaces ambiguous mail dispatch and refund-after-dispatch work,
+and the manual follow-up of an account erasure;
 operator transitions are idempotent and append an audit event atomically.

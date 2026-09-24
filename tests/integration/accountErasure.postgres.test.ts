@@ -82,6 +82,7 @@ describePostgres('account erasure', () => {
   let identity: typeof import('../../src/auth/identity.js');
   let gifts: typeof import('../../src/services/giftLetterService.js');
   let operatorAccounts: typeof import('../../src/services/operatorAccountService.js');
+  let alerts: typeof import('../../src/services/commerceAlertService.js');
   let db: typeof import('../../src/db/index.js');
 
   beforeAll(async () => {
@@ -126,6 +127,7 @@ describePostgres('account erasure', () => {
     identity = await import('../../src/auth/identity.js');
     gifts = await import('../../src/services/giftLetterService.js');
     operatorAccounts = await import('../../src/services/operatorAccountService.js');
+    alerts = await import('../../src/services/commerceAlertService.js');
     db = await import('../../src/db/index.js');
 
     config = parseAdminRuntimeConfig({
@@ -339,6 +341,16 @@ describePostgres('account erasure', () => {
 
   async function blockersOf(userId: string) {
     return withReadOnlyTransaction(reader, (client) => erasure.readErasureBlockers(client, userId));
+  }
+
+  /** The follow-up alerts an erasure of this account opened (#453). */
+  async function followUps(userId: string): Promise<number> {
+    const result = await owner.query(
+      `SELECT 1 FROM commerce_operational_alerts
+        WHERE alert_type = 'account_erasure_followup' AND details->>'userId' = $1`,
+      [userId]
+    );
+    return result.rowCount ?? 0;
   }
 
   // ------------------------------------------------------------------ tests
@@ -682,6 +694,30 @@ describePostgres('account erasure', () => {
     // The other account is untouched.
     expect((await owner.query(`SELECT email FROM users WHERE user_id = $1`, [other.userId])).rows[0].email).toBe(other.email);
 
+    // What is left by hand is an operator alert, raised with the tombstone:
+    // one, open, naming the account by its id and nothing else (#453).
+    const followUpRows = await owner.query(
+      `SELECT alert_type, severity, status, order_id, source_event_id, details
+         FROM commerce_operational_alerts
+        WHERE alert_type = 'account_erasure_followup' AND details->>'userId' = $1`,
+      [userId]
+    );
+    expect(followUpRows.rows).toEqual([
+      {
+        alert_type: 'account_erasure_followup',
+        severity: 'warning',
+        status: 'open',
+        order_id: null,
+        source_event_id: null,
+        details: { userId }
+      }
+    ]);
+    expect(JSON.stringify(followUpRows.rows)).not.toContain(email);
+    expect(await followUps(other.userId)).toBe(0);
+    // The panel's reader finds it for the account page.
+    const followUp = await withReadOnlyTransaction(reader, (client) => erasure.readErasureFollowup(client, userId));
+    expect(followUp).toMatchObject({ status: 'open', resolvedAt: null, resolutionCode: null });
+
     const done = await owner.query(
       `SELECT status, error_code, completed_at, sanitized_result_json FROM admin_operations WHERE id = $1`,
       [operationId]
@@ -711,6 +747,22 @@ describePostgres('account erasure', () => {
     expect(await withReadOnlyTransaction(reader, (client) => erasure.readLatestErasure(client, userId))).toMatchObject({
       operationId,
       status: 'succeeded'
+    });
+    expect(await followUps(userId)).toBe(1);
+
+    // The operator resolves it through the alert transition, which the new
+    // type passes, with the code the panel offers.
+    await alerts.transitionCommerceAlert({
+      alertId: followUp!.alertId,
+      status: 'resolved',
+      resolutionCode: erasure.ERASURE_FOLLOWUP_RESOLUTION,
+      idempotencyKey: randomUUID(),
+      actorId: OWNER
+    });
+    expect(await withReadOnlyTransaction(reader, (client) => erasure.readErasureFollowup(client, userId))).toMatchObject({
+      alertId: followUp!.alertId,
+      status: 'resolved',
+      resolutionCode: 'auth0_user_deleted'
     });
   }, 120_000);
 
@@ -747,6 +799,8 @@ describePostgres('account erasure', () => {
     const untouched = await owner.query(`SELECT email, erased_at, return_address FROM users WHERE user_id = $1`, [late.userId]);
     expect(untouched.rows[0]).toMatchObject({ email: late.email, erased_at: null });
     expect(untouched.rows[0].return_address).not.toBeNull();
+    // A refusal leaves nothing for an operator to follow up.
+    expect(await followUps(late.userId)).toBe(0);
     // A refused erasure can be previewed and queued again once things settle.
     expect((await preview(late.userId)).preview.summary).toMatchObject({ blocked: true });
   }, 120_000);
@@ -801,21 +855,63 @@ describePostgres('account erasure', () => {
         [operationId]
       );
       expect(failed.rows[0]).toEqual({ status: 'failed', attempts: 3, error_code: 'ACCOUNT_ERASURE_ERROR', completed: true });
+      // No attempt got as far as the alert.
+      expect(await followUps(userId)).toBe(0);
     } finally {
       await owner.query(`DROP TRIGGER IF EXISTS erasure_test_refuse ON letters`);
       await owner.query(`DROP FUNCTION IF EXISTS erasure_test_refuse()`);
     }
 
-    // Queued again, it goes through.
+    // Queued again, it goes through, and opens its one follow-up.
     const again = await confirmation(userId);
     await runner.runAdminCommand(deps(), again.command, userId, again.fields);
     expect(await erasure.processAccountErasures()).toEqual({ erased: 1, refused: 0, retrying: 0, failed: 0 });
+    expect(await followUps(userId)).toBe(1);
+  }, 120_000);
+
+  it('commits the tombstone and its follow-up alert together, or neither (#453)', async () => {
+    const { userId, email } = await seedUser({ returnAddress: true });
+    const { command, fields } = await confirmation(userId);
+    const outcome = await runner.runAdminCommand(deps(), command, userId, fields);
+    const operationId = String(outcome.result.operationId);
+
+    // Refuse the alert, the erasure's last write: the tombstone before it must
+    // go back with it, or an erasure could finish with nobody told to follow up.
+    await owner.query(`
+      CREATE FUNCTION erasure_test_refuse_alert() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.details->>'userId' = '${userId}' THEN
+          RAISE EXCEPTION 'refused for the test';
+        END IF;
+        RETURN NEW;
+      END $$ LANGUAGE plpgsql`);
+    await owner.query(
+      `CREATE TRIGGER erasure_test_refuse_alert BEFORE INSERT ON commerce_operational_alerts
+         FOR EACH ROW EXECUTE FUNCTION erasure_test_refuse_alert()`
+    );
+    try {
+      expect(await erasure.processAccountErasures()).toEqual({ erased: 0, refused: 0, retrying: 1, failed: 0 });
+      const account = await owner.query(`SELECT email, erased_at, return_address FROM users WHERE user_id = $1`, [userId]);
+      expect(account.rows[0]).toMatchObject({ email, erased_at: null });
+      expect(account.rows[0].return_address).not.toBeNull();
+      expect(await followUps(userId)).toBe(0);
+    } finally {
+      await owner.query(`DROP TRIGGER IF EXISTS erasure_test_refuse_alert ON commerce_operational_alerts`);
+      await owner.query(`DROP FUNCTION IF EXISTS erasure_test_refuse_alert()`);
+    }
+
+    // Once the alert can be written, the retry erases and opens it.
+    await owner.query(`UPDATE admin_operations SET available_at = NOW() WHERE id = $1`, [operationId]);
+    expect(await erasure.processAccountErasures()).toEqual({ erased: 1, refused: 0, retrying: 0, failed: 0 });
+    expect(await followUps(userId)).toBe(1);
   }, 120_000);
 
   it('refuses an erased account at every sign-in path, and the tombstone refuses a real address', async () => {
     const { userId, email } = await seedUser({ returnAddress: true });
     expect(await db.transaction((client) => erasure.eraseAccountWithClient(client, userId))).toMatchObject({ outcome: 'erased' });
     expect(await db.transaction((client) => erasure.eraseAccountWithClient(client, userId))).toEqual({ outcome: 'already_erased' });
+    // The second pass found nothing to do, and opened no second follow-up.
+    expect(await followUps(userId)).toBe(1);
 
     await expect(userService.getOrCreateUser(userId, email)).rejects.toBeInstanceOf(accountErased.AccountErasedError);
     const withClaim = { userId, token: 't', authType: 'jwt' as const, scopes: [], claims: { email, email_verified: true } };
