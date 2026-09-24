@@ -50,7 +50,7 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  * 'draft', 'queued', 'processing', 'held' - means work is still pending, and
  * letterJobService builds its provider params by reading letters.content.
  */
-const REDACTABLE_LETTER_STATUSES: LetterStatus[] = [
+export const REDACTABLE_LETTER_STATUSES: LetterStatus[] = [
   'sent',
   'accepted',
   'in_transit',
@@ -65,7 +65,7 @@ const REDACTABLE_LETTER_STATUSES: LetterStatus[] = [
  * `status IN ('pending','failed')`, and the operator retry route re-enqueues
  * failed jobs at any age, so a failed job can still become a mailed letter.
  */
-const SETTLED_JOB_STATUSES: JobStatus[] = ['completed', 'cancelled'];
+export const SETTLED_JOB_STATUSES: JobStatus[] = ['completed', 'cancelled'];
 
 /**
  * Order states in which the money is settled and the content is no longer
@@ -73,7 +73,7 @@ const SETTLED_JOB_STATUSES: JobStatus[] = ['completed', 'cancelled'];
  * where the customer has been charged but the draft is still the only copy of
  * what they bought.
  */
-const SETTLED_ORDER_STATUSES: OrderStatus[] = [
+export const SETTLED_ORDER_STATUSES: OrderStatus[] = [
   'fulfilled',
   'refunded',
   'cancelled',
@@ -198,7 +198,7 @@ const DRAFT_QUARANTINE_OBJECT = DRAFT_CONTENT_COLUMNS.map(
  * row being spent, so a plain NULL violates the constraint and rolls back the
  * whole batch. The CASE preserves NULL where the column was already NULL.
  */
-const DRAFT_REDACTION_SET = `
+export const DRAFT_REDACTION_SET = `
         SET sender = '{}'::jsonb,
             recipient = '{}'::jsonb,
             body_text = '',

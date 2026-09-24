@@ -48,6 +48,14 @@ User accounts with credit balances and tier information.
 | tier_calculated_at | TIMESTAMPTZ | YES | NOW() | Last tier calculation |
 | created_at | TIMESTAMPTZ | NO | NOW() | Account creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update (auto-trigger) |
+| erased_at | TIMESTAMPTZ | YES | NULL | Set by the account erasure (#289); sign-in refuses an erased account |
+
+**Erased accounts (migration 035).** An erasure keeps the row as a tombstone, because orders, ledger
+lots, disputes and refunds keep foreign keys to it ([account-erasure.md](account-erasure.md)). The
+`users_erased_tombstone` check requires an erased row to have no return address and an
+`erased-<uuid>@erased.invalid` email, so no later write can put a real address back unless the same
+statement clears `erased_at`. The admin panel reads an account as erased from that placeholder, since
+neither admin role is granted `erased_at`.
 
 **Indexes:**
 - `idx_users_email` on email
@@ -601,15 +609,23 @@ Status and timing constraints reject inconsistent outcomes.
 
 ### admin_operations
 
-Environment-scoped provider-operation queue for a later deployed worker. Each command can enqueue one
-operation. Payload/result size, status, attempts, lock, and completion constraints support deterministic
-claim/retry behavior; a partial index covers claimable pending rows.
+Environment-scoped queue of work a command asks for and a deployed worker performs. Each command can
+enqueue one operation. Payload/result size, status, attempts, lock, and completion constraints support
+deterministic claim/retry behavior; a partial index covers claimable pending rows.
+
+Its one consumer today is the account erasure (#289): `account.erase` queues an `account.erase`
+operation with `{ userId }`. The hourly maintenance run claims operations for its own database's
+environment (the admin marker) with `SKIP LOCKED` and erases each account in one transaction as the owner
+role. It records `succeeded` with counts, or `failed` with `ACCOUNT_ERASURE_BLOCKED`,
+`ACCOUNT_ERASURE_NOT_FOUND` or, after three attempts an hour apart, `ACCOUNT_ERASURE_ERROR`
+(`src/services/accountErasureService.ts`).
 
 ### Admin grants and provisioning
 
 Migration 022 revokes `PUBLIC` privileges but creates no role or credential. The explicit provisioning
 script (`npm run admin:provision-access`) requires pre-existing, environment-specific reader/operator
-login roles, verifies migrations 021, 022 and the latest migration the grants depend on (032) plus the
+login roles, verifies migrations 021, 022 and the latest migration the grants depend on
+(`ADMIN_LATEST_REQUIRED_MIGRATION` in `src/admin/provisioning.ts`) plus the
 database marker, rejects privileged roles, and reapplies the grant set in `src/admin/provisioning.ts`:
 
 - **Reader** (`letter_irl_admin_reader_<env>`): `SELECT` on the commerce, ledger, outbox, alert, audit

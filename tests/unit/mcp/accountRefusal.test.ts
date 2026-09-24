@@ -12,6 +12,7 @@ import {
   EMAIL_ALREADY_LINKED_MESSAGE,
   EmailAlreadyLinkedError
 } from "../../../src/services/userService.js";
+import { ACCOUNT_ERASED_MESSAGE, AccountErasedError } from "../../../src/auth/accountErased.js";
 
 /**
  * A caller who has no account and cannot be given one.
@@ -89,6 +90,22 @@ describe("a tool call from a caller with no account", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toBe(EMAIL_ALREADY_LINKED_MESSAGE);
+  });
+
+  it("answers every tool for an erased account with its sentence, runs nothing, and logs no failure (#289)", async () => {
+    const logged: string[] = [];
+    const error = vi.spyOn(console, "error").mockImplementation(value => {
+      logged.push(String(value));
+    });
+    const { handlers, appServer } = await registerWithRefusal(new AccountErasedError());
+    error.mockRestore();
+
+    for (const tool of TOOLS) {
+      const result = await handlers.get(tool.name)!({}, { _meta: {} });
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: ACCOUNT_ERASED_MESSAGE }] });
+    }
+    expect(appServer.execute).not.toHaveBeenCalled();
+    expect(logged.filter(line => line.includes("auth.user_preparation_failed"))).toEqual([]);
   });
 
   it("says nothing about the caller in what it answers", async () => {

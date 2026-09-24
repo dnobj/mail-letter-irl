@@ -1,6 +1,7 @@
 import { AdminFoundationError } from "../errors.js";
 import { giftOperatorGenerationsRemaining } from "../../config/giftLetters.js";
-import { accountActionPanel, orderQuarantinePanel } from "../pages/accountActions.js";
+import { readAccountErased, readLatestErasure } from "../../services/accountErasureService.js";
+import { accountActionPanel, accountErasurePanel, orderQuarantinePanel } from "../pages/accountActions.js";
 import { accountGiftPanel, renderGifts } from "../pages/gifts.js";
 import { renderImages } from "../pages/images.js";
 import { renderPromoDetail, renderPromoForm, renderPromos } from "../pages/promos.js";
@@ -54,6 +55,8 @@ export function registerAccountRoutes(router: AdminRouter<RouteHandler>): Pick<R
         entitlements: await listEntitlements(client, userId),
         giftLetters: await listGiftLetters(client, userId),
         giftCodes: await listGiftCodes(client, { userId, limit: 50 }),
+        erased: (await readAccountErased(client, userId)) === true,
+        erasure: await readLatestErasure(client, userId),
       }));
       return join([
         accountActionPanel({ detail, entitlements: data.entitlements, mode: context.config.mode }),
@@ -64,6 +67,7 @@ export function registerAccountRoutes(router: AdminRouter<RouteHandler>): Pick<R
           defaultGenerations: giftOperatorGenerationsRemaining(),
           mode: context.config.mode,
         }),
+        accountErasurePanel({ userId, erased: data.erased, erasure: data.erasure, mode: context.config.mode }),
       ]);
     },
     orderActions: async (context, detail) => orderQuarantinePanel({ detail, mode: context.config.mode }),

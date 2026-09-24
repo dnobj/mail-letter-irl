@@ -355,6 +355,7 @@ Commands available:
 | Lift send block | a blocked account | `liftSendBlock` (refused while any dispute that justifies a block stands) |
 | Adjust letter balance | an account | `adjustCreditsWithClient` (letters in the UI, credits in the ledger; removal FIFO; atomic with the run and audit rows) |
 | Grant image generations | an account | `grantOperatorImageEntitlement` (one grant per command id, one-year expiry) |
+| Erase account | an account with nothing in flight | `enqueueAccountErasure`: queues an `admin_operations` row, which the next hourly maintenance run carries out as the database owner, re-checking the gate first. The panel's role gains no access to content ([account-erasure.md](account-erasure.md)) |
 | Release amount-mismatch quarantine | an order carrying `PAYMENT_AMOUNT_MISMATCH` | clears the code and records `operator.quarantine_released`; the hourly sweep then acts |
 | Create / change status / delete promo | `promo_campaigns` | client-taking promo service functions with a validated status machine and an `updated_at` version; delete refused once redeemed. The create form's gift budget makes a seed campaign ([gift-letters.md](gift-letters.md)); a code that reads as a printed gift code is refused |
 | Grant gift letters | an account | `grantGiftLettersWithClient` (source `operator`, keyed by the command id so a replay grants nothing; optionally bound to a seed campaign whose code the letters then print). The preview states the cost bound |

@@ -64,6 +64,7 @@ import { ToolMeta } from "../contracts/types.js";
 import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
 import { SESSION_SCOPES, IDENTITY_SCOPES } from "../auth/oauthConfig.js";
 import { prepareAuthenticatedUser } from "../auth/identity.js";
+import { AccountErasedError } from "../auth/accountErased.js";
 import { VerifiedEmailRequiredError } from "../auth/verifiedEmail.js";
 import { EmailAlreadyLinkedError } from "../services/userService.js";
 import {
@@ -74,6 +75,9 @@ import {
   buildInsufficientScopeToolResult,
   InsufficientScopeError
 } from "../auth/oauthChallenge.js";
+
+/** What every tool answers with, instead of running, when the caller has no usable account. */
+type AccountRefusal = VerifiedEmailRequiredError | EmailAlreadyLinkedError | AccountErasedError;
 
 /**
  * Build MCP tool annotations from tool definition.
@@ -836,14 +840,15 @@ export async function registerLetterTools(
   // refusal is re-evaluated on every call there. On the legacy SSE transport
   // one server serves the whole stream, so a customer who confirms their
   // address mid-session has to reconnect before it clears.
-  let accountRefusal: VerifiedEmailRequiredError | EmailAlreadyLinkedError | null = null;
+  let accountRefusal: AccountRefusal | null = null;
   if (authInfo) {
     try {
       await prepareAuthenticatedUser(authInfo);
     } catch (error) {
       if (
         error instanceof VerifiedEmailRequiredError ||
-        error instanceof EmailAlreadyLinkedError
+        error instanceof EmailAlreadyLinkedError ||
+        error instanceof AccountErasedError
       ) {
         // Already reported, by name, where it was decided. Logging it again
         // here would classify it as `database_error` - it carries no pg code -
@@ -963,9 +968,7 @@ export async function registerLetterTools(
  * the text - both messages are fixed constants - so it is safe to hand back
  * whole, the way BETA_ACCESS_MESSAGE is.
  */
-export function buildAccountRefusalToolResult(
-  error: VerifiedEmailRequiredError | EmailAlreadyLinkedError
-) {
+export function buildAccountRefusalToolResult(error: AccountRefusal) {
   return {
     isError: true,
     content: [{ type: "text" as const, text: error.message }]

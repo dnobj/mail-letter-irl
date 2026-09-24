@@ -1,3 +1,12 @@
+import {
+  enqueueAccountErasure,
+  erasureBlocked,
+  readAccountErased,
+  readErasureBlockers,
+  readErasureScope,
+  readLatestErasure,
+  type ErasureBlockers,
+} from "../../services/accountErasureService.js";
 import { adjustCreditsWithClient } from "../../services/creditService.js";
 import {
   countStandingDisputes,
@@ -22,6 +31,27 @@ export interface AccountCommandSeams {
   releaseAmountMismatchQuarantine: typeof releaseAmountMismatchQuarantine;
   adjustCreditsWithClient: typeof adjustCreditsWithClient;
   grantOperatorImageEntitlement: typeof grantOperatorImageEntitlement;
+  readAccountErased: typeof readAccountErased;
+  readLatestErasure: typeof readLatestErasure;
+  readErasureBlockers: typeof readErasureBlockers;
+  readErasureScope: typeof readErasureScope;
+  enqueueAccountErasure: typeof enqueueAccountErasure;
+}
+
+/** The gate's counts as the operator reads them; only the ones that hold. */
+function describeBlockers(blockers: ErasureBlockers): string {
+  const parts: Array<[number, string]> = [
+    [blockers.ordersInFlight, "orders not settled"],
+    [blockers.lettersInFlight, "letters on their way"],
+    [blockers.jobsInFlight, "mail jobs that could still send"],
+    [blockers.disputesOpen, "open disputes"],
+    [blockers.refundsInFlight, "refunds in progress"],
+    [blockers.imagesInFlight, "image generations in flight"],
+  ];
+  return parts
+    .filter(([count]) => count > 0)
+    .map(([count, label]) => `${count} ${label}`)
+    .join("; ");
 }
 
 interface AccountVersion {
@@ -78,6 +108,11 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
     releaseAmountMismatchQuarantine,
     adjustCreditsWithClient,
     grantOperatorImageEntitlement,
+    readAccountErased,
+    readLatestErasure,
+    readErasureBlockers,
+    readErasureScope,
+    enqueueAccountErasure,
     ...overrides,
   };
 
@@ -265,5 +300,90 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
     },
   };
 
-  return { unblockSends, adjustBalance, grantImages, releaseQuarantine };
+  /**
+   * Erase an account (#289, docs/account-erasure.md). The command only QUEUES
+   * the erasure: this role cannot touch an email, an address or a letter's
+   * content, and should not be able to. The hourly maintenance run erases the
+   * account as the database owner, re-reading the gate under the account's
+   * locks first (src/services/accountErasureService.ts).
+   */
+  const erase: CommandDefinition<Record<string, never>> = {
+    name: "account.erase",
+    title: "Erase account",
+    action: "account.erase",
+    targetType: "user",
+    transactional: true,
+    verb: () => "ERASE",
+    parseInput: () => ({}),
+    async preview(client, userId) {
+      const account = await readAccountVersion(client, userId);
+      if (!account) throw new AdminFoundationError("ADMIN_NOT_FOUND");
+      // One erasure at a time, and none for an account that is already a
+      // tombstone. A refused or failed erasure can be queued again.
+      if (await seams.readAccountErased(client, userId)) throw new AdminFoundationError("ADMIN_INVALID_STATE");
+      const latest = await seams.readLatestErasure(client, userId);
+      if (latest && (latest.status === "pending" || latest.status === "processing")) {
+        throw new AdminFoundationError("ADMIN_INVALID_STATE");
+      }
+      const blockers = await seams.readErasureBlockers(client, userId);
+      const scope = await seams.readErasureScope(client, userId);
+      const blocked = erasureBlocked(blockers);
+      const forfeits = account.credits > 0 || scope.unusedGiftLetters > 0;
+      return {
+        targetId: account.userId,
+        // Counts only: this is signed, and kept in the audit trail for two years.
+        summary: {
+          blocked,
+          blockers: { ...blockers },
+          scope: { ...scope },
+          creditsForfeited: account.credits,
+        },
+        expectedVersion: account.updatedAt.toISOString(),
+        display: [
+          ["Account", account.userId],
+          ["Still in flight", blocked ? describeBlockers(blockers) : "nothing"],
+          [
+            "Erased",
+            `the email and saved return address; the content and addresses of ${scope.letters} letters; ` +
+              `${scope.draftsToDelete} drafts deleted and ${scope.draftsToScrub} emptied (an order refers to them); ` +
+              `${scope.savedCopies} retention copies; ${scope.accessTokens} access tokens; ` +
+              `${scope.featureRequests} feature requests; ${scope.unredeemedGiftCodes} unredeemed gift codes; the upload link`,
+          ],
+          [
+            "Cleared on kept rows",
+            `${scope.seedCodeEmails} seed-code addresses and the ledger descriptions; ` +
+              `${scope.failedJobsToCancel} failed mail jobs cancelled`,
+          ],
+          ["Kept, under the same account id", `${scope.ordersKept} orders, the ledger, disputes, refunds and the audit trail`],
+          ["Forfeited", `${account.credits} credits and ${scope.unusedGiftLetters} unused gift letters`],
+          ["When", "Queued on confirmation; the next hourly maintenance run erases the account"],
+        ],
+        warnings: [
+          ...(blocked
+            ? ["Money or mail is still moving, so the command will refuse. Wait for it to settle, or settle it deliberately, then preview again."]
+            : []),
+          "Irreversible once it runs: only a database restore brings the content back.",
+          ...(forfeits
+            ? ["The balance and unused gift letters are forfeited. If the customer wants money back, refund first and preview again: the erasure blocks the account, and a pack refund refuses a blocked account."]
+            : []),
+          "After it runs, delete the Auth0 user with this id in the tenant, and take the id out of LETTER_IRL_BETA_ALLOWED_SUBJECTS and LETTER_IRL_ADMIN_USER_IDS if it is listed (docs/account-erasure.md).",
+          "Keep the customer's name and email out of the reason: the audit trail keeps it for two years.",
+        ],
+      };
+    },
+    async execute(execution, userId, _input, preview) {
+      requireClient(execution);
+      // The runner re-derived the preview at confirmation, so this is the gate
+      // as it stands now. The worker reads it once more before it erases.
+      if (preview.summary.blocked !== false) throw new AdminFoundationError("ADMIN_INVALID_STATE");
+      const operationId = await seams.enqueueAccountErasure(execution.client as never, {
+        commandId: execution.commandId,
+        environment: execution.environment,
+        userId,
+      });
+      return { operationId, status: "queued" };
+    },
+  };
+
+  return { unblockSends, adjustBalance, grantImages, releaseQuarantine, erase };
 }

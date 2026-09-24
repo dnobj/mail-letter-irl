@@ -68,6 +68,8 @@ In order, it:
   fixed. `CONTENT_RETENTION_ENABLED=false` skips the pass entirely;
 - deletes the link to a user's uploaded image 24 hours after their last upload (`recent-uploads-sweep`, #282);
 - deletes feature requests 12 months after they were submitted (`feature-requests-sweep`, #393);
+- carries out the account erasures queued from the admin panel (`account-erasures`, #289,
+  [account-erasure.md](account-erasure.md));
 - retries due or stale outbox rows;
 - reconciles commerce: fulfils paid Pay & Send orders that were not fulfilled, settles pending checkouts
   against Stripe (paid or expired), cancels orphaned checkouts, and retries `refund_pending` refunds;

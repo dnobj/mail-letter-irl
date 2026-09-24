@@ -2,6 +2,7 @@ import { McpToolDefinition, ToolContext } from "../contracts/types.js";
 import { getProfileInputSchema, getProfileOutputSchema } from "../schemas.js";
 import { findUser } from "../services/userService.js";
 import { VerifiedEmailRequiredError } from "../auth/verifiedEmail.js";
+import { AccountErasedError } from "../auth/accountErased.js";
 
 /**
  * The profile ChatGPT records for a connected account.
@@ -63,6 +64,11 @@ async function handler(
   const user = await findUser(userId);
   if (!user) {
     throw new VerifiedEmailRequiredError();
+  }
+  // The wrapper refuses an erased account before any tool runs; this keeps the
+  // tombstone's placeholder address from ever being handed out as a profile.
+  if (user.erased_at) {
+    throw new AccountErasedError();
   }
 
   context.logger.info(

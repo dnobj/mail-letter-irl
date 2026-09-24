@@ -1,4 +1,6 @@
 import { EmailAlreadyLinkedError, findUser, getOrCreateUser } from "../services/userService.js";
+import type { User } from "../services/types.js";
+import { AccountErasedError } from "./accountErased.js";
 import { AuthenticatedUser } from "./tokenValidator.js";
 import { writeDiagnostic } from "../utils/diagnosticLog.js";
 import { VerifiedEmailRequiredError, readEmailClaim } from "./verifiedEmail.js";
@@ -44,6 +46,20 @@ export { DEFAULT_EMAIL_CLAIM } from "./verifiedEmail.js";
  */
 
 /**
+ * An erased account is refused on every path (#289). The one exception to
+ * "an account that already exists is never refused" below: its row is a
+ * tombstone kept for the financial records, not an account anyone uses. A
+ * personal access token cannot reach this - the erasure deletes them - but an
+ * OAuth token issued before it can, for as long as it lives, and so can a
+ * social sign-in, which brings back the same subject.
+ */
+function refuseErasedAccount(user: User, authInfo: AuthenticatedUser): void {
+  if (!user.erased_at) return;
+  writeDiagnostic("warn", "auth.account_erased_refused", { authType: authInfo.authType });
+  throw new AccountErasedError();
+}
+
+/**
  * Make sure this caller has an account row, or refuse.
  *
  * Returns the confirmed address when there is one, so a caller that needs it -
@@ -63,6 +79,7 @@ export { DEFAULT_EMAIL_CLAIM } from "./verifiedEmail.js";
  * opened, because the token carries no confirmed address.
  * @throws EmailAlreadyLinkedError when no account exists and the address
  * belongs to another subject.
+ * @throws AccountErasedError when the account was erased (#289).
  */
 export async function prepareAuthenticatedUser(
   authInfo: AuthenticatedUser,
@@ -85,6 +102,7 @@ export async function prepareAuthenticatedUser(
       // telling them to do the thing they just did.
       const existingUser = await dependencies.findExistingUser(authInfo.userId);
       if (!existingUser) throw error;
+      refuseErasedAccount(existingUser, authInfo);
       writeDiagnostic("warn", "auth.email_conflict_not_stored", {
         authType: authInfo.authType
       });
@@ -94,6 +112,7 @@ export async function prepareAuthenticatedUser(
 
   const existingUser = await dependencies.findExistingUser(authInfo.userId);
   if (existingUser) {
+    refuseErasedAccount(existingUser, authInfo);
     if (claim?.verdict === false) {
       writeDiagnostic("warn", "auth.email_unconfirmed_not_stored", {
         authType: authInfo.authType
