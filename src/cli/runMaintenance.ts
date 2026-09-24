@@ -307,8 +307,9 @@ export async function runMaintenance(): Promise<void> {
  * validation gate without executing a real maintenance pass.
  */
 export async function maintenanceEntry(): Promise<void> {
+  let validation: ReturnType<typeof assertValidDeploymentConfig>;
   try {
-    assertValidDeploymentConfig(process.env, 'maintenance');
+    validation = assertValidDeploymentConfig(process.env, 'maintenance');
   } catch (error) {
     // Print the validator's message here, where the failure is known to be
     // configuration and the message is value-free by construction.
@@ -318,6 +319,13 @@ export async function maintenanceEntry(): Promise<void> {
     // config failure (review round 1).
     console.error(error instanceof Error ? error.message : String(error));
     throw error;
+  }
+  // The warnings the API prints at boot, printed here too: this service owns
+  // settings of its own, such as the heartbeat URL (#408).
+  if (validation.mode !== 'test') {
+    for (const warning of validation.warnings) {
+      console.warn(`[config] ${warning}`);
+    }
   }
   try {
     await runMaintenance();

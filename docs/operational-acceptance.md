@@ -16,26 +16,28 @@ Read from the production API's Railway variables on 2026-09-23:
 | `LETTER_IRL_GIFT_LETTERS_ENABLED` | unset (off) | Turned on at launch, with seed campaigns (#158) |
 | `CONTENT_RETENTION_MODE` (maintenance) | unset (report only) | Switched to `enforce` for #153, development first |
 
-The daily ceilings (`LETTER_IRL_BETA_DAILY_MAIL_CAP`, `LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP`, `LETTER_IRL_BETA_ACCOUNT_DAILY_SPEND_CAP_CENTS`, `LETTER_IRL_GIFT_DAILY_SEND_CAP`) are the durable financial limits. They are separate from, and stronger than, the process-local HTTP rate limits; neither stands in for the other.
+The daily ceilings (`LETTER_IRL_BETA_DAILY_MAIL_CAP`, `LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP`, `LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS`, `LETTER_IRL_GIFT_DAILY_SEND_CAP`) are the durable financial limits. They are separate from, and stronger than, the process-local HTTP rate limits; neither stands in for the other.
 
 ## Watching it
 
-- **Failures inside a run** raise durable alerts (`commerce_operational_alerts`) and `maintenance.run_failed` diagnostics, visible in the admin panel and the logs.
+- **Failures inside a run** raise durable alerts (`commerce_operational_alerts`), shown on the admin panel's `/alerts` page, and a `maintenance.run_failed` line in the maintenance log. The panel's `/maintenance` page shows when each scheduled task last ran.
 - **A run that does not happen**, or keeps failing, is caught by the maintenance heartbeat. After a run finishes, maintenance calls `MAINTENANCE_HEARTBEAT_URL`; an external monitor alerts when the calls stop. Setup:
   1. At [healthchecks.io](https://healthchecks.io), create one check per environment: period 1 hour, grace 1 hour, email alerts to the owner.
-  2. Set each check's ping URL as `MAINTENANCE_HEARTBEAT_URL` on `letter-irl-maintenance` (production) and `letter-irl-maintenance-dev`. The URL is a capability, so it lives only in Railway.
-  3. After the next hourly run, each check shows a ping. The maintenance log says `Heartbeat sent`.
-- **Who watches:** the owner, for held mail, refunds and disputes, through the admin panel's orders and accounts pages.
+  2. Set each check's ping URL as `MAINTENANCE_HEARTBEAT_URL` on the maintenance service in each environment: `letter-irl-maintenance` in production, `letter-irl-maintenance-dev` in development (the names in Railway's service list on 2026-09-23). The URL is a capability, so it lives only in Railway.
+  3. After the next hourly run, each check shows a ping. The maintenance log says `Heartbeat sent`. An unusable value logs `[config]` and `Heartbeat invalid` on every run instead.
+- **Who watches:** the owner, for held mail, refunds and disputes, through the admin panel: `/alerts`, and an order or account found through Lookup.
 
 ## Stopping and recovering
 
 | To stop | Set, on the API service | Undo |
 |---------|-------------------------|------|
-| All mail going to the printer | `LETTER_IRL_MAIL_SENDING_ENABLED=false` | Set it back to `true` |
+| New sends, and new Pay & Send checkouts | `LETTER_IRL_MAIL_SENDING_ENABLED=false` | Set it back to `true` |
 | New Pay & Send checkouts | `JIT_PURCHASE_ENABLED=false` | Set it back to `true` |
 | Gift sends | `LETTER_IRL_GIFT_DAILY_SEND_CAP=0` | Restore the cap |
 
-Each change redeploys the service. Rehearse the first on development: set it, confirm a send is refused and nothing reaches PostGrid, set it back, confirm a send works.
+Each change redeploys the service. None of them stops mail already on its way: letters queued in the outbox, their retries, and paid Pay & Send orders being fulfilled still go to the printer on the next maintenance run. Stopping those needs a switch in the outbox dispatcher, which does not exist yet (#444).
+
+Rehearse the first on development, with nothing queued: set it, confirm a new send is refused and nothing reaches PostGrid, set it back, confirm a send works.
 
 ## Restore drill
 

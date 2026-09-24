@@ -208,6 +208,18 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api', 'maintenance'],
     checkedBy: 'stripe.currency_unset'
   },
+  /**
+   * The maintenance cron's dead man's switch (#408). A capability: anyone
+   * holding it can report the job alive, so the preflight treats it as secret.
+   */
+  {
+    name: 'MAINTENANCE_HEARTBEAT_URL',
+    requiredIn: 'production',
+    advisory: true,
+    secret: true,
+    services: ['maintenance'],
+    checkedBy: 'maintenance.heartbeat_url_invalid'
+  },
   {
     name: 'JIT_CURRENCY',
     requiredIn: 'production',

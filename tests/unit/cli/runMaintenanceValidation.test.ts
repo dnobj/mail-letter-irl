@@ -136,6 +136,16 @@ describe('maintenance deployment validation', () => {
     );
   });
 
+  it('prints the validator\'s warnings, so an unusable heartbeat URL shows in the maintenance log (#408)', async () => {
+    const output = captureOutput();
+    stubValidDevelopment();
+    vi.stubEnv('MAINTENANCE_HEARTBEAT_URL', 'http://hc-ping.com/abc');
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(output()).toContain('[config] MAINTENANCE_HEARTBEAT_URL must be an https URL');
+  });
+
   it('sends no heartbeat after a run that failed, so the monitor raises the alarm (#408)', async () => {
     stubValidDevelopment();
     services.runCommerceMaintenance.mockRejectedValueOnce(new Error('stripe down'));
