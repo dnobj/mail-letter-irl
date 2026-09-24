@@ -54,8 +54,9 @@ The unspent balance and unused gift letters are forfeited. If the customer wants
 
    A refused or failed erasure can be queued again.
 5. Once it has run, some steps are done by hand. The erasure opens an `account_erasure_followup` alert
-   (#453) in the same transaction that erases the account. The alert is on **Alerts** and the Overview,
-   and the account page links it and says the follow-up is still to do. It carries the account id and
+   (#453) in the same transaction that erases the account. The alert is on **Alerts**, and on the
+   Overview while it is among the ten newest active alerts. The account page links it and says the
+   follow-up is still to do. It carries the account id and
    nothing else, and it stays open until you resolve it. No service can delete Auth0 users; doing it
    from the panel is #454. Do these steps:
    - **Auth0:** in the environment's tenant (see [Auth0 Tenant Configuration](auth0-tenant-configuration.md)),
@@ -119,6 +120,10 @@ UPDATE users SET erased_at = NULL, email = '<their confirmed address>' WHERE use
 
 Then lift the send block from the panel (**Lift send block**) if nothing else justifies it. Erased content
 stays erased. The balance and history are as they were.
+
+If the erasure's follow-up alert is still open, **do not delete the Auth0 user**: the person is signing back
+in with it. Resolve the alert with `account_reopened` instead. The account page no longer shows the erasure
+once the account is reopened, so find the alert on `/alerts`.
 
 ---
 

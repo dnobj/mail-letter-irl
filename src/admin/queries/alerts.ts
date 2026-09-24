@@ -10,7 +10,7 @@ export interface AlertView {
   sourceEventId: string | null;
   /** The account the details name, when they name one: an erasure's follow-up (#453). */
   accountUserId: string | null;
-  /** Serialized, bounded; alert details never carry PII by policy. */
+  /** Serialized, bounded; by policy alert details carry no personal data beyond an account id. */
   details: string;
   createdAt: Date;
   updatedAt: Date;

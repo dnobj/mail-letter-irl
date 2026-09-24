@@ -506,8 +506,8 @@ hand (`account_erasure_followup`, migration 036, #453). That last one has no ord
 `details` hold the account id and nothing else. Each alert has a severity and a three-state lifecycle
 (`open`, `acknowledged`, `resolved`) whose timestamps and resolution code the constraints keep
 consistent, and the acknowledging or resolving actor is stored as a hash. One alert per source event
-and type. The panel's acknowledge and resolve commands are the only writers besides the sweeps that
-raise them.
+and type. The panel's acknowledge and resolve commands are the only writers besides the sweeps and the
+account erasure that raise them.
 
 ### commerce_operator_audit_events
 

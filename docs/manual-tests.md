@@ -1566,8 +1566,8 @@ saved return address. Nothing on it is in flight.
    - the email shows as `e***@erased.invalid`;
    - the letters keep their statuses;
    - "Still to do by hand", linking an open `account_erasure_followup` alert. The alert is also listed
-     on `/alerts` and the Overview, with the account in its "Order or account" column. Its page lists the
-     steps, and its details hold the account id and nothing else (#453).
+     on `/alerts`, with the account in its "Order or account" column. Its page lists the steps, and its
+     details hold the account id and nothing else (#453).
 5. [ ] Call any tool from the (DEV) connector: verify the erased-account sentence, and that nothing ran.
    Reload the website dashboard: verify the same sentence (needs website #36 on development).
 6. [ ] Delete the Auth0 user in the development tenant. Resolve the follow-up alert with the code its

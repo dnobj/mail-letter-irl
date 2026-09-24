@@ -14,7 +14,7 @@ const REQUESTED = new Date("2026-09-23T10:00:00Z");
 const COMPLETED = new Date("2026-09-23T11:00:00Z");
 
 function render(input: Partial<Parameters<typeof accountErasurePanel>[0]>): string {
-  return String(accountErasurePanel({ userId: USER, erased: false, erasure: null, mode: "full", ...input }));
+  return String(accountErasurePanel({ userId: USER, erased: false, erasure: null, followup: null, mode: "full", ...input }));
 }
 
 const operation = (status: string, extra: Record<string, unknown> = {}) => ({

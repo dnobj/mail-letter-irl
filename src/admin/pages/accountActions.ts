@@ -75,8 +75,8 @@ export function accountErasurePanel(input: {
   userId: string;
   erased: boolean;
   erasure: ErasureOperationView | null;
-  /** The follow-up alert the erasure opened (#453); none before migration 036. */
-  followup?: ErasureFollowupView | null;
+  /** The follow-up alert the erasure opened (#453); null for none, as before migration 036. */
+  followup: ErasureFollowupView | null;
   mode: string;
 }): SafeHtml {
   const { erasure } = input;
@@ -89,7 +89,7 @@ export function accountErasurePanel(input: {
     // Two operators confirming at once queue two erasures; the second finds
     // the account already erased, and the counts are on the first.
     const byEarlier = erasure?.result?.alreadyErased === true;
-    body = html`<p>Erased${erasure?.completedAt ? html` ${when(erasure.completedAt)}` : ""}. ${erasureFollowup(input.followup ?? null)}</p>
+    body = html`<p>Erased${erasure?.completedAt ? html` ${when(erasure.completedAt)}` : ""}. ${erasureFollowup(input.followup)}</p>
 ${
   byEarlier
     ? html`<p class="muted">The newest erasure found the account already erased; the counts are on the one before it.</p>`

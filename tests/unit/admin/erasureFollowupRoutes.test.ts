@@ -160,6 +160,8 @@ describe("the erasure follow-up in the panel", () => {
     expect(reply.status).toBe(200);
     expect(reply.body).not.toContain("What is left to do");
     expect(reply.body).toMatch(/name="resolutionCode"[^>]*value=""/);
+    // Its details name a refund, not an account, so no account is linked.
+    expect(reply.body).not.toContain('href="/accounts/');
   });
 
   it("says on the erased account's page what is still to do, and links the alert", async () => {
