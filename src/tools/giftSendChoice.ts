@@ -10,15 +10,33 @@
  */
 
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
-import { getGiftBalance, sampleFundedCard, unfundedCard } from '../services/giftLetterService.js';
+import {
+  getGiftBalance,
+  sampleFundedCard,
+  seedCard,
+  unfundedCard,
+  type GiftBalanceSeed
+} from '../services/giftLetterService.js';
 import type { GiftCardContent, GiftCardState } from '../services/giftCardRenderer.js';
 
 export interface GiftSendChoice {
   isGift: boolean;
-  /** The card the send will print, drawn with a placeholder code. */
+  /**
+   * The card the send will print: a seed campaign's own code, or, for a chain
+   * code that does not exist until the send, a placeholder.
+   */
   card?: GiftCardContent;
   /** Unsent gift letters on the account, for the preview's note. */
   giftLettersAvailable: number;
+}
+
+/**
+ * The funded card a preview draws: the seed campaign's own card when the next
+ * gift letter prints one (#433), so the preview matches the print; otherwise
+ * the chain-code placeholder.
+ */
+function fundedPreviewCard(seed: GiftBalanceSeed | undefined): GiftCardContent {
+  return seed ? seedCard(seed.code, seed.endsAt, seed.newAccountsOnly) : sampleFundedCard();
 }
 
 export async function resolveGiftSendChoice(params: {
@@ -43,7 +61,7 @@ export async function resolveGiftSendChoice(params: {
   const state = balance.next?.cardState ?? 'funded';
   return {
     isGift: true,
-    card: state === 'funded' ? sampleFundedCard(balance.next?.seed) : unfundedCard(),
+    card: state === 'funded' ? fundedPreviewCard(balance.next?.seed) : unfundedCard(),
     giftLettersAvailable: balance.available
   };
 }

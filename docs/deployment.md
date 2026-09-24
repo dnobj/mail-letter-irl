@@ -205,6 +205,7 @@ development state in another.
 | `stripe.live_key_required` | error | `STRIPE_SECRET_KEY` is not `sk_live_`/`rk_live_` in production | Use the live key |
 | `stripe.live_key_outside_production` | error | A live Stripe key outside production | Use the test key — this one charges real cards |
 | `stripe.webhook_secret_malformed` | error in production, else warning | `STRIPE_WEBHOOK_SECRET` does not begin `whsec_` | Copy it again from the Stripe endpoint |
+| `stripe.checkout_domain_invalid` | error in production, else warning | `STRIPE_CHECKOUT_DOMAIN` is set but is not a bare host name | Set the host alone, such as `pay.letterirl.com` (#373) |
 | `stripe.pack_price_incomplete` | error in production, else warning | A `STRIPE_PRICE_*` is missing or is not a `price_…` id | Set every pack price id. Amounts come from the Price itself (#275), never from an env var |
 | `stripe.jit_config_incomplete` | error in production, else warning | `JIT_PURCHASE_ENABLED=true` with a missing or malformed `STRIPE_JIT_*_PRICE_ID` | Set the price ids, or turn Pay & Send off |
 | `stripe.currency_unset` | warning | `STRIPE_CURRENCY` is unset | Set it to match the currency the Prices are denominated in |

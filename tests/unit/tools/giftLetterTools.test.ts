@@ -121,19 +121,30 @@ describe('letter preview: the gift decision', () => {
     expect(mocks.createDraft).toHaveBeenCalledWith(expect.objectContaining({ isGiftSend: true }));
   });
 
-  it('previews the wording that will print when the next gift letter carries a seed code', async () => {
-    // The print says a seed code works once per person (#431); a preview that
-    // still said "works once" would show something other than what prints.
+  it('previews the card that will print when the next gift letter carries a seed code', async () => {
+    // A seed campaign's code exists before the send, so the preview shows it,
+    // with the campaign's end date and the multi-use wording the print carries
+    // (#431, #433). A placeholder there showed something other than what prints.
     mocks.getGiftBalance.mockResolvedValue({
       available: 1,
-      next: { giftId: 'gift-1', cardState: 'funded', seed: { newAccountsOnly: true } }
+      next: {
+        giftId: 'gift-1',
+        cardState: 'funded',
+        seed: { code: 'JANE-SMITH', endsAt: new Date('2026-12-31T23:59:59Z'), newAccountsOnly: true }
+      }
     });
     const seeded = await preview(0);
+    expect(seeded.previewHtml).toContain('>JANE-SMITH<');
+    expect(seeded.previewHtml).not.toContain('••••-••••');
+    expect(seeded.previewHtml).toContain('Redeem by December 31, 2026.');
     expect(seeded.previewHtml).toContain('For new Letter IRL customers. Each person can use the code once, while it lasts.');
     expect(seeded.previewHtml).not.toContain('The code works once.');
 
+    // A chain code does not exist until the send: the placeholder and single-use wording stay.
     mocks.getGiftBalance.mockResolvedValue({ available: 1, next: { giftId: 'gift-1', cardState: 'funded' } });
     const chained = await preview(0);
+    expect(chained.previewHtml).toContain('••••-••••');
+    expect(chained.previewHtml).not.toContain('JANE-SMITH');
     expect(chained.previewHtml).toContain('The code works once.');
   });
 

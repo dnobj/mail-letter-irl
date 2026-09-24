@@ -8,7 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
 import { getBalance, getTransactions, getDetailedBalance } from '../services/creditService.js';
 import { getUser } from '../services/userService.js';
-import { validatePromoCode, getUserRedemptions } from '../services/promoService.js';
+import { validatePromoCode, getUserRedemptions, isSeedCampaign, refusalText } from '../services/promoService.js';
 import { redeemCode } from '../services/codeRedemptionService.js';
 import { getGiftBalance } from '../services/giftLetterService.js';
 import { getLedgerEntries } from '../services/creditLedgerService.js';
@@ -20,6 +20,7 @@ import {
 } from './middleware/restAuth.js';
 import { rateLimitAccount } from './middleware/rateLimit.js';
 import { requiredRestScopes } from '../auth/restScopes.js';
+import { CREDITS_PER_LETTER } from '../config/products.js';
 
 /**
  * Send JSON response
@@ -375,18 +376,27 @@ async function handleValidatePromo(
   const result = await validatePromoCode(code, authInfo.userId);
 
   if (result.valid && result.campaign) {
+    // A seed campaign's code is a gift code: it grants a gift letter, with or
+    // without letters (docs/gift-letters.md), and says so in letters, the only
+    // unit a customer sees, as redeem does.
+    const credits = result.campaign.credits_amount;
+    const letters = Math.floor(credits / CREDITS_PER_LETTER);
     sendJson(res, 200, {
       valid: true,
       code: result.campaign.code,
       name: result.campaign.name,
-      credits: result.campaign.credits_amount,
+      credits,
       expirationDays: result.campaign.expiration_days,
-      message: `This code gives you ${result.campaign.credits_amount} credits!`
+      message: !isSeedCampaign(result.campaign)
+        ? `This code gives you ${credits} credits!`
+        : letters > 0
+          ? `This gift code gives you ${letters} ${letters === 1 ? 'letter' : 'letters'} and a gift letter.`
+          : 'This gift code gives you a gift letter.'
     });
   } else {
     sendJson(res, 200, {
       valid: false,
-      reason: result.reason
+      reason: refusalText(result)
     });
   }
 }
