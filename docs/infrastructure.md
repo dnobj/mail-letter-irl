@@ -83,7 +83,7 @@ In order, it:
   the last 7 days of Stripe payments, and recalculates user tiers;
 - closes S3 and PostgreSQL clients, then exits.
 
-The first three passes are wrapped so that a failure in one cannot skip mail dispatch.
+Every pass before the outbox is wrapped, so a failure in one cannot skip mail dispatch.
 
 While `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` pauses the outbox (#444,
 [operational-acceptance.md](operational-acceptance.md)), the outbox pass claims nothing and logs
