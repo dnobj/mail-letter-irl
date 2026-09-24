@@ -38,7 +38,8 @@ import {
   lookupGiftCodePublic,
   redeemChainCode,
   returnGiftLetterForFailedSendWithClient,
-  revokeGiftLettersForOrderWithClient
+  revokeGiftLettersForOrderWithClient,
+  seedCodeHold
 } from '../../../src/services/giftLetterService.js';
 import { VerifiedEmailRequiredError } from '../../../src/auth/verifiedEmail.js';
 
@@ -132,6 +133,8 @@ describe('consumeGiftLetterForSendWithClient', () => {
         status: 'active',
         starts_at: PAST,
         ends_at: null,
+        max_total_redemptions: null,
+        current_redemptions: 0,
         gift_generations_remaining: 1
       }
     ]);
@@ -152,6 +155,8 @@ describe('consumeGiftLetterForSendWithClient', () => {
         status: 'active',
         starts_at: PAST,
         ends_at: null,
+        max_total_redemptions: null,
+        current_redemptions: 0,
         gift_generations_remaining: 1,
         requires_new_user: true
       }
@@ -162,13 +167,103 @@ describe('consumeGiftLetterForSendWithClient', () => {
     expect(ran('FROM promo_campaigns WHERE campaign_id')[0].sql).toContain('requires_new_user');
   });
 
+  it("stops printing a seed code once its campaign is at its cap, and falls back to the letter's own card (#435)", async () => {
+    const capped = {
+      campaign_id: 'campaign-1',
+      code: 'JANE-SMITH',
+      status: 'active',
+      starts_at: PAST,
+      ends_at: null,
+      max_total_redemptions: 2,
+      current_redemptions: 2,
+      gift_generations_remaining: 1
+    };
+    on('SELECT * FROM gift_letters', [gift({ generations_remaining: 0, card_campaign_id: 'campaign-1' })]);
+    on('FROM promo_campaigns WHERE campaign_id', [capped]);
+    const plain = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1' });
+    // Every claim of that code is refused now, so printing it would promise a letter nobody can have.
+    expect(plain?.card).toEqual({ state: 'unfunded', url: 'https://letterirl.com', displayUrl: 'letterirl.com' });
+    // The cap is read where the card is decided.
+    expect(ran('FROM promo_campaigns WHERE campaign_id')[0].sql).toContain('max_total_redemptions');
+
+    state.handlers = [];
+    state.log = [];
+    on('SELECT * FROM gift_letters', [gift({ generations_remaining: 1, card_campaign_id: 'campaign-1' })]);
+    on('FROM promo_campaigns WHERE campaign_id', [capped]);
+    on('INSERT INTO gift_codes', params => [{ code: params[0] }]);
+    const chained = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1' });
+    expect(chained?.card.state).toBe('funded');
+    expect(chained?.card.code).not.toBe('JANE-SMITH');
+    expect(chained?.card.multiUse).toBeUndefined();
+    expect(ran('INSERT INTO gift_codes')).toHaveLength(1);
+
+    // One claim short of the cap, the code still prints.
+    state.handlers = [];
+    on('SELECT * FROM gift_letters', [gift({ generations_remaining: 0, card_campaign_id: 'campaign-1' })]);
+    on('FROM promo_campaigns WHERE campaign_id', [{ ...capped, current_redemptions: 1 }]);
+    const open = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1' });
+    expect(open?.card).toMatchObject({ code: 'JANE-SMITH', multiUse: true });
+
+    // A campaign with no cap (NULL) never reaches one.
+    state.handlers = [];
+    on('SELECT * FROM gift_letters', [gift({ generations_remaining: 0, card_campaign_id: 'campaign-1' })]);
+    on('FROM promo_campaigns WHERE campaign_id', [{ ...capped, max_total_redemptions: null, current_redemptions: 5000 }]);
+    const uncapped = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1' });
+    expect(uncapped?.card).toMatchObject({ code: 'JANE-SMITH', multiUse: true });
+
+    // A row read without its cap columns holds the code back: a missed seed
+    // code still prints a card that works, a capped one would not.
+    state.handlers = [];
+    const { max_total_redemptions: _cap, current_redemptions: _count, ...unread } = capped;
+    on('SELECT * FROM gift_letters', [gift({ generations_remaining: 0, card_campaign_id: 'campaign-1' })]);
+    on('FROM promo_campaigns WHERE campaign_id', [{ ...unread }]);
+    const unknown = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1' });
+    expect(unknown?.card.state).toBe('unfunded');
+  });
+
   it('falls back to its own budget when its seed campaign has ended', async () => {
     on('SELECT * FROM gift_letters', [gift({ generations_remaining: 0, card_campaign_id: 'campaign-1' })]);
     on('FROM promo_campaigns WHERE campaign_id', [
-      { campaign_id: 'campaign-1', code: 'JANE-SMITH', status: 'ended', starts_at: PAST, ends_at: null, gift_generations_remaining: 1 }
+      {
+        campaign_id: 'campaign-1',
+        code: 'JANE-SMITH',
+        status: 'ended',
+        starts_at: PAST,
+        ends_at: null,
+        max_total_redemptions: null,
+        current_redemptions: 0,
+        gift_generations_remaining: 1
+      }
     ]);
     const result = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1' });
     expect(result?.card.state).toBe('unfunded');
+  });
+
+  it('decides the card by one rule, and says why a seed code is held back', () => {
+    const live = {
+      campaign_id: 'campaign-1',
+      code: 'JANE-SMITH',
+      status: 'active',
+      starts_at: PAST,
+      ends_at: null,
+      max_total_redemptions: 2,
+      current_redemptions: 1,
+      gift_generations_remaining: 1
+    };
+    expect(seedCodeHold(live)).toBeNull();
+    expect(seedCodeHold({ ...live, gift_generations_remaining: null })).toBe('not_seed');
+    expect(seedCodeHold({ ...live, status: 'paused' })).toBe('not_live');
+    expect(seedCodeHold({ ...live, starts_at: new Date(Date.now() + 86_400_000) })).toBe('not_started');
+    expect(seedCodeHold({ ...live, ends_at: new Date(Date.now() - 1_000) })).toBe('ended');
+    expect(seedCodeHold({ ...live, ends_at: new Date(Date.now() + 86_400_000) })).toBeNull();
+    expect(seedCodeHold({ ...live, current_redemptions: 2 })).toBe('at_cap');
+    // Either cap column left unread holds the code back on its own.
+    expect(seedCodeHold({ ...live, max_total_redemptions: undefined as never })).toBe('at_cap');
+    expect(seedCodeHold({ ...live, current_redemptions: undefined as never })).toBe('at_cap');
+    expect(seedCodeHold({ ...live, max_total_redemptions: null, current_redemptions: 5000 })).toBeNull();
+    // A paused campaign at its cap is held back as not live: the claim page
+    // calls that over, not claimed out.
+    expect(seedCodeHold({ ...live, status: 'paused', current_redemptions: 2 })).toBe('not_live');
   });
 
   it('answers null when there is no gift letter to use', async () => {
@@ -310,6 +405,24 @@ describe('lookupGiftCodePublic', () => {
     expect(await lookupGiftCodePublic('WELCOME5')).toEqual({ valid: false, reason: 'not_found' });
   });
 
+  it('tells the claim page when a seed is for new customers only, and only then', async () => {
+    on('FROM promo_campaigns WHERE UPPER(code)', params => [
+      {
+        code: params[0],
+        status: 'active',
+        starts_at: PAST,
+        ends_at: null,
+        max_total_redemptions: 10,
+        current_redemptions: 3,
+        gift_generations_remaining: 1,
+        requires_new_user: params[0] === 'NEW-ONLY'
+      }
+    ]);
+    expect(await lookupGiftCodePublic('new-only')).toEqual({ valid: true, kind: 'seed', newCustomersOnly: true });
+    expect(await lookupGiftCodePublic('ANYONE')).toEqual({ valid: true, kind: 'seed' });
+    expect(ran('FROM promo_campaigns WHERE UPPER(code)')[0].sql).toContain('requires_new_user');
+  });
+
   it('reports a full seed campaign', async () => {
     on('FROM promo_campaigns WHERE UPPER(code)', [
       { code: 'JANE', status: 'active', starts_at: PAST, ends_at: null, max_total_redemptions: 3, current_redemptions: 3, gift_generations_remaining: 1 }
@@ -421,21 +534,40 @@ describe('grant, balance and reversal', () => {
   it('reports when the next gift letter prints a live seed campaign, so the preview can say so', async () => {
     const seedBound = {
       card_campaign_id: 'campaign-1',
+      campaign_code: 'JANE-SMITH',
       campaign_status: 'active',
       starts_at: PAST,
       ends_at: null,
+      max_total_redemptions: null,
+      current_redemptions: 0,
       gift_generations_remaining: 1
     };
-    on('FROM gift_letters g', [gift({ generations_remaining: 0, ...seedBound, requires_new_user: true })]);
+    const ENDS = new Date(Date.now() + 40 * 86_400_000);
+    on('FROM gift_letters g', [gift({ generations_remaining: 0, ...seedBound, ends_at: ENDS, requires_new_user: true })]);
+    // The preview draws the card the print will: the campaign's own code and end date (#433).
     expect(await getGiftBalance('user-1')).toEqual({
       available: 1,
-      next: { giftId: 'gift-1', cardState: 'funded', seed: { newAccountsOnly: true } }
+      next: { giftId: 'gift-1', cardState: 'funded', seed: { code: 'JANE-SMITH', endsAt: ENDS, newAccountsOnly: true } }
     });
-    expect(ran('FROM gift_letters g')[0].sql).toContain('c.requires_new_user');
+    const sql = ran('FROM gift_letters g')[0].sql;
+    for (const column of ['c.requires_new_user', 'c.code AS campaign_code', 'c.max_total_redemptions', 'c.current_redemptions']) {
+      expect(sql).toContain(column);
+    }
 
     state.handlers = [];
     on('FROM gift_letters g', [gift({ generations_remaining: 0, ...seedBound, requires_new_user: false })]);
-    expect((await getGiftBalance('user-1')).next?.seed).toEqual({ newAccountsOnly: false });
+    expect((await getGiftBalance('user-1')).next?.seed).toEqual({ code: 'JANE-SMITH', endsAt: null, newAccountsOnly: false });
+
+    // At its cap the campaign prints nothing, and the preview says what will print instead (#435).
+    state.handlers = [];
+    on('FROM gift_letters g', [gift({ generations_remaining: 0, ...seedBound, max_total_redemptions: 2, current_redemptions: 2 })]);
+    expect((await getGiftBalance('user-1')).next).toEqual({ giftId: 'gift-1', cardState: 'unfunded' });
+
+    // Read without its cap columns, the campaign is not promised either.
+    state.handlers = [];
+    const { max_total_redemptions: _cap, current_redemptions: _count, ...unread } = seedBound;
+    on('FROM gift_letters g', [gift({ generations_remaining: 0, ...unread })]);
+    expect((await getGiftBalance('user-1')).next).toEqual({ giftId: 'gift-1', cardState: 'unfunded' });
 
     // An ended campaign funds nothing, and the card falls back to the letter's own budget.
     state.handlers = [];
