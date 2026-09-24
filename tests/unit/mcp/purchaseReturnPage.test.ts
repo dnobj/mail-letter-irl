@@ -15,7 +15,7 @@
  * start page keeps it in a same-site cookie and forwards to Stripe.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   CHATGPT_WEB_URL,
   IOS_RETURN_LINK_VERIFIED,
@@ -74,6 +74,22 @@ describe('parseCheckoutTarget', () => {
     expect(parseCheckoutTarget('https://evil.example/pay')).toBeNull();
     expect(parseCheckoutTarget('http://checkout.stripe.com/c/pay/x')).toBeNull();
     expect(parseCheckoutTarget(null)).toBeNull();
+  });
+
+  it('forwards to the custom checkout domain once it is configured, and to Stripe\'s own host still (#373)', () => {
+    const custom = 'https://pay.letterirl.com/c/pay/cs_live_abc#fid';
+    try {
+      // Unset first, whatever the developer's shell or .env.test holds.
+      vi.stubEnv('STRIPE_CHECKOUT_DOMAIN', '');
+      expect(parseCheckoutTarget(custom)).toBeNull();
+      vi.stubEnv('STRIPE_CHECKOUT_DOMAIN', 'pay.letterirl.com');
+      expect(parseCheckoutTarget(custom)).toBe(custom);
+      expect(parseCheckoutTarget(CHECKOUT)).toBe(CHECKOUT);
+      expect(parseCheckoutTarget('https://evil.example/pay')).toBeNull();
+      expect(parseCheckoutTarget('http://pay.letterirl.com/c/pay/x')).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

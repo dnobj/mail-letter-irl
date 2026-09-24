@@ -94,6 +94,8 @@ LETTER_IRL_GIFT_LANDING_BASE_URL=<the website the printed QR opens; default http
 STRIPE_PRICE_REGULAR=<price_ id>
 STRIPE_PRICE_POWER=<price_ id>
 STRIPE_CURRENCY=usd
+# At launch, in both environments: the custom Checkout host (docs/stripe-custom-domain.md, #373).
+STRIPE_CHECKOUT_DOMAIN=<bare host such as pay.letterirl.com; unset keeps checkout.stripe.com only>
 # Amounts are read from these Prices at startup - do not mirror them here (#275).
 ```
 
