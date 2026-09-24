@@ -1598,27 +1598,36 @@ saved return address. Nothing on it is in flight.
 
 ### RETENTION-01 — The first enforcing sweep (development)
 
-**Status:** Not run.
+**Status:** Run on development on 2026-09-24 at build 7e92ba0. Results by step:
+- Steps 1, 2 and 5 passed.
+- Step 3 passed for the backlog rows. No row was swept on time, so the on-time purge could not be observed.
+- Step 4 was not verified, because nothing past the window was in flight.
+
+The run's figures:
+- **Before switching:** 3 letters due (93 past the window, 90 held back). No paid or abandoned drafts were due (17 abandoned drafts held back).
+- **The 13:00 UTC sweep:** `lettersRedacted: 3`, no drafts, nothing purged, `moreWaiting: false`, no errors. The log carried counts only. The batch was not full, so there was no `retention.backlog_remaining`.
+- **Quarantine:** the three rows showed "purge after 24h" from the moment they were quarantined.
+- **Restore:** letter `d3cb6e47` showed its saved copy and "purged 23h from now". The owner confirmed the restore, and the 15:00 run logged `retention_restore.completed`. **Recent restores** then read `restored`, the letter's page no longer showed it redacted, and `/retention` counted it as due again.
 
 Run on development before `CONTENT_RETENTION_MODE=enforce` is set anywhere else (#153).
 
 **Steps:**
 
-1. [ ] Before switching: note the counts on `/retention` (letters, paid drafts and abandoned drafts due,
+1. [x] Before switching: note the counts on `/retention` (letters, paid drafts and abandoned drafts due,
    and held back).
-2. [ ] Set `CONTENT_RETENTION_MODE=enforce` on `letter-irl-maintenance-dev`. After the next daily
+2. [x] Set `CONTENT_RETENTION_MODE=enforce` on `letter-irl-maintenance-dev`. After the next daily
    `content-retention-sweep` (`/maintenance`), verify each redacted count rose by its due count from
    step 1 or by the batch size (`CONTENT_RETENTION_BATCH_SIZE`, 500 by default), whichever is smaller,
    give or take rows that came due in between. Verify the maintenance log carries counts only, and
    `retention.backlog_remaining` when a batch was full.
-3. [ ] The same day, verify on the quarantine table:
+3. [x] The same day, verify on the quarantine table:
    - a row swept on time purges when its published period ends;
    - a row swept after its period (the backlog) purges about a day after it was quarantined. That day is
      all the time there is to restore a backlog row the sweep should not have taken, so check the swept
      rows now, not after the next run.
 4. [ ] Verify letters that were still in flight (queued, held, or with an unsettled order) were not
    touched.
-5. [ ] On a quarantined letter's own page (`/letters/<id>`), verify the saved copy shows with its purge
+5. [x] On a quarantined letter's own page (`/letters/<id>`), verify the saved copy shows with its purge
    time, preview its restore and confirm it. After the next hourly run, verify under **Recent restores**
    on `/retention` that it says `restored`, and that the letter page no longer shows the content as
    redacted. The next daily sweep quarantines it again, because nothing about it changed.

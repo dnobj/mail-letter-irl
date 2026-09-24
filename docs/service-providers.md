@@ -149,7 +149,9 @@ LETTER_PROVIDER_CONFIG='{"mode":"test","verbose":true}'
 - CASS address verification
 - Postcards: 3.5x5, 4.25x6, 5x8, 6x9, 6x11
 
-**Configuration:**
+**Configuration (had it been built):** `click2mail` is not registered (`src/services/providers/index.ts`),
+so this configuration has no provider behind it, and production refuses to boot with any provider but
+`postgrid`. Kept as the evaluation record.
 ```bash
 LETTER_PROVIDER=click2mail
 LETTER_PROVIDER_API_KEY=your_api_key
@@ -368,26 +370,19 @@ describe('DummyProvider', () => {
 
 ### Integration Tests
 
+There is no worker process. A confirmed send commits a `letter_jobs` outbox row, and the job is
+submitted by `processLetterJob` right after the send, or by `processDueLetterJobs` in the hourly
+maintenance run. The PostgreSQL suites drive those functions against a disposable database, with a stub
+provider (for example `tests/integration/failedSendRefund.postgres.test.ts`):
+
 ```typescript
-// Test with real worker
-import { startLetterWorker } from '../workers/letterWorker.js';
+import { processLetterJob } from '../../src/services/letterJobService.js';
 
-// Set environment
-process.env.LETTER_PROVIDER = 'dummy';
-process.env.LETTER_PROVIDER_CONFIG = '{"delayMs":100,"failureRate":0}';
+const outcome = await processLetterJob(jobId);
+expect(outcome).toMatchObject({ claimed: true, completed: true });
 
-// Start worker
-await startLetterWorker();
-
-// Create job
-await createLetterJob(testLetter);
-
-// Wait for processing
-await new Promise(resolve => setTimeout(resolve, 500));
-
-// Verify letter was sent
-const letter = await query('SELECT * FROM letters WHERE letter_id = $1', [testLetter.letter_id]);
-expect(letter.rows[0].status).toBe('sent');
+const letter = await pool.query('SELECT status, tracking_id FROM letters WHERE letter_id = $1', [letterId]);
+expect(letter.rows[0].status).toBe('accepted');
 expect(letter.rows[0].tracking_id).toBeDefined();
 ```
 

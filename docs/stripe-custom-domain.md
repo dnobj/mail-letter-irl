@@ -25,13 +25,15 @@ The same setting adds `https://pay.letterirl.com` to the widgets' redirect list.
    - `/readyz` answers 200;
    - the boot log has no `stripe.checkout_domain_invalid`.
 3. **Connector.** Refresh the production ChatGPT connector after that redeploy. The widgets' redirect list is cached with the connector. Confirm the panel's `csp.redirectDomains` lists `https://pay.letterirl.com`. The launch's own connector refresh can be this one if it comes after the setting.
-4. **CAA check.** Run `nslookup -querytype=CAA letterirl.com`.
+4. **CAA check.** Look up the CAA records of `letterirl.com`, for example with `curl -s "https://dns.google/resolve?name=letterirl.com&type=CAA"`. Windows `nslookup` does not know the CAA type.
    - If any CAA record exists, add one allowing `letsencrypt.org` (flags `0`, tag `issue`), because Stripe's certificates come from Let's Encrypt.
-   - No CAA record at all needs nothing.
+   - No CAA record at all needs nothing. An empty `Answer` means none; that was the case on 2026-09-24.
 5. **Stripe.** In the Dashboard, in live mode, open [Custom domains](https://dashboard.stripe.com/settings/custom-domains) and choose **Add your domain**.
    - Enter `pay.letterirl.com`.
    - Leave **Switch to this domain once added** ticked. Step 2 already made the switch safe.
    - Stripe then shows the two DNS records.
+
+   Steps 4 to 7 can run before launch, so the certificate is ready. Then **untick** the switch, because production does not accept the new host until steps 1 to 3 are done. Switch to the domain on the same page afterwards.
 6. **DNS at DreamHost**, which hosts letterirl.com's DNS. Add:
 
    | Type | Name | Value | TTL |
