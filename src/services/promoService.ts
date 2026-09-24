@@ -20,6 +20,7 @@ import {
   ListPromoCampaignsParams,
   PromoCampaignsResult,
   PromoCampaignStatus,
+  PromoRefusalCode,
   CreditLedgerEntry,
 } from './types.js';
 import { addCreditsToLedger } from './creditLedgerService.js';
@@ -29,7 +30,38 @@ import { normalizeEmail } from './giftCodes.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
 
 const SEED_EMAIL_INDEX = 'idx_promo_redemptions_campaign_email';
-const SEED_EMAIL_ALREADY_USED = 'This code has already been redeemed with this email address.';
+const SEED_EMAIL_ALREADY_USED = 'This gift code has already been claimed with this email address.';
+
+/**
+ * A seed campaign's code is a gift code (docs/gift-letters.md): it is printed
+ * on a gift letter's card and grants a gift letter. Its refusals therefore say
+ * "gift code", as a chain code's do, and never "promo code" (#432). The cap's
+ * sentence follows the claim page's ("This code has been claimed as many times
+ * as it allows."), naming the gift code.
+ */
+const SEED_REFUSALS: Partial<Record<PromoRefusalCode, string>> = {
+  inactive: 'This gift code is no longer valid.',
+  not_started: "This gift code isn't active yet.",
+  expired: 'This gift code has expired.',
+  limit_reached: 'This gift code has been claimed as many times as it allows.',
+  already_redeemed: 'You have already claimed this gift code.',
+  new_users_only: 'This gift code is for new Letter IRL customers.',
+};
+const GIFTS_UNAVAILABLE = "Gift codes can't be claimed right now. Please try again later.";
+/** #420: an ordinary campaign that grants no letters has nothing to give. */
+const NO_LETTERS = "This code doesn't include any letters.";
+
+export function isSeedCampaign(campaign: PromoCampaign | undefined): boolean {
+  return campaign?.gift_generations_remaining !== null && campaign?.gift_generations_remaining !== undefined;
+}
+
+/** A refusal as the customer reads it: a seed campaign's in gift-code words. */
+export function refusalText(validation: ValidatePromoResult): string | undefined {
+  if (isSeedCampaign(validation.campaign) && validation.reasonCode) {
+    return SEED_REFUSALS[validation.reasonCode] ?? validation.reason;
+  }
+  return validation.reason;
+}
 
 /**
  * Create a new promo campaign
@@ -185,21 +217,21 @@ export async function validatePromoCodePublic(
   const campaign = await getCampaignByCode(normalizedCode);
 
   if (!campaign) {
-    return { valid: false, reason: 'Promo code not found' };
+    return { valid: false, reason: 'Promo code not found', reasonCode: 'not_found' };
   }
 
   // Check campaign status
   if (campaign.status !== 'active') {
-    return { valid: false, reason: 'Promo code is not active', campaign };
+    return { valid: false, reason: 'Promo code is not active', reasonCode: 'inactive', campaign };
   }
 
   // Check campaign validity window
   const now = new Date();
   if (campaign.starts_at > now) {
-    return { valid: false, reason: 'Promo code is not yet active', campaign };
+    return { valid: false, reason: 'Promo code is not yet active', reasonCode: 'not_started', campaign };
   }
   if (campaign.ends_at && campaign.ends_at < now) {
-    return { valid: false, reason: 'Promo code has expired', campaign };
+    return { valid: false, reason: 'Promo code has expired', reasonCode: 'expired', campaign };
   }
 
   // Check max total redemptions (global limit)
@@ -207,7 +239,7 @@ export async function validatePromoCodePublic(
     campaign.max_total_redemptions &&
     campaign.current_redemptions >= campaign.max_total_redemptions
   ) {
-    return { valid: false, reason: 'Promo code redemption limit reached', campaign };
+    return { valid: false, reason: 'Promo code redemption limit reached', reasonCode: 'limit_reached', campaign };
   }
 
   // Code is valid for preview access
@@ -227,21 +259,21 @@ export async function validatePromoCode(
   const campaign = await getCampaignByCode(normalizedCode);
 
   if (!campaign) {
-    return { valid: false, reason: 'Promo code not found' };
+    return { valid: false, reason: 'Promo code not found', reasonCode: 'not_found' };
   }
 
   // Check campaign status
   if (campaign.status !== 'active') {
-    return { valid: false, reason: 'Promo code is not active', campaign };
+    return { valid: false, reason: 'Promo code is not active', reasonCode: 'inactive', campaign };
   }
 
   // Check campaign validity window
   const now = new Date();
   if (campaign.starts_at > now) {
-    return { valid: false, reason: 'Promo code is not yet active', campaign };
+    return { valid: false, reason: 'Promo code is not yet active', reasonCode: 'not_started', campaign };
   }
   if (campaign.ends_at && campaign.ends_at < now) {
-    return { valid: false, reason: 'Promo code has expired', campaign };
+    return { valid: false, reason: 'Promo code has expired', reasonCode: 'expired', campaign };
   }
 
   // Check max total redemptions
@@ -249,7 +281,7 @@ export async function validatePromoCode(
     campaign.max_total_redemptions &&
     campaign.current_redemptions >= campaign.max_total_redemptions
   ) {
-    return { valid: false, reason: 'Promo code redemption limit reached', campaign };
+    return { valid: false, reason: 'Promo code redemption limit reached', reasonCode: 'limit_reached', campaign };
   }
 
   // Check if user already redeemed this code
@@ -259,7 +291,7 @@ export async function validatePromoCode(
   );
 
   if (redemptionCheck.rows.length >= campaign.max_per_user) {
-    return { valid: false, reason: 'You have already redeemed this promo code', campaign };
+    return { valid: false, reason: 'You have already redeemed this promo code', reasonCode: 'already_redeemed', campaign };
   }
 
   // Check if requires new user
@@ -272,7 +304,7 @@ export async function validatePromoCode(
         [userId]
       );
       if (parseInt(txCheck.rows[0].count, 10) > 0) {
-        return { valid: false, reason: 'This promo code is for new users only', campaign };
+        return { valid: false, reason: 'This promo code is for new users only', reasonCode: 'new_users_only', campaign };
       }
     }
   }
@@ -302,7 +334,7 @@ export async function redeemPromoCode(
   if (!validation.valid) {
     return {
       success: false,
-      error: validation.reason,
+      error: refusalText(validation),
     };
   }
 
@@ -313,10 +345,15 @@ export async function redeemPromoCode(
   // where identity bounds cost: one claim per person, where a person is their
   // email with +tags and Gmail dots removed. Everything about an ordinary
   // campaign is unchanged below.
-  const isSeed =
-    campaign.gift_generations_remaining !== null && campaign.gift_generations_remaining !== undefined;
+  const isSeed = isSeedCampaign(campaign);
   if (isSeed && !isGiftLettersEnabled()) {
-    return { success: false, error: 'This code is not available right now.' };
+    return { success: false, error: GIFTS_UNAVAILABLE };
+  }
+  // Before this refusal, the ledger insert below raised 23514 for such a
+  // campaign (credit_ledger.initial_amount > 0) and the customer got a
+  // database error. 034 ended the three seeded ones; this answers any other.
+  if (!isSeed && campaign.credits_amount <= 0) {
+    return { success: false, error: NO_LETTERS };
   }
   const emailNormalized = isSeed ? normalizeEmail(email) : null;
   if (isSeed && emailNormalized) {
@@ -365,7 +402,7 @@ export async function redeemPromoCode(
         // Don't throw - return error result so transaction can rollback cleanly
         return {
           success: false,
-          error: 'Promo code redemption limit reached',
+          error: isSeed ? SEED_REFUSALS.limit_reached : 'Promo code redemption limit reached',
         };
       }
 
