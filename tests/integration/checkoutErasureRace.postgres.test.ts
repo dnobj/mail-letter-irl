@@ -7,19 +7,21 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
 /**
  * A checkout that meets an account erasure (#449), against real PostgreSQL.
  *
- * The erasure holds the account row FOR UPDATE while it scrubs and tombstones
- * the account. A checkout that got past every earlier check reaches its order
- * INSERT, whose foreign key needs a KEY SHARE lock on that row, so it waits.
- * Before #449 the insert then went through on the tombstone and the checkout
- * returned a live Stripe session; a paid pack granted letters to an account
- * nobody can sign in to. Now the account is read again after the insert, in
- * the same transaction, and the rollback leaves no order and no session.
+ * The erasure worker locks the account row FOR UPDATE, reads its gate, then
+ * scrubs and tombstones the account. A checkout that got past every earlier
+ * check reaches its order INSERT, whose foreign key needs a KEY SHARE lock on
+ * that row, so it waits. Before #449 the insert then went through on the
+ * tombstone and the checkout returned a live Stripe session; a paid pack
+ * granted letters to an account nobody can sign in to. Now the account is read
+ * again after the insert, in the same transaction, and the rollback leaves no
+ * order and no session.
  *
  * Only a real database can show this: the wait on the row lock, and READ
  * COMMITTED handing the statement after it a snapshot that includes the
- * erasure. The first case drives the erasure worker itself, so a change to the
- * worker's lock that stopped it conflicting with the insert fails here. Stripe
- * and the price catalog are the doubles.
+ * erasure. The first case pauses the worker itself just after its lock on the
+ * account row, before its gate and its tombstone, and starts the checkout
+ * there: were that lock weakened or dropped, the checkout would not wait, and
+ * the case fails. Stripe and the price catalog are the doubles.
  */
 
 const stripeDouble = vi.hoisted(() => ({ sessions: [] as string[] }));
@@ -93,6 +95,20 @@ async function settleAll(steps: Array<() => Promise<unknown>>): Promise<void> {
   }
 }
 
+function describeOutcome(outcome: unknown): string {
+  if (outcome instanceof Error) return outcome.message;
+  return typeof outcome === 'string' ? outcome : JSON.stringify(outcome);
+}
+
+/**
+ * An erasure run inside the holder's transaction: `ready` resolves once it
+ * holds the account row, `finish` lets it complete before the commit.
+ */
+interface Erasure {
+  ready: Promise<void>;
+  finish: () => Promise<void>;
+}
+
 describePostgres('a checkout that meets an account erasure (#449)', () => {
   let adminPool: pg.Pool;
   let pool: pg.Pool;
@@ -149,32 +165,79 @@ describePostgres('a checkout that meets an account erasure (#449)', () => {
     return draftId;
   }
 
-  /** An erasure's transaction, begun and left open while the checkout runs. */
-  async function openErasure(): Promise<{ holder: pg.PoolClient; pid: number }> {
-    const holder = await pool.connect();
-    await holder.query('BEGIN');
-    const pid = Number((await holder.query('SELECT pg_backend_pid() AS pid')).rows[0].pid);
-    return { holder, pid };
+  /**
+   * The erasure worker, paused just after it locks the account row: its gate
+   * and its tombstone run only in `finish`, while the checkout waits. The
+   * pause is a wrapper around the transaction's client, so the worker runs
+   * unchanged.
+   */
+  function workerPausedAtAccountLock(userId: string): (holder: pg.PoolClient) => Erasure {
+    return holder => {
+      let lockTaken!: () => void;
+      let resume!: () => void;
+      const reachedLock = new Promise<'locked'>(resolve => {
+        lockTaken = () => resolve('locked');
+      });
+      const resumed = new Promise<void>(resolve => {
+        resume = resolve;
+      });
+      let paused = false;
+      const client = {
+        async query(text: string, values?: unknown[]) {
+          const result = await holder.query(text, values);
+          if (!paused && /FROM users\b[\s\S]*FOR UPDATE/.test(text)) {
+            paused = true;
+            lockTaken();
+            await resumed;
+          }
+          return result;
+        }
+      };
+      const outcome = erasure.eraseAccountWithClient(client, userId);
+      // Never rejects, so a failure before the lock reaches `ready` rather than
+      // surfacing later as an unhandled rejection.
+      const endedEarly = outcome.then(
+        result => ({ endedEarly: result as unknown }),
+        (error: unknown) => ({ endedEarly: error })
+      );
+      const ready = (async () => {
+        const first = await Promise.race([reachedLock, endedEarly]);
+        if (first !== 'locked') {
+          throw new Error(`the erasure ended before it locked the account row: ${describeOutcome(first.endedEarly)}`);
+        }
+      })();
+      return {
+        ready,
+        finish: async () => {
+          resume();
+          expect(await outcome).toMatchObject({ outcome: 'erased' });
+        }
+      };
+    };
   }
 
   /**
    * The account row as a hand-written erasure leaves it: held FOR UPDATE, with
-   * the tombstone the 035 CHECK requires. For the Pay & Send case, where the
-   * real worker would deadlock with the checkout over the draft instead.
+   * the tombstone the 035 CHECK requires, written before the checkout starts.
    */
-  async function tombstoneByHand(holder: pg.PoolClient, userId: string): Promise<void> {
-    await holder.query('SELECT user_id FROM users WHERE user_id = $1 FOR UPDATE', [userId]);
-    await holder.query(
-      `UPDATE users
-          SET erased_at = NOW(),
-              email = $2,
-              return_address = NULL,
-              return_address_validated_at = NULL,
-              sends_blocked_at = NOW(),
-              sends_blocked_reason = 'account_erased'
-        WHERE user_id = $1`,
-      [userId, `erased-${randomUUID()}@erased.invalid`]
-    );
+  function tombstoneByHand(userId: string): (holder: pg.PoolClient) => Erasure {
+    return holder => ({
+      ready: (async () => {
+        await holder.query('SELECT user_id FROM users WHERE user_id = $1 FOR UPDATE', [userId]);
+        await holder.query(
+          `UPDATE users
+              SET erased_at = NOW(),
+                  email = $2,
+                  return_address = NULL,
+                  return_address_validated_at = NULL,
+                  sends_blocked_at = NOW(),
+                  sends_blocked_reason = 'account_erased'
+            WHERE user_id = $1`,
+          [userId, `erased-${randomUUID()}@erased.invalid`]
+        );
+      })(),
+      finish: async () => undefined
+    });
   }
 
   /** Resolves once some backend waits on the erasure's lock: the checkout is at its insert. */
@@ -191,33 +254,45 @@ describePostgres('a checkout that meets an account erasure (#449)', () => {
   }
 
   /**
-   * Start the checkout, wait until it is blocked on the erasure, commit the
-   * erasure, and return how the checkout ended. A checkout that ends before it
-   * reaches the lock is reported with its own outcome, not as a timeout, and
-   * the erasure is always rolled back unless it committed, so no failure leaves
-   * the account row locked for the rest of the suite.
+   * Open the erasure's transaction and bring it to hold the account row, start
+   * the checkout, wait until the checkout is blocked on that row, let the
+   * erasure finish and commit, and return how the checkout ended.
+   *
+   * Everything that touches the erasure's transaction runs inside this one
+   * try: whatever fails, it is rolled back and its connection destroyed, so no
+   * failure leaves the account row locked for the rest of the suite. A checkout
+   * that ends before reaching its insert is reported with its own outcome, not
+   * as a timeout.
    */
-  async function checkoutAcrossCommit(
-    erasureTx: { holder: pg.PoolClient; pid: number },
+  async function checkoutAcrossErasure(
+    erase: (holder: pg.PoolClient) => Erasure,
     start: () => Promise<unknown>
   ): Promise<unknown> {
+    const holder = await pool.connect();
     let committed = false;
     try {
+      await holder.query('BEGIN');
+      const pid = Number((await holder.query('SELECT pg_backend_pid() AS pid')).rows[0].pid);
+      const erasing = erase(holder);
+      await erasing.ready;
+
       const checkout = start().then(() => 'opened' as const, (error: unknown) => error);
-      const blocked = waitUntilBlockedBy(erasureTx.pid);
+      const blocked = waitUntilBlockedBy(pid);
       // When the checkout ends first, the abandoned wait still times out later;
       // that rejection is expected and must not surface as an unhandled one.
       blocked.catch(() => undefined);
       const first = await Promise.race([blocked, checkout.then(outcome => ({ endedEarly: outcome }))]);
       if (first !== 'blocked') {
-        throw new Error(`the checkout ended before it reached its insert: ${String((first.endedEarly as Error)?.message ?? first.endedEarly)}`);
+        throw new Error(`the checkout ended before it reached its insert: ${describeOutcome(first.endedEarly)}`);
       }
-      await erasureTx.holder.query('COMMIT');
+
+      await erasing.finish();
+      await holder.query('COMMIT');
       committed = true;
       return await checkout;
     } finally {
-      if (!committed) await erasureTx.holder.query('ROLLBACK').catch(() => undefined);
-      erasureTx.holder.release(!committed);
+      if (!committed) await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release(!committed);
     }
   }
 
@@ -226,30 +301,27 @@ describePostgres('a checkout that meets an account erasure (#449)', () => {
     return result.rows[0].n;
   }
 
-  it('refuses a pack checkout that waited out the erasure worker, leaving no order and no session', async () => {
+  it('refuses a pack checkout that waited on the erasure worker lock, leaving no order and no session', async () => {
     const userId = await seedUser();
     const sessionsBefore = stripeDouble.sessions.length;
-    const erasureTx = await openErasure();
-    // The worker itself, in the transaction: its lock on the account row is
-    // what the checkout's insert has to wait for.
-    await expect(erasure.eraseAccountWithClient(erasureTx.holder, userId)).resolves.toMatchObject({ outcome: 'erased' });
 
-    const outcome = await checkoutAcrossCommit(erasureTx, () =>
+    const outcome = await checkoutAcrossErasure(workerPausedAtAccountLock(userId), () =>
       commerce.createPackCheckout({ userId, userEmail: 'person@test.invalid', productId: 'credit-pack-4' })
     );
 
     expect(outcome).toMatchObject({ code: 'ACCOUNT_SENDS_BLOCKED' });
     expect(await ordersFor(userId)).toBe(0);
     expect(stripeDouble.sessions.length).toBe(sessionsBefore);
+    // The worker's own tombstone is what the checkout refused.
+    const account = await pool.query<{ erased_at: Date | null }>('SELECT erased_at FROM users WHERE user_id = $1', [userId]);
+    expect(account.rows[0].erased_at).not.toBeNull();
   }, 60_000);
 
   it('refuses a pack checkout that waited out a hand-written tombstone', async () => {
     const userId = await seedUser();
     const sessionsBefore = stripeDouble.sessions.length;
-    const erasureTx = await openErasure();
-    await tombstoneByHand(erasureTx.holder, userId);
 
-    const outcome = await checkoutAcrossCommit(erasureTx, () =>
+    const outcome = await checkoutAcrossErasure(tombstoneByHand(userId), () =>
       commerce.createPackCheckout({ userId, userEmail: 'person@test.invalid', productId: 'credit-pack-4' })
     );
 
@@ -260,17 +332,18 @@ describePostgres('a checkout that meets an account erasure (#449)', () => {
 
   it('makes a Pay & Send checkout read the account after its insert, whatever its first check saw', async () => {
     // The first block check reads the account before the tombstone commits and
-    // passes. The real worker would delete this draft and deadlock with the
-    // checkout, which PostgreSQL resolves safely; this proves the read after
-    // the insert, which is the only refusal when a checkout waits across the
-    // commit somewhere of its own.
+    // passes. The real worker deletes this draft: a checkout that reaches the
+    // draft after it ends with DRAFT_NOT_FOUND, and one that holds the draft
+    // first deadlocks with it, which PostgreSQL resolves safely. A
+    // hand-written tombstone leaves the draft alone, so this case isolates the
+    // read after the insert.
     const userId = await seedUser();
     const draftId = await seedDraft(userId);
     const sessionsBefore = stripeDouble.sessions.length;
-    const erasureTx = await openErasure();
-    await tombstoneByHand(erasureTx.holder, userId);
 
-    const outcome = await checkoutAcrossCommit(erasureTx, () => commerce.createJitCheckout({ userId, draftId }));
+    const outcome = await checkoutAcrossErasure(tombstoneByHand(userId), () =>
+      commerce.createJitCheckout({ userId, draftId })
+    );
 
     expect(outcome).toMatchObject({ code: 'ACCOUNT_SENDS_BLOCKED' });
     expect(await ordersFor(userId)).toBe(0);

@@ -332,9 +332,10 @@ export type ErasureOutcome =
  *   - a checkout's order insert waits for the account row this holds FOR
  *     UPDATE, and the checkout reads the account again after it
  *     (commerceService's assertAccountMayPurchase), so a checkout caught in
- *     this window is refused and opens no order (#449). That depends on this
- *     lock being FOR UPDATE: FOR NO KEY UPDATE, or a bare UPDATE, does not
- *     conflict with the insert's KEY SHARE, and the window would reopen;
+ *     this window is refused and opens no order (#449). That depends on the
+ *     row being locked FOR UPDATE BEFORE the gate is read: with a weaker lock
+ *     there (FOR NO KEY UPDATE, or none), a checkout could insert and commit
+ *     between the gate and the tombstone, and the window would reopen;
  *   - one that already holds its draft when this runs can deadlock with it
  *     instead, because the send paths take the draft first and no order
  *     serves both. PostgreSQL aborts one side. If it is this one, the worker
