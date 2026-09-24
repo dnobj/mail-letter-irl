@@ -1544,16 +1544,82 @@ caught it when the panel shipped.
 **Pass criteria:** Promo status follows the documented machine with version checks; image recovery is
 reachable and audited.
 
+### ERASE-01 — Account erasure (development)
+
+**Status:** Not run.
+
+**Preconditions:** A disposable development test account that has signed in on the website and in the
+(DEV) ChatGPT connector, has sent a letter that is now `delivered` or `failed`, and holds a draft and a
+saved return address. Nothing on it is in flight.
+
+**Steps:**
+
+1. [ ] Open the account in the panel. Under **Erase account**, preview. Verify that "Still in flight" says
+   nothing, that the counts match the account, and that no email appears anywhere in the preview.
+2. [ ] Start a Pay & Send checkout on the account and leave it open. Preview again: verify it names one
+   order not settled and that confirming is refused. Let the checkout expire (or cancel it), then preview again.
+3. [ ] Confirm with the development phrase and a reason with no personal details. Verify the account page
+   says the erasure is queued, and that `/audit` shows `account.erase` with counts only.
+4. [ ] After the next hourly maintenance run (the `account-erasures` task on `/maintenance`), verify on
+   the account page:
+   - erased, with counts;
+   - the email shows as `e***@erased.invalid`;
+   - the letters keep their statuses.
+5. [ ] Call any tool from the (DEV) connector: verify the erased-account sentence, and that nothing ran.
+   Reload the website dashboard: verify the same sentence (needs website #36 on development).
+6. [ ] Delete the Auth0 user in the development tenant. Sign in again with the same method: verify the
+   same sentence.
+7. [ ] Preview an erasure of the account again: verify it is refused.
+
+**Pass criteria:**
+- Nothing is queued while money or mail is moving.
+- The erased account keeps its money records and loses its content and identity.
+- Every sign-in path refuses it with one sentence.
+
 ### ADMIN-OPS-01 — Retention report and quarantine listing
 
 **Steps:**
 
 1. [ ] Open `/retention`; verify the counts (redacted letters and drafts, quarantine rows, purge due) and
    the report of what the next enforcing run would touch, matching `npm run maintenance` in report mode.
-2. [ ] Verify the quarantine table shows source table, row id and dates only: no content anywhere on the
-   page, and no restore control.
+2. [ ] Verify the quarantine table shows source table, row id, account and dates only, with a restore
+   control per row and no content anywhere on the page.
+3. [ ] Search the quarantine by a letter id, then by the account it belongs to: verify each finds that
+   letter's copy, and a search for an unknown id finds none. On the account page, verify the link to its
+   quarantined copies opens the same search.
 
-**Pass criteria:** Report mode only, metadata only.
+**Pass criteria:** Metadata only; any copy can be found, however old; a restore is a queued command
+(`RETENTION-01`).
+
+### RETENTION-01 — The first enforcing sweep (development)
+
+**Status:** Not run.
+
+Run on development before `CONTENT_RETENTION_MODE=enforce` is set anywhere else (#153).
+
+**Steps:**
+
+1. [ ] Before switching: note the counts on `/retention` (letters, paid drafts and abandoned drafts due,
+   and held back).
+2. [ ] Set `CONTENT_RETENTION_MODE=enforce` on `letter-irl-maintenance-dev`. After the next daily
+   `content-retention-sweep` (`/maintenance`), verify each redacted count rose by its due count from
+   step 1 or by the batch size (`CONTENT_RETENTION_BATCH_SIZE`, 500 by default), whichever is smaller,
+   give or take rows that came due in between. Verify the maintenance log carries counts only, and
+   `retention.backlog_remaining` when a batch was full.
+3. [ ] The same day, verify on the quarantine table:
+   - a row swept on time purges when its published period ends;
+   - a row swept after its period (the backlog) purges about a day after it was quarantined. That day is
+     all the time there is to restore a backlog row the sweep should not have taken, so check the swept
+     rows now, not after the next run.
+4. [ ] Verify letters that were still in flight (queued, held, or with an unsettled order) were not
+   touched.
+5. [ ] On a quarantined letter's own page (`/letters/<id>`), verify the saved copy shows with its purge
+   time, preview its restore and confirm it. After the next hourly run, verify under **Recent restores**
+   on `/retention` that it says `restored`, and that the letter page no longer shows the content as
+   redacted. The next daily sweep quarantines it again, because nothing about it changed.
+
+**Pass criteria:** The sweep cleared what the report said it would and nothing in flight, and a restore
+put a copy back.
 
 ### ADMIN-OPS-02 — Tier override
 
@@ -1734,6 +1800,47 @@ remedy when a pair does not match, are in
        ChatGPT the refused `get_profile` failed the link as
        `OAUTH_OWNER_PROFILE_ID_MISSING`, so the sentence never reached the
        person (#429). The Action was put back and checked live.
+
+### LINK-02 — Every launch sign-in method yields a confirmed address
+
+**Status:** Not run.
+
+The owner kept the refusal of a sign-in that carries no confirmed address (#429, 2026-09-23). In
+ChatGPT that refusal surfaces only as "We couldn't connect this account", so a launch sign-in method
+must always vouch for the address. A method that fails here comes off the launch list: disable its
+connection for the Letter IRL applications before launch. The rule does not change.
+
+**Launch methods:** Google, GitHub, Microsoft (personal accounts only, per
+[auth0-tenant-configuration.md](auth0-tenant-configuration.md)), and email with a password. Apple is
+not in the launch (#437).
+
+**Preconditions:**
+- A test identity for each method that has never signed in to the tenant, so each run is a first
+  sign-in.
+- The GitHub connection requests the account's email address.
+
+Run on development, then on production before launch. The sign-ins are the owner's.
+
+**Steps, for each method:**
+
+1. [ ] Sign in to the website with the method. For email with a password, sign up and confirm the
+   address from the email first; LINK-01 step 5 covers the refusal before confirming.
+2. [ ] The dashboard shows a new account. The API log shows `identity.user_created`, and no
+   `auth.account_missing_no_verified_email`.
+3. [ ] In Auth0 → User Management → Users, the user's email shows as verified (Raw JSON:
+   `"email_verified": true`).
+4. [ ] In ChatGPT, connect the environment's Letter IRL connector with the same method: the link
+   succeeds and `get_account_balance` answers.
+
+| Method | Development | Production |
+|--------|-------------|------------|
+| Google | | |
+| GitHub | | |
+| Microsoft | | |
+| Email and password | | |
+
+**Pass criteria:** every launch method gives `email_verified: true` on a first sign-in and opens an
+account in both environments. Any method that does not is disabled before launch and recorded on #158.
 
 ---
 

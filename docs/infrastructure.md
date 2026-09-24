@@ -28,7 +28,7 @@ Railway project ID: `b31314d8-fd09-4582-9c0d-52a36f879228`
 - Development environment ID: `37c9dbe4-696f-422c-866e-470010ca8949`
 - API service: `letter-irl-api`
 - Website service: `mail-letter-irl-website`
-- Maintenance service: `letter-irl-maintenance`
+- Maintenance services: `letter-irl-maintenance` (production) and `letter-irl-maintenance-dev` (development), hourly cron
 - Admin panel services: `letter-irl-admin` (development) and `letter-irl-admin-prod` (production), both tailnet-only
 - Private temporary-image bucket: `letter-irl-images`
 
@@ -62,12 +62,16 @@ The stable provider `Idempotency-Key` is the Letter IRL `letter_id`. A process c
 An hourly, short-lived Railway cron process runs `npm run maintenance` (`src/cli/runMaintenance.ts`).
 In order, it:
 
+- puts back quarantined content the admin panel queued for restore (`retention-restores`, #153),
+  first, so a copy queued for restore is never purged by the same run;
 - runs the content retention pass once a day. By default this only **reports** what the letter and
   draft sweep would clear (`content-retention-report`); it clears content only when
-  `CONTENT_RETENTION_MODE=enforce`, which stays unset until the enforce-path defects in #153 are
-  fixed. `CONTENT_RETENTION_ENABLED=false` skips the pass entirely;
+  `CONTENT_RETENTION_MODE=enforce`, which is switched on in development first, then production
+  (#153). `CONTENT_RETENTION_ENABLED=false` skips the pass entirely;
 - deletes the link to a user's uploaded image 24 hours after their last upload (`recent-uploads-sweep`, #282);
 - deletes feature requests 12 months after they were submitted (`feature-requests-sweep`, #393);
+- carries out the account erasures queued from the admin panel (`account-erasures`, #289,
+  [account-erasure.md](account-erasure.md));
 - retries due or stale outbox rows;
 - reconciles commerce: fulfils paid Pay & Send orders that were not fulfilled, settles pending checkouts
   against Stripe (paid or expired), cancels orphaned checkouts, and retries `refund_pending` refunds;

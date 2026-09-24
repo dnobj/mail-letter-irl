@@ -321,3 +321,181 @@ describe("image reservation command", () => {
     });
   });
 });
+
+describe("account.erase (#289)", () => {
+  const CLEAR = {
+    ordersInFlight: 0,
+    lettersInFlight: 0,
+    jobsInFlight: 0,
+    disputesOpen: 0,
+    refundsInFlight: 0,
+    imagesInFlight: 0,
+  };
+  const SCOPE = {
+    letters: 3,
+    draftsToDelete: 1,
+    draftsToScrub: 1,
+    savedCopies: 0,
+    accessTokens: 1,
+    featureRequests: 0,
+    unredeemedGiftCodes: 1,
+    seedCodeEmails: 1,
+    failedJobsToCancel: 0,
+    ordersKept: 2,
+    unusedGiftLetters: 2,
+    openAlerts: 0,
+  };
+  const COMMAND_ID = "22222222-2222-4222-8222-222222222222";
+
+  function erasure(overrides: Record<string, unknown> = {}) {
+    const seams = {
+      readAccountErased: vi.fn().mockResolvedValue(false),
+      readLatestErasure: vi.fn().mockResolvedValue(null),
+      readErasureBlockers: vi.fn().mockResolvedValue(CLEAR),
+      readErasureScope: vi.fn().mockResolvedValue(SCOPE),
+      enqueueAccountErasure: vi.fn().mockResolvedValue("op-1"),
+      ...overrides,
+    };
+    return { seams, command: createAccountCommands(seams as never).erase };
+  }
+
+  it("previews counts only, and on confirmation queues the account and nothing else", async () => {
+    const { seams, command } = erasure();
+    const preview = await command.preview(scripted(), "auth0|u1", {});
+    expect(preview.summary).toEqual({ blocked: false, blockers: CLEAR, scope: SCOPE, creditsForfeited: 4 });
+    expect(preview.expectedVersion).toBe("2026-09-06T10:00:00.000Z");
+    expect(command.verb({})).toBe("ERASE");
+    expect(command.transactional).toBe(true);
+
+    const client = { query: vi.fn() };
+    const result = await command.execute(execution(client), "auth0|u1", {}, preview);
+    expect(result).toEqual({ operationId: "op-1", status: "queued" });
+    expect(seams.enqueueAccountErasure).toHaveBeenCalledWith(client, {
+      commandId: COMMAND_ID,
+      environment: "development",
+      userId: "auth0|u1",
+    });
+    // The command itself writes nothing but the queue row.
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
+  it("shows what holds it back, and refuses to queue while anything does", async () => {
+    const { seams, command } = erasure({
+      readErasureBlockers: vi.fn().mockResolvedValue({ ...CLEAR, ordersInFlight: 2, disputesOpen: 1 }),
+    });
+    const preview = await command.preview(scripted(), "auth0|u1", {});
+    expect(preview.summary).toMatchObject({ blocked: true, blockers: { ordersInFlight: 2, disputesOpen: 1 } });
+    expect(preview.display).toContainEqual(["Still in flight", "2 orders not settled; 1 open disputes"]);
+    expect(preview.warnings[0]).toMatch(/will refuse/);
+
+    await expect(command.execute(execution({ query: vi.fn() }), "auth0|u1", {}, preview)).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+    expect(seams.enqueueAccountErasure).not.toHaveBeenCalled();
+  });
+
+  it("names every kind of blocker it counts", async () => {
+    const { command } = erasure({
+      readErasureBlockers: vi.fn().mockResolvedValue({
+        ordersInFlight: 1,
+        lettersInFlight: 1,
+        jobsInFlight: 1,
+        disputesOpen: 1,
+        refundsInFlight: 1,
+        imagesInFlight: 1,
+      }),
+    });
+    const preview = await command.preview(scripted(), "auth0|u1", {});
+    expect(preview.display).toContainEqual([
+      "Still in flight",
+      "1 orders not settled; 1 letters on their way; 1 mail jobs that could still send; 1 open disputes; " +
+        "1 refunds in progress; 1 image generations in flight",
+    ]);
+  });
+
+  it("refuses an account that is already erased or already queued, and allows another try after a refusal", async () => {
+    await expect(
+      erasure({ readAccountErased: vi.fn().mockResolvedValue(true) }).command.preview(scripted(), "auth0|u1", {}),
+    ).rejects.toMatchObject({ code: "ADMIN_INVALID_STATE" });
+    for (const status of ["pending", "processing"]) {
+      await expect(
+        erasure({ readLatestErasure: vi.fn().mockResolvedValue({ status }) }).command.preview(scripted(), "auth0|u1", {}),
+        status,
+      ).rejects.toMatchObject({ code: "ADMIN_INVALID_STATE" });
+    }
+    // A refused or failed erasure, or one on an account reopened by hand since
+    // (its email is real again, so it no longer reads as erased).
+    for (const status of ["failed", "succeeded"]) {
+      const preview = await erasure({ readLatestErasure: vi.fn().mockResolvedValue({ status }) }).command.preview(
+        scripted(),
+        "auth0|u1",
+        {},
+      );
+      expect(preview.summary.blocked, status).toBe(false);
+    }
+  });
+
+  it("refuses an account that does not exist", async () => {
+    await expect(erasure().command.preview(scripted({ account: [] }), "auth0|none", {})).rejects.toMatchObject({
+      code: "ADMIN_NOT_FOUND",
+    });
+  });
+
+  it("warns about a forfeit only when there is something to forfeit", async () => {
+    const forfeit = /forfeited/;
+    const withBalance = await erasure().command.preview(scripted(), "auth0|u1", {});
+    expect(withBalance.warnings.some((warning) => forfeit.test(warning))).toBe(true);
+
+    const onlyGifts = await erasure().command.preview(scripted({ account: [{ ...ACCOUNT_ROW, credits: 0 }] }), "auth0|u1", {});
+    expect(onlyGifts.warnings.some((warning) => forfeit.test(warning))).toBe(true);
+
+    const nothing = await erasure({ readErasureScope: vi.fn().mockResolvedValue({ ...SCOPE, unusedGiftLetters: 0 }) }).command.preview(
+      scripted({ account: [{ ...ACCOUNT_ROW, credits: 0 }] }),
+      "auth0|u1",
+      {},
+    );
+    expect(nothing.warnings.some((warning) => forfeit.test(warning))).toBe(false);
+  });
+
+  it("warns about open alerts on the account's orders only when there are some", async () => {
+    const quiet = await erasure().command.preview(scripted(), "auth0|u1", {});
+    expect(quiet.warnings.some((warning) => /alerts/.test(warning))).toBe(false);
+    const owed = await erasure({ readErasureScope: vi.fn().mockResolvedValue({ ...SCOPE, openAlerts: 2 }) }).command.preview(
+      scripted(),
+      "auth0|u1",
+      {},
+    );
+    expect(owed.warnings).toContainEqual(expect.stringMatching(/^2 operational alerts/));
+  });
+
+  it("always warns that it is irreversible, and what the operator does by hand afterwards", async () => {
+    const preview = await erasure().command.preview(scripted(), "auth0|u1", {});
+    expect(preview.warnings.join("\n")).toMatch(/Irreversible/);
+    expect(preview.warnings.join("\n")).toMatch(/Auth0 user/);
+    expect(preview.warnings.join("\n")).toMatch(/reason/);
+  });
+});
+
+describe("an erased account takes nothing (#446 review)", () => {
+  const erased = { readAccountErased: vi.fn().mockResolvedValue(true) };
+
+  it("refuses a balance adjustment, an image grant and an unblock", async () => {
+    const commands = createAccountCommands(erased as never);
+    await expect(commands.adjustBalance.preview(scripted(), "auth0|u1", { letters: 1, direction: "add" })).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+    await expect(commands.grantImages.preview(scripted(), "auth0|u1", { quantity: 1 })).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+    await expect(commands.unblockSends.preview(scripted(), "auth0|u1", {})).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+  });
+
+  it("still previews all three for an account that is not erased", async () => {
+    const commands = createAccountCommands({ readAccountErased: vi.fn().mockResolvedValue(false) } as never);
+    await expect(commands.adjustBalance.preview(scripted(), "auth0|u1", { letters: 1, direction: "add" })).resolves.toBeTruthy();
+    await expect(commands.grantImages.preview(scripted(), "auth0|u1", { quantity: 1 })).resolves.toBeTruthy();
+    await expect(commands.unblockSends.preview(scripted(), "auth0|u1", {})).resolves.toBeTruthy();
+  });
+});

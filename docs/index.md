@@ -84,6 +84,7 @@ maintenance job.
 ## Security, Privacy and Legal
 
 - [Security and Policy](security-and-policy.md) - consent, personal data, abuse prevention, retention, payment invariants
+- [Account Erasure](account-erasure.md) - carrying out a request to delete an account, and the steps done by hand
 - [Privacy Policy](privacy-policy.md) - published privacy policy
 - [Terms of Service](terms-of-service.md) - published terms
 

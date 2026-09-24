@@ -41,6 +41,8 @@ const REQUIRED = [
   'duplicateMail.postgres.test.ts',
   'giftLetters.postgres.test.ts',
   'accountIdentity.postgres.test.ts',
+  'accountErasure.postgres.test.ts',
+  'retentionRestore.postgres.test.ts',
 ];
 
 /**

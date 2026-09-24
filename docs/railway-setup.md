@@ -11,7 +11,7 @@ Letter IRL uses one Railway project with `production` and `development` environm
 | --- | --- | --- | --- | --- |
 | `letter-irl-api` | backend repo | `master` | `dev` | HTTP API/MCP |
 | `mail-letter-irl-website` | website repo | `main` | `dev` | Next standalone server |
-| `letter-irl-maintenance` | backend repo | `master` | `dev` | hourly cron |
+| `letter-irl-maintenance` / `letter-irl-maintenance-dev` | backend repo | `master` (`letter-irl-maintenance`) | `dev` (`-dev`) | hourly cron |
 | `letter-irl-images` | Railway bucket | environment-owned | environment-owned | private S3-compatible storage |
 | `letter-irl-admin` / `letter-irl-admin-prod` | backend repo, `Dockerfile.admin` | `master` (`-prod`) | `dev` | tailnet-only admin panel, no public domain |
 
@@ -159,9 +159,9 @@ an explicit service **Redeploy** to reach the running instance (issue #213).
 Content retention variables, read only by the maintenance service (`src/cli/runMaintenance.ts`):
 
 ```env
-# Leave unset. Only the exact word `enforce` makes the sweep clear content; anything
-# else, including unset, runs the daily report. Unset in both environments until the
-# enforce-path defects in #153 are fixed.
+# Only the exact word `enforce` makes the sweep clear content; anything else,
+# including unset, runs the daily report. Set on development first, then on
+# production after RETENTION-01 passes there (#153).
 CONTENT_RETENTION_MODE=
 # On when unset. Any value other than true/1/yes/on/enabled - including a typo -
 # skips the retention pass entirely, report included.
@@ -184,7 +184,8 @@ the owner's tailnet; its setup is in [admin-panel-guide.md](admin-panel-guide.md
 
 ## Maintenance Settings
 
-Create `letter-irl-maintenance` from the backend repository in both environments:
+The maintenance service is `letter-irl-maintenance` in production and `letter-irl-maintenance-dev` in
+development (the names in Railway's service list on 2026-09-23). Create each from the backend repository:
 
 ```text
 Build command: npm run build

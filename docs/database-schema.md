@@ -48,6 +48,14 @@ User accounts with credit balances and tier information.
 | tier_calculated_at | TIMESTAMPTZ | YES | NOW() | Last tier calculation |
 | created_at | TIMESTAMPTZ | NO | NOW() | Account creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update (auto-trigger) |
+| erased_at | TIMESTAMPTZ | YES | NULL | Set by the account erasure (#289); sign-in refuses an erased account |
+
+**Erased accounts (migration 035).** An erasure keeps the row as a tombstone, because orders, ledger
+lots, disputes and refunds keep foreign keys to it ([account-erasure.md](account-erasure.md)). The
+`users_erased_tombstone` check requires an erased row to have no return address and an
+`erased-<uuid>@erased.invalid` email, so no later write can put a real address back unless the same
+statement clears `erased_at`. The admin panel reads an account as erased from that placeholder, since
+neither admin role is granted `erased_at`.
 
 **Indexes:**
 - `idx_users_email` on email
@@ -581,6 +589,16 @@ Where the content-retention sweep (migration 026) puts what it clears from `lett
 write-back, with a `purge_after` deadline. One live row per source row. The admin reader role has
 column-level `SELECT` on this table that omits `content`.
 
+The first copy wins. A sweep saves a row's content only when no copy of it exists
+(`ON CONFLICT DO NOTHING`), and a copy is never updated, so a sweep re-run over a row whose `redacted_at`
+was cleared by hand keeps the copy that holds the content. Migration 026's comment on
+`uniq_quarantine_source` says a re-redaction replaces the copy; that stopped being true with #153's
+enforce-path fixes, and applied migrations are not edited. Do not edit a redacted row's content by hand
+while its copy exists: the next sweep empties it without saving it. Restore it instead.
+
+`purge_after` is the row's own clock plus its published period, or one day after the sweep when that is
+later: a row swept after its period (the backlog an enforcing run starts with) keeps its copy for a day.
+
 ### admin_environment_marker
 
 Singleton database identity used to fail closed when a development/production selection does not match
@@ -608,15 +626,23 @@ Status and timing constraints reject inconsistent outcomes.
 
 ### admin_operations
 
-Environment-scoped provider-operation queue for a later deployed worker. Each command can enqueue one
-operation. Payload/result size, status, attempts, lock, and completion constraints support deterministic
-claim/retry behavior; a partial index covers claimable pending rows.
+Environment-scoped queue of work a command asks for and a deployed worker performs. Each command can
+enqueue one operation. Payload/result size, status, attempts, lock, and completion constraints support
+deterministic claim/retry behavior; a partial index covers claimable pending rows.
+
+Its one consumer today is the account erasure (#289): `account.erase` queues an `account.erase`
+operation with `{ userId }`. The hourly maintenance run claims operations for its own database's
+environment (the admin marker) with `SKIP LOCKED` and erases each account in one transaction as the owner
+role. It records `succeeded` with counts, or `failed` with `ACCOUNT_ERASURE_BLOCKED`,
+`ACCOUNT_ERASURE_NOT_FOUND` or, after three attempts an hour apart, `ACCOUNT_ERASURE_ERROR`
+(`src/services/accountErasureService.ts`).
 
 ### Admin grants and provisioning
 
 Migration 022 revokes `PUBLIC` privileges but creates no role or credential. The explicit provisioning
 script (`npm run admin:provision-access`) requires pre-existing, environment-specific reader/operator
-login roles, verifies migrations 021, 022 and the latest migration the grants depend on (032) plus the
+login roles, verifies migrations 021, 022 and the latest migration the grants depend on
+(`ADMIN_LATEST_REQUIRED_MIGRATION` in `src/admin/provisioning.ts`) plus the
 database marker, rejects privileged roles, and reapplies the grant set in `src/admin/provisioning.ts`:
 
 - **Reader** (`letter_irl_admin_reader_<env>`): `SELECT` on the commerce, ledger, outbox, alert, audit
@@ -677,6 +703,7 @@ Production provisioning and the first production connection remain separate owne
 | 32 | 032_error_text_minimisation.sql | Raw error text and operator reasons rewritten out of the order, event, outbox, pack-refund and maintenance columns (#394) |
 | 33 | 033_gift_letters.sql | Gift letters: gift_letters, gift_codes, the gift_letter funding type, gift drafts, seed campaigns and gift-only redemptions |
 | 34 | 034_end_zero_letter_promos.sql | Ends the ordinary promo campaigns that grant no letters (the preview-gate codes 007 seeded), which could never be redeemed (#420) |
+| 35 | 035_account_erasure.sql | Account erasure: `users.erased_at`, and the `users_erased_tombstone` CHECK that holds an erased row to its placeholder email and no return address (#289) |
 
 ---
 

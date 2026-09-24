@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const identity = vi.hoisted(() => ({ prepareAuthenticatedUser: vi.fn() }));
 vi.mock("../../../src/auth/identity.js", () => identity);
 
-import { registerLetterTools } from "../../../src/mcp/registerTools.js";
+import { ACCOUNT_UNAVAILABLE_MESSAGE, registerLetterTools } from "../../../src/mcp/registerTools.js";
 import {
   VERIFIED_EMAIL_MESSAGE,
   VerifiedEmailRequiredError
@@ -12,6 +12,7 @@ import {
   EMAIL_ALREADY_LINKED_MESSAGE,
   EmailAlreadyLinkedError
 } from "../../../src/services/userService.js";
+import { ACCOUNT_ERASED_MESSAGE, AccountErasedError } from "../../../src/auth/accountErased.js";
 
 /**
  * A caller who has no account and cannot be given one.
@@ -91,6 +92,119 @@ describe("a tool call from a caller with no account", () => {
     expect(result.content[0].text).toBe(EMAIL_ALREADY_LINKED_MESSAGE);
   });
 
+  it("answers every tool for an erased account with its sentence, runs nothing, and logs no failure (#289)", async () => {
+    const logged: string[] = [];
+    const error = vi.spyOn(console, "error").mockImplementation(value => {
+      logged.push(String(value));
+    });
+    const { handlers, appServer } = await registerWithRefusal(new AccountErasedError());
+    error.mockRestore();
+
+    for (const tool of TOOLS) {
+      const result = await handlers.get(tool.name)!({}, { _meta: {} });
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: ACCOUNT_ERASED_MESSAGE }] });
+    }
+    expect(appServer.execute).not.toHaveBeenCalled();
+    expect(logged.filter(line => line.includes("auth.user_preparation_failed"))).toEqual([]);
+  });
+
+  it("on a long-lived session, refuses an account erased after the connection opened (#446 review)", async () => {
+    vi.stubEnv("LETTER_IRL_REQUIRE_AUTH", "true");
+    vi.stubEnv("LETTER_IRL_OAUTH_SCOPES", "openid profile email mail:read mail:draft mail:send");
+    identity.prepareAuthenticatedUser.mockReset();
+    // Fine when the stream opened, erased before the call.
+    identity.prepareAuthenticatedUser
+      .mockResolvedValueOnce("person@example.com")
+      .mockRejectedValue(new AccountErasedError());
+    const handlers = new Map<string, (args: Record<string, unknown>, extra: any) => Promise<any>>();
+    const mcpServer = {
+      registerResource: vi.fn(),
+      registerTool: vi.fn((name: string, _config: unknown, handler: any) => handlers.set(name, handler))
+    };
+    const appServer = { listTools: () => TOOLS, execute: vi.fn() };
+
+    await registerLetterTools(
+      mcpServer as never,
+      appServer as never,
+      {
+        userId: "auth0|erased-mid-session",
+        claims: {},
+        token: "token",
+        authType: "jwt" as const,
+        scopes: ["mail:read", "mail:draft", "mail:send"]
+      },
+      { recheckAccountPerCall: true }
+    );
+    const result = await handlers.get("send_letter")!({}, { _meta: {} });
+
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: ACCOUNT_ERASED_MESSAGE }] });
+    expect(appServer.execute).not.toHaveBeenCalled();
+  });
+
+  it("on a long-lived session, follows each call's own answer rather than the one from connection time", async () => {
+    vi.stubEnv("LETTER_IRL_REQUIRE_AUTH", "true");
+    vi.stubEnv("LETTER_IRL_OAUTH_SCOPES", "openid profile email mail:read mail:draft mail:send");
+    identity.prepareAuthenticatedUser.mockReset();
+    // Refused when the stream opened, fine by the call.
+    identity.prepareAuthenticatedUser
+      .mockRejectedValueOnce(new VerifiedEmailRequiredError())
+      .mockResolvedValue("person@example.com");
+    const handlers = new Map<string, (args: Record<string, unknown>, extra: any) => Promise<any>>();
+    const mcpServer = {
+      registerResource: vi.fn(),
+      registerTool: vi.fn((name: string, _config: unknown, handler: any) => handlers.set(name, handler))
+    };
+    const appServer = {
+      listTools: () => TOOLS,
+      execute: vi.fn(async () => ({ result: { lettersRemaining: 0 }, meta: {} }))
+    };
+
+    await registerLetterTools(
+      mcpServer as never,
+      appServer as never,
+      { userId: "auth0|confirmed-later", claims: {}, token: "token", authType: "jwt" as const, scopes: ["mail:read", "mail:draft", "mail:send"] },
+      { recheckAccountPerCall: true }
+    );
+    await handlers.get("get_account_balance")!({}, { _meta: {} });
+
+    expect(appServer.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("on a long-lived session, does not run a call whose account cannot be read", async () => {
+    vi.stubEnv("LETTER_IRL_REQUIRE_AUTH", "true");
+    vi.stubEnv("LETTER_IRL_OAUTH_SCOPES", "openid profile email mail:read mail:draft mail:send");
+    identity.prepareAuthenticatedUser.mockReset();
+    identity.prepareAuthenticatedUser
+      .mockResolvedValueOnce("person@example.com")
+      .mockRejectedValue(new Error("connection terminated"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const handlers = new Map<string, (args: Record<string, unknown>, extra: any) => Promise<any>>();
+    const mcpServer = {
+      registerResource: vi.fn(),
+      registerTool: vi.fn((name: string, _config: unknown, handler: any) => handlers.set(name, handler))
+    };
+    const appServer = { listTools: () => TOOLS, execute: vi.fn() };
+
+    await registerLetterTools(
+      mcpServer as never,
+      appServer as never,
+      { userId: "auth0|unreadable", claims: {}, token: "token", authType: "jwt" as const, scopes: ["mail:read", "mail:draft", "mail:send"] },
+      { recheckAccountPerCall: true }
+    );
+    const result = await handlers.get("send_letter")!({}, { _meta: {} });
+    error.mockRestore();
+
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: ACCOUNT_UNAVAILABLE_MESSAGE }] });
+    expect(appServer.execute).not.toHaveBeenCalled();
+  });
+
+  it("decides the account once per server when not asked to recheck", async () => {
+    const { handlers } = await registerWithRefusal(null);
+    await handlers.get("get_account_balance")!({}, { _meta: {} });
+    await handlers.get("get_account_balance")!({}, { _meta: {} });
+    expect(identity.prepareAuthenticatedUser).toHaveBeenCalledTimes(1);
+  });
+
   it("says nothing about the caller in what it answers", async () => {
     // Both messages are fixed constants. This is what keeps them safe to hand
     // back whole, as BETA_ACCESS_MESSAGE is.
@@ -141,13 +255,19 @@ describe("a tool call from a caller with no account", () => {
     expect(appServer.execute).toHaveBeenCalledTimes(1);
   });
 
-  it("does not hold a failure that is not a refusal", async () => {
-    // A database that will not answer is not "you have no account": the tools
-    // must still run, and fail on their own terms.
+  it("does not call a database failure a refusal, and does not run the tool on an account nobody could read", async () => {
+    // A database that will not answer is not "you have no account", so the
+    // sentence says to try again. It does not run the tool either: the account
+    // could be a tombstone (#289), and the call would fail a query later anyway
+    // (#446 review).
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { handlers, appServer } = await registerWithRefusal(new Error("connection terminated"));
+    error.mockRestore();
 
-    await handlers.get("get_account_balance")!({}, { _meta: {} });
+    const result = await handlers.get("get_account_balance")!({}, { _meta: {} });
 
-    expect(appServer.execute).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: ACCOUNT_UNAVAILABLE_MESSAGE }] });
+    expect(result.content[0].text).not.toBe(VERIFIED_EMAIL_MESSAGE);
+    expect(appServer.execute).not.toHaveBeenCalled();
   });
 });

@@ -32,7 +32,9 @@ ChatGPT, and manage their account on letterirl.com.
   Google and with a password has one balance and one history. A sign-in that carries no confirmed
   address opens no account and says so, rather than opening one under an invented address
   ([account-switching-guide.md](account-switching-guide.md),
-  [auth0-tenant-configuration.md](auth0-tenant-configuration.md)).
+  [auth0-tenant-configuration.md](auth0-tenant-configuration.md)). A request to delete an account
+  is carried out as an erasure. The operator queues it from the admin panel, and maintenance removes
+  the content and identity and keeps the money records, anonymised ([account-erasure.md](account-erasure.md)).
 
 The MCP surface is 23 tools and 6 widgets ([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)).
 Tool names and schemas are treated as stable compatibility contracts. Widget template URIs are
@@ -123,8 +125,10 @@ ahead with:
 - **Apps SDK submission:** pre-submission; owner tasks in
   [app-submission/owner-checklist.md](app-submission/owner-checklist.md).
 - **Content retention enforcement:** the letter and draft content sweep runs in report mode
-  (`CONTENT_RETENTION_MODE` unset) until the enforce-path defects tracked in #153 are fixed. The
-  upload-link and feature-request sweeps are separate and always enforce.
+  (`CONTENT_RETENTION_MODE` unset). The enforce-path defects tracked in #153 are fixed, and a
+  quarantined copy can be restored from the admin panel; switching the mode on, development first
+  (`RETENTION-01`), is the remaining step. The upload-link and feature-request sweeps are separate
+  and always enforce.
 - **Operator audit purge:** the 2-year purge of operator audit rows is tracked in #398.
 - **Gift letters:** GIFT-01 in [manual-tests.md](manual-tests.md), including a physical test
   print, before the programme is switched on; the website's claim page ships separately.

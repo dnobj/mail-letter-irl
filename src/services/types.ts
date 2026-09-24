@@ -22,6 +22,8 @@ export interface User {
   tier_calculated_at: Date;
   created_at: Date;
   updated_at: Date;
+  /** Set when the account was erased (#289); sign-in refuses such an account. */
+  erased_at?: Date | null;
 }
 
 export interface CreateUserParams {

@@ -163,6 +163,13 @@ describe("gift.grant", () => {
     });
   });
 
+  it("gives an erased account nothing (#446 review)", async () => {
+    const { grant } = createGiftCommands({ readAccountErased: vi.fn().mockResolvedValue(true) });
+    await expect(grant.preview(scripted(), "influencer-1", { quantity: 1, generationsRemaining: 1, cardCampaignCode: null })).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+  });
+
   it("grants as the operator, keyed by the command so a replay grants nothing twice", async () => {
     const grantGiftLettersWithClient = vi.fn(async () => [{ gift_id: "g1" }, { gift_id: "g2" }] as never);
     const { grant } = createGiftCommands({ grantGiftLettersWithClient });

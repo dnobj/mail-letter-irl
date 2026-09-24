@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { prepareAuthenticatedUser } from "../../../src/auth/identity.js";
 import { VerifiedEmailRequiredError } from "../../../src/auth/verifiedEmail.js";
 import { EmailAlreadyLinkedError } from "../../../src/services/userService.js";
+import { ACCOUNT_ERASED_MESSAGE, AccountErasedError } from "../../../src/auth/accountErased.js";
 import { AuthenticatedUser } from "../../../src/auth/tokenValidator.js";
 
 function user(authType: "jwt" | "pat"): AuthenticatedUser {
@@ -386,5 +387,86 @@ describe("the namespaced email claim", () => {
     );
 
     expect(email).toBe("confirmed@example.com");
+  });
+});
+
+describe("an erased account (#289)", () => {
+  // The row is a tombstone kept for the financial records. A token issued
+  // before the erasure stays valid for up to a day, and a social sign-in
+  // brings back the same subject: both land here, and neither may use it.
+  const tombstone = { email: "erased-1b9d6bcd@erased.invalid", erased_at: new Date("2026-09-24T00:00:00Z") };
+  const NS = "https://letterirl.com/email";
+  const NS_VERIFIED = "https://letterirl.com/email_verified";
+
+  it("is refused when the token carries no address, as a personal access token never does", async () => {
+    const upsertUser = vi.fn();
+    await expect(
+      prepareAuthenticatedUser(user("pat"), { findExistingUser: vi.fn().mockResolvedValue(tombstone), upsertUser })
+    ).rejects.toBeInstanceOf(AccountErasedError);
+    expect(upsertUser).not.toHaveBeenCalled();
+  });
+
+  it("is refused when the token carries an unconfirmed address", async () => {
+    await expect(
+      prepareAuthenticatedUser(
+        { ...user("jwt"), claims: { [NS]: "person@example.com", [NS_VERIFIED]: false } },
+        { findExistingUser: vi.fn().mockResolvedValue(tombstone), upsertUser: vi.fn() },
+        {} as NodeJS.ProcessEnv
+      )
+    ).rejects.toBeInstanceOf(AccountErasedError);
+  });
+
+  it("is refused, not re-addressed, when the token carries a confirmed address", async () => {
+    // getOrCreateUser refuses before its email update; this is its refusal
+    // passing through untouched rather than being mistaken for a collision.
+    await expect(
+      prepareAuthenticatedUser(
+        { ...user("jwt"), claims: { [NS]: "person@example.com", [NS_VERIFIED]: true } },
+        {
+          findExistingUser: vi.fn().mockResolvedValue(tombstone),
+          upsertUser: vi.fn().mockRejectedValue(new AccountErasedError())
+        },
+        {} as NodeJS.ProcessEnv
+      )
+    ).rejects.toBeInstanceOf(AccountErasedError);
+  });
+
+  it("is refused in the collision fallback, which would otherwise hand back its placeholder", async () => {
+    await expect(
+      prepareAuthenticatedUser(
+        { ...user("jwt"), claims: { [NS]: "shared@example.com", [NS_VERIFIED]: true } },
+        {
+          findExistingUser: vi.fn().mockResolvedValue(tombstone),
+          upsertUser: vi.fn().mockRejectedValue(new EmailAlreadyLinkedError())
+        },
+        {} as NodeJS.ProcessEnv
+      )
+    ).rejects.toBeInstanceOf(AccountErasedError);
+  });
+
+  it("logs the refusal by name and auth type only", async () => {
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation(value => {
+      logged.push(String(value));
+    });
+    await prepareAuthenticatedUser(user("pat"), {
+      findExistingUser: vi.fn().mockResolvedValue(tombstone),
+      upsertUser: vi.fn()
+    }).catch(() => undefined);
+    spy.mockRestore();
+
+    const line = logged.find(entry => entry.includes("auth.account_erased_refused"));
+    expect(line).toBeDefined();
+    expect(JSON.parse(line!)).toEqual({
+      authType: "pat",
+      event: "auth.account_erased_refused",
+      msg: "auth.account_erased_refused"
+    });
+  });
+
+  it("tells the caller in a fixed sentence that points at support", () => {
+    expect(new AccountErasedError().message).toBe(ACCOUNT_ERASED_MESSAGE);
+    expect(ACCOUNT_ERASED_MESSAGE).toContain("support@letterirl.com");
+    expect(new AccountErasedError().statusCode).toBe(403);
   });
 });
