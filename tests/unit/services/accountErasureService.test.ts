@@ -221,6 +221,9 @@ describe("what a failure costs (#446 review)", () => {
       expect(retry.text).toMatch(/available_at = NOW\(\) \+ INTERVAL '1 hour'/);
       expect(retry.text).not.toMatch(/attempts = attempts \+ 1/);
       expect(retry.text).not.toMatch(/status = 'failed'/);
+      // A class, never the driver's words.
+      expect(JSON.parse(String(retry.values?.[1]))).toEqual({ lastErrorClass: expect.any(String) });
+      expect(String(retry.values?.[1])).not.toContain("relation is locked");
     }
   );
 
