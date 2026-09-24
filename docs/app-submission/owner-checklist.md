@@ -120,6 +120,11 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
 `https://developers.openai.com/plugins/deploy/submission`). Record each gate's outcome in the
 [release record](#release-record) below.
 
+- [ ] **Launch build.** Production runs the launch promotion from `dev` (#158), which carries
+      #412, #426, #434 and gift letters, and the production connector has been refreshed. The
+      reviewer materials describe that build, so this comes before preparing the reviewer account.
+- [ ] **Pay & Send on.** `JIT_PURCHASE_ENABLED=true` on the production API. The reviewer
+      materials promise it; it was on on 2026-09-23.
 - [ ] **Access.** The submitting account has Apps Management write access in `Objective Works` /
       `Mail Letter IRL`.
 - [ ] **Listing.** Name, descriptions, logo, category, website, support, privacy and terms URLs,
@@ -127,11 +132,12 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
 - [ ] **Domain verification.** In MCP configuration the portal issues a token for
       `https://api.letterirl.com/mcp`; the challenge host is the MCP host. Set
       `OPENAI_APPS_CHALLENGE_TOKEN` on the production API service, wait for the redeploy, and check
-      that `curl -si -A 'OpenAI-Domain-Verification' https://api.letterirl.com/.well-known/openai-apps-challenge`
+      that `curl -si https://api.letterirl.com/.well-known/openai-apps-challenge`
       answers 200 with the token as the whole body. Then press Verify. The path answers 404 while the
       variable is unset.
 - [ ] **Scan Tools.** The portal discovers all 23 tools with their annotations. Record any warning.
-- [ ] **Starter prompts.** Prompts a reviewer can run as written, from `openai-test-cases.md`.
+- [ ] **Starter prompts.** The listing's prompts for customers, from
+      [Starter Prompts](./openai-test-cases.md#starter-prompts); not the reviewer's test cases.
 - [ ] **Test cases.** Five positive and three negative, from `openai-test-cases.md` (#406).
 - [ ] **Availability.** United States only.
 - [ ] **Attestations and submit.**
@@ -156,13 +162,19 @@ timestamps and screenshot names, never tokens, cookies or personal data.
 
 | Gate | Date | Commit | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- | --- |
+| Launch build on production (commit) | | | production | | |
+| Pay & Send on | | | production | | |
+| Access | | | production | | |
+| Listing | | | production | | |
 | Domain verification | | | production | | |
 | Scan Tools | | | production | | |
 | Starter prompts | | | production | | |
 | Test cases (5 positive, 3 negative) | | | production | | |
+| Availability (United States) | | | production | | |
 | Permission prompts, end to end | | | production | | |
+| Stable OAuth callback and CIMD id (RFC 9207) re-checked | | | production | | |
 | Final manual pass | | | production | | |
-| Submitted | | | production | | |
+| Attestations and submitted | | | production | | |
 | Approved and published | | | production | | |
 
 ## Demo Video Tracking

@@ -59,20 +59,19 @@ See [infrastructure.md](infrastructure.md) for identifiers and URLs.
 
 ### What is promoted
 
-Production (`master`) was last promoted on 2026-09-14 and carries migrations through
-`031_provider_error_minimisation.sql`. `dev` is ahead with the retention follow-ups that are not yet
-in production:
+Production (`master`) was last promoted on 2026-09-16 (#416, `27e160a`) and carries migrations
+through `032_error_text_minimisation.sql`. The next promotion is the launch version (#158). `dev` is
+ahead with:
 
-- deletion of stale upload links 24 hours after the last upload (#397);
-- deletion of feature requests 12 months after submission (#400);
-- error classes instead of message text in the remaining writers, and migration
-  `032_error_text_minimisation.sql` (#401);
-- the related documentation (#391, #392, #399);
-- one account per confirmed email address, with the four `@unknown.com` placeholder addresses
-  removed and the account row opened on the REST and checkout paths as well as the MCP one. **Its
-  Auth0 half is manual and per tenant**: the two Post Login Actions and the `Account Linking`
-  machine-to-machine application must be in place in a tenant before the code that depends on them
-  is deployed against it, and LINK-01 run afterwards.
+- the website's logo on every card and the Instant tip (#417), and chat-image recovery (#418);
+- the same-mail check before a second send or checkout (#419);
+- gift letters and migration `033_gift_letters.sql` (#422), with the admin fixes from GIFT-01 (#431);
+- one account per confirmed email address (#423), with the four `@unknown.com` placeholder
+  addresses removed and the account row opened on the REST and checkout paths as well as the MCP
+  one. **Its Auth0 half is manual and per tenant**: the two Post Login Actions and the
+  `Account Linking` machine-to-machine application must be in place in a tenant before the code that
+  depends on them is deployed against it, and LINK-01 run afterwards;
+- the identity scopes and the profile tool ChatGPT identifies a connected account with (#425, #426).
 
 ## Architecture
 

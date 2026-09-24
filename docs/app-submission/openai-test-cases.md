@@ -13,6 +13,18 @@ See also: [demo-scenarios.md](./demo-scenarios.md) for demo flows, and
 
 Reviewers test the production app, at one endpoint: `https://api.letterirl.com/mcp`.
 
+Two preconditions, both gates in [owner-checklist.md](./owner-checklist.md):
+
+- **Production runs the launch build.** These cases describe the development branch as of
+  2026-09-23: the same-mail check (#412), the profile tool (#426), the refusal sentence on cards
+  (#434) and gift letters. Production must carry them, with its connector refreshed, before the
+  reviewer account is prepared.
+- **Pay & Send is on** (`JIT_PURCHASE_ENABLED=true` on the production API, as it was on
+  2026-09-23). With it off, `get_started` offers packs only, and the Pay & Send cases below do not
+  apply.
+
+The setup itself:
+
 - **Sign-in.** Auth0 with Client ID Metadata Documents (CIMD).
   - ChatGPT's client authenticates with `private_key_jwt`, the method its CIMD document declares.
   - It uses the authorization code flow with PKCE S256, against the `/mcp` API. That API grants only
@@ -24,7 +36,7 @@ Reviewers test the production app, at one endpoint: `https://api.letterirl.com/m
 - **Reviewer account.** An email-and-password account with a confirmed address and no
   multi-factor step, prepared before submission:
   - enough prepaid letters for every case below, added in the admin panel
-    (`account.adjust_letters`);
+    (`account.adjust_balance`);
   - a saved return address;
   - one earlier letter, so the order and status cases have history.
 
@@ -60,6 +72,18 @@ Reviewers test the production app, at one endpoint: `https://api.letterirl.com/m
 
 ---
 
+## Starter Prompts
+
+For the listing: prompts a customer can adapt, showing the main workflows. They are not the
+reviewer's test cases below.
+
+1. "Write a thank-you letter to my grandmother and mail it to her."
+2. "Turn this photo into a postcard for my friend in Seattle."
+3. "Send a letter to my brother with this picture from our trip."
+4. "How many letters do I have left?"
+
+---
+
 ## Portal Test Cases
 
 The portal asks for five positive and three negative cases. Run them in order on the reviewer
@@ -72,7 +96,7 @@ used for at all.
 |---|--------|----------|
 | P1 | "What can Letter IRL do?" | `get_started` shows the getting-started card: what Letter IRL mails, how to pay (a letter pack, or Pay & Send for one letter), and example prompts. Nothing is drafted. |
 | P2 | "Write a short thank-you note to [the controlled address] and show me a preview." | `quote_and_preview_letter` validates both addresses, creates a draft and shows the letter preview card. The card has both addresses and the cost in letters. Nothing is mailed. |
-| P3 | After P2: "Send it." | ChatGPT asks to confirm, because the tool is marked destructive. On confirmation, `send_letter` sends that draft from the prepaid balance. Its timeline reads: order placed, letter taken from the balance, accepted by the print provider. There is no carrier tracking (`trackingSupport: estimated_only`). The balance drops by the letters the preview named. |
+| P3 | After P2: "Send it." | ChatGPT asks to confirm, because the tool is marked destructive. On confirmation, `send_letter` sends that draft from the prepaid balance. Its timeline reads "Order placed", "Letter deducted from balance", "Accepted by print provider". There is no carrier tracking (`trackingSupport: estimated_only`). The balance drops by the letters the preview named. |
 | P4 | "Make a postcard for [the controlled address] with a photo of a lighthouse." | An image comes from ChatGPT's own generation, from `generate_image_for_mail` while the account has Letter IRL generations left, or from an upload. `quote_and_preview_postcard` then shows the front and the message side. Nothing is mailed until a separate send is confirmed. |
 | P5 | "How many letters do I have left, and what happened to my last letter?" | `get_account_balance`, and `list_orders` or `get_order_status`, answer read-only: letters remaining, then the last order's status and timeline. No confirmation is asked, because nothing changes. |
 
@@ -101,7 +125,8 @@ pass (see [owner-checklist.md](./owner-checklist.md)). Reviewers may run the one
 | Pay & Send refused with letters in hand (*reviewer*) | The reviewer account | Preview a letter, then ask to pay for it instead of using letters | The card offers **Send**, not Pay & Send. A direct request is refused: the draft can be sent from the existing prepaid balance. Nobody pays for a letter they already own. |
 | Payment pending | Owner, a Pay & Send or pack checkout | Open the checkout and do not pay | The card shows "Checkout open - waiting for payment", and `get_purchase_status` answers `pending_payment`. Nothing is mailed or credited. An unpaid checkout expires, and the pack card then says "This checkout expired before it was paid. Nothing was charged." |
 | Payment failed | Owner, development (Stripe test mode) | Pay with a test card that is declined | Stripe's page refuses the card and nothing is charged; the card keeps waiting. A payment that fails after checkout shows "The payment did not go through. Nothing was charged." and offers a new checkout. |
-| Duplicate confirmation (*reviewer*) | After P3 | "Send that same letter again." | The send is refused as a possible duplicate of mail sent in the last 24 hours. The card says "This same letter was sent or paid for recently. Send another copy only if you want two." and offers **Send another copy**, which sends only on that second, explicit click (#412). |
+| Duplicate confirmation, in chat (*reviewer*) | After P3 | Ask for a preview of the same note to the same address again, then "Send it." | The send is refused as a possible duplicate of mail sent in the last 24 hours: the reply begins "Possible duplicate:" and nothing is mailed. Asking for another copy on purpose then sends it (#412). Sending P3's own draft again instead returns its existing order. |
+| Duplicate confirmation, on the card (*reviewer*) | After P3 | On that new preview's card, press **Send** | The card says the same letter went out a few minutes ago, or, when the host drops the refusal's details, "This same letter was sent or paid for recently. Send another copy only if you want two." Its button becomes **Send another copy**, which sends only on that second, explicit press. |
 | Image generations used up | An account with no Letter IRL image generations left | "Generate an image of a lighthouse for my postcard." | `generate_image_for_mail` does not generate. It says "This account has no Letter IRL image generations left. Letter packs and letter purchases include in-turn generations." and points to ChatGPT's own image generation, which the postcard then uses. |
 | Image generation available (*reviewer*) | An account with generations left | The same prompt | The image is generated. The answer says one generation was used and how many remain. |
 | Image upload fallback (*reviewer*) | ChatGPT on mobile, or an image ChatGPT cannot pass to the app | Ask for a postcard of a photo from the device | `upload_image` shows the upload card. Choosing a file uploads it through ChatGPT's file bridge, and `confirm_uploaded_image` hands the link to the postcard preview. |
@@ -247,13 +272,13 @@ and stays out when it should not (precision).
 
 | Scenario | Expected Behavior |
 |----------|-------------------|
-| Invalid address (e.g., "123 Fake St, Nowhere, XX 00000") | Clear error: "Address is invalid or undeliverable" |
+| Invalid address (e.g., "123 Fake St, Nowhere, XX 00000") | Clear error naming what USPS could not verify, with a suggested correction when there is one |
 | Letter too long (>1600 chars for text-only) | Clear error with character/line count |
 | No image provided for postcard | Clear error explaining image is required |
 | Not enough letters | Preview shows `canSendNow: false` with an explanation, and the card offers Pay & Send or a letter pack |
 | Draft expired (after 24 hours) | Clear error suggesting to create new preview |
-| Non-US address | Clear error: "US addresses only" |
-| Send without preview | Error: "draftId required from quote_and_preview" |
+| Non-US address | "Letter IRL currently only supports mailing within the United States." with the address that is not |
+| Send without preview | "send_letter requires a draftId from a letter preview tool." |
 | Wrong draft type (letter draft to send_postcard) | Clear error explaining the mismatch |
 | A refused send, seen on the card | The card shows the server's sentence alone, never the host's wrapper around it (#434) |
 
@@ -320,8 +345,8 @@ Published:
 Implemented:
 - [x] Card details are entered only on Stripe's page. The app never sees them, and collects no SSN or
       health data.
-- [x] Error columns and logs hold error classes, not message text or personal data (#394,
-      migrations 031 and 032).
+- [x] Error columns and logs hold error classes, not message text or personal data (migration
+      031 for #162, migration 032 for #394).
 - [ ] Every retention period the privacy page states is enforced by a job (#153, open).
 - [ ] An account can be deleted on request, end to end (#289, open).
 
@@ -350,7 +375,7 @@ Implemented:
 
 ## Submission Portal Information
 
-**Portal URL:** https://platform.openai.com/apps-manage
+**Portal URL:** https://platform.openai.com/plugins
 
 **Required Materials:**
 - App name: Letter IRL
