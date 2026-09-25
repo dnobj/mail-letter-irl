@@ -242,7 +242,7 @@ export async function listTokens(
     : "WHERE user_id = $1 AND status = 'active'";
 
   const result = await query<PersonalAccessToken>(
-    `SELECT token_id, name, token_prefix, status, expires_at, last_used_at, created_at
+    `SELECT token_id, name, token_prefix, status, expires_at, last_used_at, created_at, scopes
      FROM personal_access_tokens
      ${whereClause}
      ORDER BY created_at DESC`,
@@ -257,6 +257,7 @@ export async function listTokens(
     expiresAt: row.expires_at,
     lastUsedAt: row.last_used_at,
     createdAt: row.created_at,
+    scopes: Array.isArray(row.scopes) ? row.scopes : [],
   }));
 }
 
@@ -282,7 +283,7 @@ export async function validateToken(rawToken: string): Promise<ValidateTokenResu
 
   // Find active tokens with matching prefix
   const result = await query<PersonalAccessToken>(
-    `SELECT token_id, user_id, token_hash, status, expires_at
+    `SELECT token_id, user_id, token_hash, status, expires_at, scopes
      FROM personal_access_tokens
      WHERE token_prefix = $1 AND status = 'active'`,
     [tokenPrefix]
@@ -306,6 +307,7 @@ export async function validateToken(rawToken: string): Promise<ValidateTokenResu
         valid: true,
         userId: token.user_id,
         tokenId: token.token_id,
+        scopes: Array.isArray(token.scopes) ? token.scopes : [],
       };
     }
   }

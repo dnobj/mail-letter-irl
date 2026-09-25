@@ -91,7 +91,14 @@ const claude = (scopes = ALL_SCOPES): AuthenticatedUser => ({
   authType: "jwt",
   scopes
 });
-const pat: AuthenticatedUser = { userId: "auth0|user", claims: {}, token: "t", authType: "pat", scopes: [] };
+// Read and draft, what migration 037 gives every personal access token.
+const pat: AuthenticatedUser = {
+  userId: "auth0|user",
+  claims: {},
+  token: "t",
+  authType: "pat",
+  scopes: ["mail:read", "mail:draft"]
+};
 
 type Callback = (args: Record<string, unknown>, extra: Record<string, unknown>) => Promise<any>;
 

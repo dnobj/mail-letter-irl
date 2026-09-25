@@ -8,8 +8,9 @@
  * and restScopes.test.ts fails if the two drift. A route with no twin takes the
  * scope of the nearest equivalent, recorded here rather than inferred.
  *
- * Personal access tokens carry no scopes and pass every check, as they do on
- * MCP (requireScopes).
+ * These routes accept only JWTs (authenticateRestRequest). Personal access
+ * tokens reach MCP alone, where since #470 they carry their own scopes, read and
+ * draft (migration 037), and are checked like any other token (requireScopes).
  */
 
 import { PRODUCT_SCOPES } from './oauthConfig.js';

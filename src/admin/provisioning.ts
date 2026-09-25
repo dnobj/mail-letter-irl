@@ -20,9 +20,12 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  *
  * 036 adds an alert type to a table the reader already reads, so the same
  * holds for it.
+ *
+ * 037 adds personal_access_tokens.scopes, which neither role is granted (the
+ * column list below is explicit), so again nothing to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "036_account_erasure_followup_alert.sql";
+  "037_personal_access_token_scopes.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

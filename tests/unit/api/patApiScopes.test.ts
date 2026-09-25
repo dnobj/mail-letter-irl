@@ -55,10 +55,11 @@ function jwt(scopes: string[]): AuthenticatedUser {
   return { userId: 'auth0|user-1', authType: 'jwt', scopes, claims: {}, token: 'jwt' };
 }
 
+// What migration 037 gives every token (#470): read and draft, never send.
 const pat: AuthenticatedUser = {
   userId: 'auth0|user-1',
   authType: 'pat',
-  scopes: [],
+  scopes: ['mail:read', 'mail:draft'],
   claims: {},
   token: 'pat'
 };
@@ -158,7 +159,9 @@ describe('personal access token routes', () => {
     const mint = response();
     await handlePATApiRequest(request('POST', { name: 'Laptop' }), mint.res, '/api/tokens');
     expect(mint.state.status).toBe(403);
-    expect(JSON.parse(mint.state.body).message).toMatch(/PAT authentication/);
+    // Refused by its scopes now (#470: a token carries read and draft, and
+    // minting needs mail:send), before the handler's own PAT refusal is reached.
+    expect(String(mint.state.headers['www-authenticate'])).toContain('scope="mail:send"');
     expect(createToken).not.toHaveBeenCalled();
   });
 

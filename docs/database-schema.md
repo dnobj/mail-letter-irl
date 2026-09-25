@@ -424,17 +424,21 @@ Historical record of all status changes for letters and postcards.
 
 ### personal_access_tokens
 
-API tokens for programmatic access (future use).
+Personal access tokens (`lirl_pat_…`). People make them on the website, under Dashboard, then Tokens, for MCP clients that take a bearer header (migrations 011 and 037).
 
 | Column | Type | Nullable | Default | Description |
 |--------|------|----------|---------|-------------|
-| token_id | UUID | NO | gen_random_uuid() | Primary key |
+| token_id | SERIAL | NO | - | Primary key |
 | user_id | VARCHAR(255) | NO | - | FK to users |
+| name | VARCHAR(100) | NO | - | User-friendly name |
 | token_hash | VARCHAR(255) | NO | - | Bcrypt hash of token |
-| name | VARCHAR(255) | NO | - | User-friendly name |
-| last_used_at | TIMESTAMPTZ | YES | - | Last usage timestamp |
+| token_prefix | CHAR(4) | NO | - | Last 4 characters, for display |
+| status | pat_status | NO | 'active' | `active` or `revoked` |
 | expires_at | TIMESTAMPTZ | YES | - | Expiration (NULL = never) |
+| last_used_at | TIMESTAMPTZ | YES | - | Last usage timestamp |
 | created_at | TIMESTAMPTZ | NO | NOW() | Token creation |
+| revoked_at | TIMESTAMPTZ | YES | - | When it was revoked |
+| scopes | TEXT[] | NO | `{mail:read,mail:draft}` | What the token may do (037, #470). The allowed values are `mail:read`, `mail:draft` and `mail:send`, and nothing grants `mail:send` today, so no token sends. A send from a token becomes the confirmation link (docs/letter-send-flow.md) |
 
 **Indexes:**
 - `idx_personal_access_tokens_user_id` on user_id

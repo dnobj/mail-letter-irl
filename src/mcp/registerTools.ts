@@ -419,9 +419,9 @@ export function buildToolSecuritySchemes(
       // tool calls work although Auth0 never grants them.
       //
       // Session and identity scopes go here and nowhere else. They must never
-      // reach getRequiredToolScopes: PAT callers authorize with no scopes at
-      // all, so a tool demanding one would deny them permanently
-      // (tests/unit/auth/sessionScopes.test.ts pins that).
+      // reach getRequiredToolScopes: a personal access token carries product
+      // scopes only (migration 037, #470), so a tool demanding one would deny
+      // it permanently (tests/unit/auth/sessionScopes.test.ts pins that).
       //
       // Applied to every tool deliberately. A typed @-mention scopes the turn's
       // toolset, so a scope carried by only some tools would be requested only
