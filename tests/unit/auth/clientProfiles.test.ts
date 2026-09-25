@@ -1,3 +1,5 @@
+import * as fs from "fs";
+import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clientIdOf,
@@ -52,6 +54,9 @@ describe("resolveClientProfile (#473)", () => {
 
   it.each([
     "https://chatgpt.com.evil.example/oauth/abc/client.json",
+    // A document elsewhere that merely embeds ChatGPT's address.
+    "https://evil.example/?next=https://chatgpt.com/oauth/abc/client.json",
+    "https://evil.example/?next=https://chatgpt.com/oauth/codex/abc/client.json",
     "http://chatgpt.com/oauth/abc/client.json",
     "https://chatgpt.com/oauth/abc/client.json?x=1",
     "https://chatgpt.com/oauth/a/b/client.json",
@@ -152,5 +157,24 @@ describe("clientLogFields (#473)", () => {
     });
     expect(clientLogFields(jwt({}))).toEqual({ client: "generic", clientIdKind: "absent" });
     expect(clientLogFields(null)).toEqual({ client: "generic", clientIdKind: "absent" });
+  });
+
+  // Source-shape assertions, as in rateLimitCoverage.test.ts: the wiring is a
+  // few lines of one request handler, and there is nothing to call without
+  // booting the server.
+  it("is written on every MCP request line that knows the caller", () => {
+    const httpServer = fs.readFileSync(
+      path.resolve(__dirname, "../../../src/mcp/httpServer.ts"),
+      "utf-8"
+    );
+    expect(httpServer).toMatch(
+      /const clientFields = clientLogFields\(authInfo\);\s*\n\s*writeDiagnostic\("info", "mcp\.request_received", \{[^}]*\.\.\.clientFields\s*\}\);/
+    );
+    expect(httpServer).toMatch(
+      /writeDiagnostic\("info", "mcp\.sse_session_established", \{[^}]*\.\.\.clientLogFields\(authInfo\)\s*\}\);/
+    );
+    expect(httpServer).toMatch(
+      /logMcpClientRequests\(\s*parsedBody,\s*req\.headers\["user-agent"\],\s*cachedToolNames \?\? new Set\(\),\s*clientFields\.client\s*\);/
+    );
   });
 });
