@@ -58,12 +58,18 @@ import {
 import { AccountErasedError, ACCOUNT_ERASED_MESSAGE } from '../../auth/accountErased.js';
 import type { ProductScope } from '../../auth/toolScopes.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../../utils/diagnosticLog.js';
+import { clientIdOf } from '../../auth/clientProfiles.js';
 
 export interface RestAuthInfo {
   userId: string;
   email?: string;
   /** Every scope the token carries. Empty when it carries none. */
   scopes: string[];
+  /**
+   * The application Auth0 issued the token to (clientIdOf). The send
+   * confirmation routes accept only the website's own (#470).
+   */
+  clientId?: string;
 }
 
 export type RestAuthFailureReason =
@@ -242,7 +248,10 @@ export async function authenticateRestRequest(
   // token minted for a custom API, so it was undefined on every request.
   const account = await prepareRestAccount(user);
   if (!account.ok) return account;
-  return { ok: true, user: { userId: user.userId, email: account.email, scopes: user.scopes } };
+  return {
+    ok: true,
+    user: { userId: user.userId, email: account.email, scopes: user.scopes, clientId: clientIdOf(user) }
+  };
 }
 
 /**

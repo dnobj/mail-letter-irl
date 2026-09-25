@@ -1168,7 +1168,7 @@ See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_EN
 - [ ] Accepts `Authorization: Bearer lirl_pat_xxx` header
 - [ ] Validates token against stored hashes
 - [ ] Looks up user from token
-- [ ] All MCP tools work with PAT auth
+- [ ] The read and draft tools work with PAT auth; a send from a PAT becomes the confirmation link, and paying, redeeming and token management are refused (#470)
 - [ ] Updates `last_used_at` on token record
 - [ ] Invalid/revoked token returns 401
 - [ ] PAT auth logged separately from OAuth (for analytics)

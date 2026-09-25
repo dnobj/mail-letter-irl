@@ -89,6 +89,21 @@ describe("logMcpClientRequests", () => {
     });
   });
 
+  it("names the calling app by its profile when one is given (#473)", () => {
+    logMcpClientRequests(
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_started" } },
+      "node",
+      knownTools,
+      "claude"
+    );
+    expect(writeSpy).toHaveBeenCalledWith("info", "mcp.client_request", {
+      rpcMethod: "tools/call",
+      clientClass: "other",
+      client: "claude",
+      toolName: "get_started"
+    });
+  });
+
   it("ignores notifications, unknown methods, and non-object bodies", () => {
     logMcpClientRequests({ method: "notifications/initialized" }, "x", knownTools);
     logMcpClientRequests("tools/list", "x", knownTools);

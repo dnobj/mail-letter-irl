@@ -46,6 +46,9 @@ unachievable rather than merely unmet:
 
 The DCR/static-client sections below document the temporary rollback baseline,
 not the desired configuration. Do not enable them in a normal CIMD rollout.
+While rollback mode is on, the server treats a token from the static client
+(`CHATGPT_STATIC_CLIENT_ID`) as ChatGPT's (`src/auth/clientProfiles.ts`, #473),
+so that application's callbacks must stay OpenAI's alone.
 
 ## Tenants Overview
 
@@ -728,6 +731,12 @@ subjects, and only the surviving primary subject counts afterwards.
 1. **Client ID Metadata Document registration**
    - Import the current OpenAI-hosted HTTPS CIMD URL manually
      (Applications -> Create Application -> **Import from URL**).
+   - Before importing any other app's document, add its URL to
+     `CLIENT_DOCUMENTS` in `src/auth/clientProfiles.ts` under its own
+     profile (#473). The server names the calling app from the token's client
+     id, which is the document URL, and it gives ChatGPT's trust to any
+     one-segment document on chatgpt.com (`https://chatgpt.com/oauth/<id>/client.json`).
+     A new OpenAI document of that shape imported first would inherit it.
    - Verify authorization code, PKCE S256, and that the callback matches the
      document exactly. The client authentication method is whatever the
      document declares - currently `private_key_jwt` - and is not a choice.
@@ -968,6 +977,16 @@ subjects, and only the surviving primary subject counts afterwards.
    After the repoint and the deletion, the website's sign-in and ChatGPT's
    authorize request, both with `resource` and with neither `resource` nor
    `audience`, reach the Auth0 login page with no error.
+
+   **The send rule depends on the website application's grants** (#470). Only a
+   token issued to `Letter IRL Website` may confirm a send on the confirmation
+   page. The API's `LETTER_IRL_WEBSITE_CLIENT_ID` names that application's Client
+   ID: `ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX` on development and
+   `wX17u1wOn3XJRVba1ejIappBNpDno3ER` on production. The check holds because the
+   application stays a confidential client with the `authorization_code` and
+   `refresh_token` grants alone, so only a person signing in can obtain its
+   tokens. Re-enabling Implicit or Client Credentials on it is a change to the
+   send rule, not a routine setting (docs/letter-send-flow.md).
 
 3. **Domain-Level Connections**
    - **All 5 connections** must have `is_domain_connection: true`

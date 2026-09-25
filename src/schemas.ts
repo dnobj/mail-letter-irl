@@ -707,6 +707,37 @@ export const sendPostcardInputSchema: JsonSchema = {
   }
 };
 
+export const requestSendInputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId"],
+  properties: {
+    draftId: { type: "string", description: "The draftId from a letter or postcard preview" }
+  }
+};
+
+export const requestSendOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "mailType", "confirmationUrl", "expiresAtISO", "recipientSummary"],
+  properties: {
+    draftId: { type: "string" },
+    mailType: { type: "string", enum: ["letter", "postcard"] },
+    confirmationUrl: {
+      type: "string",
+      description: "Where the person checks the preview and sends it themselves"
+    },
+    expiresAtISO: { type: "string" },
+    recipientSummary: {
+      type: "object",
+      required: ["name", "city", "state"],
+      properties: {
+        name: { type: "string" },
+        city: { type: "string" },
+        state: { type: "string" }
+      }
+    }
+  }
+};
+
 export const sendPostcardOutputSchema: JsonSchema = {
   type: "object",
   required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary", "lettersRemaining"],

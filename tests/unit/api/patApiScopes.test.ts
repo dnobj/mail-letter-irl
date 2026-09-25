@@ -5,10 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 /**
  * Scopes on personal access token management (audit A-02, A-03).
  *
- * A personal access token passes every scope check, so a token that can only
- * read must not be able to mint one: that would turn a read grant into a
- * standing credential that can spend. These drive the real handler and the
- * real requireScopes; only the header validation, the service and the account
+ * A token that can only read must not be able to mint one: that would turn a
+ * read grant into a standing credential. A personal access token carries read
+ * and draft (migration 037, #470), and the handler refuses one on minting and
+ * revoking whatever it carries. These drive the real handler and the real
+ * requireScopes; only the header validation, the service and the account
  * limiter are stubbed.
  */
 
@@ -55,10 +56,11 @@ function jwt(scopes: string[]): AuthenticatedUser {
   return { userId: 'auth0|user-1', authType: 'jwt', scopes, claims: {}, token: 'jwt' };
 }
 
+// What migration 037 gives every token (#470): read and draft, never send.
 const pat: AuthenticatedUser = {
   userId: 'auth0|user-1',
   authType: 'pat',
-  scopes: [],
+  scopes: ['mail:read', 'mail:draft'],
   claims: {},
   token: 'pat'
 };
@@ -158,8 +160,29 @@ describe('personal access token routes', () => {
     const mint = response();
     await handlePATApiRequest(request('POST', { name: 'Laptop' }), mint.res, '/api/tokens');
     expect(mint.state.status).toBe(403);
+    // Refused by its scopes now (#470: a token carries read and draft, and
+    // minting needs mail:send), before the handler's own PAT refusal is reached.
+    expect(String(mint.state.headers['www-authenticate'])).toContain('scope="mail:send"');
+    expect(createToken).not.toHaveBeenCalled();
+  });
+
+  it('refuses a personal access token minting or revoking even if it ever carries mail:send', async () => {
+    // Migration 037 keeps mail:send an allowed value for a later, explicit
+    // grant. The handler's own PAT refusals are then all that stop such a
+    // token minting a standing credential, so they are pinned here.
+    vi.mocked(validateAuthorizationHeader).mockResolvedValue({ ...pat, scopes: ALL });
+
+    const mint = response();
+    await handlePATApiRequest(request('POST', { name: 'Laptop' }), mint.res, '/api/tokens');
+    expect(mint.state.status).toBe(403);
     expect(JSON.parse(mint.state.body).message).toMatch(/PAT authentication/);
     expect(createToken).not.toHaveBeenCalled();
+
+    const revoke = response();
+    await handlePATApiRequest(request('DELETE'), revoke.res, '/api/tokens/7');
+    expect(revoke.state.status).toBe(403);
+    expect(JSON.parse(revoke.state.body).message).toMatch(/PAT authentication/);
+    expect(revokeToken).not.toHaveBeenCalled();
   });
 
   it('answers a refused expiry with 400, not 500', async () => {

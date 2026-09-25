@@ -8,8 +8,9 @@
  * and restScopes.test.ts fails if the two drift. A route with no twin takes the
  * scope of the nearest equivalent, recorded here rather than inferred.
  *
- * Personal access tokens carry no scopes and pass every check, as they do on
- * MCP (requireScopes).
+ * These routes accept only JWTs (authenticateRestRequest). Personal access
+ * tokens reach MCP alone, where since #470 they carry their own scopes, read and
+ * draft (migration 037), and are checked like any other token (requireScopes).
  */
 
 import { PRODUCT_SCOPES } from './oauthConfig.js';
@@ -44,13 +45,20 @@ export const REST_ROUTE_SCOPES: readonly RestRouteScope[] = [
   { id: 'return_address.get', method: 'GET', path: '/api/return-address', scope: 'mail:read', twin: 'get_return_address' },
   { id: 'return_address.set', method: 'POST', path: '/api/return-address', scope: 'mail:draft', twin: 'set_return_address' },
   { id: 'return_address.clear', method: 'DELETE', path: '/api/return-address', scope: 'mail:draft', twin: 'clear_return_address' },
-  // No twin. A personal access token passes every scope check, so a token that
-  // could mint one with less than mail:send could escalate itself (audit A-02).
-  // Revoking manages the same credential and takes the same scope.
+  // No twin. A token that can mint a personal access token holds a standing
+  // credential, so both need mail:send (audit A-02). A personal access token
+  // carries read and draft (037, #470) and never gets here, and
+  // patApiHandler refuses one on both regardless. Revoking manages the same
+  // credential and takes the same scope.
   { id: 'tokens.list', method: 'GET', path: '/api/tokens', scope: 'mail:read' },
   { id: 'tokens.create', method: 'POST', path: '/api/tokens', scope: 'mail:send' },
   { id: 'tokens.revoke', method: 'DELETE', path: /^\/api\/tokens\/\d+$/, scope: 'mail:send' },
-  { id: 'checkout.create', method: 'POST', path: '/api/stripe/create-checkout-session', scope: 'mail:send', twin: 'create_pack_checkout' }
+  { id: 'checkout.create', method: 'POST', path: '/api/stripe/create-checkout-session', scope: 'mail:send', twin: 'create_pack_checkout' },
+  // The confirmation page (#470). Reading a draft is a read; pressing Send is
+  // what send_letter does. Both also require the website's own application
+  // (src/api/sendConfirmationApiHandler.ts).
+  { id: 'sends.get', method: 'GET', path: /^\/api\/sends\/[^/]+$/, scope: 'mail:read' },
+  { id: 'sends.confirm', method: 'POST', path: /^\/api\/sends\/[^/]+$/, scope: 'mail:send', twin: 'send_letter' }
 ];
 
 function matches(route: RestRouteScope, method: string | undefined, pathname: string): boolean {

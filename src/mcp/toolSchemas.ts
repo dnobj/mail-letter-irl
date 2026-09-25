@@ -128,6 +128,10 @@ export const toolInputSchemas = {
     confirm: z.boolean(),
     sendAnotherCopy: z.boolean().optional()
   }),
+  // A link where the person sends a preview themselves (#470)
+  request_send: z.object({
+    draftId: z.string()
+  }),
   // Feedback tools
   submit_feature_request: z.object({
     title: z.string(),

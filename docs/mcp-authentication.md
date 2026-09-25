@@ -119,7 +119,7 @@ lirl_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 - Tokens are hashed (bcrypt) - we never store the raw token
 - Shown only once at creation
 - Can be revoked anytime from the dashboard
-- Scope is per-user (same permissions as OAuth login)
+- Reads and drafts only (migration 037, #470). A token can use the read and preview tools and ask for the confirmation link (`request_send`). It cannot send, pay, redeem a promo code, or mint or revoke tokens. A send from a token becomes the link where the person sends it themselves ([letter-send-flow.md](letter-send-flow.md))
 
 ---
 

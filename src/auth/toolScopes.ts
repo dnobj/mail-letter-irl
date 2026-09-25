@@ -4,9 +4,9 @@ import { PRODUCT_SCOPES } from "./oauthConfig.js";
 /**
  * Derived, not hand-written. This type is what stops a session or identity
  * scope being enforced by a tool - putting "openid" in TOOL_SCOPES has to fail
- * the build, because a personal access token authorizes with no scopes at all
- * and would then be denied permanently. A hand-maintained union could drift
- * from PRODUCT_SCOPES and quietly stop guarding that.
+ * the build, because a personal access token carries product scopes only
+ * (migration 037, #470) and would then be denied permanently. A hand-maintained
+ * union could drift from PRODUCT_SCOPES and quietly stop guarding that.
  */
 export type ProductScope = (typeof PRODUCT_SCOPES)[number];
 
@@ -42,7 +42,11 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   // union unchanged.
   redeem_promo_code: "mail:send",
   send_letter: "mail:send",
-  send_postcard: "mail:send"
+  send_postcard: "mail:send",
+  // Hands back a link and sends nothing: the person sends from the page, with
+  // the website's own token (#470). So it sits with the drafting tools, and a
+  // token that can preview can also ask for the link.
+  request_send: "mail:draft"
 };
 
 export function getRequiredToolScopes(toolName: string): ProductScope[] {

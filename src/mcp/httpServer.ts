@@ -11,7 +11,8 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { LetterIrlServer } from "../server.js";
 import { registerLetterTools, type RegisterToolsOptions } from "./registerTools.js";
 import { logMcpClientRequests } from "./clientRequestLog.js";
-import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
+import { buildServerInstructions } from "./serverInstructions.js";
+import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
 import { stringifyManifest } from "./manifest.js";
 import {
@@ -23,6 +24,7 @@ import { handleCreditApiRequest } from "../api/creditApiHandler.js";
 import { handlePATApiRequest } from "../api/patApiHandler.js";
 import { handleLetterApiRequest } from "../api/letterApiHandler.js";
 import { handleReturnAddressApiRequest } from "../api/returnAddressApiHandler.js";
+import { handleSendConfirmationApiRequest } from "../api/sendConfirmationApiHandler.js";
 import { handleTempImageRequest } from "../api/tempImageHandler.js";
 import {
   handleCreateCheckoutSession,
@@ -69,6 +71,7 @@ import { installProcessGuards, withRequestBoundary } from "./requestBoundary.js"
 import { APPS_CHALLENGE_PATH, appsChallengeResponse } from "./appsChallenge.js";
 import { logRestRequestOnFinish } from "../api/restRequestLog.js";
 import { OAUTH_NOT_CONFIGURED } from "../auth/oauthErrors.js";
+import { clientLogFields } from "../auth/clientProfiles.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -284,7 +287,7 @@ async function createMcpServer(
     name: "letter-irl",
     version: "0.1.0"
   }, {
-    instructions: LETTER_IRL_SERVER_INSTRUCTIONS
+    instructions: buildServerInstructions(isSendConfirmationEnabled())
   });
   await registerLetterTools(mcpServer, letterServer, authInfo, options);
   return mcpServer;
@@ -369,7 +372,8 @@ export async function startHttpServer() {
         authInfo
       });
       writeDiagnostic("info", "mcp.sse_session_established", {
-        authType: authInfo?.authType ?? "disabled"
+        authType: authInfo?.authType ?? "disabled",
+        ...clientLogFields(authInfo)
       });
     } catch (error) {
       writeDiagnostic("error", "mcp.sse_session_start_failed", {
@@ -913,6 +917,17 @@ export async function startHttpServer() {
       return;
     }
 
+    // The confirmation page's API (#470): where the person sends a preview.
+    if (url.pathname.startsWith('/api/sends')) {
+      if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
+        return; // Rate limited
+      }
+    }
+    const sendsApiHandled = await handleSendConfirmationApiRequest(req, res, url.pathname);
+    if (sendsApiHandled) {
+      return;
+    }
+
     if (url.pathname === MCP_PATH) {
       // Rate limit MCP tool calls
       if (await rateLimitMiddlewareWithTier(req, res, 'mcp')) {
@@ -947,9 +962,13 @@ export async function startHttpServer() {
         return;
       }
 
+      // Which app is calling (#473), so a tool call can be traced to ChatGPT,
+      // Claude, Codex or a personal access token from the log alone.
+      const clientFields = clientLogFields(authInfo);
       writeDiagnostic("info", "mcp.request_received", {
         method: req.method ?? "unknown",
-        authType: authInfo?.authType ?? "disabled"
+        authType: authInfo?.authType ?? "disabled",
+        ...clientFields
       });
 
       const sessionTransport = new StreamableHTTPServerTransport({
@@ -984,7 +1003,8 @@ export async function startHttpServer() {
         logMcpClientRequests(
           parsedBody,
           req.headers["user-agent"],
-          cachedToolNames ?? new Set()
+          cachedToolNames ?? new Set(),
+          clientFields.client
         );
 
         await sessionTransport.handleRequest(req, res, parsedBody);

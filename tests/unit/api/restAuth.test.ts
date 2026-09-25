@@ -102,6 +102,16 @@ describe("REST bearer authentication", () => {
     vi.restoreAllMocks();
   });
 
+  it("refuses a personal access token outright: these routes take JWTs only (#470)", async () => {
+    // The send confirmation route relies on this: its website-only check reads
+    // the JWT's client id, and a personal access token has none.
+    const outcome = await authenticateRestRequest(
+      request({ authorization: "Bearer lirl_pat_0123456789abcdef0123456789abcdef" }),
+      ["mail:send"]
+    );
+    expect(outcome).toMatchObject({ ok: false, reason: "rejected", status: 401 });
+  });
+
   it("accepts a token for the MCP audience, and reports the scopes it carries", async () => {
     const outcome = await authenticateRestRequest(
       request({ authorization: `Bearer ${await mint(mcpAudience)}` }),

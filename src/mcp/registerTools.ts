@@ -31,6 +31,7 @@ import {
   clearReturnAddressInputZ,
   quoteAndPreviewPostcardInputZ,
   sendPostcardInputZ,
+  requestSendInputZ,
   submitFeatureRequestInputZ,
   getStartedInputZ,
   uploadImageInputZ,
@@ -52,6 +53,7 @@ import {
   clearReturnAddressOutputZ,
   quoteAndPreviewPostcardOutputZ,
   sendPostcardOutputZ,
+  requestSendOutputZ,
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
   uploadImageOutputZ,
@@ -76,6 +78,13 @@ import {
   buildInsufficientScopeToolResult,
   InsufficientScopeError
 } from "../auth/oauthChallenge.js";
+import { resolveClientProfile, type ClientProfileName } from "../auth/clientProfiles.js";
+import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
+import {
+  REQUEST_SEND_TOOL,
+  SendConfirmationRefusedError,
+  type RequestSendOutput
+} from "../tools/requestSend.js";
 
 /** What every tool answers with, instead of running, when the caller has no usable account. */
 type AccountRefusal = VerifiedEmailRequiredError | EmailAlreadyLinkedError | AccountErasedError;
@@ -113,7 +122,9 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'get_order_status',
     'get_purchase_status',
     'get_return_address',
-    'list_letter_packs'
+    'list_letter_packs',
+    // Hands back a link; the person sends from the page it opens (#470).
+    'request_send'
   ];
 
   // Tools that call external APIs (PostGrid for validation or mail fulfillment)
@@ -408,9 +419,9 @@ export function buildToolSecuritySchemes(
       // tool calls work although Auth0 never grants them.
       //
       // Session and identity scopes go here and nowhere else. They must never
-      // reach getRequiredToolScopes: PAT callers authorize with no scopes at
-      // all, so a tool demanding one would deny them permanently
-      // (tests/unit/auth/sessionScopes.test.ts pins that).
+      // reach getRequiredToolScopes: a personal access token carries product
+      // scopes only (migration 037, #470), so a tool demanding one would deny
+      // it permanently (tests/unit/auth/sessionScopes.test.ts pins that).
       //
       // Applied to every tool deliberately. A typed @-mention scopes the turn's
       // toolset, so a scope carried by only some tools would be requested only
@@ -420,22 +431,46 @@ export function buildToolSecuritySchemes(
   ];
 }
 
+/**
+ * The tools that send, which the send rule (#470) makes card-only: the card's
+ * Send button can call them, the model cannot.
+ */
+export const CARD_ONLY_SEND_TOOLS: ReadonlySet<string> = new Set(["send_letter", "send_postcard"]);
+
+/**
+ * Pay & Send: the person pays for the previewed mail and payment sends it. Not
+ * card-only - in ChatGPT the model may start it, and the person sees the card
+ * and pays - but an app that may not take a purchase gets the link instead.
+ */
+export const PAY_AND_SEND_TOOL = "create_mail_checkout";
+
 export function buildToolMeta(
   toolName: string,
   meta: ToolMeta,
-  requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false"
+  requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false",
+  sendRule = isSendConfirmationEnabled()
 ): ToolMeta {
   const outputTemplate = meta["openai/outputTemplate"] as string | undefined;
   const widgetAccessible = meta["openai/widgetAccessible"] as boolean | undefined;
   const existingUi = (meta.ui as Record<string, unknown> | undefined) ?? {};
+  // Hidden from the model and left callable by the card: MCP Apps'
+  // ui.visibility ["app"], ChatGPT's own "private". An app that honours
+  // neither shows the tool to its model, and the wrapper below answers that
+  // app with a link instead of a send. Claude Code asks before every call of
+  // a tool marked as needing the person.
+  const cardOnly = sendRule && CARD_ONLY_SEND_TOOLS.has(toolName);
 
   return {
     securitySchemes: buildToolSecuritySchemes(toolName, requireAuth),
     ...meta,
+    ...(cardOnly
+      ? { "openai/visibility": "private", "anthropic/requiresUserInteraction": true }
+      : {}),
     ui: {
       ...existingUi,
       ...(outputTemplate ? { resourceUri: outputTemplate } : {}),
-      ...(widgetAccessible !== undefined ? { widgetAccessible } : {})
+      ...(widgetAccessible !== undefined ? { widgetAccessible } : {}),
+      ...(cardOnly ? { visibility: ["app"] } : {})
     }
   };
 }
@@ -704,6 +739,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Postcard tools
   quote_and_preview_postcard: quoteAndPreviewPostcardInputZ,
   send_postcard: sendPostcardInputZ,
+  request_send: requestSendInputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestInputZ,
   get_started: getStartedInputZ,
@@ -736,6 +772,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Postcard tools
   quote_and_preview_postcard: quoteAndPreviewPostcardOutputZ,
   send_postcard: sendPostcardOutputZ,
+  request_send: requestSendOutputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestOutputZ,
   get_started: getStartedOutputZ,
@@ -895,6 +932,11 @@ export async function registerLetterTools(
   // Register widget resources for ChatGPT UI rendering
   await registerWidgetResources(mcpServer);
 
+  // The send rule (#470), decided once for this registration: which app is
+  // calling (#473), and whether the rule is on.
+  const sendRule = isSendConfirmationEnabled();
+  const client = resolveClientProfile(authInfo);
+
   const toolDefs = appServer.listTools();
   for (const tool of toolDefs) {
     const inputShape = getZodInputShape(tool.name);
@@ -902,6 +944,21 @@ export async function registerLetterTools(
     if (!inputShape || !outputShape) {
       continue;
     }
+
+    // From an app that cannot be trusted to keep a card-only tool away from
+    // its model, a send tool is the model asking to send - so it gets the
+    // link the person sends from, and is authorized as request_send is. A
+    // token that can preview but not send gets the link rather than a scope
+    // error, which is the point of read-and-draft tokens.
+    //
+    // Pay & Send too (round 1 of #480): payment sends the mail, and Stripe's
+    // page never shows the preview. So the model may start it only where the
+    // app takes purchases AND shows our card, which is where the person saw
+    // the preview; anywhere else the person pays and sends from the page.
+    const sendsByLinkOnly =
+      sendRule &&
+      ((CARD_ONLY_SEND_TOOLS.has(tool.name) && !client.honorsCardOnlyTools) ||
+        (tool.name === PAY_AND_SEND_TOOL && !(client.inAppPurchases && client.rendersCards)));
 
     // Build annotations for ChatGPT to classify tools as READ or WRITE
     const annotations = buildAnnotations(tool);
@@ -921,9 +978,12 @@ export async function registerLetterTools(
       },
       async (args: Record<string, unknown>, extra: any) => {
         try {
-          authorizeTool(tool.name, authInfo);
+          authorizeTool(sendsByLinkOnly ? REQUEST_SEND_TOOL : tool.name, authInfo);
         } catch (error) {
           if (error instanceof InsufficientScopeError) {
+            // A personal access token can never be granted more (#470), so an
+            // OAuth challenge would point its agent at a dead end.
+            if (authInfo?.authType === "pat") return buildTokenScopeToolResult(tool.name);
             return buildInsufficientScopeToolResult(error);
           }
           throw error;
@@ -937,6 +997,16 @@ export async function registerLetterTools(
           return buildAccountRefusalToolResult(accountRefusal);
         } else if (initialCheck.status === "unavailable") {
           return buildAccountUnavailableToolResult();
+        }
+        if (sendsByLinkOnly) {
+          return buildSendByLinkToolResult(
+            await appServer.execute<{ draftId: unknown }, RequestSendOutput>({
+              toolName: REQUEST_SEND_TOOL,
+              input: { draftId: args.draftId },
+              userId
+            }),
+            client.name
+          );
         }
         // Extract userAgent from request metadata (US-POSTCARD-04: Mobile Image Graceful Degradation)
         const argsMeta = (args as Record<string, unknown>)._meta as Record<string, unknown> | undefined;
@@ -961,7 +1031,11 @@ export async function registerLetterTools(
         }
         const { result, meta } = executed;
 
-        const summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
+        let summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
+        const draftId = (result as Record<string, unknown>).draftId;
+        if (sendRule && PREVIEW_TOOLS.has(tool.name) && typeof draftId === "string") {
+          summaryText += ` ${howToSendText(draftId, client.rendersCards)}`;
+        }
 
         // Per OpenAI docs, response has three sibling payloads:
         // - structuredContent: data for model + widget (→ window.openai.toolOutput)
@@ -1041,6 +1115,84 @@ export function buildDuplicateMailToolResult(error: DuplicateMailError) {
   };
 }
 
+/**
+ * What a personal access token is told when a tool needs more than it carries
+ * (#470): it reads and drafts, and no sign-in can widen it, so the answer says
+ * what to do instead and carries no OAuth challenge.
+ */
+export const TOKEN_SCOPE_REFUSAL =
+  "A personal access token can read your Letter IRL account and make previews, but it can't send, pay or buy. " +
+  "To buy letters, use your Letter IRL dashboard at letterirl.com; to send, use an app signed in with your Letter IRL account.";
+
+export function buildTokenScopeToolResult(toolName: string) {
+  writeDiagnostic("info", "auth.pat_scope_refused", { toolName });
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: TOKEN_SCOPE_REFUSAL }]
+  };
+}
+
+/**
+ * The link, in words the model can pass on (#470). Nothing is sent until the
+ * person presses Send on the page, and the text says so, so a model cannot
+ * report the mail as sent.
+ */
+export function sendLinkText(result: RequestSendOutput): string {
+  const what = result.mailType === "postcard" ? "postcard" : "letter";
+  const to = result.recipientSummary?.name ? ` to ${result.recipientSummary.name}` : "";
+  return (
+    `Ask the person to open ${result.confirmationUrl} to check the ${what}${to} and send it themselves. ` +
+    `Nothing is sent until they press Send there. The link works until ${result.expiresAtISO}.`
+  );
+}
+
+/**
+ * A send tool's answer to an app that cannot show our card (#470): not sent,
+ * and the link where the person sends it. An error result, because nothing
+ * was sent and the tool's output schema describes a sent order - and because
+ * a client then puts this text in front of the model rather than treating the
+ * call as done.
+ */
+export function buildSendByLinkToolResult(
+  executed: { result: RequestSendOutput },
+  client: ClientProfileName
+) {
+  writeDiagnostic("info", "send.link_instead", {
+    client,
+    mailType: executed.result.mailType
+  });
+  return {
+    isError: true,
+    content: [
+      {
+        type: "text" as const,
+        text: `Not sent: Letter IRL sends mail only when the person sends it. ${sendLinkText(executed.result)}`
+      }
+    ]
+  };
+}
+
+/**
+ * Appended to a preview's narration while the send rule is on (#470). It
+ * carries the draft id for an app that shows the model only the text. Where
+ * our card shows, the card's Send button is the way, and the link is for a
+ * card that did not appear; elsewhere the link is the only way.
+ */
+export function howToSendText(draftId: string, rendersCards: boolean): string {
+  return rendersCards
+    ? `Nothing has been sent. The person sends it with Send on the preview card; point them to it when they ask you to send. ` +
+        `Only if the card is not showing, call request_send with draftId ${draftId} and give them its link.`
+    : `Nothing has been sent. To send it, call request_send with draftId ${draftId} and give the person its link, ` +
+        `where they check it and send it themselves.`;
+}
+
+const PREVIEW_TOOLS: ReadonlySet<string> = new Set([
+  "quote_and_preview_letter",
+  "quote_and_preview_letter_with_header_image",
+  "quote_and_preview_letter_with_image",
+  "quote_and_preview_postcard"
+]);
+
 export function summarizeToolResult(
   toolName: string,
   result: Record<string, unknown>
@@ -1084,6 +1236,8 @@ export function summarizeToolResult(
       }
       return summary;
     }
+    case "request_send":
+      return sendLinkText(result as unknown as RequestSendOutput);
     case "send_letter": {
       const status = result.currentStatus ?? "unknown";
       const order = result.orderId ?? "(no id)";
