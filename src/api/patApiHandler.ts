@@ -101,9 +101,10 @@ export async function handlePATApiRequest(
     return true;
   }
 
-  // The route's scope (src/auth/restScopes.ts). A personal access token
-  // carries none and passes, as it does on MCP; creating and revoking refuse
-  // one separately below.
+  // The route's scope (src/auth/restScopes.ts), checked for every token. A
+  // personal access token carries read and draft (migration 037, #470), so it
+  // can list tokens and is refused minting and revoking here. The authType
+  // checks below stay as the guard for a token that ever carries mail:send.
   try {
     requireScopes(authInfo, requiredRestScopes(req.method, pathname));
   } catch (error) {

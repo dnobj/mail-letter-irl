@@ -24,7 +24,8 @@ import {
   howToSendText,
   PAY_AND_SEND_TOOL,
   registerLetterTools,
-  sendLinkText
+  sendLinkText,
+  TOKEN_SCOPE_REFUSAL
 } from "../../../src/mcp/registerTools.js";
 import { prepareAuthenticatedUser } from "../../../src/auth/identity.js";
 import { AccountErasedError } from "../../../src/auth/accountErased.js";
@@ -72,6 +73,7 @@ const TOOLS = [
   "send_letter",
   "send_postcard",
   "create_mail_checkout",
+  "create_pack_checkout",
   "request_send",
   "quote_and_preview_letter",
   "get_account_balance"
@@ -143,6 +145,20 @@ describe("the send rule in the MCP server (#470)", () => {
       expect(execute).toHaveBeenCalledWith(expect.objectContaining({ toolName: "send_letter" }));
       expect(result.isError).toBeUndefined();
       expect(result.structuredContent).toMatchObject({ orderId: "order-1" });
+    });
+
+    it("tells a personal access token it cannot send, with no OAuth challenge (#481 review)", async () => {
+      const { callbacks, execute } = await register(pat);
+      const result = await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
+      expect(execute).not.toHaveBeenCalled();
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: TOKEN_SCOPE_REFUSAL }] });
+      expect(writeSpy).toHaveBeenCalledWith("info", "auth.pat_scope_refused", { toolName: "send_letter" });
+    });
+
+    it("still gives an OAuth token its challenge", async () => {
+      const { callbacks } = await register(claude(["mail:read", "mail:draft"]));
+      const result = await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
+      expect(result._meta["mcp/www_authenticate"][0]).toContain('scope="mail:send"');
     });
 
     it("leaves the send tools visible and the preview narration as it was", async () => {
@@ -245,6 +261,13 @@ describe("the send rule in the MCP server (#470)", () => {
       const { callbacks } = await register(claude());
       await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
       expect(writeSpy).toHaveBeenCalledWith("info", "send.link_instead", { client: "claude", mailType: "letter" });
+    });
+
+    it("tells a personal access token it cannot buy letters, with no OAuth challenge", async () => {
+      const { callbacks, execute } = await register(pat);
+      const result = await callbacks.get("create_pack_checkout")!({ pack: "starter" }, {});
+      expect(execute).not.toHaveBeenCalled();
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: TOKEN_SCOPE_REFUSAL }] });
     });
 
     it("gives a token that can draft but not send the link, not a scope error", async () => {

@@ -655,7 +655,7 @@ database marker, rejects privileged roles, and reapplies the grant set in `src/a
 - **Reader** (`letter_irl_admin_reader_<env>`): `SELECT` on the commerce, ledger, outbox, alert, audit
   and admin tables, and **column-level** `SELECT` on `users` (no `return_address`), `letters` (no
   `content`, `recipient`, `preview_html`), `letter_drafts` (no bodies, addresses, validations or
-  images), `personal_access_tokens` (no `token_hash`), `feature_requests` (no `contact_email`),
+  images), `personal_access_tokens` (no `token_hash`, no `scopes`), `feature_requests` (no `contact_email`),
   `redacted_content_quarantine` (no `content`), and `credit_transactions` and `credit_ledger` (no
   `description`); `INSERT` on `admin_audit_events` only; no `EXECUTE` on functions, including the
   `PUBLIC` default.
@@ -712,6 +712,7 @@ Production provisioning and the first production connection remain separate owne
 | 34 | 034_end_zero_letter_promos.sql | Ends the ordinary promo campaigns that grant no letters (the preview-gate codes 007 seeded), which could never be redeemed (#420) |
 | 35 | 035_account_erasure.sql | Account erasure: `users.erased_at`, and the `users_erased_tombstone` CHECK that holds an erased row to its placeholder email and no return address (#289) |
 | 36 | 036_account_erasure_followup_alert.sql | The `account_erasure_followup` alert type, which an erasure opens for the steps done by hand (#453) |
+| 37 | 037_personal_access_token_scopes.sql | `personal_access_tokens.scopes`: every token reads and drafts, and none sends (#470) |
 
 ---
 

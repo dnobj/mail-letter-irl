@@ -45,9 +45,11 @@ export const REST_ROUTE_SCOPES: readonly RestRouteScope[] = [
   { id: 'return_address.get', method: 'GET', path: '/api/return-address', scope: 'mail:read', twin: 'get_return_address' },
   { id: 'return_address.set', method: 'POST', path: '/api/return-address', scope: 'mail:draft', twin: 'set_return_address' },
   { id: 'return_address.clear', method: 'DELETE', path: '/api/return-address', scope: 'mail:draft', twin: 'clear_return_address' },
-  // No twin. A personal access token passes every scope check, so a token that
-  // could mint one with less than mail:send could escalate itself (audit A-02).
-  // Revoking manages the same credential and takes the same scope.
+  // No twin. A token that can mint a personal access token holds a standing
+  // credential, so both need mail:send (audit A-02). A personal access token
+  // carries read and draft (037, #470) and never gets here, and
+  // patApiHandler refuses one on both regardless. Revoking manages the same
+  // credential and takes the same scope.
   { id: 'tokens.list', method: 'GET', path: '/api/tokens', scope: 'mail:read' },
   { id: 'tokens.create', method: 'POST', path: '/api/tokens', scope: 'mail:send' },
   { id: 'tokens.revoke', method: 'DELETE', path: /^\/api\/tokens\/\d+$/, scope: 'mail:send' },
