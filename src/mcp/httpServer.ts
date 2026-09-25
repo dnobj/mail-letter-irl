@@ -69,6 +69,7 @@ import { installProcessGuards, withRequestBoundary } from "./requestBoundary.js"
 import { APPS_CHALLENGE_PATH, appsChallengeResponse } from "./appsChallenge.js";
 import { logRestRequestOnFinish } from "../api/restRequestLog.js";
 import { OAUTH_NOT_CONFIGURED } from "../auth/oauthErrors.js";
+import { clientLogFields } from "../auth/clientProfiles.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -369,7 +370,8 @@ export async function startHttpServer() {
         authInfo
       });
       writeDiagnostic("info", "mcp.sse_session_established", {
-        authType: authInfo?.authType ?? "disabled"
+        authType: authInfo?.authType ?? "disabled",
+        ...clientLogFields(authInfo)
       });
     } catch (error) {
       writeDiagnostic("error", "mcp.sse_session_start_failed", {
@@ -947,9 +949,13 @@ export async function startHttpServer() {
         return;
       }
 
+      // Which app is calling (#473), so a tool call can be traced to ChatGPT,
+      // Claude, Codex or a personal access token from the log alone.
+      const clientFields = clientLogFields(authInfo);
       writeDiagnostic("info", "mcp.request_received", {
         method: req.method ?? "unknown",
-        authType: authInfo?.authType ?? "disabled"
+        authType: authInfo?.authType ?? "disabled",
+        ...clientFields
       });
 
       const sessionTransport = new StreamableHTTPServerTransport({
@@ -984,7 +990,8 @@ export async function startHttpServer() {
         logMcpClientRequests(
           parsedBody,
           req.headers["user-agent"],
-          cachedToolNames ?? new Set()
+          cachedToolNames ?? new Set(),
+          clientFields.client
         );
 
         await sessionTransport.handleRequest(req, res, parsedBody);
