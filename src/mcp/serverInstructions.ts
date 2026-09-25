@@ -1,9 +1,17 @@
 const SEND_BY_MODEL =
   "Only call send_letter or send_postcard after the user has reviewed a draft and clearly confirms sending.";
 
+const ANOTHER_COPY_BY_MODEL =
+  "If send_letter, send_postcard or create_mail_checkout says the same mail was already sent, paid for, or is awaiting payment, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy.";
+
 // The send rule (#470, src/config/sendConfirmation.ts): the model cannot send.
 const SEND_BY_PERSON =
   "Mail is sent only by the person, never by you: they press Send on the preview card, or, when there is no card or they ask you to send it, call request_send and give them its link, where they check the mail and send it themselves.";
+
+// Under the send rule the model cannot repeat a send; the card and the page
+// ask the person about another copy themselves (#412).
+const ANOTHER_COPY_BY_PERSON =
+  "If create_mail_checkout says the same mail was already sent, paid for, or is awaiting payment, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy. For a send, the preview card or the confirmation page offers another copy itself.";
 
 function instructionLines(sendRule: boolean): string[] {
   return [
@@ -11,7 +19,7 @@ function instructionLines(sendRule: boolean): string[] {
     "Always create a preview draft before sending. Preview tools are free drafts; they do not send mail.",
     sendRule ? SEND_BY_PERSON : SEND_BY_MODEL,
     "Do not say mail has been sent unless the send tool succeeds.",
-    "If send_letter, send_postcard or create_mail_checkout says the same mail was already sent, paid for, or is awaiting payment, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy.",
+    sendRule ? ANOTHER_COPY_BY_PERSON : ANOTHER_COPY_BY_MODEL,
     "A preview exists only when the preview tool's result includes a draftId, and a checkout only when its result includes a checkoutUrl. If a Letter IRL tool call returns no result, say it did not complete: the preview card offers a Create my preview button, or offer to try again. Never describe a draft, order or checkout you did not receive.",
     "Use saved return addresses when available, and ask for missing real U.S. mailing addresses when required.",
     "For image mail, reuse existing conversation images or hosted imageUrl values before opening upload_image.",

@@ -80,6 +80,12 @@ describe("request_send", () => {
     });
   });
 
+  it("takes a draft id in upper case, as PostgreSQL's uuid type does", async () => {
+    vi.mocked(getDraft).mockResolvedValue(draft() as any);
+    await requestSendTool.handler({ draftId: DRAFT_ID.toUpperCase() }, context());
+    expect(getDraft).toHaveBeenCalledWith(DRAFT_ID.toUpperCase());
+  });
+
   it("names a postcard as a postcard", async () => {
     vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: "postcard" }) as any);
     const result = await requestSendTool.handler({ draftId: DRAFT_ID }, context());

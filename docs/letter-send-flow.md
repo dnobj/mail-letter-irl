@@ -21,16 +21,17 @@ The preview response includes a `draftId`. Sending is a separate, explicit tool 
 ## Who Can Send: the Send Rule (#470)
 
 With `LETTER_IRL_SEND_CONFIRMATION_ENABLED` on, only the person can finish a
-send. The model can't, in any app. There are two ways to send:
+send. The model can't, in any app. There are three ways to send:
 
 - **The card's Send button.** `send_letter` and `send_postcard` are card-only:
   - They carry `_meta.ui.visibility: ["app"]` and `openai/visibility: "private"`, so an app that honours them keeps the tools away from its model.
-  - They also carry `anthropic/requiresUserInteraction: true`, so Claude Code asks before each call.
+  - They also carry `anthropic/requiresUserInteraction: true`. Claude Code's MCP documentation describes this as prompting before every call. It is a hint only: Claude Code is protected by its profile, which gets the link.
   - They stay callable by the card, which sends when the person presses Send.
 - **A confirmation link.** `request_send` returns `<website>/confirm/<draftId>`:
   - There the person, signed in, sees the preview and the cost, and presses Send.
   - Nothing is sent by the tool. It is read-only and needs only `mail:draft`.
   - Its link text says nothing is sent until the person presses Send.
+- **Pay & Send, in ChatGPT only.** `create_mail_checkout` stays model-callable there: the person sees the card, and the mail is sent when they pay. In an app that may not take a purchase (the profile's `inAppPurchases`), it gets the link instead, so the person pays and sends from the page, which shows them the preview.
 
 **Where the rule is enforced.** Hiding a tool is the app's side of the rule. The
 server enforces its own side by the calling app's profile
@@ -38,7 +39,8 @@ server enforces its own side by the calling app's profile
 - **Apps that honour card-only tools** (today only ChatGPT): a send tool call
   sends as before.
 - **Every other caller:** a personal access token, an app with no card, or an
-  app we do not know. A send tool call:
+  app we do not know. A send tool call, and a Pay & Send call from an app that
+  may not take a purchase:
   - sends nothing;
   - is authorized as `request_send` is, so a read-and-draft token gets the link
     and not a scope error;
@@ -46,20 +48,26 @@ server enforces its own side by the calling app's profile
 
 **Model-facing text.** While the rule is on:
 - every preview's text ends with how the person sends it, including the draft
-  id;
-- the server instructions say the model cannot send.
+  id. Where our card shows, it points to the card's Send button; elsewhere, to
+  `request_send`;
+- the server instructions say the model cannot send, and that the card or the
+  page offers another copy of mail sent recently.
 
 **The confirmation page's API** is `GET` and `POST` `/api/sends/:draftId`
 (`src/api/sendConfirmationApiHandler.ts`). It accepts only a token issued to the
 website's own Auth0 application (`LETTER_IRL_WEBSITE_CLIENT_ID`). REST accepts
 the MCP audience, so without that check a local agent could read its own token
-and press Send itself. The `POST`:
+and press Send itself. The check holds only while the website's application
+can get tokens by nothing but a person signing in: it must stay a confidential
+client with the `authorization_code` and `refresh_token` grants alone (see
+[auth0-tenant-configuration.md](auth0-tenant-configuration.md)). A change to its
+grants is a change to the send rule. The `POST`:
 - runs the same service as the tools, below, so every check applies;
 - rewords the service's refusals for the page.
 
 **Rollout.** The rule is off by default. It is turned on once:
 - the website's confirmation page is live (website #39);
-- the ChatGPT DEV regression pass has run with it on;
+- the ChatGPT DEV regression pass has run with it on. It includes asking the model to send a preview: it must point to the card's Send button, or give the link, and never reach `send_letter` itself;
 - the development log shows ChatGPT's tokens resolving to the `chatgpt` profile.
 
 ## Confirmed Send Transaction

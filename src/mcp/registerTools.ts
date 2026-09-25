@@ -437,6 +437,13 @@ export function buildToolSecuritySchemes(
  */
 export const CARD_ONLY_SEND_TOOLS: ReadonlySet<string> = new Set(["send_letter", "send_postcard"]);
 
+/**
+ * Pay & Send: the person pays for the previewed mail and payment sends it. Not
+ * card-only - in ChatGPT the model may start it, and the person sees the card
+ * and pays - but an app that may not take a purchase gets the link instead.
+ */
+export const PAY_AND_SEND_TOOL = "create_mail_checkout";
+
 export function buildToolMeta(
   toolName: string,
   meta: ToolMeta,
@@ -943,8 +950,14 @@ export async function registerLetterTools(
     // link the person sends from, and is authorized as request_send is. A
     // token that can preview but not send gets the link rather than a scope
     // error, which is the point of read-and-draft tokens.
+    //
+    // Pay & Send too (round 1 of #480): payment sends the mail, so where the
+    // app may not take a purchase, the person pays and sends from the page,
+    // which shows them the preview, rather than on a checkout that does not.
     const sendsByLinkOnly =
-      sendRule && CARD_ONLY_SEND_TOOLS.has(tool.name) && !client.honorsCardOnlyTools;
+      sendRule &&
+      ((CARD_ONLY_SEND_TOOLS.has(tool.name) && !client.honorsCardOnlyTools) ||
+        (tool.name === PAY_AND_SEND_TOOL && !client.inAppPurchases));
 
     // Build annotations for ChatGPT to classify tools as READ or WRITE
     const annotations = buildAnnotations(tool);
@@ -1017,7 +1030,7 @@ export async function registerLetterTools(
         let summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
         const draftId = (result as Record<string, unknown>).draftId;
         if (sendRule && PREVIEW_TOOLS.has(tool.name) && typeof draftId === "string") {
-          summaryText += ` ${howToSendText(draftId)}`;
+          summaryText += ` ${howToSendText(draftId, client.rendersCards)}`;
         }
 
         // Per OpenAI docs, response has three sibling payloads:
@@ -1140,13 +1153,16 @@ export function buildSendByLinkToolResult(
 
 /**
  * Appended to a preview's narration while the send rule is on (#470). It
- * carries the draft id for an app that shows the model only the text.
+ * carries the draft id for an app that shows the model only the text. Where
+ * our card shows, the card's Send button is the way, and the link is for a
+ * card that did not appear; elsewhere the link is the only way.
  */
-export function howToSendText(draftId: string): string {
-  return (
-    `Nothing has been sent. The person sends it with Send on the preview card; ` +
-    `if there is no card, or they ask you to send it, call request_send with draftId ${draftId} and give them its link.`
-  );
+export function howToSendText(draftId: string, rendersCards: boolean): string {
+  return rendersCards
+    ? `Nothing has been sent. The person sends it with Send on the preview card; point them to it when they ask you to send. ` +
+        `Only if the card is not showing, call request_send with draftId ${draftId} and give them its link.`
+    : `Nothing has been sent. To send it, call request_send with draftId ${draftId} and give the person its link, ` +
+        `where they check it and send it themselves.`;
 }
 
 const PREVIEW_TOOLS: ReadonlySet<string> = new Set([

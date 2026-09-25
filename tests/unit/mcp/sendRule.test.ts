@@ -8,9 +8,12 @@ import {
   buildToolMeta,
   CARD_ONLY_SEND_TOOLS,
   howToSendText,
+  PAY_AND_SEND_TOOL,
   registerLetterTools,
   sendLinkText
 } from "../../../src/mcp/registerTools.js";
+import { prepareAuthenticatedUser } from "../../../src/auth/identity.js";
+import { AccountErasedError } from "../../../src/auth/accountErased.js";
 import {
   buildServerInstructions,
   LETTER_IRL_SERVER_INSTRUCTIONS
@@ -49,9 +52,16 @@ const SENT = {
   trackingSupport: "estimated_only"
 };
 
-const TOOLS = ["send_letter", "send_postcard", "request_send", "quote_and_preview_letter", "get_account_balance"].map(
-  (name) => ({ name, description: name, readOnly: false, meta: {} })
-);
+const CHECKOUT = { orderId: "order-2", checkoutUrl: "https://checkout.example/pay", status: "awaiting_payment" };
+
+const TOOLS = [
+  "send_letter",
+  "send_postcard",
+  "create_mail_checkout",
+  "request_send",
+  "quote_and_preview_letter",
+  "get_account_balance"
+].map((name) => ({ name, description: name, readOnly: false, meta: {} }));
 
 const chatgpt = (scopes = ALL_SCOPES): AuthenticatedUser => ({
   userId: "auth0|user",
@@ -86,6 +96,7 @@ async function register(authInfo: AuthenticatedUser) {
   const execute = vi.fn(async ({ toolName }: { toolName: string }) => {
     if (toolName === "request_send") return { result: LINK, meta: {} };
     if (toolName === "send_letter" || toolName === "send_postcard") return { result: SENT, meta: {} };
+    if (toolName === "create_mail_checkout") return { result: CHECKOUT, meta: {} };
     if (toolName === "quote_and_preview_letter") return { result: { draftId: DRAFT_ID, lettersRequired: 1 }, meta: {} };
     throw new Error(`unexpected tool ${toolName}`);
   });
@@ -148,7 +159,38 @@ describe("the send rule in the MCP server (#470)", () => {
         expect(result.content[0].text).toBe(
           `Not sent: Letter IRL sends mail only when the person sends it. ${sendLinkText(LINK as any)}`
         );
+        // The whole point of the answer: the page and how long it lasts.
+        expect(result.content[0].text).toContain(LINK.confirmationUrl);
+        expect(result.content[0].text).toContain(LINK.expiresAtISO);
       }
+    });
+
+    it.each([
+      ["Claude", claude()],
+      ["a personal access token", pat]
+    ])("answers Pay & Send from %s, which may not take a purchase, with the link too", async (_label, authInfo) => {
+      const { callbacks, execute } = await register(authInfo);
+      const result = await callbacks.get(PAY_AND_SEND_TOOL)!({ draftId: DRAFT_ID, sendAnotherCopy: true }, {});
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(execute).toHaveBeenCalledWith({ toolName: "request_send", input: { draftId: DRAFT_ID }, userId: "auth0|user" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain(LINK.confirmationUrl);
+    });
+
+    it("still starts Pay & Send in ChatGPT, where the person sees the card and pays", async () => {
+      const { callbacks, execute } = await register(chatgpt());
+      const result = await callbacks.get(PAY_AND_SEND_TOOL)!({ draftId: DRAFT_ID }, {});
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({ toolName: PAY_AND_SEND_TOOL }));
+      expect(result.structuredContent).toMatchObject({ checkoutUrl: CHECKOUT.checkoutUrl });
+    });
+
+    it("refuses an erased account before any link", async () => {
+      vi.mocked(prepareAuthenticatedUser).mockRejectedValueOnce(new AccountErasedError());
+      const { callbacks, execute } = await register(claude());
+      const result = await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
+      expect(execute).not.toHaveBeenCalled();
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result)).not.toContain(LINK.confirmationUrl);
     });
 
     it("logs which app was sent to the link", async () => {
@@ -205,8 +247,24 @@ describe("the send rule in the MCP server (#470)", () => {
     it("tells the model how the person sends, with the draft id, after every preview", async () => {
       const { callbacks } = await register(claude());
       const preview = await callbacks.get("quote_and_preview_letter")!({}, {});
-      expect(preview.content[0].text.endsWith(` ${howToSendText(DRAFT_ID)}`)).toBe(true);
-      expect(preview.content[0].text).toContain(`draftId ${DRAFT_ID}`);
+      expect(preview.content[0].text.endsWith(` ${howToSendText(DRAFT_ID, false)}`)).toBe(true);
+      expect(preview.content[0].text).toContain(`call request_send with draftId ${DRAFT_ID}`);
+      expect(preview.content[0].text).not.toContain("preview card");
+    });
+
+    it("points ChatGPT at the card's Send button, and at the link only if the card is missing", async () => {
+      const { callbacks } = await register(chatgpt());
+      const preview = await callbacks.get("quote_and_preview_letter")!({}, {});
+      expect(preview.content[0].text.endsWith(` ${howToSendText(DRAFT_ID, true)}`)).toBe(true);
+      expect(preview.content[0].text).toContain("Send on the preview card");
+      expect(preview.content[0].text).toContain(`Only if the card is not showing, call request_send with draftId ${DRAFT_ID}`);
+    });
+
+    it("adds nothing to a preview that carries no draft id", async () => {
+      const { callbacks, execute } = await register(claude());
+      execute.mockResolvedValueOnce({ result: { lettersRequired: 1 }, meta: {} } as any);
+      const preview = await callbacks.get("quote_and_preview_letter")!({}, {});
+      expect(preview.content[0].text).not.toContain("request_send");
     });
 
     it("narrates the link without claiming anything was sent", async () => {
@@ -216,6 +274,14 @@ describe("the send rule in the MCP server (#470)", () => {
       expect(result.content[0].text).toContain("Nothing is sent until they press Send there");
       expect(result.structuredContent).toMatchObject({ confirmationUrl: LINK.confirmationUrl });
     });
+  });
+
+  it("words the link with the page, the mail, the recipient and its end", () => {
+    const text = sendLinkText({ ...LINK, mailType: "postcard" } as any);
+    expect(text).toContain(`open ${LINK.confirmationUrl} to check the postcard to Sam Rivera`);
+    expect(text).toContain("Nothing is sent until they press Send there.");
+    expect(text).toContain(`The link works until ${LINK.expiresAtISO}.`);
+    expect(sendLinkText({ ...LINK, recipientSummary: { name: "", city: "", state: "" } } as any)).toContain("to check the letter and send");
   });
 
   it("builds the card-only metadata only for the send tools, only with the rule on", () => {
@@ -246,10 +312,13 @@ describe("the server instructions under the send rule (#470)", () => {
     expect(on).not.toContain("Only call send_letter");
     expect(on).toContain("Mail is sent only by the person, never by you");
     expect(on).toContain("call request_send and give them its link");
-    // Only the one line differs.
+    // Another copy is the card's or the page's to offer, not the model's.
+    expect(on).not.toContain("If send_letter, send_postcard or create_mail_checkout says");
+    expect(on).toContain("the preview card or the confirmation page offers another copy itself");
+    // Only those two lines differ.
     const before = LETTER_IRL_SERVER_INSTRUCTIONS.split("\n");
     const after = on.split("\n");
     expect(after).toHaveLength(before.length);
-    expect(after.filter((line, index) => line !== before[index])).toHaveLength(1);
+    expect(after.filter((line, index) => line !== before[index])).toHaveLength(2);
   });
 });

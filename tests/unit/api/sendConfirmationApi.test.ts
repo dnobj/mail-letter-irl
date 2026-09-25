@@ -193,6 +193,20 @@ describe('the confirmation page API (#470)', () => {
     expect(theirs.state.body).toBe(missing.state.body);
   });
 
+  it("limits each account's calls, and a limited call goes no further", async () => {
+    signedIn();
+    vi.mocked(getDraft).mockResolvedValue(draft() as any);
+    await call('GET');
+    expect(rateLimitAccount).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'auth0|owner', 'api_account');
+
+    vi.mocked(getDraft).mockClear();
+    vi.mocked(rateLimitAccount).mockResolvedValue(true);
+    const limited = await call('POST', '{}');
+    expect(limited.handled).toBe(true);
+    expect(getDraft).not.toHaveBeenCalled();
+    expect(createMailOrderFromDraft).not.toHaveBeenCalled();
+  });
+
   it.each(['not-a-uuid', '%E0%A4%A', `${DRAFT_ID}x`])('never asks the database about %j', async (id) => {
     signedIn();
     const { state } = await call('GET', undefined, `/api/sends/${id}`);
@@ -233,6 +247,7 @@ describe('the confirmation page API (#470)', () => {
       const { json } = await call('GET');
       expect(json().state).toBe(expected);
       expect(json().orderId).toBe(orderId);
+      expect(writeSpy).toHaveBeenCalledWith('info', 'send.confirmation_viewed', { mailType: 'letter', state: expected });
     });
 
     it('counts a long letter and a postcard as the preview tools do', async () => {
@@ -277,6 +292,8 @@ describe('the confirmation page API (#470)', () => {
       expect(createMailOrderFromDraft).toHaveBeenCalledWith(expect.objectContaining({ mailType: 'postcard', allowDuplicate: true }));
       await call('POST', JSON.stringify({ sendAnotherCopy: 'yes' }));
       expect(createMailOrderFromDraft).toHaveBeenLastCalledWith(expect.objectContaining({ allowDuplicate: false }));
+      await call('POST', JSON.stringify({ sendAnotherCopy: 1 }));
+      expect(createMailOrderFromDraft).toHaveBeenLastCalledWith(expect.objectContaining({ allowDuplicate: false }));
     });
 
     it('returns the first order for a second press, without dispatching again', async () => {
@@ -286,6 +303,7 @@ describe('the confirmation page API (#470)', () => {
       const { json } = await call('POST');
       expect(json()).toEqual({ orderId: 'L1', alreadySent: true, lettersRemaining: 2 });
       expect(processLetterJob).not.toHaveBeenCalled();
+      expect(writeSpy).toHaveBeenCalledWith('info', 'send.confirmed_on_website', { mailType: 'letter', outcome: 'already_sent' });
     });
 
     it('reports a committed send as sent even when the printer hand-off fails', async () => {
@@ -303,6 +321,20 @@ describe('the confirmation page API (#470)', () => {
       vi.mocked(getDraft).mockResolvedValue(draft() as any);
       const { state } = await call('POST', '{nope');
       expect(state.status).toBe(400);
+      expect(createMailOrderFromDraft).not.toHaveBeenCalled();
+    });
+
+    it('answers an oversized body with 413, before sending', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      const req = Object.assign(Readable.from([]), {
+        method: 'POST',
+        headers: { authorization: 'Bearer x', 'content-length': String(64 * 1024 * 1024) }
+      }) as unknown as IncomingMessage;
+      const out = response();
+      await handleSendConfirmationApiRequest(req, out.res, PATH);
+      expect(out.state.status).toBe(413);
+      expect(out.json()).toEqual({ error: 'too_large' });
       expect(createMailOrderFromDraft).not.toHaveBeenCalled();
     });
 

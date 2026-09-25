@@ -32,7 +32,11 @@ import { isDuplicateMailError } from '../services/duplicateMailService.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
 import type { LetterDraft } from '../services/types.js';
 import { isDraftIdShape } from '../tools/requestSend.js';
-import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
+import {
+  readRequestBody,
+  RequestBodyTooLargeError,
+  JSON_API_BODY_LIMIT_BYTES
+} from '../utils/requestBody.js';
 import {
   carriedDiagnosticClass,
   classifyDiagnosticError,
@@ -169,7 +173,18 @@ export function refusalFor(error: unknown): Refusal {
 
 async function sendDraft(req: IncomingMessage, res: ServerResponse, draft: LetterDraft, userId: string): Promise<void> {
   let body: { sendAnotherCopy?: unknown } = {};
-  const raw = await readRequestBody(req, { limitBytes: JSON_API_BODY_LIMIT_BYTES });
+  let raw: string;
+  try {
+    raw = await readRequestBody(req, { limitBytes: JSON_API_BODY_LIMIT_BYTES });
+  } catch (error) {
+    // Answered here: nothing between this handler and the request boundary
+    // maps it, and the boundary would answer 500 (#480 review).
+    if (error instanceof RequestBodyTooLargeError) {
+      sendJson(res, 413, { error: 'too_large' });
+      return;
+    }
+    throw error;
+  }
   if (raw.trim()) {
     try {
       const parsed = JSON.parse(raw);
