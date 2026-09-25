@@ -4,6 +4,20 @@ vi.mock("../../../src/auth/identity.js", () => ({
   prepareAuthenticatedUser: vi.fn().mockResolvedValue(undefined)
 }));
 
+// A profile a test can put in place of the one resolved from the token: today
+// every profile has the same card and purchase flags, so only a made-up one can
+// show the rule reading the right flag for each tool.
+const profileOverride = vi.hoisted(() => ({ value: null as null | Record<string, unknown> }));
+vi.mock("../../../src/auth/clientProfiles.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/auth/clientProfiles.js")>();
+  return {
+    ...actual,
+    resolveClientProfile: (user: Parameters<typeof actual.resolveClientProfile>[0]) =>
+      (profileOverride.value as ReturnType<typeof actual.resolveClientProfile> | null) ??
+      actual.resolveClientProfile(user)
+  };
+});
+
 import {
   buildToolMeta,
   CARD_ONLY_SEND_TOOLS,
@@ -175,6 +189,22 @@ describe("the send rule in the MCP server (#470)", () => {
       expect(execute).toHaveBeenCalledWith({ toolName: "request_send", input: { draftId: DRAFT_ID }, userId: "auth0|user" });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain(LINK.confirmationUrl);
+    });
+
+    it("reads the card flag for a send and the purchase flag for Pay & Send", async () => {
+      // Claude once its cards work (#474): it keeps card-only tools from its
+      // model, but may never take a purchase (#475).
+      profileOverride.value = { name: "claude", rendersCards: true, honorsCardOnlyTools: true, inAppPurchases: false };
+      try {
+        const { callbacks, execute } = await register(claude());
+        await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
+        expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ toolName: "send_letter" }));
+        const checkout = await callbacks.get(PAY_AND_SEND_TOOL)!({ draftId: DRAFT_ID }, {});
+        expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ toolName: "request_send" }));
+        expect(checkout.content[0].text).toContain(LINK.confirmationUrl);
+      } finally {
+        profileOverride.value = null;
+      }
     });
 
     it("still starts Pay & Send in ChatGPT, where the person sees the card and pays", async () => {
