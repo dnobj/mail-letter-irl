@@ -90,8 +90,10 @@ const CLIENT_DOCUMENTS: ReadonlyMap<string, ClientProfileName> = new Map([
   ["https://chatgpt.com/oauth/codex/client.json", "codex"]
 ]);
 
-// Checked after the exact list and in this order: the stable Codex document,
-// https://chatgpt.com/oauth/codex/client.json, also fits the ChatGPT pattern.
+// Checked after the exact list, which has to come first: the stable Codex
+// document, https://chatgpt.com/oauth/codex/client.json, also fits the ChatGPT
+// pattern. The two patterns never match the same URL - ChatGPT's allows one
+// path segment, Codex's two - so their own order does not matter.
 const CODEX_CALLBACK_DOCUMENT =
   /^https:\/\/chatgpt\.com\/oauth\/codex\/[A-Za-z0-9_-]+\/client\.json$/;
 const CHATGPT_CALLBACK_DOCUMENT =
