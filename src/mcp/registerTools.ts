@@ -419,9 +419,9 @@ export function buildToolSecuritySchemes(
       // tool calls work although Auth0 never grants them.
       //
       // Session and identity scopes go here and nowhere else. They must never
-      // reach getRequiredToolScopes: PAT callers authorize with no scopes at
-      // all, so a tool demanding one would deny them permanently
-      // (tests/unit/auth/sessionScopes.test.ts pins that).
+      // reach getRequiredToolScopes: a personal access token carries product
+      // scopes only (migration 037, #470), so a tool demanding one would deny
+      // it permanently (tests/unit/auth/sessionScopes.test.ts pins that).
       //
       // Applied to every tool deliberately. A typed @-mention scopes the turn's
       // toolset, so a scope carried by only some tools would be requested only
@@ -981,6 +981,9 @@ export async function registerLetterTools(
           authorizeTool(sendsByLinkOnly ? REQUEST_SEND_TOOL : tool.name, authInfo);
         } catch (error) {
           if (error instanceof InsufficientScopeError) {
+            // A personal access token can never be granted more (#470), so an
+            // OAuth challenge would point its agent at a dead end.
+            if (authInfo?.authType === "pat") return buildTokenScopeToolResult(tool.name);
             return buildInsufficientScopeToolResult(error);
           }
           throw error;
@@ -1109,6 +1112,23 @@ export function buildDuplicateMailToolResult(error: DuplicateMailError) {
         ageMinutes: Math.floor(Math.max(0, ageSeconds) / 60)
       }
     }
+  };
+}
+
+/**
+ * What a personal access token is told when a tool needs more than it carries
+ * (#470): it reads and drafts, and no sign-in can widen it, so the answer says
+ * what to do instead and carries no OAuth challenge.
+ */
+export const TOKEN_SCOPE_REFUSAL =
+  "A personal access token can read your Letter IRL account and make previews, but it can't send, pay or buy. " +
+  "To buy letters, use your Letter IRL dashboard at letterirl.com; to send, use an app signed in with your Letter IRL account.";
+
+export function buildTokenScopeToolResult(toolName: string) {
+  writeDiagnostic("info", "auth.pat_scope_refused", { toolName });
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: TOKEN_SCOPE_REFUSAL }]
   };
 }
 

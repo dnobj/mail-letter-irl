@@ -36,14 +36,22 @@ describe("tool scope enforcement", () => {
     );
   });
 
-  it("keeps PAT authorization on its separate server-side path", () => {
+  it("checks a personal access token's own scopes like any other token's (#470)", () => {
+    // Read and draft, what migration 037 gives every token. It used to pass
+    // every check here, send included.
     const pat: AuthenticatedUser = {
       userId: "pat-user",
       claims: { authType: "pat" },
       token: "redacted",
       authType: "pat",
-      scopes: []
+      scopes: ["mail:read", "mail:draft"]
     };
-    expect(() => authorizeTool("send_letter", pat, true)).not.toThrow();
+    expect(() => authorizeTool("get_account_balance", pat, true)).not.toThrow();
+    expect(() => authorizeTool("quote_and_preview_letter", pat, true)).not.toThrow();
+    expect(() => authorizeTool("send_letter", pat, true)).toThrow("insufficient_scope");
+    expect(() => authorizeTool("create_mail_checkout", pat, true)).toThrow("insufficient_scope");
+    expect(() => authorizeTool("get_account_balance", { ...pat, scopes: [] }, true)).toThrow(
+      "insufficient_scope"
+    );
   });
 });

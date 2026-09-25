@@ -7,9 +7,9 @@
  * joined the per-tool vocabulary - by being added to PRODUCT_SCOPES, or named
  * in TOOL_SCOPES - then every caller holding a valid token without it would
  * start failing closed with insufficient_scope. PAT callers would break
- * immediately: they authorize with no scopes at all (tokenValidator.ts returns
- * early for authType "pat"), so any tool requiring a scope they cannot obtain
- * would be permanently denied.
+ * immediately: a personal access token carries product scopes only (migration
+ * 037, #470), so any tool requiring a scope it cannot obtain would be
+ * permanently denied.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -42,7 +42,7 @@ describe('session scopes (issue #160)', () => {
         expect(
           sessionScopes.has(scope),
           `${toolName} requires the session scope "${scope}"; session scopes are ` +
-            `requested from Auth0, not demanded of callers, and PAT callers carry no scopes at all`
+            `requested from Auth0, not demanded of callers, and PAT callers carry product scopes only`
         ).toBe(false);
       }
     }
@@ -138,8 +138,8 @@ describe('session scopes are requested per tool but never enforced', () => {
  * registered outside strict mode can use them.
  *
  * So the two halves still have to hold, as for the session scope in #160 -
- * asked for on every tool, enforced by none - and a PAT caller, who carries no
- * scopes at all, must never be denied by one.
+ * asked for on every tool, enforced by none - and a PAT caller, who carries
+ * product scopes only, must never be denied by one.
  */
 describe('identity scopes (issue #424)', () => {
   it('asks for every identity scope on every tool', () => {
@@ -170,16 +170,16 @@ describe('identity scopes (issue #424)', () => {
 
   it('lets no tool require an identity scope', () => {
     // The PAT half, and the reason these may never join PRODUCT_SCOPES or
-    // TOOL_SCOPES: a personal access token authorizes with no scopes at all
-    // (tokenValidator returns early for authType "pat"), so a tool demanding
-    // openid would deny every PAT caller permanently.
+    // TOOL_SCOPES: a personal access token carries product scopes only
+    // (migration 037, #470), so a tool demanding openid would deny every PAT
+    // caller permanently.
     const identityScopes = new Set<string>(IDENTITY_SCOPES);
     for (const toolName of Object.keys(TOOL_SCOPES)) {
       for (const scope of getRequiredToolScopes(toolName)) {
         expect(
           identityScopes.has(scope),
           `${toolName} requires the identity scope "${scope}"; identity scopes are ` +
-            `requested from Auth0, not demanded of callers, and PAT callers carry no scopes at all`
+            `requested from Auth0, not demanded of callers, and PAT callers carry product scopes only`
         ).toBe(false);
       }
     }

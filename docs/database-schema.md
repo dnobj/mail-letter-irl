@@ -424,17 +424,21 @@ Historical record of all status changes for letters and postcards.
 
 ### personal_access_tokens
 
-API tokens for programmatic access (future use).
+Personal access tokens (`lirl_pat_…`). People make them on the website, under Dashboard, then Tokens, for MCP clients that take a bearer header (migrations 011 and 037).
 
 | Column | Type | Nullable | Default | Description |
 |--------|------|----------|---------|-------------|
-| token_id | UUID | NO | gen_random_uuid() | Primary key |
+| token_id | SERIAL | NO | - | Primary key |
 | user_id | VARCHAR(255) | NO | - | FK to users |
+| name | VARCHAR(100) | NO | - | User-friendly name |
 | token_hash | VARCHAR(255) | NO | - | Bcrypt hash of token |
-| name | VARCHAR(255) | NO | - | User-friendly name |
-| last_used_at | TIMESTAMPTZ | YES | - | Last usage timestamp |
+| token_prefix | CHAR(4) | NO | - | Last 4 characters, for display |
+| status | pat_status | NO | 'active' | `active` or `revoked` |
 | expires_at | TIMESTAMPTZ | YES | - | Expiration (NULL = never) |
+| last_used_at | TIMESTAMPTZ | YES | - | Last usage timestamp |
 | created_at | TIMESTAMPTZ | NO | NOW() | Token creation |
+| revoked_at | TIMESTAMPTZ | YES | - | When it was revoked |
+| scopes | TEXT[] | NO | `{mail:read,mail:draft}` | What the token may do (037, #470). The allowed values are `mail:read`, `mail:draft` and `mail:send`, and nothing grants `mail:send` today, so no token sends. A send from a token becomes the confirmation link (docs/letter-send-flow.md) |
 
 **Indexes:**
 - `idx_personal_access_tokens_user_id` on user_id
@@ -651,7 +655,7 @@ database marker, rejects privileged roles, and reapplies the grant set in `src/a
 - **Reader** (`letter_irl_admin_reader_<env>`): `SELECT` on the commerce, ledger, outbox, alert, audit
   and admin tables, and **column-level** `SELECT` on `users` (no `return_address`), `letters` (no
   `content`, `recipient`, `preview_html`), `letter_drafts` (no bodies, addresses, validations or
-  images), `personal_access_tokens` (no `token_hash`), `feature_requests` (no `contact_email`),
+  images), `personal_access_tokens` (no `token_hash`, no `scopes`), `feature_requests` (no `contact_email`),
   `redacted_content_quarantine` (no `content`), and `credit_transactions` and `credit_ledger` (no
   `description`); `INSERT` on `admin_audit_events` only; no `EXECUTE` on functions, including the
   `PUBLIC` default.
@@ -708,6 +712,7 @@ Production provisioning and the first production connection remain separate owne
 | 34 | 034_end_zero_letter_promos.sql | Ends the ordinary promo campaigns that grant no letters (the preview-gate codes 007 seeded), which could never be redeemed (#420) |
 | 35 | 035_account_erasure.sql | Account erasure: `users.erased_at`, and the `users_erased_tombstone` CHECK that holds an erased row to its placeholder email and no return address (#289) |
 | 36 | 036_account_erasure_followup_alert.sql | The `account_erasure_followup` alert type, which an erasure opens for the steps done by hand (#453) |
+| 37 | 037_personal_access_token_scopes.sql | `personal_access_tokens.scopes`: every token reads and drafts, and none sends (#470) |
 
 ---
 

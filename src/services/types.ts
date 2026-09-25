@@ -625,6 +625,8 @@ export interface PersonalAccessToken {
   last_used_at: Date | null;
   created_at: Date;
   revoked_at: Date | null;
+  /** What the token may do (migration 037, #470). Never mail:send today. */
+  scopes: string[];
 }
 
 /**
@@ -649,6 +651,7 @@ export interface TokenInfo {
   expiresAt: Date | null;
   lastUsedAt: Date | null;
   createdAt: Date;
+  scopes: string[];
 }
 
 /**
@@ -658,6 +661,8 @@ export interface ValidateTokenResult {
   valid: boolean;
   userId?: string;
   tokenId?: number;
+  /** The token's own scopes (#470). */
+  scopes?: string[];
   error?: string;
 }
 

@@ -377,7 +377,13 @@ Test Claude Desktop via mcp-remote.
 ### PAT Authentication (US-MCP-03)
 - [ ] Generate PAT from website dashboard
 - [ ] Configure Claude Desktop with PAT header
-- [ ] Tools work without OAuth flow
+- [ ] The read and preview tools work without an OAuth flow
+- [ ] `create_pack_checkout` and `redeem_promo_code` are refused with "A personal access token can
+      read your Letter IRL account and make previews, but it can't send, pay or buy.", and no
+      sign-in is offered (migration 037, #470)
+- [ ] `send_letter` sends nothing. With the send rule on, it answers with the confirmation link
+      ([SEND-01](#send-01--only-the-person-sends-issue-470)); with the rule off, it is refused like
+      a purchase
 - [ ] `last_used_at` updates in database
 
 ---
