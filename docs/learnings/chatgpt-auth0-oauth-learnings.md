@@ -404,6 +404,10 @@ Created helper scripts to inspect and modify Auth0 configuration:
 
 ## Environment Variables Required
 
+> These are the names the `examples/chatgpt-auth0-hello` prototype read. Nothing in `src/` reads
+> them. The Letter IRL server's own variables are in [deployment.md](../deployment.md) and
+> [auth0-setup.md](../auth0-setup.md).
+
 ```bash
 # Server
 SERVER_HOST=0.0.0.0

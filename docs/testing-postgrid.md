@@ -587,7 +587,7 @@ Before going live, verify:
 - [ ] Letter appears in dashboard
 - [ ] Address validation works
 - [ ] Cost estimation matches expectations
-- [ ] Worker processes letter jobs
+- [ ] The outbox submits the letter job right after the send
 - [ ] Database stores tracking IDs
 - [ ] Status tracking works
 - [ ] Error handling works (invalid addresses)

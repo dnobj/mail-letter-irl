@@ -66,6 +66,6 @@ Neon keeps history for point-in-time restore. The drill only reads:
 | Item | Date | Result | Evidence |
 |------|------|--------|----------|
 | Heartbeat checks created and pinging (both environments) | | | |
-| Outbox and sending switches rehearsed on development | | | |
+| Outbox and sending switches rehearsed on development | 2026-09-24 | Both passed | **Outbox switch (build 7e92ba0):** with it `false` on both services, a sent letter stayed `queued` with its job `pending` and nothing reached PostGrid. The 13:00 UTC run logged `outbox.dispatch_paused` with 1 waiting, and "Heartbeat withheld … 1 waiting". Set back to `true`, the 14:00 run logged `processed: 1, completed: 1` and PostGrid (test) accepted the letter. Development has no heartbeat URL, so no heartbeat was sent. **Sending switch (build c25f86d):** with it `false`, Send on a ready card answered "Sending is temporarily paused. Please try again later." Nothing reached PostGrid and the balance was unchanged: the send's ledger deduction rolled back, although its log line is written. Set back to `true`, the same card sent at 21:01 UTC and PostGrid (test) accepted it |
 | Restore drill: recovery time and recovery point | | | |
 | Operator for held mail, refunds and disputes confirmed | | | |
