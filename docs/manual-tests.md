@@ -1766,12 +1766,32 @@ remedy when a pair does not match, are in
 3. [ ] The dashboard shows **one** account: the same balance, the same letters.
 4. [ ] Auth0 -> User Management shows one user with two identities, and the
        Action logs show the link.
-5. [x] A brand-new password sign-up is refused until its address is confirmed,
-       with "Confirm your email address, then sign in again."
+5. [x] A brand-new password sign-up gets one confirmation email and is refused
+       until its address is confirmed, with "We've sent a confirmation link to
+       your email address - check your spam folder if it's not in your inbox.
+       Open the link, then sign in again. If nothing arrives within 10 minutes,
+       sign in again for a new link." Signing in again sends nothing within ten
+       minutes of the sign-up; after that, one sign-in sends one fresh link, and
+       the ten minutes start again. Once a link is opened, the next sign-in
+       opens a new, empty account.
 
-       **Passed 2026-09-23 on development,** but with the live Action's own words ("We've sent a
-       confirmation link..."), not the sentence above, and every refused attempt sends another
-       confirmation email (#428).
+       **Passed 2026-09-25 on development** (#428), as `testlirl01+428@…`, a
+       plus-address that Auth0 treats as a new user. Times are UTC, from the
+       Auth0 log:
+       - 04:38 sign-up, with Auth0's own email. The automatic sign-in a second
+         later was refused with nothing re-sent.
+       - 04:49, eleven minutes on: a sign-in was refused and sent one fresh
+         link, and Auth0 recorded the time on the user.
+       - 04:49 to 04:50: six more refused sign-ins sent nothing, so the
+         recorded time survives a refused login.
+       - Two emails arrived in all, at 04:38 and 04:49.
+       - 13:44: after a link was opened, the sign-in reached an empty
+         dashboard. The API logged `identity.user_created` with no identity
+         warning, and the admin lookup shows the new account with 0 letters.
+
+       The 2026-09-23 run passed on the refusal alone: that version of the
+       Action worded it differently and sent another email on every refused
+       attempt.
 6. [ ] An Apple sign-in with **Hide My Email** on is a separate account, as
        documented.
 7. [x] In ChatGPT, connect Letter IRL on an address that already has an account
