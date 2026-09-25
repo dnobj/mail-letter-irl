@@ -6,7 +6,7 @@ const ANOTHER_COPY_BY_MODEL =
 
 // The send rule (#470, src/config/sendConfirmation.ts): the model cannot send.
 const SEND_BY_PERSON =
-  "Mail is sent only by the person, never by you: they press Send on the preview card, or, when there is no card or they ask you to send it, call request_send and give them its link, where they check the mail and send it themselves.";
+  "Mail is sent only by the person, never by you: when a preview card is showing, they press its Send button; when there is no card, call request_send and give them its link, where they check the mail and send it themselves.";
 
 // Under the send rule the model cannot repeat a send; the card and the page
 // ask the person about another copy themselves (#412).

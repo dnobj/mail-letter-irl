@@ -119,7 +119,7 @@ export const requestSendTool: McpToolDefinition<RequestSendInput, RequestSendOut
   description:
     'Get a link where the person checks a previewed letter or postcard and sends it themselves on letterirl.com. ' +
     'Nothing is sent by this tool, and nothing is sent until the person presses Send on that page. ' +
-    'Use it when the person wants to send a preview and there is no preview card with a Send button, or they ask you to send it.',
+    'Use it when the person wants to send a preview and no preview card with a Send button is showing.',
   readOnly: true,
   inputSchema: requestSendInputSchema,
   outputSchema: requestSendOutputSchema,

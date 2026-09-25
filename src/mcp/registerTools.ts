@@ -951,13 +951,14 @@ export async function registerLetterTools(
     // token that can preview but not send gets the link rather than a scope
     // error, which is the point of read-and-draft tokens.
     //
-    // Pay & Send too (round 1 of #480): payment sends the mail, so where the
-    // app may not take a purchase, the person pays and sends from the page,
-    // which shows them the preview, rather than on a checkout that does not.
+    // Pay & Send too (round 1 of #480): payment sends the mail, and Stripe's
+    // page never shows the preview. So the model may start it only where the
+    // app takes purchases AND shows our card, which is where the person saw
+    // the preview; anywhere else the person pays and sends from the page.
     const sendsByLinkOnly =
       sendRule &&
       ((CARD_ONLY_SEND_TOOLS.has(tool.name) && !client.honorsCardOnlyTools) ||
-        (tool.name === PAY_AND_SEND_TOOL && !client.inAppPurchases));
+        (tool.name === PAY_AND_SEND_TOOL && !(client.inAppPurchases && client.rendersCards)));
 
     // Build annotations for ChatGPT to classify tools as READ or WRITE
     const annotations = buildAnnotations(tool);

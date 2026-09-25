@@ -70,6 +70,11 @@ grants is a change to the send rule. The `POST`:
 - the ChatGPT DEV regression pass has run with it on. It includes asking the model to send a preview: it must point to the card's Send button, or give the link, and never reach `send_letter` itself;
 - the development log shows ChatGPT's tokens resolving to the `chatgpt` profile.
 
+A Pay & Send checkout opened before the switch still mails when the person
+pays, for as long as the checkout lasts: at most the draft's 24 hours. The
+person's own payment for that exact mail is the trigger, so this is expected,
+not a gap.
+
 ## Confirmed Send Transaction
 
 `send_letter` and `send_postcard` call the same atomic service. Inside one PostgreSQL transaction the service:
