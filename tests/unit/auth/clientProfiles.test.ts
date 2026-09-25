@@ -61,6 +61,13 @@ describe("resolveClientProfile (#473)", () => {
     "https://chatgpt.com/oauth/abc/client.json?x=1",
     "https://chatgpt.com/oauth/a/b/client.json",
     "https://chatgpt.com/oauth//client.json",
+    // Each pattern's anchors and escaped dots, one lookalike apiece.
+    "https://chatgptXcom/oauth/abc/client.json",
+    "https://chatgpt.com/oauth/abc/clientXjson",
+    "https://chatgpt.com/oauth/codex/abc/client.json?x=1",
+    "https://chatgpt.com/oauth/codex//client.json",
+    "https://chatgptXcom/oauth/codex/abc/client.json",
+    "https://chatgpt.com/oauth/codex/abc/clientXjson",
     "https://claude.ai/oauth/mcp-oauth-client-metadata/",
     "HTTPS://CLAUDE.AI/oauth/mcp-oauth-client-metadata",
     "a1B2c3D4e5F6g7H8i9J0",
@@ -79,6 +86,14 @@ describe("resolveClientProfile (#473)", () => {
     expect(clientIdOf(jwt({ client_id: ["x"] }))).toBeUndefined();
   });
 
+  it("does not fall back to azp when client_id names an app it does not know", () => {
+    expect(
+      resolveClientProfile(
+        jwt({ client_id: "tpc_x", azp: "https://chatgpt.com/oauth/abc/client.json" })
+      ).name
+    ).toBe("generic");
+  });
+
   it("names a personal access token 'token', whatever it carries", () => {
     expect(resolveClientProfile(pat()).name).toBe("token");
     expect(
@@ -92,12 +107,22 @@ describe("resolveClientProfile (#473)", () => {
     expect(resolveClientProfile(jwt({})).name).toBe("generic");
   });
 
-  it("recognises ChatGPT's static rollback client from its configured id (#20)", () => {
+  it("recognises ChatGPT's static rollback client, only while rollback mode is on (#20)", () => {
     const client = jwt({ azp: "StAtIcClIeNtId0123" });
     expect(resolveClientProfile(client).name).toBe("generic");
-    vi.stubEnv("CHATGPT_STATIC_CLIENT_ID", "StAtIcClIeNtId0123");
+    vi.stubEnv("CHATGPT_STATIC_CLIENT_ID", "  StAtIcClIeNtId0123  ");
+    // Configured, but rollback mode is off: /oauth/register is not handing
+    // the id to anyone, so it is not ChatGPT's.
+    expect(resolveClientProfile(client).name).toBe("generic");
+    vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "true");
     expect(resolveClientProfile(client).name).toBe("chatgpt");
     expect(resolveClientProfile(jwt({ azp: "SomeOtherClient" })).name).toBe("generic");
+  });
+
+  it.each(["", "   "])("matches no client with a blank static id %j", (value) => {
+    vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "true");
+    vi.stubEnv("CHATGPT_STATIC_CLIENT_ID", value);
+    expect(resolveClientProfile(jwt({ azp: "AnyClient" })).name).toBe("generic");
   });
 
   // The trust table is the security boundary for the send rule (#470). A flag
@@ -155,6 +180,11 @@ describe("clientLogFields (#473)", () => {
       client: "generic",
       clientIdKind: "opaque"
     });
+    // Auth0's own id for an imported document (tpc_...), and anything that is
+    // not an https document URL from its first character, read as opaque.
+    for (const azp of ["tpc_3e5dGr4xSikvNzScZkiVhd", "http://new-app.example/client.json", "x https://new-app.example"]) {
+      expect(clientLogFields(jwt({ azp }))).toEqual({ client: "generic", clientIdKind: "opaque" });
+    }
     expect(clientLogFields(jwt({}))).toEqual({ client: "generic", clientIdKind: "absent" });
     expect(clientLogFields(null)).toEqual({ client: "generic", clientIdKind: "absent" });
   });
@@ -168,7 +198,7 @@ describe("clientLogFields (#473)", () => {
       "utf-8"
     );
     expect(httpServer).toMatch(
-      /const clientFields = clientLogFields\(authInfo\);\s*\n\s*writeDiagnostic\("info", "mcp\.request_received", \{[^}]*\.\.\.clientFields\s*\}\);/
+      /const clientFields = clientLogFields\(authInfo\);[\s\S]{0,300}?writeDiagnostic\("info", "mcp\.request_received", \{[^}]*\.\.\.clientFields\s*\}\);/
     );
     expect(httpServer).toMatch(
       /writeDiagnostic\("info", "mcp\.sse_session_established", \{[^}]*\.\.\.clientLogFields\(authInfo\)\s*\}\);/

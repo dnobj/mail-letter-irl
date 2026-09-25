@@ -73,6 +73,11 @@ const PROFILES: Readonly<Record<ClientProfileName, ClientProfile>> = {
  * client id, so an app registered from its own document is recognised by that
  * URL on both tenants. Only documents imported into our tenant can mint a
  * token at all, which is what makes a URL match trustworthy.
+ *
+ * Expected, not yet observed: these are the URLs each app publishes, and none
+ * has been seen in our own log. That costs only a log label while an entry
+ * trusts nothing. A trust flag is turned on only for an entry that has been
+ * seen in the development log, in that app's live test (#471).
  */
 const CLIENT_DOCUMENTS: ReadonlyMap<string, ClientProfileName> = new Map([
   ["https://claude.ai/oauth/mcp-oauth-client-metadata", "claude"],
@@ -94,6 +99,11 @@ const CLIENT_DOCUMENTS: ReadonlyMap<string, ClientProfileName> = new Map([
 // document, https://chatgpt.com/oauth/codex/client.json, also fits the ChatGPT
 // pattern. The two patterns never match the same URL - ChatGPT's allows one
 // path segment, Codex's two - so their own order does not matter.
+//
+// The ChatGPT pattern gives ChatGPT's trust to ANY one-segment document on
+// chatgpt.com. So before another OpenAI document of that shape is imported
+// into Auth0 (a new OpenAI app), it goes into CLIENT_DOCUMENTS above under its
+// own name; see the import procedure in docs/auth0-tenant-configuration.md.
 const CODEX_CALLBACK_DOCUMENT =
   /^https:\/\/chatgpt\.com\/oauth\/codex\/[A-Za-z0-9_-]+\/client\.json$/;
 const CHATGPT_CALLBACK_DOCUMENT =
@@ -129,9 +139,13 @@ function profileNameForClientId(clientId: string): ClientProfileName {
     return "chatgpt";
   }
   // The rollback path (static registration, #20) hands ChatGPT a client id
-  // Auth0 made up rather than a document URL.
-  const staticClientId = getOAuthConfig().staticClientId?.trim();
-  if (staticClientId && clientId === staticClientId) {
+  // Auth0 made up rather than a document URL. Honoured only while that path is
+  // on: /oauth/register hands the same id to every registrant, and only the
+  // callback list on that Auth0 application keeps it ChatGPT's. Those callbacks
+  // must stay OpenAI's alone (docs/auth0-tenant-configuration.md).
+  const config = getOAuthConfig();
+  const staticClientId = config.staticClientId?.trim();
+  if (config.staticDcrCompatibility && staticClientId && clientId === staticClientId) {
     return "chatgpt";
   }
   return "generic";
