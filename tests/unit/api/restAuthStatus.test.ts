@@ -226,6 +226,17 @@ describe('restAuth failure statuses', () => {
     expect(outcome).toMatchObject({ ok: true, user: { email: 'user@example.invalid' } });
   });
 
+  it('reports the application the token was issued to (#470)', async () => {
+    // The send confirmation routes accept only the website's own application.
+    vi.mocked(validateJWTToken).mockResolvedValue({ ...validUser, claims: { azp: 'WebsiteClient01' } });
+    const withClient = await authenticateRestRequest(request({ authorization: 'Bearer t' }), READ);
+    expect(withClient).toMatchObject({ ok: true, user: { clientId: 'WebsiteClient01' } });
+
+    vi.mocked(validateJWTToken).mockResolvedValue(validUser);
+    const withoutClient = await authenticateRestRequest(request({ authorization: 'Bearer t' }), READ);
+    expect(withoutClient.ok && withoutClient.user.clientId).toBeUndefined();
+  });
+
   it('labels each status honestly', () => {
     expect(restAuthErrorLabel(401)).toBe('Unauthorized');
     expect(restAuthErrorLabel(403)).toBe('Forbidden');

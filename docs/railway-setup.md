@@ -86,6 +86,13 @@ LETTER_IRL_MAIL_SENDING_ENABLED=<true to allow sending; refuses new sends when f
 # The outbox switch (#444): false pauses everything going to the printer, queued mail included.
 # Set it on the API AND the maintenance service. Unset or blank means on; write false to pause.
 LETTER_IRL_OUTBOX_DISPATCH_ENABLED=<true; false pauses the outbox>
+# The send rule (#470, docs/letter-send-flow.md): only the person finishes a send, from our card or
+# the website's confirmation page. Off unless explicitly true. API service only.
+LETTER_IRL_SEND_CONFIRMATION_ENABLED=<true once the confirmation page is live>
+# The website's own Auth0 application's Client ID: the only token that may confirm a send.
+LETTER_IRL_WEBSITE_CLIENT_ID=<the website application's Client ID in this tenant>
+# Where the confirmation link points. Defaults to LETTER_IRL_GIFT_LANDING_BASE_URL.
+LETTER_IRL_WEBSITE_BASE_URL=<https://letterirl.com, or the development website's address>
 LETTER_IRL_BETA_GATE_ENABLED=<true to restrict access to the invited cohort>
 LETTER_IRL_BETA_DAILY_MAIL_CAP=<global letters per day>
 LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP=<letters per account per day>

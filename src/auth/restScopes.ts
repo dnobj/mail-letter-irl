@@ -50,7 +50,12 @@ export const REST_ROUTE_SCOPES: readonly RestRouteScope[] = [
   { id: 'tokens.list', method: 'GET', path: '/api/tokens', scope: 'mail:read' },
   { id: 'tokens.create', method: 'POST', path: '/api/tokens', scope: 'mail:send' },
   { id: 'tokens.revoke', method: 'DELETE', path: /^\/api\/tokens\/\d+$/, scope: 'mail:send' },
-  { id: 'checkout.create', method: 'POST', path: '/api/stripe/create-checkout-session', scope: 'mail:send', twin: 'create_pack_checkout' }
+  { id: 'checkout.create', method: 'POST', path: '/api/stripe/create-checkout-session', scope: 'mail:send', twin: 'create_pack_checkout' },
+  // The confirmation page (#470). Reading a draft is a read; pressing Send is
+  // what send_letter does. Both also require the website's own application
+  // (src/api/sendConfirmationApiHandler.ts).
+  { id: 'sends.get', method: 'GET', path: /^\/api\/sends\/[^/]+$/, scope: 'mail:read' },
+  { id: 'sends.confirm', method: 'POST', path: /^\/api\/sends\/[^/]+$/, scope: 'mail:send', twin: 'send_letter' }
 ];
 
 function matches(route: RestRouteScope, method: string | undefined, pathname: string): boolean {

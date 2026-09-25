@@ -42,7 +42,11 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   // union unchanged.
   redeem_promo_code: "mail:send",
   send_letter: "mail:send",
-  send_postcard: "mail:send"
+  send_postcard: "mail:send",
+  // Hands back a link and sends nothing: the person sends from the page, with
+  // the website's own token (#470). So it sits with the drafting tools, and a
+  // token that can preview can also ask for the link.
+  request_send: "mail:draft"
 };
 
 export function getRequiredToolScopes(toolName: string): ProductScope[] {

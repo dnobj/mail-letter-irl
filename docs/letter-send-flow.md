@@ -1,6 +1,6 @@
 # Letter and Postcard Send Flow
 
-**Last Updated:** September 23, 2026
+**Last Updated:** September 25, 2026
 **Purpose:** Draft, payment, outbox, and provider workflow for letters and postcards
 
 This document describes the current draft, payment, outbox, and provider workflow for letters and postcards.
@@ -17,6 +17,50 @@ Preview tools validate the user's input, render the appropriate widget, and crea
 | `quote_and_preview_postcard` | image front, message back | postcard-specific message limit |
 
 The preview response includes a `draftId`. Sending is a separate, explicit tool call requiring `confirm: true`.
+
+## Who Can Send: the Send Rule (#470)
+
+With `LETTER_IRL_SEND_CONFIRMATION_ENABLED` on, only the person can finish a
+send. The model can't, in any app. There are two ways to send:
+
+- **The card's Send button.** `send_letter` and `send_postcard` are card-only:
+  - They carry `_meta.ui.visibility: ["app"]` and `openai/visibility: "private"`, so an app that honours them keeps the tools away from its model.
+  - They also carry `anthropic/requiresUserInteraction: true`, so Claude Code asks before each call.
+  - They stay callable by the card, which sends when the person presses Send.
+- **A confirmation link.** `request_send` returns `<website>/confirm/<draftId>`:
+  - There the person, signed in, sees the preview and the cost, and presses Send.
+  - Nothing is sent by the tool. It is read-only and needs only `mail:draft`.
+  - Its link text says nothing is sent until the person presses Send.
+
+**Where the rule is enforced.** Hiding a tool is the app's side of the rule. The
+server enforces its own side by the calling app's profile
+(`src/auth/clientProfiles.ts`, #473):
+- **Apps that honour card-only tools** (today only ChatGPT): a send tool call
+  sends as before.
+- **Every other caller:** a personal access token, an app with no card, or an
+  app we do not know. A send tool call:
+  - sends nothing;
+  - is authorized as `request_send` is, so a read-and-draft token gets the link
+    and not a scope error;
+  - answers with an error result carrying the link.
+
+**Model-facing text.** While the rule is on:
+- every preview's text ends with how the person sends it, including the draft
+  id;
+- the server instructions say the model cannot send.
+
+**The confirmation page's API** is `GET` and `POST` `/api/sends/:draftId`
+(`src/api/sendConfirmationApiHandler.ts`). It accepts only a token issued to the
+website's own Auth0 application (`LETTER_IRL_WEBSITE_CLIENT_ID`). REST accepts
+the MCP audience, so without that check a local agent could read its own token
+and press Send itself. The `POST`:
+- runs the same service as the tools, below, so every check applies;
+- rewords the service's refusals for the page.
+
+**Rollout.** The rule is off by default. It is turned on once:
+- the website's confirmation page is live (website #39);
+- the ChatGPT DEV regression pass has run with it on;
+- the development log shows ChatGPT's tokens resolving to the `chatgpt` profile.
 
 ## Confirmed Send Transaction
 

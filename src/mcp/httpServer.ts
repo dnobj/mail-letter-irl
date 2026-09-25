@@ -11,7 +11,8 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { LetterIrlServer } from "../server.js";
 import { registerLetterTools, type RegisterToolsOptions } from "./registerTools.js";
 import { logMcpClientRequests } from "./clientRequestLog.js";
-import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
+import { buildServerInstructions } from "./serverInstructions.js";
+import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
 import { stringifyManifest } from "./manifest.js";
 import {
@@ -23,6 +24,7 @@ import { handleCreditApiRequest } from "../api/creditApiHandler.js";
 import { handlePATApiRequest } from "../api/patApiHandler.js";
 import { handleLetterApiRequest } from "../api/letterApiHandler.js";
 import { handleReturnAddressApiRequest } from "../api/returnAddressApiHandler.js";
+import { handleSendConfirmationApiRequest } from "../api/sendConfirmationApiHandler.js";
 import { handleTempImageRequest } from "../api/tempImageHandler.js";
 import {
   handleCreateCheckoutSession,
@@ -285,7 +287,7 @@ async function createMcpServer(
     name: "letter-irl",
     version: "0.1.0"
   }, {
-    instructions: LETTER_IRL_SERVER_INSTRUCTIONS
+    instructions: buildServerInstructions(isSendConfirmationEnabled())
   });
   await registerLetterTools(mcpServer, letterServer, authInfo, options);
   return mcpServer;
@@ -912,6 +914,17 @@ export async function startHttpServer() {
     }
     const returnAddressApiHandled = await handleReturnAddressApiRequest(req, res, url.pathname);
     if (returnAddressApiHandled) {
+      return;
+    }
+
+    // The confirmation page's API (#470): where the person sends a preview.
+    if (url.pathname.startsWith('/api/sends')) {
+      if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
+        return; // Rate limited
+      }
+    }
+    const sendsApiHandled = await handleSendConfirmationApiRequest(req, res, url.pathname);
+    if (sendsApiHandled) {
       return;
     }
 
