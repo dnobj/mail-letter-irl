@@ -253,6 +253,7 @@ at `src/db/index.ts:32-37`. A `?sslmode=require` URL satisfies all three rules.
 | Rule | Severity | Raised when | Fix |
 |---|---|---|---|
 | `outbox.dispatch_paused` | warning | `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` holds anything but an affirmative, so the outbox is paused and nothing goes to the print provider (#444) | Intended during a printing incident. Otherwise set it to `true` on the API and the maintenance service ([operational-acceptance.md](operational-acceptance.md)). The API prints it at boot, maintenance at every run |
+| `send_confirmation.website_client_missing` | error in production, warning elsewhere | `LETTER_IRL_SEND_CONFIRMATION_ENABLED` is on and `LETTER_IRL_WEBSITE_CLIENT_ID` is not set, so the confirmation page refuses every send and apps without our card cannot send at all (#470) | Set `LETTER_IRL_WEBSITE_CLIENT_ID` on the API to the Client ID of the website's own Auth0 application in that tenant, or turn the rule off |
 
 ## Development Release Procedure
 

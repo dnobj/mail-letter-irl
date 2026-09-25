@@ -193,6 +193,11 @@ export const sendPostcardInputZ = z.object({
   sendAnotherCopy: z.boolean().optional().describe("Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise.")
 });
 
+// A link where the person sends a preview themselves (#470).
+export const requestSendInputZ = z.object({
+  draftId: z.string().describe("The draftId from a letter or postcard preview")
+});
+
 // ============================================================================
 // Feature Request Schema (US-FEEDBACK-01)
 // ============================================================================
@@ -543,6 +548,14 @@ export const sendPostcardOutputZ = z.object({
   trackingSupport: trackingSupportZ.optional(),
   saveReturnAddressNote: z.string().optional(),
   suggestSaveReturnAddress: z.boolean().optional()
+});
+
+export const requestSendOutputZ = z.object({
+  draftId: z.string(),
+  mailType: z.enum(["letter", "postcard"]),
+  confirmationUrl: z.string().describe("Where the person checks the preview and sends it themselves"),
+  expiresAtISO: z.string(),
+  recipientSummary: recipientSummaryZ
 });
 
 export const submitFeatureRequestOutputZ = z.object({

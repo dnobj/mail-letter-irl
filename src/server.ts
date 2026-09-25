@@ -32,8 +32,12 @@ import {
   // Image-intent router (returns routing guidance; does not generate)
   generateImageForMailTool,
   // Confirm uploaded image tool (widget relay)
-  confirmUploadedImageTool
+  confirmUploadedImageTool,
+  // A link where the person sends a preview themselves (#470)
+  requestSendTool
 } from "./tools/index.js";
+import { REQUEST_SEND_TOOL } from "./tools/requestSend.js";
+import { isSendConfirmationEnabled } from "./config/sendConfirmation.js";
 import {
   McpToolDefinition,
   ToolContext,
@@ -67,6 +71,9 @@ const tools: McpToolDefinition<any, any>[] = [
   // Postcard tools
   quoteAndPreviewPostcardTool,
   sendPostcardTool,
+  // The model's way to send, once the send rule is on (#470): a link where
+  // the person sends the preview themselves. Listed only while the rule is on.
+  requestSendTool,
   // Image-intent router: must stay inside the exposed set so @-mention
   // generate requests land on it instead of a capability narration.
   generateImageForMailTool,
@@ -217,15 +224,22 @@ export class LetterIrlServer {
   }
 
   listTools() {
-    return tools.map((tool) => ({
-      name: tool.name,
-      title: tool.title,
-      description: tool.description,
-      readOnly: tool.readOnly,
-      inputSchema: tool.inputSchema,
-      outputSchema: tool.outputSchema,
-      meta: tool.meta
-    }));
+    // request_send points at the confirmation page, which ships with the send
+    // rule, so the tool is listed only while the rule is on. execute() still
+    // reaches it: a send tool answers an app without our card with its link
+    // (src/mcp/registerTools.ts).
+    const sendRule = isSendConfirmationEnabled();
+    return tools
+      .filter((tool) => sendRule || tool.name !== REQUEST_SEND_TOOL)
+      .map((tool) => ({
+        name: tool.name,
+        title: tool.title,
+        description: tool.description,
+        readOnly: tool.readOnly,
+        inputSchema: tool.inputSchema,
+        outputSchema: tool.outputSchema,
+        meta: tool.meta
+      }));
   }
 }
 

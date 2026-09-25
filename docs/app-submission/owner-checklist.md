@@ -149,8 +149,12 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
 - [ ] **Configurable permission prompts (June 2026).** A fresh end-to-end test in ChatGPT that each
       destructive tool's annotation still brings the host's prompt, and that the app's own
       confirmation (the preview and the explicit send) still stands on top of it.
-- [x] **`openai/visibility` deprecated for `_meta.ui.visibility` (July 2026).** Neither key is used
-      in `src/`, so nothing needs migrating (checked 2026-09-23).
+- [ ] **`openai/visibility` deprecated for `_meta.ui.visibility` (July 2026).** Neither key was
+      used in `src/` on 2026-09-23. The send rule (#470) now emits both on `send_letter` and
+      `send_postcard` while `LETTER_IRL_SEND_CONFIRMATION_ENABLED` is on, so that ChatGPT keeps
+      the tools from its model and the card can still call them. Before the rule goes on in
+      production, confirm in ChatGPT that the model cannot call `send_letter` and the card's Send
+      button still can (docs/letter-send-flow.md, Rollout).
 - [ ] **Stable OAuth callback and CIMD id (August 2026).** They rely on RFC 9207 issuer
       identification, which the production Auth0 discovery did not advertise on 2026-09-16. Keep
       the imported CIMD client; do not swap it for the stable URL without testing the swap.

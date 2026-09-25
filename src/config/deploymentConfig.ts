@@ -30,6 +30,7 @@ import {
 } from './products.js';
 import { isDebugEnabled } from '../utils/debug.js';
 import { stripeCheckoutDomainInvalid } from './checkoutDomain.js';
+import { isSendConfirmationEnabled, websiteClientId } from './sendConfirmation.js';
 
 export type DeploymentMode = 'production' | 'development' | 'test';
 
@@ -447,6 +448,38 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     advisory: true,
     secret: false,
     services: ['api', 'maintenance']
+  },
+  /**
+   * The send rule (#470, src/config/sendConfirmation.ts): mail goes out only
+   * when the person sends it, from our card or the confirmation page. Advisory
+   * while it is rolled out; meant to be on in production before launch.
+   */
+  {
+    name: 'LETTER_IRL_SEND_CONFIRMATION_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /** The website, for the confirmation link. Defaults to the gift landing address. */
+  {
+    name: 'LETTER_IRL_WEBSITE_BASE_URL',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * The website's own Auth0 application: the only one whose tokens may
+   * confirm a send. Missing while the rule is on is its own rule's finding.
+   */
+  {
+    name: 'LETTER_IRL_WEBSITE_CLIENT_ID',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api'],
+    checkedBy: 'send_confirmation.website_client_missing'
   },
   /**
    * Image generation, which is NOT new - and that is the point.
@@ -1103,6 +1136,18 @@ export function validateDeploymentConfig(
       rule: 'outbox.dispatch_paused',
       message:
         'LETTER_IRL_OUTBOX_DISPATCH_ENABLED pauses the outbox: nothing goes to the print provider until it is set to true'
+    });
+  }
+
+  // #470: with the send rule on and no website application named, the
+  // confirmation page refuses every send, and apps without our card cannot
+  // send at all. An error in production, where that is a customer outage.
+  if (isSendConfirmationEnabled(env) && !websiteClientId(env)) {
+    findings.push({
+      severity: production ? 'error' : 'warning',
+      rule: 'send_confirmation.website_client_missing',
+      message:
+        'LETTER_IRL_SEND_CONFIRMATION_ENABLED is on without LETTER_IRL_WEBSITE_CLIENT_ID, so nobody can send from the confirmation page'
     });
   }
 

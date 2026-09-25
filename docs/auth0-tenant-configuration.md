@@ -978,6 +978,16 @@ subjects, and only the surviving primary subject counts afterwards.
    authorize request, both with `resource` and with neither `resource` nor
    `audience`, reach the Auth0 login page with no error.
 
+   **The send rule depends on the website application's grants** (#470). Only a
+   token issued to `Letter IRL Website` may confirm a send on the confirmation
+   page. The API's `LETTER_IRL_WEBSITE_CLIENT_ID` names that application's Client
+   ID: `ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX` on development and
+   `wX17u1wOn3XJRVba1ejIappBNpDno3ER` on production. The check holds because the
+   application stays a confidential client with the `authorization_code` and
+   `refresh_token` grants alone, so only a person signing in can obtain its
+   tokens. Re-enabling Implicit or Client Credentials on it is a change to the
+   send rule, not a routine setting (docs/letter-send-flow.md).
+
 3. **Domain-Level Connections**
    - **All 5 connections** must have `is_domain_connection: true`
    - **Why:** Third-party clients (like dynamically registered ChatGPT apps) can only use domain-level connections

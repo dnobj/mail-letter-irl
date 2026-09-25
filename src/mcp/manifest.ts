@@ -1,7 +1,8 @@
 import { LetterIrlServer } from "../server.js";
 import { WIDGET_DEFINITIONS } from "./registerTools.js";
 import { DEFAULT_OAUTH_SCOPES } from "../auth/oauthConfig.js";
-import { LETTER_IRL_SERVER_INSTRUCTIONS } from "./serverInstructions.js";
+import { buildServerInstructions } from "./serverInstructions.js";
+import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 
 function getManifestUrls(publicBaseUrlOverride?: string) {
   const publicBaseUrl =
@@ -42,7 +43,7 @@ export function buildManifest(publicBaseUrl?: string) {
     name: "Letter IRL",
     version: "0.1.0",
     description: APP_DIRECTORY_DESCRIPTION,
-    instructions: LETTER_IRL_SERVER_INSTRUCTIONS,
+    instructions: buildServerInstructions(isSendConfirmationEnabled()),
     contactEmail: "support@letterirl.com",
     legalInfoUrl: "https://letterirl.com/terms",
     tools,
