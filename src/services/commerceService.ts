@@ -455,6 +455,20 @@ function productSnapshot(product: CommerceProductConfig): Record<string, unknown
 }
 
 /**
+ * The line a pack's grant writes into the customer's history, which the
+ * website shows as it is (#460). Named as the customer bought it: the name
+ * the order recorded at checkout, then the catalogue's, and never the
+ * internal product code. The repair after a missed webhook writes the same
+ * line; that it was a repair is on the order event, not in the history.
+ */
+function packPurchaseLine(order: Pick<Order, 'product_code' | 'product_snapshot'>): string {
+  const recorded = (order.product_snapshot as { name?: unknown } | null)?.name;
+  if (typeof recorded === 'string' && recorded.trim()) return `Purchased ${recorded.trim()}`;
+  const product = PACK_PRODUCTS.find(candidate => candidate.productCode === order.product_code);
+  return `Purchased ${product?.name ?? 'a letter pack'}`;
+}
+
+/**
  * The parts of a Pay & Send checkout request that follow configuration, and so
  * can change between two attempts on one order (#279): the Stripe Price and
  * the return URLs. Everything else Stripe receives - the order id, its
@@ -1408,7 +1422,7 @@ export async function repairFulfilledPackGrant(
         currency: order.currency
       },
       expirationDays: PURCHASE_CREDIT_EXPIRY_DAYS,
-      description: `Repaired ${order.product_code} grant after Stripe reconciliation`
+      description: packPurchaseLine(order)
     });
     await recordOrderEvent(
       client,
@@ -1529,7 +1543,7 @@ async function transitionPaidCheckout(
         currency: order.currency
       },
       expirationDays: PURCHASE_CREDIT_EXPIRY_DAYS,
-      description: `Purchased ${order.product_code} via Stripe Checkout`
+      description: packPurchaseLine(order)
     });
     await grantImageEntitlementWithClient(client, {
       userId: order.user_id,

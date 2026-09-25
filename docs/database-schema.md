@@ -64,11 +64,12 @@ neither admin role is granted `erased_at`.
 
 **The UNIQUE on `email` is load-bearing, and PostgreSQL calls it
 `users_email_key`.** Auth0 mints a subject per sign-in method, so one person
-arriving by a second method presents an address the first already holds; the
-constraint is what stops that becoming two accounts, and the name is what
-`EmailAlreadyLinkedError` matches on a 23505 (`src/services/userService.ts`,
-proven against a real database in `tests/integration/accountIdentity.postgres.test.ts`).
-A migration that renames or replaces it has to update both.
+arriving by a second method presents an address the first already holds. The
+constraint is what stops that becoming two accounts.
+- **Moving an address, or opening an account inside a grant:** `EmailAlreadyLinkedError` matches the constraint's name on a 23505, in `updateUserEmail` and in `ensureAccountRowWithClient`. A migration that renames or replaces the constraint has to update `EMAIL_UNIQUE_CONSTRAINT` in `src/services/userService.ts` to match.
+- **Opening an account on a first request:** `createUser` skips a conflict on any unique index, then reads what the conflict was (#457). The subject's own row means a request made at the same moment opened it. Otherwise, another subject holding the address is the collision.
+
+Both are proven against a real database in `tests/integration/accountIdentity.postgres.test.ts` (`src/services/userService.ts`).
 
 ---
 
