@@ -359,7 +359,9 @@ the call JWT-authenticated and successful.
 **Status:** Partly run in development on 2026-09-26, with the send rule on. It used Claude on the web
 (claude.ai, in the Claude app's built-in browser) and Letter IRL test account testlirl02. Steps 1 to
 3 passed; step 4 ran as far as the link; steps 5 and 6 were not run. Step 7 ran the same day, after
-#486 deployed (88dd3d2): titles and the image text passed, and the purchase text needs #475.
+#486 deployed (88dd3d2): titles and the image text passed, and the purchase text needs #475. Step 8
+ran after #489 deployed (d686367). Claude has no checkout tools and offers none, and it gives the
+letter packs link only when asked.
 
 Background: Claude connects with its published identity, the document at
 `https://claude.ai/oauth/mcp-oauth-client-metadata`. That document must be imported into each tenant
@@ -432,13 +434,30 @@ Findings, fixed by #484:
 The development log showed each call as `client=claude`. The getting-started and image cards
 could not display ("There was a problem displaying content"), as expected until #474.
 
-8. Purchases (#475), once it is deployed to development. Refresh the tool list first.
-- [ ] The connector page lists neither **Buy a letter pack** nor **Pay & Send a letter or
-      postcard**.
+8. Purchases (#475), once it is deployed to development. Refresh the tool list first. (Run on
+   2026-09-26 after #489 deployed, d686367. The refresh logged `tools/list` with
+   `steeringRev=11`.)
+- [x] The connector page lists neither **Buy a letter pack** nor **Pay & Send a letter or
+      postcard**. (Yes: 7 interactive, 8 read-only and 5 write tools, down from 8, 8 and 6.)
 - [ ] Ask "How do I get started with Letter IRL?", then ask for the balance with no letters. Both
-      answers give the letter packs link and offer no checkout.
-- [ ] Ask to buy a letter pack. Claude lists the packs and gives the letter packs link. Nothing
-      creates a checkout: the development log shows no `create_pack_checkout` call.
+      answers give the letter packs link and offer no checkout. (Partly. Neither offered a
+      checkout, and both said to buy a pack "on your Letter IRL dashboard". Neither gave the
+      link, although the result names it and asks for it to be passed on.)
+- [x] Ask to buy a letter pack. Claude lists the packs and gives the letter packs link. Nothing
+      creates a checkout: the development log shows no `create_pack_checkout` call. (Claude
+      called `list_letter_packs`, showed the three packs, and said "I can't make the purchase from
+      here. You buy packs on the Letter IRL dashboard." The log shows no checkout call. Asked
+      "What's the link to buy one?", it gave the letter packs link at once.)
+
+Claude doesn't pass on a link from a tool result unprompted, even when the result asks it to; it
+gives the link when the person asks. Once the cards show in Claude (#474), a card can carry the
+link as a button.
+
+9. Image generation off (#467), once it is deployed to development. Refresh the tool list first.
+- [ ] The connector page no longer lists **Create an image for mail**.
+- [ ] Ask Letter IRL to make an image for a postcard. Claude says Letter IRL doesn't make images
+      there and asks for one of your own. The development log shows no `generate_image_for_mail`
+      call.
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
 

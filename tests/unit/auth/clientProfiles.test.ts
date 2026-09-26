@@ -130,16 +130,18 @@ describe("resolveClientProfile (#473)", () => {
 
   // The trust table is the security boundary for the send rule (#470). A flag
   // turned on here must be a decision made after a live test, so this pins it.
+  // The fifth flag is a rule, not trust: Letter IRL's own AI image generation
+  // is off in Anthropic's apps, whose directory does not accept it (#467).
   it("trusts only ChatGPT with cards, card-only tools, purchases and its own images", () => {
-    const expected: Record<ClientProfileName, [boolean, boolean, boolean, boolean]> = {
-      chatgpt: [true, true, true, true],
-      claude: [false, false, false, false],
-      claude_code: [false, false, false, false],
-      codex: [false, false, false, false],
-      vscode: [false, false, false, false],
-      hermes: [false, false, false, false],
-      token: [false, false, false, false],
-      generic: [false, false, false, false]
+    const expected: Record<ClientProfileName, [boolean, boolean, boolean, boolean, boolean]> = {
+      chatgpt: [true, true, true, true, true],
+      claude: [false, false, false, false, false],
+      claude_code: [false, false, false, false, false],
+      codex: [false, false, false, false, true],
+      vscode: [false, false, false, false, true],
+      hermes: [false, false, false, false, true],
+      token: [false, false, false, false, true],
+      generic: [false, false, false, false, true]
     };
     const samples: Record<ClientProfileName, AuthenticatedUser | null> = {
       chatgpt: jwt({ azp: "https://chatgpt.com/oauth/abc/client.json" }),
@@ -155,7 +157,7 @@ describe("resolveClientProfile (#473)", () => {
     };
     for (const [name, flags] of Object.entries(expected) as [
       ClientProfileName,
-      [boolean, boolean, boolean, boolean]
+      [boolean, boolean, boolean, boolean, boolean]
     ][]) {
       const profile = resolveClientProfile(samples[name]);
       expect(profile.name).toBe(name);
@@ -163,7 +165,8 @@ describe("resolveClientProfile (#473)", () => {
         profile.rendersCards,
         profile.honorsCardOnlyTools,
         profile.inAppPurchases,
-        profile.generatesImages
+        profile.generatesImages,
+        profile.offersImageGeneration
       ]).toEqual(flags);
       // The same profile by name, for text written for one app on purpose.
       expect(clientProfileNamed(name)).toBe(profile);

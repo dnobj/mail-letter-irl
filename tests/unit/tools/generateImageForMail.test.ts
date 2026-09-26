@@ -420,12 +420,14 @@ describe("generate_image_for_mail (hybrid)", () => {
  * of their own. A context that names no app gets the same.
  */
 describe("generate_image_for_mail in an app with no image generation of its own", () => {
-  const claudeContext = {
+  // VS Code: offered Letter IRL's generation, with none of its own. Claude is
+  // not offered the tool at all (#467), so it never reaches these answers.
+  const vscodeContext = {
     user: { userId: "user-1" },
     correlationId: "test",
     isMobile: false,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    client: clientProfileNamed("claude")
+    client: clientProfileNamed("vscode")
   } as never;
   const unnamedContext = {
     user: { userId: "user-1" },
@@ -472,7 +474,7 @@ describe("generate_image_for_mail in an app with no image generation of its own"
     });
     vi.mocked(tempStore.storeImage).mockResolvedValue("token-9" as never);
 
-    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, claudeContext);
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, vscodeContext);
 
     expect(result.mode).toBe("generated");
   });
@@ -485,7 +487,7 @@ describe("generate_image_for_mail in an app with no image generation of its own"
       allowance: 3
     } as never);
 
-    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, claudeContext);
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, vscodeContext);
 
     expect(result.status).toBe("no_credits");
     expect(result.prompt).toBe("a walrus");
@@ -498,7 +500,7 @@ describe("generate_image_for_mail in an app with no image generation of its own"
   it("says generation is off, rather than that ChatGPT has the request, when the mode is off", async () => {
     process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
 
-    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, claudeContext);
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, vscodeContext);
 
     expect(result.status).toBe("generation_disabled");
     expectOwnImageRedirect(result as never, "Letter IRL is not making images here right now.");
@@ -506,7 +508,7 @@ describe("generate_image_for_mail in an app with no image generation of its own"
   });
 
   it("asks for a description without calling it routing", async () => {
-    const result = await generateImageForMailTool.handler({}, claudeContext);
+    const result = await generateImageForMailTool.handler({}, vscodeContext);
 
     expect(result.status).toBe("no_prompt");
     expectOwnImageRedirect(result as never, "Letter IRL needs a description to make an image.");

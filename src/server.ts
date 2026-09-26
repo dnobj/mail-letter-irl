@@ -125,6 +125,13 @@ export const IN_APP_PURCHASE_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Letter IRL's AI image generation: listed only where the app allows it
+ * (offersImageGeneration). Anthropic's Connectors Directory takes no connector
+ * that generates images through AI models, so Claude is not offered it (#467).
+ */
+export const IMAGE_GENERATION_TOOLS: ReadonlySet<string> = new Set(["generate_image_for_mail"]);
+
+/**
  * A tool's description as the calling app reads it (#484). Most tools say the
  * same to every app; a few give each app its own words.
  */
@@ -252,8 +259,9 @@ export class LetterIrlServer {
 
   /**
    * The tools as one app sees them: each description in that app's words
-   * (#484), and the checkouts only where it takes purchases (#475). Without an
-   * app, the list for an app that trusts nothing.
+   * (#484), the checkouts only where it takes purchases (#475), and image
+   * generation only where it is allowed (#467). Without an app, the list for
+   * an app that trusts nothing.
    */
   listTools(client: ClientProfile = callingApp(undefined)) {
     // request_send points at the confirmation page, which ships with the send
@@ -264,6 +272,7 @@ export class LetterIrlServer {
     return tools
       .filter((tool) => sendRule || tool.name !== REQUEST_SEND_TOOL)
       .filter((tool) => client.inAppPurchases || !IN_APP_PURCHASE_TOOLS.has(tool.name))
+      .filter((tool) => client.offersImageGeneration || !IMAGE_GENERATION_TOOLS.has(tool.name))
       .map((tool) => ({
         name: tool.name,
         title: tool.title,

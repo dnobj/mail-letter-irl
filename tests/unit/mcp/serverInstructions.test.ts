@@ -99,12 +99,23 @@ describe('server instructions in an app other than ChatGPT', () => {
   const claude = buildServerInstructions(false, clientProfileNamed('claude')).split('\n');
   const line = (pattern: RegExp) => claude.find(entry => pattern.test(entry));
 
-  it('make generate_image_for_mail the way to make an image', () => {
-    const images = line(/generate_image_for_mail/);
+  it('make generate_image_for_mail the way to make an image, where Letter IRL makes them', () => {
+    // An app with no image generation of its own that is still offered
+    // Letter IRL's; Claude is not (#467, below).
+    const images = buildServerInstructions(false, clientProfileNamed('vscode'))
+      .split('\n')
+      .find(entry => /generate_image_for_mail/.test(entry));
     expect(images).toBeDefined();
     expect(images).toContain('rather than refusing');
     expect(images).toContain('an image of their own');
     expect(images).not.toMatch(/ChatGPT|image_gen|addressed to Letter IRL|copy-ready prompt/);
+  });
+
+  it('tell Claude that Letter IRL makes no images there (#467)', () => {
+    expect(line(/generate_image_for_mail/)).toBeUndefined();
+    expect(line(/make images/)).toBe(
+      'Letter IRL does not make images in this app. For image mail, use an image the user already has: pass a link to it as imageUrl.'
+    );
   });
 
   it("offer an upload without ChatGPT's library", () => {

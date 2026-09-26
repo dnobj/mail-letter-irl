@@ -92,6 +92,15 @@ describe("tool text on the wire (#484)", () => {
     expect(claude).toContain("list_letter_packs");
   });
 
+  it("offers Letter IRL's image generation to ChatGPT and not to Claude (#467)", async () => {
+    const names = async (app: keyof typeof APPS) => {
+      const { client } = await connect(app);
+      return (await client.listTools()).tools.map((tool) => tool.name);
+    };
+    expect(await names("chatgpt")).toContain("generate_image_for_mail");
+    expect(await names("claude")).not.toContain("generate_image_for_mail");
+  });
+
   it("describes the tools in each app's words", async () => {
     const described = async (app: keyof typeof APPS) => {
       const { client } = await connect(app);
