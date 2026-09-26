@@ -125,10 +125,11 @@ async function handler(
     // purchases: create_pack_checkout and list_letter_packs (#311, #312) made
     // "go to letterirl.com" both stale and - with LETTER_IRL_PACKS_URL unset -
     // a dead end. An app that takes none, such as Claude (#475), gets the
-    // dashboard page instead (#484).
+    // dashboard page instead (#484). Claude passed on "your Letter IRL
+    // dashboard" and dropped the address, so the text asks for the link.
     balanceLine = callingApp(context).inAppPurchases
       ? "No letters on this account yet. You can buy a letter pack here, or pay for a single letter as you send it."
-      : `No letters on this account yet. Buy a letter pack on your Letter IRL dashboard at ${letterPacksPageUrl()}.`;
+      : `No letters on this account yet. Letter packs are bought on the Letter IRL website, not in this app. Give the person this link: ${letterPacksPageUrl()}`;
   } else {
     balanceLine = `Letter Balance: ${lettersRemaining} ${lettersRemaining === 1 ? 'letter' : 'letters'} remaining.`;
   }

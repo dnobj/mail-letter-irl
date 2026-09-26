@@ -8,6 +8,8 @@ import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { listLetterPacksInputSchema, listLetterPacksOutputSchema } from '../schemas.js';
 import { ensurePriceCatalog } from '../services/priceCatalog.js';
 import { getPackProductConfig } from '../services/stripeService.js';
+import { callingApp } from '../auth/clientProfiles.js';
+import { letterPacksPageUrl } from '../config/sendConfirmation.js';
 
 interface ListLetterPacksInput {
   [key: string]: never;
@@ -29,7 +31,7 @@ interface ListLetterPacksOutput {
 
 async function handler(
   _input: ListLetterPacksInput,
-  _context: ToolContext
+  context: ToolContext
 ): Promise<ListLetterPacksOutput> {
   // Prices resolve lazily (#275 stage A). They are already warmed at boot by
   // kickPriceCatalog(undefined, "http_listen"), so this is normally a memo read
@@ -75,7 +77,12 @@ async function handler(
     // a refusal here would read to the model as a broken tool rather than an
     // unavailable product.
     message: packs.length
-      ? `${packs.length} letter ${packs.length === 1 ? 'pack is' : 'packs are'} available to buy.`
+      ? `${packs.length} letter ${packs.length === 1 ? 'pack is' : 'packs are'} available to buy.` +
+        // Where the app takes no purchases there is no checkout to offer
+        // (#475): the link is how the person buys one.
+        (callingApp(context).inAppPurchases
+          ? ''
+          : ` They are bought on the Letter IRL website, not in this app. Give the person this link: ${letterPacksPageUrl()}`)
       : 'Letter packs are temporarily unavailable.'
   };
 }
@@ -83,8 +90,10 @@ async function handler(
 export const listLetterPacksTool: McpToolDefinition<ListLetterPacksInput, ListLetterPacksOutput> = {
   name: 'list_letter_packs',
   title: 'List letter packs',
-  description:
-    'List the letter packs available to buy, with how many letters each adds and what it costs. Use this to answer questions about pack sizes or pricing, and before create_pack_checkout when the customer has not said which size they want.',
+  description: (client) =>
+    client.inAppPurchases
+      ? 'List the letter packs available to buy, with how many letters each adds and what it costs. Use this to answer questions about pack sizes or pricing, and before create_pack_checkout when the customer has not said which size they want.'
+      : 'List the letter packs, with how many letters each adds and what it costs. Use this to answer questions about pack sizes or pricing. Packs are bought on the Letter IRL website, not in this app, and the result gives the link.',
   readOnly: true,
   inputSchema: listLetterPacksInputSchema,
   outputSchema: listLetterPacksOutputSchema,

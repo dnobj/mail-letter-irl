@@ -278,7 +278,11 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
 
   describe('Tool Classification Summary', () => {
     it('should cover all 23 registered tools in annotation checks', () => {
-      const runtimeToolNames = new LetterIrlServer().listTools().map((tool) => tool.name).sort();
+      // ChatGPT's list is the full one; other apps lack the checkouts (#475).
+      const runtimeToolNames = new LetterIrlServer()
+        .listTools(clientProfileNamed('chatgpt'))
+        .map((tool) => tool.name)
+        .sort();
       const checkedToolNames = allTools.map((tool) => tool.name).sort();
 
       expect(allTools.length).toBe(23);
@@ -335,7 +339,7 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
 
   describe('Runtime Zod Schema Coverage', () => {
     it('should register input and output Zod shapes for every runtime tool', () => {
-      const tools = new LetterIrlServer().listTools();
+      const tools = new LetterIrlServer().listTools(clientProfileNamed('chatgpt'));
 
       for (const tool of tools) {
         expect(getZodInputShape(tool.name), `${tool.name} input shape`).toBeDefined();
@@ -508,6 +512,8 @@ describe('OpenAI Apps SDK Submission Compliance', () => {
       for (const prompt of output.examplePrompts) {
         expect(summary).toContain(`"${prompt}"`);
       }
+      // Claude dropped the letter packs link when paraphrasing (#475).
+      expect(summary).toContain('including any link');
       expect(summary).not.toMatch(/\bcard\b/i);
     });
 

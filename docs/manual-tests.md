@@ -432,6 +432,14 @@ Findings, fixed by #484:
 The development log showed each call as `client=claude`. The getting-started and image cards
 could not display ("There was a problem displaying content"), as expected until #474.
 
+8. Purchases (#475), once it is deployed to development. Refresh the tool list first.
+- [ ] The connector page lists neither **Buy a letter pack** nor **Pay & Send a letter or
+      postcard**.
+- [ ] Ask "How do I get started with Letter IRL?", then ask for the balance with no letters. Both
+      answers give the letter packs link and offer no checkout.
+- [ ] Ask to buy a letter pack. Claude lists the packs and gives the letter packs link. Nothing
+      creates a checkout: the development log shows no `create_pack_checkout` call.
+
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
 **Status:** Steps 1 to 3 run in development on 2026-09-26 (Claude Code 2.1.282, Windows).

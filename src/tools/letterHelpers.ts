@@ -19,6 +19,9 @@ import {
 } from "../services/previewService.js";
 import { createDraft } from "../services/draftService.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
+import type { MailType } from "../services/types.js";
+import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
+import { letterPacksPageUrl } from "../config/sendConfirmation.js";
 import { giftCardSummary, resolveGiftSendChoice } from "./giftSendChoice.js";
 import type { GiftCardState } from "../services/giftCardRenderer.js";
 import {
@@ -511,6 +514,44 @@ export function giftSendEligibility(eligibility: SendEligibility): SendEligibili
   };
 }
 
+/**
+ * An app that takes no purchases (#475) offers neither checkout, so a card
+ * there shows no Pay & Send and no Buy a Letter Pack, and the pack link is the
+ * website's letter packs page, where the person buys one. Apply it before
+ * giftSendEligibility, whose reason for a gift draft is the truer one.
+ */
+export function appSendEligibility(eligibility: SendEligibility, client: ClientProfile): SendEligibility {
+  if (client.inAppPurchases) {
+    return eligibility;
+  }
+  return {
+    payAndSend: {
+      available: false,
+      unavailableReason: "Pay & Send isn't available in this app."
+    },
+    letterPack: {
+      available: false,
+      purchaseUrl: letterPacksPageUrl()
+    }
+  };
+}
+
+/**
+ * What a preview offers for buying: Pay & Send and the letter pack button, as
+ * the account, a gift send and the calling app allow (#475). Both previews,
+ * letter and postcard, build it here.
+ */
+export function previewSendEligibility(
+  available: number,
+  requiredCredits: number,
+  mailType: MailType,
+  isGift: boolean,
+  client: ClientProfile
+): SendEligibility {
+  const eligibility = appSendEligibility(getSendEligibility(available, requiredCredits, mailType), client);
+  return isGift ? giftSendEligibility(eligibility) : eligibility;
+}
+
 export async function createLetterDraftAndBuildOutput(
   params: CreateLetterDraftParams
 ): Promise<LetterQuoteOutput> {
@@ -611,9 +652,7 @@ export async function createLetterDraftAndBuildOutput(
     lettersRequired,
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
-    sendEligibility: gift.isGift
-      ? giftSendEligibility(getSendEligibility(available, requiredCredits, "letter"))
-      : getSendEligibility(available, requiredCredits, "letter"),
+    sendEligibility: previewSendEligibility(available, requiredCredits, "letter", gift.isGift, callingApp(context)),
     deliveryClass: DELIVERY_CLASS,
     deliveryEstimate: DELIVERY_ESTIMATE,
     deliveryDisclaimer: DELIVERY_DISCLAIMER,

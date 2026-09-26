@@ -39,5 +39,10 @@
  *     profile. ChatGPT is named only to ChatGPT, where its image-routing text
  *     is unchanged; elsewhere generate_image_for_mail is the only way to make
  *     an image, and apps that take no purchases are sent to the dashboard.
+ * r11: purchases per app (#475): an app that takes no purchases is not
+ *     offered create_pack_checkout or create_mail_checkout, list_letter_packs
+ *     there gives the letter packs link, and the instructions name no
+ *     checkout. Results ask the model to give the person the link, which
+ *     Claude had dropped.
  */
-export const STEERING_COPY_REV = 10;
+export const STEERING_COPY_REV = 11;

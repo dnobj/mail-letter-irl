@@ -1319,7 +1319,8 @@ export function summarizeToolResult(
           result.overview,
           result.purchaseStep,
           examples.length ? `Things to try: ${examples.map((example) => `"${example}"`).join(", ")}.` : "",
-          "Pass this on to the person in your own words."
+          // Claude dropped the letter packs link when paraphrasing (#475).
+          "Pass this on to the person in your own words, including any link."
         ]
           .filter((part): part is string => typeof part === "string" && part.length > 0)
           .join(" ");

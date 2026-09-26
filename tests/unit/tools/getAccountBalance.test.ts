@@ -170,8 +170,10 @@ describe("get_account_balance: where to buy letters", () => {
       emptyAccount();
       const result = await getAccountBalanceTool.handler({} as any, inApp(name));
 
+      // Claude passed on "your Letter IRL dashboard" without the address in
+      // CLIENT-01 step 7, so the text asks for the link itself (#475).
       expect(result.message).toContain(
-        "No letters on this account yet. Buy a letter pack on your Letter IRL dashboard at https://website.example/dashboard/letter-packs."
+        "No letters on this account yet. Letter packs are bought on the Letter IRL website, not in this app. Give the person this link: https://website.example/dashboard/letter-packs"
       );
       expect(result.message).not.toMatch(/buy a letter pack here|pay for a single letter/);
     }

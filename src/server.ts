@@ -113,6 +113,18 @@ export interface ServerResponse<Output> {
 }
 
 /**
+ * The checkouts: listed only where the app takes purchases (#475). Claude
+ * allows no purchases through connectors, and the Connectors Directory takes
+ * no connector that executes financial transactions. There, letters are
+ * bought on the website, which get_started, get_account_balance and
+ * list_letter_packs link to.
+ */
+export const IN_APP_PURCHASE_TOOLS: ReadonlySet<string> = new Set([
+  "create_pack_checkout",
+  "create_mail_checkout"
+]);
+
+/**
  * A tool's description as the calling app reads it (#484). Most tools say the
  * same to every app; a few give each app its own words.
  */
@@ -240,7 +252,8 @@ export class LetterIrlServer {
 
   /**
    * The tools as one app sees them: each description in that app's words
-   * (#484). Without an app, the words for an app that trusts nothing.
+   * (#484), and the checkouts only where it takes purchases (#475). Without an
+   * app, the list for an app that trusts nothing.
    */
   listTools(client: ClientProfile = callingApp(undefined)) {
     // request_send points at the confirmation page, which ships with the send
@@ -250,6 +263,7 @@ export class LetterIrlServer {
     const sendRule = isSendConfirmationEnabled();
     return tools
       .filter((tool) => sendRule || tool.name !== REQUEST_SEND_TOOL)
+      .filter((tool) => client.inAppPurchases || !IN_APP_PURCHASE_TOOLS.has(tool.name))
       .map((tool) => ({
         name: tool.name,
         title: tool.title,

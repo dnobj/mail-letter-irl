@@ -114,13 +114,27 @@ describe('server instructions in an app other than ChatGPT', () => {
     expect(upload).not.toMatch(/ChatGPT|library/);
   });
 
-  it('recover a lost call without naming a card button', () => {
+  it('recover a lost call without naming a card button or a checkout', () => {
     const lost = line(/returns no result/);
     expect(lost).toContain('say it did not complete and offer to try again.');
-    expect(lost).not.toMatch(/\bcard\b|Create my preview/);
-    // The claims the line exists to tie down are the same in every app.
-    expect(lost).toMatch(/preview exists only when the preview tool's result includes a draftId/);
-    expect(lost).toMatch(/Never describe a draft, order or checkout you did not receive/);
+    expect(lost).not.toMatch(/\bcard\b|Create my preview|checkout/);
+    // The claims the line exists to tie down, less the checkout Claude is not
+    // offered (#475).
+    expect(lost).toMatch(/preview exists only when the preview tool's result includes a draftId\./);
+    expect(lost).toMatch(/Never describe a draft or order you did not receive/);
+  });
+
+  it('name no create_mail_checkout, which Claude is not offered, for the same mail twice', () => {
+    const off = line(/another copy/);
+    expect(off).toBe(
+      'If send_letter or send_postcard says the same mail was already sent, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy.'
+    );
+    // Under the send rule the page asks about another copy itself, and with
+    // no card in Claude it is the only place that does.
+    const on = buildServerInstructions(true, clientProfileNamed('claude'))
+      .split('\n')
+      .find(entry => /another copy/.test(entry));
+    expect(on).toBe('If the same mail was sent recently, the confirmation page says so and offers another copy itself.');
   });
 
   it('keep the refund line word for word', () => {

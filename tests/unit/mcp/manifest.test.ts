@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { LetterIrlServer } from "../../../src/server.js";
 import { buildManifest, stringifyManifest } from "../../../src/mcp/manifest.js";
 import { WIDGET_DEFINITIONS } from "../../../src/mcp/registerTools.js";
+import { clientProfileNamed } from "../../../src/auth/clientProfiles.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,7 +13,12 @@ const manifestPath = path.resolve(__dirname, "../../../manifest.json");
 
 describe("Compatibility manifest", () => {
   it("should mirror the runtime tool registry", () => {
-    const runtimeTools = new LetterIrlServer().listTools().map((tool) => tool.name).sort();
+    // The manifest is ChatGPT's, and ChatGPT's list is the full one: an app
+    // that takes no purchases is not offered the checkouts (#475).
+    const runtimeTools = new LetterIrlServer()
+      .listTools(clientProfileNamed("chatgpt"))
+      .map((tool) => tool.name)
+      .sort();
     const manifestTools = buildManifest().tools.map((tool) => tool.name).sort();
 
     expect(manifestTools).toEqual(runtimeTools);

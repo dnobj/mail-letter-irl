@@ -68,21 +68,29 @@ Embed or adapt this block in the app instructions so the assistant consistently 
 Everything above is what ChatGPT reads. Since #484, another app reads its own version wherever
 ChatGPT's would be false there. The app's profile (`src/auth/clientProfiles.ts`) chooses the words:
 
-- **Instructions.** Three lines differ; `buildServerInstructions` builds them per app.
+- **The checkouts.** An app that takes no purchases, such as Claude, is not offered
+  `create_pack_checkout` or `create_mail_checkout` at all (#475). Claude doesn't allow purchases
+  through connectors, and the Connectors Directory takes no connector that executes financial
+  transactions. Letters are bought on the website's letter packs page (`/dashboard/letter-packs`).
+- **Instructions.** Four lines differ; `buildServerInstructions` builds them per app.
   - An app without ChatGPT's own image generation is told that `generate_image_for_mail` is the way
     to make an image. It hears nothing about `image_gen` or ChatGPT's library.
   - An app that shows no cards is not told about the **Create my preview** button.
-- **Tool descriptions.** `get_started` and `get_account_balance` promise a purchase in the
-  conversation only where the app takes purchases; elsewhere they say letters are bought on the
-  website. `generate_image_for_mail` names ChatGPT only to ChatGPT.
+  - An app that takes no purchases hears nothing about a checkout. Its line about the same mail
+    twice names only the send tools, or, under the send rule, the confirmation page.
+- **Tool descriptions.** `get_started`, `get_account_balance` and `list_letter_packs` promise a
+  purchase in the conversation only where the app takes purchases; elsewhere they say letters are
+  bought on the website. `generate_image_for_mail` names ChatGPT only to ChatGPT.
 - **Tool results.**
-  - Where the app takes no purchases, `get_started` and `get_account_balance` give the website's
-    letter packs page (`/dashboard/letter-packs`).
+  - Where the app takes no purchases, `get_started`, `get_account_balance` and `list_letter_packs`
+    give the letter packs page and ask the model to pass the link on.
+  - A preview there marks Pay & Send and pack buying unavailable, so a card would show neither
+    button.
   - Where no card shows, `get_started` returns the guide as text.
   - Without ChatGPT's image generation, `generate_image_for_mail` gives the reason and asks for an
     image of the person's own.
 - **Titles.** Every tool has a short title, such as "Check letter balance", the same in every app.
   An app shows it where the tool's name belongs, for example when it asks to allow a call.
 
-`tests/unit/mcp/modelFacingCopy.test.ts` checks every app's text, and
+`tests/unit/mcp/modelFacingCopy.test.ts` checks every app's text and tool list, and
 `tests/unit/mcp/toolTextWire.test.ts` checks what ChatGPT and Claude actually receive.

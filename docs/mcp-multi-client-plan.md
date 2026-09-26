@@ -59,7 +59,7 @@
 
 - **Which app is calling.** The server reads it from the sign-in token's `azp`, which names the Auth0 application. Personal access tokens get the profile "token".
 - **What a profile holds.** Whether the app renders our cards and honours card-only tools, whether purchases are allowed in it, whether it makes images itself, and which card domain it needs.
-- **Nothing else branches on the app.** Every app gets the same tool list, and an unknown app gets the safest profile.
+- **Nothing else branches on the app.** Every app gets the same tool list, and an unknown app gets the safest profile. The one exception is the checkouts: only an app that takes purchases is offered them (#475).
 - **The words follow the profile (#484).** Where a sentence would be false in some app, that app reads its own version: ChatGPT is named only to ChatGPT, and an app that takes no purchases is sent to the dashboard to buy letters. Every tool has a short title.
 
 ### 2. Sending: only the person can finish it (#470, website #39)
@@ -93,7 +93,9 @@ There are two ways to send, and the AI can complete neither by itself:
 - **Fallbacks for ChatGPT-only features:**
   - photo upload goes to the upload-link page;
   - `widgetState` becomes data kept on the server.
-- **Purchases in Claude.** The cards hide Pay & Send and Buy letters, and the text points to the Letter IRL dashboard.
+- **Purchases in Claude (#475).** Claude isn't offered the checkout tools. A preview marks Pay & Send and pack buying unavailable, so the cards hide both buttons, and the text gives the link to the website's letter packs page. Two rules decided the design:
+  - Claude's Help Center: "Purchases through third-party interactive connectors are not supported."
+  - The Connectors Directory takes no connector that executes financial transactions, and every listed tool must return a successful response. So a checkout that only answers "not here" would not pass.
 - **Text results that stand alone.** For apps without cards they carry the draft id, the summary, the cost and how to send.
 
 ### 5. Getting people connected (website #38, website #40, #468, #476, #467)
