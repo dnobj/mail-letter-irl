@@ -354,6 +354,57 @@ the call JWT-authenticated and successful.
 
 ## Claude Desktop Integration
 
+### CLIENT-01 — Claude through a custom connector (launch gate, #471)
+
+**Status:** Partly run in development on 2026-09-26, with the send rule on. It used Claude on the web
+(claude.ai, in the Claude app's built-in browser) and Letter IRL test account testlirl02. Steps 1 to
+3 passed; step 4 ran as far as the link; steps 5 and 6 were not run.
+
+Background: Claude connects with its published identity, the document at
+`https://claude.ai/oauth/mcp-oauth-client-metadata`. That document must be imported into each tenant
+([auth0-tenant-configuration.md](auth0-tenant-configuration.md), Applications, section 6). One
+connector on a Claude account covers Claude on the web, Desktop, mobile and Cowork.
+
+1. Install
+- [x] Customize, then Connectors, then **Add custom connector**: name "Letter IRL (DEV)", URL the
+      development `/mcp`. Claude should detect **Sign in now** and **Use Claude's published
+      identity** by itself; keep both. (It did. A link can fill the form in:
+      `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=…&connectorUrl=…`,
+      and Claude then warns that the connector came from an external link.)
+2. Sign in
+- [x] Press **Connect**, sign in, and accept the consent screen. (The first press did nothing: no
+      request reached Auth0 or the API. The second opened the sign-in, which reused an existing
+      session, then the consent screen: Read, Draft, Send and offline access.)
+- [x] The development log should show `client=claude` on `mcp.request_received`. (It did, for
+      `initialize`, `tools/list` and `resources/list`.)
+- [x] The connector's page should list `send_letter` and `send_postcard` under **App-only tools**,
+      and `request_send` among the read-only tools. (Both as expected.)
+3. Preview
+- [x] Ask for the balance, then a text-only letter preview, approving each call with **Allow
+      once**. (Both ran. Claude could not display the preview card ("There was a problem displaying
+      content"), which is expected until the cards work outside ChatGPT, #474.)
+4. The person sends it
+- [x] Say "Send it." Claude should call `request_send`, give the link and send nothing. (It said
+      it can't send from there and gave the link. The log shows no send tool call.)
+- [ ] Open the link on the development website, signed in as the same account, and press **Send
+      this letter**. (Not run. SEND-01 covers the page, and this account's only letter was a gift
+      letter.)
+5. Refusals
+- [ ] No letters, an unconfirmed address, an erased account. (Not run.)
+6. Disconnect
+- [ ] Disconnect on Claude's connector page, then check that the Auth0 user no longer lists Claude
+      among authorized applications. (Not run.)
+
+Findings to fix before listing:
+- Several tool descriptions still say "so ChatGPT can reuse that existing image".
+- Claude uses a tool's description as its name in approval prompts ("Claude wants to use Check how
+  many prepaid letters remain…"), so the tools need a `title`.
+- `get_started` promises buying "without leaving the conversation", and Claude offered to set up a
+  pack purchase, which Claude doesn't allow (#475).
+
+The sections below describe the older path, before Claude could connect with its published
+identity.
+
 Test Claude Desktop via mcp-remote.
 
 ### OAuth Flow (US-MCP-04)
