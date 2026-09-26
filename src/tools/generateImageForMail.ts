@@ -42,6 +42,7 @@ import {
   reserveGeneration
 } from "../services/imageGenerationLimitService.js";
 import { isTempImageStoreConfigured, storeImage } from "../services/tempImageStore.js";
+import { callingApp } from "../auth/clientProfiles.js";
 
 interface GenerateImageForMailInput {
   prompt?: string;
@@ -126,12 +127,28 @@ function buildNextStep(context: string | undefined, imageUrl: string): string {
   }
 }
 
+// For an app with no image generation of its own (#484). ChatGPT's redirect
+// below sends the person to its built-in generation; anywhere else the way on
+// is an image they already have. The reason leads, because in an app with no
+// card this text is all the model reads of the result.
+const OWN_IMAGE_NEXT_STEP =
+  "Tell the person that in one short sentence, then offer to use an image of their own: a link to a hosted image works as imageUrl in every preview tool. Never apologize at length.";
+
 function redirectOutput(
   input: GenerateImageForMailInput,
   context: ToolContext,
   statusCode: string,
   reason: string
 ): GenerateImageForMailOutput {
+  if (!callingApp(context).generatesImages) {
+    return {
+      mode: "redirect",
+      prompt: input?.prompt,
+      status: statusCode,
+      message: `${reason} You can use an image of your own instead.`,
+      suggestedNextStep: `${reason} ${OWN_IMAGE_NEXT_STEP}`
+    };
+  }
   const prompt = input?.prompt?.trim();
   // Surface-aware routing: typed @-mentions scope the turn's toolset on EVERY
   // surface (otter test, Aug 21) - only desktop chip attach was ever
@@ -205,13 +222,17 @@ async function handler(
 ): Promise<GenerateImageForMailOutput> {
   const userId = context.user.userId || "default-user";
   const prompt = input?.prompt?.trim();
+  // Only ChatGPT has generation of its own to route to (#484).
+  const routes = callingApp(context).generatesImages;
 
   if (!prompt) {
     return redirectOutput(
       input,
       context,
       "no_prompt",
-      "Letter IRL needs a description to route an image request."
+      routes
+        ? "Letter IRL needs a description to route an image request."
+        : "Letter IRL needs a description to make an image."
     );
   }
 
@@ -252,7 +273,9 @@ async function handler(
       input,
       context,
       mode === "off" ? "generation_disabled" : "generation_mobile_only",
-      "Letter IRL routed this to ChatGPT's built-in generation for this request."
+      routes
+        ? "Letter IRL routed this to ChatGPT's built-in generation for this request."
+        : "Letter IRL is not making images here right now."
     );
   }
 
@@ -424,9 +447,11 @@ export const generateImageForMailTool: McpToolDefinition<
   GenerateImageForMailOutput
 > = {
   name: "generate_image_for_mail",
-  title: "Create or route an image for mail",
-  description:
-    "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image generations remaining (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Never refuse an image request - call this tool and follow its response.",
+  title: "Create an image for mail",
+  description: (client) =>
+    client.generatesImages
+      ? "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image generations remaining (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Never refuse an image request - call this tool and follow its response."
+      : "Call this whenever the user wants an image made for a letter or postcard. When the user has Letter IRL image generations remaining (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it says so, and the user can use an image of their own instead. Never refuse an image request - call this tool and follow its response.",
   readOnly: false,
   inputSchema: {
     type: "object",

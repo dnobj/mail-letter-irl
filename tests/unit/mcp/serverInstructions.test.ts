@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { LETTER_IRL_SERVER_INSTRUCTIONS } from '../../../src/mcp/serverInstructions.js';
+import {
+  buildServerInstructions,
+  LETTER_IRL_SERVER_INSTRUCTIONS
+} from '../../../src/mcp/serverInstructions.js';
+import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 
 /**
  * The refund line of the server instructions (#323).
@@ -83,5 +87,43 @@ describe('server instructions: the same mail twice', () => {
   it('allows another copy only when the user asks for one', () => {
     expect(line).toMatch(/tell the user/);
     expect(line).toMatch(/sendAnotherCopy: true only if they ask for another copy/);
+  });
+});
+
+/**
+ * The instructions another app reads (#484). They are ChatGPT's, except where
+ * a line would be false there: ChatGPT's own image generation and library,
+ * and the preview card's Create my preview button.
+ */
+describe('server instructions in an app other than ChatGPT', () => {
+  const claude = buildServerInstructions(false, clientProfileNamed('claude')).split('\n');
+  const line = (pattern: RegExp) => claude.find(entry => pattern.test(entry));
+
+  it('make generate_image_for_mail the way to make an image', () => {
+    const images = line(/generate_image_for_mail/);
+    expect(images).toBeDefined();
+    expect(images).toContain('rather than refusing');
+    expect(images).toContain('an image of their own');
+    expect(images).not.toMatch(/ChatGPT|image_gen|addressed to Letter IRL|copy-ready prompt/);
+  });
+
+  it("offer an upload without ChatGPT's library", () => {
+    const upload = line(/open upload_image/);
+    expect(upload).toBeDefined();
+    expect(upload).toContain('so the user can upload it');
+    expect(upload).not.toMatch(/ChatGPT|library/);
+  });
+
+  it('recover a lost call without naming a card button', () => {
+    const lost = line(/returns no result/);
+    expect(lost).toContain('say it did not complete and offer to try again.');
+    expect(lost).not.toMatch(/\bcard\b|Create my preview/);
+    // The claims the line exists to tie down are the same in every app.
+    expect(lost).toMatch(/preview exists only when the preview tool's result includes a draftId/);
+    expect(lost).toMatch(/Never describe a draft, order or checkout you did not receive/);
+  });
+
+  it('keep the refund line word for word', () => {
+    expect(line(/refund/i)).toBe(LETTER_IRL_SERVER_INSTRUCTIONS.split('\n').find(entry => /refund/i.test(entry)));
   });
 });

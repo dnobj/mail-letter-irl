@@ -20,10 +20,12 @@
  * coverage whatsoever.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LetterIrlServer } from '../../../src/server.js';
 import { summarizeToolResult } from '../../../src/mcp/registerTools.js';
 import { buildManifest } from '../../../src/mcp/manifest.js';
+import { buildServerInstructions } from '../../../src/mcp/serverInstructions.js';
+import { CLIENT_PROFILE_NAMES, clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 
 const tools = new LetterIrlServer().listTools();
 
@@ -164,5 +166,99 @@ describe('the manifest prose ChatGPT reads first', () => {
     // anywhere in the manifest, so this one sweeps everything - tools,
     // widgets and prose alike - and stays correct as fields are added.
     expect(JSON.stringify(manifest)).not.toMatch(/credit/i);
+  });
+});
+
+/**
+ * Every app's own words (#484). Claude on development showed tool
+ * descriptions where the tool names belong, read "so ChatGPT can reuse that
+ * existing image" in three preview tools, and offered to set up a pack purchase
+ * because a description said letters could be bought without leaving the
+ * conversation - where Claude allows no purchases through connectors (#475).
+ */
+describe('tool text in every app', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  // With the send rule on, so request_send is in the list too.
+  const listed = (name: (typeof CLIENT_PROFILE_NAMES)[number]) => {
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+    return new LetterIrlServer().listTools(clientProfileNamed(name));
+  };
+
+  it('walks every app', () => {
+    expect(CLIENT_PROFILE_NAMES).toEqual(
+      expect.arrayContaining(['chatgpt', 'claude', 'claude_code', 'codex', 'vscode', 'hermes', 'token', 'generic'])
+    );
+  });
+
+  it('gives every tool a short title of its own', () => {
+    const all = listed('generic');
+    expect(all.map(tool => tool.name)).toContain('request_send');
+    for (const tool of all) {
+      expect(typeof tool.title, tool.name).toBe('string');
+      expect(tool.title.length, tool.name).toBeGreaterThan(3);
+      // Short enough to stand where a name stands: a title is not a sentence.
+      expect(tool.title.length, `${tool.name}: "${tool.title}"`).toBeLessThanOrEqual(40);
+      expect(tool.title.endsWith('.'), tool.name).toBe(false);
+      expect(tool.title.charAt(0), tool.name).toBe(tool.title.charAt(0).toUpperCase());
+      expect(tool.title, tool.name).not.toMatch(/ChatGPT|credit/i);
+      expect(tool.description.startsWith(tool.title), tool.name).toBe(false);
+    }
+    expect(new Set(all.map(tool => tool.title)).size).toBe(all.length);
+  });
+
+  it.each(CLIENT_PROFILE_NAMES.map(name => [name]))('%s: no description says "credit"', name => {
+    for (const tool of listed(name)) {
+      expect(tool.description, tool.name).not.toMatch(/credit/i);
+    }
+  });
+
+  it.each(CLIENT_PROFILE_NAMES.filter(name => name !== 'chatgpt').map(name => [name]))(
+    '%s: no description or instruction names ChatGPT',
+    name => {
+      for (const tool of listed(name)) {
+        expect(tool.description, tool.name).not.toMatch(/ChatGPT|image_gen/);
+      }
+      for (const sendRule of [false, true]) {
+        expect(buildServerInstructions(sendRule, clientProfileNamed(name))).not.toMatch(/ChatGPT|image_gen/);
+      }
+    }
+  );
+
+  it.each(CLIENT_PROFILE_NAMES.filter(name => !clientProfileNamed(name).inAppPurchases).map(name => [name]))(
+    '%s: no description promises a purchase in the conversation',
+    name => {
+      for (const tool of listed(name)) {
+        expect(tool.description, tool.name).not.toMatch(
+          /without leaving the conversation|right here|buy a letter pack here|create_pack_checkout buys/i
+        );
+      }
+    }
+  );
+
+  it.each(CLIENT_PROFILE_NAMES.filter(name => !clientProfileNamed(name).rendersCards).map(name => [name]))(
+    '%s: the instructions name no card button',
+    name => {
+      for (const sendRule of [false, true]) {
+        expect(buildServerInstructions(sendRule, clientProfileNamed(name))).not.toContain('Create my preview');
+      }
+    }
+  );
+
+  it("keeps ChatGPT's text and forks only the three lines that differ", () => {
+    // ChatGPT's instructions are pinned verbatim in sendRule.test.ts. The
+    // no-result line (a card button), the image line (ChatGPT's own
+    // generation) and the upload line (ChatGPT's library) are the only ones
+    // another app reads differently; everything else is one text for all.
+    for (const sendRule of [false, true]) {
+      const chatgpt = buildServerInstructions(sendRule, clientProfileNamed('chatgpt')).split('\n');
+      const other = buildServerInstructions(sendRule, clientProfileNamed('generic')).split('\n');
+      expect(other).toHaveLength(chatgpt.length);
+      const forked = other.filter((line, index) => line !== chatgpt[index]);
+      expect(forked).toHaveLength(3);
+      expect(forked.join(' ')).toContain('generate_image_for_mail');
+      expect(forked.join(' ')).toContain('upload_image');
+      expect(forked.join(' ')).toContain('returns no result');
+    }
   });
 });

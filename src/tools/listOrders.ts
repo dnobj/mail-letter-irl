@@ -105,6 +105,7 @@ export const listOrdersTool: McpToolDefinition<
   ListOrdersOutput
 > = {
   name: "list_orders",
+  title: "List recent orders",
   description:
     "List the user's recent orders: mailed letters and postcards (recipient and delivery status; use the order IDs with get_order_status) and letter pack purchases (payment status, letters in the pack, amount; use those order IDs with get_purchase_status). Use this when asked about a recent purchase, a pack, or whether a payment went through.",
   readOnly: true,

@@ -42,6 +42,14 @@ export function sendConfirmationUrl(draftId: string, env: NodeJS.ProcessEnv = pr
 }
 
 /**
+ * Where the person buys letter packs when the app they are in takes no
+ * purchases (#484). The dashboard signs them in first and then opens this page.
+ */
+export function letterPacksPageUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return `${websiteBaseUrl(env)}/dashboard/letter-packs`;
+}
+
+/**
  * The website's own Auth0 application. Only a token issued to it may confirm a
  * send: the REST routes accept the MCP audience, so a token held by any MCP
  * client is valid there too, and a local agent with a shell can read its own

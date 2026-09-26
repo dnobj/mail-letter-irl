@@ -90,6 +90,7 @@ export const redeemPromoCodeTool: McpToolDefinition<
   RedeemPromoCodeOutput
 > = {
   name: 'redeem_promo_code',
+  title: 'Redeem a promo or gift code',
   description:
     'Redeem a promo code or a gift code from a printed letter to add letters to the account. Returns redeemed: false with the reason when a code is invalid, expired, or already used - that is an ordinary answer, not an error. Letters must still be sent afterward.',
   readOnly: false,

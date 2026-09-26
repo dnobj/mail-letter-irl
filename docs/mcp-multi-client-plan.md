@@ -58,8 +58,9 @@
 ### 1. One server, one tool list, and a profile per app (#473)
 
 - **Which app is calling.** The server reads it from the sign-in token's `azp`, which names the Auth0 application. Personal access tokens get the profile "token".
-- **What a profile holds.** Whether the app renders our cards and honours card-only tools, whether purchases are allowed in it, and which card domain it needs.
+- **What a profile holds.** Whether the app renders our cards and honours card-only tools, whether purchases are allowed in it, whether it makes images itself, and which card domain it needs.
 - **Nothing else branches on the app.** Every app gets the same tool list, and an unknown app gets the safest profile.
+- **The words follow the profile (#484).** Where a sentence would be false in some app, that app reads its own version: ChatGPT is named only to ChatGPT, and an app that takes no purchases is sent to the dashboard to buy letters. Every tool has a short title.
 
 ### 2. Sending: only the person can finish it (#470, website #39)
 
@@ -113,7 +114,7 @@ The order is safety, sign-in, cards, getting people connected, more apps, then p
 |---|---|---|
 | **M1: app profiles and send safety** | API-1 app profiles and logging. API-2 send confirmations, `request_send`, card-only send tools enforced on the server, host-neutral wording, and a switch. API-3 scoped personal access tokens. Web-1 the `/confirm/[id]` page | #473, #470, website #39 |
 | **M2: sign-in for each app** | API-4 drops the OIDC scopes; the ChatGPT DEV link must pass before merging. Dev-tenant imports: Claude, Claude Code, Codex, VS Code, Hermes. The Origin allowlist | #469, #465 |
-| **M3: cards outside ChatGPT** | API-5 the bridge in all six cards, the card domain per profile, the upload and purchase fallbacks | #474, #475 |
+| **M3: cards outside ChatGPT** | First, tool text for every app: titles, no ChatGPT wording outside ChatGPT, purchase text per profile. Then API-5 the bridge in all six cards, the card domain per profile, the upload and purchase fallbacks | #484, #474, #475 |
 | **M4: getting people connected** | Web-2 the Connect page and the agent card. Web-3 the skill files (optional). API-6 `server.json` | website #38, website #40, #468 |
 | **M5: more apps** | Gemini and Perplexity, after test accounts. OpenClaw's hosted client document. Published client ids | #466 |
 | **M6: production** | The same Auth0 setup on production. Promote. Refresh the ChatGPT connector. A production pass per launch app. Listings | #476, #468 |
@@ -191,6 +192,7 @@ Each app gets one CLIENT-xx test in [manual-tests.md](manual-tests.md), with the
 | #475 | Purchases per app |
 | #476 | ChatGPT plugins |
 | #477 | The 2026-07-28 MCP spec, after launch |
+| #484 | Tool text for every app |
 | website #38 | Connect page |
 | website #39 | Confirmation page |
 | website #40 | Agent card and skill |

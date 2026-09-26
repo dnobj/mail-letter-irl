@@ -82,6 +82,7 @@ async function handler(
 
 export const listLetterPacksTool: McpToolDefinition<ListLetterPacksInput, ListLetterPacksOutput> = {
   name: 'list_letter_packs',
+  title: 'List letter packs',
   description:
     'List the letter packs available to buy, with how many letters each adds and what it costs. Use this to answer questions about pack sizes or pricing, and before create_pack_checkout when the customer has not said which size they want.',
   readOnly: true,

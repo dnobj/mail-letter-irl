@@ -26,6 +26,7 @@ import {
   summarizeToolResult
 } from '../../../src/mcp/registerTools.js';
 import { getStartedTool } from '../../../src/tools/index.js';
+import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 
 /**
  * Tool definitions matching the actual tools in the codebase.
@@ -483,8 +484,9 @@ describe('OpenAI Apps SDK Submission Compliance', () => {
      * the model adds at most one sentence.
      */
     it('get_started tells the model the card already speaks, and does not echo it', async () => {
-      const output = await getStartedTool.handler({}, {} as never);
-      const summary = summarizeToolResult('get_started', output as unknown as Record<string, unknown>);
+      const chatgpt = clientProfileNamed('chatgpt');
+      const output = await getStartedTool.handler({}, { client: chatgpt } as never);
+      const summary = summarizeToolResult('get_started', output as unknown as Record<string, unknown>, chatgpt);
 
       expect(summary).not.toContain(output.overview);
       expect(summary).not.toContain(output.purchaseStep);
@@ -492,6 +494,28 @@ describe('OpenAI Apps SDK Submission Compliance', () => {
         expect(summary, `summary re-lists the example prompt "${prompt}"`).not.toContain(prompt);
       }
       expect(summary.toLowerCase()).toContain('one short sentence');
+    });
+
+    it('get_started carries the guide itself where no card shows it (#484)', async () => {
+      // Told that a card "is displayed above", the model in an app with no
+      // card had nothing to pass on, including where to buy letters.
+      const claude = clientProfileNamed('claude');
+      const output = await getStartedTool.handler({}, { client: claude } as never);
+      const summary = summarizeToolResult('get_started', output as unknown as Record<string, unknown>, claude);
+
+      expect(summary).toContain(output.overview);
+      expect(summary).toContain(output.purchaseStep);
+      for (const prompt of output.examplePrompts) {
+        expect(summary).toContain(`"${prompt}"`);
+      }
+      expect(summary).not.toMatch(/\bcard\b/i);
+    });
+
+    it('a summary that names no app is the one for an app with no card', async () => {
+      const output = (await getStartedTool.handler({}, {} as never)) as unknown as Record<string, unknown>;
+      expect(summarizeToolResult('get_started', output)).toBe(
+        summarizeToolResult('get_started', output, clientProfileNamed('generic'))
+      );
     });
   });
 });

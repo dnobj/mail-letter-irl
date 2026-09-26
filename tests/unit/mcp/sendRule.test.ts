@@ -33,6 +33,7 @@ import {
   buildServerInstructions,
   LETTER_IRL_SERVER_INSTRUCTIONS
 } from "../../../src/mcp/serverInstructions.js";
+import { clientProfileNamed } from "../../../src/auth/clientProfiles.js";
 import { LetterIrlServer } from "../../../src/server.js";
 import type { AuthenticatedUser } from "../../../src/auth/tokenValidator.js";
 import * as diagnostics from "../../../src/utils/diagnosticLog.js";
@@ -182,15 +183,21 @@ describe("the send rule in the MCP server (#470)", () => {
     });
 
     it.each([
-      ["Claude", claude()],
-      ["a personal access token", pat]
-    ])("answers %s with the link where the person sends, and sends nothing", async (_label, authInfo) => {
+      ["Claude", claude(), "claude"],
+      ["a personal access token", pat, "token"]
+    ])("answers %s with the link where the person sends, and sends nothing", async (_label, authInfo, app) => {
       for (const tool of ["send_letter", "send_postcard"]) {
         const { callbacks, execute } = await register(authInfo);
         const result = await callbacks.get(tool)!({ draftId: DRAFT_ID, confirm: true, sendAnotherCopy: true }, {});
 
         expect(execute).toHaveBeenCalledTimes(1);
-        expect(execute).toHaveBeenCalledWith({ toolName: "request_send", input: { draftId: DRAFT_ID }, userId: "auth0|user" });
+        // The app travels with the call, for the text that differs per app (#484).
+        expect(execute).toHaveBeenCalledWith({
+          toolName: "request_send",
+          input: { draftId: DRAFT_ID },
+          userId: "auth0|user",
+          client: expect.objectContaining({ name: app })
+        });
         expect(result.isError).toBe(true);
         expect(result.structuredContent).toBeUndefined();
         expect(result.content[0].text).toBe(
@@ -203,13 +210,18 @@ describe("the send rule in the MCP server (#470)", () => {
     });
 
     it.each([
-      ["Claude", claude()],
-      ["a personal access token", pat]
-    ])("answers Pay & Send from %s, which may not take a purchase, with the link too", async (_label, authInfo) => {
+      ["Claude", claude(), "claude"],
+      ["a personal access token", pat, "token"]
+    ])("answers Pay & Send from %s, which may not take a purchase, with the link too", async (_label, authInfo, app) => {
       const { callbacks, execute } = await register(authInfo);
       const result = await callbacks.get(PAY_AND_SEND_TOOL)!({ draftId: DRAFT_ID, sendAnotherCopy: true }, {});
       expect(execute).toHaveBeenCalledTimes(1);
-      expect(execute).toHaveBeenCalledWith({ toolName: "request_send", input: { draftId: DRAFT_ID }, userId: "auth0|user" });
+      expect(execute).toHaveBeenCalledWith({
+        toolName: "request_send",
+        input: { draftId: DRAFT_ID },
+        userId: "auth0|user",
+        client: expect.objectContaining({ name: app })
+      });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain(LINK.confirmationUrl);
     });
@@ -391,13 +403,15 @@ const PRE_470_INSTRUCTIONS = [
 
 describe("the server instructions under the send rule (#470)", () => {
   it("are unchanged with the rule off", () => {
-    expect(buildServerInstructions(false)).toBe(PRE_470_INSTRUCTIONS);
-    expect(buildServerInstructions(false)).toBe(LETTER_IRL_SERVER_INSTRUCTIONS);
+    // ChatGPT's instructions: other apps read their own lines since #484.
+    const chatgpt = clientProfileNamed("chatgpt");
+    expect(buildServerInstructions(false, chatgpt)).toBe(PRE_470_INSTRUCTIONS);
+    expect(buildServerInstructions(false, chatgpt)).toBe(LETTER_IRL_SERVER_INSTRUCTIONS);
     expect(LETTER_IRL_SERVER_INSTRUCTIONS).toContain("Only call send_letter or send_postcard after the user has reviewed");
   });
 
   it("tell the model it cannot send, and how the person does", () => {
-    const on = buildServerInstructions(true);
+    const on = buildServerInstructions(true, clientProfileNamed("chatgpt"));
     expect(on).not.toContain("Only call send_letter");
     expect(on).toContain("Mail is sent only by the person, never by you");
     expect(on).toContain("call request_send and give them its link");

@@ -1,6 +1,6 @@
 # App Instructions (Manifest Guidance)
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 26, 2026
 **Purpose:** App description, onboarding copy, and extended assistant instructions for the ChatGPT app
 
 The instructions ChatGPT actually receives are `LETTER_IRL_SERVER_INSTRUCTIONS` in
@@ -62,3 +62,27 @@ Use this wording for broad first-run prompts such as `what can you do?` or `help
 > 11. For new users or broad onboarding requests, call `get_started` to show the getting-started card.
 
 Embed or adapt this block in the app instructions so the assistant consistently gathers the required address fields and routes new users to the supported onboarding surface.
+
+## Other apps
+
+Everything above is what ChatGPT reads. Since #484, another app reads its own version wherever
+ChatGPT's would be false there. The app's profile (`src/auth/clientProfiles.ts`) chooses the words:
+
+- **Instructions.** Three lines differ; `buildServerInstructions` builds them per app.
+  - An app without ChatGPT's own image generation is told that `generate_image_for_mail` is the way
+    to make an image. It hears nothing about `image_gen` or ChatGPT's library.
+  - An app that shows no cards is not told about the **Create my preview** button.
+- **Tool descriptions.** `get_started` and `get_account_balance` promise a purchase in the
+  conversation only where the app takes purchases; elsewhere they say letters are bought on the
+  website. `generate_image_for_mail` names ChatGPT only to ChatGPT.
+- **Tool results.**
+  - Where the app takes no purchases, `get_started` and `get_account_balance` give the website's
+    letter packs page (`/dashboard/letter-packs`).
+  - Where no card shows, `get_started` returns the guide as text.
+  - Without ChatGPT's image generation, `generate_image_for_mail` gives the reason and asks for an
+    image of the person's own.
+- **Titles.** Every tool has a short title, such as "Check letter balance", the same in every app.
+  An app shows it where the tool's name belongs, for example when it asks to allow a call.
+
+`tests/unit/mcp/modelFacingCopy.test.ts` checks every app's text, and
+`tests/unit/mcp/toolTextWire.test.ts` checks what ChatGPT and Claude actually receive.

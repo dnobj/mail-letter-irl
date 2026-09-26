@@ -3,6 +3,7 @@ import { WIDGET_DEFINITIONS } from "./registerTools.js";
 import { DEFAULT_OAUTH_SCOPES } from "../auth/oauthConfig.js";
 import { buildServerInstructions } from "./serverInstructions.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
+import { clientProfileNamed } from "../auth/clientProfiles.js";
 
 function getManifestUrls(publicBaseUrlOverride?: string) {
   const publicBaseUrl =
@@ -32,7 +33,10 @@ export const APP_DIRECTORY_DESCRIPTION =
 export function buildManifest(publicBaseUrl?: string) {
   const server = new LetterIrlServer();
   const urls = getManifestUrls(publicBaseUrl);
-  const tools = server.listTools().map((tool) => ({
+  // ChatGPT's manifest, so ChatGPT's words where tools and instructions give
+  // each app its own (#484).
+  const chatgpt = clientProfileNamed("chatgpt");
+  const tools = server.listTools(chatgpt).map((tool) => ({
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema,
@@ -43,7 +47,7 @@ export function buildManifest(publicBaseUrl?: string) {
     name: "Letter IRL",
     version: "0.1.0",
     description: APP_DIRECTORY_DESCRIPTION,
-    instructions: buildServerInstructions(isSendConfirmationEnabled()),
+    instructions: buildServerInstructions(isSendConfirmationEnabled(), chatgpt),
     contactEmail: "support@letterirl.com",
     legalInfoUrl: "https://letterirl.com/terms",
     tools,

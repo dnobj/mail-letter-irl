@@ -74,6 +74,7 @@ export const confirmUploadedImageTool: McpToolDefinition<
   ConfirmUploadedImageOutput
 > = {
   name: "confirm_uploaded_image",
+  title: "Confirm an uploaded image",
   description: "Internal widget relay that confirms an uploaded image and returns the imageUrl plus next-step guidance. Not intended for direct user requests.",
   readOnly: false,
   inputSchema: confirmUploadedImageInputSchema,

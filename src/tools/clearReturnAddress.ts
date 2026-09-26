@@ -51,6 +51,7 @@ export const clearReturnAddressTool: McpToolDefinition<
   ClearReturnAddressOutput
 > = {
   name: "clear_return_address",
+  title: "Clear return address",
   description:
     "Clear your saved return address. After clearing it, you will need to provide a sender address when creating new mail.",
   readOnly: false,

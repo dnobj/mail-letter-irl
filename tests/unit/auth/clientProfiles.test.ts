@@ -2,8 +2,11 @@ import * as fs from "fs";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  callingApp,
+  CLIENT_PROFILE_NAMES,
   clientIdOf,
   clientLogFields,
+  clientProfileNamed,
   resolveClientProfile,
   type ClientProfileName
 } from "../../../src/auth/clientProfiles.js";
@@ -127,16 +130,16 @@ describe("resolveClientProfile (#473)", () => {
 
   // The trust table is the security boundary for the send rule (#470). A flag
   // turned on here must be a decision made after a live test, so this pins it.
-  it("trusts only ChatGPT with cards, card-only tools and purchases", () => {
-    const expected: Record<ClientProfileName, [boolean, boolean, boolean]> = {
-      chatgpt: [true, true, true],
-      claude: [false, false, false],
-      claude_code: [false, false, false],
-      codex: [false, false, false],
-      vscode: [false, false, false],
-      hermes: [false, false, false],
-      token: [false, false, false],
-      generic: [false, false, false]
+  it("trusts only ChatGPT with cards, card-only tools, purchases and its own images", () => {
+    const expected: Record<ClientProfileName, [boolean, boolean, boolean, boolean]> = {
+      chatgpt: [true, true, true, true],
+      claude: [false, false, false, false],
+      claude_code: [false, false, false, false],
+      codex: [false, false, false, false],
+      vscode: [false, false, false, false],
+      hermes: [false, false, false, false],
+      token: [false, false, false, false],
+      generic: [false, false, false, false]
     };
     const samples: Record<ClientProfileName, AuthenticatedUser | null> = {
       chatgpt: jwt({ azp: "https://chatgpt.com/oauth/abc/client.json" }),
@@ -152,14 +155,26 @@ describe("resolveClientProfile (#473)", () => {
     };
     for (const [name, flags] of Object.entries(expected) as [
       ClientProfileName,
-      [boolean, boolean, boolean]
+      [boolean, boolean, boolean, boolean]
     ][]) {
       const profile = resolveClientProfile(samples[name]);
       expect(profile.name).toBe(name);
-      expect([profile.rendersCards, profile.honorsCardOnlyTools, profile.inAppPurchases]).toEqual(
-        flags
-      );
+      expect([
+        profile.rendersCards,
+        profile.honorsCardOnlyTools,
+        profile.inAppPurchases,
+        profile.generatesImages
+      ]).toEqual(flags);
+      // The same profile by name, for text written for one app on purpose.
+      expect(clientProfileNamed(name)).toBe(profile);
     }
+    expect([...CLIENT_PROFILE_NAMES].sort()).toEqual(Object.keys(expected).sort());
+  });
+
+  it("answers a tool context that names no app as an app that trusts nothing (#484)", () => {
+    expect(callingApp(undefined)).toBe(clientProfileNamed("generic"));
+    expect(callingApp({})).toBe(clientProfileNamed("generic"));
+    expect(callingApp({ client: clientProfileNamed("claude") })).toBe(clientProfileNamed("claude"));
   });
 });
 

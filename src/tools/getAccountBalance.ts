@@ -8,6 +8,8 @@ import { findUser } from "../services/userService.js";
 import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
 import { CREDITS_PER_LETTER } from "../config/products.js";
 import { getGiftBalance } from "../services/giftLetterService.js";
+import { letterPacksPageUrl } from "../config/sendConfirmation.js";
+import { callingApp } from "../auth/clientProfiles.js";
 
 interface ExpiringLettersInfo {
   letters: number;
@@ -119,11 +121,14 @@ async function handler(
   const identityLine = `Account: ${email}`;
   let balanceLine: string;
   if (lettersRemaining === 0) {
-    // Points at the conversation, not the website. create_pack_checkout and
-    // list_letter_packs (#311, #312) made "go to letterirl.com" both stale and
-    // - with LETTER_IRL_PACKS_URL unset - a dead end.
-    balanceLine =
-      "No letters on this account yet. You can buy a letter pack here, or pay for a single letter as you send it.";
+    // Points at the conversation, not the website, where the app takes
+    // purchases: create_pack_checkout and list_letter_packs (#311, #312) made
+    // "go to letterirl.com" both stale and - with LETTER_IRL_PACKS_URL unset -
+    // a dead end. An app that takes none, such as Claude (#475), gets the
+    // dashboard page instead (#484).
+    balanceLine = callingApp(context).inAppPurchases
+      ? "No letters on this account yet. You can buy a letter pack here, or pay for a single letter as you send it."
+      : `No letters on this account yet. Buy a letter pack on your Letter IRL dashboard at ${letterPacksPageUrl()}.`;
   } else {
     balanceLine = `Letter Balance: ${lettersRemaining} ${lettersRemaining === 1 ? 'letter' : 'letters'} remaining.`;
   }
@@ -171,11 +176,15 @@ export const getAccountBalanceTool: McpToolDefinition<
   GetAccountBalanceOutput
 > = {
   name: "get_account_balance",
+  title: "Check letter balance",
   // A tool description is permanent model context - it is read every turn,
   // not only when the tool runs - so a stale route here misdirects far more
-  // often than a stale message does.
-  description:
-    "Check how many prepaid letters remain on this account. Letters can be bought without leaving the conversation: list_letter_packs shows the sizes, create_pack_checkout buys one.",
+  // often than a stale message does. Claude offered a pack purchase from this
+  // sentence, where purchases through connectors are not allowed (#484).
+  description: (client) =>
+    client.inAppPurchases
+      ? "Check how many prepaid letters remain on this account. Letters can be bought without leaving the conversation: list_letter_packs shows the sizes, create_pack_checkout buys one."
+      : "Check how many prepaid letters remain on this account. Letter packs are bought on the Letter IRL website, and the result gives the link when none are left.",
   readOnly: true,
   inputSchema: getAccountBalanceInputSchema,
   outputSchema: getAccountBalanceOutputSchema,

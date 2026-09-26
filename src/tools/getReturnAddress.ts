@@ -52,6 +52,7 @@ export const getReturnAddressTool: McpToolDefinition<
   GetReturnAddressOutput
 > = {
   name: "get_return_address",
+  title: "Get return address",
   description:
     "Get your saved return address. This is the default sender address used when you create mail without specifying one.",
   readOnly: true,
