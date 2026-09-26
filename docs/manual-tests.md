@@ -361,7 +361,8 @@ the call JWT-authenticated and successful.
 3 passed; step 4 ran as far as the link; steps 5 and 6 were not run. Step 7 ran the same day, after
 #486 deployed (88dd3d2): titles and the image text passed, and the purchase text needs #475. Step 8
 ran after #489 deployed (d686367). Claude has no checkout tools and offers none, and it gives the
-letter packs link only when asked.
+letter packs link only when asked. Step 9 ran after #491 deployed (45c7287) and passed: Claude has
+no image tool and says Letter IRL can't create images.
 
 Background: Claude connects with its published identity, the document at
 `https://claude.ai/oauth/mcp-oauth-client-metadata`. That document must be imported into each tenant
@@ -454,10 +455,17 @@ gives the link when the person asks. Once the cards show in Claude (#474), a car
 link as a button.
 
 9. Image generation off (#467), once it is deployed to development. Refresh the tool list first.
-- [ ] The connector page no longer lists **Create an image for mail**.
-- [ ] Ask Letter IRL to make an image for a postcard. Claude says Letter IRL doesn't make images
+   (Run on 2026-09-26 after #491 deployed, 45c7287. The refresh logged `tools/list` with
+   `steeringRev=12`.)
+- [x] The connector page no longer lists **Create an image for mail**. (Yes: 6 interactive, 8
+      read-only and 5 write tools.)
+- [x] Ask Letter IRL to make an image for a postcard. Claude says Letter IRL doesn't make images
       there and asks for one of your own. The development log shows no `generate_image_for_mail`
-      call.
+      call. (Yes: "Letter IRL can't create images. Its postcard tool only takes an image you
+      already have (an attachment or a hosted link)". The log shows no image call. Claude then
+      offered to draw an illustration itself, which is Claude's own ability, not Letter IRL's.
+      It suggested adding it "through Letter IRL's upload step", which needs the cards in Claude
+      (#474).)
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
