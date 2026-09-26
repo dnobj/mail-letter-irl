@@ -3,28 +3,43 @@ import { clientProfileNamed, type ClientProfile } from "../auth/clientProfiles.j
 const SEND_BY_MODEL =
   "Only call send_letter or send_postcard after the user has reviewed a draft and clearly confirms sending.";
 
-const ANOTHER_COPY_BY_MODEL =
-  "If send_letter, send_postcard or create_mail_checkout says the same mail was already sent, paid for, or is awaiting payment, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy.";
-
 // The send rule (#470, src/config/sendConfirmation.ts): the model cannot send.
 const SEND_BY_PERSON =
   "Mail is sent only by the person, never by you: when a preview card is showing, they press its Send button; when there is no card, call request_send and give them its link, where they check the mail and send it themselves.";
 
-// Under the send rule the model cannot repeat a send; the card and the page
-// ask the person about another copy themselves (#412).
-const ANOTHER_COPY_BY_PERSON =
-  "If create_mail_checkout says the same mail was already sent, paid for, or is awaiting payment, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy. For a send, the preview card or the confirmation page offers another copy itself.";
+// The same mail twice (#412). create_mail_checkout is listed only where the
+// app takes purchases (#475), so it is named only there.
+function anotherCopyLine(sendRule: boolean, client: ClientProfile): string {
+  if (!sendRule) {
+    const tools = client.inAppPurchases
+      ? "send_letter, send_postcard or create_mail_checkout says the same mail was already sent, paid for, or is awaiting payment"
+      : "send_letter or send_postcard says the same mail was already sent";
+    return `If ${tools}, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy.`;
+  }
+  // Under the send rule the model cannot repeat a send; the card and the page
+  // ask the person about another copy themselves (#412).
+  const where = client.rendersCards ? "the preview card or the confirmation page" : "the confirmation page";
+  if (!client.inAppPurchases) {
+    return `If the same mail was sent recently, ${where} says so and offers another copy itself.`;
+  }
+  return (
+    "If create_mail_checkout says the same mail was already sent, paid for, or is awaiting payment, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy. " +
+    `For a send, ${where} offers another copy itself.`
+  );
+}
 
 // A call that returns nothing (#411). The Create my preview button is on our
-// preview cards, so it is named only to an app that shows them (#484).
+// preview cards, so it is named only to an app that shows them (#484), and a
+// checkout only where the app takes purchases (#475).
 function noResultLine(client: ClientProfile): string {
   const recovery = client.rendersCards
     ? "say it did not complete: the preview card offers a Create my preview button, or offer to try again."
     : "say it did not complete and offer to try again.";
-  return (
-    "A preview exists only when the preview tool's result includes a draftId, and a checkout only when its result includes a checkoutUrl. " +
-    `If a Letter IRL tool call returns no result, ${recovery} Never describe a draft, order or checkout you did not receive.`
-  );
+  return client.inAppPurchases
+    ? "A preview exists only when the preview tool's result includes a draftId, and a checkout only when its result includes a checkoutUrl. " +
+        `If a Letter IRL tool call returns no result, ${recovery} Never describe a draft, order or checkout you did not receive.`
+    : "A preview exists only when the preview tool's result includes a draftId. " +
+        `If a Letter IRL tool call returns no result, ${recovery} Never describe a draft or order you did not receive.`;
 }
 
 // ChatGPT makes images itself and hands them to our tools (the generatesImages
@@ -47,7 +62,7 @@ function instructionLines(sendRule: boolean, client: ClientProfile): string[] {
     "Always create a preview draft before sending. Preview tools are free drafts; they do not send mail.",
     sendRule ? SEND_BY_PERSON : SEND_BY_MODEL,
     "Do not say mail has been sent unless the send tool succeeds.",
-    sendRule ? ANOTHER_COPY_BY_PERSON : ANOTHER_COPY_BY_MODEL,
+    anotherCopyLine(sendRule, client),
     noResultLine(client),
     "Use saved return addresses when available, and ask for missing real U.S. mailing addresses when required.",
     "For image mail, reuse existing conversation images or hosted imageUrl values before opening upload_image.",

@@ -31,19 +31,23 @@ vi.mock('../../../src/services/userService.js', async importOriginal => ({
   findUser: mocks.findUser
 }));
 
-import { createLetterDraftAndBuildOutput } from '../../../src/tools/letterHelpers.js';
+import { createLetterDraftAndBuildOutput, previewSendEligibility } from '../../../src/tools/letterHelpers.js';
+import { clientProfileNamed, type ClientProfileName } from '../../../src/auth/clientProfiles.js';
 import { redeemPromoCodeTool } from '../../../src/tools/redeemPromoCode.js';
 import { friendlyCheckoutError } from '../../../src/tools/createMailCheckout.js';
 import { friendlyDraftError } from '../../../src/tools/draftErrors.js';
 import { getZodInputShape, getZodOutputShape } from '../../../src/mcp/registerTools.js';
 
-function context(creditsRemaining: number): ToolContext {
+// ChatGPT by default: an app that takes no purchases offers no Pay & Send at
+// all (#475), which has its own suite below.
+function context(creditsRemaining: number, app: ClientProfileName = 'chatgpt'): ToolContext {
   return {
     user: { userId: 'user-1', creditsRemaining, orders: [] },
     correlationId: 'test',
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn() },
     now: () => new Date('2026-09-17T12:00:00Z'),
-    persist: vi.fn()
+    persist: vi.fn(),
+    client: clientProfileNamed(app)
   } as unknown as ToolContext;
 }
 
@@ -56,7 +60,7 @@ const address = {
   country: 'US'
 };
 
-async function preview(creditsRemaining: number, sendAsGift?: boolean) {
+async function preview(creditsRemaining: number, sendAsGift?: boolean, app: ClientProfileName = 'chatgpt') {
   return createLetterDraftAndBuildOutput({
     sender: address,
     recipient: { ...address, name: 'Grandma' },
@@ -65,9 +69,82 @@ async function preview(creditsRemaining: number, sendAsGift?: boolean) {
     layoutType: 'text_only',
     usedSavedReturnAddress: false,
     sendAsGift,
-    context: context(creditsRemaining)
+    context: context(creditsRemaining, app)
   });
 }
+
+/**
+ * What a preview offers for buying, per app (#475). The cards already hide
+ * Pay & Send and Buy a Letter Pack when these say unavailable, so an app that
+ * takes no purchases gets neither button once cards show there (#474), and the
+ * pack link is the website's letter packs page.
+ */
+describe('letter preview: purchases per app', () => {
+  const PRICED = {
+    payAndSend: { available: true, amountCents: 499 },
+    letterPack: { available: true, purchaseUrl: 'https://letterirl.com/pricing' }
+  };
+  const NO_PURCHASES = {
+    payAndSend: { available: false, unavailableReason: "Pay & Send isn't available in this app." },
+    letterPack: { available: false, purchaseUrl: 'https://website.example/dashboard/letter-packs' }
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.LETTER_IRL_GIFT_LETTERS_ENABLED = 'true';
+    vi.stubEnv('LETTER_IRL_WEBSITE_BASE_URL', 'https://website.example');
+    mocks.createDraft.mockResolvedValue({ draftId: 'draft-1', expiresAt: new Date('2026-09-18T12:00:00Z') });
+    mocks.getGiftBalance.mockResolvedValue({ available: 0, next: undefined });
+    mocks.getSendEligibility.mockReturnValue(PRICED);
+  });
+
+  afterEach(() => {
+    delete process.env.LETTER_IRL_GIFT_LETTERS_ENABLED;
+    vi.unstubAllEnvs();
+  });
+
+  it('keeps both where the app takes purchases', async () => {
+    expect((await preview(0, undefined, 'chatgpt')).sendEligibility).toEqual(PRICED);
+  });
+
+  it.each(['claude', 'claude_code', 'codex', 'vscode', 'hermes', 'token', 'generic'] as const)(
+    'offers neither in %s, and links to the letter packs page',
+    async app => {
+      expect((await preview(0, undefined, app)).sendEligibility).toEqual(NO_PURCHASES);
+    }
+  );
+
+  it('keeps the gift reason for a gift send in an app that takes no purchases', async () => {
+    mocks.getGiftBalance.mockResolvedValue({ available: 1, next: { giftId: 'gift-1', cardState: 'funded' } });
+    const output = await preview(0, undefined, 'claude');
+    expect(output.giftCard?.state).toBe('funded');
+    expect(output.sendEligibility.payAndSend).toEqual({
+      available: false,
+      unavailableReason: 'This uses a gift letter, so there is nothing to pay.'
+    });
+    expect(output.sendEligibility.letterPack).toEqual(NO_PURCHASES.letterPack);
+  });
+
+  it('builds the postcard preview the same way', () => {
+    // quote_and_preview_postcard calls this helper with its mail type; the
+    // source check below pins that it does.
+    expect(previewSendEligibility(0, 2, 'postcard', false, clientProfileNamed('claude'))).toEqual(NO_PURCHASES);
+    expect(mocks.getSendEligibility).toHaveBeenLastCalledWith(0, 2, 'postcard');
+    expect(previewSendEligibility(0, 2, 'postcard', false, clientProfileNamed('chatgpt'))).toEqual(PRICED);
+  });
+
+  it('is what quote_and_preview_postcard uses, with the calling app', async () => {
+    const { readFile } = await import('fs/promises');
+    const source = await readFile(
+      new URL('../../../src/tools/quoteAndPreviewPostcard.ts', import.meta.url),
+      'utf8'
+    );
+    expect(source).toMatch(
+      /previewSendEligibility\(\s*available,\s*requiredCredits,\s*"postcard",\s*gift\.isGift,\s*callingApp\(context\)\s*\)/
+    );
+    expect(source).not.toContain('getSendEligibility(');
+  });
+});
 
 describe('letter preview: the gift decision', () => {
   beforeEach(() => {

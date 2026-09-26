@@ -65,8 +65,9 @@ describe("tool text on the wire (#484)", () => {
   });
 
   it("gives every tool its short title, in every app", async () => {
-    const titles = new Map(new LetterIrlServer().listTools().map((tool) => [tool.name, tool.title]));
     for (const app of ["chatgpt", "claude"] as const) {
+      const listed = new LetterIrlServer().listTools(clientProfileNamed(app));
+      const titles = new Map(listed.map((tool) => [tool.name, tool.title]));
       const { client } = await connect(app);
       const { tools } = await client.listTools();
       expect(tools.length).toBe(titles.size);
@@ -75,6 +76,20 @@ describe("tool text on the wire (#484)", () => {
         expect(tool.title, `${app} ${tool.name}`).not.toBe(tool.description);
       }
     }
+  });
+
+  it("offers the checkouts to ChatGPT and not to Claude (#475)", async () => {
+    const names = async (app: keyof typeof APPS) => {
+      const { client } = await connect(app);
+      return (await client.listTools()).tools.map((tool) => tool.name);
+    };
+    const checkouts = ["create_pack_checkout", "create_mail_checkout"];
+    expect(await names("chatgpt")).toEqual(expect.arrayContaining(checkouts));
+    const claude = await names("claude");
+    for (const checkout of checkouts) {
+      expect(claude).not.toContain(checkout);
+    }
+    expect(claude).toContain("list_letter_packs");
   });
 
   it("describes the tools in each app's words", async () => {

@@ -27,7 +27,9 @@ import { buildManifest } from '../../../src/mcp/manifest.js';
 import { buildServerInstructions } from '../../../src/mcp/serverInstructions.js';
 import { CLIENT_PROFILE_NAMES, clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 
-const tools = new LetterIrlServer().listTools();
+// ChatGPT's list is the full one: an app that takes no purchases is not
+// offered the checkouts (#475). The other apps' text has its own suite below.
+const tools = new LetterIrlServer().listTools(clientProfileNamed('chatgpt'));
 
 describe('tool descriptions and invocation messages', () => {
   it('registers something to check', () => {
@@ -245,20 +247,65 @@ describe('tool text in every app', () => {
     }
   );
 
-  it("keeps ChatGPT's text and forks only the three lines that differ", () => {
-    // ChatGPT's instructions are pinned verbatim in sendRule.test.ts. The
-    // no-result line (a card button), the image line (ChatGPT's own
-    // generation) and the upload line (ChatGPT's library) are the only ones
-    // another app reads differently; everything else is one text for all.
+  it("keeps ChatGPT's text and forks only the four lines that differ", () => {
+    // ChatGPT's instructions are pinned verbatim in sendRule.test.ts. Another
+    // app reads its own version of four lines, and everything else is one text
+    // for all:
+    // - the same-mail line, which names create_mail_checkout (#475);
+    // - the no-result line (a card button, and a checkout);
+    // - the image line (ChatGPT's own generation);
+    // - the upload line (ChatGPT's library).
     for (const sendRule of [false, true]) {
       const chatgpt = buildServerInstructions(sendRule, clientProfileNamed('chatgpt')).split('\n');
       const other = buildServerInstructions(sendRule, clientProfileNamed('generic')).split('\n');
       expect(other).toHaveLength(chatgpt.length);
       const forked = other.filter((line, index) => line !== chatgpt[index]);
-      expect(forked).toHaveLength(3);
+      expect(forked).toHaveLength(4);
+      expect(forked.join(' ')).toContain('another copy');
       expect(forked.join(' ')).toContain('generate_image_for_mail');
       expect(forked.join(' ')).toContain('upload_image');
       expect(forked.join(' ')).toContain('returns no result');
+    }
+  });
+});
+
+/**
+ * Purchases per app (#475). Claude allows no purchases through connectors, and
+ * the Connectors Directory takes no connector that executes financial
+ * transactions. In CLIENT-01 step 7, Claude still offered "a checkout link for
+ * a starter, regular, or power pack" because create_pack_checkout was in its
+ * tool list.
+ */
+describe('purchases in every app', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  const CHECKOUTS = ['create_pack_checkout', 'create_mail_checkout'];
+  const noPurchases = CLIENT_PROFILE_NAMES.filter(name => !clientProfileNamed(name).inAppPurchases);
+
+  it('offers the checkouts only where the app takes purchases', () => {
+    expect(noPurchases.length).toBeGreaterThan(0);
+    for (const sendRule of ['false', 'true']) {
+      vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', sendRule);
+      const chatgpt = new LetterIrlServer().listTools(clientProfileNamed('chatgpt')).map(tool => tool.name);
+      expect(chatgpt).toEqual(expect.arrayContaining(CHECKOUTS));
+      for (const name of noPurchases) {
+        const listed = new LetterIrlServer().listTools(clientProfileNamed(name)).map(tool => tool.name);
+        for (const checkout of CHECKOUTS) {
+          expect(listed, `${name} lists ${checkout}`).not.toContain(checkout);
+        }
+        // Everything else is the same list.
+        expect(listed.length, name).toBe(chatgpt.length - CHECKOUTS.length);
+      }
+    }
+  });
+
+  it.each(noPurchases.map(name => [name]))('%s: nothing points at a checkout it is not offered', name => {
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+    for (const tool of new LetterIrlServer().listTools(clientProfileNamed(name))) {
+      expect(tool.description, tool.name).not.toMatch(/create_pack_checkout|create_mail_checkout|checkout/i);
+    }
+    for (const sendRule of [false, true]) {
+      expect(buildServerInstructions(sendRule, clientProfileNamed(name))).not.toMatch(/checkout/i);
     }
   });
 });

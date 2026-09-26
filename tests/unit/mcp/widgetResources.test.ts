@@ -18,6 +18,11 @@ import {
   ZERO_DECIMAL_CURRENCIES
 } from '../../../src/config/products.js';
 import * as fs from 'fs/promises';
+import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
+
+// Every tool: ChatGPT's list is the full one, since an app that takes no
+// purchases is not offered the checkouts (#475).
+const allTools = () => new LetterIrlServer().listTools(clientProfileNamed('chatgpt'));
 import * as path from 'path';
 import {
   buildWidgetResourceMeta,
@@ -202,7 +207,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 
   describe('tool outputTemplate references', () => {
     const templates = new Map(
-      new LetterIrlServer().listTools().map(tool => [
+      allTools().map(tool => [
         tool.name,
         tool.meta?.['openai/outputTemplate'] as string | undefined
       ])
@@ -416,7 +421,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 
     function widgetToolNames(): Map<string, string> {
       const byWidget = new Map<string, string>();
-      for (const tool of new LetterIrlServer().listTools()) {
+      for (const tool of allTools()) {
         const template = tool.meta?.['openai/outputTemplate'];
         if (typeof template !== 'string') continue;
         // Version suffix is REQUIRED here: an unversioned outputTemplate keeps

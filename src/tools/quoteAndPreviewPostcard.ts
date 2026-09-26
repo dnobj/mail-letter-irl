@@ -10,7 +10,12 @@
  */
 
 import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
-import { giftSendEligibility, validateAddressesWithProvider, outputValidationStatus } from "./letterHelpers.js";
+import {
+  previewSendEligibility,
+  validateAddressesWithProvider,
+  outputValidationStatus
+} from "./letterHelpers.js";
+import { callingApp } from "../auth/clientProfiles.js";
 import { giftCardSummary, resolveGiftSendChoice } from "./giftSendChoice.js";
 import { giftPostcardBlockSvg, type GiftCardContent, type GiftCardState } from "../services/giftCardRenderer.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
@@ -23,7 +28,7 @@ import { createPostcardDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
 import { downloadAndProcessPostcardImageWithPreview, ImageProcessingError, type ImageInput } from "../services/imageService.js";
 import type { PostcardSize, ImageFileParam } from "../services/types.js";
-import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
+import type { SendEligibility } from "../services/commerceService.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
 import { resolvePreviewImageSource } from "../services/previewImageSource.js";
 import { isUnresolvedImageReference, usableImageFile } from "../utils/imageFileParam.js";
@@ -408,9 +413,13 @@ async function handler(
 
   // Check credits
   const canSendNow = gift.isGift || available >= requiredCredits;
-  const sendEligibility = gift.isGift
-    ? giftSendEligibility(getSendEligibility(available, requiredCredits, "postcard"))
-    : getSendEligibility(available, requiredCredits, "postcard");
+  const sendEligibility = previewSendEligibility(
+    available,
+    requiredCredits,
+    "postcard",
+    gift.isGift,
+    callingApp(context)
+  );
   const lettersRequired = 1; // User-facing: 1 letter = 1 postcard
 
   context.logger.info(
