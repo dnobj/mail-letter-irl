@@ -402,6 +402,52 @@ Findings to fix before listing:
 - `get_started` promises buying "without leaving the conversation", and Claude offered to set up a
   pack purchase, which Claude doesn't allow (#475).
 
+### CLIENT-02 — Claude Code (launch gate, #471)
+
+**Status:** Steps 1 to 3 run in development on 2026-09-26 (Claude Code 2.1.282, Windows).
+
+- [x] Add the server: `claude mcp add --transport http --scope user letter-irl-dev-cli
+      <development /mcp>`. `claude mcp get` should say it needs authentication.
+- [x] In an interactive session, `/mcp`, pick the server, **Authenticate**, sign in and accept.
+      (The browser page said "Authentication successful". Claude Code used its published document
+      and called back on a random port, `localhost:45364`. The log shows `client=claude_code`.)
+- [x] Ask for the balance. (A `get_account_balance` call as `client=claude_code` succeeded.)
+- [ ] Preview, send by the link, refusals, disconnect. (Not run.)
+
+A Claude Code session signed in to a Claude account also gets that account's connectors. There,
+our tools arrive through Claude's own connection and log as `client=claude` (checked the same day).
+
+### CLIENT-03 — Visual Studio Code (launch gate, #471)
+
+**Status:** Steps 1 and 2 run in development on 2026-09-26 (VS Code 1.123.2, Windows).
+
+- [x] Add the server: `code --add-mcp
+      '{"name":"letter-irl-dev","type":"http","url":"<development /mcp>"}'`.
+- [x] **MCP: List Servers**, then the server, then **Start Server**. Sign in and accept. (VS Code
+      found the metadata by itself, waited for the sign-in, and discovered 24 tools. The log shows
+      `client=vscode`.)
+- [ ] A tool call from Copilot Chat, a preview, send by the link, refusals, disconnect. (Not run.)
+- VS Code keeps a stream open on `/mcp`. When it dropped that stream, the API looped in its close
+  handler until the stack overflowed (#485).
+
+### CLIENT-04 — Codex (launch gate, #471)
+
+**Status:** In progress in development on 2026-09-26 (Codex CLI 0.157.1, in WSL).
+
+- [x] `codex mcp add letter-irl-dev --url <development /mcp>`.
+- [x] In `~/.codex/config.toml`, add
+      `scopes = ["mail:read", "mail:draft", "mail:send", "offline_access"]` to that server's entry.
+      Without it, Codex requests Auth0's OpenID scopes instead of ours
+      ([auth0-tenant-configuration.md](auth0-tenant-configuration.md), Applications, section 6).
+- [x] `codex mcp login letter-irl-dev`. The consent screen should list Read, Draft, Send and
+      offline access. (The first login, before the scopes line, listed only offline access. Its
+      `get_account_balance` call reached the server as `client=codex` and was refused as "Additional
+      authorization is required for this action".)
+- [ ] Ask Codex to use the `letter-irl-dev` server, not the Letter IRL app, for the balance.
+- [ ] Preview, send by the link, refusals, disconnect.
+- [ ] Check what Codex's app route (`codex_apps`, the person's ChatGPT plugins) shows its model.
+      Those calls use the ChatGPT connection, so the server treats them as ChatGPT.
+
 The sections below describe the older path, before Claude could connect with its published
 identity.
 

@@ -375,7 +375,7 @@ screen. The server names each app from its document URL
 |---|---|---|---|
 | Claude | `tpc_nzv1WDzBigLDqccQkDsVx3` | `https://claude.ai/oauth/mcp-oauth-client-metadata` | `https://claude.ai/api/mcp/auth_callback` |
 | Claude Code | `tpc_vaiqGx16ntpvuNWLnCYqSt` | `https://claude.ai/oauth/claude-code-client-metadata` | `http://localhost/callback`, `http://127.0.0.1/callback` |
-| Codex | `tpc_x7ejt3SYLC114dzhJEvmpP` | `https://chatgpt.com/oauth/codex/IJMOsCBL6i7U/client.json` | `http://127.0.0.1/callback/IJMOsCBL6i7U`, `http://localhost/callback/IJMOsCBL6i7U` |
+| Codex | `tpc_1pVfZCrG4TFNTwhJsrSU1f` | `https://chatgpt.com/oauth/codex/pGLYK3svyYGg/client.json` | `http://127.0.0.1/callback/pGLYK3svyYGg`, `http://localhost/callback/pGLYK3svyYGg` |
 | Visual Studio Code | `tpc_eG8tnoxeEJJknqqBXxPY3Y` | `https://vscode.dev/oauth/client-metadata.json` | `http://127.0.0.1:33418/`, `https://vscode.dev/redirect` |
 | Hermes Agent | `tpc_rgU3u4iFg4SSpyFzikWN2n` | `https://nousresearch.github.io/hermes-agent/docs/oauth/client-metadata.json` | ports 27890-27894 on `127.0.0.1` and `localhost`, path `/callback` |
 
@@ -396,9 +396,37 @@ What the imports showed:
 - **The consent wording reads "mail your read".** Auth0 builds it from the scope
   names (#267).
 
-Claude connected and ran tools on 2026-09-26 (CLIENT-01 in
-[manual-tests.md](manual-tests.md)). The other four are imported but not yet
-connected.
+**Codex needs three things to know** (found during the Codex connect):
+- **Its document is derived from our URL.** The id is the first 12 characters
+  of the base64url SHA-256 of the MCP URL, so every Codex user of a URL presents
+  the same document, and one import per tenant covers them all:
+  - development `pGLYK3svyYGg`;
+  - production `IJMOsCBL6i7U`, from `https://api.letterirl.com/mcp`.
+
+  A copy of production's document was imported into development by mistake and
+  deleted the same day. OpenAI would use a single stable document only if the
+  authorization server returned `iss` in its authorization responses (RFC 9207),
+  and Auth0 doesn't.
+- **It asks for the wrong scopes.** Codex requests the authorization server's
+  `scopes_supported` rather than the protected resource's
+  ([openai/codex#15643](https://github.com/openai/codex/issues/15643)). Auth0
+  lists only OpenID scopes there, so the token carries no mail scope, and every
+  tool is refused with "Additional authorization is required for this action".
+  The fix is on the person's side: put
+  `scopes = ["mail:read", "mail:draft", "mail:send", "offline_access"]` on the
+  server's entry in `~/.codex/config.toml` (or pass `--scopes` to
+  `codex mcp login`), then sign in again.
+- **It can also reach us as ChatGPT.** Codex offers the person's installed
+  ChatGPT plugins as `codex_apps`. Those calls use the ChatGPT plugin's
+  connection, so the server sees ChatGPT, not Codex.
+
+Connected on development on 2026-09-26, recognised by name in the log:
+- Claude: CLIENT-01, with tool calls;
+- Claude Code: `claude_code`, with a tool call;
+- VS Code: `vscode`;
+- Codex: `codex`.
+
+Hermes Agent is imported but not yet connected.
 
 ---
 
