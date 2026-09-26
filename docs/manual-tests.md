@@ -395,12 +395,21 @@ connector on a Claude account covers Claude on the web, Desktop, mobile and Cowo
 - [ ] Disconnect on Claude's connector page, then check that the Auth0 user no longer lists Claude
       among authorized applications. (Not run.)
 
-Findings to fix before listing:
-- Several tool descriptions still say "so ChatGPT can reuse that existing image".
-- Claude uses a tool's description as its name in approval prompts ("Claude wants to use Check how
-  many prepaid letters remain…"), so the tools need a `title`.
-- `get_started` promises buying "without leaving the conversation", and Claude offered to set up a
-  pack purchase, which Claude doesn't allow (#475).
+Findings, fixed by #484:
+- Several tool descriptions said "so ChatGPT can reuse that existing image".
+- Claude used a tool's description as its name in approval prompts ("Claude wants to use Check how
+  many prepaid letters remain…"). Every tool now has a short title.
+- `get_started` promised buying "without leaving the conversation", and Claude offered to set up a
+  pack purchase, which Claude doesn't allow (#475). An app that takes no purchases is now sent to
+  the dashboard. The checkout tools themselves are #475.
+
+7. Tool text (#484), once it is deployed to development
+- [ ] Approval prompts show short titles, such as "Claude wants to use Check letter balance".
+- [ ] Ask "How do I get started with Letter IRL?" The answer carries the guide and the website's
+      letter packs link, and offers no purchase in the conversation.
+- [ ] With no letters left, ask for the balance. The answer gives the letter packs link.
+- [ ] Ask Letter IRL for an image for a postcard. Nothing mentions ChatGPT; with no image
+      generations left, Claude asks for an image of your own.
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
 

@@ -5,7 +5,7 @@ import type { AuthenticatedUser } from "./tokenValidator.js";
  * Which app is calling, as a profile (#473).
  *
  * Every app gets the same tools. What differs is what the server can trust
- * about how an app reaches the person, and a profile answers that in three
+ * about how an app reaches the person, and a profile answers that in four
  * flags:
  *
  * - `rendersCards`: our cards (the letter preview, the checkout) show in this
@@ -17,12 +17,22 @@ import type { AuthenticatedUser } from "./tokenValidator.js";
  *   from such an app.
  * - `inAppPurchases`: the app may offer a checkout. Claude does not allow
  *   purchases through connectors (#475).
+ * - `generatesImages`: the app makes images itself and hands them to our
+ *   preview tools: ChatGPT's image generation, its image library, and the file
+ *   parameters that pass a conversation image to a tool. Our text sends people
+ *   there when Letter IRL cannot make an image; elsewhere it asks for an image
+ *   of their own instead (#484).
  *
- * Only ChatGPT is trusted with all three, because only ChatGPT has been
+ * Only ChatGPT is trusted with all four, because only ChatGPT has been
  * tested with our cards. Every other profile starts at "trust nothing" and a
  * flag is turned on for an app only after a live test proves it, so a wrong
  * guess costs a detour through the confirmation link rather than a letter
  * nobody saw.
+ *
+ * The flags also choose the words the model reads (#484): a tool description,
+ * a server instruction or a tool result that would be false in some app takes
+ * that app's version from here, rather than naming ChatGPT or promising a
+ * checkout everywhere.
  */
 export type ClientProfileName =
   | "chatgpt"
@@ -39,12 +49,14 @@ export interface ClientProfile {
   readonly rendersCards: boolean;
   readonly honorsCardOnlyTools: boolean;
   readonly inAppPurchases: boolean;
+  readonly generatesImages: boolean;
 }
 
 const TRUSTS_NOTHING = {
   rendersCards: false,
   honorsCardOnlyTools: false,
-  inAppPurchases: false
+  inAppPurchases: false,
+  generatesImages: false
 } as const;
 
 const PROFILES: Readonly<Record<ClientProfileName, ClientProfile>> = {
@@ -52,7 +64,8 @@ const PROFILES: Readonly<Record<ClientProfileName, ClientProfile>> = {
     name: "chatgpt",
     rendersCards: true,
     honorsCardOnlyTools: true,
-    inAppPurchases: true
+    inAppPurchases: true,
+    generatesImages: true
   },
   // Claude renders MCP Apps cards, but not ours until they speak the MCP Apps
   // bridge (#474), and it refuses purchases through connectors (#475).
@@ -157,6 +170,25 @@ export function resolveClientProfile(user: AuthenticatedUser | null): ClientProf
   }
   const clientId = clientIdOf(user);
   return PROFILES[clientId ? profileNameForClientId(clientId) : "generic"];
+}
+
+/**
+ * A profile by name: for text written for one app on purpose, such as the
+ * ChatGPT manifest, and for tests that walk every app.
+ */
+export function clientProfileNamed(name: ClientProfileName): ClientProfile {
+  return PROFILES[name];
+}
+
+export const CLIENT_PROFILE_NAMES = Object.keys(PROFILES) as readonly ClientProfileName[];
+
+/**
+ * The app a tool call came from. registerTools always says; a context without
+ * one (a unit test, the CLI harness) gets the text for an app that trusts
+ * nothing, which is never a claim some app cannot keep.
+ */
+export function callingApp(context: { client?: ClientProfile } | undefined): ClientProfile {
+  return context?.client ?? PROFILES.generic;
 }
 
 /**

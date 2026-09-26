@@ -71,7 +71,7 @@ import { installProcessGuards, withRequestBoundary } from "./requestBoundary.js"
 import { APPS_CHALLENGE_PATH, appsChallengeResponse } from "./appsChallenge.js";
 import { logRestRequestOnFinish } from "../api/restRequestLog.js";
 import { OAUTH_NOT_CONFIGURED } from "../auth/oauthErrors.js";
-import { clientLogFields } from "../auth/clientProfiles.js";
+import { clientLogFields, resolveClientProfile } from "../auth/clientProfiles.js";
 import { closeSseSessionOnce } from "./sseSessionClose.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -279,7 +279,8 @@ async function serveWidget(
   }
 }
 
-async function createMcpServer(
+/** One MCP server for one request or stream, in the calling app's words (#484). */
+export async function createMcpServer(
   letterServer: LetterIrlServer,
   authInfo: AuthenticatedUser | null,
   options: RegisterToolsOptions = {}
@@ -288,7 +289,8 @@ async function createMcpServer(
     name: "letter-irl",
     version: "0.1.0"
   }, {
-    instructions: buildServerInstructions(isSendConfirmationEnabled())
+    // In the calling app's words (#484), as its tool descriptions are.
+    instructions: buildServerInstructions(isSendConfirmationEnabled(), resolveClientProfile(authInfo))
   });
   await registerLetterTools(mcpServer, letterServer, authInfo, options);
   return mcpServer;

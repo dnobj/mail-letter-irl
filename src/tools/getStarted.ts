@@ -1,6 +1,8 @@
-import { McpToolDefinition } from "../contracts/types.js";
+import { McpToolDefinition, ToolContext } from "../contracts/types.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import { isJitPurchaseEnabled } from "../config/products.js";
+import { letterPacksPageUrl } from "../config/sendConfirmation.js";
+import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 
 const OUTPUT_TEMPLATE = widgetTemplateUri("GetStartedCard");
 
@@ -16,7 +18,16 @@ const OUTPUT_TEMPLATE = widgetTemplateUri("GetStartedCard");
  * Read per call rather than captured at module load, so a restart is enough to
  * change it and a test can vary it without re-importing.
  */
-function purchaseStep(): string {
+function purchaseStep(client: ClientProfile): string {
+  if (!client.inAppPurchases) {
+    // An app that takes no purchases, such as Claude (#475): both routes below
+    // are checkouts in the conversation, so this names the dashboard instead
+    // (#484).
+    return (
+      `Letters are prepaid: buy a letter pack on your Letter IRL dashboard at ${letterPacksPageUrl()}. ` +
+      "Then tell me who the mail is for and what you want to say."
+    );
+  }
   // Both branches now buy IN the conversation. Only Pay & Send is conditional:
   // packs are gated on beta access and price configuration, never on
   // JIT_PURCHASE_ENABLED - so the flag-off branch changed most. It used to
@@ -46,8 +57,11 @@ interface GetStartedOutput {
 
 export const getStartedTool: McpToolDefinition<GetStartedInput, GetStartedOutput> = {
   name: "get_started",
-  description:
-    "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy prepaid letters without leaving the conversation, and example prompts to try next.",
+  title: "Get started",
+  description: (client) =>
+    client.inAppPurchases
+      ? "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy prepaid letters without leaving the conversation, and example prompts to try next."
+      : "Get a short getting-started guide for new Letter IRL users: what the app can do, how to buy prepaid letters, and example prompts to try next.",
   readOnly: true,
   inputSchema: {
     type: "object",
@@ -73,12 +87,12 @@ export const getStartedTool: McpToolDefinition<GetStartedInput, GetStartedOutput
     "openai/toolInvocation/invoked": "Getting-started guide ready",
     readOnlyHint: true
   },
-  async handler() {
+  async handler(_input: GetStartedInput, context: ToolContext) {
     return {
       title: "Get Started with Letter IRL",
       overview:
         "Letter IRL can draft, preview, and mail real physical letters and postcards in the U.S.",
-      purchaseStep: purchaseStep(),
+      purchaseStep: purchaseStep(callingApp(context)),
       examplePrompts: [
         "Draft a letter to my grandmother",
         "Create a postcard for my friend in Seattle",

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getStartedTool } from '../../../src/tools/getStarted.js';
+import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 
 /**
  * get_started must describe the payment routes this deployment actually has
@@ -15,10 +16,13 @@ import { getStartedTool } from '../../../src/tools/getStarted.js';
  * renders `state.purchaseStep` verbatim, so this string is the only copy.
  */
 
+// These are the words for an app that takes purchases, where both routes are
+// checkouts in the conversation; any other app is sent to the dashboard
+// (#484, tests/unit/tools/getStarted.test.ts).
 const purchaseStep = async (): Promise<string> => {
   const output = (await getStartedTool.handler(
     {} as never,
-    {} as never
+    { client: clientProfileNamed('chatgpt') } as never
   )) as { purchaseStep: string };
   return output.purchaseStep;
 };

@@ -106,6 +106,7 @@ export const setReturnAddressTool: McpToolDefinition<
   SetReturnAddressOutput
 > = {
   name: "set_return_address",
+  title: "Save return address",
   description:
     "Save your preferred return address for future letters and postcards. The address is validated before saving, corrected when possible, and used automatically when you omit a sender address. U.S. addresses only.",
   readOnly: false,

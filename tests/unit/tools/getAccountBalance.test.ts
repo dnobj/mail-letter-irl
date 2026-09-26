@@ -4,8 +4,10 @@
  * Tests the balance handler including image generation quota info.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ToolContext } from "../../../src/contracts/types.js";
+import { clientProfileNamed } from "../../../src/auth/clientProfiles.js";
+import { describeTool } from "../../../src/server.js";
 
 // Mock credit service
 vi.mock("../../../src/services/creditService.js", () => ({
@@ -110,5 +112,84 @@ describe("get_account_balance tool", () => {
 
     expect(result.imageGenerationsRemaining).toBe(0);
     expect(result.imageGenerationsAllowance).toBe(0);
+  });
+});
+
+/**
+ * Where to buy, per app (#484). Claude read "Letters can be bought without
+ * leaving the conversation" in this description and offered to set up a pack
+ * purchase, where Claude allows no purchases through connectors (#475).
+ */
+describe("get_account_balance: where to buy letters", () => {
+  const emptyAccount = () =>
+    mockGetDetailedBalance.mockResolvedValueOnce({
+      totalAvailable: 0,
+      expiringSoon: 0,
+      expiringDates: [],
+      neverExpiring: 0,
+      bySource: []
+    });
+  const inApp = (name: Parameters<typeof clientProfileNamed>[0] | null): ToolContext => ({
+    ...createMockContext(),
+    ...(name ? { client: clientProfileNamed(name) } : {})
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFindUser.mockResolvedValue({ user_id: "google-oauth2|test-123", email: "test@example.com" });
+    mockGetDetailedBalance.mockResolvedValue({
+      totalAvailable: 10,
+      expiringSoon: 0,
+      expiringDates: [],
+      neverExpiring: 10,
+      bySource: []
+    });
+    mockGetGenerationQuota.mockResolvedValue({ used: 0, allowance: 0, remaining: 0 });
+    vi.stubEnv("LETTER_IRL_WEBSITE_BASE_URL", "https://website.example");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("has a short title", () => {
+    expect(getAccountBalanceTool.title).toBe("Check letter balance");
+  });
+
+  it("offers the checkout in the conversation where the app takes purchases", async () => {
+    emptyAccount();
+    const result = await getAccountBalanceTool.handler({} as any, inApp("chatgpt"));
+
+    expect(result.lettersRemaining).toBe(0);
+    expect(result.message).toContain(
+      "No letters on this account yet. You can buy a letter pack here, or pay for a single letter as you send it."
+    );
+    expect(result.message).not.toContain("website.example");
+  });
+
+  it.each(["claude", "claude_code", "codex", "vscode", "hermes", "token", "generic", null] as const)(
+    "sends %s to the dashboard's letter packs page instead",
+    async (name) => {
+      emptyAccount();
+      const result = await getAccountBalanceTool.handler({} as any, inApp(name));
+
+      expect(result.message).toContain(
+        "No letters on this account yet. Buy a letter pack on your Letter IRL dashboard at https://website.example/dashboard/letter-packs."
+      );
+      expect(result.message).not.toMatch(/buy a letter pack here|pay for a single letter/);
+    }
+  );
+
+  it("says nothing about buying while letters remain", async () => {
+    const result = await getAccountBalanceTool.handler({} as any, inApp("claude"));
+
+    expect(result.lettersRemaining).toBe(5);
+    expect(result.message).not.toMatch(/buy|dashboard/i);
+  });
+
+  it("describes where letters are bought, per app", () => {
+    expect(describeTool(getAccountBalanceTool, clientProfileNamed("chatgpt"))).toContain(
+      "Letters can be bought without leaving the conversation"
+    );
+    const elsewhere = describeTool(getAccountBalanceTool, clientProfileNamed("claude"));
+    expect(elsewhere).toContain("Letter packs are bought on the Letter IRL website");
+    expect(elsewhere).not.toMatch(/without leaving the conversation|create_pack_checkout/);
   });
 });

@@ -78,7 +78,12 @@ import {
   buildInsufficientScopeToolResult,
   InsufficientScopeError
 } from "../auth/oauthChallenge.js";
-import { resolveClientProfile, type ClientProfileName } from "../auth/clientProfiles.js";
+import {
+  callingApp,
+  resolveClientProfile,
+  type ClientProfile,
+  type ClientProfileName
+} from "../auth/clientProfiles.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import {
   REQUEST_SEND_TOOL,
@@ -937,7 +942,8 @@ export async function registerLetterTools(
   const sendRule = isSendConfirmationEnabled();
   const client = resolveClientProfile(authInfo);
 
-  const toolDefs = appServer.listTools();
+  // Each description in this app's words (#484).
+  const toolDefs = appServer.listTools(client);
   for (const tool of toolDefs) {
     const inputShape = getZodInputShape(tool.name);
     const outputShape = getZodOutputShape(tool.name);
@@ -969,7 +975,10 @@ export async function registerLetterTools(
     mcpServer.registerTool(
       tool.name,
       {
-        title: tool.title ?? tool.description,  // Short label when provided; description otherwise
+        // The short label an app shows for the tool. It used to fall back to
+        // the description, which Claude then showed where the name belongs
+        // (#484); every tool has a title now.
+        title: tool.title,
         description: tool.description,
         inputSchema: inputShape,
         outputSchema: outputShape,
@@ -1003,7 +1012,8 @@ export async function registerLetterTools(
             await appServer.execute<{ draftId: unknown }, RequestSendOutput>({
               toolName: REQUEST_SEND_TOOL,
               input: { draftId: args.draftId },
-              userId
+              userId,
+              client
             }),
             client.name
           );
@@ -1022,7 +1032,8 @@ export async function registerLetterTools(
             toolName: tool.name,
             input: args,
             userId,
-            isMobile
+            isMobile,
+            client
           });
         } catch (error) {
           // #412: a refusal the card acts on, so its details travel with it.
@@ -1031,7 +1042,7 @@ export async function registerLetterTools(
         }
         const { result, meta } = executed;
 
-        let summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>);
+        let summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>, client);
         const draftId = (result as Record<string, unknown>).draftId;
         if (sendRule && PREVIEW_TOOLS.has(tool.name) && typeof draftId === "string") {
           summaryText += ` ${howToSendText(draftId, client.rendersCards)}`;
@@ -1195,7 +1206,8 @@ const PREVIEW_TOOLS: ReadonlySet<string> = new Set([
 
 export function summarizeToolResult(
   toolName: string,
-  result: Record<string, unknown>
+  result: Record<string, unknown>,
+  client: ClientProfile = callingApp(undefined)
 ): string {
   switch (toolName) {
     case "get_profile": {
@@ -1298,6 +1310,20 @@ export function summarizeToolResult(
       return message || "Feature request submitted.";
     }
     case "get_started": {
+      if (!client.rendersCards) {
+        // No card shows the guide in this app, so the text carries it; the
+        // card-only wording below would have the model point at nothing
+        // (#484).
+        const examples = Array.isArray(result.examplePrompts) ? (result.examplePrompts as string[]) : [];
+        return [
+          result.overview,
+          result.purchaseStep,
+          examples.length ? `Things to try: ${examples.map((example) => `"${example}"`).join(", ")}.` : "",
+          "Pass this on to the person in your own words."
+        ]
+          .filter((part): part is string => typeof part === "string" && part.length > 0)
+          .join(" ");
+      }
       // The summary used to be the card's own `overview` sentence, so the
       // model received the card's copy as its account of what happened and
       // dutifully restated it - overview, purchase step, and all three example

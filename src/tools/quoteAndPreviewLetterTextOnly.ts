@@ -101,6 +101,7 @@ export const quoteAndPreviewLetterTextOnlyTool: McpToolDefinition<
   LetterQuoteOutput
 > = {
   name: "quote_and_preview_letter",
+  title: "Preview a letter",
   description:
     "Preview a text-only physical letter draft. This does not send mail. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. Send later with send_letter.",
   // readOnly: false because this tool creates draft records in the database

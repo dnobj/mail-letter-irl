@@ -105,6 +105,7 @@ export const submitFeatureRequestTool: McpToolDefinition<
   SubmitFeatureRequestOutput
 > = {
   name: "submit_feature_request",
+  title: "Suggest a feature",
   description: "Submit a feature request to the Letter IRL team for unsupported capabilities or product improvements. Use this for missing mail formats, workflows, or integrations, not for billing or bug support.",
   readOnly: false,
   inputSchema: submitFeatureRequestInputSchema,

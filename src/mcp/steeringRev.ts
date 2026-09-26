@@ -34,5 +34,10 @@
  * r9: not image routing either (#412): a send or checkout refused because
  *     the same mail went out recently is repeated with sendAnotherCopy only
  *     when the user asks for another copy.
+ * r10: tool text for every app (#484): every tool has a short title, and the
+ *     descriptions and instructions take each app's own words from its
+ *     profile. ChatGPT is named only to ChatGPT, where its image-routing text
+ *     is unchanged; elsewhere generate_image_for_mail is the only way to make
+ *     an image, and apps that take no purchases are sent to the dashboard.
  */
-export const STEERING_COPY_REV = 9;
+export const STEERING_COPY_REV = 10;

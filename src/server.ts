@@ -41,9 +41,11 @@ import { isSendConfirmationEnabled } from "./config/sendConfirmation.js";
 import {
   McpToolDefinition,
   ToolContext,
+  ToolDescription,
   UserAccount,
   Logger
 } from "./contracts/types.js";
+import { callingApp, type ClientProfile } from "./auth/clientProfiles.js";
 import { createLogger } from "./logging/index.js";
 import { carriedDiagnosticClass, classifyDiagnosticError } from "./utils/diagnosticLog.js";
 
@@ -101,11 +103,21 @@ export interface ServerRequest<Input> {
    * @see US-POSTCARD-04: Mobile Image Graceful Degradation
    */
   isMobile?: boolean;
+  /** The app the call came from (#473), for text that differs per app (#484). */
+  client?: ClientProfile;
 }
 
 export interface ServerResponse<Output> {
   result: Output;
   meta: Record<string, unknown>;
+}
+
+/**
+ * A tool's description as the calling app reads it (#484). Most tools say the
+ * same to every app; a few give each app its own words.
+ */
+export function describeTool(tool: { description: ToolDescription }, client: ClientProfile): string {
+  return typeof tool.description === "function" ? tool.description(client) : tool.description;
 }
 
 export function summarizeToolInput(input: unknown): Record<string, unknown> {
@@ -136,7 +148,8 @@ export class LetterIrlServer {
     userId: string,
     logger: Logger,
     correlationId: string,
-    isMobile?: boolean
+    isMobile?: boolean,
+    client?: ClientProfile
   ): Promise<ToolContext> {
     const account = await this.store.getOrCreate(userId);
     return {
@@ -147,7 +160,8 @@ export class LetterIrlServer {
       },
       logger,
       correlationId,
-      isMobile
+      isMobile,
+      client
     };
   }
 
@@ -185,7 +199,8 @@ export class LetterIrlServer {
       request.userId,
       requestLogger.child({ stage: "tool-handler" }),
       correlationId,
-      request.isMobile
+      request.isMobile,
+      request.client
     );
 
     try {
@@ -223,7 +238,11 @@ export class LetterIrlServer {
     }
   }
 
-  listTools() {
+  /**
+   * The tools as one app sees them: each description in that app's words
+   * (#484). Without an app, the words for an app that trusts nothing.
+   */
+  listTools(client: ClientProfile = callingApp(undefined)) {
     // request_send points at the confirmation page, which ships with the send
     // rule, so the tool is listed only while the rule is on. execute() still
     // reaches it: a send tool answers an app without our card with its link
@@ -234,7 +253,7 @@ export class LetterIrlServer {
       .map((tool) => ({
         name: tool.name,
         title: tool.title,
-        description: tool.description,
+        description: describeTool(tool, client),
         readOnly: tool.readOnly,
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema,

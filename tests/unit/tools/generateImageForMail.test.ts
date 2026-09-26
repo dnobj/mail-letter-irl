@@ -38,12 +38,17 @@ import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import * as genService from "../../../src/services/imageGenerationService.js";
 import * as limitService from "../../../src/services/imageGenerationLimitService.js";
 import * as tempStore from "../../../src/services/tempImageStore.js";
+import { clientProfileNamed } from "../../../src/auth/clientProfiles.js";
+import { describeTool } from "../../../src/server.js";
 const tempStoreModule = tempStore;
 
+// The redirect below routes to ChatGPT's own image generation, which only
+// ChatGPT has (#484); the other apps' redirect has its own suite at the end.
 const context = {
   user: { userId: "user-1" },
   correlationId: "test",
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  client: clientProfileNamed("chatgpt")
 } as never;
 
 // 1x1 JPEG so sharp can build a real preview in the generated-mode test.
@@ -69,8 +74,9 @@ describe("generate_image_for_mail (hybrid)", () => {
     expect(generateImageForMailTool.meta["openai/outputTemplate"]).toBe(
       widgetTemplateUri("ImageRoutingCard")
     );
-    expect(generateImageForMailTool.description).toContain("Letter IRL image generations");
-    expect(generateImageForMailTool.description).toContain("built-in image generation");
+    const description = describeTool(generateImageForMailTool, clientProfileNamed("chatgpt"));
+    expect(description).toContain("Letter IRL image generations");
+    expect(description).toContain("built-in image generation");
   });
 
   it("generates in-turn when a credit reserves, and chains to the preview tool", async () => {
@@ -403,5 +409,114 @@ describe("generate_image_for_mail (hybrid)", () => {
     const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, mobileContext);
 
     expect(result.mode).toBe("generated");
+  });
+});
+
+/**
+ * Outside ChatGPT (#484). Claude read "ChatGPT's built-in image generation
+ * creates images free" in this tool's description, and the redirect told the
+ * person to resend the prompt to a generator their app does not have. An app
+ * with no image generation of its own gets the reason and one way on: an image
+ * of their own. A context that names no app gets the same.
+ */
+describe("generate_image_for_mail in an app with no image generation of its own", () => {
+  const claudeContext = {
+    user: { userId: "user-1" },
+    correlationId: "test",
+    isMobile: false,
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    client: clientProfileNamed("claude")
+  } as never;
+  const unnamedContext = {
+    user: { userId: "user-1" },
+    correlationId: "test",
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+  } as never;
+
+  function expectOwnImageRedirect(result: Record<string, unknown>, reason: string) {
+    expect(result.mode).toBe("redirect");
+    expect(result.message).toBe(`${reason} You can use an image of your own instead.`);
+    // In an app with no card, this is all the model reads, so it leads with
+    // the reason and names the one way on.
+    expect((result.suggestedNextStep as string).startsWith(`${reason} `)).toBe(true);
+    expect(result.suggestedNextStep).toContain("an image of their own");
+    expect(result.suggestedNextStep).toContain("imageUrl");
+    expect(result.redirectStyle).toBeUndefined();
+    const text = `${result.message} ${result.suggestedNextStep}`;
+    expect(text).not.toMatch(/ChatGPT|built-in|image_gen|WITHOUT mentioning|card above/);
+  }
+
+  it("describes itself without naming ChatGPT", () => {
+    for (const name of ["claude", "claude_code", "codex", "vscode", "hermes", "token", "generic"] as const) {
+      const description = describeTool(generateImageForMailTool, clientProfileNamed(name));
+      expect(description, name).toContain("Letter IRL image generations");
+      expect(description, name).toContain("an image of their own");
+      expect(description, name).toContain("Never refuse an image request");
+      expect(description, name).not.toMatch(/ChatGPT|built-in/);
+    }
+  });
+
+  it("still generates while the account has generations left", async () => {
+    vi.mocked(limitService.reserveGeneration).mockResolvedValue({
+      reserved: true,
+      reservationId: "res-9",
+      remaining: 1,
+      used: 2,
+      allowance: 3
+    } as never);
+    vi.mocked(limitService.markGenerationDispatched).mockResolvedValue(true as never);
+    vi.mocked(limitService.commitGenerationReservation).mockResolvedValue(true as never);
+    vi.mocked(genService.generateImage).mockImplementation(async (_prompt, opts) => {
+      await (opts as { beforeDispatch: () => Promise<void> }).beforeDispatch();
+      return { base64Data: TINY_JPEG_BASE64, providerRequestId: "prov-9" } as never;
+    });
+    vi.mocked(tempStore.storeImage).mockResolvedValue("token-9" as never);
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, claudeContext);
+
+    expect(result.mode).toBe("generated");
+  });
+
+  it("asks for an image of their own when no generations remain", async () => {
+    vi.mocked(limitService.reserveGeneration).mockResolvedValue({
+      reserved: false,
+      remaining: 0,
+      used: 3,
+      allowance: 3
+    } as never);
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, claudeContext);
+
+    expect(result.status).toBe("no_credits");
+    expect(result.prompt).toBe("a walrus");
+    expectOwnImageRedirect(
+      result as never,
+      "This account has no Letter IRL image generations left. Letter packs and letter purchases include in-turn generations."
+    );
+  });
+
+  it("says generation is off, rather than that ChatGPT has the request, when the mode is off", async () => {
+    process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, claudeContext);
+
+    expect(result.status).toBe("generation_disabled");
+    expectOwnImageRedirect(result as never, "Letter IRL is not making images here right now.");
+    expect(limitService.reserveGeneration).not.toHaveBeenCalled();
+  });
+
+  it("asks for a description without calling it routing", async () => {
+    const result = await generateImageForMailTool.handler({}, claudeContext);
+
+    expect(result.status).toBe("no_prompt");
+    expectOwnImageRedirect(result as never, "Letter IRL needs a description to make an image.");
+  });
+
+  it("treats a context that names no app as an app with no generation of its own", async () => {
+    process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, unnamedContext);
+
+    expectOwnImageRedirect(result as never, "Letter IRL is not making images here right now.");
   });
 });
