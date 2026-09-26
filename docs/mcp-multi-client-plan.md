@@ -156,7 +156,10 @@ Each app gets one CLIENT-xx test in [manual-tests.md](manual-tests.md), with the
 - **New from the Codex connect:**
   - Codex's document is derived from our URL, so one import per tenant covers every Codex user.
   - Codex needs a `scopes` line in its config, or it requests Auth0's OpenID scopes instead of ours ([openai/codex#15643](https://github.com/openai/codex/issues/15643)). The Codex instructions on the Connect page (website #38) must include that line.
-  - Codex also offers the person's ChatGPT plugins as `codex_apps`, and the server sees those calls as ChatGPT. Before production gets the send rule, check whether that route shows its model the send tools ChatGPT hides (CLIENT-04).
+  - Codex also offers the person's ChatGPT plugins as `codex_apps`, and the server sees those calls as ChatGPT.
+    - **Checked 2026-09-26:** that route hides the card-only send tools just as ChatGPT does (CLIENT-04).
+    - Pay & Send stays open to the model there, which #475 should cover.
+- **Hermes connected from a remote host** (CLIENT-05). A person running Hermes on their own computer signs in normally. On a remote host, the callback has to be carried to Hermes's loopback listener.
 - Whether Claude signs in once the OIDC scopes are gone, and whether ChatGPT still links.
   - **Answered 2026-09-26: Claude signs in with them still advertised.** Auth0 drops OIDC scopes for these clients rather than refusing them.
   - So #469 is not needed for Claude (CLIENT-01).

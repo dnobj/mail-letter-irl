@@ -443,10 +443,45 @@ our tools arrive through Claude's own connection and log as `client=claude` (che
       offline access. (The first login, before the scopes line, listed only offline access. Its
       `get_account_balance` call reached the server as `client=codex` and was refused as "Additional
       authorization is required for this action".)
-- [ ] Ask Codex to use the `letter-irl-dev` server, not the Letter IRL app, for the balance.
+- [x] Ask Codex to use the `letter-irl-dev` server, not the Letter IRL app, for the balance. (After
+      the second login, `get_account_balance` succeeded as `client=codex`.)
 - [ ] Preview, send by the link, refusals, disconnect.
-- [ ] Check what Codex's app route (`codex_apps`, the person's ChatGPT plugins) shows its model.
-      Those calls use the ChatGPT connection, so the server treats them as ChatGPT.
+- [x] Check what Codex's app route (`codex_apps`, the person's ChatGPT plugins) shows its model.
+      Those calls use the ChatGPT connection, so the server treats them as ChatGPT. (Codex listed 22
+      tools from the development app: no `send_letter` or `send_postcard`, and `request_send` is
+      there. So this route hides card-only tools, as ChatGPT does. The production app still listed
+      both send tools, because production doesn't have the send rule yet.)
+- Pay & Send is still open to the model on that route, because the server takes it for ChatGPT.
+  The person still pays on Stripe, but never saw our card (#475).
+
+### CLIENT-05 — Hermes Agent on a remote host (launch gate, #471)
+
+**Status:** Connected in development on 2026-09-26. Hermes v0.21.0 was running in Docker on a VPS,
+with the browser on another machine.
+
+Hermes waits for the sign-in on the loopback address of wherever it runs, on one of ports 27890 to
+27894. From a browser on another machine, that callback can't arrive by itself. Here the listener
+was inside a container on a private network with no published ports, so an SSH tunnel to the host
+could not reach it either.
+
+- [x] Add the server: `hermes config set mcp_servers.letter_irl_dev.url <development /mcp>` and
+      `... .auth oauth`. Raise the connect step's timeout to 300 seconds
+      (`mcp_servers.letter_irl_dev.connect_timeout`); otherwise a second sign-in starts after
+      about a minute and collides with the first on the port.
+- [x] Run `hermes mcp login letter_irl_dev` inside the container. It prints the authorize link.
+      The link had the right `resource` (the full `/mcp` URL) and asked for our mail scopes.
+- [x] Deliver the callback. A one-shot relay on the browser's machine listened on
+      127.0.0.1:27890 and replayed the callback over SSH to the container's listener
+      (`C:\letter-irl-scripts\hermes-callback-relay.mjs`). **Never probe that listener first:** it
+      answers exactly one request, so a probe uses it up and the real callback hangs.
+- [x] Hermes reported "Authenticated — 24 tool(s) available". The token carries `mail:read
+      mail:draft mail:send offline_access` and a refresh token. The log shows `client=hermes`.
+- [ ] A tool call, preview, send by the link, refusals, disconnect.
+
+Hermes's own bugs on remote hosts are [#87329](https://github.com/NousResearch/hermes-agent/issues/87329)
+(the port collision) and [#103633](https://github.com/NousResearch/hermes-agent/issues/103633). The
+second, about the token exchange for `/mcp` paths, did not occur against Auth0. A person running
+Hermes on their own computer needs none of this.
 
 The sections below describe the older path, before Claude could connect with its published
 identity.

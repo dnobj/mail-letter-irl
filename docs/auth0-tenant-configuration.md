@@ -420,13 +420,13 @@ What the imports showed:
   ChatGPT plugins as `codex_apps`. Those calls use the ChatGPT plugin's
   connection, so the server sees ChatGPT, not Codex.
 
-Connected on development on 2026-09-26, recognised by name in the log:
+All five connected on development on 2026-09-26, recognised by name in the log:
 - Claude: CLIENT-01, with tool calls;
 - Claude Code: `claude_code`, with a tool call;
 - VS Code: `vscode`;
-- Codex: `codex`.
-
-Hermes Agent is imported but not yet connected.
+- Codex: `codex`, with a tool call;
+- Hermes Agent: `hermes`, from a Docker container on a remote host, using the callback relay
+  described in CLIENT-05.
 
 ---
 
