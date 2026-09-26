@@ -97,15 +97,19 @@ async function handler(
   const lettersExpiringSoon = Math.floor(internalCreditsExpiring / standardCost);
   const canSendStandardLetter = lettersRemaining >= 1;
 
-  // Fetch image generation quota
+  // Fetch image generation quota, where Letter IRL makes images at all: an app
+  // that does not offer generate_image_for_mail (Claude, #467) is not told
+  // about generations it cannot use.
   let imageGenerationsRemaining: number | undefined;
   let imageGenerationsAllowance: number | undefined;
-  try {
-    const generationQuota = await getGenerationQuota(userId);
-    imageGenerationsRemaining = generationQuota.remaining;
-    imageGenerationsAllowance = generationQuota.allowance;
-  } catch {
-    // Ignore — user may not exist yet
+  if (callingApp(context).offersImageGeneration) {
+    try {
+      const generationQuota = await getGenerationQuota(userId);
+      imageGenerationsRemaining = generationQuota.remaining;
+      imageGenerationsAllowance = generationQuota.allowance;
+    } catch {
+      // Ignore — user may not exist yet
+    }
   }
 
   // Gift letters are counted apart from the balance: a normal send never

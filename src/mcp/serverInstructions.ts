@@ -51,6 +51,18 @@ const IMAGES_WITH_APP_GENERATION =
 const IMAGES_FROM_LETTER_IRL_ONLY =
   "When the user wants an image made for their mail, call generate_image_for_mail rather than refusing, and follow its response exactly: it either generates the image using the user's remaining Letter IRL image generations, or says why it cannot, and the user can use an image of their own instead.";
 
+// Where Letter IRL makes no images at all (#467): Claude, whose directory
+// takes no connector that generates images with AI.
+const NO_IMAGE_GENERATION =
+  "Letter IRL does not make images in this app. For image mail, use an image the user already has: pass a link to it as imageUrl.";
+
+function imageLine(client: ClientProfile): string {
+  if (!client.offersImageGeneration) {
+    return NO_IMAGE_GENERATION;
+  }
+  return client.generatesImages ? IMAGES_WITH_APP_GENERATION : IMAGES_FROM_LETTER_IRL_ONLY;
+}
+
 function uploadLine(client: ClientProfile): string {
   const choose = client.generatesImages ? "pick it from their ChatGPT library or upload it" : "upload it";
   return `If a specific image fails to hand off to a preview tool, open upload_image so the user can ${choose} - that preserves the exact image they approved.`;
@@ -66,7 +78,7 @@ function instructionLines(sendRule: boolean, client: ClientProfile): string[] {
     noResultLine(client),
     "Use saved return addresses when available, and ask for missing real U.S. mailing addresses when required.",
     "For image mail, reuse existing conversation images or hosted imageUrl values before opening upload_image.",
-    client.generatesImages ? IMAGES_WITH_APP_GENERATION : IMAGES_FROM_LETTER_IRL_ONLY,
+    imageLine(client),
     uploadLine(client),
     "For unsupported formats, integrations, or product ideas, offer submit_feature_request instead of promising support.",
     "No tool can request or issue a refund. If the user asks for one, tell them to email support@letterirl.com from the email on their Letter IRL account, quoting the order id from get_purchase_status; refunds are decided by a person, so never promise, estimate, or deny a refund or an amount."

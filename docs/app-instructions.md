@@ -72,9 +72,14 @@ ChatGPT's would be false there. The app's profile (`src/auth/clientProfiles.ts`)
   `create_pack_checkout` or `create_mail_checkout` at all (#475). Claude doesn't allow purchases
   through connectors, and the Connectors Directory takes no connector that executes financial
   transactions. Letters are bought on the website's letter packs page (`/dashboard/letter-packs`).
+- **Image generation.** Claude and Claude Code are not offered `generate_image_for_mail` (#467). The
+  Connectors Directory does not accept a connector that generates images through AI models, and
+  the owner turned it off there on 2026-09-26. Their instructions say Letter IRL makes no images
+  in that app, and their balance leaves out image generations. Every other app still has it.
 - **Instructions.** Four lines differ; `buildServerInstructions` builds them per app.
   - An app without ChatGPT's own image generation is told that `generate_image_for_mail` is the way
-    to make an image. It hears nothing about `image_gen` or ChatGPT's library.
+    to make an image. It hears nothing about `image_gen` or ChatGPT's library. Claude is told
+    instead that Letter IRL makes no images there.
   - An app that shows no cards is not told about the **Create my preview** button.
   - An app that takes no purchases hears nothing about a checkout. Its line about the same mail
     twice names only the send tools, or, under the send rule, the confirmation page.
