@@ -59,7 +59,7 @@
 
 - **Which app is calling.** The server reads it from the sign-in token's `azp`, which names the Auth0 application. Personal access tokens get the profile "token".
 - **What a profile holds.** Whether the app renders our cards and honours card-only tools, whether purchases are allowed in it, whether it makes images itself, and which card domain it needs.
-- **Nothing else branches on the app.** Every app gets the same tool list, and an unknown app gets the safest profile. The one exception is the checkouts: only an app that takes purchases is offered them (#475).
+- **Nothing else branches on the app.** Every app gets the same tool list, and an unknown app gets the safest profile. There are two exceptions. Only an app that takes purchases is offered the checkouts (#475). Claude is not offered Letter IRL's AI image generation, which Anthropic's directory does not accept (#467).
 - **The words follow the profile (#484).** Where a sentence would be false in some app, that app reads its own version: ChatGPT is named only to ChatGPT, and an app that takes no purchases is sent to the dashboard to buy letters. Every tool has a short title.
 
 ### 2. Sending: only the person can finish it (#470, website #39)

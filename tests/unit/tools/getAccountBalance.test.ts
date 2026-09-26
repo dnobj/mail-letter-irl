@@ -179,6 +179,20 @@ describe("get_account_balance: where to buy letters", () => {
     }
   );
 
+  it("reports image generations only where Letter IRL makes images (#467)", async () => {
+    mockGetGenerationQuota.mockResolvedValue({ used: 1, allowance: 3, remaining: 2 });
+
+    const chatgpt = await getAccountBalanceTool.handler({} as any, inApp("chatgpt"));
+    expect(chatgpt.imageGenerationsRemaining).toBe(2);
+    expect(chatgpt.imageGenerationsAllowance).toBe(3);
+
+    mockGetGenerationQuota.mockClear();
+    const claude = await getAccountBalanceTool.handler({} as any, inApp("claude"));
+    expect(claude.imageGenerationsRemaining).toBeUndefined();
+    expect(claude.imageGenerationsAllowance).toBeUndefined();
+    expect(mockGetGenerationQuota).not.toHaveBeenCalled();
+  });
+
   it("says nothing about buying while letters remain", async () => {
     const result = await getAccountBalanceTool.handler({} as any, inApp("claude"));
 

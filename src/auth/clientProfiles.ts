@@ -23,16 +23,24 @@ import type { AuthenticatedUser } from "./tokenValidator.js";
  *   there when Letter IRL cannot make an image; elsewhere it asks for an image
  *   of their own instead (#484).
  *
- * Only ChatGPT is trusted with all four, because only ChatGPT has been
- * tested with our cards. Every other profile starts at "trust nothing" and a
- * flag is turned on for an app only after a live test proves it, so a wrong
- * guess costs a detour through the confirmation link rather than a letter
- * nobody saw.
+ * One more flag is a rule rather than trust:
  *
- * The flags also choose the words the model reads (#484): a tool description,
- * a server instruction or a tool result that would be false in some app takes
- * that app's version from here, rather than naming ChatGPT or promising a
- * checkout everywhere.
+ * - `offersImageGeneration`: Letter IRL makes images with AI here
+ *   (generate_image_for_mail). Off in Claude and Claude Code: Anthropic's
+ *   Connectors Directory does not accept a connector that generates images
+ *   through AI models (#467), and the owner turned it off there on
+ *   2026-09-26. On everywhere else for now.
+ *
+ * Only ChatGPT is trusted with all four trust flags, because only ChatGPT has
+ * been tested with our cards. Every other profile starts at "trust nothing"
+ * and a flag is turned on for an app only after a live test proves it, so a
+ * wrong guess costs a detour through the confirmation link rather than a
+ * letter nobody saw.
+ *
+ * The flags also choose the words the model reads (#484) and the tools an app
+ * is offered (#475): a tool description, a server instruction or a tool
+ * result that would be false in some app takes that app's version from here,
+ * rather than naming ChatGPT or promising a checkout everywhere.
  */
 export type ClientProfileName =
   | "chatgpt"
@@ -50,14 +58,19 @@ export interface ClientProfile {
   readonly honorsCardOnlyTools: boolean;
   readonly inAppPurchases: boolean;
   readonly generatesImages: boolean;
+  readonly offersImageGeneration: boolean;
 }
 
 const TRUSTS_NOTHING = {
   rendersCards: false,
   honorsCardOnlyTools: false,
   inAppPurchases: false,
-  generatesImages: false
+  generatesImages: false,
+  offersImageGeneration: true
 } as const;
+
+// Anthropic's apps: no AI image generation (#467).
+const NO_AI_IMAGES = { ...TRUSTS_NOTHING, offersImageGeneration: false } as const;
 
 const PROFILES: Readonly<Record<ClientProfileName, ClientProfile>> = {
   chatgpt: {
@@ -65,12 +78,14 @@ const PROFILES: Readonly<Record<ClientProfileName, ClientProfile>> = {
     rendersCards: true,
     honorsCardOnlyTools: true,
     inAppPurchases: true,
-    generatesImages: true
+    generatesImages: true,
+    offersImageGeneration: true
   },
   // Claude renders MCP Apps cards, but not ours until they speak the MCP Apps
-  // bridge (#474), and it refuses purchases through connectors (#475).
-  claude: { name: "claude", ...TRUSTS_NOTHING },
-  claude_code: { name: "claude_code", ...TRUSTS_NOTHING },
+  // bridge (#474), it refuses purchases through connectors (#475), and its
+  // directory takes no connector that generates images with AI (#467).
+  claude: { name: "claude", ...NO_AI_IMAGES },
+  claude_code: { name: "claude_code", ...NO_AI_IMAGES },
   codex: { name: "codex", ...TRUSTS_NOTHING },
   vscode: { name: "vscode", ...TRUSTS_NOTHING },
   hermes: { name: "hermes", ...TRUSTS_NOTHING },

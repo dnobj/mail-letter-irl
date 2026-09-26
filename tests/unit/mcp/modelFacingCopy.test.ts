@@ -293,8 +293,10 @@ describe('purchases in every app', () => {
         for (const checkout of CHECKOUTS) {
           expect(listed, `${name} lists ${checkout}`).not.toContain(checkout);
         }
-        // Everything else is the same list.
-        expect(listed.length, name).toBe(chatgpt.length - CHECKOUTS.length);
+        // Everything else is the same list, less image generation where it is
+        // off (the suite below).
+        const imagesOff = clientProfileNamed(name).offersImageGeneration ? 0 : 1;
+        expect(listed.length, name).toBe(chatgpt.length - CHECKOUTS.length - imagesOff);
       }
     }
   });
@@ -306,6 +308,39 @@ describe('purchases in every app', () => {
     }
     for (const sendRule of [false, true]) {
       expect(buildServerInstructions(sendRule, clientProfileNamed(name))).not.toMatch(/checkout/i);
+    }
+  });
+});
+
+/**
+ * Letter IRL's AI image generation, per app (#467). Anthropic's Connectors
+ * Directory does not accept a connector that generates images through AI
+ * models, and the owner turned it off in Claude on 2026-09-26: Claude and
+ * Claude Code are not offered generate_image_for_mail, and nothing they read
+ * points at it.
+ */
+describe('image generation in every app', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  const noImages = CLIENT_PROFILE_NAMES.filter(name => !clientProfileNamed(name).offersImageGeneration);
+
+  it('is off in Claude and Claude Code, and on everywhere else', () => {
+    expect([...noImages].sort()).toEqual(['claude', 'claude_code']);
+    for (const name of CLIENT_PROFILE_NAMES) {
+      const listed = new LetterIrlServer().listTools(clientProfileNamed(name)).map(tool => tool.name);
+      expect(listed.includes('generate_image_for_mail'), name).toBe(!noImages.includes(name));
+    }
+  });
+
+  it.each(noImages.map(name => [name]))('%s: nothing points at image generation', name => {
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+    for (const tool of new LetterIrlServer().listTools(clientProfileNamed(name))) {
+      expect(tool.description, tool.name).not.toContain('generate_image_for_mail');
+    }
+    for (const sendRule of [false, true]) {
+      const instructions = buildServerInstructions(sendRule, clientProfileNamed(name));
+      expect(instructions).not.toContain('generate_image_for_mail');
+      expect(instructions).toContain('Letter IRL does not make images in this app.');
     }
   });
 });
