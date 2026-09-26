@@ -70,6 +70,13 @@ grants is a change to the send rule. The `POST`:
 - the ChatGPT DEV regression pass has run with it on. It includes asking the model to send a preview: it must point to the card's Send button, or give the link, and never reach `send_letter` itself;
 - the development log shows ChatGPT's tokens resolving to the `chatgpt` profile.
 
+**Where it stands.**
+- **Development:** on since 2026-09-25, with all three conditions met. SEND-01 passed there ([manual-tests.md](manual-tests.md)).
+- **Production:** off. It goes on with the promotion that carries #479, #480, #481 and website #41, and needs:
+  - `LETTER_IRL_WEBSITE_CLIENT_ID`, the production website's client id;
+  - the production connector refreshed;
+  - a production send from the card and from the page.
+
 A Pay & Send checkout opened before the switch still mails when the person
 pays, for as long as the checkout lasts: at most the draft's 24 hours. The
 person's own payment for that exact mail is the trigger, so this is expected,
