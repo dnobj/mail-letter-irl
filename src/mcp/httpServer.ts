@@ -72,6 +72,7 @@ import { APPS_CHALLENGE_PATH, appsChallengeResponse } from "./appsChallenge.js";
 import { logRestRequestOnFinish } from "../api/restRequestLog.js";
 import { OAUTH_NOT_CONFIGURED } from "../auth/oauthErrors.js";
 import { clientLogFields } from "../auth/clientProfiles.js";
+import { closeSseSessionOnce } from "./sseSessionClose.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -354,10 +355,12 @@ export async function startHttpServer() {
       enableDnsRebindingProtection: true
     });
 
-    sseTransport.onclose = async () => {
-      sseSessions.delete(sseTransport.sessionId);
-      await sessionServer.close();
-    };
+    // Once only: closing the server closes the transport, which calls this
+    // again (src/mcp/sseSessionClose.ts).
+    sseTransport.onclose = closeSseSessionOnce(
+      () => sessionServer.close(),
+      () => sseSessions.delete(sseTransport.sessionId)
+    );
     sseTransport.onerror = (error) => {
       writeDiagnostic("error", "mcp.sse_transport_error", {
         errorClass: classifyDiagnosticError(error, "transport_error")
