@@ -358,12 +358,19 @@ the call JWT-authenticated and successful.
 
 **Status:** Partly run in development on 2026-09-26, with the send rule on. It used Claude on the web
 (claude.ai, in the Claude app's built-in browser) and Letter IRL test account testlirl02. Steps 1 to
-3 passed; step 4 ran as far as the link; steps 5 and 6 were not run.
+3 passed; step 4 ran as far as the link; steps 5 and 6 were not run. Step 7 ran the same day, after
+#486 deployed (88dd3d2): titles and the image text passed, and the purchase text needs #475.
 
 Background: Claude connects with its published identity, the document at
 `https://claude.ai/oauth/mcp-oauth-client-metadata`. That document must be imported into each tenant
 ([auth0-tenant-configuration.md](auth0-tenant-configuration.md), Applications, section 6). One
 connector on a Claude account covers Claude on the web, Desktop, mobile and Cowork.
+
+Claude keeps a connector's tool list until it is refreshed. After a deploy that changes tool titles
+or descriptions, open **Customize**, then **Connectors**, then **Yours**, then the connector. From its
+**⋮** menu choose **Refresh tools list**, then start a new chat. The development log then shows
+`tools/list` with the new `steeringRev`. Tool results come from the server on every call, so they
+change without a refresh.
 
 1. Install
 - [x] Customize, then Connectors, then **Add custom connector**: name "Letter IRL (DEV)", URL the
@@ -404,12 +411,26 @@ Findings, fixed by #484:
   the dashboard. The checkout tools themselves are #475.
 
 7. Tool text (#484), once it is deployed to development
-- [ ] Approval prompts show short titles, such as "Claude wants to use Check letter balance".
+- [x] Approval prompts show short titles, such as "Claude wants to use Check letter balance". (Yes,
+      after **Refresh tools list**. Until then Claude showed the old descriptions. The connector
+      page lists every tool by its title. The small prompt Claude shows after searching its tools
+      names the tool instead, such as `get_started`; that is Claude's choice.)
 - [ ] Ask "How do I get started with Letter IRL?" The answer carries the guide and the website's
-      letter packs link, and offers no purchase in the conversation.
-- [ ] With no letters left, ask for the balance. The answer gives the letter packs link.
-- [ ] Ask Letter IRL for an image for a postcard. Nothing mentions ChatGPT; with no image
-      generations left, Claude asks for an image of your own.
+      letter packs link, and offers no purchase in the conversation. (Partly. The guide came
+      through and named "your Letter IRL dashboard", but Claude left out the link, and it offered
+      to "create a checkout link for a starter, regular, or power pack", because
+      `create_pack_checkout` is still in its tool list. Both are for #475.)
+- [ ] With no letters left, ask for the balance. The answer gives the letter packs link. (Partly,
+      the same way. Claude reported no letters and the account's one gift letter, named the
+      dashboard without the link, and offered a checkout link.)
+- [x] Ask Letter IRL for an image for a postcard. Nothing mentions ChatGPT; with no image
+      generations left, Claude asks for an image of your own. (Yes. Image generation is off in
+      development, so the reason was "Letter IRL isn't generating images right now". Claude
+      asked for a link to a photo or an attachment. An attachment can't reach our tools in Claude
+      yet, #474.)
+
+The development log showed each call as `client=claude`. The getting-started and image cards
+could not display ("There was a problem displaying content"), as expected until #474.
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
