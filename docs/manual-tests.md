@@ -887,7 +887,20 @@ gives a card no `_meta` for a refused call; see
 
 ### SEND-01 — Only the person sends (issue #470)
 
-**Status:** Not yet run. It runs in development once #479, #480 and website #41 are deployed there.
+**Status:** Executed in development between 2026-09-25 22:30 and 2026-09-26 00:50 UTC, through the
+Claude app's built-in browser, on #479 (c19b131), #480 (e002a68) with the rule on, then #481
+(ea3fd96), and website #41 (52b8f7c). The (DEV) connector, "Letter IRL (DEV) v8 no-OIDC", was used
+as testlirl02; mail went to PostGrid's test mode, so nothing was printed. **Passed.** The model never
+reached `send_letter`: asked to send, it gave the link each time. The optional token check was not
+run.
+
+Observations:
+- With the card showing, "Send it." got the link rather than a pointer to the card's Send button.
+  ChatGPT offered two candidate replies and both called `request_send`. The rule allows either way.
+- The preview replies said nothing had been sent but did not mention the card's Send button. The
+  narration asks the model to point there when the person asks to send.
+- A send refused as a duplicate logs `credits.ledger_deducted` from inside the transaction it then
+  rolls back. The balance was unchanged, but the log line reads as a charge.
 
 Background: with `LETTER_IRL_SEND_CONFIRMATION_ENABLED` on, the model can't send mail in any app.
 The person sends it with the preview card's Send button, or on a confirmation page on the website
@@ -895,53 +908,67 @@ that `request_send` links to. ChatGPT keeps its card and its Pay & Send checkout
 ([letter-send-flow.md](letter-send-flow.md)).
 
 Before the rule is on:
-- [ ] Set `LETTER_IRL_WEBSITE_CLIENT_ID` on the development API to the development website's Auth0
-      client id ([auth0-tenant-configuration.md](auth0-tenant-configuration.md)).
-- [ ] Make one Letter IRL (DEV) call in ChatGPT, such as the balance. Its `mcp.request_received`
+- [x] Set `LETTER_IRL_WEBSITE_CLIENT_ID` on the development API to the development website's Auth0
+      client id ([auth0-tenant-configuration.md](auth0-tenant-configuration.md)). (Set without a
+      redeploy; #480's deployment picked it up.)
+- [x] Make one Letter IRL (DEV) call in ChatGPT, such as the balance. Its `mcp.request_received`
       log line should read `client: chatgpt`. If it reads anything else, stop: with the rule on,
-      the card's Send button would get the link instead of sending.
+      the card's Send button would get the link instead of sending. (A balance call at 22:31:34
+      logged `client=chatgpt` on both `mcp.request_received` and `mcp.client_request`.)
 
 With the rule on:
-- [ ] Set `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` on the development API and redeploy it.
-- [ ] Refresh the (DEV) connector. Its settings page should list `request_send`. Note whether it
+- [x] Set `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` on the development API and redeploy it. (The
+      variable change redeployed it by itself. `GET /api/sends/<uuid>` without a token went from
+      404 to 401, and the boot log had no `send_confirmation.website_client_missing`.)
+- [x] Refresh the (DEV) connector. Its settings page should list `request_send`. Note whether it
       still lists `send_letter` and `send_postcard`: they stay in `tools/list`, marked private, so
-      the card can call them.
-- [ ] Ask for a text-only letter preview. The card should read **Ready to send**, and the reply
-      should point to the card's Send button.
-- [ ] Ask ChatGPT to send it. It should point to the card's Send button, or call `request_send` and
+      the card can call them. (Refresh tools is under Plugins, the plugin's … menu, Manage. It
+      logged `tools/list` at steering revision 9 and widget v37. The app's tool list, opened from
+      the plugin page, shows 24 tools: `request_send` among 9 read tools, and `send_letter` and
+      `send_postcard` still among 15 write tools.)
+- [x] Ask for a text-only letter preview. The card should read **Ready to send**, and the reply
+      should point to the card's Send button. (Ready to send once the account had a letter. The
+      reply said it had not been sent, without mentioning the Send button; see Observations.)
+- [x] Ask ChatGPT to send it. It should point to the card's Send button, or call `request_send` and
       give the link. It must not call `send_letter`: no approval panel for a send, and no
       `send_letter` call in the development log. If it does call it, the letter is sent and the rule
-      has failed in ChatGPT.
-- [ ] Press **Send Letter** on the card. It should send as before: **With the printer**, and the
-      balance one lower.
-- [ ] Ask for a different letter, then ask for a link to send it from the website. `request_send`
+      has failed in ChatGPT. ("Send it." at 00:48: no approval panel, two `request_send` calls, one
+      per candidate reply, and no `send_letter`.)
+- [x] Press **Send Letter** on the card. It should send as before: **With the printer**, and the
+      balance one lower. (The card's `send_letter` call ran at 00:49:33 as `client=chatgpt`; the card
+      read **With the printer** and **Letter Sent!**, and the balance went from 1 to 0.)
+- [x] Ask for a different letter, then ask for a link to send it from the website. `request_send`
       is read-only, so it should run without an approval panel, and return a link to
-      `/confirm/<draftId>` on the development website.
+      `/confirm/<draftId>` on the development website. (Run first, at 22:40, on a preview made with
+      no letters in the account.)
 
 On the confirmation page, signed in to the development website with the same account:
-- [ ] Open the link. The page should read "Check your letter, then send it" and "Nothing is sent
+- [x] Open the link. The page should read "Check your letter, then send it" and "Nothing is sent
       until you press Send.", and show the preview, where it goes, and how many letters it takes.
-- [ ] Press **Send this letter**. The page should read "Sent. We'll print your letter and mail it."
-      with the letters left, and the letter should appear on the dashboard's letters page.
-- [ ] Reload the page. It should read "This letter has already been sent."
-- [ ] Ask ChatGPT for the same letter again and for its link, then press **Send this letter**. The
+- [x] Press **Send this letter**. The page should read "Sent. We'll print your letter and mail it."
+      with the letters left, and the letter should appear on the dashboard's letters page. ("You have
+      1 letter left."; `send.confirmed_on_website outcome=sent` at 00:44:18; listed as Accepted.)
+- [x] Reload the page. It should read "This letter has already been sent."
+- [x] Ask ChatGPT for the same letter again and for its link, then press **Send this letter**. The
       page should say this letter went to the recipient a few minutes ago and ask "Send another
-      copy?". Press **Don't send**. Nothing is sent.
-- [ ] Sign out, open a link and sign in. You should land back on the same page.
-- [ ] Signed in with another development account, open the first link. The page should read "We
-      couldn't find this preview."
-- [ ] Optional: on an account with no letters, open a link. The page should say there aren't
+      copy?". Press **Don't send**. Nothing is sent. ("You sent this letter to Sam Rivera 2 minutes
+      ago." A fresh load still showed 1 letter.)
+- [x] Sign out, open a link and sign in. You should land back on the same page.
+- [x] Signed in with another development account, open the first link. The page should read "We
+      couldn't find this preview." (testlirl01+428, with a testlirl02 link; the API answered 404
+      and logged no client refusal.)
+- [x] Optional: on an account with no letters, open a link. The page should say there aren't
       enough letters and offer **Buy letters**, which opens Letter Packs. A test purchase (the
       owner enters the test card) should lead back to the page, where **Check again** shows the new
-      balance.
+      balance. (The page came back already showing 2 letters, so **Check again** was not needed.)
 
 Other callers:
 - [ ] Optional: from an MCP client that uses a development personal access token (see
       [PAT Authentication](#pat-authentication-us-mcp-03)), call `send_letter` for a preview. It
       should send nothing and answer "Not sent: Letter IRL sends mail only when the person sends
-      it.", followed by the link.
+      it.", followed by the link. (Not run.)
 
-Leave the rule on in development afterwards.
+Leave the rule on in development afterwards. (It is on.)
 
 ### Validation Errors
 - [x] Missing address fields → clear error
