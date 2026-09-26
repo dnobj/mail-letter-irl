@@ -148,10 +148,31 @@ Each app gets one CLIENT-xx test in [manual-tests.md](manual-tests.md), with the
 ## Only a live test can tell
 
 - Whether Auth0 imports Claude's client document, and whether it accepts loopback redirects on any port (Claude Code, Codex).
+  - **Answered 2026-09-26: yes to both.**
+  - Claude, Claude Code, Codex, VS Code and Hermes were imported into the development tenant.
+  - A loopback callback registered without a port accepts any port.
+  - Claude, Claude Code, VS Code and Codex connected, and the log names each one.
+  - See [auth0-tenant-configuration.md](auth0-tenant-configuration.md), Applications, section 6.
+- **New from the Codex connect:**
+  - Codex's document is derived from our URL, so one import per tenant covers every Codex user.
+  - Codex needs a `scopes` line in its config, or it requests Auth0's OpenID scopes instead of ours ([openai/codex#15643](https://github.com/openai/codex/issues/15643)). The Codex instructions on the Connect page (website #38) must include that line.
+  - Codex also offers the person's ChatGPT plugins as `codex_apps`, and the server sees those calls as ChatGPT.
+    - **Checked 2026-09-26:** that route hides the card-only send tools just as ChatGPT does (CLIENT-04).
+    - Pay & Send stays open to the model there, which #475 should cover.
+- **Hermes connected from a remote host** (CLIENT-05). A person running Hermes on their own computer signs in normally. On a remote host, the callback has to be carried to Hermes's loopback listener.
 - Whether Claude signs in once the OIDC scopes are gone, and whether ChatGPT still links.
+  - **Answered 2026-09-26: Claude signs in with them still advertised.** Auth0 drops OIDC scopes for these clients rather than refusing them.
+  - So #469 is not needed for Claude (CLIENT-01).
 - Whether our cards render in Claude after the bridge, and in ChatGPT desktop and Codex.
+  - Not yet: Claude could not display the card before the bridge (#474).
 - Gemini's and Perplexity's callback addresses.
 - Whether ChatGPT honours card-only tools the way its docs say.
+  - **Answered 2026-09-26: yes.** Told "Send it.", the model gave the link and never called `send_letter` (SEND-01).
+  - Claude also lists the send tools as app-only.
+
+**Auth0's free plan allows 10 applications per tenant.** Development reached the limit with the five imports above, after four unused applications were deleted. Production has the same cap. M6 therefore needs one of these:
+- a paid plan;
+- one shared client for the long-tail apps (Hermes, OpenClaw, Cursor), which would then share the generic profile.
 
 ## Issues
 

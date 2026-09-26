@@ -1,6 +1,6 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** September 14, 2026
+**Last Updated:** September 26, 2026
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
 
@@ -273,7 +273,15 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 
 ## Applications
 
-### 1. Default App
+This section describes the development tenant.
+
+**The free plan allows 10 applications and SSO integrations per tenant.** The
+development tenant reached the limit on 2026-09-26, when the other MCP apps'
+documents were imported (section 6 below). **Create application** is disabled
+at the limit. Each app we import needs a slot in each tenant, and production has
+the same cap.
+
+### 1. Default App - deleted
 
 | Property | Value |
 |----------|-------|
@@ -281,7 +289,8 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 | **Type** | Generic |
 | **Grant Types** | `authorization_code`, `implicit`, `refresh_token`, `client_credentials` |
 
-Default application created by Auth0.
+Default application created by Auth0. Deleted on 2026-09-26 to make room for the
+MCP apps, after the usage review below found nothing that referenced it.
 
 ### 2. Mail Letter IRL
 
@@ -309,7 +318,7 @@ Main application for the Letter IRL project.
 Auth0 created it alongside the retired `Letter IRL API`. It held no grant on
 any API, and it was deleted on 2026-09-14, after that API.
 
-### 4. API Explorer Application
+### 4. API Explorer Application - deleted
 
 | Property | Value |
 |----------|-------|
@@ -317,12 +326,29 @@ any API, and it was deleted on 2026-09-14, after that API.
 | **Type** | Machine to Machine |
 | **Grant Types** | `client_credentials` |
 
-Auth0's API Explorer for Management API access. Nothing in this repository uses
-it, and it is most likely the development credential the removed prod-to-dev
-sync authenticated as (`AUTH0_DEV_CLIENT_ID`). Its Management API client access
-was revoked on 2026-09-14. Delete it once the tenant logs show no failed token
-exchange from its client id; authorizing its client access again undoes the
-revoke.
+Auth0's API Explorer for Management API access. It was the development
+credential of the prod-to-dev sync, which was removed in #383. Its only copy was
+`AUTH0_DEV_CLIENT_ID` in a local `.env.dev`, which nothing reads any more. Its
+Management API client access was revoked on 2026-09-14, and it was deleted on
+2026-09-26.
+
+**Usage review before the 2026-09-26 deletions.** Four applications were
+deleted: this one, the Default App, a leftover ChatGPT import
+(`tpc_uYsHMmxqs8W7uKdqPt7hyF`, whose document belonged to a temporary
+development host removed on 2026-09-22), and "PKCE probe (temporary)", a
+first-party app from the same investigation (#424). Before deleting, each was
+checked for use in:
+- every branch of both repositories;
+- the local scripts and every checkout;
+- Railway variables in both environments, shared variables included;
+- GitHub secrets and variables;
+- the browser-test agent's repositories;
+- the Auth0 logs (about one day kept on this plan);
+- refresh tokens by user;
+- application grants.
+
+Only the local `.env.dev` line above turned up. Deleting the old ChatGPT import
+also revoked five refresh tokens that one test account still held for it.
 
 ### 5. ChatGPT (Dynamically Registered)
 
@@ -334,6 +360,73 @@ revoke.
 | **Callbacks** | `https://chatgpt.com/connector_platform_oauth_redirect` |
 
 Dynamically registered via RFC 7591 when ChatGPT connects to the MCP server. Multiple instances may exist as users connect/reconnect.
+
+### 6. Other MCP apps, imported from their documents (development, 2026-09-26)
+
+The M2 imports in [mcp-multi-client-plan.md](mcp-multi-client-plan.md) (#465).
+Each was imported with **Import from URL**, like ChatGPT (below). Each was then
+authorized for `Letter IRL DEV MCP` with `mail:read`, `mail:draft` and
+`mail:send` as user-delegated access, and nothing else. There is no client
+access, and **Always grant all permissions** is off, so people see a consent
+screen. The server names each app from its document URL
+(`src/auth/clientProfiles.ts`).
+
+| App | Auth0 client | Document | Callbacks |
+|---|---|---|---|
+| Claude | `tpc_nzv1WDzBigLDqccQkDsVx3` | `https://claude.ai/oauth/mcp-oauth-client-metadata` | `https://claude.ai/api/mcp/auth_callback` |
+| Claude Code | `tpc_vaiqGx16ntpvuNWLnCYqSt` | `https://claude.ai/oauth/claude-code-client-metadata` | `http://localhost/callback`, `http://127.0.0.1/callback` |
+| Codex | `tpc_1pVfZCrG4TFNTwhJsrSU1f` | `https://chatgpt.com/oauth/codex/pGLYK3svyYGg/client.json` | `http://127.0.0.1/callback/pGLYK3svyYGg`, `http://localhost/callback/pGLYK3svyYGg` |
+| Visual Studio Code | `tpc_eG8tnoxeEJJknqqBXxPY3Y` | `https://vscode.dev/oauth/client-metadata.json` | `http://127.0.0.1:33418/`, `https://vscode.dev/redirect` |
+| Hermes Agent | `tpc_rgU3u4iFg4SSpyFzikWN2n` | `https://nousresearch.github.io/hermes-agent/docs/oauth/client-metadata.json` | ports 27890-27894 on `127.0.0.1` and `localhost`, path `/callback` |
+
+What the imports showed:
+- **Unsupported grants are ignored with a warning.** That covers Claude's
+  `jwt-bearer` and VS Code's `device_code`: only `authorization_code` and
+  `refresh_token` work for these clients.
+- **A loopback callback registered without a port accepts any port.** Checked
+  on 2026-09-26 with `/authorize` probes that sign no one in
+  (`C:\letter-irl-scripts\cimd-authorize-probe.mjs`):
+  - Claude Code and Codex were accepted on a random port.
+  - Hermes, which lists fixed ports, got `403 Callback URL mismatch` on any
+    other port. That is the probe's control.
+- **OIDC scopes are dropped, not refused.** Claude asks for `openid profile
+  email`. Auth0 accepts the request, and the consent screen lists only the mail
+  scopes and offline access. So Claude signs in with our advertised scopes as
+  they are (#469).
+- **The consent wording reads "mail your read".** Auth0 builds it from the scope
+  names (#267).
+
+**Codex needs three things to know** (found during the Codex connect):
+- **Its document is derived from our URL.** The id is the first 12 characters
+  of the base64url SHA-256 of the MCP URL, so every Codex user of a URL presents
+  the same document, and one import per tenant covers them all:
+  - development `pGLYK3svyYGg`;
+  - production `IJMOsCBL6i7U`, from `https://api.letterirl.com/mcp`.
+
+  A copy of production's document was imported into development by mistake and
+  deleted the same day. OpenAI would use a single stable document only if the
+  authorization server returned `iss` in its authorization responses (RFC 9207),
+  and Auth0 doesn't.
+- **It asks for the wrong scopes.** Codex requests the authorization server's
+  `scopes_supported` rather than the protected resource's
+  ([openai/codex#15643](https://github.com/openai/codex/issues/15643)). Auth0
+  lists only OpenID scopes there, so the token carries no mail scope, and every
+  tool is refused with "Additional authorization is required for this action".
+  The fix is on the person's side: put
+  `scopes = ["mail:read", "mail:draft", "mail:send", "offline_access"]` on the
+  server's entry in `~/.codex/config.toml` (or pass `--scopes` to
+  `codex mcp login`), then sign in again.
+- **It can also reach us as ChatGPT.** Codex offers the person's installed
+  ChatGPT plugins as `codex_apps`. Those calls use the ChatGPT plugin's
+  connection, so the server sees ChatGPT, not Codex.
+
+All five connected on development on 2026-09-26, recognised by name in the log:
+- Claude: CLIENT-01, with tool calls;
+- Claude Code: `claude_code`, with a tool call;
+- VS Code: `vscode`;
+- Codex: `codex`, with a tool call;
+- Hermes Agent: `hermes`, from a Docker container on a remote host, using the callback relay
+  described in CLIENT-05.
 
 ---
 

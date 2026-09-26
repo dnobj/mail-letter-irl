@@ -354,6 +354,138 @@ the call JWT-authenticated and successful.
 
 ## Claude Desktop Integration
 
+### CLIENT-01 — Claude through a custom connector (launch gate, #471)
+
+**Status:** Partly run in development on 2026-09-26, with the send rule on. It used Claude on the web
+(claude.ai, in the Claude app's built-in browser) and Letter IRL test account testlirl02. Steps 1 to
+3 passed; step 4 ran as far as the link; steps 5 and 6 were not run.
+
+Background: Claude connects with its published identity, the document at
+`https://claude.ai/oauth/mcp-oauth-client-metadata`. That document must be imported into each tenant
+([auth0-tenant-configuration.md](auth0-tenant-configuration.md), Applications, section 6). One
+connector on a Claude account covers Claude on the web, Desktop, mobile and Cowork.
+
+1. Install
+- [x] Customize, then Connectors, then **Add custom connector**: name "Letter IRL (DEV)", URL the
+      development `/mcp`. Claude should detect **Sign in now** and **Use Claude's published
+      identity** by itself; keep both. (It did. A link can fill the form in:
+      `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=…&connectorUrl=…`,
+      and Claude then warns that the connector came from an external link.)
+2. Sign in
+- [x] Press **Connect**, sign in, and accept the consent screen. (The first press did nothing: no
+      request reached Auth0 or the API. The second opened the sign-in, which reused an existing
+      session, then the consent screen: Read, Draft, Send and offline access.)
+- [x] The development log should show `client=claude` on `mcp.request_received`. (It did, for
+      `initialize`, `tools/list` and `resources/list`.)
+- [x] The connector's page should list `send_letter` and `send_postcard` under **App-only tools**,
+      and `request_send` among the read-only tools. (Both as expected.)
+3. Preview
+- [x] Ask for the balance, then a text-only letter preview, approving each call with **Allow
+      once**. (Both ran. Claude could not display the preview card ("There was a problem displaying
+      content"), which is expected until the cards work outside ChatGPT, #474.)
+4. The person sends it
+- [x] Say "Send it." Claude should call `request_send`, give the link and send nothing. (It said
+      it can't send from there and gave the link. The log shows no send tool call.)
+- [ ] Open the link on the development website, signed in as the same account, and press **Send
+      this letter**. (Not run. SEND-01 covers the page, and this account's only letter was a gift
+      letter.)
+5. Refusals
+- [ ] No letters, an unconfirmed address, an erased account. (Not run.)
+6. Disconnect
+- [ ] Disconnect on Claude's connector page, then check that the Auth0 user no longer lists Claude
+      among authorized applications. (Not run.)
+
+Findings to fix before listing:
+- Several tool descriptions still say "so ChatGPT can reuse that existing image".
+- Claude uses a tool's description as its name in approval prompts ("Claude wants to use Check how
+  many prepaid letters remain…"), so the tools need a `title`.
+- `get_started` promises buying "without leaving the conversation", and Claude offered to set up a
+  pack purchase, which Claude doesn't allow (#475).
+
+### CLIENT-02 — Claude Code (launch gate, #471)
+
+**Status:** Steps 1 to 3 run in development on 2026-09-26 (Claude Code 2.1.282, Windows).
+
+- [x] Add the server: `claude mcp add --transport http --scope user letter-irl-dev-cli
+      <development /mcp>`. `claude mcp get` should say it needs authentication.
+- [x] In an interactive session, `/mcp`, pick the server, **Authenticate**, sign in and accept.
+      (The browser page said "Authentication successful". Claude Code used its published document
+      and called back on a random port, `localhost:45364`. The log shows `client=claude_code`.)
+- [x] Ask for the balance. (A `get_account_balance` call as `client=claude_code` succeeded.)
+- [ ] Preview, send by the link, refusals, disconnect. (Not run.)
+
+A Claude Code session signed in to a Claude account also gets that account's connectors. There,
+our tools arrive through Claude's own connection and log as `client=claude` (checked the same day).
+
+### CLIENT-03 — Visual Studio Code (launch gate, #471)
+
+**Status:** Steps 1 and 2 run in development on 2026-09-26 (VS Code 1.123.2, Windows).
+
+- [x] Add the server: `code --add-mcp
+      '{"name":"letter-irl-dev","type":"http","url":"<development /mcp>"}'`.
+- [x] **MCP: List Servers**, then the server, then **Start Server**. Sign in and accept. (VS Code
+      found the metadata by itself, waited for the sign-in, and discovered 24 tools. The log shows
+      `client=vscode`.)
+- [ ] A tool call from Copilot Chat, a preview, send by the link, refusals, disconnect. (Not run.)
+- VS Code keeps a stream open on `/mcp`. When it dropped that stream, the API looped in its close
+  handler until the stack overflowed (#485).
+
+### CLIENT-04 — Codex (launch gate, #471)
+
+**Status:** In progress in development on 2026-09-26 (Codex CLI 0.157.1, in WSL).
+
+- [x] `codex mcp add letter-irl-dev --url <development /mcp>`.
+- [x] In `~/.codex/config.toml`, add
+      `scopes = ["mail:read", "mail:draft", "mail:send", "offline_access"]` to that server's entry.
+      Without it, Codex requests Auth0's OpenID scopes instead of ours
+      ([auth0-tenant-configuration.md](auth0-tenant-configuration.md), Applications, section 6).
+- [x] `codex mcp login letter-irl-dev`. The consent screen should list Read, Draft, Send and
+      offline access. (The first login, before the scopes line, listed only offline access. Its
+      `get_account_balance` call reached the server as `client=codex` and was refused as "Additional
+      authorization is required for this action".)
+- [x] Ask Codex to use the `letter-irl-dev` server, not the Letter IRL app, for the balance. (After
+      the second login, `get_account_balance` succeeded as `client=codex`.)
+- [ ] Preview, send by the link, refusals, disconnect.
+- [x] Check what Codex's app route (`codex_apps`, the person's ChatGPT plugins) shows its model.
+      Those calls use the ChatGPT connection, so the server treats them as ChatGPT. (Codex listed 22
+      tools from the development app: no `send_letter` or `send_postcard`, and `request_send` is
+      there. So this route hides card-only tools, as ChatGPT does. The production app still listed
+      both send tools, because production doesn't have the send rule yet.)
+- Pay & Send is still open to the model on that route, because the server takes it for ChatGPT.
+  The person still pays on Stripe, but never saw our card (#475).
+
+### CLIENT-05 — Hermes Agent on a remote host (launch gate, #471)
+
+**Status:** Connected in development on 2026-09-26. Hermes v0.21.0 was running in Docker on a VPS,
+with the browser on another machine.
+
+Hermes waits for the sign-in on the loopback address of wherever it runs, on one of ports 27890 to
+27894. From a browser on another machine, that callback can't arrive by itself. Here the listener
+was inside a container on a private network with no published ports, so an SSH tunnel to the host
+could not reach it either.
+
+- [x] Add the server: `hermes config set mcp_servers.letter_irl_dev.url <development /mcp>` and
+      `... .auth oauth`. Raise the connect step's timeout to 300 seconds
+      (`mcp_servers.letter_irl_dev.connect_timeout`); otherwise a second sign-in starts after
+      about a minute and collides with the first on the port.
+- [x] Run `hermes mcp login letter_irl_dev` inside the container. It prints the authorize link.
+      The link had the right `resource` (the full `/mcp` URL) and asked for our mail scopes.
+- [x] Deliver the callback. A one-shot relay on the browser's machine listened on
+      127.0.0.1:27890 and replayed the callback over SSH to the container's listener
+      (`C:\letter-irl-scripts\hermes-callback-relay.mjs`). **Never probe that listener first:** it
+      answers exactly one request, so a probe uses it up and the real callback hangs.
+- [x] Hermes reported "Authenticated — 24 tool(s) available". The token carries `mail:read
+      mail:draft mail:send offline_access` and a refresh token. The log shows `client=hermes`.
+- [ ] A tool call, preview, send by the link, refusals, disconnect.
+
+Hermes's own bugs on remote hosts are [#87329](https://github.com/NousResearch/hermes-agent/issues/87329)
+(the port collision) and [#103633](https://github.com/NousResearch/hermes-agent/issues/103633). The
+second, about the token exchange for `/mcp` paths, did not occur against Auth0. A person running
+Hermes on their own computer needs none of this.
+
+The sections below describe the older path, before Claude could connect with its published
+identity.
+
 Test Claude Desktop via mcp-remote.
 
 ### OAuth Flow (US-MCP-04)
