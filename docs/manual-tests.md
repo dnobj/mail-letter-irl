@@ -366,7 +366,8 @@ no image tool and says Letter IRL can't create images. Step 10 ran after #494 de
 the getting-started card draws in Claude on the web and still works in ChatGPT. Step 11 ran on
 2026-09-27 after #496 deployed (5ee991e): both preview cards draw in Claude on the web from the
 result's `_meta`, and Claude keeps the card-only send tools from its model. Opening the letter
-packs page is still to check in a normal browser.
+packs page is still to check in a normal browser. Step 12 ran the same day after #498 deployed
+(1290a83) and passed: the card's Send sends in Claude, and asked to send, Claude points to the card.
 
 Background: Claude connects with its published identity, the document at
 `https://claude.ai/oauth/mcp-oauth-client-metadata`. That document must be imported into each tenant
@@ -545,17 +546,27 @@ scrolled inside its frame; Claude did not grow the frame to fit.
 12. Send from the card in Claude (#474, phase 2b), once it is deployed to development. Refresh the
     tool list first; the log should show `tools/list` at `steeringRev=14` and
     `widgetTemplateVersion=40`. This sends real mail to PostGrid's test mode and spends a letter or
-    a gift letter.
-- [ ] Preview a letter on an account that can send it. The card says **Ready to send**, revision
-      t27, and Claude's reply points to the card's Send button rather than to a link.
-- [ ] Press **Send** on the card. The card shows **With the printer** and the order id. The
+    a gift letter. (Run on 2026-09-27 after #498 deployed, 1290a83, on testlirl02, whose gift
+    letter paid for the send. The refresh logged `tools/list` at `steeringRev=14` and
+    `widgetTemplateVersion=40`.)
+- [x] Preview a letter on an account that can send it. The card says **Ready to send**, revision
+      t27, and Claude's reply points to the card's Send button rather than to a link. (Yes, with
+      **Send Gift Letter**. Claude: the letter "goes out only if you press Send on the card".)
+- [x] Press **Send** on the card. The card shows **With the printer** and the order id. The
       development log shows `tools/call send_letter` as `client=claude`, and no
-      `send.link_instead`.
-- [ ] Preview another letter and tell Claude "Send it." Claude does not send it: it points to the
+      `send.link_instead`. (Yes: order 3a456780-5ce9-4eec-bea4-be3e7cf6c9f8 and **Letter Sent!**.
+      The log shows `send_letter` as `client=claude`, PostGrid's test-mode `create_letter`, and
+      `send.letter.committed` with the submission complete. Claude asked for no approval.)
+- [x] Preview another letter and tell Claude "Send it." Claude does not send it: it points to the
       card's Send button, or calls `request_send` and gives the link. The log shows no `send_letter`
-      call.
-- [ ] In ChatGPT (DEV connector, after **Refresh tools**) both preview cards look and work as
-      before, revision t27.
+      call. (Claude said to press **Send** on that card, and offered a send link if the card was
+      not showing. The log shows only the preview: no `send_letter` and no `request_send`. With the
+      gift letter spent, that card offered **Buy letters on the website**, not Send, which
+      Claude's reply did not know.)
+- [x] In ChatGPT (DEV connector, after **Refresh tools**) both preview cards look and work as
+      before, revision t27. (Yes, on testlirl02 with no letters left. The refresh logged
+      `resources/read` at v40. The letter and the postcard cards showed **Pay & Send (USD 4.99)**,
+      **Buy a Letter Pack** and the checkout note, and no website or confirmation page button.)
 
 The card's **Open the confirmation page** state now shows only in an app not trusted with
 card-only tools, such as VS Code (CLIENT-03); unit tests cover it until that app's card test.
