@@ -113,7 +113,7 @@ describe('photo uploads through the card (#474)', () => {
     await expect(receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 2, data: b64(300, 1) }, NOW)).resolves.toEqual(done);
     expect(storeUploadedPhoto).toHaveBeenCalledTimes(1);
     // Not a new upload: nothing in progress, and one start counted.
-    expect(photoUploadsHeld()).toEqual({ pending: 0, finishing: 0, finished: 1, counted: 1 });
+    expect(photoUploadsHeld()).toEqual({ pending: 0, finishing: 0, finished: 1, counted: 1, starts: 1, bytes: 0 });
   });
 
   describe('a chunk sent again while the photo is being checked and kept', () => {
@@ -134,14 +134,14 @@ describe('photo uploads through the card (#474)', () => {
       const first = receivePhotoChunk(USER, { uploadId: ID, index: 1, total: 2, data: b64(300, 2) }, NOW);
       const again = receivePhotoChunk(USER, { uploadId: ID, index: 1, total: 2, data: b64(300, 2) }, NOW);
       // Still held, and counted against the memory budget, until it is kept.
-      expect(photoUploadsHeld()).toEqual({ pending: 1, finishing: 1, finished: 0, counted: 1 });
+      expect(photoUploadsHeld()).toEqual({ pending: 0, finishing: 1, finished: 0, counted: 1, starts: 1, bytes: 600 });
       release();
       const answer = await first;
       await expect(again).resolves.toEqual(answer);
       expect(answer).toMatchObject({ done: true });
       expect(inspectUploadedPhoto).toHaveBeenCalledTimes(1);
       expect(storeUploadedPhoto).toHaveBeenCalledTimes(1);
-      expect(photoUploadsHeld()).toEqual({ pending: 0, finishing: 0, finished: 1, counted: 1 });
+      expect(photoUploadsHeld()).toEqual({ pending: 0, finishing: 0, finished: 1, counted: 1, starts: 1, bytes: 0 });
     });
 
     it('does not start a one-chunk upload again, or count it twice', async () => {
@@ -151,7 +151,7 @@ describe('photo uploads through the card (#474)', () => {
       release();
       await expect(again).resolves.toEqual(await first);
       expect(inspectUploadedPhoto).toHaveBeenCalledTimes(1);
-      expect(photoUploadsHeld().counted).toBe(1);
+      expect(photoUploadsHeld()).toMatchObject({ counted: 1, starts: 1 });
     });
 
     it('leaves alone a new upload started meanwhile', async () => {
@@ -181,6 +181,34 @@ describe('photo uploads through the card (#474)', () => {
       await expect(again).resolves.toEqual(answer);
     });
 
+    it('keeps the photos in the order their uploads started, even when the newer one is quicker', async () => {
+      // The older check is held; the newer one would answer at once.
+      const releaseFirst = holdTheCheck(async () => ({ width: 2400, height: 1600, format: 'jpeg' }));
+      const first = receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 1, data: b64(300, 1) }, NOW);
+      const second = receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 1, data: b64(300, 2) }, NOW);
+      releaseFirst();
+      await first;
+      const answer = await second;
+
+      const kept = vi.mocked(storeUploadedPhoto).mock.calls.map(([, photo]) => (photo as Buffer)[0]);
+      expect(kept).toEqual([1, 2]);
+      // The newer upload is the one on record, so its resend gets its answer.
+      await expect(
+        receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 1, data: b64(300, 2) }, NOW)
+      ).resolves.toEqual(answer);
+      expect(photoUploadsHeld()).toMatchObject({ finishing: 0, starts: 2, bytes: 0 });
+    });
+
+    it('counts a photo being kept against the memory budget, even once a newer upload takes its place', async () => {
+      const release = holdTheCheck(async () => ({ width: 2400, height: 1600, format: 'jpeg' }));
+      const first = receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 1, data: b64(300, 1) }, NOW);
+      await receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 2, data: b64(300, 2) }, NOW);
+      expect(photoUploadsHeld()).toMatchObject({ pending: 1, finishing: 1, bytes: 600 });
+      release();
+      await first;
+      expect(photoUploadsHeld()).toMatchObject({ pending: 1, finishing: 0, bytes: 300 });
+    });
+
     it('gets the same refusal when the photo fails its check', async () => {
       const refused = new Error('Unsupported image format. Please use PNG, JPEG, or WebP.');
       const release = holdTheCheck(async () => {
@@ -192,7 +220,7 @@ describe('photo uploads through the card (#474)', () => {
       await expect(first).rejects.toBe(refused);
       await expect(again).rejects.toBe(refused);
       expect(storeUploadedPhoto).not.toHaveBeenCalled();
-      expect(photoUploadsHeld()).toEqual({ pending: 0, finishing: 0, finished: 0, counted: 1 });
+      expect(photoUploadsHeld()).toEqual({ pending: 0, finishing: 0, finished: 0, counted: 1, starts: 1, bytes: 0 });
     });
   });
 
@@ -381,17 +409,17 @@ describe('photo uploads through the card (#474)', () => {
   it('holds nothing for an account once its upload, its answer and its day have passed', async () => {
     await receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 1, data: b64(300) }, NOW);
     await receivePhotoChunk('auth0|slow', { uploadId: OTHER_ID, index: 0, total: 2, data: b64(300) }, NOW);
-    expect(photoUploadsHeld()).toEqual({ pending: 1, finishing: 0, finished: 1, counted: 2 });
+    expect(photoUploadsHeld()).toEqual({ pending: 1, finishing: 0, finished: 1, counted: 2, starts: 2, bytes: 300 });
 
     // Any account's next chunk sweeps the rest.
     const later = NOW + UPLOAD_WINDOW_MS + 1;
     await receivePhotoChunk('auth0|third', { uploadId: ID, index: 0, total: 2, data: b64(300) }, later);
-    expect(photoUploadsHeld()).toEqual({ pending: 1, finishing: 0, finished: 0, counted: 3 });
+    expect(photoUploadsHeld()).toEqual({ pending: 1, finishing: 0, finished: 0, counted: 3, starts: 3, bytes: 300 });
 
     const nextDay = NOW + 24 * 60 * 60 * 1000 + 1;
     await receivePhotoChunk('auth0|fourth', { uploadId: ID, index: 0, total: 2, data: b64(300) }, nextDay);
     // The third's upload has run out of time, and the first two have left
     // the day's count; the third still counts against its own day.
-    expect(photoUploadsHeld()).toEqual({ pending: 1, finishing: 0, finished: 0, counted: 2 });
+    expect(photoUploadsHeld()).toEqual({ pending: 1, finishing: 0, finished: 0, counted: 2, starts: 2, bytes: 300 });
   });
 });

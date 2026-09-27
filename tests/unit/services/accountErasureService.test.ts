@@ -353,6 +353,18 @@ describe("the photo an account uploaded through our card (#474)", () => {
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("account_erasure.uploaded_photo_delete_failed"));
   });
 
+  it("leaves no timer running once the photo is deleted, so the run can exit", async () => {
+    vi.useFakeTimers();
+    try {
+      scriptedClient({ queue: [OPERATION()] });
+      await processAccountErasures();
+      expect(store.deleteUploadedPhoto).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("moves on after ten seconds when the store does not answer", async () => {
     vi.useFakeTimers();
     try {

@@ -24,6 +24,8 @@ import {
 export const UPLOAD_PHOTO_CHUNK_TOOL = 'upload_photo_chunk';
 
 async function handler(input: PhotoChunkInput, context: ToolContext): Promise<PhotoChunkResult> {
+  // Off, the tool is not registered at all (server.ts listTools); this holds
+  // the switch for any caller that reaches the handler another way.
   if (!isCardUploadEnabled()) {
     throw new PhotoUploadRefusedError(
       'UNAVAILABLE',

@@ -91,16 +91,20 @@ interface PendingUpload {
 
 const pending = new Map<string, PendingUpload>();
 const startedAt = new Map<string, number[]>();
-// The upload per account whose photo is being checked and kept, and the last
-// finished one, so a chunk of either sent again (the answer was lost on the
-// way back, or a client sends in parallel) gets the same answer, rather than
-// "interrupted" or a second start.
+// The latest upload per account whose photo is being checked and kept, and
+// the last finished one, so a chunk of either sent again (the answer was lost
+// on the way back, or a client sends in parallel) gets the same answer,
+// rather than "interrupted" or a second start.
 const finishing = new Map<string, { uploadId: string; answer: Promise<PhotoChunkResult> }>();
 const finished = new Map<string, { result: PhotoChunkResult; atMs: number }>();
+// Every photo being checked and kept, across accounts: in memory until then,
+// whatever has taken its account's place in `pending`.
+const finishingPhotos = new Set<Buffer>();
 
 function pendingBytes(): number {
   let bytes = 0;
   for (const upload of pending.values()) bytes += upload.bytes;
+  for (const photo of finishingPhotos) bytes += photo.length;
   return bytes;
 }
 
@@ -215,11 +219,17 @@ export async function receivePhotoChunk(
   }
 
   // The last chunk: the whole photo, checked, then kept in place of the last.
-  // Until then the upload still counts against the memory budget, held as
-  // one buffer rather than its chunks.
+  // It counts against the memory budget until then, as one buffer rather than
+  // its chunks. It waits for any finish the account already has in flight,
+  // so photos are kept, and the last answer recorded, in the order their
+  // uploads were started.
+  pending.delete(userId);
   const photo = Buffer.concat(upload.chunks);
-  upload.chunks = [photo];
-  const answer = finishUpload(userId, upload, photo, nowMs);
+  upload.chunks = [];
+  finishingPhotos.add(photo);
+  const before = finishing.get(userId)?.answer.catch(() => undefined);
+  const finish = () => finishUpload(userId, upload, photo, nowMs);
+  const answer = before ? before.then(finish) : finish();
   finishing.set(userId, { uploadId: upload.uploadId, answer });
   return answer;
 }
@@ -245,15 +255,31 @@ async function finishUpload(
     finished.set(userId, { result, atMs: nowMs });
     return result;
   } finally {
-    // Only this upload's own entries: a new upload may have started meanwhile.
-    if (pending.get(userId) === upload) pending.delete(userId);
+    finishingPhotos.delete(photo);
+    // Only this upload's own record: a newer one may be on it by now.
     if (finishing.get(userId)?.uploadId === upload.uploadId) finishing.delete(userId);
   }
 }
 
 /** For tests: how many accounts this process holds something for. */
-export function photoUploadsHeld(): { pending: number; finishing: number; finished: number; counted: number } {
-  return { pending: pending.size, finishing: finishing.size, finished: finished.size, counted: startedAt.size };
+export function photoUploadsHeld(): {
+  pending: number;
+  finishing: number;
+  finished: number;
+  counted: number;
+  starts: number;
+  bytes: number;
+} {
+  let starts = 0;
+  for (const times of startedAt.values()) starts += times.length;
+  return {
+    pending: pending.size,
+    finishing: finishing.size,
+    finished: finished.size,
+    counted: startedAt.size,
+    starts,
+    bytes: pendingBytes()
+  };
 }
 
 /** For tests: start from nothing. */
@@ -262,4 +288,5 @@ export function resetPhotoUploads(): void {
   startedAt.clear();
   finishing.clear();
   finished.clear();
+  finishingPhotos.clear();
 }
