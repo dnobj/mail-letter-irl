@@ -154,72 +154,45 @@ describe('photo uploads through the card (#474)', () => {
       expect(photoUploadsHeld()).toMatchObject({ counted: 1, starts: 1 });
     });
 
-    it('leaves alone a new upload started meanwhile', async () => {
+    it('refuses to start a new upload until the last photo is kept, and counts nothing for it', async () => {
       const release = holdTheCheck(async () => ({ width: 2400, height: 1600, format: 'jpeg' }));
       const first = receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 1, data: b64(300, 1) }, NOW);
-      await receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 2, data: b64(300, 2) }, NOW);
+      const refused = await refusal(
+        receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 2, data: b64(300, 2) }, NOW)
+      );
+      expect(refused.code).toBe('STILL_SAVING');
+      expect(refused.message).toBe('Your last photo is still being saved. Please try again in a moment.');
+      expect(photoUploadsHeld()).toMatchObject({ pending: 0, finishing: 1, starts: 1, bytes: 300 });
+      // Another account is not held back.
+      await expect(
+        receivePhotoChunk('auth0|other', { uploadId: OTHER_ID, index: 0, total: 1, data: b64(300, 3) }, NOW)
+      ).resolves.toMatchObject({ done: true });
       release();
       await first;
+      // Once it is kept, the new upload starts, and its photo is kept after the first.
+      await receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 2, data: b64(300, 2) }, NOW);
       await expect(
-        receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 1, total: 2, data: b64(300, 3) }, NOW)
+        receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 1, total: 2, data: b64(300, 2) }, NOW)
       ).resolves.toMatchObject({ uploadId: OTHER_ID, done: true });
-    });
-
-    it('keeps a newer upload finishing at the same time on record until it is done', async () => {
-      const releaseFirst = holdTheCheck(async () => ({ width: 2400, height: 1600, format: 'jpeg' }));
-      const releaseSecond = holdTheCheck(async () => ({ width: 1800, height: 1200, format: 'jpeg' }));
-      const first = receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 1, data: b64(300, 1) }, NOW);
-      const second = receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 1, data: b64(300, 2) }, NOW);
-      releaseFirst();
-      await first;
-      // The first upload's end leaves the second's finish in place: a resend
-      // of the second waits for its answer rather than reading it as unfinished.
-      const again = receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 1, data: b64(300, 2) }, NOW);
-      releaseSecond();
-      const answer = await second;
-      expect(answer).toMatchObject({ uploadId: OTHER_ID, done: true, width: 1800 });
-      await expect(again).resolves.toEqual(answer);
-    });
-
-    it('keeps the photos in the order their uploads started, even when the newer one is quicker', async () => {
-      // The older check is held; the newer one would answer at once.
-      const releaseFirst = holdTheCheck(async () => ({ width: 2400, height: 1600, format: 'jpeg' }));
-      const first = receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 1, data: b64(300, 1) }, NOW);
-      const second = receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 1, data: b64(300, 2) }, NOW);
-      releaseFirst();
-      await first;
-      const answer = await second;
-
-      const kept = vi.mocked(storeUploadedPhoto).mock.calls.map(([, photo]) => (photo as Buffer)[0]);
+      const kept = vi
+        .mocked(storeUploadedPhoto)
+        .mock.calls.filter(([user]) => user === USER)
+        .map(([, photo]) => (photo as Buffer)[0]);
       expect(kept).toEqual([1, 2]);
-      // The newer upload is the one on record, so its resend gets its answer.
-      await expect(
-        receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 1, data: b64(300, 2) }, NOW)
-      ).resolves.toEqual(answer);
-      expect(photoUploadsHeld()).toMatchObject({ finishing: 0, starts: 2, bytes: 0 });
     });
 
-    it('still keeps the newer photo when the older one fails its check', async () => {
-      const refused = new Error('Unsupported image format. Please use PNG, JPEG, or WebP.');
-      const releaseFirst = holdTheCheck(async () => {
-        throw refused;
+    it('takes a new upload once the last photo has failed its check', async () => {
+      const failed = new Error('Unsupported image format. Please use PNG, JPEG, or WebP.');
+      const release = holdTheCheck(async () => {
+        throw failed;
       });
       const first = receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 1, data: b64(300, 1) }, NOW);
-      const second = receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 1, data: b64(300, 2) }, NOW);
-      releaseFirst();
-      await expect(first).rejects.toBe(refused);
-      await expect(second).resolves.toMatchObject({ uploadId: OTHER_ID, done: true });
-      expect(vi.mocked(storeUploadedPhoto).mock.calls.map(([, photo]) => (photo as Buffer)[0])).toEqual([2]);
-    });
-
-    it('counts a photo being kept against the memory budget, even once a newer upload takes its place', async () => {
-      const release = holdTheCheck(async () => ({ width: 2400, height: 1600, format: 'jpeg' }));
-      const first = receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 1, data: b64(300, 1) }, NOW);
-      await receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 2, data: b64(300, 2) }, NOW);
-      expect(photoUploadsHeld()).toMatchObject({ pending: 1, finishing: 1, bytes: 600 });
       release();
-      await first;
-      expect(photoUploadsHeld()).toMatchObject({ pending: 1, finishing: 0, bytes: 300 });
+      await expect(first).rejects.toBe(failed);
+      await expect(
+        receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 1, data: b64(300, 2) }, NOW)
+      ).resolves.toMatchObject({ uploadId: OTHER_ID, done: true });
+      expect(vi.mocked(storeUploadedPhoto).mock.calls.map(([, photo]) => (photo as Buffer)[0])).toEqual([2]);
     });
 
     it('gets the same refusal when the photo fails its check', async () => {

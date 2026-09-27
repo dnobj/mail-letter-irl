@@ -89,12 +89,25 @@ function storageMode(): 'bucket' | 'memory' {
   return 'memory';
 }
 
+/**
+ * Time limits on every bucket request. The SDK's default is to wait for ever,
+ * so a request lost on the network would hold a generated image, or an
+ * account's photo upload (which then refuses the next one), indefinitely.
+ * requestTimeout only warns unless throwOnRequestTimeout is set.
+ */
+export const BUCKET_REQUEST_LIMITS = {
+  connectionTimeout: 5_000,
+  requestTimeout: 30_000,
+  throwOnRequestTimeout: true,
+} as const;
+
 function client(config: BucketConfig): S3Client {
   if (!s3Client) {
     s3Client = new S3Client({
       endpoint: config.endpoint,
       region: config.region,
       forcePathStyle: true,
+      requestHandler: { ...BUCKET_REQUEST_LIMITS },
       credentials: {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,

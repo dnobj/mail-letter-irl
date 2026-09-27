@@ -14,7 +14,8 @@ const bucket = vi.hoisted(() => ({
     { body: Buffer; metadata: Record<string, string>; contentType?: string; cacheControl?: string; lastModified: Date }
   >(),
   sent: [] as Array<{ command: string; input: Record<string, any> }>,
-  failNext: null as Error | null
+  failNext: null as Error | null,
+  clientConfigs: [] as Array<Record<string, any>>
 }));
 
 vi.mock('@aws-sdk/client-s3', () => {
@@ -26,6 +27,9 @@ vi.mock('@aws-sdk/client-s3', () => {
   class DeleteObjectCommand extends Command {}
   class ListObjectsV2Command extends Command {}
   class S3Client {
+    constructor(config: Record<string, any>) {
+      bucket.clientConfigs.push(config);
+    }
     async send(command: Command) {
       const input = command.input;
       bucket.sent.push({ command: command.constructor.name, input });
@@ -142,6 +146,15 @@ describe('uploaded photos in the bucket (#474)', () => {
     await expect(deleteUploadedPhoto('auth0|a')).resolves.toBeUndefined();
     bucket.failNext = Object.assign(new Error('Access Denied'), { name: 'AccessDenied', $metadata: { httpStatusCode: 403 } });
     await expect(deleteUploadedPhoto('auth0|a')).rejects.toThrow('Access Denied');
+  });
+
+  it('gives up on a bucket request that hangs, rather than waiting for ever', async () => {
+    await getUploadedPhoto('auth0|a');
+    expect(bucket.clientConfigs.at(-1)?.requestHandler).toEqual({
+      connectionTimeout: 5_000,
+      requestTimeout: 30_000,
+      throwOnRequestTimeout: true
+    });
   });
 
   it('sweeps photos older than 15 minutes with the other temporary images', async () => {

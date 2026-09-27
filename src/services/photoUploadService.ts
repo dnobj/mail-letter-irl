@@ -10,7 +10,9 @@
  * it (src/services/previewImageSource.ts).
  *
  * Limits, per account unless noted:
- * - one upload at a time: a new upload (chunk 0) drops the one in progress;
+ * - one upload at a time: a new upload (chunk 0) drops the one in progress,
+ *   and waits while the last photo is still being checked and kept, so
+ *   photos are kept in the order they were sent;
  * - one photo held: a finished upload replaces the photo held before it;
  * - DAILY uploads started in a rolling 24 hours (dailyPhotoUploadsPerAccount);
  * - a chunk of at most MAX_CHUNK_CHARS base64, at most MAX_CHUNKS chunks and
@@ -71,6 +73,7 @@ export class PhotoUploadRefusedError extends Error {
       | 'TOO_LARGE'
       | 'DAILY_LIMIT'
       | 'BUSY'
+      | 'STILL_SAVING'
       | 'FAILED',
     message: string
   ) {
@@ -91,20 +94,25 @@ interface PendingUpload {
 
 const pending = new Map<string, PendingUpload>();
 const startedAt = new Map<string, number[]>();
-// The latest upload per account whose photo is being checked and kept, and
-// the last finished one, so a chunk of either sent again (the answer was lost
-// on the way back, or a client sends in parallel) gets the same answer,
-// rather than "interrupted" or a second start.
-const finishing = new Map<string, { uploadId: string; answer: Promise<PhotoChunkResult> }>();
+interface Finishing {
+  uploadId: string;
+  /** The photo's size: in memory, and counted against the budget, until it is kept. */
+  bytes: number;
+  answer: Promise<PhotoChunkResult>;
+}
+
+// The account's one upload whose photo is being checked and kept (an account
+// never has two: a new upload waits for it), and its last finished one, so a
+// chunk of either sent again (the answer was lost on the way back, or a client
+// sends in parallel) gets the same answer, rather than "interrupted" or a
+// second start.
+const finishing = new Map<string, Finishing>();
 const finished = new Map<string, { result: PhotoChunkResult; atMs: number }>();
-// Every photo being checked and kept, across accounts: in memory until then,
-// whatever has taken its account's place in `pending`.
-const finishingPhotos = new Set<Buffer>();
 
 function pendingBytes(): number {
   let bytes = 0;
   for (const upload of pending.values()) bytes += upload.bytes;
-  for (const photo of finishingPhotos) bytes += photo.length;
+  for (const finish of finishing.values()) bytes += finish.bytes;
   return bytes;
 }
 
@@ -152,8 +160,9 @@ function checkShape(input: PhotoChunkInput): PhotoContext | undefined {
 /**
  * Take one chunk from an account. Chunk 0 starts an upload, later chunks
  * continue it in order, and the last one finishes it. The chunk just received,
- * or any chunk of the upload just finished, sent again, answers as before and
- * changes nothing, so the card may retry a call whose answer it lost.
+ * or any chunk of the upload being finished or just finished, sent again,
+ * answers as before and changes nothing, so the card may retry a call whose
+ * answer it lost.
  */
 export async function receivePhotoChunk(
   userId: string,
@@ -173,6 +182,14 @@ export async function receivePhotoChunk(
 
   let upload = pending.get(userId);
   if (input.index === 0 && upload?.uploadId !== input.uploadId) {
+    // One photo kept at a time per account, so the last upload started is
+    // the photo held. The card waits for each answer, so it never meets this.
+    if (finishing.has(userId)) {
+      throw new PhotoUploadRefusedError(
+        'STILL_SAVING',
+        'Your last photo is still being saved. Please try again in a moment.'
+      );
+    }
     // A new upload replaces the one in progress; it counts against the day.
     pending.delete(userId);
     const starts = recentStarts(userId, nowMs);
@@ -219,19 +236,23 @@ export async function receivePhotoChunk(
   }
 
   // The last chunk: the whole photo, checked, then kept in place of the last.
-  // It counts against the memory budget until then, as one buffer rather than
-  // its chunks. It waits for any finish the account already has in flight,
-  // so photos are kept, and the last answer recorded, in the order their
-  // uploads were started.
+  // Until then it is the account's finish in flight, counted against the
+  // memory budget as one buffer rather than its chunks.
   pending.delete(userId);
   const photo = Buffer.concat(upload.chunks);
   upload.chunks = [];
-  finishingPhotos.add(photo);
-  const before = finishing.get(userId)?.answer.catch(() => undefined);
-  const finish = () => finishUpload(userId, upload, photo, nowMs);
-  const answer = before ? before.then(finish) : finish();
-  finishing.set(userId, { uploadId: upload.uploadId, answer });
-  return answer;
+  const finish: Finishing = {
+    uploadId: upload.uploadId,
+    bytes: photo.length,
+    answer: finishUpload(userId, upload, photo, nowMs)
+  };
+  finishing.set(userId, finish);
+  // Off the record once settled: this entry and no other.
+  const forget = () => {
+    if (finishing.get(userId) === finish) finishing.delete(userId);
+  };
+  finish.answer.then(forget, forget);
+  return finish.answer;
 }
 
 async function finishUpload(
@@ -240,25 +261,19 @@ async function finishUpload(
   photo: Buffer,
   nowMs: number
 ): Promise<PhotoChunkResult> {
-  try {
-    const inspected = await inspectUploadedPhoto(photo, userId);
-    await storeUploadedPhoto(userId, photo, `image/${inspected.format}`);
-    await setRecentUploadedImage(userId, UPLOADED_PHOTO_REFERENCE, upload.context);
-    const result: PhotoChunkResult = {
-      uploadId: upload.uploadId,
-      received: upload.total,
-      total: upload.total,
-      done: true,
-      width: inspected.width,
-      height: inspected.height
-    };
-    finished.set(userId, { result, atMs: nowMs });
-    return result;
-  } finally {
-    finishingPhotos.delete(photo);
-    // Only this upload's own record: a newer one may be on it by now.
-    if (finishing.get(userId)?.uploadId === upload.uploadId) finishing.delete(userId);
-  }
+  const inspected = await inspectUploadedPhoto(photo, userId);
+  await storeUploadedPhoto(userId, photo, `image/${inspected.format}`);
+  await setRecentUploadedImage(userId, UPLOADED_PHOTO_REFERENCE, upload.context);
+  const result: PhotoChunkResult = {
+    uploadId: upload.uploadId,
+    received: upload.total,
+    total: upload.total,
+    done: true,
+    width: inspected.width,
+    height: inspected.height
+  };
+  finished.set(userId, { result, atMs: nowMs });
+  return result;
 }
 
 /** For tests: how many accounts this process holds something for. */
@@ -288,5 +303,4 @@ export function resetPhotoUploads(): void {
   startedAt.clear();
   finishing.clear();
   finished.clear();
-  finishingPhotos.clear();
 }
