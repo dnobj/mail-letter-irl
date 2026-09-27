@@ -491,6 +491,10 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
    * neither variable appeared in this manifest, so the preflight reported full
    * parity while the paid path was quietly unavailable. Listing them does not
    * turn the feature on; it makes its absence something an operator can see.
+   *
+   * The mode's values are on (the default), mobile_only, redirect (never
+   * generates, the tool stays listed) and off (the feature is gone: no tool,
+   * no purchase grants, no counts). See src/config/imageGeneration.ts.
    */
   {
     name: 'OPENAI_API_KEY',

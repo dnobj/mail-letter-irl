@@ -1,4 +1,5 @@
 import { clientProfileNamed, type ClientProfile } from "../auth/clientProfiles.js";
+import { offersImageGeneration } from "../config/imageGeneration.js";
 
 const SEND_BY_MODEL =
   "Only call send_letter or send_postcard after the user has reviewed a draft and clearly confirms sending.";
@@ -51,14 +52,20 @@ const IMAGES_WITH_APP_GENERATION =
 const IMAGES_FROM_LETTER_IRL_ONLY =
   "When the user wants an image made for their mail, call generate_image_for_mail rather than refusing, and follow its response exactly: it either generates the image using the user's remaining Letter IRL image generations, or says why it cannot, and the user can use an image of their own instead.";
 
-// Where Letter IRL makes no images at all (#467): Claude, whose directory
-// takes no connector that generates images with AI.
+// Where Letter IRL makes no images at all: Claude, whose directory takes no
+// connector that generates images with AI (#467), and every app once the
+// switch is off (src/config/imageGeneration.ts).
 const NO_IMAGE_GENERATION =
   "Letter IRL does not make images in this app. For image mail, use an image the user already has: pass a link to it as imageUrl.";
 
+// ChatGPT with Letter IRL's generation switched off: its own generation is
+// the way, and it is withheld in a message that mentions Letter IRL (#227).
+const IMAGES_FROM_THE_APP_ONLY =
+  "Letter IRL does not make images. For an image, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly. If it is not available in a message that mentions Letter IRL, ask the user to request the image in a message that does not mention Letter IRL.";
+
 function imageLine(client: ClientProfile): string {
-  if (!client.offersImageGeneration) {
-    return NO_IMAGE_GENERATION;
+  if (!offersImageGeneration(client)) {
+    return client.generatesImages ? IMAGES_FROM_THE_APP_ONLY : NO_IMAGE_GENERATION;
   }
   return client.generatesImages ? IMAGES_WITH_APP_GENERATION : IMAGES_FROM_LETTER_IRL_ONLY;
 }

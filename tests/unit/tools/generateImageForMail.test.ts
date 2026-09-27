@@ -320,8 +320,8 @@ describe("generate_image_for_mail (hybrid)", () => {
     expect(limitService.reserveGeneration).not.toHaveBeenCalled();
   });
 
-  it("mode off: always redirects, grants nothing, spends nothing", async () => {
-    process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
+  it("mode redirect: always redirects, grants nothing, spends nothing", async () => {
+    process.env.LETTER_IRL_IMAGE_GEN_MODE = "redirect";
 
     const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, context);
 
@@ -332,8 +332,22 @@ describe("generate_image_for_mail (hybrid)", () => {
     expect(limitService.reserveGeneration).not.toHaveBeenCalled();
   });
 
-  it("mode off on confirmed desktop: handoff redirect instructs in-turn built-in generation", async () => {
+  it("mode off: a call from a stale tool list still gets the card, and grants and spends nothing", async () => {
+    // Under off no app is offered the tool (src/config/imageGeneration.ts),
+    // but an app can hold an old tool list; its call must not generate.
     process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
+
+    const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, context);
+
+    expect(result.mode).toBe("redirect");
+    expect(result.status).toBe("generation_disabled");
+    expect(limitService.ensureStarterGrant).not.toHaveBeenCalled();
+    expect(limitService.reserveGeneration).not.toHaveBeenCalled();
+    expect(genService.generateImage).not.toHaveBeenCalled();
+  });
+
+  it("mode redirect on confirmed desktop: handoff redirect instructs in-turn built-in generation", async () => {
+    process.env.LETTER_IRL_IMAGE_GEN_MODE = "redirect";
     const desktopContext = { ...context, isMobile: false } as never;
 
     const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, desktopContext);
@@ -346,8 +360,8 @@ describe("generate_image_for_mail (hybrid)", () => {
     expect(limitService.reserveGeneration).not.toHaveBeenCalled();
   });
 
-  it("mode off on mobile: resend card (built-in generation absent from mention-scoped turns)", async () => {
-    process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
+  it("mode redirect on mobile: resend card (built-in generation absent from mention-scoped turns)", async () => {
+    process.env.LETTER_IRL_IMAGE_GEN_MODE = "redirect";
     const mobileContext = { ...context, isMobile: true } as never;
 
     const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, mobileContext);
@@ -497,8 +511,8 @@ describe("generate_image_for_mail in an app with no image generation of its own"
     );
   });
 
-  it("says generation is off, rather than that ChatGPT has the request, when the mode is off", async () => {
-    process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
+  it("says generation is off, rather than that ChatGPT has the request, under redirect", async () => {
+    process.env.LETTER_IRL_IMAGE_GEN_MODE = "redirect";
 
     const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, vscodeContext);
 
@@ -515,7 +529,7 @@ describe("generate_image_for_mail in an app with no image generation of its own"
   });
 
   it("treats a context that names no app as an app with no generation of its own", async () => {
-    process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
+    process.env.LETTER_IRL_IMAGE_GEN_MODE = "redirect";
 
     const result = await generateImageForMailTool.handler({ prompt: "a walrus" }, unnamedContext);
 

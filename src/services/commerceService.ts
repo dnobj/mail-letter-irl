@@ -28,6 +28,7 @@ import {
   revokeGiftLettersForOrderWithClient
 } from './giftLetterService.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
+import { isImageGenerationOff } from '../config/imageGeneration.js';
 import { createMailOrderFromDraftWithClient } from './mailSendService.js';
 import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import {
@@ -1341,6 +1342,20 @@ async function claimStripeEvent(
   return Boolean(claimed.rows[0]);
 }
 
+/**
+ * The image generations a purchase brings: none while image generation is
+ * switched off (LETTER_IRL_IMAGE_GEN_MODE=off, src/config/imageGeneration.ts),
+ * so nobody is handed generations they cannot use. Like the grant itself it is
+ * per order, and turning the switch back on does not backfill.
+ */
+async function grantPurchaseImageEntitlement(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: Parameters<typeof grantImageEntitlementWithClient>[1]
+): Promise<void> {
+  if (isImageGenerationOff()) return;
+  await grantImageEntitlementWithClient(client, params);
+}
+
 function packImageGrant(credits: number): number {
   const perLetter = integerSetting(
     'IMAGE_ENTITLEMENTS_PER_PACK_LETTER',
@@ -1399,7 +1414,7 @@ export async function repairFulfilledPackGrant(
        FOR UPDATE`,
       [order.order_id]
     );
-    await grantImageEntitlementWithClient(client, {
+    await grantPurchaseImageEntitlement(client, {
       userId: order.user_id,
       sourceType: 'letter_pack',
       sourceReferenceId: order.order_id,
@@ -1545,7 +1560,7 @@ async function transitionPaidCheckout(
       expirationDays: PURCHASE_CREDIT_EXPIRY_DAYS,
       description: packPurchaseLine(order)
     });
-    await grantImageEntitlementWithClient(client, {
+    await grantPurchaseImageEntitlement(client, {
       userId: order.user_id,
       sourceType: 'letter_pack',
       sourceReferenceId: order.order_id,
@@ -1585,7 +1600,7 @@ async function transitionPaidCheckout(
       mailType,
       funding: { type: 'jit_order', orderId: order.order_id }
     });
-    await grantImageEntitlementWithClient(client, {
+    await grantPurchaseImageEntitlement(client, {
       userId: order.user_id,
       sourceType: 'jit_order',
       sourceReferenceId: order.order_id,
@@ -3494,7 +3509,7 @@ export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
         mailType: String(order.product_snapshot.mailType || 'letter') as MailType,
         funding: { type: 'jit_order', orderId }
       });
-      await grantImageEntitlementWithClient(client, {
+      await grantPurchaseImageEntitlement(client, {
         userId: order.user_id,
         sourceType: 'jit_order',
         sourceReferenceId: order.order_id,

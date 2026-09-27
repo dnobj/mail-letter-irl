@@ -344,3 +344,43 @@ describe('image generation in every app', () => {
     }
   });
 });
+
+/**
+ * The image switch (src/config/imageGeneration.ts). With LETTER_IRL_IMAGE_GEN_MODE
+ * set to off, no app is offered generate_image_for_mail, so no agent thinks it
+ * can call it. ChatGPT is told to use its own image generation, and every
+ * other app that Letter IRL makes no images.
+ */
+describe('image generation switched off', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('leaves the tool out of every app\'s list, and "redirect" keeps it', () => {
+    vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', 'off');
+    for (const name of CLIENT_PROFILE_NAMES) {
+      const listed = new LetterIrlServer().listTools(clientProfileNamed(name)).map(tool => tool.name);
+      expect(listed, name).not.toContain('generate_image_for_mail');
+    }
+    vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', 'redirect');
+    expect(
+      new LetterIrlServer().listTools(clientProfileNamed('chatgpt')).map(tool => tool.name)
+    ).toContain('generate_image_for_mail');
+  });
+
+  it('sends ChatGPT to its own image generation, and tells every other app Letter IRL makes none', () => {
+    vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', 'off');
+    for (const sendRule of [false, true]) {
+      const chatgpt = buildServerInstructions(sendRule, clientProfileNamed('chatgpt'));
+      expect(chatgpt).not.toContain('generate_image_for_mail');
+      expect(chatgpt).toContain(
+        "Letter IRL does not make images. For an image, use ChatGPT's built-in image generation (image_gen)"
+      );
+      expect(chatgpt).toContain('a message that does not mention Letter IRL');
+      for (const name of CLIENT_PROFILE_NAMES.filter(entry => entry !== 'chatgpt')) {
+        const instructions = buildServerInstructions(sendRule, clientProfileNamed(name));
+        expect(instructions, name).not.toContain('generate_image_for_mail');
+        expect(instructions, name).toContain('Letter IRL does not make images in this app.');
+        expect(instructions, name).not.toMatch(/ChatGPT|image_gen/);
+      }
+    }
+  });
+});

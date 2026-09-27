@@ -10,6 +10,7 @@ import { CREDITS_PER_LETTER } from "../config/products.js";
 import { getGiftBalance } from "../services/giftLetterService.js";
 import { letterPacksPageUrl } from "../config/sendConfirmation.js";
 import { callingApp } from "../auth/clientProfiles.js";
+import { offersImageGeneration } from "../config/imageGeneration.js";
 
 interface ExpiringLettersInfo {
   letters: number;
@@ -98,11 +99,11 @@ async function handler(
   const canSendStandardLetter = lettersRemaining >= 1;
 
   // Fetch image generation quota, where Letter IRL makes images at all: an app
-  // that does not offer generate_image_for_mail (Claude, #467) is not told
-  // about generations it cannot use.
+  // that is not offered generate_image_for_mail (Claude, #467, or every app
+  // once the switch is off) is not told about generations it cannot use.
   let imageGenerationsRemaining: number | undefined;
   let imageGenerationsAllowance: number | undefined;
-  if (callingApp(context).offersImageGeneration) {
+  if (offersImageGeneration(callingApp(context))) {
     try {
       const generationQuota = await getGenerationQuota(userId);
       imageGenerationsRemaining = generationQuota.remaining;
