@@ -53,7 +53,7 @@ function initialize(mounted: ReturnType<typeof mountInMcpHost>, hostContext: Rec
 const bridgePage = (body = '') => `<!doctype html><html><body>${body}<script>${BRIDGE}</script></body></html>`;
 
 describe('the bridge in ChatGPT', () => {
-  function mountInChatGpt() {
+  function mountInChatGpt(overrides: Record<string, unknown> = {}) {
     const calls: unknown[][] = [];
     const openai: Record<string, unknown> = {
       theme: 'dark',
@@ -64,8 +64,12 @@ describe('the bridge in ChatGPT', () => {
       callTool: async (...args: unknown[]) => { calls.push(['callTool', ...args]); return { structuredContent: { ok: true } }; },
       openExternal: async (...args: unknown[]) => { calls.push(['openExternal', ...args]); },
       setWidgetState: async (...args: unknown[]) => { calls.push(['setWidgetState', ...args]); },
-      sendFollowUpMessage: async (...args: unknown[]) => { calls.push(['sendFollowUpMessage', ...args]); }
+      sendFollowUpMessage: async (...args: unknown[]) => { calls.push(['sendFollowUpMessage', ...args]); },
+      ...overrides
     };
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value === undefined) delete openai[key];
+    }
     const sent: unknown[] = [];
     const dom = new JSDOM(bridgePage(), {
       runScripts: 'dangerously',
@@ -102,6 +106,39 @@ describe('the bridge in ChatGPT', () => {
       ['sendFollowUpMessage', { prompt: 'hello' }]
     ]);
     expect(sent).toEqual([]);
+  });
+
+  it("passes ChatGPT's empty values through, so a card can tell no result from an empty one", () => {
+    const { window } = mountInChatGpt({ toolInput: undefined, toolOutput: null, toolResponseMetadata: undefined, widgetState: undefined });
+    const host = window.letterIrlHost;
+    expect(host.toolInput()).toBeUndefined();
+    expect(host.toolOutput()).toBeNull();
+    expect(host.toolMeta()).toBeUndefined();
+    expect(host.widgetState()).toBeUndefined();
+  });
+
+  it('offers a capability only where window.openai has it', () => {
+    const { window } = mountInChatGpt({ openExternal: undefined, setWidgetState: undefined, sendFollowUpMessage: undefined });
+    const host = window.letterIrlHost;
+    expect(typeof host.callTool).toBe('function');
+    for (const name of ['openLink', 'setWidgetState', 'sendMessage', 'uploadFile', 'selectFiles', 'getFileDownloadUrl']) {
+      expect(host[name], name).toBeUndefined();
+    }
+  });
+
+  it("hands ChatGPT's file store calls straight through", async () => {
+    const calls: unknown[][] = [];
+    const { window } = mountInChatGpt({
+      uploadFile: async (...args: unknown[]) => { calls.push(['uploadFile', ...args]); return { fileId: 'file_1' }; },
+      selectFiles: async (...args: unknown[]) => { calls.push(['selectFiles', ...args]); return [{ fileId: 'file_2' }]; },
+      getFileDownloadUrl: async (...args: unknown[]) => { calls.push(['getFileDownloadUrl', ...args]); return { downloadUrl: 'https://files.example/2' }; }
+    });
+    const host = window.letterIrlHost;
+    const file = { name: 'photo.jpg' };
+    await expect(host.uploadFile(file)).resolves.toEqual({ fileId: 'file_1' });
+    await expect(host.selectFiles()).resolves.toEqual([{ fileId: 'file_2' }]);
+    await expect(host.getFileDownloadUrl({ fileId: 'file_2' })).resolves.toEqual({ downloadUrl: 'https://files.example/2' });
+    expect(calls).toEqual([['uploadFile', file], ['selectFiles'], ['getFileDownloadUrl', { fileId: 'file_2' }]]);
   });
 
   it('tells the card when ChatGPT sets new globals', () => {
@@ -215,7 +252,23 @@ describe('the bridge in an MCP Apps host', () => {
     mounted.window.dispatchEvent(
       new mounted.window.MessageEvent('message', { data: { method: 'ui/notifications/tool-result', params: { structuredContent: { evil: true } } }, source: mounted.window.parent })
     );
-    expect(mounted.host().toolOutput()).toEqual({});
+    expect(mounted.host().toolOutput()).toBeNull();
+  });
+
+  it('starts empty, and has no widget state writer and no file store', () => {
+    const host = mountInMcpHost(bridgePage()).host();
+    expect(host.toolInput()).toBeNull();
+    expect(host.toolOutput()).toBeNull();
+    expect(host.toolMeta()).toBeNull();
+    expect(host.widgetState()).toBeNull();
+    // A card checks for these before using them (the preview cards' photo
+    // picker and saved-state paths), so they must be absent, not stubs.
+    for (const name of ['setWidgetState', 'uploadFile', 'selectFiles', 'getFileDownloadUrl']) {
+      expect(host[name], name).toBeUndefined();
+    }
+    for (const name of ['callTool', 'openLink', 'sendMessage']) {
+      expect(typeof host[name], name).toBe('function');
+    }
   });
 
   it('reports its height only after the handshake, and only when it changes', async () => {

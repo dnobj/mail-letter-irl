@@ -23,6 +23,7 @@ import { JSDOM } from 'jsdom';
 import * as fs from 'fs';
 import * as path from 'path';
 import { stampPreviewTool } from '../../../src/mcp/registerTools.js';
+import { inlineHostBridge } from '../../../src/mcp/widgetHost.js';
 
 const WIDGET_DIR = path.resolve(__dirname, '../../../widgets');
 
@@ -143,6 +144,8 @@ interface MountOptions {
   sendResponse?: (args: Json) => unknown;
   /** What create_mail_checkout answers, instead of the usual checkout (#412). */
   checkoutResponse?: (args: Json) => unknown;
+  /** What openExternal does, instead of resolving (#474). */
+  openExternal?: (arg: unknown) => unknown;
   /** The host's file bridge. Only the functions given are exposed. */
   fileApis?: {
     selectFiles?: () => unknown;
@@ -159,7 +162,11 @@ async function flush(times = 8): Promise<void> {
 }
 
 function mount(spec: CardSpec, options: MountOptions = {}) {
-  const raw = fs.readFileSync(path.join(WIDGET_DIR, `${spec.file}.html`), 'utf-8');
+  // The card as served, with the host bridge inlined (#474).
+  const raw = inlineHostBridge(
+    fs.readFileSync(path.join(WIDGET_DIR, `${spec.file}.html`), 'utf-8'),
+    WIDGET_DIR
+  );
   const stamp = options.stamp === undefined ? spec.tool : options.stamp;
   const stamped = stamp === null ? raw : stampPreviewTool(raw, stamp);
   if (stamp !== null) expect(stamped).not.toBe(raw);
@@ -174,6 +181,8 @@ function mount(spec: CardSpec, options: MountOptions = {}) {
   let checkoutFailures = options.failCheckouts ?? 0;
   let gate: Promise<void> | null = null;
   let openGate: (() => void) | null = null;
+  let lettersRemaining = 0;
+  const externalCalls: unknown[] = [];
 
   const openai: Json = {
     theme: 'light',
@@ -184,7 +193,10 @@ function mount(spec: CardSpec, options: MountOptions = {}) {
     setWidgetState: async (state: unknown) => {
       savedStates.push(JSON.parse(JSON.stringify(state)));
     },
-    openExternal: async () => {}
+    openExternal: async (arg: unknown) => {
+      externalCalls.push(JSON.parse(JSON.stringify(arg)));
+      return options.openExternal ? options.openExternal(arg) : undefined;
+    }
   };
   if (!options.noCallTool) {
     openai.callTool = async (name: string, args: Json) => {
@@ -216,7 +228,7 @@ function mount(spec: CardSpec, options: MountOptions = {}) {
         };
       }
       if (name === 'get_purchase_status') return { structuredContent: purchaseStatus };
-      if (name === 'get_account_balance') return { structuredContent: { lettersRemaining: 0 } };
+      if (name === 'get_account_balance') return { structuredContent: { lettersRemaining } };
       return { structuredContent: {} };
     };
   }
@@ -282,6 +294,11 @@ function mount(spec: CardSpec, options: MountOptions = {}) {
     setStatus: (status: Json) => {
       purchaseStatus = status;
     },
+    /** What get_account_balance answers from now on. */
+    setBalance: (letters: number) => {
+      lettersRemaining = letters;
+    },
+    externalCalls,
     holdCalls: () => {
       gate = new Promise<void>(resolve => {
         openGate = resolve;
@@ -2447,5 +2464,157 @@ describe.each([LETTER, POSTCARD])('$file keeps what it did for a reopened conver
 
     expect(harness.visible('retry-button')).toBe(true);
     expect(harness.text('status-pill')).toBe('No preview');
+  });
+});
+
+/** What the server sends where the app takes no purchases (#475). */
+function noPurchaseEligibility(purchaseUrl = 'https://letterirl.com/packs'): Json {
+  return {
+    canSendNow: false,
+    reasonCannotSend: 'Not enough letters in your balance.',
+    sendEligibility: {
+      payAndSend: { available: false, unavailableReason: "Pay & Send isn't available in this app." },
+      letterPack: { available: false, purchaseUrl }
+    }
+  };
+}
+
+describe.each([LETTER, POSTCARD])('$file where the app takes no purchases (#474)', spec => {
+  const CHECKOUT_NOTE =
+    'Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.';
+  const WEBSITE_NOTE =
+    'Letter packs are sold on the website. Sign in there with the same email you use here - this card updates when you return to this tab, or use Check status.';
+
+  const unpaid = async (options: MountOptions = {}) => {
+    const harness = mount(spec, { toolOutput: spec.output('draft_host_0001', noPurchaseEligibility()), ...options });
+    await flush();
+    return harness;
+  };
+
+  it('offers the website instead of a checkout, with a note that says so', async () => {
+    const harness = await unpaid();
+
+    expect(harness.visible('purchase-actions')).toBe(true);
+    expect(harness.visible('website-packs-button')).toBe(true);
+    expect(harness.text('website-packs-button')).toBe('Buy letters on the website');
+    expect(harness.visible('pay-send-button')).toBe(false);
+    expect(harness.visible('buy-pack-button')).toBe(false);
+    expect(harness.visible('send-button')).toBe(false);
+    expect(harness.visible('check-status-button')).toBe(false);
+    expect(harness.visible('checkout-note')).toBe(true);
+    expect(harness.text('checkout-note')).toBe(WEBSITE_NOTE);
+    expect(harness.calls).toEqual([]);
+  });
+
+  it('opens the letter packs page, then waits for the letters and offers Send', async () => {
+    const harness = await unpaid();
+
+    await harness.click('website-packs-button');
+
+    expect(harness.externalCalls).toEqual([{ href: 'https://letterirl.com/packs' }]);
+    expect(harness.text('status-pill')).toBe('Waiting for your Letter Pack');
+    expect(harness.visible('check-status-button')).toBe(true);
+    expect(harness.visible('website-packs-button')).toBe(true);
+    expect(harness.visible('error-message')).toBe(false);
+
+    await harness.runTimer(3000);
+    expect(harness.callsTo('get_account_balance')).toHaveLength(1);
+    expect(harness.visible('send-button')).toBe(false);
+
+    harness.setBalance(1);
+    await harness.runTimer(3000);
+
+    expect(harness.text('status-pill')).toBe('Ready to send');
+    expect(harness.visible('send-button')).toBe(true);
+    expect(harness.visible('purchase-actions')).toBe(false);
+    expect(harness.pendingTimers()).toEqual([]);
+    // Nothing here buys anything: the website did.
+    for (const tool of ['list_letter_packs', 'create_pack_checkout', 'create_mail_checkout']) {
+      expect(harness.callsTo(tool), tool).toEqual([]);
+    }
+  });
+
+  it('opens the page again on a second click, and keeps one wait', async () => {
+    const harness = await unpaid();
+
+    await harness.click('website-packs-button');
+    await harness.click('website-packs-button');
+
+    expect(harness.externalCalls).toHaveLength(2);
+    expect(harness.pendingTimers()).toHaveLength(1);
+  });
+
+  it('shows the address when the host does not open the page, and still waits', async () => {
+    const harness = await unpaid({
+      openExternal: () => {
+        throw new Error('blocked');
+      }
+    });
+
+    await harness.click('website-packs-button');
+
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('error-message')).toBe('The website did not open. Letter packs are at https://letterirl.com/packs');
+    expect(harness.visible('check-status-button')).toBe(true);
+    expect(harness.pendingTimers()).toHaveLength(1);
+  });
+
+  it('clears that message when the page opens on the next click', async () => {
+    let fail = true;
+    const harness = await unpaid({
+      openExternal: () => {
+        if (fail) throw new Error('blocked');
+      }
+    });
+    await harness.click('website-packs-button');
+    fail = false;
+
+    await harness.click('website-packs-button');
+
+    expect(harness.visible('error-message')).toBe(false);
+  });
+
+  it('offers no website address that is not https', async () => {
+    for (const url of ['http://letterirl.com/packs', 'javascript:alert(1)', '']) {
+      const harness = mount(spec, { toolOutput: spec.output('draft_host_0001', noPurchaseEligibility(url)) });
+      await flush();
+      expect(harness.visible('website-packs-button'), url).toBe(false);
+      expect(harness.visible('checkout-note'), url).toBe(false);
+    }
+  });
+
+  it('keeps the checkout and its note where the app takes purchases', async () => {
+    const harness = mount(spec, { toolOutput: spec.output('draft_host_0001', eligibility(false)) });
+    await flush();
+
+    expect(harness.visible('buy-pack-button')).toBe(true);
+    expect(harness.visible('pay-send-button')).toBe(true);
+    expect(harness.visible('website-packs-button')).toBe(false);
+    expect(harness.visible('checkout-note')).toBe(true);
+    expect(harness.text('checkout-note')).toBe(CHECKOUT_NOTE);
+  });
+
+  it('shows no checkout note when nothing can be bought', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001', {
+        canSendNow: false,
+        sendEligibility: { payAndSend: { available: false } }
+      })
+    });
+    await flush();
+
+    expect(harness.visible('purchase-actions')).toBe(true);
+    expect(harness.visible('website-packs-button')).toBe(false);
+    expect(harness.visible('checkout-note')).toBe(false);
+  });
+
+  it('offers nothing to buy once the letters are there', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001', { ...noPurchaseEligibility(), canSendNow: true })
+    });
+    await flush();
+
+    expect(harness.visible('send-button')).toBe(true);
+    expect(harness.visible('purchase-actions')).toBe(false);
   });
 });

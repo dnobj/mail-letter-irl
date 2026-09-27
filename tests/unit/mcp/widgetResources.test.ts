@@ -143,8 +143,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       parts.push(`shared/host.js:${createHash('sha256').update(bridge).digest('hex')}`);
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 38,
-        digest: 'c80484f01b96'
+        version: 39,
+        digest: '90ad252cd394'
       });
     });
   });
@@ -786,13 +786,14 @@ describe('widget resources tolerate any template version (#235)', () => {
       const uri = widgetTemplateUri(name);
       const result = await client.readResource({ uri });
       const text = String(result.contents[0].text);
-      const original = await fs.readFile(path.join(widgetDir, `${file}.html`), 'utf-8');
+      // The file on disk with the host bridge inlined (#474).
+      const original = inlineHostBridge(await fs.readFile(path.join(widgetDir, `${file}.html`), 'utf-8'), widgetDir);
 
       expect(result.contents[0].uri).toBe(uri);
       expect(result.contents[0].mimeType).toBe(WIDGET_MIME_TYPE);
       expect(text).toContain(`<meta name="letter-irl-preview-tool" content="${tool}" />`);
       expect(text.match(/<meta name="letter-irl-preview-tool"/g), `${name} carries one stamp`).toHaveLength(1);
-      // The stamp is the only difference from the file on disk.
+      // The stamp is the only other difference from the file on disk.
       expect(text.replace(/\n\s*<meta name="letter-irl-preview-tool"[^>]*>/, '')).toBe(original);
     }
   });

@@ -87,6 +87,22 @@ describe("the cards on the wire (#474)", () => {
     }
   });
 
+  it("serves the preview cards to Claude on the bridge, stamped with their tool, with no card address", async () => {
+    const cards = [
+      ["LetterPreviewCard", "quote_and_preview_letter"],
+      ["LetterHeaderImagePreviewCard", "quote_and_preview_letter_with_header_image"],
+      ["LetterInlineImagePreviewCard", "quote_and_preview_letter_with_image"],
+      ["PostcardPreviewCard", "quote_and_preview_postcard"]
+    ];
+    for (const [name, tool] of cards) {
+      const card = await readCard("claude", name);
+      expect(card.text, name).not.toContain("<!-- letter-irl:host -->");
+      expect(card.text, name).toContain('"ui/initialize"');
+      expect(card.text, name).toContain(`<meta name="letter-irl-preview-tool" content="${tool}" />`);
+      expect(card._meta.ui, name).not.toHaveProperty("domain");
+    }
+  });
+
   it("keeps the getting-started copy in _meta for ChatGPT, and in structuredContent too for Claude", async () => {
     const fromChatgpt = await (await connect("chatgpt")).callTool({ name: "get_started", arguments: {} });
     expect(fromChatgpt.structuredContent).toEqual({});
