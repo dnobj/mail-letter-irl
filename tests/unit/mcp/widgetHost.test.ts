@@ -37,7 +37,7 @@ describe('inlining the card host bridge', () => {
     const bridge = fs.readFileSync(path.join(WIDGET_DIR, 'shared', 'host.js'), 'utf-8');
     expect(served).not.toContain(HOST_BRIDGE_PLACEHOLDER);
     expect(served).toContain(`<script>\n${bridge}\n    </script><script>render()</script>`);
-    expect(served.split('window.letterIrlHost = {').length - 1).toBe(2);
+    expect(served.split(bridge).length - 1).toBe(1);
   });
 
   it('keeps a $ in the bridge as written', () => {

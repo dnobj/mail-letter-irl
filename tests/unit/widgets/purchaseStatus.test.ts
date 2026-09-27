@@ -30,6 +30,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { JSDOM } from 'jsdom';
 import * as fs from 'fs';
 import * as path from 'path';
+import { inlineHostBridge } from '../../../src/mcp/widgetHost.js';
 
 const WIDGET_DIR = path.resolve(__dirname, '../../../widgets');
 const CARDS = ['LetterPreviewCard', 'PostcardPreviewCard'] as const;
@@ -99,7 +100,11 @@ function mount(
   card: string,
   options: { openExternalRejects?: boolean } = {}
 ): Harness {
-  const html = fs.readFileSync(path.join(WIDGET_DIR, `${card}.html`), 'utf-8');
+  // The card as served, with the host bridge inlined (#474).
+  const html = inlineHostBridge(
+    fs.readFileSync(path.join(WIDGET_DIR, `${card}.html`), 'utf-8'),
+    WIDGET_DIR
+  );
   // See limit (1) at the top of this file.
   const runnable = html.replace('<script type="module">', '<script>');
 

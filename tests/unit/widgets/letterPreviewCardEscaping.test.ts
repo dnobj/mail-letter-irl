@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import { JSDOM } from 'jsdom';
 import * as fs from 'fs';
 import * as path from 'path';
+import { inlineHostBridge } from '../../../src/mcp/widgetHost.js';
 
 const WIDGET_DIR = path.resolve(__dirname, '../../../widgets');
 
@@ -34,7 +35,11 @@ function hostileAddress(label: string) {
 }
 
 function mount() {
-  const html = fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8');
+  // The card as served, with the host bridge inlined (#474).
+  const html = inlineHostBridge(
+    fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'),
+    WIDGET_DIR
+  );
   // jsdom does not execute module scripts; the card's script parses as a
   // classic script (see tests/unit/widgets/purchaseStatus.test.ts, limit 1).
   const runnable = html.replace('<script type="module">', '<script>');

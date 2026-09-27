@@ -41,25 +41,42 @@
   // ChatGPT: window.openai is there before the page runs.
   if (window.openai) {
     var openai = window.openai;
-    window.letterIrlHost = {
+    // Values come back exactly as ChatGPT gives them, null or undefined
+    // included, so a card can still tell "no result yet" from an empty one.
+    // Each capability exists here only where window.openai has it, so a
+    // card's "can this host do X?" check keeps its meaning.
+    var chatgpt = {
       kind: "chatgpt",
       theme: function () { return openai.theme || "light"; },
-      toolInput: function () { return openai.toolInput || {}; },
-      toolOutput: function () { return openai.toolOutput || {}; },
-      toolMeta: function () { return openai.toolResponseMetadata || {}; },
-      widgetState: function () { return openai.widgetState || null; },
-      setWidgetState: function (state) {
-        return openai.setWidgetState ? openai.setWidgetState(state) : Promise.resolve();
-      },
-      callTool: function (name, args) { return openai.callTool(name, args || {}); },
-      openLink: function (url) { return openai.openExternal({ href: url }); },
-      sendMessage: function (text) {
-        return openai.sendFollowUpMessage
-          ? openai.sendFollowUpMessage({ prompt: text })
-          : Promise.reject(new Error("sendFollowUpMessage is not available"));
-      },
+      toolInput: function () { return openai.toolInput; },
+      toolOutput: function () { return openai.toolOutput; },
+      toolMeta: function () { return openai.toolResponseMetadata; },
+      widgetState: function () { return openai.widgetState; },
       onChange: onChange
     };
+    if (typeof openai.callTool === "function") {
+      chatgpt.callTool = function (name, args) { return openai.callTool(name, args || {}); };
+    }
+    if (typeof openai.openExternal === "function") {
+      chatgpt.openLink = function (url) { return openai.openExternal({ href: url }); };
+    }
+    if (typeof openai.sendFollowUpMessage === "function") {
+      chatgpt.sendMessage = function (text) { return openai.sendFollowUpMessage({ prompt: text }); };
+    }
+    if (typeof openai.setWidgetState === "function") {
+      chatgpt.setWidgetState = function (value) { return openai.setWidgetState(value); };
+    }
+    // ChatGPT's file store: no MCP Apps equivalent (#474).
+    if (typeof openai.uploadFile === "function") {
+      chatgpt.uploadFile = function (file) { return openai.uploadFile(file); };
+    }
+    if (typeof openai.selectFiles === "function") {
+      chatgpt.selectFiles = function () { return openai.selectFiles(); };
+    }
+    if (typeof openai.getFileDownloadUrl === "function") {
+      chatgpt.getFileDownloadUrl = function (request) { return openai.getFileDownloadUrl(request); };
+    }
+    window.letterIrlHost = chatgpt;
     window.addEventListener("openai:set_globals", changed);
     return;
   }
@@ -68,7 +85,8 @@
   // host to talk to, and must not answer its own messages.
   var parent = window.parent;
   var framed = Boolean(parent) && parent !== window;
-  var state = { theme: "light", toolInput: {}, toolOutput: {}, toolMeta: {} };
+  // Null until the host sends them, as window.openai's are before a result.
+  var state = { theme: "light", toolInput: null, toolOutput: null, toolMeta: null };
   var pending = {};
   var nextId = 1;
   var initialized = false;
@@ -116,12 +134,12 @@
     var params = message.params || {};
     switch (message.method) {
       case "ui/notifications/tool-input":
-        state.toolInput = params.arguments || {};
+        state.toolInput = params.arguments || null;
         changed();
         break;
       case "ui/notifications/tool-result":
-        state.toolOutput = params.structuredContent || {};
-        state.toolMeta = params._meta || {};
+        state.toolOutput = params.structuredContent || null;
+        state.toolMeta = params._meta || null;
         changed();
         break;
       case "ui/notifications/host-context-changed":
@@ -152,6 +170,8 @@
     }
   }
 
+  // No setWidgetState and no file store here: MCP Apps has neither, and a card
+  // checks for them before using them.
   window.letterIrlHost = {
     kind: "mcp-apps",
     theme: function () { return state.theme; },
@@ -159,7 +179,6 @@
     toolOutput: function () { return state.toolOutput; },
     toolMeta: function () { return state.toolMeta; },
     widgetState: function () { return null; },
-    setWidgetState: function () { return Promise.resolve(); },
     callTool: function (name, args) {
       return request("tools/call", { name: name, arguments: args || {} });
     },

@@ -362,7 +362,9 @@ the call JWT-authenticated and successful.
 #486 deployed (88dd3d2): titles and the image text passed, and the purchase text needs #475. Step 8
 ran after #489 deployed (d686367). Claude has no checkout tools and offers none, and it gives the
 letter packs link only when asked. Step 9 ran after #491 deployed (45c7287) and passed: Claude has
-no image tool and says Letter IRL can't create images.
+no image tool and says Letter IRL can't create images. Step 10 ran after #494 deployed (e6194ed):
+the getting-started card draws in Claude on the web and still works in ChatGPT. Step 11 (the
+preview cards) has not run yet.
 
 Background: Claude connects with its published identity, the document at
 `https://claude.ai/oauth/mcp-oauth-client-metadata`. That document must be imported into each tenant
@@ -482,6 +484,29 @@ link as a button.
 - [x] In ChatGPT (DEV connector, after **Refresh tools**) the getting-started card looks and works
       as before. (Yes: revision t16, with ChatGPT's own purchase step. ChatGPT read the v38 cards
       on the refresh.)
+
+11. The letter and postcard preview cards on the shared bridge (#474, phase 2a), once they are
+    deployed to development. Refresh the tool list first; the log should show `tools/list` at
+    `widgetTemplateVersion=39`.
+- [ ] Ask Claude to preview a short letter to a test address. The letter card draws in Claude's
+      theme, revision t26, with the letter's text, both addresses, the cost and the delivery. If
+      the text shows only as "Letter preview", Claude did not hand the card the result's `_meta`:
+      record it, because phase 2b then brings the preview from the server.
+- [ ] Preview a postcard with an `https` image link. The front and the back draw, revision t26.
+- [ ] On an account with letters the card shows **Send**. With the send rule on, pressing it shows
+      that nothing was sent, with the link to send it from, and the development log shows
+      `send.link_instead` for `client=claude`. Nothing is sent.
+- [ ] On an account with no letters the card shows **Buy letters on the website** and the note to
+      sign in there with the same email, and neither **Pay & Send** nor **Buy a Letter Pack**.
+      Pressing it, Claude asks to open the letter packs page. Once it opens, the pill says
+      **Waiting for your Letter Pack** and **Check status** appears. Declining shows the page's
+      address on the card.
+- [ ] Ask Claude which Letter IRL tools it can call. Record whether it names **Send a letter** or
+      **Send a postcard**, which are marked for the card only. This decides phase 2b: if Claude
+      keeps them from its model, the card's **Send** can send in Claude as it does in ChatGPT.
+- [ ] In ChatGPT (DEV connector, after **Refresh tools**) both preview cards look and work as
+      before, revision t26: a letter preview with **Send**, and on an account with no letters
+      **Pay & Send** and **Buy a Letter Pack** with the checkout note, and no website button.
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
 

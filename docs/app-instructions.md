@@ -91,8 +91,9 @@ ChatGPT's would be false there. The app's profile (`src/auth/clientProfiles.ts`)
 - **Tool results.**
   - Where the app takes no purchases, `get_started`, `get_account_balance` and `list_letter_packs`
     give the letter packs page and ask the model to pass the link on.
-  - A preview there marks Pay & Send and pack buying unavailable, so a card would show neither
-    button.
+  - A preview there marks Pay & Send and pack buying unavailable, so the preview cards show
+    neither button. They offer **Buy letters on the website** instead, which opens the letter packs
+    page (#474).
   - Where no card shows, `get_started` returns the guide as text.
   - Without ChatGPT's image generation, `generate_image_for_mail` gives the reason and asks for an
     image of the person's own.

@@ -166,6 +166,13 @@
           <button class="send-button secondary" id="buy-pack-button">
             Buy a Letter Pack
           </button>
+          <button
+            class="send-button"
+            id="website-packs-button"
+            style="display: none"
+          >
+            Buy letters on the website
+          </button>
           <div id="pack-options" style="display: none"></div>
           <a
             class="send-button checkout-link"
@@ -182,7 +189,7 @@
           >
             Check status
           </button>
-          <div class="note">Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.</div>
+          <div class="note" id="checkout-note">Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.</div>
         </div>
         <div
           id="error-message"
@@ -190,12 +197,16 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t25</p>
+      <p class="rev">letter t26</p>
     </div>
 
+    <!-- letter-irl:host -->
     <script type="module">
-      // Per OpenAI docs, data may not be available immediately
-      // Must listen for 'openai:set_globals' event
+      // The card talks to its host only through window.letterIrlHost
+      // (widgets/shared/host.js, #474): window.openai in ChatGPT, MCP Apps in
+      // Claude and VS Code. Data may not be available immediately, so the
+      // card re-renders on host.onChange.
+      const host = window.letterIrlHost;
       //
       // US-LAYOUT-05: Visual letter mockup with layout-aware rendering
       // US-MCP-08: Send button calls send_letter via callTool
@@ -334,7 +345,7 @@
       // letter; otherwise null.
       function hostRequest() {
         const tool = previewTool();
-        const input = window.openai?.toolInput;
+        const input = host.toolInput();
         if (!tool || !input || typeof input !== "object" || Array.isArray(input)) return null;
         if (!input.recipient || typeof input.recipient !== "object") return null;
         if (typeof input.bodyText !== "string" || typeof input.signOff !== "string") return null;
@@ -343,9 +354,9 @@
 
       // The call this card can repeat faithfully, or null.
       function retryRequest() {
-        const host = hostRequest();
-        if (!host) return null;
-        const { tool, input } = host;
+        const asked = hostRequest();
+        if (!asked) return null;
+        const { tool, input } = asked;
         // Image arguments on the text-only template mean the page was drawn
         // for an image letter. Repeating the call would drop the image, so the
         // card asks for the preview again in the chat instead.
@@ -363,11 +374,11 @@
       // host's image is the only thing this card cannot pass back; otherwise
       // null. Its arguments leave the image out, and the pick adds imageUrl.
       function imageRequest() {
-        const host = hostRequest();
-        if (!host || host.tool === "quote_and_preview_letter") return null;
-        if (imageArgumentRepeatable(host.input.image) && imageUrlRepeatable(host.input)) return null;
-        const { image, imageUrl, ...args } = host.input;
-        return { tool: host.tool, args };
+        const asked = hostRequest();
+        if (!asked || asked.tool === "quote_and_preview_letter") return null;
+        if (imageArgumentRepeatable(asked.input.image) && imageUrlRepeatable(asked.input)) return null;
+        const { image, imageUrl, ...args } = asked.input;
+        return { tool: asked.tool, args };
       }
 
       function isHttpsUrl(value) {
@@ -377,28 +388,28 @@
       function canPreviewByLink() {
         return (
           Boolean(imageRequest()) &&
-          typeof window.openai?.callTool === "function" &&
-          typeof window.openai?.getFileDownloadUrl === "function"
+          typeof host.callTool === "function" &&
+          typeof host.getFileDownloadUrl === "function"
         );
       }
 
       function canChooseImage() {
-        return canPreviewByLink() && typeof window.openai?.selectFiles === "function";
+        return canPreviewByLink() && typeof host.selectFiles === "function";
       }
 
       function canUploadImage() {
-        return canPreviewByLink() && typeof window.openai?.uploadFile === "function";
+        return canPreviewByLink() && typeof host.uploadFile === "function";
       }
 
       // The tool output this card is drawing: its own preview if it made one,
       // otherwise the host's.
       function currentOutput() {
-        return retryResult ? retryResult.output : window.openai?.toolOutput;
+        return retryResult ? retryResult.output : host.toolOutput();
       }
 
       // The widget-only half of the same result: preview HTML, image previews.
       function currentMeta() {
-        return (retryResult ? retryResult.meta : window.openai?.toolResponseMetadata) || {};
+        return (retryResult ? retryResult.meta : host.toolMeta()) || {};
       }
 
       // ---- Kept state: reopened conversations -------------------------------
@@ -419,7 +430,7 @@
       let resumed = null;
 
       function readSaved() {
-        const value = window.openai?.widgetState;
+        const value = host.widgetState();
         if (!value || typeof value !== "object" || value.v !== SAVED_STATE_VERSION) return null;
         if (typeof value.draftId !== "string" || !value.draftId) return null;
         return value;
@@ -438,10 +449,10 @@
 
       function keep(patch) {
         saved = { ...(saved || readSaved() || {}), ...patch, v: SAVED_STATE_VERSION };
-        if (typeof window.openai?.setWidgetState !== "function") return;
+        if (typeof host.setWidgetState !== "function") return;
         const snapshot = saved;
         Promise.resolve()
-          .then(() => window.openai.setWidgetState(snapshot))
+          .then(() => host.setWidgetState(snapshot))
           .catch(() => {});
       }
 
@@ -487,7 +498,7 @@
         document.getElementById("id-value").textContent = "—";
         document.getElementById("send-button").style.display = "none";
         const canRetry =
-          Boolean(retryRequest()) && typeof window.openai?.callTool === "function";
+          Boolean(retryRequest()) && typeof host.callTool === "function";
         const canChoose = canChooseImage();
         const canUpload = canUploadImage();
         let next = "Otherwise, ask for the preview again in the chat.";
@@ -501,8 +512,10 @@
         document.getElementById("choose-image-button").style.display = canChoose ? "flex" : "none";
         document.getElementById("upload-image-button").style.display = canUpload ? "flex" : "none";
         // A reopened card is empty because the host does not replay results,
-        // not because a call was lost.
-        document.getElementById("empty-hint").style.display = resumed ? "none" : "block";
+        // not because a call was lost. The tip is about ChatGPT's Instant
+        // mode, so no other app shows it (#474).
+        document.getElementById("empty-hint").style.display =
+          resumed || host.kind !== "chatgpt" ? "none" : "block";
         document.getElementById("empty-state").style.display = "block";
       }
 
@@ -532,7 +545,7 @@
           statusPill.textContent = "With the printer";
           return;
         }
-        if (!orderId || typeof window.openai?.callTool !== "function") {
+        if (!orderId || typeof host.callTool !== "function") {
           statusPill.classList.remove("ok", "alert");
           statusPill.textContent = "Checkout started";
           return;
@@ -677,7 +690,7 @@
       async function handleCreatePreview() {
         if (retryBusy || dataLoaded) return;
         const request = retryRequest();
-        if (!request || typeof window.openai?.callTool !== "function") return;
+        if (!request || typeof host.callTool !== "function") return;
         retryBusy = true;
         try {
           await runPreview(
@@ -703,7 +716,7 @@
         // the host's, this call's, or an earlier call's that outlasted its
         // timeout. Any later one is left unused.
         const drawn = Promise.resolve()
-          .then(() => window.openai.callTool(request.tool, request.args))
+          .then(() => host.callTool(request.tool, request.args))
           .then((result) => {
             const output = previewOutput(result);
             if (!output) {
@@ -802,7 +815,7 @@
         let url = null;
         try {
           const result = await waitForHost(flow, buttonText, label, () =>
-            window.openai.getFileDownloadUrl({ fileId }),
+            host.getFileDownloadUrl({ fileId }),
           );
           url = result?.downloadUrl || result?.download_url || null;
         } catch (error) {
@@ -832,7 +845,7 @@
         try {
           let files = null;
           try {
-            files = await waitForHost(flow, buttonText, CHOOSE_LABEL, () => window.openai.selectFiles());
+            files = await waitForHost(flow, buttonText, CHOOSE_LABEL, () => host.selectFiles());
           } catch (error) {
             files = null;
           }
@@ -891,7 +904,7 @@
           let failed = false;
           let failure = null;
           try {
-            const uploaded = await waitForHost(flow, buttonText, UPLOAD_LABEL, () => window.openai.uploadFile(file));
+            const uploaded = await waitForHost(flow, buttonText, UPLOAD_LABEL, () => host.uploadFile(file));
             fileId = uploaded?.fileId || uploaded?.file_id || null;
           } catch (error) {
             failed = true;
@@ -917,7 +930,7 @@
       }
 
       function applyTheme() {
-        const theme = window.openai?.theme ?? "light";
+        const theme = host.theme();
         document.documentElement.classList.toggle("dark", theme === "dark");
       }
 
@@ -1157,11 +1170,11 @@
         // knows, so switching keeps a send from the card and a send from the
         // chat on one draft, which the server sends only once. From the first
         // attempt on, successful or not, the card keeps its own draft.
-        const hostOutput = window.openai?.toolOutput;
+        const hostOutput = host.toolOutput();
         if (retryResult && hostOutput?.draftId !== undefined && !draftActedOn) {
           retryResult = null;
         }
-        const state = retryResult ? retryResult.output : window.openai?.toolOutput;
+        const state = retryResult ? retryResult.output : host.toolOutput();
 
         // Check if we have actual data
         if (!state || state.draftId === undefined) {
@@ -1349,6 +1362,28 @@
           // true means there is nothing left to buy.
           document.getElementById("pack-options").style.display =
             packsBuyable && packOptionsOpen ? "grid" : "none";
+          // An app that takes no purchases (#475) offers neither button
+          // above; the server says so with letterPack.available false and
+          // the website's letter packs page as purchaseUrl (#474).
+          const packsOnWebsite =
+            !effectiveCanSendNow &&
+            letterPack?.available === false &&
+            isHttpsUrl(letterPack?.purchaseUrl) &&
+            typeof host.openLink === "function";
+          document.getElementById("website-packs-button").style.display =
+            packsOnWebsite ? "flex" : "none";
+          // The note describes a checkout this card opens, so it shows only
+          // where there is one to open.
+          const checkoutNote = document.getElementById("checkout-note");
+          if (payAndSendAvailable || packsBuyable) {
+            checkoutNote.textContent = CHECKOUT_NOTE;
+            checkoutNote.style.display = "block";
+          } else if (packsOnWebsite) {
+            checkoutNote.textContent = WEBSITE_PACKS_NOTE;
+            checkoutNote.style.display = "block";
+          } else {
+            checkoutNote.style.display = "none";
+          }
         }
       }
 
@@ -1378,7 +1413,7 @@
           // Call send_letter via OpenAI callTool
           const sendArgs = { draftId: sentDraftId, confirm: true };
           if (anotherCopy) sendArgs.sendAnotherCopy = true;
-          const result = await window.openai.callTool("send_letter", sendArgs);
+          const result = await host.callTool("send_letter", sendArgs);
           // A refused send comes back as an error result, not a rejection.
           if (result?.isError) {
             const duplicate = duplicateDetails(result, null);
@@ -1527,7 +1562,7 @@
 
       async function refreshOrderStatus() {
         const status = toolData(
-          await window.openai.callTool("get_purchase_status", {
+          await host.callTool("get_purchase_status", {
             orderId: trackedOrderId,
           }),
         );
@@ -1541,7 +1576,7 @@
       // point render() has taken over and there is nothing left to wait for.
       async function refreshLetterBalance() {
         const balance = toolData(
-          await window.openai.callTool("get_account_balance", {}),
+          await host.callTool("get_account_balance", {}),
         );
         if (typeof balance.lettersRemaining !== "number") return false;
         refreshedLetters = balance.lettersRemaining;
@@ -1694,7 +1729,7 @@
         try {
           const checkoutArgs = { draftId: currentDraftId };
           if (anotherCopy) checkoutArgs.sendAnotherCopy = true;
-          const raw = await window.openai.callTool("create_mail_checkout", checkoutArgs);
+          const raw = await host.callTool("create_mail_checkout", checkoutArgs);
           if (raw?.isError) {
             const duplicate = duplicateDetails(raw, null);
             if (duplicate) {
@@ -1749,7 +1784,7 @@
           startStatusPolling("Checkout open - waiting for payment");
 
           try {
-            await window.openai.openExternal({ href: result.checkoutUrl });
+            await host.openLink(result.checkoutUrl);
             buttonText.textContent = "Checkout Opened";
           } catch {
             // The host declined to open a tab. Not an error worth showing as
@@ -1787,7 +1822,7 @@
         errorMessage.style.display = "none";
         try {
           const listed = toolData(
-            await window.openai.callTool("list_letter_packs", {}),
+            await host.callTool("list_letter_packs", {}),
           );
           const packs = Array.isArray(listed.packs) ? listed.packs : [];
           if (!packs.length) {
@@ -1841,7 +1876,7 @@
           // expected outcome. A tool call creates the session for the
           // authenticated user, and that whole class of failure goes away.
           const result = toolData(
-            await window.openai.callTool("create_pack_checkout", { pack }),
+            await host.callTool("create_pack_checkout", { pack }),
           );
           if (!result.checkoutUrl) {
             throw new Error(result.message || "Checkout URL was not returned");
@@ -1863,7 +1898,7 @@
           render();
 
           try {
-            await window.openai.openExternal({ href: result.checkoutUrl });
+            await host.openLink(result.checkoutUrl);
           } catch {
             // Nothing to do: the link is already on screen.
           }
@@ -1877,6 +1912,38 @@
         }
       }
 
+      const CHECKOUT_NOTE =
+        "Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.";
+      const WEBSITE_PACKS_NOTE =
+        "Letter packs are sold on the website. Sign in there with the same email you use here - this card updates when you return to this tab, or use Check status.";
+
+      // Where the app takes no purchases (#475), letters are bought on the
+      // website (#474). As with a pack bought here, the balance is the only
+      // thing to watch, so the card waits for the letters the same way, and
+      // each open starts the wait afresh, as each checkout does. It waits even
+      // when the host would not open the page: the address is on the card,
+      // and the person may open it themselves.
+      async function handleWebsitePacks() {
+        const url = currentEligibility?.letterPack?.purchaseUrl;
+        if (!isHttpsUrl(url) || typeof host.openLink !== "function") return;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.style.display = "none";
+        packPurchasePending = true;
+        startStatusPolling();
+        render();
+        let opened = false;
+        try {
+          // A host that declines answers with isError rather than failing.
+          opened = !(await host.openLink(url))?.isError;
+        } catch {
+          opened = false;
+        }
+        if (!opened) {
+          errorMessage.textContent = `The website did not open. Letter packs are at ${url}`;
+          errorMessage.style.display = "block";
+        }
+      }
+
       // Attach click handler
       document
         .getElementById("send-button")
@@ -1887,6 +1954,11 @@
       document
         .getElementById("buy-pack-button")
         .addEventListener("click", handleBuyPack);
+      document
+        .getElementById("website-packs-button")
+        .addEventListener("click", () => {
+          void handleWebsitePacks();
+        });
       document
         .getElementById("retry-button")
         .addEventListener("click", handleCreatePreview);
@@ -1924,7 +1996,7 @@
       render();
 
       // Listen for data updates (per OpenAI docs)
-      window.addEventListener("openai:set_globals", () => {
+      host.onChange(() => {
         render();
       });
     </script>

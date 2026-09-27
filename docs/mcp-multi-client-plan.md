@@ -88,12 +88,14 @@ There are two ways to send, and the AI can complete neither by itself:
 
 ### 4. Cards outside ChatGPT (#474, #475)
 
-- **A bridge in each card.** It uses `window.openai` when present, and otherwise the MCP Apps protocol through `@modelcontextprotocol/ext-apps`.
+- **A bridge in each card.** It uses `window.openai` when present, and otherwise the MCP Apps protocol. It is our own small script (`widgets/shared/host.js`), inlined as each card is served, rather than `@modelcontextprotocol/ext-apps`, which would add 337 KB to every card.
+  - Phase 1 put the getting-started card on it, and phase 2a the letter and postcard preview cards ([ui-widgets.md](ui-widgets.md), Runtime Bridge Notes).
+  - Phase 2b brings a card's state from the server where the app keeps none, and decides card Send in Claude by a live test. Phase 3 is photo upload in Claude.
 - **The card domain** comes from the app's profile.
 - **Fallbacks for ChatGPT-only features:**
   - photo upload goes to the upload-link page;
   - `widgetState` becomes data kept on the server.
-- **Purchases in Claude (#475).** Claude isn't offered the checkout tools. A preview marks Pay & Send and pack buying unavailable, so the cards hide both buttons, and the text gives the link to the website's letter packs page. Two rules decided the design:
+- **Purchases in Claude (#475).** Claude isn't offered the checkout tools. A preview marks Pay & Send and pack buying unavailable, so the cards hide both buttons, and the text gives the link to the website's letter packs page. Claude passes that link on only when asked, so the preview cards carry it as a **Buy letters on the website** button (#474, phase 2a). Two rules decided the design:
   - Claude's Help Center: "Purchases through third-party interactive connectors are not supported."
   - The Connectors Directory takes no connector that executes financial transactions, and every listed tool must return a successful response. So a checkout that only answers "not here" would not pass.
 - **Text results that stand alone.** For apps without cards they carry the draft id, the summary, the cost and how to send.
@@ -167,7 +169,7 @@ Each app gets one CLIENT-xx test in [manual-tests.md](manual-tests.md), with the
   - **Answered 2026-09-26: Claude signs in with them still advertised.** Auth0 drops OIDC scopes for these clients rather than refusing them.
   - So #469 is not needed for Claude (CLIENT-01).
 - Whether our cards render in Claude after the bridge, and in ChatGPT desktop and Codex.
-  - Not yet: Claude could not display the card before the bridge (#474).
+  - **Answered in part 2026-09-26:** the getting-started card draws in Claude on the web (CLIENT-01 step 10). The preview cards are step 11. Desktop and mobile are still to run.
 - Gemini's and Perplexity's callback addresses.
 - Whether ChatGPT honours card-only tools the way its docs say.
   - **Answered 2026-09-26: yes.** Told "Send it.", the model gave the link and never called `send_letter` (SEND-01).
