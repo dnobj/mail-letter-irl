@@ -468,14 +468,20 @@ link as a button.
       (#474).)
 
 10. The getting-started card on the shared bridge (#474, phase 1), once it is deployed to
-    development. Refresh the tool list first.
-- [ ] Ask "How do I get started with Letter IRL?" In Claude on the web the card draws, in Claude's
+    development. Refresh the tool list first. (Run on 2026-09-26 after #494 deployed, e6194ed.)
+- [x] Ask "How do I get started with Letter IRL?" In Claude on the web the card draws, in Claude's
       theme, with the title, the overview, the purchase step and the example prompts. Claude no
-      longer shows "There was a problem displaying content".
+      longer shows "There was a problem displaying content". (Yes: the first Letter IRL card
+      drawn in Claude, dark theme, revision t16, with the letter packs link in the purchase step.
+      The log shows `tools/list` at `widgetTemplateVersion=38`, then `resources/read` of the v38
+      card and `tools/call get_started`, all as `client=claude`. Claude's reply gave the link
+      this time.)
 - [ ] The same on Claude Desktop (Windows) and in the Android app. Claude Desktop on Windows has a
       reported bug that shows remote-connector cards as text only (anthropics/claude-ai-mcp#987).
-- [ ] In ChatGPT (DEV connector, after **Refresh tools**) the getting-started card looks and works
-      as before.
+      (Not run: needs the owner's devices.)
+- [x] In ChatGPT (DEV connector, after **Refresh tools**) the getting-started card looks and works
+      as before. (Yes: revision t16, with ChatGPT's own purchase step. ChatGPT read the v38 cards
+      on the refresh.)
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
