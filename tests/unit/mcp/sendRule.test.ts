@@ -94,6 +94,14 @@ const claude = (scopes = ALL_SCOPES): AuthenticatedUser => ({
   authType: "jwt",
   scopes
 });
+// An app not yet trusted with card-only tools, which gets the link.
+const vscode = (scopes = ALL_SCOPES): AuthenticatedUser => ({
+  userId: "auth0|user",
+  claims: { azp: "https://vscode.dev/oauth/client-metadata.json" },
+  token: "t",
+  authType: "jwt",
+  scopes
+});
 // Read and draft, what migration 037 gives every personal access token.
 const pat: AuthenticatedUser = {
   userId: "auth0|user",
@@ -174,16 +182,24 @@ describe("the send rule in the MCP server (#470)", () => {
   describe("with the rule on", () => {
     beforeEach(() => vi.stubEnv("LETTER_IRL_SEND_CONFIRMATION_ENABLED", "true"));
 
-    it("still sends from ChatGPT, whose card is the only caller that can reach the tool", async () => {
-      const { callbacks, execute } = await register(chatgpt());
-      const result = await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
-      expect(execute).toHaveBeenCalledTimes(1);
-      expect(execute).toHaveBeenCalledWith(expect.objectContaining({ toolName: "send_letter" }));
-      expect(result.structuredContent).toMatchObject({ orderId: "order-1" });
+    // ChatGPT, and Claude since CLIENT-01 step 11 (#474): each keeps card-only
+    // tools from its model, so the card is the only caller that can reach one.
+    it.each([
+      ["ChatGPT", chatgpt()],
+      ["Claude", claude()]
+    ])("still sends from %s, whose card is the only caller that can reach the tool", async (_label, authInfo) => {
+      for (const tool of ["send_letter", "send_postcard"]) {
+        const { callbacks, execute } = await register(authInfo);
+        const result = await callbacks.get(tool)!({ draftId: DRAFT_ID, confirm: true }, {});
+        expect(execute).toHaveBeenCalledTimes(1);
+        expect(execute).toHaveBeenCalledWith(expect.objectContaining({ toolName: tool }));
+        expect(result.structuredContent).toMatchObject({ orderId: "order-1" });
+      }
+      expect(writeSpy).not.toHaveBeenCalledWith("info", "send.link_instead", expect.anything());
     });
 
     it.each([
-      ["Claude", claude(), "claude"],
+      ["VS Code", vscode(), "vscode"],
       ["a personal access token", pat, "token"]
     ])("answers %s with the link where the person sends, and sends nothing", async (_label, authInfo, app) => {
       for (const tool of ["send_letter", "send_postcard"]) {
@@ -227,19 +243,14 @@ describe("the send rule in the MCP server (#470)", () => {
     });
 
     it("reads the card flag for a send and the purchase flag for Pay & Send", async () => {
-      // Claude once its cards work (#474): it keeps card-only tools from its
-      // model, but may never take a purchase (#475).
-      profileOverride.value = { name: "claude", rendersCards: true, honorsCardOnlyTools: true, inAppPurchases: false };
-      try {
-        const { callbacks, execute } = await register(claude());
-        await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
-        expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ toolName: "send_letter" }));
-        const checkout = await callbacks.get(PAY_AND_SEND_TOOL)!({ draftId: DRAFT_ID }, {});
-        expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ toolName: "request_send" }));
-        expect(checkout.content[0].text).toContain(LINK.confirmationUrl);
-      } finally {
-        profileOverride.value = null;
-      }
+      // Claude (#474): it keeps card-only tools from its model, but may never
+      // take a purchase (#475).
+      const { callbacks, execute } = await register(claude());
+      await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
+      expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ toolName: "send_letter" }));
+      const checkout = await callbacks.get(PAY_AND_SEND_TOOL)!({ draftId: DRAFT_ID }, {});
+      expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ toolName: "request_send" }));
+      expect(checkout.content[0].text).toContain(LINK.confirmationUrl);
     });
 
     it("answers Pay & Send with the link where purchases are allowed but no card shows the preview", async () => {
@@ -262,7 +273,7 @@ describe("the send rule in the MCP server (#470)", () => {
 
     it("refuses an erased account before any link", async () => {
       vi.mocked(prepareAuthenticatedUser).mockRejectedValueOnce(new AccountErasedError());
-      const { callbacks, execute } = await register(claude());
+      const { callbacks, execute } = await register(vscode());
       const result = await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
       expect(execute).not.toHaveBeenCalled();
       expect(result.isError).toBe(true);
@@ -270,9 +281,9 @@ describe("the send rule in the MCP server (#470)", () => {
     });
 
     it("logs which app was sent to the link", async () => {
-      const { callbacks } = await register(claude());
+      const { callbacks } = await register(vscode());
       await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
-      expect(writeSpy).toHaveBeenCalledWith("info", "send.link_instead", { client: "claude", mailType: "letter" });
+      expect(writeSpy).toHaveBeenCalledWith("info", "send.link_instead", { client: "vscode", mailType: "letter" });
     });
 
     it("tells a personal access token it cannot buy letters, with no OAuth challenge", async () => {
@@ -283,14 +294,14 @@ describe("the send rule in the MCP server (#470)", () => {
     });
 
     it("gives a token that can draft but not send the link, not a scope error", async () => {
-      const { callbacks, execute } = await register(claude(["mail:read", "mail:draft"]));
+      const { callbacks, execute } = await register(vscode(["mail:read", "mail:draft"]));
       const result = await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
       expect(execute).toHaveBeenCalledWith(expect.objectContaining({ toolName: "request_send" }));
       expect(result.content[0].text).toMatch(/^Not sent:/);
     });
 
     it("asks a token that cannot draft for the link's own scope", async () => {
-      const { callbacks, execute } = await register(claude(["mail:read"]));
+      const { callbacks, execute } = await register(vscode(["mail:read"]));
       const result = await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
       expect(execute).not.toHaveBeenCalled();
       expect(result.isError).toBe(true);
@@ -298,8 +309,11 @@ describe("the send rule in the MCP server (#470)", () => {
       expect(JSON.stringify(result)).not.toContain("mail:send");
     });
 
-    it("keeps the send scope for ChatGPT, which really sends", async () => {
-      const { callbacks, execute } = await register(chatgpt(["mail:read", "mail:draft"]));
+    it.each([
+      ["ChatGPT", chatgpt(["mail:read", "mail:draft"])],
+      ["Claude", claude(["mail:read", "mail:draft"])]
+    ])("keeps the send scope for %s, which really sends", async (_label, authInfo) => {
+      const { callbacks, execute } = await register(authInfo);
       const result = await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
       expect(execute).not.toHaveBeenCalled();
       expect(JSON.stringify(result)).toContain("mail:send");
@@ -328,15 +342,18 @@ describe("the send rule in the MCP server (#470)", () => {
     });
 
     it("tells the model how the person sends, with the draft id, after every preview", async () => {
-      const { callbacks } = await register(claude());
+      const { callbacks } = await register(vscode());
       const preview = await callbacks.get("quote_and_preview_letter")!({}, {});
       expect(preview.content[0].text.endsWith(` ${howToSendText(DRAFT_ID, false)}`)).toBe(true);
       expect(preview.content[0].text).toContain(`call request_send with draftId ${DRAFT_ID}`);
       expect(preview.content[0].text).not.toContain("preview card");
     });
 
-    it("points ChatGPT at the card's Send button, and at the link only if the card is missing", async () => {
-      const { callbacks } = await register(chatgpt());
+    it.each([
+      ["ChatGPT", chatgpt()],
+      ["Claude", claude()]
+    ])("points %s at the card's Send button, and at the link only if the card is missing", async (_label, authInfo) => {
+      const { callbacks } = await register(authInfo);
       const preview = await callbacks.get("quote_and_preview_letter")!({}, {});
       expect(preview.content[0].text.endsWith(` ${howToSendText(DRAFT_ID, true)}`)).toBe(true);
       expect(preview.content[0].text).toContain("Send on the preview card");

@@ -36,15 +36,18 @@ send. The model can't, in any app. There are three ways to send:
 **Where the rule is enforced.** Hiding a tool is the app's side of the rule. The
 server enforces its own side by the calling app's profile
 (`src/auth/clientProfiles.ts`, #473):
-- **Apps that honour card-only tools** (today only ChatGPT): a send tool call
-  sends as before.
+- **Apps that honour card-only tools** (ChatGPT, and Claude since CLIENT-01
+  step 11 showed its model does not have them, #474): a send tool call sends as
+  before.
 - **Every other caller:** a personal access token, an app with no card, or an
   app we do not know. A send tool call, and a Pay & Send call from an app that
   may not take a purchase:
   - sends nothing;
   - is authorized as `request_send` is, so a read-and-draft token gets the link
     and not a scope error;
-  - answers with an error result carrying the link.
+  - answers with an error result carrying the link. A preview card that gets
+    this answer to its own Send offers the page in place of Send
+    ([ui-widgets.md](ui-widgets.md)).
 
 **Model-facing text.** While the rule is on:
 - every preview's text ends with how the person sends it, including the draft

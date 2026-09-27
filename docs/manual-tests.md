@@ -542,6 +542,24 @@ link as a button.
 Seen on the way: once **Check status** and the message were showing, the letter card in Claude
 scrolled inside its frame; Claude did not grow the frame to fit.
 
+12. Send from the card in Claude (#474, phase 2b), once it is deployed to development. Refresh the
+    tool list first; the log should show `tools/list` at `steeringRev=14` and
+    `widgetTemplateVersion=40`. This sends real mail to PostGrid's test mode and spends a letter or
+    a gift letter.
+- [ ] Preview a letter on an account that can send it. The card says **Ready to send**, revision
+      t27, and Claude's reply points to the card's Send button rather than to a link.
+- [ ] Press **Send** on the card. The card shows **With the printer** and the order id. The
+      development log shows `tools/call send_letter` as `client=claude`, and no
+      `send.link_instead`.
+- [ ] Preview another letter and tell Claude "Send it." Claude does not send it: it points to the
+      card's Send button, or calls `request_send` and gives the link. The log shows no `send_letter`
+      call.
+- [ ] In ChatGPT (DEV connector, after **Refresh tools**) both preview cards look and work as
+      before, revision t27.
+
+The card's **Open the confirmation page** state now shows only in an app not trusted with
+card-only tools, such as VS Code (CLIENT-03); unit tests cover it until that app's card test.
+
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
 **Status:** Steps 1 to 3 run in development on 2026-09-26 (Claude Code 2.1.282, Windows).

@@ -155,6 +155,16 @@
         <button class="send-button" id="send-button" disabled>
           <span id="send-button-text">Send Letter</span>
         </button>
+        <button
+          class="send-button"
+          id="send-page-button"
+          style="display: none"
+        >
+          Open the confirmation page
+        </button>
+        <div class="note" id="send-page-note" style="display: none">
+          Not sent: in this app, mail is sent from Letter IRL's confirmation page. Open it, check the letter, and press Send there.
+        </div>
         <div
           class="purchase-actions"
           id="purchase-actions"
@@ -197,7 +207,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t26</p>
+      <p class="rev">letter t27</p>
     </div>
 
     <!-- letter-irl:host -->
@@ -630,6 +640,57 @@
       // Set once the person has been told about the earlier copy. From then
       // on, this card's send or checkout asks for another copy.
       let anotherCopy = false;
+
+      // An app not yet trusted with card-only tools gets a link instead of a
+      // send (#470, src/auth/clientProfiles.ts): the server answers this
+      // card's Send as it answers the model there, with the page where the
+      // person checks the mail and sends it. The answer is recognised by its
+      // text, which every host passes back (#412), and the page is the
+      // /confirm/ address in it for this card's own draft.
+      const SEND_BY_LINK_MARKER = "sends mail only when the person sends it";
+      // {url, draftId} once the server has given this card's draft its page.
+      let sendPage = null;
+
+      function sendPageFrom(text, draftId) {
+        if (typeof text !== "string" || !text.includes(SEND_BY_LINK_MARKER)) return null;
+        const match = text.match(/https:\/\/[^\s"'<>\\]+\/confirm\/[A-Za-z0-9_.~%-]+/);
+        if (!match || typeof draftId !== "string") return null;
+        return match[0].endsWith(`/confirm/${encodeURIComponent(draftId)}`) ? match[0] : null;
+      }
+
+      function sendPageShown() {
+        return sendPage !== null && sendPage.draftId === currentDraftId;
+      }
+
+      function showSendPage(url, draftId) {
+        sendPage = { url, draftId };
+        sendInProgress = false;
+        const sendButton = document.getElementById("send-button");
+        sendButton.classList.remove("loading");
+        sendButton.disabled = false;
+        document.getElementById("error-message").style.display = "none";
+        render();
+      }
+
+      async function handleSendPage() {
+        if (!sendPageShown()) return;
+        const url = sendPage.url;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.style.display = "none";
+        let opened = false;
+        if (typeof host.openLink === "function") {
+          try {
+            // A host that declines answers with isError rather than failing.
+            opened = !(await host.openLink(url))?.isError;
+          } catch {
+            opened = false;
+          }
+        }
+        if (!opened) {
+          errorMessage.textContent = `The page did not open. It is at ${url}`;
+          errorMessage.style.display = "block";
+        }
+      }
 
       // The refusal's details, {} when only its text says so, or null.
       function duplicateDetails(result, error) {
@@ -1285,7 +1346,9 @@
         if (cardIsShowingDraft()) {
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
-          if (effectiveCanSendNow) {
+          if (sendPageShown()) {
+            statusPill.textContent = "Send it on the confirmation page";
+          } else if (effectiveCanSendNow) {
             statusPill.classList.add("ok");
             statusPill.textContent = "Ready to send";
           } else if (packPurchasePending) {
@@ -1330,8 +1393,11 @@
         const buyPackButton = document.getElementById("buy-pack-button");
 
         if (!sendInProgress && !checkoutInProgress) {
-          sendButton.style.display = effectiveCanSendNow ? "flex" : "none";
+          const onSendPage = sendPageShown();
+          sendButton.style.display = effectiveCanSendNow && !onSendPage ? "flex" : "none";
           sendButton.disabled = !effectiveCanSendNow;
+          document.getElementById("send-page-button").style.display = onSendPage ? "flex" : "none";
+          document.getElementById("send-page-note").style.display = onSendPage ? "block" : "none";
           sendButtonText.textContent = anotherCopy
             ? ANOTHER_COPY_SEND_LABEL
             : isGiftSend ? "Send Gift Letter" : "Send Letter";
@@ -1421,6 +1487,8 @@
               showDuplicate(duplicate, "send");
               return;
             }
+            // Thrown with its text, where the catch below also finds the
+            // confirmation page's address (#470).
             throw new Error(resultText(result) || "The letter was not sent.");
           }
 
@@ -1460,6 +1528,14 @@
           const duplicate = duplicateDetails(null, error);
           if (duplicate) {
             showDuplicate(duplicate, "send");
+            return;
+          }
+          // An error result arrives here with its text, and a host's
+          // rejection with its message. Not readableError: that keeps only
+          // the first sentence, and the page's address is in the second.
+          const page = sendPageFrom(String(error?.message ?? ""), sentDraftId);
+          if (page) {
+            showSendPage(page, sentDraftId);
             return;
           }
           // Show error message
@@ -1948,6 +2024,11 @@
       document
         .getElementById("send-button")
         .addEventListener("click", handleSend);
+      document
+        .getElementById("send-page-button")
+        .addEventListener("click", () => {
+          void handleSendPage();
+        });
       document
         .getElementById("pay-send-button")
         .addEventListener("click", handlePayAndSend);

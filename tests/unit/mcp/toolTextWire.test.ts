@@ -26,7 +26,8 @@ import { getStartedTool } from "../../../src/tools/getStarted.js";
 
 const APPS = {
   chatgpt: "https://chatgpt.com/oauth/abc/client.json",
-  claude: "https://claude.ai/oauth/mcp-oauth-client-metadata"
+  claude: "https://claude.ai/oauth/mcp-oauth-client-metadata",
+  vscode: "https://vscode.dev/oauth/client-metadata.json"
 } as const;
 
 async function connect(app: keyof typeof APPS) {
@@ -127,14 +128,23 @@ describe("tool text on the wire (#484)", () => {
     const chatgptText = (fromChatgpt.content as Array<{ text: string }>)[0].text;
     expect(chatgptText).toContain("getting-started card is displayed above");
 
+    // Claude shows the card too (#474), which carries the letter packs link.
     const claude = await connect("claude");
     const fromClaude = await claude.client.callTool({ name: "get_started", arguments: {} });
     expect(claude.execute).toHaveBeenCalledWith(
       expect.objectContaining({ toolName: "get_started", client: clientProfileNamed("claude") })
     );
-    const claudeText = (fromClaude.content as Array<{ text: string }>)[0].text;
-    expect(claudeText).toContain("https://website.example/dashboard/letter-packs");
-    expect(claudeText).toContain("Things to try:");
-    expect(claudeText).not.toMatch(/\bcard\b|right here/);
+    expect((fromClaude.content as Array<{ text: string }>)[0].text).toBe(chatgptText);
+    expect(fromClaude.structuredContent).toMatchObject({
+      purchaseStep: expect.stringContaining("https://website.example/dashboard/letter-packs")
+    });
+
+    // An app with no card gets the guide as text.
+    const vscode = await connect("vscode");
+    const fromVscode = await vscode.client.callTool({ name: "get_started", arguments: {} });
+    const vscodeText = (fromVscode.content as Array<{ text: string }>)[0].text;
+    expect(vscodeText).toContain("https://website.example/dashboard/letter-packs");
+    expect(vscodeText).toContain("Things to try:");
+    expect(vscodeText).not.toMatch(/\bcard\b|right here/);
   });
 });

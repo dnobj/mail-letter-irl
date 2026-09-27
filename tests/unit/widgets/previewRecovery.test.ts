@@ -2618,3 +2618,134 @@ describe.each([LETTER, POSTCARD])('$file where the app takes no purchases (#474)
     expect(harness.visible('purchase-actions')).toBe(false);
   });
 });
+
+/** The server's answer to a send from an app not trusted with card-only tools (#470). */
+function sendByLinkText(draftId: string, noun: string): string {
+  return (
+    'Not sent: Letter IRL sends mail only when the person sends it. ' +
+    `Ask the person to open https://letterirl.com/confirm/${draftId} to check the ${noun} to Sam Rivera and send it themselves. ` +
+    'Nothing is sent until they press Send there. The link works until 2026-09-28T15:00:00.000Z.'
+  );
+}
+
+describe.each([LETTER, POSTCARD])('$file when the app sends from the confirmation page (#470, #474)', spec => {
+  const PAGE = 'https://letterirl.com/confirm/draft_host_0001';
+  const answered = (text: string) => () => ({ isError: true, content: [{ type: 'text', text }] });
+
+  const sentByLink = async (options: MountOptions = {}) => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001'),
+      sendResponse: answered(sendByLinkText('draft_host_0001', spec.noun)),
+      ...options
+    });
+    await flush();
+    await harness.click('send-button');
+    return harness;
+  };
+
+  it('offers the page in place of Send, and never says the send failed', async () => {
+    const harness = await sentByLink();
+
+    expect(harness.callsTo(spec.sendTool)).toHaveLength(1);
+    expect(harness.visible('send-button')).toBe(false);
+    expect(harness.visible('send-page-button')).toBe(true);
+    expect(harness.text('send-page-button')).toBe('Open the confirmation page');
+    expect(harness.visible('send-page-note')).toBe(true);
+    expect(harness.text('send-page-note')).toContain(`check the ${spec.noun}, and press Send there`);
+    expect(harness.text('status-pill')).toBe('Send it on the confirmation page');
+    expect(harness.visible('error-message')).toBe(false);
+  });
+
+  it('opens the page for its own draft', async () => {
+    const harness = await sentByLink();
+
+    await harness.click('send-page-button');
+
+    expect(harness.externalCalls).toEqual([{ href: PAGE }]);
+    expect(harness.visible('error-message')).toBe(false);
+    // Opening the page sends nothing.
+    expect(harness.callsTo(spec.sendTool)).toHaveLength(1);
+  });
+
+  it('shows the address when the host does not open the page', async () => {
+    const harness = await sentByLink({
+      openExternal: () => {
+        throw new Error('blocked');
+      }
+    });
+
+    await harness.click('send-page-button');
+
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('error-message')).toBe(`The page did not open. It is at ${PAGE}`);
+    expect(harness.visible('send-page-button')).toBe(true);
+  });
+
+  it('recognises the answer inside a host rejection too', async () => {
+    const wrapped = new Error(
+      'Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: ' +
+        `[TextContent(type='text', text='${sendByLinkText('draft_host_0001', spec.noun)}', annotations=None, meta=None)]`
+    );
+    const harness = await sentByLink({
+      sendResponse: () => {
+        throw wrapped;
+      }
+    });
+
+    expect(harness.visible('send-page-button')).toBe(true);
+    expect(harness.text('status-pill')).toBe('Send it on the confirmation page');
+    expect(harness.visible('error-message')).toBe(false);
+  });
+
+  it('keeps the page through a re-render, and drops it for another draft', async () => {
+    const harness = await sentByLink();
+
+    await harness.fireGlobals();
+    expect(harness.visible('send-page-button')).toBe(true);
+    expect(harness.visible('send-button')).toBe(false);
+
+    await harness.deliverHostResult(spec.output('draft_host_0002'));
+    expect(harness.visible('send-page-button')).toBe(false);
+    expect(harness.visible('send-page-note')).toBe(false);
+    expect(harness.visible('send-button')).toBe(true);
+    expect(harness.text('status-pill')).toBe('Ready to send');
+  });
+
+  it('treats a link for another draft as a failure, not a page to open', async () => {
+    const harness = await sentByLink({
+      sendResponse: answered(sendByLinkText('draft_other_9999', spec.noun))
+    });
+
+    expect(harness.visible('send-page-button')).toBe(false);
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('status-pill')).toBe('Send failed');
+  });
+
+  it('keeps the usual failure for an answer with no page in it', async () => {
+    const harness = await sentByLink({
+      sendResponse: answered('Not sent: Letter IRL sends mail only when the person sends it.')
+    });
+
+    expect(harness.visible('send-page-button')).toBe(false);
+    expect(harness.visible('error-message')).toBe(true);
+  });
+
+  it('keeps the usual failure for another refusal that happens to name the page', async () => {
+    const harness = await sentByLink({
+      sendResponse: answered(`This preview has expired. Make a new one; ${PAGE} no longer works.`)
+    });
+
+    expect(harness.visible('send-page-button')).toBe(false);
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('status-pill')).toBe('Send failed');
+  });
+
+  it('shows the address when the host declines to open the page', async () => {
+    const harness = await sentByLink({ openExternal: () => ({ isError: true }) });
+
+    await harness.click('send-page-button');
+
+    expect(harness.visible('error-message')).toBe(true);
+    expect(harness.text('error-message')).toBe(`The page did not open. It is at ${PAGE}`);
+  });
+});

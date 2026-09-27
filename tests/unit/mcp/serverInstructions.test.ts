@@ -125,13 +125,22 @@ describe('server instructions in an app other than ChatGPT', () => {
     expect(upload).not.toMatch(/ChatGPT|library/);
   });
 
-  it('recover a lost call without naming a card button or a checkout', () => {
-    const lost = line(/returns no result/);
+  it('recover a lost call without naming a card button or a checkout, where no card shows', () => {
+    const lost = buildServerInstructions(false, clientProfileNamed('vscode'))
+      .split('\n')
+      .find(entry => /returns no result/.test(entry));
     expect(lost).toContain('say it did not complete and offer to try again.');
     expect(lost).not.toMatch(/\bcard\b|Create my preview|checkout/);
-    // The claims the line exists to tie down, less the checkout Claude is not
-    // offered (#475).
+    // The claims the line exists to tie down, less the checkout this app is
+    // not offered (#475).
     expect(lost).toMatch(/preview exists only when the preview tool's result includes a draftId\./);
+    expect(lost).toMatch(/Never describe a draft or order you did not receive/);
+  });
+
+  it("name Claude's card button for a lost call, and still no checkout (#474)", () => {
+    const lost = line(/returns no result/);
+    expect(lost).toContain('the preview card offers a Create my preview button, or offer to try again.');
+    expect(lost).not.toMatch(/checkout/);
     expect(lost).toMatch(/Never describe a draft or order you did not receive/);
   });
 
@@ -140,12 +149,17 @@ describe('server instructions in an app other than ChatGPT', () => {
     expect(off).toBe(
       'If send_letter or send_postcard says the same mail was already sent, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy.'
     );
-    // Under the send rule the page asks about another copy itself, and with
-    // no card in Claude it is the only place that does.
-    const on = buildServerInstructions(true, clientProfileNamed('claude'))
-      .split('\n')
-      .find(entry => /another copy/.test(entry));
-    expect(on).toBe('If the same mail was sent recently, the confirmation page says so and offers another copy itself.');
+    // Under the send rule the card and the page ask about another copy
+    // themselves. Claude shows our card (#474); an app without one has only
+    // the page.
+    const on = (app: 'claude' | 'vscode') =>
+      buildServerInstructions(true, clientProfileNamed(app))
+        .split('\n')
+        .find(entry => /another copy/.test(entry));
+    expect(on('claude')).toBe(
+      'If the same mail was sent recently, the preview card or the confirmation page says so and offers another copy itself.'
+    );
+    expect(on('vscode')).toBe('If the same mail was sent recently, the confirmation page says so and offers another copy itself.');
   });
 
   it('keep the refund line word for word', () => {
