@@ -368,6 +368,7 @@ the getting-started card draws in Claude on the web and still works in ChatGPT. 
 result's `_meta`, and Claude keeps the card-only send tools from its model. Opening the letter
 packs page is still to check in a normal browser. Step 12 ran the same day after #498 deployed
 (1290a83) and passed: the card's Send sends in Claude, and asked to send, Claude points to the card.
+Step 13 ran after #499 deployed (8babf9f) and passed: reopened, the sent card shows it was sent.
 
 Background: Claude connects with its published identity, the document at
 `https://claude.ai/oauth/mcp-oauth-client-metadata`. That document must be imported into each tenant
@@ -574,13 +575,26 @@ card-only tools, such as VS Code (CLIENT-03); unit tests cover it until that app
 13. A reopened conversation in Claude (#474, phase 2b), once `get_draft_status` is deployed to
     development. Refresh the tool list first; the log should show `tools/list` at
     `steeringRev=15` and `widgetTemplateVersion=41`, and the connector page should list **Check a
-    preview** under **App-only tools**.
-- [ ] Open the conversation from step 12 again, or reload it. The card whose letter was sent shows
+    preview** under **App-only tools**. (Run on 2026-09-27 after #499 deployed, 8babf9f. The
+    refresh logged `tools/list` at `steeringRev=15` and `widgetTemplateVersion=41`, and the page
+    listed three app-only tools: **Check a preview**, **Send a letter** and **Send a postcard**.)
+- [x] Open the conversation from step 12 again, or reload it. The card whose letter was sent shows
       the preview with **With the printer**, the order id and the note that it has already been
       sent, and no Send button. The development log shows `tools/call get_draft_status` as
-      `client=claude`.
-- [ ] A card for a preview that was not sent still offers **Send**.
-- [ ] Ask Claude which Letter IRL tools it can call. It does not name `get_draft_status`.
+      `client=claude`. (Yes, at revision t28: Claude read the v41 card for a result made at v40.
+      The card showed order 3a456780-5ce9-4eec-bea4-be3e7cf6c9f8 and "This letter has already been
+      sent. Ask for its status in the chat." The log shows `resources/read` at v41, then one
+      `get_draft_status` per card, as `client=claude`.)
+- [x] A card for a preview that was not sent still offers **Send**. (It stayed as the host gave it,
+      not marked sent. testlirl02 has no letters left, so that card offered **Buy letters on the
+      website** rather than Send.)
+- [x] Ask Claude which Letter IRL tools it can call. It does not name `get_draft_status`. (Claude
+      listed 19 tools without it or the send tools, and named `request_send` as the closest.)
+
+Found on the way: Claude's permission for **Preview a letter** had become **Always allow**, most
+likely from an approval click in step 12 that landed on the wrong button as the prompt moved. It
+was set back to **Needs approval** before this step. Check the connector page after a run that
+clicks Claude's prompts.
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
