@@ -199,6 +199,19 @@ describe('photo uploads through the card (#474)', () => {
       expect(photoUploadsHeld()).toMatchObject({ finishing: 0, starts: 2, bytes: 0 });
     });
 
+    it('still keeps the newer photo when the older one fails its check', async () => {
+      const refused = new Error('Unsupported image format. Please use PNG, JPEG, or WebP.');
+      const releaseFirst = holdTheCheck(async () => {
+        throw refused;
+      });
+      const first = receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 1, data: b64(300, 1) }, NOW);
+      const second = receivePhotoChunk(USER, { uploadId: OTHER_ID, index: 0, total: 1, data: b64(300, 2) }, NOW);
+      releaseFirst();
+      await expect(first).rejects.toBe(refused);
+      await expect(second).resolves.toMatchObject({ uploadId: OTHER_ID, done: true });
+      expect(vi.mocked(storeUploadedPhoto).mock.calls.map(([, photo]) => (photo as Buffer)[0])).toEqual([2]);
+    });
+
     it('counts a photo being kept against the memory budget, even once a newer upload takes its place', async () => {
       const release = holdTheCheck(async () => ({ width: 2400, height: 1600, format: 'jpeg' }));
       const first = receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 1, data: b64(300, 1) }, NOW);
