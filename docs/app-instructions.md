@@ -75,7 +75,9 @@ ChatGPT's would be false there. The app's profile (`src/auth/clientProfiles.ts`)
 - **Image generation.** Claude and Claude Code are not offered `generate_image_for_mail` (#467). The
   Connectors Directory does not accept a connector that generates images through AI models, and
   the owner turned it off there on 2026-09-26. Their instructions say Letter IRL makes no images
-  in that app, and their balance leaves out image generations. Every other app still has it.
+  in that app, and their balance leaves out image generations. Every other app still has it,
+  until `LETTER_IRL_IMAGE_GEN_MODE=off` switches the feature off everywhere: then no app is offered
+  the tool, ChatGPT is sent to its own image generation, and no purchase grants image generations.
 - **Instructions.** Four lines differ; `buildServerInstructions` builds them per app.
   - An app without ChatGPT's own image generation is told that `generate_image_for_mail` is the way
     to make an image. It hears nothing about `image_gen` or ChatGPT's library. Claude is told

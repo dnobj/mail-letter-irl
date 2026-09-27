@@ -46,6 +46,7 @@ import {
   Logger
 } from "./contracts/types.js";
 import { callingApp, type ClientProfile } from "./auth/clientProfiles.js";
+import { offersImageGeneration } from "./config/imageGeneration.js";
 import { createLogger } from "./logging/index.js";
 import { carriedDiagnosticClass, classifyDiagnosticError } from "./utils/diagnosticLog.js";
 
@@ -125,9 +126,10 @@ export const IN_APP_PURCHASE_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Letter IRL's AI image generation: listed only where the app allows it
- * (offersImageGeneration). Anthropic's Connectors Directory takes no connector
- * that generates images through AI models, so Claude is not offered it (#467).
+ * Letter IRL's AI image generation: listed only where the app allows it and
+ * the switch is not off (offersImageGeneration, src/config/imageGeneration.ts).
+ * Anthropic's Connectors Directory takes no connector that generates images
+ * through AI models, so Claude is never offered it (#467).
  */
 export const IMAGE_GENERATION_TOOLS: ReadonlySet<string> = new Set(["generate_image_for_mail"]);
 
@@ -272,7 +274,7 @@ export class LetterIrlServer {
     return tools
       .filter((tool) => sendRule || tool.name !== REQUEST_SEND_TOOL)
       .filter((tool) => client.inAppPurchases || !IN_APP_PURCHASE_TOOLS.has(tool.name))
-      .filter((tool) => client.offersImageGeneration || !IMAGE_GENERATION_TOOLS.has(tool.name))
+      .filter((tool) => offersImageGeneration(client) || !IMAGE_GENERATION_TOOLS.has(tool.name))
       .map((tool) => ({
         name: tool.name,
         title: tool.title,

@@ -193,6 +193,19 @@ describe("get_account_balance: where to buy letters", () => {
     expect(mockGetGenerationQuota).not.toHaveBeenCalled();
   });
 
+  it("reports no image generations anywhere while the image switch is off", async () => {
+    vi.stubEnv("LETTER_IRL_IMAGE_GEN_MODE", "off");
+    mockGetGenerationQuota.mockResolvedValue({ used: 1, allowance: 3, remaining: 2 });
+
+    for (const app of ["chatgpt", "codex", null] as const) {
+      const result = await getAccountBalanceTool.handler({} as any, inApp(app));
+      expect(result.imageGenerationsRemaining, String(app)).toBeUndefined();
+      expect(result.imageGenerationsAllowance, String(app)).toBeUndefined();
+      expect(JSON.stringify(result), String(app)).not.toMatch(/generation/i);
+    }
+    expect(mockGetGenerationQuota).not.toHaveBeenCalled();
+  });
+
   it("says nothing about buying while letters remain", async () => {
     const result = await getAccountBalanceTool.handler({} as any, inApp("claude"));
 

@@ -736,10 +736,14 @@ Env: `OPENAI_API_KEY` (absence degrades to the redirect card - never
 boot-fails), `OPENAI_IMAGE_MODEL`/`OPENAI_IMAGE_QUALITY` (cost dials),
 `LETTER_IRL_IMAGE_STARTER_CREDITS` (default 3, one-time per user),
 `LETTER_IRL_IMAGE_DAILY_CEILING` (default 200; **0 is a kill switch that
-blocks all generation**), `LETTER_IRL_IMAGE_GEN_MODE` (`on` | `off` |
-`mobile_only`, default `on` - the product switch for whether @Letter IRL
-requests may generate server-side at all; `mobile_only` limits spend to the
-surface where built-in generation is genuinely unavailable). Redirect responses
+blocks all generation**), `LETTER_IRL_IMAGE_GEN_MODE` (`on` | `mobile_only` |
+`redirect` | `off`, default `on` - the product switch; `mobile_only` limits
+spend to the surface where built-in generation is genuinely unavailable;
+`redirect` never generates but keeps the tool and its redirect card; `off`
+removes the feature: no app is offered the tool, no purchase grants image
+generations, and nothing reports how many are left. Set `on` again, or
+remove the variable, and redeploy to bring it back; see
+`src/config/imageGeneration.ts`). Redirect responses
 are surface-aware on every path: confirmed desktop gets a "handoff" card
 (the model generates in the same turn when built-in generation is present;
 on mention-scoped turns it tells the user a bare "go ahead" reply

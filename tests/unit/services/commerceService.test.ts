@@ -735,6 +735,114 @@ describe('commerceService', () => {
     expect([String(ordered[0]?.[0]), ordered[0]?.[1]]).toEqual([ACCOUNT_LOCK_SQL, ['user-1']]);
   });
 
+  /**
+   * Image generations come with purchases, except while image generation is
+   * switched off (LETTER_IRL_IMAGE_GEN_MODE=off, src/config/imageGeneration.ts):
+   * then no path grants any, so nobody is handed generations they cannot use.
+   * Four paths grant: pack fulfilment, pack repair, Pay & Send fulfilment and
+   * its maintenance recovery.
+   */
+  describe('image generations with a purchase, and the image switch', () => {
+    // The suite's beforeEach stubs its own variables again for every test.
+    afterEach(() => vi.unstubAllEnvs());
+
+    const pendingPackOrder = {
+      ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4',
+      credits: 4, amount_cents: 500, draft_id: undefined, status: 'checkout_pending'
+    };
+
+    function packWebhook() {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+        if (sql.includes('SELECT * FROM orders')) return { rows: [pendingPackOrder] };
+        return { rows: [] };
+      });
+      return processStripeWebhookEvent(checkoutEvent({ amount_total: 500 }) as any);
+    }
+
+    function payAndSendWebhook() {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+        if (sql.includes('SELECT * FROM orders')) return { rows: [baseOrder] };
+        return { rows: [] };
+      });
+      return processStripeWebhookEvent(checkoutEvent());
+    }
+
+    function repairPack() {
+      const packOrder = {
+        ...baseOrder, order_id: 'pack-order', order_type: 'letter_pack', draft_id: undefined,
+        status: 'fulfilled', credits: 4, amount_cents: 500, currency: 'usd',
+        product_code: 'credit-pack-4', stripe_checkout_session_id: 'cs-pack'
+      };
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes("order_type = 'letter_pack'")) return { rows: [packOrder] };
+        return { rows: [] };
+      });
+      return repairFulfilledPackGrant({
+        orderId: 'pack-order', stripeSessionId: 'cs-pack', expectedCredits: 4,
+        paidAmountCents: 500, paidCurrency: 'usd'
+      });
+    }
+
+    function recoverPayAndSend() {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+          return { rows: [{ ...baseOrder, status: 'paid' }] };
+        }
+        return { rows: [] };
+      });
+      return fulfillPaidOrder('order-1');
+    }
+
+    it('grants a pack its image generations while the switch is on', async () => {
+      await expect(packWebhook()).resolves.toMatchObject({ status: 'fulfilled' });
+      expect(mocks.grantEntitlement).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ sourceType: 'letter_pack', sourceReferenceId: 'order-1', quantity: 10 })
+      );
+    });
+
+    it('grants a pack its letters and no image generations while the switch is off', async () => {
+      vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', 'off');
+      await expect(packWebhook()).resolves.toMatchObject({ status: 'fulfilled' });
+      expect(mocks.addCredits).toHaveBeenCalledTimes(1);
+      expect(mocks.grantEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('still grants under redirect, which only stops generating', async () => {
+      vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', 'redirect');
+      await expect(packWebhook()).resolves.toMatchObject({ status: 'fulfilled' });
+      expect(mocks.grantEntitlement).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends a Pay & Send letter and grants no image generations while the switch is off', async () => {
+      vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', 'off');
+      await expect(payAndSendWebhook()).resolves.toMatchObject({ status: 'fulfillment_pending' });
+      expect(mocks.createMail).toHaveBeenCalledTimes(1);
+      expect(mocks.grantEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('repairs a pack without image generations while the switch is off', async () => {
+      vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', 'off');
+      await expect(repairPack()).resolves.toBe('repaired');
+      expect(mocks.addCredits).toHaveBeenCalledTimes(1);
+      expect(mocks.grantEntitlement).not.toHaveBeenCalled();
+    });
+
+    it('recovers a paid Pay & Send order with image generations only while the switch is on', async () => {
+      await expect(recoverPayAndSend()).resolves.toBe(true);
+      expect(mocks.grantEntitlement).toHaveBeenCalledTimes(1);
+
+      mocks.grantEntitlement.mockClear();
+      mocks.createMail.mockClear();
+      vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', 'off');
+      await expect(recoverPayAndSend()).resolves.toBe(true);
+      expect(mocks.createMail).toHaveBeenCalledTimes(1);
+      expect(mocks.grantEntitlement).not.toHaveBeenCalled();
+    });
+  });
+
   it('adopts a paid legacy session from the product table, whatever the catalog says', async () => {
     // Adoption of already-paid money must not depend on the current state of
     // a Stripe lookup: terminal-classed blips stranded paying customers as

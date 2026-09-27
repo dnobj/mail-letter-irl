@@ -47,5 +47,8 @@
  * r12: no AI image generation in Claude (#467): Claude and Claude Code are not
  *     offered generate_image_for_mail, and their instructions say Letter IRL
  *     makes no images there.
+ * r13: the image switch (LETTER_IRL_IMAGE_GEN_MODE=off) hides
+ *     generate_image_for_mail from every app. ChatGPT is then told to use its
+ *     own image generation, and the other apps that Letter IRL makes no images.
  */
-export const STEERING_COPY_REV = 12;
+export const STEERING_COPY_REV = 13;

@@ -43,6 +43,7 @@ import {
 } from "../services/imageGenerationLimitService.js";
 import { isTempImageStoreConfigured, storeImage } from "../services/tempImageStore.js";
 import { callingApp } from "../auth/clientProfiles.js";
+import { imageGenMode } from "../config/imageGeneration.js";
 
 interface GenerateImageForMailInput {
   prompt?: string;
@@ -63,18 +64,6 @@ interface GenerateImageForMailOutput {
 
 const PREVIEW_CONFIG = { maxWidth: 400, jpegQuality: 60 } as const;
 
-type ImageGenMode = "on" | "off" | "mobile_only";
-
-function imageGenMode(): ImageGenMode {
-  // Owner-facing product switch, separate from the spend kill switch
-  // (LETTER_IRL_IMAGE_DAILY_CEILING=0): "off" turns the tool into the pure
-  // redirect-card experience everywhere; "mobile_only" generates only where
-  // the mention-scoped toolset makes it irreplaceable (isMobile detection is
-  // log-verified: desktop web reports false, the native app true). Unknown
-  // surfaces count as NOT mobile, failing closed toward the free path.
-  const raw = (process.env.LETTER_IRL_IMAGE_GEN_MODE ?? "on").toLowerCase();
-  return raw === "off" || raw === "mobile_only" ? (raw as ImageGenMode) : "on";
-}
 
 function dailyCeiling(): number {
   // 0 is a KILL SWITCH (block all generation), not "disabled" - an operator
@@ -258,8 +247,16 @@ async function handler(
     );
   }
 
+  // The owner's switch (src/config/imageGeneration.ts), separate from the
+  // spend kill switch (LETTER_IRL_IMAGE_DAILY_CEILING=0). "redirect" hands
+  // back the card everywhere; "mobile_only" generates only where the
+  // mention-scoped toolset makes it irreplaceable (isMobile is log-verified:
+  // desktop web reports false, the native app true), and unknown surfaces
+  // count as not mobile, failing closed toward the free path. Under "off" no
+  // app is offered this tool, so a call that arrives anyway, from a stale
+  // tool list, gets the card too.
   const mode = imageGenMode();
-  if (mode === "off" || (mode === "mobile_only" && context.isMobile !== true)) {
+  if (mode === "off" || mode === "redirect" || (mode === "mobile_only" && context.isMobile !== true)) {
     context.logger.info(
       {
         correlationId: context.correlationId,
@@ -272,7 +269,7 @@ async function handler(
     return redirectOutput(
       input,
       context,
-      mode === "off" ? "generation_disabled" : "generation_mobile_only",
+      mode === "mobile_only" ? "generation_mobile_only" : "generation_disabled",
       routes
         ? "Letter IRL routed this to ChatGPT's built-in generation for this request."
         : "Letter IRL is not making images here right now."

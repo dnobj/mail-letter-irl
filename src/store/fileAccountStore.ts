@@ -2,6 +2,7 @@ import { UserAccount, OrderRecord, LetterStatus } from "../contracts/types.js";
 import { query } from "../db/index.js";
 import { getBalance } from "../services/creditService.js";
 import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
+import { isImageGenerationOff } from "../config/imageGeneration.js";
 import {
   classifyDiagnosticError,
   writeDiagnostic
@@ -168,16 +169,19 @@ export class FileAccountStore {
       });
     }
 
-    // Fetch image generation quota
+    // Fetch image generation quota, unless image generation is switched off
+    // (src/config/imageGeneration.ts): then there is nothing to count.
     let imageGenerationsRemaining: number | undefined;
-    try {
-      const quota = await getGenerationQuota(userId);
-      imageGenerationsRemaining = quota.remaining;
-    } catch (error) {
-      // User not found or other error — leave undefined
-      writeDiagnostic("warn", "account.image_quota_lookup_failed", {
-        errorClass: classifyDiagnosticError(error, "database_error")
-      });
+    if (!isImageGenerationOff()) {
+      try {
+        const quota = await getGenerationQuota(userId);
+        imageGenerationsRemaining = quota.remaining;
+      } catch (error) {
+        // User not found or other error — leave undefined
+        writeDiagnostic("warn", "account.image_quota_lookup_failed", {
+          errorClass: classifyDiagnosticError(error, "database_error")
+        });
+      }
     }
 
     // Fetch orders from database
