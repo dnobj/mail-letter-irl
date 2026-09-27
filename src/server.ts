@@ -35,9 +35,12 @@ import {
   confirmUploadedImageTool,
   // A link where the person sends a preview themselves (#470)
   requestSendTool,
-  getDraftStatusTool
+  getDraftStatusTool,
+  uploadPhotoChunkTool
 } from "./tools/index.js";
 import { REQUEST_SEND_TOOL } from "./tools/requestSend.js";
+import { UPLOAD_PHOTO_CHUNK_TOOL } from "./tools/uploadPhotoChunk.js";
+import { isCardUploadEnabled } from "./config/cardUpload.js";
 import { isSendConfirmationEnabled } from "./config/sendConfirmation.js";
 import {
   McpToolDefinition,
@@ -81,6 +84,9 @@ const tools: McpToolDefinition<any, any>[] = [
   // The preview card's question, in a host that keeps no state for it (#474):
   // was this draft sent, or has it expired? Card-only.
   getDraftStatusTool,
+  // The upload card's way to send a photo in an app with no file store
+  // (#474, phase 3). Card-only, and listed only while its switch is on.
+  uploadPhotoChunkTool,
   // Image-intent router: must stay inside the exposed set so @-mention
   // generate requests land on it instead of a capability narration.
   generateImageForMailTool,
@@ -275,8 +281,10 @@ export class LetterIrlServer {
     // reaches it: a send tool answers an app without our card with its link
     // (src/mcp/registerTools.ts).
     const sendRule = isSendConfirmationEnabled();
+    const cardUpload = isCardUploadEnabled();
     return tools
       .filter((tool) => sendRule || tool.name !== REQUEST_SEND_TOOL)
+      .filter((tool) => cardUpload || tool.name !== UPLOAD_PHOTO_CHUNK_TOOL)
       .filter((tool) => client.inAppPurchases || !IN_APP_PURCHASE_TOOLS.has(tool.name))
       .filter((tool) => offersImageGeneration(client) || !IMAGE_GENERATION_TOOLS.has(tool.name))
       .map((tool) => ({

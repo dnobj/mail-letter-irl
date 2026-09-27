@@ -1,6 +1,6 @@
 /** Restart-safe temporary image storage backed by a private S3-compatible bucket. */
 
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -11,6 +11,24 @@ import {
 
 const TTL_MS = 15 * 60 * 1000;
 const OBJECT_PREFIX = 'temp-images/';
+/**
+ * Photos people upload through our card (#474, phase 3). One per account,
+ * under a key made from the account, so a new upload replaces the last one.
+ * GET /api/temp-image/:token reads OBJECT_PREFIX only, so nothing here is
+ * ever served by URL; the preview tools read an account's own photo directly
+ * (src/services/imageService.ts). Kept as long as the temporary images: long
+ * enough to make the preview, which keeps its own copy.
+ */
+const UPLOADED_PHOTO_PREFIX = 'uploaded-photos/';
+export const UPLOADED_PHOTO_TTL_MS = TTL_MS;
+
+/**
+ * What an account's recent upload records for a photo it sent through our
+ * card: not an address anyone can fetch, but a reference the image service
+ * resolves to the CALLER's own photo (src/services/imageService.ts). A model
+ * that passes it as imageUrl reaches only its own person's photo.
+ */
+export const UPLOADED_PHOTO_REFERENCE = 'letterirl-upload:latest';
 
 interface StoredImage {
   base64Data: string;
@@ -154,38 +172,122 @@ export async function cleanupExpiredImages(): Promise<number> {
   const now = Date.now();
   if (storageMode() === 'memory') {
     let deleted = 0;
-    for (const [token, entry] of memoryStore) {
-      if (entry.expiresAt <= now) {
-        memoryStore.delete(token);
-        deleted += 1;
+    for (const store of [memoryStore, uploadedPhotoMemory]) {
+      for (const [key, entry] of store) {
+        if (entry.expiresAt <= now) {
+          store.delete(key);
+          deleted += 1;
+        }
       }
     }
     return deleted;
   }
 
   const config = bucketConfig()!;
-  let continuationToken: string | undefined;
   let deleted = 0;
-  do {
-    const listed = await client(config).send(
-      new ListObjectsV2Command({
-        Bucket: config.bucket,
-        Prefix: OBJECT_PREFIX,
-        ContinuationToken: continuationToken,
-      })
-    );
-    for (const object of listed.Contents || []) {
-      if (!object.Key || !object.LastModified) continue;
-      if (object.LastModified.getTime() + TTL_MS > now) continue;
-      await client(config).send(
-        new DeleteObjectCommand({ Bucket: config.bucket, Key: object.Key })
+  for (const prefix of [OBJECT_PREFIX, UPLOADED_PHOTO_PREFIX]) {
+    let continuationToken: string | undefined;
+    do {
+      const listed = await client(config).send(
+        new ListObjectsV2Command({
+          Bucket: config.bucket,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+        })
       );
-      deleted += 1;
-    }
-    continuationToken = listed.NextContinuationToken;
-  } while (continuationToken);
+      for (const object of listed.Contents || []) {
+        if (!object.Key || !object.LastModified) continue;
+        if (object.LastModified.getTime() + TTL_MS > now) continue;
+        await client(config).send(
+          new DeleteObjectCommand({ Bucket: config.bucket, Key: object.Key })
+        );
+        deleted += 1;
+      }
+      continuationToken = listed.NextContinuationToken;
+    } while (continuationToken);
+  }
 
   return deleted;
+}
+
+// ---------------------------------------------------------------------------
+// Uploaded photos (#474, phase 3): one per account, never served by URL.
+// ---------------------------------------------------------------------------
+
+const uploadedPhotoMemory = new Map<string, StoredImage>();
+
+function uploadedPhotoKey(userId: string): string {
+  // The account id is not a safe object key (auth0|..., google-oauth2|...),
+  // and the key should not name the account. A digest is both.
+  return `${UPLOADED_PHOTO_PREFIX}${createHash('sha256').update(userId).digest('hex').slice(0, 32)}`;
+}
+
+/** Keep an account's photo, replacing the one it held. */
+export async function storeUploadedPhoto(userId: string, bytes: Buffer, contentType: string): Promise<void> {
+  const expiresAt = Date.now() + UPLOADED_PHOTO_TTL_MS;
+  const key = uploadedPhotoKey(userId);
+
+  if (storageMode() === 'memory') {
+    uploadedPhotoMemory.set(key, { base64Data: bytes.toString('base64'), expiresAt });
+    return;
+  }
+
+  const config = bucketConfig()!;
+  await client(config).send(
+    new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: key,
+      Body: bytes,
+      ContentType: contentType,
+      CacheControl: 'private, no-store',
+      Metadata: { expiresat: String(expiresAt) },
+    })
+  );
+}
+
+/** An account's photo while it lasts, or null. */
+export async function getUploadedPhoto(userId: string): Promise<Buffer | null> {
+  const key = uploadedPhotoKey(userId);
+
+  if (storageMode() === 'memory') {
+    const entry = uploadedPhotoMemory.get(key);
+    if (!entry) return null;
+    if (entry.expiresAt <= Date.now()) {
+      uploadedPhotoMemory.delete(key);
+      return null;
+    }
+    return Buffer.from(entry.base64Data, 'base64');
+  }
+
+  const config = bucketConfig()!;
+  try {
+    const response = await client(config).send(new GetObjectCommand({ Bucket: config.bucket, Key: key }));
+    const expiresAt = Number.parseInt(response.Metadata?.expiresat || '', 10);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+      await client(config).send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+      return null;
+    }
+    if (!response.Body) return null;
+    return Buffer.from(await response.Body.transformToByteArray());
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw error;
+  }
+}
+
+/** Forget an account's photo, if it holds one. */
+export async function deleteUploadedPhoto(userId: string): Promise<void> {
+  const key = uploadedPhotoKey(userId);
+  if (storageMode() === 'memory') {
+    uploadedPhotoMemory.delete(key);
+    return;
+  }
+  const config = bucketConfig()!;
+  try {
+    await client(config).send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
 }
 
 export function getStoreSize(): number {

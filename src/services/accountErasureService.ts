@@ -11,6 +11,8 @@ import {
   SETTLED_JOB_STATUSES,
   SETTLED_ORDER_STATUSES
 } from './retentionService.js';
+import { deleteUploadedPhoto } from './tempImageStore.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 /**
  * Account erasure (#289, docs/account-erasure.md).
@@ -587,6 +589,14 @@ export async function handleAccountErasure(client: SqlClient, payload: unknown):
     userId !== null ? await eraseAccountWithClient(client, userId) : { outcome: 'not_found' };
   switch (outcome.outcome) {
     case 'erased':
+      // The photo the account last uploaded through our card (#474) is in the
+      // image store, not the database. It expires within 15 minutes anyway,
+      // so a failure here is logged and does not hold up the erasure.
+      await deleteUploadedPhoto(userId!).catch((error: unknown) => {
+        writeDiagnostic('error', 'account_erasure.uploaded_photo_delete_failed', {
+          errorClass: classifyDiagnosticError(error)
+        });
+      });
       return { outcome: 'done', result: { ...outcome.counts }, diagnostic: { alreadyErased: false } };
     case 'already_erased':
       return { outcome: 'done', result: { alreadyErased: true }, diagnostic: { alreadyErased: true } };

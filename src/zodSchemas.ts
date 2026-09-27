@@ -198,6 +198,14 @@ export const requestSendInputZ = z.object({
   draftId: z.string().describe("The draftId from a letter or postcard preview")
 });
 
+export const uploadPhotoChunkInputZ = z.object({
+  uploadId: z.string().describe("The card's id for this upload, a UUID"),
+  index: z.number().int().min(0).describe("This chunk's place, from 0"),
+  total: z.number().int().min(1).max(24).describe("How many chunks the photo has"),
+  data: z.string().max(512 * 1024).describe("This chunk of the photo, base64"),
+  context: z.enum(["postcard", "header_image", "inline_image"]).optional()
+});
+
 export const getDraftStatusInputZ = z.object({
   draftId: z.string().describe("The draftId from a letter or postcard preview")
 });
@@ -554,6 +562,15 @@ export const sendPostcardOutputZ = z.object({
   suggestSaveReturnAddress: z.boolean().optional()
 });
 
+export const uploadPhotoChunkOutputZ = z.object({
+  uploadId: z.string(),
+  received: z.number().int(),
+  total: z.number().int(),
+  done: z.boolean(),
+  width: z.number().int().optional(),
+  height: z.number().int().optional()
+});
+
 export const getDraftStatusOutputZ = z.object({
   draftId: z.string(),
   status: z.enum(["ready", "sent", "expired", "not_found"]),
@@ -594,7 +611,8 @@ export const uploadImageOutputZ = z.object({
   maxSizeMB: z.number(),
   context: z.string(),
   debugEnabled: z.boolean(),
-  debugEndpoint: z.string().optional()
+  debugEndpoint: z.string().optional(),
+  cardUploadAvailable: z.boolean().optional()
 });
 
 export const generateImageForMailOutputZ = z.object({

@@ -18,6 +18,7 @@ the owner's decision on #289 (2026-09-23).
 | Drafts (emptied instead when an order refers to one) | Orders, ledger lots and transactions, with their descriptions cleared |
 | Retention copies of letters and drafts | Disputes and refunds |
 | Personal access tokens, the upload link and feature requests | Gift letters, and gift codes another account redeemed |
+| The photo uploaded through the card, from the image store (#474) | |
 | Gift codes nobody has redeemed, so a card already in the post stops working | The admin audit trail, kept two years as the privacy policy says |
 | The address a seed code was claimed with | |
 
@@ -107,6 +108,11 @@ the gate is not retried: an open dispute can take months, and the operator queue
   address, because the tombstone no longer holds it.
 - **The upload link may linger briefly.** The API process can hold it in memory for up to six hours.
   Nothing can reach it, since every request from the account is refused.
+- **An uploaded photo is deleted with the erasure, but not by the database.** It lives in the image
+  store, so the delete cannot be part of the transaction: it runs once the account's rows are
+  scrubbed, before the commit. If it fails, the erasure still completes and logs
+  `account_erasure.uploaded_photo_delete_failed`; the photo expires within 15 minutes anyway. An
+  upload still in progress is only in the API process's memory, and is dropped within ten minutes.
 
 ## Reopening an account by hand
 

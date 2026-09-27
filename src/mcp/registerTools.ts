@@ -33,6 +33,7 @@ import {
   sendPostcardInputZ,
   requestSendInputZ,
   getDraftStatusInputZ,
+  uploadPhotoChunkInputZ,
   submitFeatureRequestInputZ,
   getStartedInputZ,
   uploadImageInputZ,
@@ -56,6 +57,7 @@ import {
   sendPostcardOutputZ,
   requestSendOutputZ,
   getDraftStatusOutputZ,
+  uploadPhotoChunkOutputZ,
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
   uploadImageOutputZ,
@@ -89,6 +91,7 @@ import {
 } from "../auth/clientProfiles.js";
 import { inlineHostBridge } from "./widgetHost.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
+import { uploadsThroughCard } from "../config/cardUpload.js";
 import {
   REQUEST_SEND_TOOL,
   SendConfirmationRefusedError,
@@ -160,6 +163,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'send_postcard',         // Draft consumption makes retries safe
     'create_mail_checkout',  // Reuses the active checkout for a draft
     'redeem_promo_code',     // A spent code is refused, so repeats do nothing
+    'upload_photo_chunk',    // A chunk sent again changes nothing (#474)
     'set_return_address',    // Setting same address twice = no change
     'clear_return_address',  // Clearing twice = no additional effect
     'confirm_uploaded_image' // Repeating the same relay overwrites with the same value
@@ -457,11 +461,12 @@ export const PAY_AND_SEND_TOOL = "create_mail_checkout";
 
 /**
  * Tools only a card asks, whatever the send rule: get_draft_status answers
- * the preview card about its own draft (#474), and the model has no use for
- * it. Unlike a send it needs no person to press anything, so it is only
+ * the preview card about its own draft (#474), and upload_photo_chunk takes
+ * the upload card's photo (#474, phase 3). The model has no use for either.
+ * Unlike a send they need no person to press anything, so they are only
  * hidden from the model.
  */
-export const APP_ONLY_TOOLS: ReadonlySet<string> = new Set(["get_draft_status"]);
+export const APP_ONLY_TOOLS: ReadonlySet<string> = new Set(["get_draft_status", "upload_photo_chunk"]);
 
 export function buildToolMeta(
   toolName: string,
@@ -778,6 +783,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   send_postcard: sendPostcardInputZ,
   request_send: requestSendInputZ,
   get_draft_status: getDraftStatusInputZ,
+  upload_photo_chunk: uploadPhotoChunkInputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestInputZ,
   get_started: getStartedInputZ,
@@ -812,6 +818,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   send_postcard: sendPostcardOutputZ,
   request_send: requestSendOutputZ,
   get_draft_status: getDraftStatusOutputZ,
+  upload_photo_chunk: uploadPhotoChunkOutputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestOutputZ,
   get_started: getStartedOutputZ,
@@ -1299,6 +1306,10 @@ export function summarizeToolResult(
     }
     case "request_send":
       return sendLinkText(result as unknown as RequestSendOutput);
+    case "upload_photo_chunk":
+      // Card-only: a model sees this only in an app that shows card-only
+      // tools to it.
+      return result.done ? "The photo is uploaded." : "Part of the photo is uploaded.";
     case "get_draft_status": {
       // Card-only: a model sees this only in an app that shows card-only
       // tools to it, and then it is a plain fact.
@@ -1402,6 +1413,14 @@ export function summarizeToolResult(
       );
     }
     case "upload_image": {
+      // Where the card sends the photo itself there is no imageUrl (#474).
+      if (result.cardUploadAvailable === true && uploadsThroughCard(client)) {
+        return (
+          "The upload card is showing. Once the person has uploaded their photo, the card asks for the preview in " +
+          "the conversation. Then call the preview tool with no image and no imageUrl: Letter IRL uses the photo " +
+          "they just uploaded."
+        );
+      }
       const message = result.message as string;
       return message || "Photo picker ready. Waiting for user to select a photo.";
     }

@@ -707,6 +707,31 @@ export const sendPostcardInputSchema: JsonSchema = {
   }
 };
 
+export const uploadPhotoChunkInputSchema: JsonSchema = {
+  type: "object",
+  required: ["uploadId", "index", "total", "data"],
+  properties: {
+    uploadId: { type: "string", description: "The card's id for this upload, a UUID" },
+    index: { type: "integer", minimum: 0, description: "This chunk's place, from 0" },
+    total: { type: "integer", minimum: 1, maximum: 24, description: "How many chunks the photo has" },
+    data: { type: "string", maxLength: 524288, description: "This chunk of the photo, base64" },
+    context: { type: "string", enum: ["postcard", "header_image", "inline_image"] }
+  }
+};
+
+export const uploadPhotoChunkOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["uploadId", "received", "total", "done"],
+  properties: {
+    uploadId: { type: "string" },
+    received: { type: "integer" },
+    total: { type: "integer" },
+    done: { type: "boolean" },
+    width: { type: "integer" },
+    height: { type: "integer" }
+  }
+};
+
 export const getDraftStatusInputSchema: JsonSchema = {
   type: "object",
   required: ["draftId"],
@@ -902,6 +927,10 @@ export const uploadImageOutputSchema: JsonSchema = {
     debugEndpoint: {
       type: "string",
       description: "Optional absolute URL for debug beacon ingestion"
+    },
+    cardUploadAvailable: {
+      type: "boolean",
+      description: "True when the card may send the photo itself, in an app with no file store (#474)"
     }
   }
 };

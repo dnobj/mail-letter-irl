@@ -25,6 +25,15 @@ Images reach a preview tool in one of these ways, in the order the server instru
    `recent_uploads`, so the next preview can use it even if the model drops the URL. That link is
    readable for at most six hours and deleted 24 hours after the last upload (#282).
 
+   In an app with no file store for cards (Claude), the card sends the photo itself, while
+   `LETTER_IRL_CARD_UPLOAD_ENABLED` is on (#474, phase 3). It shrinks the photo to a JPEG of at most
+   2400 px, sends it in chunks through the card-only `upload_photo_chunk`, and then asks for the
+   preview in the conversation. The server keeps the photo privately as the account's one uploaded
+   photo for 15 minutes and records `letterirl-upload:latest` as its recent upload. The image service
+   resolves that reference only to the photo of the account the preview is for, straight from the
+   store, with no fetch. After 15 minutes the preview says the upload has expired and asks for it
+   again. See [tool-apis.md](tool-apis.md) for the limits.
+
    A request whose `image` names a picture the server cannot open is stricter (#414). Such a
    request carries a string other than `""` (a sandbox path such as `/mnt/data/photo.png`, or a mobile
    placeholder such as `chat_upload://image_0`) or a file object without a download address. It uses a

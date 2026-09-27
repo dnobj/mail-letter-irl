@@ -56,5 +56,11 @@
  * r15: get_draft_status (#474), the preview card's card-only question about
  *     its draft. Its description reaches only a model in an app that shows
  *     card-only tools to it.
+ * r16: photo upload through the card (#474, phase 3). While
+ *     LETTER_IRL_CARD_UPLOAD_ENABLED is on, the card-only upload_photo_chunk
+ *     is listed, and in an app whose card sends the photo itself (Claude) the
+ *     instructions offer upload_image for an image not at a link, and they,
+ *     upload_image's description and its result say to call the preview with
+ *     no image once the card asks for it.
  */
-export const STEERING_COPY_REV = 15;
+export const STEERING_COPY_REV = 16;

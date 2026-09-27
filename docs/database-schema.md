@@ -566,7 +566,9 @@ panel's image recovery page lists those and the resolve command settles them wit
 
 The most recent uploaded image per user (one row per `user_id`), kept so a widget that lost its
 in-memory state can recover the image it was about to send. The URL is a capability URL and is
-treated as one (#282):
+treated as one (#282). For a photo uploaded through the card in an app with no file store (#474),
+`image_url` is instead the reference `letterirl-upload:latest`, which the image service resolves
+only to that account's own photo in the image store ([tool-apis.md](tool-apis.md)).
 
 - A read returns the row for at most `LETTER_IRL_RECENT_UPLOAD_TTL_MS`. The default is one hour,
   the cap in code is six hours, and an unreadable value falls back to one hour.

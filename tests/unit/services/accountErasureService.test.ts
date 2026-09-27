@@ -11,6 +11,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({ transaction: vi.fn(), query: vi.fn() }));
 vi.mock("../../../src/db/index.js", () => db);
+// The photo an account uploaded through our card lives in the image store (#474).
+const store = vi.hoisted(() => ({ deleteUploadedPhoto: vi.fn(async (_userId: string) => undefined) }));
+vi.mock("../../../src/services/tempImageStore.js", () => store);
 
 import {
   MAX_ERASURE_ATTEMPTS,
@@ -309,5 +312,30 @@ describe("what a failure costs (#446 review)", () => {
     db.query.mockRejectedValueOnce(new Error("connection terminated"));
 
     await expect(processAccountErasures()).resolves.toEqual({ erased: 0, refused: 0, retrying: 1, failed: 0 });
+  });
+});
+
+describe("the photo an account uploaded through our card (#474)", () => {
+  // A block, not an expression: a function returned from beforeEach is run as its teardown.
+  beforeEach(() => {
+    store.deleteUploadedPhoto.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("is deleted with the account", async () => {
+    scriptedClient({ queue: [OPERATION()] });
+    expect(await processAccountErasures()).toEqual({ erased: 1, refused: 0, retrying: 0, failed: 0 });
+    expect(store.deleteUploadedPhoto).toHaveBeenCalledWith("auth0|gone");
+  });
+
+  it("does not hold up the erasure when it cannot be deleted, since it expires in minutes", async () => {
+    store.deleteUploadedPhoto.mockRejectedValue(new Error("bucket unreachable"));
+    scriptedClient({ queue: [OPERATION()] });
+    expect(await processAccountErasures()).toEqual({ erased: 1, refused: 0, retrying: 0, failed: 0 });
+  });
+
+  it("is left alone when the erasure is refused", async () => {
+    scriptedClient({ queue: [OPERATION()], blockers: { orders_in_flight: 1 } });
+    await processAccountErasures();
+    expect(store.deleteUploadedPhoto).not.toHaveBeenCalled();
   });
 });

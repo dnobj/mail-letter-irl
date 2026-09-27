@@ -2422,6 +2422,10 @@
           "debugEndpoint": {
             "type": "string",
             "description": "Optional absolute URL for debug beacon ingestion"
+          },
+          "cardUploadAvailable": {
+            "type": "boolean",
+            "description": "True when the card may send the photo itself, in an app with no file store (#474)"
           }
         }
       }
