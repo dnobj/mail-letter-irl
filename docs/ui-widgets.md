@@ -1,6 +1,6 @@
 # UI Widgets
 
-**Last Updated:** September 18, 2026
+**Last Updated:** September 26, 2026
 
 Letter IRL registers six OpenAI Apps SDK widgets as MCP resources with `ui://` URIs and `text/html;profile=mcp-app`. Widget template URIs are versioned (`ui://widgets/<name>.html@v<N>` via `src/mcp/widgetUris.ts`) because the native mobile apps cache widget metadata aggressively (issue #235); bump `WIDGET_TEMPLATE_VERSION` on any widget change — a digest-pinning test enforces this — and the legacy unversioned URI stays registered as a transition alias for stale clients. Tool results keep model-facing data in `structuredContent` and send large render payloads, such as preview HTML and compressed letter-image previews, through widget-only `_meta`.
 
@@ -31,9 +31,21 @@ Every card's header shows the website's mark, the logo in its navbar. `scripts/b
 
 ## Runtime Bridge Notes
 
-- Widgets currently use the `window.openai` compatibility bridge, including `toolOutput`, `toolResponseMetadata`, `callTool`, and `sendFollowUpMessage` where needed.
+- **The shared card bridge (#474).** A card marks the spot with `<!-- letter-irl:host -->`, and the server inlines `widgets/shared/host.js` there (`inlineHostBridge`, `src/mcp/widgetHost.ts`). This happens both in `resources/read` and on the `/widgets` debug route. The card then talks only to `window.letterIrlHost`: `theme`, `toolInput`, `toolOutput`, `toolMeta`, `widgetState`/`setWidgetState`, `callTool`, `openLink`, `sendMessage` and `onChange`.
+  - **In ChatGPT** it wraps `window.openai` exactly as the cards always used it.
+  - **Elsewhere** (Claude, VS Code) it speaks MCP Apps (spec 2026-01-26) with the frame's parent:
+    - `ui/initialize`, then `ui/notifications/initialized` after the reply;
+    - the `tool-input`, `tool-result` and `host-context-changed` notifications;
+    - `tools/call`, `ui/open-link` and `ui/message` (content as an array);
+    - `size-changed`, plus answers to `ping` and `ui/resource-teardown`.
+  - **Where MCP Apps has no equivalent:** `widgetState` is empty and saving it does nothing; ChatGPT's file store and `openExternal`'s `redirectUrl` are absent.
+  - **Cards moved so far:** `GetStartedCard` (phase 1). The others still call `window.openai` directly until phase 2.
+- **Card address and copy per app (#474).**
+  - **Card address:** ChatGPT's card resources carry `ui.domain` and `openai/widgetDomain` as the API origin. Every other app gets neither, because Claude refuses to draw a card whose domain is not its own hashed `claudemcpcontent.com` form. With no domain, Claude gives the card an origin per conversation.
+  - **Copy:** where the app is not proven to pass a result's `_meta` to a card (every profile but ChatGPT's, `passesResultMetaToCards`), `get_started`'s card copy also travels in `structuredContent`.
+- Widgets not yet on the bridge use `window.openai` directly, including `toolOutput`, `toolResponseMetadata`, `callTool`, and `sendFollowUpMessage` where needed.
 - A result returned to a widget through `callTool` is visible to that widget only; the model never sees it (#366). On 2026-09-12 the checkout card created a checkout this way and the model could not name the order afterwards. Rule: every widget-initiated action leaves a customer-readable trace on the card (for a checkout, the order id and the purchase outcome), and nothing relies on `sendFollowUpMessage` to inform the model: `docs/learnings/generate-image-removal-decision.md` records that call resolving without posting the message on-device (2026-08-21). The conversation-side fallback is a read-only tool the model can call itself, which is why `list_orders` lists pack purchases (#365).
-- Current OpenAI guidance prefers MCP Apps bridge notifications for new widget work, including tool-result and tool-input notifications. Treat a future bridge migration as a focused widget task, not as part of routine tool changes.
+- ChatGPT implements MCP Apps too, and OpenAI's guidance is to use `window.openai` only for what the shared specification does not cover. For now the bridge keeps ChatGPT on `window.openai`, its proven path. Moving ChatGPT onto MCP Apps would be a separate, deliberate step.
 - Widget resource metadata includes canonical `ui` metadata plus legacy `openai/*` aliases for compatibility. The connector detail panel renders our `ui.csp` back verbatim, which is how we know the canonical key is the one being read (issue #228).
 
 ### Content Security Policy

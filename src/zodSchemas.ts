@@ -568,7 +568,14 @@ export const submitFeatureRequestOutputZ = z.object({
 // Deliberately empty: every field of the getting-started guide is card copy,
 // routed to _meta by partitionToolResult so the model cannot restate it. The
 // model learns what happened from the tool summary instead.
-export const getStartedOutputZ = z.object({});
+export const getStartedOutputZ = z.object({
+  // Empty for ChatGPT, whose card reads the copy from _meta. An app not proven
+  // to pass _meta to a card gets it here as well (#474).
+  title: z.string().optional(),
+  overview: z.string().optional(),
+  purchaseStep: z.string().optional(),
+  examplePrompts: z.array(z.string()).optional()
+});
 
 export const uploadImageOutputZ = z.object({
   status: z.string(),

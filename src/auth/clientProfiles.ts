@@ -5,7 +5,7 @@ import type { AuthenticatedUser } from "./tokenValidator.js";
  * Which app is calling, as a profile (#473).
  *
  * Every app gets the same tools. What differs is what the server can trust
- * about how an app reaches the person, and a profile answers that in four
+ * about how an app reaches the person, and a profile answers that in five
  * flags:
  *
  * - `rendersCards`: our cards (the letter preview, the checkout) show in this
@@ -22,8 +22,18 @@ import type { AuthenticatedUser } from "./tokenValidator.js";
  *   parameters that pass a conversation image to a tool. Our text sends people
  *   there when Letter IRL cannot make an image; elsewhere it asks for an image
  *   of their own instead (#484).
+ * - `passesResultMetaToCards`: the app hands our card the tool result's
+ *   `_meta` (ChatGPT's toolResponseMetadata). Card-only copy travels there
+ *   so the model does not restate it. Elsewhere, where that is unproven, the
+ *   card's small copy also travels in structuredContent (#474).
  *
- * One more flag is a rule rather than trust:
+ * Two more fields are rules rather than trust:
+ *
+ * - `cardDomain`: the card address this app accepts (#474). ChatGPT wants our
+ *   API origin, which must be unique to the plugin. Claude accepts only a
+ *   hashed claudemcpcontent.com host, or none, and refuses to draw a card with
+ *   anything else. So every other app gets none, and its host picks the card's
+ *   origin itself.
  *
  * - `offersImageGeneration`: Letter IRL makes images with AI here
  *   (generate_image_for_mail). Off in Claude and Claude Code: Anthropic's
@@ -31,7 +41,7 @@ import type { AuthenticatedUser } from "./tokenValidator.js";
  *   through AI models (#467), and the owner turned it off there on
  *   2026-09-26. On everywhere else for now.
  *
- * Only ChatGPT is trusted with all four trust flags, because only ChatGPT has
+ * Only ChatGPT is trusted with all five trust flags, because only ChatGPT has
  * been tested with our cards. Every other profile starts at "trust nothing"
  * and a flag is turned on for an app only after a live test proves it, so a
  * wrong guess costs a detour through the confirmation link rather than a
@@ -58,6 +68,8 @@ export interface ClientProfile {
   readonly honorsCardOnlyTools: boolean;
   readonly inAppPurchases: boolean;
   readonly generatesImages: boolean;
+  readonly passesResultMetaToCards: boolean;
+  readonly cardDomain: "origin" | "none";
   readonly offersImageGeneration: boolean;
 }
 
@@ -66,6 +78,8 @@ const TRUSTS_NOTHING = {
   honorsCardOnlyTools: false,
   inAppPurchases: false,
   generatesImages: false,
+  passesResultMetaToCards: false,
+  cardDomain: "none",
   offersImageGeneration: true
 } as const;
 
@@ -79,6 +93,8 @@ const PROFILES: Readonly<Record<ClientProfileName, ClientProfile>> = {
     honorsCardOnlyTools: true,
     inAppPurchases: true,
     generatesImages: true,
+    passesResultMetaToCards: true,
+    cardDomain: "origin",
     offersImageGeneration: true
   },
   // Claude renders MCP Apps cards, but not ours until they speak the MCP Apps

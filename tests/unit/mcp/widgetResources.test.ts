@@ -41,6 +41,7 @@ import {
 import type { z } from 'zod';
 import { createHash } from 'crypto';
 import { widgetTemplateUri, WIDGET_TEMPLATE_VERSION } from '../../../src/mcp/widgetUris.js';
+import { inlineHostBridge } from '../../../src/mcp/widgetHost.js';
 import { LetterIrlServer } from '../../../src/server.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -136,10 +137,14 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
         const content = (await fs.readFile(path.join(widgetDir, `${name}.html`), 'utf-8')).replace(/\r\n/g, '\n');
         parts.push(`${name}:${createHash('sha256').update(content).digest('hex')}`);
       }
+      // The shared bridge is inlined into cards as they are served (#474), so
+      // a change to it changes what every such card sends.
+      const bridge = (await fs.readFile(path.join(widgetDir, 'shared', 'host.js'), 'utf-8')).replace(/\r\n/g, '\n');
+      parts.push(`shared/host.js:${createHash('sha256').update(bridge).digest('hex')}`);
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 37,
-        digest: 'e64f9e5dbba7'
+        version: 38,
+        digest: 'c80484f01b96'
       });
     });
   });
@@ -299,21 +304,23 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
     );
 
+    // Read as served: a card on the shared bridge (#474) reaches window.openai
+    // through widgets/shared/host.js, which the server inlines.
     it.each(WIDGET_DEFINITIONS)(
-      '$name.html should use window.openai.toolOutput',
+      '$name.html should use window.openai.toolOutput, directly or through the bridge',
       async ({ name }) => {
         const filePath = path.join(widgetDir, `${name}.html`);
-        const content = await fs.readFile(filePath, 'utf-8');
+        const content = inlineHostBridge(await fs.readFile(filePath, 'utf-8'), widgetDir);
         expect(content).toContain('window.openai');
         expect(content).toContain('toolOutput');
       }
     );
 
     it.each(WIDGET_DEFINITIONS)(
-      '$name.html should listen for openai:set_globals event',
+      '$name.html should listen for openai:set_globals event, directly or through the bridge',
       async ({ name }) => {
         const filePath = path.join(widgetDir, `${name}.html`);
-        const content = await fs.readFile(filePath, 'utf-8');
+        const content = inlineHostBridge(await fs.readFile(filePath, 'utf-8'), widgetDir);
         expect(content).toContain('openai:set_globals');
       }
     );

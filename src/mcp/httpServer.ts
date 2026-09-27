@@ -15,6 +15,7 @@ import { buildServerInstructions } from "./serverInstructions.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { getOpenIdConfiguration, getProtectedResourceMetadata } from "../auth/metadata.js";
 import { stringifyManifest } from "./manifest.js";
+import { inlineHostBridge } from "./widgetHost.js";
 import {
   AuthenticatedUser,
   validateAuthorizationHeader
@@ -264,7 +265,8 @@ async function serveWidget(
   const safeName = path.basename(widgetName);
   const filePath = path.join(DEFAULT_WIDGET_DIR, safeName);
   try {
-    const file = await fs.readFile(filePath, "utf-8");
+    // With the shared bridge inlined (#474), as resources/read serves it.
+    const file = inlineHostBridge(await fs.readFile(filePath, "utf-8"), DEFAULT_WIDGET_DIR);
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.end(file);

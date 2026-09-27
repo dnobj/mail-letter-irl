@@ -132,6 +132,17 @@ describe("resolveClientProfile (#473)", () => {
   // turned on here must be a decision made after a live test, so this pins it.
   // The fifth flag is a rule, not trust: Letter IRL's own AI image generation
   // is off in Anthropic's apps, whose directory does not accept it (#467).
+  // The card fields (#474): only ChatGPT is proven to hand a card the result's
+  // _meta, and only ChatGPT takes our API origin as the card address; Claude
+  // refuses to draw a card with any domain but its own hashed form.
+  it("hands result _meta to cards, and takes our card address, only in ChatGPT", () => {
+    for (const name of CLIENT_PROFILE_NAMES) {
+      const profile = clientProfileNamed(name);
+      expect(profile.passesResultMetaToCards, name).toBe(name === "chatgpt");
+      expect(profile.cardDomain, name).toBe(name === "chatgpt" ? "origin" : "none");
+    }
+  });
+
   it("trusts only ChatGPT with cards, card-only tools, purchases and its own images", () => {
     const expected: Record<ClientProfileName, [boolean, boolean, boolean, boolean, boolean]> = {
       chatgpt: [true, true, true, true, true],
