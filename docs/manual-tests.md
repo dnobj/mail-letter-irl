@@ -363,8 +363,10 @@ the call JWT-authenticated and successful.
 ran after #489 deployed (d686367). Claude has no checkout tools and offers none, and it gives the
 letter packs link only when asked. Step 9 ran after #491 deployed (45c7287) and passed: Claude has
 no image tool and says Letter IRL can't create images. Step 10 ran after #494 deployed (e6194ed):
-the getting-started card draws in Claude on the web and still works in ChatGPT. Step 11 (the
-preview cards) has not run yet.
+the getting-started card draws in Claude on the web and still works in ChatGPT. Step 11 ran on
+2026-09-27 after #496 deployed (5ee991e): both preview cards draw in Claude on the web from the
+result's `_meta`, and Claude keeps the card-only send tools from its model. Opening the letter
+packs page is still to check in a normal browser.
 
 Background: Claude connects with its published identity, the document at
 `https://claude.ai/oauth/mcp-oauth-client-metadata`. That document must be imported into each tenant
@@ -487,26 +489,58 @@ link as a button.
 
 11. The letter and postcard preview cards on the shared bridge (#474, phase 2a), once they are
     deployed to development. Refresh the tool list first; the log should show `tools/list` at
-    `widgetTemplateVersion=39`.
-- [ ] Ask Claude to preview a short letter to a test address. The letter card draws in Claude's
+    `widgetTemplateVersion=39`. (Run on 2026-09-27 after #496 deployed, 5ee991e. The refresh
+    logged `tools/list` at `steeringRev=13` and `widgetTemplateVersion=39`. testlirl02 has no
+    saved return address, and PostGrid refused made-up addresses, so the previews used the pair
+    under Test Addresses below, with the return address for each preview only.)
+- [x] Ask Claude to preview a short letter to a test address. The letter card draws in Claude's
       theme, revision t26, with the letter's text, both addresses, the cost and the delivery. If
       the text shows only as "Letter preview", Claude did not hand the card the result's `_meta`:
-      record it, because phase 2b then brings the preview from the server.
-- [ ] Preview a postcard with an `https` image link. The front and the back draw, revision t26.
-- [ ] On an account with letters the card shows **Send**. With the send rule on, pressing it shows
+      record it, because phase 2b then brings the preview from the server. (Yes, and Claude does
+      hand the card `_meta`: the card drew "Hello Sam, see you soon." and "Love, Dee", which only
+      the result's `previewHtml` carries. It showed both addresses, the gift card's page, "Free
+      (gift letter)", the delivery line and **Send Gift Letter**, in the dark theme. The log shows
+      `resources/read` at v39, then `tools/call quote_and_preview_letter`, as `client=claude`.)
+- [x] Preview a postcard with an `https` image link. The front and the back draw, revision t26.
+      (Yes: the photo on the front, and on the back the message, both addresses and the gift
+      strip, with **Send Gift Postcard**.)
+- [x] On an account with letters the card shows **Send**. With the send rule on, pressing it shows
       that nothing was sent, with the link to send it from, and the development log shows
-      `send.link_instead` for `client=claude`. Nothing is sent.
+      `send.link_instead` for `client=claude`. Nothing is sent. (Yes, with testlirl02's gift
+      letter. **Send Gift Letter** reached the server as `tools/call send_letter` without a prompt
+      from Claude, and the log shows `send.link_instead client=claude mailType=letter`. The card
+      showed "Send failed" and **Retry Send** over "Not sent: Letter IRL sends mail only when the
+      person sends it…", with the confirmation page's address as plain text. Phase 2b changes
+      this.)
 - [ ] On an account with no letters the card shows **Buy letters on the website** and the note to
       sign in there with the same email, and neither **Pay & Send** nor **Buy a Letter Pack**.
       Pressing it, Claude asks to open the letter packs page. Once it opens, the pill says
       **Waiting for your Letter Pack** and **Check status** appears. Declining shows the page's
-      address on the card.
-- [ ] Ask Claude which Letter IRL tools it can call. Record whether it names **Send a letter** or
+      address on the card. (Partly. testlirl02 has no paid letters, so the letter was previewed
+      again with `sendAsGift` false. The card showed the button and the note, and neither checkout
+      button. Pressing it, Claude asked "Open external link" for the development
+      `/dashboard/letter-packs` page. The pill said **Waiting for your Letter Pack** and **Check
+      status** appeared at once, and the card read the balance with `tools/call
+      get_account_balance` every 4 seconds or so, as `client=claude`. Declining showed "The
+      website did not open. Letter packs are at" with the address. **Open link** did nothing in
+      the Claude app's built-in browser, so the page opening is still to check in a normal
+      browser.)
+- [x] Ask Claude which Letter IRL tools it can call. Record whether it names **Send a letter** or
       **Send a postcard**, which are marked for the card only. This decides phase 2b: if Claude
       keeps them from its model, the card's **Send** can send in Claude as it does in ChatGPT.
-- [ ] In ChatGPT (DEV connector, after **Refresh tools**) both preview cards look and work as
+      (Claude keeps them from its model. Its connector page lists both under **App-only tools**,
+      with no permission setting. Asked, Claude listed 19 tools without them, said they "aren't
+      among the ones" it can call, and named `request_send` as the closest.)
+- [x] In ChatGPT (DEV connector, after **Refresh tools**) both preview cards look and work as
       before, revision t26: a letter preview with **Send**, and on an account with no letters
       **Pay & Send** and **Buy a Letter Pack** with the checkout note, and no website button.
+      (Yes, on testlirl02. The refresh logged `resources/read` at v39 as `client=chatgpt`. With
+      `sendAsGift` false the letter and the postcard cards showed **Pay & Send (USD 4.99)**,
+      **Buy a Letter Pack** and the checkout note, and no website button. A gift preview showed
+      **Send Gift Letter**. Nothing was pressed.)
+
+Seen on the way: once **Check status** and the message were showing, the letter card in Claude
+scrolled inside its frame; Claude did not grow the frame to fit.
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
 

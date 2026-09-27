@@ -169,11 +169,12 @@ Each app gets one CLIENT-xx test in [manual-tests.md](manual-tests.md), with the
   - **Answered 2026-09-26: Claude signs in with them still advertised.** Auth0 drops OIDC scopes for these clients rather than refusing them.
   - So #469 is not needed for Claude (CLIENT-01).
 - Whether our cards render in Claude after the bridge, and in ChatGPT desktop and Codex.
-  - **Answered in part 2026-09-26:** the getting-started card draws in Claude on the web (CLIENT-01 step 10). The preview cards are step 11. Desktop and mobile are still to run.
+  - **Answered in part 2026-09-26:** the getting-started card draws in Claude on the web (CLIENT-01 step 10). Desktop and mobile are still to run.
+  - **2026-09-27:** both preview cards draw in Claude on the web, and Claude hands a card the result's `_meta` (CLIENT-01 step 11).
 - Gemini's and Perplexity's callback addresses.
 - Whether ChatGPT honours card-only tools the way its docs say.
   - **Answered 2026-09-26: yes.** Told "Send it.", the model gave the link and never called `send_letter` (SEND-01).
-  - Claude also lists the send tools as app-only.
+  - Claude also lists the send tools as app-only, and keeps them from its model: asked, it listed its tools without them (CLIENT-01 step 11, 2026-09-27). Its card called `send_letter` without a prompt.
 
 **Auth0's free plan allows 10 applications per tenant.** Development reached the limit with the five imports above, after four unused applications were deleted. Production has the same cap. M6 therefore needs one of these:
 - a paid plan;
