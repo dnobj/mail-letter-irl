@@ -50,5 +50,8 @@
  * r13: the image switch (LETTER_IRL_IMAGE_GEN_MODE=off) hides
  *     generate_image_for_mail from every app. ChatGPT is then told to use its
  *     own image generation, and the other apps that Letter IRL makes no images.
+ * r14: Claude shows our cards (#474): its instructions name the preview card
+ *     and its Create my preview button, its preview text points to the card's
+ *     Send button, and get_started leaves the guide to the card.
  */
-export const STEERING_COPY_REV = 13;
+export const STEERING_COPY_REV = 14;

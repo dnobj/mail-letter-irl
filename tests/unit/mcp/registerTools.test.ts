@@ -503,18 +503,27 @@ describe('OpenAI Apps SDK Submission Compliance', () => {
     it('get_started carries the guide itself where no card shows it (#484)', async () => {
       // Told that a card "is displayed above", the model in an app with no
       // card had nothing to pass on, including where to buy letters.
-      const claude = clientProfileNamed('claude');
-      const output = await getStartedTool.handler({}, { client: claude } as never);
-      const summary = summarizeToolResult('get_started', output as unknown as Record<string, unknown>, claude);
+      const vscode = clientProfileNamed('vscode');
+      const output = await getStartedTool.handler({}, { client: vscode } as never);
+      const summary = summarizeToolResult('get_started', output as unknown as Record<string, unknown>, vscode);
 
       expect(summary).toContain(output.overview);
       expect(summary).toContain(output.purchaseStep);
       for (const prompt of output.examplePrompts) {
         expect(summary).toContain(`"${prompt}"`);
       }
-      // Claude dropped the letter packs link when paraphrasing (#475).
+      // Claude dropped the letter packs link when paraphrasing, before its
+      // card showed it (#475).
       expect(summary).toContain('including any link');
       expect(summary).not.toMatch(/\bcard\b/i);
+    });
+
+    it("get_started points Claude at the card, which carries the letter packs link (#474)", async () => {
+      const claude = clientProfileNamed('claude');
+      const output = await getStartedTool.handler({}, { client: claude } as never);
+      const summary = summarizeToolResult('get_started', output as unknown as Record<string, unknown>, claude);
+      expect(summary).toBe(summarizeToolResult('get_started', output as unknown as Record<string, unknown>, clientProfileNamed('chatgpt')));
+      expect(summary).toMatch(/getting-started card is displayed above/);
     });
 
     it('a summary that names no app is the one for an app with no card', async () => {

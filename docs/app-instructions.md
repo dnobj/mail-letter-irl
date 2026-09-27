@@ -78,11 +78,15 @@ ChatGPT's would be false there. The app's profile (`src/auth/clientProfiles.ts`)
   in that app, and their balance leaves out image generations. Every other app still has it,
   until `LETTER_IRL_IMAGE_GEN_MODE=off` switches the feature off everywhere: then no app is offered
   the tool, ChatGPT is sent to its own image generation, and no purchase grants image generations.
+- **Cards.** Claude shows our cards (#474) and keeps card-only tools from its model, so its profile
+  has `rendersCards` and `honorsCardOnlyTools`: its preview text points to the card's Send button,
+  its instructions name the card, and a send from its card sends. Other apps get the text written
+  for an app with no card.
 - **Instructions.** Four lines differ; `buildServerInstructions` builds them per app.
   - An app without ChatGPT's own image generation is told that `generate_image_for_mail` is the way
     to make an image. It hears nothing about `image_gen` or ChatGPT's library. Claude is told
     instead that Letter IRL makes no images there.
-  - An app that shows no cards is not told about the **Create my preview** button.
+  - An app that shows no cards is not told about the **Create my preview** button; Claude is.
   - An app that takes no purchases hears nothing about a checkout. Its line about the same mail
     twice names only the send tools, or, under the send rule, the confirmation page.
 - **Tool descriptions.** `get_started`, `get_account_balance` and `list_letter_packs` promise a

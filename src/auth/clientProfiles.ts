@@ -41,11 +41,12 @@ import type { AuthenticatedUser } from "./tokenValidator.js";
  *   through AI models (#467), and the owner turned it off there on
  *   2026-09-26. On everywhere else for now.
  *
- * Only ChatGPT is trusted with all five trust flags, because only ChatGPT has
- * been tested with our cards. Every other profile starts at "trust nothing"
- * and a flag is turned on for an app only after a live test proves it, so a
- * wrong guess costs a detour through the confirmation link rather than a
- * letter nobody saw.
+ * Only ChatGPT is trusted with all five trust flags, because it was the first
+ * app tested with our cards. Claude has `rendersCards` and
+ * `honorsCardOnlyTools` since its live tests (CLIENT-01 steps 10 and 11).
+ * Every other profile starts at "trust nothing" and a flag is turned on for
+ * an app only after a live test proves it, so a wrong guess costs a detour
+ * through the confirmation link rather than a letter nobody saw.
  *
  * The flags also choose the words the model reads (#484) and the tools an app
  * is offered (#475): a tool description, a server instruction or a tool
@@ -97,10 +98,14 @@ const PROFILES: Readonly<Record<ClientProfileName, ClientProfile>> = {
     cardDomain: "origin",
     offersImageGeneration: true
   },
-  // Claude renders MCP Apps cards, but not ours until they speak the MCP Apps
-  // bridge (#474), it refuses purchases through connectors (#475), and its
-  // directory takes no connector that generates images with AI (#467).
-  claude: { name: "claude", ...NO_AI_IMAGES },
+  // Claude draws our preview cards on the MCP Apps bridge (#474), and keeps
+  // card-only tools away from its model: its connector page lists them as
+  // app-only and its model does not have them (CLIENT-01 step 11,
+  // 2026-09-27). So a send from Claude is the person pressing Send on our
+  // card. It refuses purchases through connectors (#475), its directory takes
+  // no connector that generates images with AI (#467), and whether its apps
+  // other than the web hand a card `_meta` is not yet tested.
+  claude: { name: "claude", ...NO_AI_IMAGES, rendersCards: true, honorsCardOnlyTools: true },
   claude_code: { name: "claude_code", ...NO_AI_IMAGES },
   codex: { name: "codex", ...TRUSTS_NOTHING },
   vscode: { name: "vscode", ...TRUSTS_NOTHING },
@@ -118,10 +123,13 @@ const PROFILES: Readonly<Record<ClientProfileName, ClientProfile>> = {
  * URL on both tenants. Only documents imported into our tenant can mint a
  * token at all, which is what makes a URL match trustworthy.
  *
- * Expected, not yet observed: these are the URLs each app publishes, and none
- * has been seen in our own log. That costs only a log label while an entry
- * trusts nothing. A trust flag is turned on only for an entry that has been
- * seen in the development log, in that app's live test (#471).
+ * These are the URLs each app publishes. Claude's, Claude Code's, VS Code's
+ * and Hermes's were each seen in the development log in their live tests on
+ * 2026-09-26 (CLIENT-01, 02, 03 and 05). ChatGPT's and Codex's stable
+ * documents have not been seen, for the reason given below. An entry that
+ * trusts nothing costs only a log label if its URL is wrong. A trust flag is
+ * turned on only for an entry that has been seen in the development log, in
+ * that app's live test (#471).
  */
 const CLIENT_DOCUMENTS: ReadonlyMap<string, ClientProfileName> = new Map([
   ["https://claude.ai/oauth/mcp-oauth-client-metadata", "claude"],

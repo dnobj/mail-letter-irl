@@ -143,10 +143,11 @@ describe("resolveClientProfile (#473)", () => {
     }
   });
 
-  it("trusts only ChatGPT with cards, card-only tools, purchases and its own images", () => {
+  it("trusts ChatGPT with cards, card-only tools, purchases and its own images, and Claude with cards and card-only tools", () => {
     const expected: Record<ClientProfileName, [boolean, boolean, boolean, boolean, boolean]> = {
       chatgpt: [true, true, true, true, true],
-      claude: [false, false, false, false, false],
+      // CLIENT-01 steps 10 and 11 (#474).
+      claude: [true, true, false, false, false],
       claude_code: [false, false, false, false, false],
       codex: [false, false, false, false, true],
       vscode: [false, false, false, false, true],

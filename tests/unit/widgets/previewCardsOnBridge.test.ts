@@ -210,6 +210,40 @@ describe.each([LETTER, POSTCARD])('$file in an MCP Apps host (#474)', spec => {
     expect(card.text('status-pill')).not.toBe('With the printer');
   });
 
+  it('offers the confirmation page when the server answers Send with it (#470), and opens it with ui/open-link', async () => {
+    const card = await showing(spec, canSend);
+    const page = 'https://letterirl.com/confirm/draft_0001';
+
+    await card.click('send-button');
+    await card.answer(
+      'tools/call',
+      {
+        result: {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text:
+                'Not sent: Letter IRL sends mail only when the person sends it. ' +
+                `Ask the person to open ${page} to check the mail and send it themselves. Nothing is sent until they press Send there.`
+            }
+          ]
+        }
+      },
+      spec.sendTool
+    );
+
+    expect(card.visible('send-button')).toBe(false);
+    expect(card.visible('send-page-button')).toBe(true);
+    expect(card.visible('error-message')).toBe(false);
+    expect(card.text('status-pill')).toBe('Send it on the confirmation page');
+
+    await card.click('send-page-button');
+    expect(card.lastRequest('ui/open-link')!.params).toEqual({ url: page });
+    await card.answer('ui/open-link', { result: {} });
+    expect(card.visible('error-message')).toBe(false);
+  });
+
   it('opens the letter packs page with ui/open-link, then checks the balance with tools/call', async () => {
     const card = await showing(spec, noLetters);
     expect(card.visible('website-packs-button')).toBe(true);
