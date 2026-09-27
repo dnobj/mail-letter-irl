@@ -560,6 +560,17 @@ scrolled inside its frame; Claude did not grow the frame to fit.
 The card's **Open the confirmation page** state now shows only in an app not trusted with
 card-only tools, such as VS Code (CLIENT-03); unit tests cover it until that app's card test.
 
+13. A reopened conversation in Claude (#474, phase 2b), once `get_draft_status` is deployed to
+    development. Refresh the tool list first; the log should show `tools/list` at
+    `steeringRev=15` and `widgetTemplateVersion=41`, and the connector page should list **Check a
+    preview** under **App-only tools**.
+- [ ] Open the conversation from step 12 again, or reload it. The card whose letter was sent shows
+      the preview with **With the printer**, the order id and the note that it has already been
+      sent, and no Send button. The development log shows `tools/call get_draft_status` as
+      `client=claude`.
+- [ ] A card for a preview that was not sent still offers **Send**.
+- [ ] Ask Claude which Letter IRL tools it can call. It does not name `get_draft_status`.
+
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
 **Status:** Steps 1 to 3 run in development on 2026-09-26 (Claude Code 2.1.282, Windows).

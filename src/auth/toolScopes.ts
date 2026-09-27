@@ -46,7 +46,10 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   // Hands back a link and sends nothing: the person sends from the page, with
   // the website's own token (#470). So it sits with the drafting tools, and a
   // token that can preview can also ask for the link.
-  request_send: "mail:draft"
+  request_send: "mail:draft",
+  // The preview card asks what became of its draft (#474): a read of the
+  // caller's own draft, so it gates on the lightest product scope.
+  get_draft_status: "mail:read"
 };
 
 export function getRequiredToolScopes(toolName: string): ProductScope[] {

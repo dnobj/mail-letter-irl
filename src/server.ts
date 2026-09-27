@@ -34,7 +34,8 @@ import {
   // Confirm uploaded image tool (widget relay)
   confirmUploadedImageTool,
   // A link where the person sends a preview themselves (#470)
-  requestSendTool
+  requestSendTool,
+  getDraftStatusTool
 } from "./tools/index.js";
 import { REQUEST_SEND_TOOL } from "./tools/requestSend.js";
 import { isSendConfirmationEnabled } from "./config/sendConfirmation.js";
@@ -77,6 +78,9 @@ const tools: McpToolDefinition<any, any>[] = [
   // The model's way to send, once the send rule is on (#470): a link where
   // the person sends the preview themselves. Listed only while the rule is on.
   requestSendTool,
+  // The preview card's question, in a host that keeps no state for it (#474):
+  // was this draft sent, or has it expired? Card-only.
+  getDraftStatusTool,
   // Image-intent router: must stay inside the exposed set so @-mention
   // generate requests land on it instead of a capability narration.
   generateImageForMailTool,

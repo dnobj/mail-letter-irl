@@ -207,7 +207,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t27</p>
+      <p class="rev">letter t28</p>
     </div>
 
     <!-- letter-irl:host -->
@@ -660,6 +660,45 @@
 
       function sendPageShown() {
         return sendPage !== null && sendPage.draftId === currentDraftId;
+      }
+
+      // What the server says became of the host's draft (#474), in a host
+      // that keeps no state for this card: MCP Apps has no widgetState, and
+      // Claude hands a reopened card the preview's result again, which would
+      // offer Send for mail that has gone. ChatGPT keeps the card's own state
+      // instead, so the card never asks there. {draftId, status, orderId}
+      // once the draft turns out to be sent or expired.
+      let draftState = null;
+      const draftStateAsked = new Set();
+
+      function askDraftState(draftId) {
+        if (typeof host.setWidgetState === "function") return;
+        if (typeof host.callTool !== "function") return;
+        if (typeof draftId !== "string" || !draftId || draftStateAsked.has(draftId)) return;
+        draftStateAsked.add(draftId);
+        host.callTool("get_draft_status", { draftId }).then(
+          (result) => {
+            const answer = toolData(result);
+            if (answer.draftId !== draftId) return;
+            // Both answers are final: a sent or expired draft never becomes
+            // ready again, so a late one is still true. A send this card is
+            // making or has made keeps the pill and the buttons meanwhile
+            // (cardIsShowingDraft).
+            if (answer.status !== "sent" && answer.status !== "expired") return;
+            draftState = {
+              draftId,
+              status: answer.status,
+              orderId: typeof answer.orderId === "string" ? answer.orderId : null,
+            };
+            render();
+          },
+          // Unanswered, the card shows the preview as the host gave it.
+          () => {},
+        );
+      }
+
+      function settledDraft() {
+        return draftState !== null && draftState.draftId === currentDraftId ? draftState : null;
       }
 
       function showSendPage(url, draftId) {
@@ -1283,6 +1322,8 @@
         // Store draftId for send button
         currentDraftId = draftId;
         currentEligibility = sendEligibility || null;
+        if (!retryResult) askDraftState(draftId);
+        const settled = settledDraft();
         if (typeof draftId === "string" && draftId && saved?.draftId !== draftId) {
           keep({ draftId });
         }
@@ -1346,7 +1387,14 @@
         if (cardIsShowingDraft()) {
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
-          if (sendPageShown()) {
+          if (settled?.status === "sent") {
+            // The words the card uses when its own send succeeds.
+            statusPill.classList.add("ok");
+            statusPill.textContent = "With the printer";
+          } else if (settled?.status === "expired") {
+            statusPill.classList.add("alert");
+            statusPill.textContent = "Preview expired";
+          } else if (sendPageShown()) {
             statusPill.textContent = "Send it on the confirmation page";
           } else if (effectiveCanSendNow) {
             statusPill.classList.add("ok");
@@ -1367,6 +1415,11 @@
         // say different things and neither is long.
         const noteEl = document.getElementById("note");
         const noteParts = [];
+        if (settled?.status === "sent") {
+          noteParts.push("This letter has already been sent. Ask for its status in the chat.");
+        } else if (settled?.status === "expired") {
+          noteParts.push("This preview has expired. Ask for a new one in the chat.");
+        }
         if (isGiftSend && state.giftCard.description) noteParts.push(state.giftCard.description);
         if (savedReturnAddressNote) noteParts.push(savedReturnAddressNote);
         if (noteParts.length > 0) {
@@ -1377,7 +1430,10 @@
         }
 
         // Show Draft ID - same ownership rule as the status pill above.
-        if (cardIsShowingDraft()) {
+        if (cardIsShowingDraft() && settled?.status === "sent") {
+          document.getElementById("id-label").textContent = "Order";
+          document.getElementById("id-value").textContent = settled.orderId || "-";
+        } else if (cardIsShowingDraft()) {
           document.getElementById("id-label").textContent = "Draft";
           document.getElementById("id-value").textContent = draftId || "—";
         }
@@ -1449,6 +1505,15 @@
             checkoutNote.style.display = "block";
           } else {
             checkoutNote.style.display = "none";
+          }
+          // Nothing to press on a draft that was sent or has expired, and an
+          // earlier failure to send it no longer says anything true.
+          if (settled) {
+            sendButton.style.display = "none";
+            purchaseActions.style.display = "none";
+            document.getElementById("send-page-button").style.display = "none";
+            document.getElementById("send-page-note").style.display = "none";
+            document.getElementById("error-message").style.display = "none";
           }
         }
       }

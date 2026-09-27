@@ -1,11 +1,11 @@
 # MCP Tool API Specifications
 
-**Last Updated:** September 23, 2026  
+**Last Updated:** September 27, 2026  
 **Purpose:** Practical reference for the MCP tools exposed by Letter IRL
 
 The runtime MCP registry is the source of truth. The checked-in `manifest.json` is generated from that registry with `npm run manifest:generate`, and submission-facing tests verify that the manifest, widget list, and runtime tool registry stay aligned.
 
-Letter IRL currently exposes **23 tools** and **6 widgets**:
+Letter IRL currently exposes **24 tools** and **6 widgets**, and a 25th, `request_send`, while the send rule is on:
 
 ## Onboarding
 
@@ -23,6 +23,8 @@ omitted, a gift letter is used only when the balance cannot pay. A gift preview 
 - `quote_and_preview_letter_with_header_image`: Create a free draft preview for a letter with a header image at the top. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterHeaderImagePreviewCard.html@v<N>`, which serves the letter card under its own name so the card knows which preview to repeat (#411).
 - `quote_and_preview_letter_with_image`: Create a free draft preview for a letter with an enclosed image after the signature. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterInlineImagePreviewCard.html@v<N>`, the letter card under its own name for the same reason.
 - `send_letter`: Send a letter from a prior draft. Requires `draftId` and `confirm: true`. Idempotent retries with the same draft return the existing order rather than charging twice. The same letter sent, paid for or awaiting payment from the account in the last 24 hours refuses the call unless `sendAnotherCopy: true` is passed, which the model does only after the user asks for another copy ([letter-send-flow.md](letter-send-flow.md#the-same-mail-twice)).
+- `request_send`: Listed only while the send rule is on ([letter-send-flow.md](letter-send-flow.md)). Returns the letterirl.com page where the person checks a previewed draft and sends it themselves. Sends nothing, and is read-only.
+- `get_draft_status`: Card-only: hidden from the model (`ui.visibility: ["app"]`, `openai/visibility: "private"`) and asked by the preview cards in a host that keeps no state for them ([ui-widgets.md](ui-widgets.md)). Says whether a preview's draft is `ready`, `sent` (with its `orderId`), `expired` or `not_found`. Read-only; a draft that is not the caller's reads as `not_found`.
 
 ## Buying Letters and Pay & Send
 

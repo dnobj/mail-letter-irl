@@ -2010,6 +2010,47 @@
       }
     },
     {
+      "name": "get_draft_status",
+      "description": "Used by Letter IRL's preview card: says whether a previewed letter or postcard is still ready to send, has been sent (with its order id), or has expired. It sends nothing and changes nothing.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "draftId"
+        ],
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "description": "The draftId from a letter or postcard preview"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "draftId",
+          "status"
+        ],
+        "properties": {
+          "draftId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "sent",
+              "expired",
+              "not_found"
+            ]
+          },
+          "orderId": {
+            "type": "string",
+            "description": "The order the draft became, once sent"
+          }
+        }
+      }
+    },
+    {
       "name": "generate_image_for_mail",
       "description": "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image generations remaining (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Never refuse an image request - call this tool and follow its response.",
       "inputSchema": {

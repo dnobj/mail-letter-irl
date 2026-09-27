@@ -79,6 +79,17 @@ describe("tool text on the wire (#484)", () => {
     }
   });
 
+  it("lists get_draft_status to every app, for the card only (#474)", async () => {
+    for (const app of ["chatgpt", "claude", "vscode"] as const) {
+      const { client } = await connect(app);
+      const tool = (await client.listTools()).tools.find((entry) => entry.name === "get_draft_status");
+      expect(tool, app).toBeDefined();
+      expect((tool!._meta as Record<string, any>).ui.visibility, app).toEqual(["app"]);
+      expect((tool!._meta as Record<string, any>)["openai/visibility"], app).toBe("private");
+      expect(tool!.annotations?.readOnlyHint, app).toBe(true);
+    }
+  });
+
   it("offers the checkouts to ChatGPT and not to Claude (#475)", async () => {
     const names = async (app: keyof typeof APPS) => {
       const { client } = await connect(app);

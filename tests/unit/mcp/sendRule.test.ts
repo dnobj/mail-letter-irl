@@ -384,6 +384,15 @@ describe("the send rule in the MCP server (#470)", () => {
     expect(sendLinkText({ ...LINK, recipientSummary: { name: "", city: "", state: "" } } as any)).toContain("to check the letter and send");
   });
 
+  it("hides get_draft_status from the model whatever the rule, and asks for no person (#474)", () => {
+    for (const sendRule of [false, true]) {
+      const meta = buildToolMeta("get_draft_status", {}, true, sendRule);
+      expect(meta["openai/visibility"], String(sendRule)).toBe("private");
+      expect((meta.ui as Record<string, unknown>).visibility, String(sendRule)).toEqual(["app"]);
+      expect(meta["anthropic/requiresUserInteraction"], String(sendRule)).toBeUndefined();
+    }
+  });
+
   it("builds the card-only metadata only for the send tools, only with the rule on", () => {
     expect(buildToolMeta("send_letter", {}, true, false)["openai/visibility"]).toBeUndefined();
     expect(buildToolMeta("send_letter", {}, true, true)["openai/visibility"]).toBe("private");

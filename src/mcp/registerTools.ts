@@ -32,6 +32,7 @@ import {
   quoteAndPreviewPostcardInputZ,
   sendPostcardInputZ,
   requestSendInputZ,
+  getDraftStatusInputZ,
   submitFeatureRequestInputZ,
   getStartedInputZ,
   uploadImageInputZ,
@@ -54,6 +55,7 @@ import {
   quoteAndPreviewPostcardOutputZ,
   sendPostcardOutputZ,
   requestSendOutputZ,
+  getDraftStatusOutputZ,
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
   uploadImageOutputZ,
@@ -131,7 +133,9 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'get_return_address',
     'list_letter_packs',
     // Hands back a link; the person sends from the page it opens (#470).
-    'request_send'
+    'request_send',
+    // The preview card's question about its draft (#474).
+    'get_draft_status'
   ];
 
   // Tools that call external APIs (PostGrid for validation or mail fulfillment)
@@ -451,6 +455,14 @@ export const CARD_ONLY_SEND_TOOLS: ReadonlySet<string> = new Set(["send_letter",
  */
 export const PAY_AND_SEND_TOOL = "create_mail_checkout";
 
+/**
+ * Tools only a card asks, whatever the send rule: get_draft_status answers
+ * the preview card about its own draft (#474), and the model has no use for
+ * it. Unlike a send it needs no person to press anything, so it is only
+ * hidden from the model.
+ */
+export const APP_ONLY_TOOLS: ReadonlySet<string> = new Set(["get_draft_status"]);
+
 export function buildToolMeta(
   toolName: string,
   meta: ToolMeta,
@@ -466,18 +478,18 @@ export function buildToolMeta(
   // app with a link instead of a send. Claude Code asks before every call of
   // a tool marked as needing the person.
   const cardOnly = sendRule && CARD_ONLY_SEND_TOOLS.has(toolName);
+  const hidden = cardOnly || APP_ONLY_TOOLS.has(toolName);
 
   return {
     securitySchemes: buildToolSecuritySchemes(toolName, requireAuth),
     ...meta,
-    ...(cardOnly
-      ? { "openai/visibility": "private", "anthropic/requiresUserInteraction": true }
-      : {}),
+    ...(hidden ? { "openai/visibility": "private" } : {}),
+    ...(cardOnly ? { "anthropic/requiresUserInteraction": true } : {}),
     ui: {
       ...existingUi,
       ...(outputTemplate ? { resourceUri: outputTemplate } : {}),
       ...(widgetAccessible !== undefined ? { widgetAccessible } : {}),
-      ...(cardOnly ? { visibility: ["app"] } : {})
+      ...(hidden ? { visibility: ["app"] } : {})
     }
   };
 }
@@ -765,6 +777,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   quote_and_preview_postcard: quoteAndPreviewPostcardInputZ,
   send_postcard: sendPostcardInputZ,
   request_send: requestSendInputZ,
+  get_draft_status: getDraftStatusInputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestInputZ,
   get_started: getStartedInputZ,
@@ -798,6 +811,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   quote_and_preview_postcard: quoteAndPreviewPostcardOutputZ,
   send_postcard: sendPostcardOutputZ,
   request_send: requestSendOutputZ,
+  get_draft_status: getDraftStatusOutputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestOutputZ,
   get_started: getStartedOutputZ,
@@ -1285,6 +1299,21 @@ export function summarizeToolResult(
     }
     case "request_send":
       return sendLinkText(result as unknown as RequestSendOutput);
+    case "get_draft_status": {
+      // Card-only: a model sees this only in an app that shows card-only
+      // tools to it, and then it is a plain fact.
+      const orderId = typeof result.orderId === "string" ? ` as order ${result.orderId}` : "";
+      switch (result.status) {
+        case "sent":
+          return `That preview has been sent${orderId}.`;
+        case "expired":
+          return "That preview has expired.";
+        case "ready":
+          return "That preview has not been sent and can still be sent.";
+        default:
+          return "That preview was not found.";
+      }
+    }
     case "send_letter": {
       const status = result.currentStatus ?? "unknown";
       const order = result.orderId ?? "(no id)";

@@ -707,6 +707,24 @@ export const sendPostcardInputSchema: JsonSchema = {
   }
 };
 
+export const getDraftStatusInputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId"],
+  properties: {
+    draftId: { type: "string", description: "The draftId from a letter or postcard preview" }
+  }
+};
+
+export const getDraftStatusOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "status"],
+  properties: {
+    draftId: { type: "string" },
+    status: { type: "string", enum: ["ready", "sent", "expired", "not_found"] },
+    orderId: { type: "string", description: "The order the draft became, once sent" }
+  }
+};
+
 export const requestSendInputSchema: JsonSchema = {
   type: "object",
   required: ["draftId"],

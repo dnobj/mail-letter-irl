@@ -2749,3 +2749,14 @@ describe.each([LETTER, POSTCARD])('$file when the app sends from the confirmatio
     expect(harness.text('error-message')).toBe(`The page did not open. It is at ${PAGE}`);
   });
 });
+
+describe.each([LETTER, POSTCARD])('$file in ChatGPT, which keeps its own state (#474)', spec => {
+  it('never asks the server what became of its draft', async () => {
+    const harness = mount(spec, { toolOutput: spec.output('draft_host_0001') });
+    await flush();
+    await harness.deliverHostResult(spec.output('draft_host_0002'));
+
+    expect(harness.callsTo('get_draft_status')).toEqual([]);
+    expect(harness.visible('send-button')).toBe(true);
+  });
+});
