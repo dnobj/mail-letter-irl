@@ -148,13 +148,16 @@ describe('uploaded photos in the bucket (#474)', () => {
     await expect(deleteUploadedPhoto('auth0|a')).rejects.toThrow('Access Denied');
   });
 
-  it('gives up on a bucket request that hangs, rather than waiting for ever', async () => {
+  it('builds the bucket client with time limits, and with no wait for "100 Continue"', async () => {
     await getUploadedPhoto('auth0|a');
-    expect(bucket.clientConfigs.at(-1)?.requestHandler).toEqual({
+    const config = bucket.clientConfigs.at(-1);
+    expect(config?.requestHandler).toEqual({
       connectionTimeout: 5_000,
       requestTimeout: 30_000,
+      socketTimeout: 30_000,
       throwOnRequestTimeout: true
     });
+    expect(config?.expectContinueHeader).toBe(false);
   });
 
   it('sweeps photos older than 15 minutes with the other temporary images', async () => {

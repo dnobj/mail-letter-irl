@@ -11,7 +11,7 @@
  *
  * Limits, per account unless noted:
  * - one upload at a time: a new upload (chunk 0) drops the one in progress,
- *   and waits while the last photo is still being checked and kept, so
+ *   and is refused while the last photo is still being checked and kept, so
  *   photos are kept in the order they were sent;
  * - one photo held: a finished upload replaces the photo held before it;
  * - DAILY uploads started in a rolling 24 hours (dailyPhotoUploadsPerAccount);
@@ -183,7 +183,9 @@ export async function receivePhotoChunk(
   let upload = pending.get(userId);
   if (input.index === 0 && upload?.uploadId !== input.uploadId) {
     // One photo kept at a time per account, so the last upload started is
-    // the photo held. The card waits for each answer, so it never meets this.
+    // the photo held. The card waits for each answer, so it meets this only
+    // when an answer was lost and a new card starts a photo while the last is
+    // still being saved; the sentence tells the person what to do.
     if (finishing.has(userId)) {
       throw new PhotoUploadRefusedError(
         'STILL_SAVING',

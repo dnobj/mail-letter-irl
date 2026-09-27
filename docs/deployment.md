@@ -783,9 +783,14 @@ never reach storage.
 A chunk is at most 512 Ki base64 characters, so `LETTER_IRL_MCP_BODY_LIMIT_BYTES`
 must stay above about 600 KiB for uploads to work; its default is 1 MiB.
 
-Every bucket request, for generated images as well as uploaded photos, gives
-up after 5 seconds without a connection or 30 seconds in all
-(`BUCKET_REQUEST_LIMITS` in `src/services/tempImageStore.ts`). The SDK's
-default is to wait indefinitely, which would leave an account's upload unable
-to finish, and the account unable to start another, until a restart.
+Every bucket request, for generated images as well as uploaded photos, has
+time limits (`BUCKET_REQUEST_LIMITS` in `src/services/tempImageStore.ts`). An
+attempt gives up after 5 seconds without a connection, 30 seconds without a
+response, or 30 seconds of silence while a response is read. The SDK retries a
+timed-out attempt up to three times, so a request that hangs every time is
+given up after about a minute and a half. The SDK's default is to wait
+indefinitely, which would leave an account's upload unable to finish, and the
+account unable to start another, until a restart. Bodies are sent at once,
+without waiting for "100 Continue" (`expectContinueHeader: false`), so a store
+that never sends it cannot hold a large upload until it times out.
 
