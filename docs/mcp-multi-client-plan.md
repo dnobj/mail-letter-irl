@@ -90,7 +90,7 @@ There are two ways to send, and the AI can complete neither by itself:
 
 - **A bridge in each card.** It uses `window.openai` when present, and otherwise the MCP Apps protocol. It is our own small script (`widgets/shared/host.js`), inlined as each card is served, rather than `@modelcontextprotocol/ext-apps`, which would add 337 KB to every card.
   - Phase 1 put the getting-started card on it, and phase 2a the letter and postcard preview cards ([ui-widgets.md](ui-widgets.md), Runtime Bridge Notes).
-  - Phase 2b turns on Claude's `rendersCards` and `honorsCardOnlyTools` (CLIENT-01 step 11 showed its model does not have the card-only tools), so the card's Send sends in Claude. It also brings a card's state from the server where the app keeps none. Phase 3 is photo upload in Claude.
+  - Phase 2b turns on Claude's `rendersCards` and `honorsCardOnlyTools` (CLIENT-01 step 11 showed its model does not have the card-only tools), so the card's Send sends in Claude. It also brings a card's state from the server where the app keeps none: the card-only `get_draft_status` says whether the draft was sent or has expired (2b-2). Phase 3 is photo upload in Claude.
 - **The card domain** comes from the app's profile.
 - **Fallbacks for ChatGPT-only features:**
   - photo upload goes to the upload-link page;

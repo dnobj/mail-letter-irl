@@ -132,6 +132,10 @@ export const toolInputSchemas = {
   request_send: z.object({
     draftId: z.string()
   }),
+  // What became of a preview's draft, for the card (#474)
+  get_draft_status: z.object({
+    draftId: z.string()
+  }),
   // Feedback tools
   submit_feature_request: z.object({
     title: z.string(),

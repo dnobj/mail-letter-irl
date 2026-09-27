@@ -253,6 +253,22 @@ export async function getDraft(draftId: string): Promise<LetterDraft | null> {
 }
 
 /**
+ * What became of a draft, without its content (#474): who owns it, its status,
+ * when it expires, and the mail it became once sent. For get_draft_status,
+ * which the preview card asks where its host keeps no state for it.
+ */
+export async function getDraftState(
+  draftId: string
+): Promise<Pick<LetterDraft, 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id'> | null> {
+  const result = await query<Pick<LetterDraft, 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id'>>(
+    `SELECT draft_id, user_id, status, expires_at, consumed_letter_id
+     FROM letter_drafts WHERE draft_id = $1`,
+    [draftId]
+  );
+  return result.rows[0] || null;
+}
+
+/**
  * Get all pending drafts for a user.
  */
 export async function getPendingDrafts(userId: string): Promise<LetterDraft[]> {

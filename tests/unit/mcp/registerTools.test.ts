@@ -48,6 +48,8 @@ const readOnlyTools = [
   { name: 'get_purchase_status', readOnly: true },
   { name: 'get_return_address', readOnly: true },
   { name: 'list_orders', readOnly: true },
+  // The preview card's question about its draft (#474).
+  { name: 'get_draft_status', readOnly: true },
 ];
 
 // Quote/preview tools: create draft records in database (NOT read-only)
@@ -103,8 +105,8 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
       }
     );
 
-    it('should have exactly 8 read-only tools', () => {
-      expect(readOnlyTools.length).toBe(8);
+    it('should have exactly 9 read-only tools', () => {
+      expect(readOnlyTools.length).toBe(9);
     });
   });
 
@@ -277,7 +279,7 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
   });
 
   describe('Tool Classification Summary', () => {
-    it('should cover all 23 registered tools in annotation checks', () => {
+    it('should cover all 24 registered tools in annotation checks', () => {
       // ChatGPT's list is the full one; other apps lack the checkouts (#475).
       const runtimeToolNames = new LetterIrlServer()
         .listTools(clientProfileNamed('chatgpt'))
@@ -285,16 +287,16 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
         .sort();
       const checkedToolNames = allTools.map((tool) => tool.name).sort();
 
-      expect(allTools.length).toBe(23);
+      expect(allTools.length).toBe(24);
       expect(checkedToolNames).toEqual(runtimeToolNames);
     });
 
-    it('should have 8 read-only tools', () => {
+    it('should have 9 read-only tools', () => {
       const readOnlyCount = allTools.filter(t => {
         const annotations = buildAnnotations({ name: t.name, readOnly: t.readOnly });
         return annotations.readOnlyHint === true;
       }).length;
-      expect(readOnlyCount).toBe(8);
+      expect(readOnlyCount).toBe(9);
     });
 
     it('should have 15 write tools (non-read-only)', () => {
@@ -531,6 +533,15 @@ describe('OpenAI Apps SDK Submission Compliance', () => {
       expect(summarizeToolResult('get_started', output)).toBe(
         summarizeToolResult('get_started', output, clientProfileNamed('generic'))
       );
+    });
+
+    it('get_draft_status reads as a plain fact, for an app that shows it to its model (#474)', () => {
+      const summary = (result: Record<string, unknown>) => summarizeToolResult('get_draft_status', result);
+      expect(summary({ draftId: 'd', status: 'sent', orderId: 'ord_1' })).toBe('That preview has been sent as order ord_1.');
+      expect(summary({ draftId: 'd', status: 'sent' })).toBe('That preview has been sent.');
+      expect(summary({ draftId: 'd', status: 'expired' })).toBe('That preview has expired.');
+      expect(summary({ draftId: 'd', status: 'ready' })).toBe('That preview has not been sent and can still be sent.');
+      expect(summary({ draftId: 'd', status: 'not_found' })).toBe('That preview was not found.');
     });
   });
 });

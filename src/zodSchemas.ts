@@ -198,6 +198,10 @@ export const requestSendInputZ = z.object({
   draftId: z.string().describe("The draftId from a letter or postcard preview")
 });
 
+export const getDraftStatusInputZ = z.object({
+  draftId: z.string().describe("The draftId from a letter or postcard preview")
+});
+
 // ============================================================================
 // Feature Request Schema (US-FEEDBACK-01)
 // ============================================================================
@@ -548,6 +552,12 @@ export const sendPostcardOutputZ = z.object({
   trackingSupport: trackingSupportZ.optional(),
   saveReturnAddressNote: z.string().optional(),
   suggestSaveReturnAddress: z.boolean().optional()
+});
+
+export const getDraftStatusOutputZ = z.object({
+  draftId: z.string(),
+  status: z.enum(["ready", "sent", "expired", "not_found"]),
+  orderId: z.string().optional().describe("The order the draft became, once sent")
 });
 
 export const requestSendOutputZ = z.object({

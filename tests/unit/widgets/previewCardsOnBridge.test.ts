@@ -172,8 +172,10 @@ describe.each([LETTER, POSTCARD])('$file in an MCP Apps host (#474)', spec => {
     expect(card.text('status-pill')).toBe('Ready to send');
     expect(card.visible('send-button')).toBe(true);
     expect(card.document.documentElement.classList.contains('dark')).toBe(true);
-    // Only the handshake so far: nothing is saved to or asked of the host.
-    expect(card.sent.map(message => message.method)).toEqual(['ui/initialize', 'ui/notifications/initialized']);
+    // The handshake, then one question about the draft (#474): nothing is
+    // saved to the host, which keeps nothing for the card.
+    expect(card.sent.map(message => message.method)).toEqual(['ui/initialize', 'ui/notifications/initialized', 'tools/call']);
+    expect(card.lastRequest('tools/call')!.params.name).toBe('get_draft_status');
   });
 
   it('sends with tools/call and shows the order', async () => {
@@ -291,5 +293,136 @@ describe.each([LETTER, POSTCARD])('$file in an MCP Apps host (#474)', spec => {
 
     await card.click('retry-button');
     expect(card.lastRequest('tools/call', spec.tool)!.params).toEqual({ name: spec.tool, arguments: spec.args });
+  });
+});
+
+describe.each([LETTER, POSTCARD])('$file asks the server what became of its draft (#474)', spec => {
+  const noun = spec.file === 'LetterPreviewCard' ? 'letter' : 'postcard';
+  const status = (card: Awaited<ReturnType<typeof showing>>, answer: Json) =>
+    card.answer('tools/call', { result: { content: [], structuredContent: answer } }, 'get_draft_status');
+
+  it('asks once, for the draft the host showed', async () => {
+    const card = await showing(spec, canSend);
+
+    expect(card.requests('tools/call').filter(message => message.params?.name === 'get_draft_status')).toHaveLength(1);
+    expect(card.lastRequest('tools/call', 'get_draft_status')!.params).toEqual({
+      name: 'get_draft_status',
+      arguments: { draftId: 'draft_0001' }
+    });
+
+    // The host handing the same result over again asks nothing new.
+    await card.toolResult({ content: [], structuredContent: spec.output('draft_0001', canSend), _meta: spec.meta });
+    expect(card.requests('tools/call').filter(message => message.params?.name === 'get_draft_status')).toHaveLength(1);
+  });
+
+  it('shows a draft that was sent as sent, with its order, and offers nothing to press', async () => {
+    const card = await showing(spec, canSend);
+
+    await status(card, { draftId: 'draft_0001', status: 'sent', orderId: 'ord_0001' });
+
+    expect(card.text('status-pill')).toBe('With the printer');
+    expect(card.text('id-label')).toBe('Order');
+    expect(card.text('id-value')).toBe('ord_0001');
+    expect(card.visible('send-button')).toBe(false);
+    expect(card.visible('purchase-actions')).toBe(false);
+    expect(card.text('note')).toContain(`This ${noun} has already been sent. Ask for its status in the chat.`);
+    // The preview itself stays.
+    expect(card.html(spec.pane)).toContain(spec.drawnFromMeta);
+  });
+
+  it('shows an expired preview as expired, with nothing to buy or send', async () => {
+    const card = await showing(spec, noLetters);
+    expect(card.visible('website-packs-button')).toBe(true);
+
+    await status(card, { draftId: 'draft_0001', status: 'expired' });
+
+    expect(card.text('status-pill')).toBe('Preview expired');
+    expect(card.visible('send-button')).toBe(false);
+    expect(card.visible('purchase-actions')).toBe(false);
+    expect(card.text('note')).toContain('This preview has expired. Ask for a new one in the chat.');
+  });
+
+  it('leaves a ready draft as the host gave it', async () => {
+    const card = await showing(spec, canSend);
+
+    await status(card, { draftId: 'draft_0001', status: 'ready' });
+
+    expect(card.text('status-pill')).toBe('Ready to send');
+    expect(card.visible('send-button')).toBe(true);
+    expect(card.text('id-label')).toBe('Draft');
+  });
+
+  it('ignores an answer about another draft', async () => {
+    const card = await showing(spec, canSend);
+    await status(card, { draftId: 'draft_other', status: 'sent', orderId: 'ord_other' });
+    expect(card.text('status-pill')).toBe('Ready to send');
+    expect(card.visible('send-button')).toBe(true);
+  });
+
+  it("keeps the card's own send on screen while an answer arrives", async () => {
+    const card = await showing(spec, canSend);
+    await card.click('send-button');
+
+    await status(card, { draftId: 'draft_0001', status: 'sent', orderId: 'ord_0001' });
+    // The send is still under way, and it owns the pill.
+    expect(card.text('status-pill')).toBe('Ready to send');
+
+    await card.answer('tools/call', { result: { content: [], structuredContent: { orderId: 'ord_0001' } } }, spec.sendTool);
+    expect(card.text('status-pill')).toBe('With the printer');
+    expect(card.text('id-value')).toBe('ord_0001');
+  });
+
+  it('shows a draft as sent when the answer comes after its own send failed', async () => {
+    const card = await showing(spec, canSend);
+    await card.click('send-button');
+    await card.answer('tools/call', { error: { code: -32603, message: 'The host timed out' } }, spec.sendTool);
+    expect(card.text('status-pill')).toBe('Send failed');
+
+    await status(card, { draftId: 'draft_0001', status: 'sent', orderId: 'ord_0001' });
+
+    expect(card.text('status-pill')).toBe('With the printer');
+    expect(card.text('id-value')).toBe('ord_0001');
+    expect(card.visible('send-button')).toBe(false);
+    expect(card.visible('error-message')).toBe(false);
+  });
+
+  it('shows the preview as the host gave it when the question goes unanswered', async () => {
+    const card = await showing(spec, canSend);
+
+    await card.answer('tools/call', { error: { code: -32603, message: 'no such tool' } }, 'get_draft_status');
+
+    expect(card.text('status-pill')).toBe('Ready to send');
+    expect(card.visible('send-button')).toBe(true);
+  });
+
+  it('drops the answer when the host shows another draft, and asks about that one', async () => {
+    const card = await showing(spec, canSend);
+    await status(card, { draftId: 'draft_0001', status: 'sent', orderId: 'ord_0001' });
+    expect(card.text('status-pill')).toBe('With the printer');
+
+    await card.toolResult({ content: [], structuredContent: spec.output('draft_0002', canSend), _meta: spec.meta });
+
+    expect(card.text('status-pill')).toBe('Ready to send');
+    expect(card.text('id-value')).toBe('draft_0002');
+    expect(card.visible('send-button')).toBe(true);
+    expect(card.lastRequest('tools/call', 'get_draft_status')!.params.arguments).toEqual({ draftId: 'draft_0002' });
+  });
+
+  it('does not ask about a draft it made itself', async () => {
+    const card = mountInMcpHost(spec);
+    await flush();
+    await card.initialize();
+    await card.toolInput(spec.args);
+    await card.runTimer(spec.waitMs);
+    await card.click('retry-button');
+
+    await card.answer(
+      'tools/call',
+      { result: { content: [], structuredContent: spec.output('draft_retry', canSend), _meta: spec.meta } },
+      spec.tool
+    );
+
+    expect(card.text('id-value')).toBe('draft_retry');
+    expect(card.requests('tools/call').filter(message => message.params?.name === 'get_draft_status')).toEqual([]);
   });
 });

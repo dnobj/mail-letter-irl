@@ -53,5 +53,8 @@
  * r14: Claude shows our cards (#474): its instructions name the preview card
  *     and its Create my preview button, its preview text points to the card's
  *     Send button, and get_started leaves the guide to the card.
+ * r15: get_draft_status (#474), the preview card's card-only question about
+ *     its draft. Its description reaches only a model in an app that shows
+ *     card-only tools to it.
  */
-export const STEERING_COPY_REV = 14;
+export const STEERING_COPY_REV = 15;
