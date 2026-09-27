@@ -80,10 +80,12 @@ import {
 } from "../auth/oauthChallenge.js";
 import {
   callingApp,
+  clientProfileNamed,
   resolveClientProfile,
   type ClientProfile,
   type ClientProfileName
 } from "../auth/clientProfiles.js";
+import { inlineHostBridge } from "./widgetHost.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import {
   REQUEST_SEND_TOOL,
@@ -480,16 +482,26 @@ export function buildToolMeta(
   };
 }
 
-export function buildWidgetResourceMeta(description: string) {
+/**
+ * A card's resource metadata, for the app that reads it. The card address
+ * (`ui.domain`) is per app (#474): ChatGPT's is our API origin, and every
+ * other app gets none, because Claude refuses to draw a card whose domain is
+ * not its own hashed form.
+ */
+export function buildWidgetResourceMeta(
+  description: string,
+  client: ClientProfile = clientProfileNamed("chatgpt")
+) {
+  const withDomain = client.cardDomain === "origin";
   return {
     ui: {
       description,
-      domain: WIDGET_DOMAIN,
+      ...(withDomain ? { domain: WIDGET_DOMAIN } : {}),
       csp: WIDGET_CSP_CANONICAL,
       prefersBorder: true
     },
     "openai/widgetPrefersBorder": true,
-    "openai/widgetDomain": WIDGET_DOMAIN,
+    ...(withDomain ? { "openai/widgetDomain": WIDGET_DOMAIN } : {}),
     "openai/widgetCSP": WIDGET_CSP_LEGACY,
     "openai/widgetDescription": description
   };
@@ -537,7 +549,12 @@ const WIDGET_BY_NAME = new Map<string, { file: string; description: string }>([
  * handler before our code runs and is NOT logged here - so silence in this log
  * means "no read arrived", not "no read was attempted".
  */
-async function readWidgetResource(name: string, uri: string, version: number | undefined) {
+async function readWidgetResource(
+  name: string,
+  uri: string,
+  version: number | undefined,
+  client: ClientProfile
+) {
   const widget = WIDGET_BY_NAME.get(name);
 
   if (!widget) {
@@ -552,7 +569,7 @@ async function readWidgetResource(name: string, uri: string, version: number | u
   );
   // `name` has been resolved against WIDGET_BY_NAME above, so it is one of our
   // own template names by the time it indexes the preview-tool map.
-  const text = stampPreviewTool(html, previewToolFor(name, version));
+  const text = stampPreviewTool(inlineHostBridge(html, DEFAULT_WIDGET_DIR), previewToolFor(name, version));
   console.log(`🎨 Returning widget HTML (${text.length} bytes)`);
 
   return {
@@ -560,7 +577,7 @@ async function readWidgetResource(name: string, uri: string, version: number | u
       uri,
       mimeType: WIDGET_MIME_TYPE,
       text,
-      _meta: buildWidgetResourceMeta(widget.description)
+      _meta: buildWidgetResourceMeta(widget.description, client)
     }]
   };
 }
@@ -575,7 +592,10 @@ async function readWidgetResource(name: string, uri: string, version: number | u
  *
  * The widget HTML profile signals the client to inject the runtime bridge.
  */
-export async function registerWidgetResources(mcpServer: McpServer) {
+export async function registerWidgetResources(
+  mcpServer: McpServer,
+  client: ClientProfile = clientProfileNamed("chatgpt")
+) {
   for (const widget of WIDGET_DEFINITIONS) {
     const filePath = path.join(DEFAULT_WIDGET_DIR, `${widget.name}.html`);
 
@@ -610,7 +630,7 @@ export async function registerWidgetResources(mcpServer: McpServer) {
         uri,
         {},  // Empty options per docs
         async () => {
-          const result = await readWidgetResource(widget.name, uri, version);
+          const result = await readWidgetResource(widget.name, uri, version, client);
           // Unreachable: the name comes from WIDGET_DEFINITIONS itself.
           if (!result) {
             throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
@@ -639,7 +659,7 @@ export async function registerWidgetResources(mcpServer: McpServer) {
       uri,
       {},
       async () => {
-        const result = await readWidgetResource(variant.name, uri, WIDGET_TEMPLATE_VERSION);
+        const result = await readWidgetResource(variant.name, uri, WIDGET_TEMPLATE_VERSION, client);
         if (!result) {
           throw new McpError(ErrorCode.InvalidParams, `Resource ${uri} not found`);
         }
@@ -679,7 +699,7 @@ export async function registerWidgetResources(mcpServer: McpServer) {
       const name = Array.isArray(raw) ? raw[0] : raw;
       const rawVersion = Array.isArray(variables.version) ? variables.version[0] : variables.version;
       const version = /^\d{1,6}$/.test(String(rawVersion ?? "")) ? Number(rawVersion) : undefined;
-      const result = await readWidgetResource(String(name ?? ""), uri.toString(), version);
+      const result = await readWidgetResource(String(name ?? ""), uri.toString(), version, client);
       if (!result) {
         // Same error the SDK raises for an unregistered URI, so an unknown
         // widget name is indistinguishable to the client from one we never
@@ -806,7 +826,11 @@ type PartitionedToolResult = {
 /** Keep widget-only previews out of model context while retaining chainable URLs. */
 export function partitionToolResult(
   result: Record<string, unknown>,
-  meta: Record<string, unknown> = {}
+  meta: Record<string, unknown> = {},
+  // Where the app is not proven to hand a card the result's _meta (#474), the
+  // card's small copy also stays in structuredContent, or the card could have
+  // nothing to show. Large previews are never duplicated.
+  keepCardCopy = false
 ): PartitionedToolResult {
   const {
     previewHtml,
@@ -829,8 +853,17 @@ export function partitionToolResult(
     ...modelFacingData
   } = result;
 
+  const cardCopy = keepCardCopy
+    ? {
+        ...(title !== undefined ? { title } : {}),
+        ...(overview !== undefined ? { overview } : {}),
+        ...(purchaseStep !== undefined ? { purchaseStep } : {}),
+        ...(examplePrompts !== undefined ? { examplePrompts } : {})
+      }
+    : {};
+
   return {
-    structuredContent: modelFacingData,
+    structuredContent: { ...modelFacingData, ...cardCopy },
     _meta: {
       ...meta,
       ...(previewHtml !== undefined ? { previewHtml } : {}),
@@ -934,13 +967,14 @@ export async function registerLetterTools(
   const initialCheck: AccountCheck = authInfo ? await checkAccount(authInfo) : { status: "ok" };
   const accountRefusal: AccountRefusal | null = initialCheck.status === "refused" ? initialCheck.refusal : null;
 
-  // Register widget resources for ChatGPT UI rendering
-  await registerWidgetResources(mcpServer);
-
   // The send rule (#470), decided once for this registration: which app is
   // calling (#473), and whether the rule is on.
   const sendRule = isSendConfirmationEnabled();
   const client = resolveClientProfile(authInfo);
+
+  // The cards, served for this app: its card address, and the shared bridge
+  // inlined (#474).
+  await registerWidgetResources(mcpServer, client);
 
   // Each description in this app's words (#484).
   const toolDefs = appServer.listTools(client);
@@ -1057,7 +1091,8 @@ export async function registerLetterTools(
         // The model doesn't need raw HTML; it gets the summaryText narration instead.
         const { structuredContent, _meta } = partitionToolResult(
           result as Record<string, unknown>,
-          meta
+          meta,
+          !client.passesResultMetaToCards
         );
 
         const response = {

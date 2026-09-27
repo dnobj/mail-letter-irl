@@ -467,6 +467,16 @@ link as a button.
       It suggested adding it "through Letter IRL's upload step", which needs the cards in Claude
       (#474).)
 
+10. The getting-started card on the shared bridge (#474, phase 1), once it is deployed to
+    development. Refresh the tool list first.
+- [ ] Ask "How do I get started with Letter IRL?" In Claude on the web the card draws, in Claude's
+      theme, with the title, the overview, the purchase step and the example prompts. Claude no
+      longer shows "There was a problem displaying content".
+- [ ] The same on Claude Desktop (Windows) and in the Android app. Claude Desktop on Windows has a
+      reported bug that shows remote-connector cards as text only (anthropics/claude-ai-mcp#987).
+- [ ] In ChatGPT (DEV connector, after **Refresh tools**) the getting-started card looks and works
+      as before.
+
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
 **Status:** Steps 1 to 3 run in development on 2026-09-26 (Claude Code 2.1.282, Windows).

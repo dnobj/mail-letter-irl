@@ -65,20 +65,27 @@
           </div>
         </div>
       </div>
-      <p class="rev">started t15</p>
+      <p class="rev">started t16</p>
     </div>
 
+    <!-- letter-irl:host -->
     <script>
+      // The card talks to its host only through window.letterIrlHost
+      // (widgets/shared/host.js, #474): window.openai in ChatGPT, MCP Apps in
+      // Claude and VS Code.
+      const host = window.letterIrlHost;
+
       function applyTheme() {
-        const theme = window.openai?.theme ?? "light";
+        const theme = host.theme();
         document.documentElement.classList.toggle("dark", theme === "dark");
       }
 
       function render() {
         applyTheme();
-        const output = window.openai?.toolOutput ?? {};
-        const responseMeta = window.openai?.toolResponseMetadata ?? {};
-        const state = { ...responseMeta, ...output };
+        // ChatGPT hands the card this copy in the result's _meta. Elsewhere it
+        // also travels in structuredContent, since not every host passes
+        // _meta on to a card.
+        const state = { ...host.toolMeta(), ...host.toolOutput() };
 
         const hasData = Boolean(
           state.overview || state.purchaseStep || (state.examplePrompts || []).length
@@ -101,7 +108,7 @@
         }
       }
 
-      window.addEventListener("openai:set_globals", render);
+      host.onChange(render);
       render();
     </script>
   </body>
