@@ -569,34 +569,71 @@ export interface AccountErasureRunSummary {
 export async function processAccountErasures(
   batchLimit = DEFAULT_ERASURE_BATCH
 ): Promise<AccountErasureRunSummary> {
+  const erased: string[] = [];
   const summary = await processAdminOperations(
     {
       operationType: ACCOUNT_ERASE_OPERATION,
       errorCode: 'ACCOUNT_ERASURE_ERROR',
       event: 'account_erasure',
-      handle: handleAccountErasure
+      handle: (client, payload) => handleAccountErasure(client, payload, erased)
     },
     batchLimit
   );
+  await deleteUploadedPhotos(erased);
   return { erased: summary.done, refused: summary.refused, retrying: summary.retrying, failed: summary.failed };
 }
 
-/** One queued erasure, as the database owner, inside the runner's savepoint. */
-export async function handleAccountErasure(client: SqlClient, payload: unknown): Promise<OperationResult> {
+/**
+ * How long deleting one erased account's uploaded photo may take before the
+ * run moves on. The photo expires within 15 minutes anyway (#474).
+ */
+export const UPLOADED_PHOTO_DELETE_TIMEOUT_MS = 10_000;
+
+/**
+ * The photos the erased accounts last uploaded through our card (#474). They
+ * live in the image store, not the database, so they go once the run's
+ * database work is done, never inside its transactions, and a failure or a
+ * slow store is logged and holds up nothing. An erasure whose transaction was
+ * then rolled back loses its photo too, which it was about to lose anyway.
+ */
+async function deleteUploadedPhotos(userIds: readonly string[]): Promise<void> {
+  for (const userId of userIds) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(Object.assign(new Error('Deleting the uploaded photo timed out'), { code: 'ETIMEDOUT' })),
+        UPLOADED_PHOTO_DELETE_TIMEOUT_MS
+      );
+    });
+    try {
+      await Promise.race([deleteUploadedPhoto(userId), timedOut]);
+    } catch (error) {
+      writeDiagnostic('error', 'account_erasure.uploaded_photo_delete_failed', {
+        errorClass: classifyDiagnosticError(error)
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
+/**
+ * One queued erasure, as the database owner, inside the runner's savepoint.
+ * An account it erases is added to `erased`, for the work that happens
+ * outside the database once the run is done.
+ */
+export async function handleAccountErasure(
+  client: SqlClient,
+  payload: unknown,
+  erased: string[] = []
+): Promise<OperationResult> {
   const payloadUser = (payload as { userId?: unknown } | null)?.userId;
   const userId = typeof payloadUser === 'string' && payloadUser.length > 0 ? payloadUser : null;
   const outcome: ErasureOutcome =
     userId !== null ? await eraseAccountWithClient(client, userId) : { outcome: 'not_found' };
   switch (outcome.outcome) {
     case 'erased':
-      // The photo the account last uploaded through our card (#474) is in the
-      // image store, not the database. It expires within 15 minutes anyway,
-      // so a failure here is logged and does not hold up the erasure.
-      await deleteUploadedPhoto(userId!).catch((error: unknown) => {
-        writeDiagnostic('error', 'account_erasure.uploaded_photo_delete_failed', {
-          errorClass: classifyDiagnosticError(error)
-        });
-      });
+      erased.push(userId!);
       return { outcome: 'done', result: { ...outcome.counts }, diagnostic: { alreadyErased: false } };
     case 'already_erased':
       return { outcome: 'done', result: { alreadyErased: true }, diagnostic: { alreadyErased: true } };

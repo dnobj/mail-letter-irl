@@ -775,7 +775,11 @@ The finished photo goes to the same private bucket as generated images, under
 served at an address. There is one per account, so a new upload replaces the
 one before. It is readable for 15 minutes: a read after that deletes it, and
 otherwise the hourly maintenance run's `cleanupExpiredImages` does. Account
-erasure deletes it at once (`account_erasure.uploaded_photo_delete_failed` if
-that fails, since it expires anyway). Unfinished uploads are held in the API
-process's memory and never reach storage.
+erasure deletes it once the run's database work is done, allowing ten seconds
+(`account_erasure.uploaded_photo_delete_failed` if that fails, since it
+expires anyway). Unfinished uploads are held in the API process's memory and
+never reach storage.
+
+A chunk is at most 512 Ki base64 characters, so `LETTER_IRL_MCP_BODY_LIMIT_BYTES`
+must stay above about 600 KiB for uploads to work; its default is 1 MiB.
 

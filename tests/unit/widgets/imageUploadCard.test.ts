@@ -290,6 +290,17 @@ describe('the upload card in an MCP Apps host, as in Claude (#474)', () => {
     expect(card.requests('ui/message')).toHaveLength(0);
   });
 
+  it('says upload is not available when the switch went off after the card was drawn', async () => {
+    const card = await inMcpHost({ context: 'postcard', cardUploadAvailable: true });
+    await upload(card);
+    await card.answer('tools/call', {
+      result: { isError: true, content: [{ type: 'text', text: 'MCP error -32602: Tool upload_photo_chunk not found' }] }
+    });
+
+    expect(card.chunks()).toHaveLength(1);
+    expect(card.text('error-message')).toBe("Photo upload isn't available in this app yet. Use a link to the photo instead.");
+  });
+
   it('does not claim an upload the server did not finish', async () => {
     const card = await inMcpHost({ context: 'postcard', cardUploadAvailable: true });
     await upload(card);

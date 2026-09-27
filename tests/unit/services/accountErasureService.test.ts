@@ -17,6 +17,7 @@ vi.mock("../../../src/services/tempImageStore.js", () => store);
 
 import {
   MAX_ERASURE_ATTEMPTS,
+  UPLOADED_PHOTO_DELETE_TIMEOUT_MS,
   erasureBlocked,
   processAccountErasures
 } from "../../../src/services/accountErasureService.js";
@@ -327,10 +328,48 @@ describe("the photo an account uploaded through our card (#474)", () => {
     expect(store.deleteUploadedPhoto).toHaveBeenCalledWith("auth0|gone");
   });
 
+  it("is deleted only once the erasure has committed, outside its transaction", async () => {
+    const events: string[] = [];
+    const client = scriptedClient({ queue: [OPERATION()] });
+    db.transaction.mockImplementation(async (callback: (c: typeof client) => Promise<unknown>) => {
+      events.push("begin");
+      const result = await callback(client);
+      events.push("commit");
+      return result;
+    });
+    store.deleteUploadedPhoto.mockImplementation(async () => {
+      events.push("delete");
+    });
+    await processAccountErasures();
+    expect(events.filter((event) => event === "delete")).toHaveLength(1);
+    expect(events.at(-1)).toBe("delete");
+    expect(events.lastIndexOf("commit")).toBeLessThan(events.indexOf("delete"));
+  });
+
   it("does not hold up the erasure when it cannot be deleted, since it expires in minutes", async () => {
     store.deleteUploadedPhoto.mockRejectedValue(new Error("bucket unreachable"));
     scriptedClient({ queue: [OPERATION()] });
     expect(await processAccountErasures()).toEqual({ erased: 1, refused: 0, retrying: 0, failed: 0 });
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("account_erasure.uploaded_photo_delete_failed"));
+  });
+
+  it("moves on after ten seconds when the store does not answer", async () => {
+    vi.useFakeTimers();
+    try {
+      store.deleteUploadedPhoto.mockImplementation(() => new Promise<undefined>(() => undefined));
+      scriptedClient({ queue: [OPERATION()] });
+      let settled = false;
+      const run = processAccountErasures().finally(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(UPLOADED_PHOTO_DELETE_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(run).resolves.toEqual({ erased: 1, refused: 0, retrying: 0, failed: 0 });
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining('"errorClass":"ETIMEDOUT"'));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("is left alone when the erasure is refused", async () => {

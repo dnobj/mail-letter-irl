@@ -91,8 +91,11 @@ interface PendingUpload {
 
 const pending = new Map<string, PendingUpload>();
 const startedAt = new Map<string, number[]>();
-// The last finished upload per account, so a retry of its last chunk (the
-// answer was lost on the way back) gets the same answer, not "interrupted".
+// The upload per account whose photo is being checked and kept, and the last
+// finished one, so a chunk of either sent again (the answer was lost on the
+// way back, or a client sends in parallel) gets the same answer, rather than
+// "interrupted" or a second start.
+const finishing = new Map<string, { uploadId: string; answer: Promise<PhotoChunkResult> }>();
 const finished = new Map<string, { result: PhotoChunkResult; atMs: number }>();
 
 function pendingBytes(): number {
@@ -156,12 +159,13 @@ export async function receivePhotoChunk(
   const context = checkShape(input);
   dropExpired(nowMs);
 
-  // Any chunk of the upload just finished, sent again, gets its answer and
-  // starts nothing. dropExpired has already let go of one older than the window.
+  // Any chunk of an upload finishing or just finished, sent again, gets its
+  // answer and starts nothing. dropExpired has already let go of a finished
+  // one older than the window.
+  const inFlight = finishing.get(userId);
+  if (inFlight && inFlight.uploadId === input.uploadId) return inFlight.answer;
   const done = finished.get(userId);
-  if (done && done.result.uploadId === input.uploadId) {
-    return done.result;
-  }
+  if (done && done.result.uploadId === input.uploadId) return done.result;
 
   let upload = pending.get(userId);
   if (input.index === 0 && upload?.uploadId !== input.uploadId) {
@@ -211,31 +215,51 @@ export async function receivePhotoChunk(
   }
 
   // The last chunk: the whole photo, checked, then kept in place of the last.
-  pending.delete(userId);
+  // Until then the upload still counts against the memory budget, held as
+  // one buffer rather than its chunks.
   const photo = Buffer.concat(upload.chunks);
-  const inspected = await inspectUploadedPhoto(photo, userId);
-  await storeUploadedPhoto(userId, photo, `image/${inspected.format}`);
-  await setRecentUploadedImage(userId, UPLOADED_PHOTO_REFERENCE, upload.context);
-  const result: PhotoChunkResult = {
-    uploadId: upload.uploadId,
-    received: upload.total,
-    total: upload.total,
-    done: true,
-    width: inspected.width,
-    height: inspected.height
-  };
-  finished.set(userId, { result, atMs: nowMs });
-  return result;
+  upload.chunks = [photo];
+  const answer = finishUpload(userId, upload, photo, nowMs);
+  finishing.set(userId, { uploadId: upload.uploadId, answer });
+  return answer;
+}
+
+async function finishUpload(
+  userId: string,
+  upload: PendingUpload,
+  photo: Buffer,
+  nowMs: number
+): Promise<PhotoChunkResult> {
+  try {
+    const inspected = await inspectUploadedPhoto(photo, userId);
+    await storeUploadedPhoto(userId, photo, `image/${inspected.format}`);
+    await setRecentUploadedImage(userId, UPLOADED_PHOTO_REFERENCE, upload.context);
+    const result: PhotoChunkResult = {
+      uploadId: upload.uploadId,
+      received: upload.total,
+      total: upload.total,
+      done: true,
+      width: inspected.width,
+      height: inspected.height
+    };
+    finished.set(userId, { result, atMs: nowMs });
+    return result;
+  } finally {
+    // Only this upload's own entries: a new upload may have started meanwhile.
+    if (pending.get(userId) === upload) pending.delete(userId);
+    if (finishing.get(userId)?.uploadId === upload.uploadId) finishing.delete(userId);
+  }
 }
 
 /** For tests: how many accounts this process holds something for. */
-export function photoUploadsHeld(): { pending: number; finished: number; counted: number } {
-  return { pending: pending.size, finished: finished.size, counted: startedAt.size };
+export function photoUploadsHeld(): { pending: number; finishing: number; finished: number; counted: number } {
+  return { pending: pending.size, finishing: finishing.size, finished: finished.size, counted: startedAt.size };
 }
 
 /** For tests: start from nothing. */
 export function resetPhotoUploads(): void {
   pending.clear();
   startedAt.clear();
+  finishing.clear();
   finished.clear();
 }

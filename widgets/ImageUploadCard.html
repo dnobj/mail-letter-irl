@@ -510,6 +510,11 @@
                 break;
               }
             }
+            // A card shown while upload was on, used after it was turned off:
+            // the tool is gone, so say what the card says when it is off.
+            if (/Tool upload_photo_chunk (not found|disabled)/.test(text)) {
+              text = uploadUnavailable.textContent;
+            }
             var refused = new Error(text || "The photo could not be uploaded.");
             refused.refused = true;
             throw refused;
