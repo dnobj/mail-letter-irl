@@ -237,7 +237,7 @@ export const getStartedInputZ = z.object({});
 // ============================================================================
 
 export const uploadImageInputZ = z.object({
-  context: z.string().optional()
+  context: z.string().optional().describe("What the photo is for: 'postcard', 'header_image' or 'inline_image'.")
 });
 
 // ============================================================================
@@ -255,7 +255,7 @@ export const generateImageForMailInputZ = z.object({
 
 export const confirmUploadedImageInputZ = z.object({
   imageUrl: z.string(),
-  context: z.string().optional()
+  context: z.string().optional().describe("What the photo is for: 'postcard', 'header_image' or 'inline_image'.")
 });
 
 // ============================================================================

@@ -598,11 +598,24 @@ clicks Claude's prompts.
 
 14. A photo uploaded through the card in Claude (#474, phase 3), once it is deployed to development
     and `LETTER_IRL_CARD_UPLOAD_ENABLED=true` is set on the development API. Refresh the tool list
-    first; the log should show `tools/list` at `widgetTemplateVersion=42`, and the connector page
-    should list **Upload a photo** under **App-only tools**. The limits and refusals are covered by
-    unit tests; this checks the path end to end.
+    first; the log should show `tools/list` at `steeringRev=17` and `widgetTemplateVersion=43`, and
+    the connector page should list **Upload a photo** under **App-only tools**. The limits and
+    refusals are covered by unit tests; this checks the path end to end. A person picks the photo:
+    no browser tool reaches the card's file input, which sits in a cross-origin frame behind a
+    native file dialog. The test photos are in `C:\letter-irl-scripts\testdata`, made by
+    `make-test-photos.mjs`: `photo-a.jpg` and `photo-b.jpg` are 4032x3024 and 3024x4032, 3.3 MB each,
+    and `photo-small.jpg` is 1800x1200.
+
+    First run, 2026-09-28 (UTC), with #502 deployed (33c4caf) and the switch on:
+    - the refresh logged `tools/list` at `steeringRev=16` and `widgetTemplateVersion=42`;
+    - the connector page listed **Upload a photo** among four app-only tools;
+    - asked for a postcard with a photo from the computer, Claude offered the connector, and after
+      **Use** it opened the card, revision t16, showing **Select Photo** and "Max 25 MB";
+    - but it filled `upload_image`'s `context` with a sentence, which the card would have passed on
+      and `upload_photo_chunk` refused. The follow-up fix reads such a context as one of the three
+      names (steering r17, v43), and the run starts again once it is deployed.
 - [ ] Ask Claude for a postcard to a test address with a photo you will upload. Claude calls
-      `upload_image`, and the card, revision t16, shows **Select Photo** and "Max 25 MB".
+      `upload_image`, and the card, revision t17, shows **Select Photo** and "Max 25 MB".
 - [ ] Choose a photo larger than 2400 px, a phone JPEG of a few MB. The card shows "Sending your
       photo…" with a percentage, then the photo and "Uploaded. Your request for the preview is in
       the conversation." The message "Make the postcard with the photo I just uploaded." appears in
@@ -1967,9 +1980,10 @@ audit.
 
 ### ADMIN-ACCT-04 — Promo campaigns and ambiguous image reservations
 
-**Status:** Not run. Step 1 fails on development until #431: the create form sends no `target`
-and the preview refuses it (found by GIFT-01 step 9, 2026-09-23). Running this step would have
-caught it when the panel shipped.
+**Status:** Step 1 passed on development on 2026-09-23, after #431 (merged as 6ba1f99); steps 2 to
+4 not run. Until #431 step 1 failed: the create form sent no `target` and the preview refused it
+(found by GIFT-01 step 9, 2026-09-23). Running this step would have caught it when the panel
+shipped.
 
 **Steps:**
 

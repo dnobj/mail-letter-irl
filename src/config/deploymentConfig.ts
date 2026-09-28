@@ -550,6 +550,50 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     secret: true,
     services: ['maintenance'],
     checkedBy: 'maintenance.heartbeat_url_invalid'
+  },
+  /**
+   * The retention sweep (#153): reports what is past the published window
+   * unless this is `enforce`, which production switches to at the launch
+   * promotion. Listed so the preflight shows each environment's state.
+   */
+  {
+    name: 'CONTENT_RETENTION_MODE',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['maintenance']
+  },
+  /**
+   * Photo upload through the card in apps with no file store (#474,
+   * src/config/cardUpload.ts). Off unless explicitly on, and meant to stay
+   * off in production until it is proven on development, so its absence
+   * there is the intended state; listed so the preflight shows where it is on.
+   */
+  {
+    name: 'LETTER_IRL_CARD_UPLOAD_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_PHOTO_UPLOADS_PER_DAY',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
+   * The ChatGPT plugin portal's domain-verification token (#407), served at
+   * /.well-known/openai-apps-challenge. Set on production at submission; it
+   * is served publicly, so it is not a secret.
+   */
+  {
+    name: 'OPENAI_APPS_CHALLENGE_TOKEN',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
   }
 ];
 

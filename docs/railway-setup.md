@@ -94,7 +94,7 @@ LETTER_IRL_WEBSITE_CLIENT_ID=<the website application's Client ID in this tenant
 # Where the confirmation link points. Defaults to LETTER_IRL_GIFT_LANDING_BASE_URL.
 LETTER_IRL_WEBSITE_BASE_URL=<https://letterirl.com, or the development website's address>
 LETTER_IRL_BETA_GATE_ENABLED=<true to restrict access to the invited cohort>
-LETTER_IRL_BETA_DAILY_MAIL_CAP=<global letters per day>
+LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING=<global letters per day>
 LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP=<letters per account per day>
 LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS=<spend per account per day, in cents>
 # Gift letters (docs/gift-letters.md): off unless explicitly true. API service only.

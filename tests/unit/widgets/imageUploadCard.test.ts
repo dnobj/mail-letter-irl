@@ -242,6 +242,17 @@ describe('the upload card in an MCP Apps host, as in Claude (#474)', () => {
     expect(card.requests('ui/message').at(-1)!.params.content[0].text).toBe(prompt);
   });
 
+  it('sends no context it does not know, as a result from before the server read it may carry words', async () => {
+    const card = await inMcpHost({
+      context: 'Postcard to Sam Rivera, 1 Main St, Springfield, IL 62701, message: "Wish you were here!"',
+      cardUploadAvailable: true
+    });
+    await upload(card);
+    expect('context' in card.chunks()[0]).toBe(false);
+    await card.accept(true);
+    expect(card.requests('ui/message').at(-1)!.params.content[0].text).toBe('Make the preview with the photo I just uploaded.');
+  });
+
   it('gives the person the sentence to send when the app will not take the message', async () => {
     for (const reply of [{ error: { code: -32000, message: 'not allowed' } }, { result: { isError: true } }]) {
       const card = await inMcpHost({ context: 'header_image', cardUploadAvailable: true });
@@ -383,6 +394,18 @@ describe('the upload card in ChatGPT keeps its file store (#474)', () => {
     expect(card.shown('url-box')).toBe(true);
     // No canvas: ChatGPT gets the original.
     expect(card.drawing.canvases).toHaveLength(0);
+  });
+
+  it('confirms the upload with no context it does not know', async () => {
+    const card = inChatGpt({ toolOutput: { context: 'a postcard for Sam, with this photo on the front' } });
+    await card.pick();
+    await card.click('btn-use');
+    const confirm = card.calls.find(call => call[1] === 'confirm_uploaded_image');
+    expect(confirm?.[2]).toEqual({ imageUrl: 'https://files.example/1', context: undefined });
+    expect(card.calls.at(-1)).toEqual([
+      'sendFollowUpMessage',
+      { prompt: 'Image upload completed. Please call a preview tool with imageUrl "https://files.example/1".' }
+    ]);
   });
 
   it('keeps its own path even before ChatGPT has offered its file store', async () => {
