@@ -66,9 +66,9 @@ Remaining:
 - [ ] Avoid user-facing submission language that frames the product as generic digital `credits`, `tokens`, or a subscription.
 - [ ] Confirm submission materials explain that Letter Packs are prepaid physical mail sends for real USPS letters/postcards.
 - [ ] Describe checkout as it runs: a card opens Letter IRL's own start page
-      (`https://api.letterirl.com/purchase/start`), which hands off to Stripe-hosted Checkout, and
-      nothing is paid inside the widget. Never claim embedded payment. If Stripe's custom domain is
-      adopted (#373), update this line.
+      (`https://api.letterirl.com/purchase/start`), which hands off to Stripe-hosted Checkout on
+      Letter IRL's checkout domain, `pay.letterirl.com` (#373, switched on in Stripe at launch), and
+      nothing is paid inside the widget. Never claim embedded payment.
 - [ ] The listing sells physical mail only: no digital generation credits, and no upsell of
       image-generation capacity.
 - [ ] Reviewers use production and the prepared reviewer account, with letters preloaded; nothing in

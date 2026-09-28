@@ -1980,9 +1980,10 @@ audit.
 
 ### ADMIN-ACCT-04 — Promo campaigns and ambiguous image reservations
 
-**Status:** Not run. Step 1 fails on development until #431: the create form sends no `target`
-and the preview refuses it (found by GIFT-01 step 9, 2026-09-23). Running this step would have
-caught it when the panel shipped.
+**Status:** Step 1 passed on development on 2026-09-23, after #431 (merged as 6ba1f99); steps 2 to
+4 not run. Until #431 step 1 failed: the create form sent no `target` and the preview refused it
+(found by GIFT-01 step 9, 2026-09-23). Running this step would have caught it when the panel
+shipped.
 
 **Steps:**
 
