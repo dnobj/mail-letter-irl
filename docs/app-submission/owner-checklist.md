@@ -86,11 +86,12 @@ Remaining:
 - [ ] **Short description, 30 characters or fewer.** Proposed: `Mail real letters & postcards`
       (29). The long description stays within 4,000 characters.
 - [ ] **Category.** Proposed: Communication.
-- [ ] **Support URL.** The listing needs an HTTPS support page, not only an email. `/support` on
-      letterirl.com does not exist yet (a website page, #476).
+- [ ] **Support URL.** The listing needs an HTTPS support page, not only an email:
+      `https://letterirl.com/support` (website #45, live on letterirl.com once the website is
+      promoted).
 - [ ] **Developer Identity.** The portal checks the verified developer, Objective Works, against the
-      name, website, support, privacy and terms pages. Name Objective Works as the operator on the
-      privacy and terms pages (website, #476; the owner's wording).
+      name, website, support, privacy and terms pages. Website #45 names Objective Works as the
+      operator on the privacy, terms and support pages and in the footer, for the owner's sign-off.
 - [ ] Confirm app description and short metadata match `docs/chatgpt-app-submission.md`.
 - [ ] Confirm localization fields, if required by the submission portal.
 

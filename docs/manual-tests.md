@@ -684,7 +684,9 @@ our tools arrive through Claude's own connection and log as `client=claude` (che
       there. So this route hides card-only tools, as ChatGPT does. The production app still listed
       both send tools, because production doesn't have the send rule yet.)
 - Pay & Send is still open to the model on that route, because the server takes it for ChatGPT.
-  The person still pays on Stripe, but never saw our card (#475).
+  The person still pays on Stripe, but never saw our card (#475). PR #508 makes Pay & Send
+  card-only under the send rule in every app. After it deploys, list this route's tools again:
+  `create_mail_checkout` should be gone as well.
 
 ### CLIENT-05 — Hermes Agent on a remote host (launch gate, #471)
 
@@ -714,6 +716,48 @@ Hermes's own bugs on remote hosts are [#87329](https://github.com/NousResearch/h
 (the port collision) and [#103633](https://github.com/NousResearch/hermes-agent/issues/103633). The
 second, about the token exchange for `/mcp` paths, did not occur against Auth0. A person running
 Hermes on their own computer needs none of this.
+
+### CLIENT-06 — OpenClaw (launch gate, #471)
+
+**Status:** Not run. It needs website #44 deployed to development, and its document imported into
+the development tenant.
+
+OpenClaw publishes no client document, and it takes no pre-registered client id
+([openclaw#116052](https://github.com/openclaw/openclaw/issues/116052)). What it can do is point at a
+document with `--oauth-client-metadata-url`, so the website serves one:
+`<website>/oauth/openclaw-client-metadata.json` (website #44). The document's `client_id` is that
+address, built from the website's `APP_BASE_URL`, so each environment serves its own. Its
+redirects are OpenClaw's fixed sign-in listener, `http://127.0.0.1:8989/oauth/callback`, and the
+`localhost` address OpenClaw retries with. The Connect page's OpenClaw block shows once `openclaw` is
+in the website's `LETTER_IRL_CONNECT_APPS`.
+
+- [ ] **Import (owner).** In the development tenant: Applications, then Create Application, then
+      Import from URL, with
+      `https://mail-letter-irl-website-development.up.railway.app/oauth/openclaw-client-metadata.json`.
+      Grant it the three user-delegated scopes on the Letter IRL DEV MCP API, as for the other
+      imports ([auth0-tenant-configuration.md](auth0-tenant-configuration.md)). The tenant is at its
+      10-app cap, so delete an unused application first.
+- [ ] An authorize request with the document's client id is accepted for both redirects, and
+      refused with "Callback URL mismatch" for another port.
+- [ ] Install OpenClaw 2026.9.6 or later, then add the server:
+      `openclaw mcp add letter-irl-dev --url <development /mcp> --transport streamable-http --auth
+      oauth --oauth-client-metadata-url <the document's address> --oauth-scope 'mail:read
+      mail:draft mail:send offline_access'`. Without `--oauth-scope`, OpenClaw asks for the
+      server's advertised scopes, OpenID's included, which went wrong for Codex (CLIENT-04).
+- [ ] `openclaw mcp login letter-irl-dev`, with the browser on the same computer. The consent screen
+      names OpenClaw and lists Read, Draft, Send and offline access. On another computer the
+      callback can't arrive; OpenClaw's fallback is `openclaw mcp login letter-irl-dev --code
+      <code>`, which is known to fail on some versions
+      ([openclaw#123605](https://github.com/openclaw/openclaw/issues/123605)).
+- [ ] `openclaw mcp doctor letter-irl-dev --probe` finds the server and its tools. The API's log
+      labels the calls `client=generic` with `clientIdKind=url`, since no profile names OpenClaw.
+- [ ] A balance, a preview, then a send by the link: the preview's text ends with `request_send`,
+      and the person sends on the confirmation page.
+- [ ] The refusals: no letters, an unconfirmed address, an erased account.
+- [ ] Disconnect: remove the server in OpenClaw, and check that its next call is refused.
+
+OpenClaw does not ask before each tool call by default, so its agent may call `request_send`
+unattended. That only returns the link: the send rule is the safeguard (#470).
 
 The sections below describe the older path, before Claude could connect with its published
 identity.
