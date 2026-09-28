@@ -145,7 +145,19 @@ describe("upload_image tool", () => {
       expect(result.message).toBe(
         "Select a photo to use in your letter or postcard."
       );
-      expect(result.context).toBe("unknown_context");
+      // None, rather than words the card would pass on and the upload refuse (#474).
+      expect(result.context).toBe("");
+    });
+
+    it("reads a context in the model's own words as one of the three (#474)", async () => {
+      const context = createMockContext();
+      const result = await uploadImageTool.handler(
+        { context: 'Postcard to Sam Rivera, 1 Main St, Springfield, IL 62701, message: "Wish you were here!"' },
+        context
+      );
+
+      expect(result.context).toBe("postcard");
+      expect(result.message).toBe("Select a photo for the front of your postcard.");
     });
   });
 
