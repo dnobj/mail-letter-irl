@@ -660,8 +660,9 @@ tools. The account was testlirl02. The refusals on other accounts and the discon
 - [ ] Disconnect: `claude mcp remove letter-irl-dev-cli -s user`. (Not run: it removes the owner's
       server entry.)
 
-The preview tools' descriptions still end "Send later with send_letter", a tool Claude Code doesn't
-list (#516).
+The preview tools' descriptions still ended "Send later with send_letter", a tool Claude Code's
+model doesn't see: Claude Code hides card-only tools, and the server answers a call with the link
+(#516).
 
 A Claude Code session signed in to a Claude account also gets that account's connectors. There,
 our tools arrive through Claude's own connection and log as `client=claude` (checked the same day).
