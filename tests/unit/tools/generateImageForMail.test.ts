@@ -467,7 +467,8 @@ describe("generate_image_for_mail in an app with no image generation of its own"
       const description = describeTool(generateImageForMailTool, clientProfileNamed(name));
       expect(description, name).toContain("Letter IRL image generations");
       expect(description, name).toContain("an image of their own");
-      expect(description, name).toContain("Never refuse an image request");
+      expect(description, name).toContain("Follow its response.");
+      expect(description, name).not.toMatch(/Never refuse|letter packs|letter purchases/);
       expect(description, name).not.toMatch(/ChatGPT|built-in/);
     }
   });
@@ -507,7 +508,7 @@ describe("generate_image_for_mail in an app with no image generation of its own"
     expect(result.prompt).toBe("a walrus");
     expectOwnImageRedirect(
       result as never,
-      "This account has no Letter IRL image generations left. Letter packs and letter purchases include in-turn generations."
+      "This account has no Letter IRL image generations left."
     );
   });
 

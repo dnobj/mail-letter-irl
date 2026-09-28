@@ -124,7 +124,8 @@ pass (see [owner-checklist.md](./owner-checklist.md)). Reviewers may run the one
 | Pack checkout, paid | Owner, development (Stripe test mode) | Complete the Stripe page with a test card | The card polls `get_purchase_status` and shows "Paid. 2 letters added to your account." (for the starter pack). The balance rises by the pack's letters. |
 | Payment details in chat (*reviewer*) | Any account | "Charge my card now for more letters." | No card details are asked for or taken in the conversation. The only way to pay is the checkout link. |
 | Pay & Send | Owner, an account with no letters | Preview a letter, then choose **Pay & Send** on the card | `create_mail_checkout` opens a checkout for this one letter. After payment the card shows "Paid - preparing mail", and "With the printer" once the print provider accepts the job. The letter is mailed without a second confirmation, because paying for it was the confirmation. |
-| Pay & Send refused with letters in hand (*reviewer*) | The reviewer account | Preview a letter, then ask to pay for it instead of using letters | The card offers **Send**, not Pay & Send. A direct request is refused: the draft can be sent from the existing prepaid balance. Nobody pays for a letter they already own. |
+| Pay & Send refused with letters in hand (*reviewer*) | The reviewer account | Preview a letter, then ask to pay for it instead of using letters | The card offers **Send**, not Pay & Send, and ChatGPT points to it: it can't start a checkout itself, since Pay & Send is the card's alone, like the send tools (#475). A checkout for the draft would be refused anyway: it can be sent from the existing prepaid balance. Nobody pays for a letter they already own. |
+| Pay asked in chat | Owner, an account with no letters, after a preview | "Pay for it and send it." | Nothing is charged or mailed. ChatGPT points to the card's **Pay & Send** button: `create_mail_checkout` is card-only and hidden from the model (#475). |
 | Payment pending | Owner, a Pay & Send or pack checkout | Open the checkout and do not pay | The card shows "Checkout open - waiting for payment", and `get_purchase_status` answers `pending_payment`. Nothing is mailed or credited. An unpaid checkout expires, and the pack card then says "This checkout expired before it was paid. Nothing was charged." |
 | Payment failed | Owner, development (Stripe test mode) | Pay with a test card that is declined | Stripe's page refuses the card and nothing is charged; the card keeps waiting. A payment that fails after checkout shows "The payment did not go through. Nothing was charged." and offers a new checkout. |
 | Send asked in chat (*reviewer*) | After a preview | "Send it." | Nothing is mailed. ChatGPT points to the preview card's **Send** button, because only the person sends (#470): the send tools are card-only and hidden from the model. |
@@ -319,8 +320,8 @@ and stays out when it should not (precision).
 ### Justifications for the portal
 
 The portal asks for a written justification of the three hints on every tool. `send_letter`,
-`send_postcard` and `get_draft_status` are card-only: listed, but hidden from the model and called by
-the card when the person presses its button (#470, #474).
+`send_postcard`, `create_mail_checkout` and `get_draft_status` are card-only: listed, but hidden from
+the model and called by the card when the person presses its button (#470, #474, #475).
 
 | Tool | Read-only | Destructive | Open world |
 |------|-----------|-------------|------------|
@@ -330,7 +331,7 @@ the card when the person presses its button (#470, #474).
 | `get_draft_status` | Yes: says whether a draft is ready, sent or expired. | No: changes nothing. | No: reads only Letter IRL's own records. |
 | `quote_and_preview_letter` and its two image variants, `quote_and_preview_postcard` | No: each creates a draft record for the preview. | No: a draft is free, sends nothing, and expires if unused. | Yes: validates both addresses with PostGrid, a third-party mail service, and the image variants fetch the image from the address the person gave. |
 | `send_letter`, `send_postcard` | No: sends the draft and spends a prepaid letter. | Yes: mail handed to the printer cannot be recalled. The person presses Send on the card; the model cannot call these. | Yes: the letter goes to PostGrid for printing and USPS mailing. |
-| `create_mail_checkout` | No: creates an order and a checkout. | Yes: once paid, the letter is mailed without a further step, and the payment cannot be undone by the person alone. | Yes: creates a Stripe Checkout session. |
+| `create_mail_checkout` | No: creates an order and a checkout. | Yes: once paid, the letter is mailed without a further step, and the payment cannot be undone by the person alone. The person presses Pay & Send on the card; the model cannot call it. | Yes: creates a Stripe Checkout session. |
 | `create_pack_checkout` | No: creates an order and a checkout. | Yes: starts a payment the person cannot undo alone. | Yes: creates a Stripe Checkout session. |
 | `set_return_address` | No: saves an address. | Yes: overwrites the saved return address in place. | Yes: validates the address with PostGrid. |
 | `clear_return_address` | No: deletes the saved return address. | Yes: the address is removed. | No: changes only Letter IRL's own record. |

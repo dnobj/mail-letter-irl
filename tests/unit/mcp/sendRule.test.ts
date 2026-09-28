@@ -264,7 +264,21 @@ describe("the send rule in the MCP server (#470)", () => {
       }
     });
 
-    it("still starts Pay & Send in ChatGPT, where the person sees the card and pays", async () => {
+    it("answers Pay & Send with the link where the card shows but the model can see card-only tools (#475)", async () => {
+      // Takes purchases and shows the card, but a call may be its model's.
+      profileOverride.value = { name: "generic", rendersCards: true, honorsCardOnlyTools: false, inAppPurchases: true };
+      try {
+        const { callbacks, execute } = await register(chatgpt());
+        const result = await callbacks.get(PAY_AND_SEND_TOOL)!({ draftId: DRAFT_ID }, {});
+        expect(execute).toHaveBeenCalledTimes(1);
+        expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ toolName: "request_send" }));
+        expect(result.content[0].text).toContain(LINK.confirmationUrl);
+      } finally {
+        profileOverride.value = null;
+      }
+    });
+
+    it("still starts Pay & Send from ChatGPT's card, the only caller that can reach it", async () => {
       const { callbacks, execute } = await register(chatgpt());
       const result = await callbacks.get(PAY_AND_SEND_TOOL)!({ draftId: DRAFT_ID }, {});
       expect(execute).toHaveBeenCalledWith(expect.objectContaining({ toolName: PAY_AND_SEND_TOOL }));
@@ -326,15 +340,18 @@ describe("the send rule in the MCP server (#470)", () => {
       await expect(callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {})).rejects.toBe(refused);
     });
 
-    it("makes the send tools card-only, and nothing else", async () => {
+    it("makes the send tools and Pay & Send card-only, and nothing else", async () => {
       const { definitions } = await register(chatgpt());
+      // Named, so a tool dropped from the set fails here and not only below.
+      expect([...CARD_ONLY_SEND_TOOLS].sort()).toEqual(["create_mail_checkout", "send_letter", "send_postcard"]);
       for (const tool of CARD_ONLY_SEND_TOOLS) {
         const meta = definitions.get(tool)._meta;
         expect(meta["openai/visibility"]).toBe("private");
         expect(meta["anthropic/requiresUserInteraction"]).toBe(true);
         expect(meta.ui.visibility).toEqual(["app"]);
       }
-      for (const tool of ["request_send", "quote_and_preview_letter", "get_account_balance"]) {
+      // Buying a pack sends nothing, so the model may still start one.
+      for (const tool of ["request_send", "quote_and_preview_letter", "get_account_balance", "create_pack_checkout"]) {
         const meta = definitions.get(tool)._meta;
         expect(meta["openai/visibility"]).toBeUndefined();
         expect(meta.ui.visibility).toBeUndefined();
@@ -344,20 +361,27 @@ describe("the send rule in the MCP server (#470)", () => {
     it("tells the model how the person sends, with the draft id, after every preview", async () => {
       const { callbacks } = await register(vscode());
       const preview = await callbacks.get("quote_and_preview_letter")!({}, {});
-      expect(preview.content[0].text.endsWith(` ${howToSendText(DRAFT_ID, false)}`)).toBe(true);
+      expect(preview.content[0].text.endsWith(` ${howToSendText(DRAFT_ID, clientProfileNamed("vscode"))}`)).toBe(true);
       expect(preview.content[0].text).toContain(`call request_send with draftId ${DRAFT_ID}`);
       expect(preview.content[0].text).not.toContain("preview card");
+      expect(preview.content[0].text).not.toContain("Pay & Send");
     });
 
     it.each([
-      ["ChatGPT", chatgpt()],
-      ["Claude", claude()]
-    ])("points %s at the card's Send button, and at the link only if the card is missing", async (_label, authInfo) => {
+      ["ChatGPT", chatgpt(), "chatgpt", "from the preview card, with Send, or with Pay & Send to pay for just this one"],
+      ["Claude", claude(), "claude", "with Send on the preview card"]
+    ] as const)("points %s at the card, and at the link only if the card is missing", async (_label, authInfo, app, how) => {
       const { callbacks } = await register(authInfo);
       const preview = await callbacks.get("quote_and_preview_letter")!({}, {});
-      expect(preview.content[0].text.endsWith(` ${howToSendText(DRAFT_ID, true)}`)).toBe(true);
-      expect(preview.content[0].text).toContain("Send on the preview card");
+      expect(preview.content[0].text.endsWith(` ${howToSendText(DRAFT_ID, clientProfileNamed(app))}`)).toBe(true);
+      expect(preview.content[0].text).toContain(how);
       expect(preview.content[0].text).toContain(`Only if the card is not showing, call request_send with draftId ${DRAFT_ID}`);
+    });
+
+    it("names the card's Pay & Send only to an app that takes purchases, since no model can start one (#475)", () => {
+      expect(howToSendText(DRAFT_ID, clientProfileNamed("chatgpt"))).toContain("Pay & Send");
+      expect(howToSendText(DRAFT_ID, clientProfileNamed("claude"))).not.toContain("Pay & Send");
+      expect(howToSendText(DRAFT_ID, clientProfileNamed("vscode"))).not.toContain("Pay & Send");
     });
 
     it("adds nothing to a preview that carries no draft id", async () => {
@@ -393,10 +417,12 @@ describe("the send rule in the MCP server (#470)", () => {
     }
   });
 
-  it("builds the card-only metadata only for the send tools, only with the rule on", () => {
+  it("builds the card-only metadata only for the send tools and Pay & Send, only with the rule on", () => {
     expect(buildToolMeta("send_letter", {}, true, false)["openai/visibility"]).toBeUndefined();
     expect(buildToolMeta("send_letter", {}, true, true)["openai/visibility"]).toBe("private");
-    expect(buildToolMeta("create_mail_checkout", {}, true, true)["openai/visibility"]).toBeUndefined();
+    expect(buildToolMeta("create_mail_checkout", {}, true, false)["openai/visibility"]).toBeUndefined();
+    expect(buildToolMeta("create_mail_checkout", {}, true, true)["openai/visibility"]).toBe("private");
+    expect(buildToolMeta("create_pack_checkout", {}, true, true)["openai/visibility"]).toBeUndefined();
   });
 });
 
@@ -410,7 +436,25 @@ describe("request_send's place in the tool list (#470)", () => {
   });
 });
 
-// The instructions as they were before the send rule (8465b1f), verbatim. With
+describe("the pack checkout's pointer to Pay & Send (#475)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  const description = () =>
+    new LetterIrlServer()
+      .listTools(clientProfileNamed("chatgpt"))
+      .find((tool) => tool.name === "create_pack_checkout")!.description;
+
+  it("names create_mail_checkout with the rule off, and the card's Pay & Send with it on", () => {
+    expect(description()).toContain("Use create_mail_checkout instead to pay for one specific draft.");
+    vi.stubEnv("LETTER_IRL_SEND_CONFIRMATION_ENABLED", "true");
+    // The model cannot call a card-only tool, so it is pointed at the button.
+    expect(description()).toContain("To pay for one specific draft instead, the person presses Pay & Send on its preview card.");
+    expect(description()).not.toContain("create_mail_checkout");
+  });
+});
+
+// The instructions as they were before the send rule (8465b1f), verbatim, less
+// the "Never refuse an image request." that #476 removed from every app. With
 // the rule off they must not change by a character.
 const PRE_470_INSTRUCTIONS = [
   "Letter IRL drafts, previews, and sends real physical letters and postcards in the U.S.",
@@ -421,7 +465,7 @@ const PRE_470_INSTRUCTIONS = [
   "A preview exists only when the preview tool's result includes a draftId, and a checkout only when its result includes a checkoutUrl. If a Letter IRL tool call returns no result, say it did not complete: the preview card offers a Create my preview button, or offer to try again. Never describe a draft, order or checkout you did not receive.",
   "Use saved return addresses when available, and ask for missing real U.S. mailing addresses when required.",
   "For image mail, reuse existing conversation images or hosted imageUrl values before opening upload_image.",
-  "For an image request addressed to Letter IRL, call generate_image_for_mail and follow its response exactly: it either generates the image in-turn using the user's remaining Letter IRL image generations, or returns routing guidance with a copy-ready prompt. Never refuse an image request. For image requests not addressed to Letter IRL, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly.",
+  "For an image request addressed to Letter IRL, call generate_image_for_mail and follow its response exactly: it either generates the image in-turn using the user's remaining Letter IRL image generations, or returns routing guidance with a copy-ready prompt. For image requests not addressed to Letter IRL, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly.",
   "If a specific image fails to hand off to a preview tool, open upload_image so the user can pick it from their ChatGPT library or upload it - that preserves the exact image they approved.",
   "For unsupported formats, integrations, or product ideas, offer submit_feature_request instead of promising support.",
   "No tool can request or issue a refund. If the user asks for one, tell them to email support@letterirl.com from the email on their Letter IRL account, quoting the order id from get_purchase_status; refunds are decided by a person, so never promise, estimate, or deny a refund or an amount."
@@ -441,9 +485,13 @@ describe("the server instructions under the send rule (#470)", () => {
     expect(on).not.toContain("Only call send_letter");
     expect(on).toContain("Mail is sent only by the person, never by you");
     expect(on).toContain("call request_send and give them its link");
-    // Another copy is the card's or the page's to offer, not the model's.
+    // Another copy is the card's or the page's to offer, not the model's, and
+    // Pay & Send is the card's too (#475), so no checkout is named.
     expect(on).not.toContain("If send_letter, send_postcard or create_mail_checkout says");
-    expect(on).toContain("the preview card or the confirmation page offers another copy itself");
+    expect(on.split("\n")).toContain(
+      "If the same mail was sent recently, the preview card or the confirmation page says so and offers another copy itself."
+    );
+    expect(on).not.toContain("create_mail_checkout");
     // Only those two lines differ.
     const before = LETTER_IRL_SERVER_INSTRUCTIONS.split("\n");
     const after = on.split("\n");

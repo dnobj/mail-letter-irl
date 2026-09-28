@@ -106,7 +106,8 @@ describe('server instructions in an app other than ChatGPT', () => {
       .split('\n')
       .find(entry => /generate_image_for_mail/.test(entry));
     expect(images).toBeDefined();
-    expect(images).toContain('rather than refusing');
+    expect(images).toContain('follow its response exactly');
+    expect(images).not.toMatch(/refus/);
     expect(images).toContain('an image of their own');
     expect(images).not.toMatch(/ChatGPT|image_gen|addressed to Letter IRL|copy-ready prompt/);
   });

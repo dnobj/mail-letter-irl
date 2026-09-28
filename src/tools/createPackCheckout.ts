@@ -6,6 +6,7 @@ import {
   type PackChoice,
   type PackProductId
 } from '../config/products.js';
+import { isSendConfirmationEnabled } from '../config/sendConfirmation.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { widgetTemplateUri } from '../mcp/widgetUris.js';
 import { createPackCheckoutInputSchema, createPackCheckoutOutputSchema } from '../schemas.js';
@@ -162,8 +163,13 @@ export const createPackCheckoutTool: McpToolDefinition<
 > = {
   name: 'create_pack_checkout',
   title: 'Buy a letter pack',
-  description:
-    'Create a Stripe-hosted checkout to buy a pack of prepaid letters. The result carries a checkoutUrl that the customer must be shown as a link to click; nothing opens automatically and no card is guaranteed to render, so present the link. The price and pack sizes come only from server configuration. Payment adds letters to the account balance; it does not send anything, so the customer still chooses and sends afterward. Use create_mail_checkout instead to pay for one specific draft.',
+  // Under the send rule Pay & Send is card-only (#475), so the model is sent
+  // to the card rather than to a tool it cannot call.
+  description: () =>
+    'Create a Stripe-hosted checkout to buy a pack of prepaid letters. The result carries a checkoutUrl that the customer must be shown as a link to click; nothing opens automatically and no card is guaranteed to render, so present the link. The price and pack sizes come only from server configuration. Payment adds letters to the account balance; it does not send anything, so the customer still chooses and sends afterward. ' +
+    (isSendConfirmationEnabled()
+      ? 'To pay for one specific draft instead, the person presses Pay & Send on its preview card.'
+      : 'Use create_mail_checkout instead to pay for one specific draft.'),
   readOnly: false,
   inputSchema: createPackCheckoutInputSchema,
   outputSchema: createPackCheckoutOutputSchema,

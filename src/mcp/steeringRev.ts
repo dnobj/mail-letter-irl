@@ -67,5 +67,13 @@
  *     served schema had no description, and in CLIENT-01 step 14 Claude
  *     filled it with a sentence, which upload_photo_chunk refused. The server
  *     now also reads a context in other words as one of the three, or none.
+ * r18: launch text for the Plugin Directory. Under the send rule Pay & Send
+ *     (create_mail_checkout) is card-only in every app (#475): Codex reaches
+ *     us through ChatGPT's connection with no card, so no model may start a
+ *     checkout that sends. ChatGPT's preview text names the card's Pay & Send,
+ *     its instructions no longer ask the model to repeat a checkout, and the
+ *     pack checkout's description points to the card. The image text no
+ *     longer says "Never refuse an image request" or that purchases include
+ *     image generations (#476).
  */
-export const STEERING_COPY_REV = 17;
+export const STEERING_COPY_REV = 18;

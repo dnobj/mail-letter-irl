@@ -83,6 +83,12 @@ after payment. A new checkout for mail sent, paid for or awaiting payment in the
 last 24 hours is refused unless `sendAnotherCopy` is true
 ([letter-send-flow.md](letter-send-flow.md#the-same-mail-twice)).
 
+While the send rule is on, the tool is card-only like the send tools (#475):
+the preview card's **Pay & Send** button calls it, and no app shows it to its
+model. From a caller that can't be trusted to keep it from the model, or an
+app that may not take a purchase, it answers with the confirmation link
+instead ([letter-send-flow.md](letter-send-flow.md#who-can-send-the-send-rule-470)).
+
 ### `get_purchase_status`
 
 Input: `{ orderId: string }`.
