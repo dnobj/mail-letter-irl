@@ -34,7 +34,9 @@ function hostileAddress(label: string) {
   };
 }
 
-function mount() {
+function mount(
+  previewHtml = '<div class="letter-body">Hello</div><div class="sign-off">Bye</div>'
+) {
   // The card as served, with the host bridge inlined (#474).
   const html = inlineHostBridge(
     fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'),
@@ -59,10 +61,7 @@ function mount() {
           senderAddressValidation: { status: 'verified', originalAddress: hostileAddress('Sender') },
           recipientAddressValidation: { status: 'verified', originalAddress: hostileAddress('Recipient') }
         },
-        toolResponseMetadata: {
-          previewHtml:
-            '<div class="letter-body">Hello</div><div class="sign-off">Bye</div>'
-        },
+        toolResponseMetadata: { previewHtml },
         callTool: async () => ({})
       };
     }
@@ -96,5 +95,29 @@ describe('LetterPreviewCard address window', () => {
     const container = dom.window.document.getElementById('mockup-container');
     expect(container!.querySelector('.body-text')?.textContent).toContain('Hello');
     expect(container!.querySelector('.sign-off')?.textContent).toContain('Bye');
+  });
+});
+
+describe('LetterPreviewCard letter text', () => {
+  // The preview HTML as previewService writes it: every character its
+  // escapeHtml touches, escaped once. ChatGPT showed "Let&#039;s" on
+  // 2026-09-28 because the card escaped that a second time.
+  const ESCAPED =
+    '<div class="letter-body">Let&#039;s meet at Joe&#039;s &amp; say &quot;hi&quot; &lt;3 ' +
+    '&lt;b&gt;not bold&lt;/b&gt; and &amp;lt; stays</div>' +
+    '<div class="sign-off">Love, Sam &amp; Alex&#039;s</div>';
+
+  it("shows the customer's characters, not the server's escapes", () => {
+    const container = mount(ESCAPED).window.document.getElementById('mockup-container')!;
+    expect(container.querySelector('.body-text')?.textContent).toBe(
+      'Let\'s meet at Joe\'s & say "hi" <3 <b>not bold</b> and &lt; stays'
+    );
+    expect(container.querySelector('.sign-off')?.textContent).toBe("Love, Sam & Alex's");
+  });
+
+  it('still draws markup the customer typed as text', () => {
+    const container = mount(ESCAPED).window.document.getElementById('mockup-container')!;
+    expect(container.querySelector('.body-text b')).toBeNull();
+    expect(container.querySelector('.body-text')?.innerHTML).toContain('&lt;b&gt;not bold&lt;/b&gt;');
   });
 });
