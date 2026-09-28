@@ -17,6 +17,7 @@ import {
 } from "./letterHelpers.js";
 import { callingApp } from "../auth/clientProfiles.js";
 import { giftCardSummary, resolveGiftSendChoice } from "./giftSendChoice.js";
+import { previewSendStep } from "./previewSendStep.js";
 import { giftPostcardBlockSvg, type GiftCardContent, type GiftCardState } from "../services/giftCardRenderer.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import {
@@ -552,8 +553,10 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_postcard",
   title: "Preview a postcard",
-  description:
-    "Create a preview of a physical postcard draft with a front image and back message. Use this when the user wants to make, create, design, or preview a postcard through Letter IRL. This does not send mail. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment for the image, pass imageUrl when a generated or hosted image is already available, and use upload_image only if no attachment or usable imageUrl made it through after a direct preview attempt. If sender is omitted, the saved return address is used automatically. Send later with send_postcard.",
+  // The last sentence follows the send rule and the app (#516).
+  description: (client) =>
+    "Create a preview of a physical postcard draft with a front image and back message. Use this when the user wants to make, create, design, or preview a postcard through Letter IRL. This does not send mail. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment for the image, pass imageUrl when a generated or hosted image is already available, and use upload_image only if no attachment or usable imageUrl made it through after a direct preview attempt. If sender is omitted, the saved return address is used automatically. " +
+    previewSendStep("send_postcard", client),
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale
   readOnly: false,

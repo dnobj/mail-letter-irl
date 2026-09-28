@@ -29,6 +29,14 @@ import {
   imageProcessingConfig,
 } from '../../fixtures/postcards.js';
 import { quoteAndPreviewPostcardTool } from '../../../src/tools/quoteAndPreviewPostcard.js';
+import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
+
+// Resolved here rather than with describeTool from src/server.js, whose module
+// graph loads dotenv and more than this file mocks (as listLetterPacks.test.ts).
+function describedForChatGpt(): string {
+  const description = quoteAndPreviewPostcardTool.description;
+  return typeof description === 'function' ? description(clientProfileNamed('chatgpt')) : description;
+}
 
 describe('quote_and_preview_postcard Tool', () => {
   beforeEach(() => {
@@ -345,9 +353,12 @@ describe('quote_and_preview_postcard Tool', () => {
   // ==========================================================================
   describe('Widget Output Template', () => {
     it('should describe imageUrl reuse and upload_image as fallback-only', () => {
-      expect(quoteAndPreviewPostcardTool.description).toContain('Use this when the user wants to make, create, design, or preview a postcard');
-      expect(quoteAndPreviewPostcardTool.description).toContain('pass imageUrl when a generated or hosted image is already available');
-      expect(quoteAndPreviewPostcardTool.description).toContain('use upload_image only if no attachment or usable imageUrl made it through');
+      // Read per app since #516, whose last sentence depends on the app; this
+      // part reads the same in every app.
+      const description = describedForChatGpt();
+      expect(description).toContain('Use this when the user wants to make, create, design, or preview a postcard');
+      expect(description).toContain('pass imageUrl when a generated or hosted image is already available');
+      expect(description).toContain('use upload_image only if no attachment or usable imageUrl made it through');
     });
 
     it('should specify PostcardPreviewCard widget in _meta', () => {
