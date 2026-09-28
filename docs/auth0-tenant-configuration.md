@@ -1,6 +1,6 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** September 26, 2026
+**Last Updated:** September 28, 2026
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
 
@@ -80,7 +80,6 @@ Use this table to verify each application has the correct settings:
 
 | Application | Type | Callbacks Required | Web Origins Required | Domain Connection |
 |-------------|------|-------------------|---------------------|-------------------|
-| **Mail Letter IRL** | SPA | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect`<br>`https://platform.openai.com/apps-manage/oauth` | `https://chat.openai.com`<br>`https://chatgpt.com`<br>`https://platform.openai.com` | N/A |
 | **Letter IRL API** | M2M | None | None | N/A |
 | **ChatGPT CIMD** | Strict third-party, `private_key_jwt` (Auth0 maps `app_type: regular_web`; strict is forced, not chosen) | Exact current `https://chatgpt.com/connector/oauth/{callback_id}` from CIMD | N/A | Domain-level connections |
 
@@ -279,7 +278,8 @@ This section describes the development tenant.
 development tenant reached the limit on 2026-09-26, when the other MCP apps'
 documents were imported (section 6 below). **Create application** is disabled
 at the limit. Each app we import needs a slot in each tenant, and production has
-the same cap.
+the same cap. On 2026-09-28 deleting Mail Letter IRL (section 2) made room for
+OpenClaw (section 6), so the tenant is at the limit again.
 
 ### 1. Default App - deleted
 
@@ -292,7 +292,7 @@ the same cap.
 Default application created by Auth0. Deleted on 2026-09-26 to make room for the
 MCP apps, after the usage review below found nothing that referenced it.
 
-### 2. Mail Letter IRL
+### 2. Mail Letter IRL - deleted
 
 | Property | Value |
 |----------|-------|
@@ -303,9 +303,24 @@ MCP apps, after the usage review below found nothing that referenced it.
 | **Logout URLs** | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect` |
 | **Web Origins** | `https://chat.openai.com`<br>`https://chatgpt.com`<br>`https://platform.openai.com` |
 
-Main application for the Letter IRL project.
+ChatGPT's static client from the first Auth0 integration (326b32e, 2025-11-14),
+from before ChatGPT registered itself. ChatGPT now signs in with its own client
+document (section 5, and the CIMD configuration below), so nothing used this
+application. It was deleted on 2026-09-28 to make room for OpenClaw, after
+these checks:
+- its client id appeared in no branch of either repository except in this
+  document;
+- no development Railway variable held it
+  (`C:\letter-irl-scripts\railway-var-value-match.mjs`).
 
-> **Important:** The `https://platform.openai.com/apps-manage/oauth` callback is required for the OpenAI app review process. See [OpenAI Apps SDK Auth Documentation](https://developers.openai.com/apps-sdk/build/auth/).
+Production may hold a copy of it. Check during the production imports, which
+need the slots.
+
+Its callbacks included `https://platform.openai.com/apps-manage/oauth`, which
+this document used to call required for OpenAI's app review. That dates from the
+static client. OpenAI's current [auth guide](https://developers.openai.com/apps-sdk/build/auth/),
+read on 2026-09-28, names only `chatgpt.com` redirects, which under CIMD come
+from ChatGPT's own client document. It says nothing about that address.
 
 ### 3. Letter IRL API (Test Application) - deleted
 
@@ -361,7 +376,7 @@ also revoked five refresh tokens that one test account still held for it.
 
 Dynamically registered via RFC 7591 when ChatGPT connects to the MCP server. Multiple instances may exist as users connect/reconnect.
 
-### 6. Other MCP apps, imported from their documents (development, 2026-09-26)
+### 6. Other MCP apps, imported from their documents (development, 2026-09-26; OpenClaw 2026-09-28)
 
 The M2 imports in [mcp-multi-client-plan.md](mcp-multi-client-plan.md) (#465).
 Each was imported with **Import from URL**, like ChatGPT (below). Each was then
@@ -371,6 +386,12 @@ access, and **Always grant all permissions** is off, so people see a consent
 screen. The server names each app from its document URL
 (`src/auth/clientProfiles.ts`).
 
+OpenClaw publishes no document, so its document is ours: the website serves it,
+with a `client_id` built from the website's `APP_BASE_URL` (website #44,
+[CLIENT-06](manual-tests.md#client-06--openclaw-launch-gate-471)). Production's
+is `https://letterirl.com/oauth/openclaw-client-metadata.json`, served once the
+website is promoted.
+
 | App | Auth0 client | Document | Callbacks |
 |---|---|---|---|
 | Claude | `tpc_nzv1WDzBigLDqccQkDsVx3` | `https://claude.ai/oauth/mcp-oauth-client-metadata` | `https://claude.ai/api/mcp/auth_callback` |
@@ -378,6 +399,7 @@ screen. The server names each app from its document URL
 | Codex | `tpc_1pVfZCrG4TFNTwhJsrSU1f` | `https://chatgpt.com/oauth/codex/pGLYK3svyYGg/client.json` | `http://127.0.0.1/callback/pGLYK3svyYGg`, `http://localhost/callback/pGLYK3svyYGg` |
 | Visual Studio Code | `tpc_eG8tnoxeEJJknqqBXxPY3Y` | `https://vscode.dev/oauth/client-metadata.json` | `http://127.0.0.1:33418/`, `https://vscode.dev/redirect` |
 | Hermes Agent | `tpc_rgU3u4iFg4SSpyFzikWN2n` | `https://nousresearch.github.io/hermes-agent/docs/oauth/client-metadata.json` | ports 27890-27894 on `127.0.0.1` and `localhost`, path `/callback` |
+| OpenClaw | `tpc_uW9yLTZS9R7MBQSUAg1q96` | `https://mail-letter-irl-website-development.up.railway.app/oauth/openclaw-client-metadata.json` | `http://127.0.0.1:8989/oauth/callback`, `http://localhost:8989/oauth/callback` |
 
 What the imports showed:
 - **Unsupported grants are ignored with a warning.** That covers Claude's
@@ -389,6 +411,11 @@ What the imports showed:
   - Claude Code and Codex were accepted on a random port.
   - Hermes, which lists fixed ports, got `403 Callback URL mismatch` on any
     other port. That is the probe's control.
+  - OpenClaw, on its fixed port 8989, was accepted on both of its callbacks
+    and got the same 403 on port 8990 (2026-09-28).
+- **Our own document's `scope` and `client_uri` are ignored.** OpenClaw's import
+  took neither, so its token carries the scopes OpenClaw asks for. That is why
+  CLIENT-06 passes `--oauth-scope`.
 - **OIDC scopes are dropped, not refused.** Claude asks for `openid profile
   email`. Auth0 accepts the request, and the consent screen lists only the mail
   scopes and offline access. So Claude signs in with our advertised scopes as
@@ -427,6 +454,9 @@ All five connected on development on 2026-09-26, recognised by name in the log:
 - Codex: `codex`, with a tool call;
 - Hermes Agent: `hermes`, from a Docker container on a remote host, using the callback relay
   described in CLIENT-05.
+
+OpenClaw has not connected yet. OpenClaw 2026.9.6 needs Node 24.16 or later, or 26.1 or later
+(CLIENT-06).
 
 ---
 
@@ -1085,11 +1115,12 @@ subjects, and only the surviving primary subject counts afterwards.
    - **All 5 connections** must have `is_domain_connection: true`
    - **Why:** Third-party clients (like dynamically registered ChatGPT apps) can only use domain-level connections
 
-4. **OpenAI Review Redirect URI** ⚠️
-   - **Location:** Applications → Mail Letter IRL → Settings → Allowed Callback URLs
-   - **Required URI:** `https://platform.openai.com/apps-manage/oauth`
-   - **Why:** OpenAI's app review process uses this redirect URI to test OAuth flows
-   - **Reference:** [OpenAI Apps SDK Auth Docs](https://developers.openai.com/apps-sdk/build/auth/)
+4. **OpenAI review redirect: no longer ours to set**
+   - This item used to put `https://platform.openai.com/apps-manage/oauth` on the static client,
+     Mail Letter IRL, which was deleted from development on 2026-09-28 (section 2 of Applications).
+   - Under CIMD, ChatGPT's redirects come from its own client document. OpenAI's
+     [auth guide](https://developers.openai.com/apps-sdk/build/auth/), read on 2026-09-28, names
+     only `chatgpt.com` redirects and says nothing about this address.
 
 ### Environment Variables (.env)
 

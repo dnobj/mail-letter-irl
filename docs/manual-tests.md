@@ -227,7 +227,7 @@ the only rehearsal of the rollback path.
 - [ ] Confirm production was unchanged throughout.
 
 **Purpose:** Integration and end-to-end tests that require manual verification
-**Last Updated:** September 25, 2026
+**Last Updated:** September 28, 2026
 
 ---
 
@@ -719,8 +719,9 @@ Hermes on their own computer needs none of this.
 
 ### CLIENT-06 — OpenClaw (launch gate, #471)
 
-**Status:** Not run. It needs website #44 deployed to development, and its document imported into
-the development tenant.
+**Status:** The first two steps passed in development on 2026-09-28. The OpenClaw steps are not
+run: OpenClaw 2026.9.6 needs Node 24.16 or later, or 26.1 or later, and the test computer has
+Node 22.
 
 OpenClaw publishes no client document, and it takes no pre-registered client id
 ([openclaw#116052](https://github.com/openclaw/openclaw/issues/116052)). What it can do is point at a
@@ -731,14 +732,18 @@ redirects are OpenClaw's fixed sign-in listener, `http://127.0.0.1:8989/oauth/ca
 `localhost` address OpenClaw retries with. The Connect page's OpenClaw block shows once `openclaw` is
 in the website's `LETTER_IRL_CONNECT_APPS`.
 
-- [ ] **Import (owner).** In the development tenant: Applications, then Create Application, then
+- [x] **Import (owner).** In the development tenant: Applications, then Create Application, then
       Import from URL, with
       `https://mail-letter-irl-website-development.up.railway.app/oauth/openclaw-client-metadata.json`.
       Grant it the three user-delegated scopes on the Letter IRL DEV MCP API, as for the other
       imports ([auth0-tenant-configuration.md](auth0-tenant-configuration.md)). The tenant is at its
-      10-app cap, so delete an unused application first.
-- [ ] An authorize request with the document's client id is accepted for both redirects, and
-      refused with "Callback URL mismatch" for another port.
+      10-app cap, so delete an unused application first. (Imported on 2026-09-28 as
+      `tpc_uW9yLTZS9R7MBQSUAg1q96`, after the unused Mail Letter IRL application was deleted. The
+      import ignored the document's `scope` and `client_uri`.)
+- [x] An authorize request with the document's client id is accepted for both redirects, and
+      refused with "Callback URL mismatch" for another port. (`cimd-authorize-probe.mjs dev` on
+      2026-09-28: port 8989 on `127.0.0.1` and on `localhost` reached the login page, and port 8990
+      got `403 Callback URL mismatch.`)
 - [ ] Install OpenClaw 2026.9.6 or later, then add the server:
       `openclaw mcp add letter-irl-dev --url <development /mcp> --transport streamable-http --auth
       oauth --oauth-client-metadata-url <the document's address> --oauth-scope 'mail:read
@@ -1293,6 +1298,13 @@ MCP transport), and a successful call does return `_meta` to a card (PREVIEW-01)
 gives a card no `_meta` for a refused call; see
 [openai-app-sdk-notes.md](learnings/openai-app-sdk-notes.md).
 
+**Card step re-run on 2026-09-28** in development, on 53ffdf2 with widget v44, in the Claude app's
+built-in browser as testlirl02. A letter was sent from its card, then previewed again, and
+**Send Letter** on the second card got the same notice and **Send another copy** (not clicked).
+The refused send logged `credits.ledger_deducted` with `newBalance=6` at 14:56:46 UTC, but the
+balance still read 4 letters at 15:02:07, not 3, so the deduction rolled back with the refusal
+(#458 covers the log line).
+
 ### SEND-01 — Only the person sends (issue #470)
 
 **Status:** Executed in development between 2026-09-25 22:30 and 2026-09-26 00:50 UTC, through the
@@ -1309,6 +1321,22 @@ Observations:
   narration asks the model to point there when the person asks to send.
 - A send refused as a duplicate logs `credits.ledger_deducted` from inside the transaction it then
   rolls back. The balance was unchanged, but the log line reads as a charge.
+
+**Re-run on 2026-09-28**, after #508 made `create_mail_checkout` card-only too. Development ran
+53ffdf2 (steering r18, widget v44), with the same connector and account, and Medium thinking.
+**Passed.**
+- The letter card (t29) showed `It's`, `let's`, `&` and `"good"` as typed, not as HTML entities
+  (#510).
+- **Send Letter** on the card sent it, with no approval panel: **Letter Sent!** and **With the
+  printer**.
+- On a second preview of the same letter, "Send it." got one `request_send` call and the link.
+  Nothing was sent.
+- "Use Pay & Send for this draft instead of my letter credits, please." made no tool call. The model
+  said Pay & Send isn't offered while the account holds letters, and pointed back to the link.
+  With letters in the account the card offers no Pay & Send either, so the same request from an
+  empty account was not run.
+- The development log from 14:55 to 15:03 UTC has no `send_letter` or `create_mail_checkout` from
+  the model. Its one `send_letter`, at 14:56:46, was the second card's (DUPLICATE-01).
 
 Background: with `LETTER_IRL_SEND_CONFIRMATION_ENABLED` on, the model can't send mail in any app.
 The person sends it with the preview card's Send button, or on a confirmation page on the website
@@ -1382,9 +1410,13 @@ Leave the rule on in development afterwards. (It is on.)
 - [x] Missing address fields → clear error
 - [x] Non-US address → "Only supports US" error (2026-09-13: refused as a missing `state`
       instead; clear, but not that wording)
-- [ ] Text-only body over 1,600 characters or 24 lines returns a clear limit error
+- [x] Text-only body over 1,600 characters or 26 lines returns a clear limit error (2026-09-28 in
+      ChatGPT: 2,368 characters in 38 lines was refused with "Letter exceeds one-page limit:
+      2368/1600 characters and 38/26 lines. Please shorten your message.", and no draft was made.
+      The sentence goes on to repeat the count and "Please shorten your message", and the model
+      quoted all of it. 24 lines is the soft limit; the refusal is at 26.)
 - [ ] Invalid address → suggestions returned
-- [ ] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200)
+- [x] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200) (2026-09-28 in ChatGPT, with Suite 3300: the draft was made, and the reply said USPS confirmed the building but not the suite, and that the letter goes out as entered)
 - [x] Same building with no unit given → draft IS created with an "add the unit if you have it" note
 - [x] Garbage street (123 Fake Street, Nowhere) → still refused, message says what to check
 - Expected refusals like these, and an over-long gift postcard, log `tool.invocation.failure`
