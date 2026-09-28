@@ -147,7 +147,8 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
       variable is unset.
 - [ ] **Scan Tools.** The portal discovers the tools production serves. At launch that is 24: the 23
       without `generate_image_for_mail` (image generation off), plus `request_send` (the send rule
-      on), with the card-only `send_letter`, `send_postcard` and `get_draft_status` among them.
+      on), with the card-only `send_letter`, `send_postcard`, `create_mail_checkout` and
+      `get_draft_status` among them.
       Other switch settings change the count. Record any warning, and give each tool's three hint
       justifications from [Justifications for the portal](./openai-test-cases.md#justifications-for-the-portal).
 - [ ] **Starter prompts.** The listing's prompts for customers, from
@@ -164,11 +165,12 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
       destructive tool's annotation still brings the host's prompt, and that the app's own
       confirmation (the preview and the explicit send) still stands on top of it.
 - [ ] **`openai/visibility` deprecated for `_meta.ui.visibility` (July 2026).** Neither key was
-      used in `src/` on 2026-09-23. The send rule (#470) now emits both on `send_letter` and
-      `send_postcard` while `LETTER_IRL_SEND_CONFIRMATION_ENABLED` is on, so that ChatGPT keeps
-      the tools from its model and the card can still call them. Before the rule goes on in
-      production, confirm in ChatGPT that the model cannot call `send_letter` and the card's Send
-      button still can (docs/letter-send-flow.md, Rollout).
+      used in `src/` on 2026-09-23. The send rule (#470) now emits both on `send_letter`,
+      `send_postcard` and `create_mail_checkout` (#475) while `LETTER_IRL_SEND_CONFIRMATION_ENABLED`
+      is on, so that ChatGPT keeps the tools from its model and the card can still call them.
+      Before the rule goes on in production, confirm in ChatGPT that the model cannot call
+      `send_letter` or `create_mail_checkout`, and that the card's Send and Pay & Send buttons
+      still can (docs/letter-send-flow.md, Rollout).
 - [ ] **Stable OAuth callback and CIMD id (August 2026).** They rely on RFC 9207 issuer
       identification, which the production Auth0 discovery did not advertise on 2026-09-16. Keep
       the imported CIMD client; do not swap it for the stable URL without testing the swap.

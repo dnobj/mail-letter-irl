@@ -74,7 +74,7 @@ grants is a change to the send rule. The `POST`:
 
 **Rollout.** The rule is off by default. It is turned on once:
 - the website's confirmation page is live (website #39);
-- the ChatGPT DEV regression pass has run with it on. It includes asking the model to send a preview: it must point to the card's Send button, or give the link, and never reach `send_letter` itself;
+- the ChatGPT DEV regression pass has run with it on. It includes asking the model to send a preview: it must point to the card's Send button, or give the link, and never reach `send_letter` itself. Since #475 it also includes asking it to pay for one: it must point to the card's Pay & Send, and never reach `create_mail_checkout`, while the card's button still opens a checkout;
 - the development log shows ChatGPT's tokens resolving to the `chatgpt` profile.
 
 **Where it stands.**
