@@ -891,7 +891,7 @@ export const uploadImageInputSchema: JsonSchema = {
   properties: {
     context: {
       type: "string",
-      description: "Optional hint for widget guidance text: 'postcard', 'header_image', or 'inline_image'"
+      description: "What the photo is for: 'postcard', 'header_image' or 'inline_image'."
     }
   }
 };
@@ -949,7 +949,7 @@ export const confirmUploadedImageInputSchema: JsonSchema = {
     },
     context: {
       type: "string",
-      description: "Usage context: 'postcard', 'header_image', or 'inline_image'"
+      description: "What the photo is for: 'postcard', 'header_image' or 'inline_image'."
     }
   }
 };

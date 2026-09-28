@@ -132,6 +132,28 @@ describe("confirm_uploaded_image tool", () => {
       );
     });
 
+    it("reads a context in the model's own words, so the recent upload still matches its preview (#474)", async () => {
+      const context = createMockContext();
+      const result = await confirmUploadedImageTool.handler(
+        { imageUrl: TEST_URL, context: "Postcard to Sam Rivera, 1 Main St, Springfield, IL 62701" },
+        context
+      );
+
+      expect(result.suggestedNextStep).toContain("call quote_and_preview_postcard");
+      const recent = await getRecentUploadedImage(context.user.userId, "postcard");
+      expect(recent?.imageUrl).toBe(TEST_URL);
+      expect(recent?.context).toBe("postcard");
+    });
+
+    it("stores no context it cannot read, so the upload matches any preview", async () => {
+      const context = createMockContext();
+      await confirmUploadedImageTool.handler({ imageUrl: TEST_URL, context: "a photo for Sam" }, context);
+
+      const recent = await getRecentUploadedImage(context.user.userId, "header_image");
+      expect(recent?.imageUrl).toBe(TEST_URL);
+      expect(recent?.context).toBeUndefined();
+    });
+
     it("should store the uploaded image URL for per-user fallback", async () => {
       const context = createMockContext();
       await confirmUploadedImageTool.handler(
