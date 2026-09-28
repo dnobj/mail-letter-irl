@@ -21,6 +21,7 @@
  */
 
 import { maintenanceHeartbeatUrlInvalid } from '../services/maintenanceHeartbeat.js';
+import { operatorAlertUrlInvalid } from './operatorAlerts.js';
 import { enabledUnlessDisabled } from '../utils/envSettings.js';
 import {
   JIT_PRICE_ENV_VARS,
@@ -550,6 +551,18 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     secret: true,
     services: ['maintenance'],
     checkedBy: 'maintenance.heartbeat_url_invalid'
+  },
+  /**
+   * Where the operator is told a daily limit refused someone (migration 038).
+   * A capability, like the heartbeat, so the preflight treats it as secret.
+   */
+  {
+    name: 'LETTER_IRL_OPERATOR_ALERT_URL',
+    requiredIn: 'production',
+    advisory: true,
+    secret: true,
+    services: ['api'],
+    checkedBy: 'limits.operator_alert_url_invalid'
   },
   /**
    * The retention sweep (#153): reports what is past the published window
@@ -1171,6 +1184,17 @@ export function validateDeploymentConfig(
       severity: 'warning',
       rule: 'maintenance.heartbeat_url_invalid',
       message: 'MAINTENANCE_HEARTBEAT_URL must be an https URL, such as a healthchecks.io ping URL'
+    });
+  }
+
+  // The operator's notice (src/config/operatorAlerts.ts): a URL the API
+  // cannot post to means a limit that refuses customers tells nobody. A
+  // warning: the alert in the admin panel still opens.
+  if (operatorAlertUrlInvalid(env)) {
+    findings.push({
+      severity: 'warning',
+      rule: 'limits.operator_alert_url_invalid',
+      message: 'LETTER_IRL_OPERATOR_ALERT_URL must be an https URL, such as a healthchecks.io /fail URL'
     });
   }
 

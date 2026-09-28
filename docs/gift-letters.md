@@ -116,7 +116,7 @@ The claim page is `letterirl.com/g/<code>` (the QR) or `letterirl.com/g` with th
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `LETTER_IRL_GIFT_LETTERS_ENABLED` | off | The programme. Only an explicit `true`, `1`, `yes`, `on` or `enabled` turns it on |
-| `LETTER_IRL_GIFT_DAILY_SEND_CAP` | 20 | Gift sends per UTC day, all accounts. 0 stops them |
+| `LETTER_IRL_GIFT_DAILY_SEND_CAP` | 20 | Gift sends per UTC day, all accounts. 0 stops them. The admin panel's Limits page can set another value without a redeploy (migration 038) |
 | `LETTER_IRL_GIFT_CODE_TTL_DAYS` | 90 | How long a printed chain code stays redeemable |
 | `LETTER_IRL_GIFT_LETTER_TTL_DAYS` | 180 | How long an unsent gift letter lasts |
 | `LETTER_IRL_GIFT_OPERATOR_GENERATIONS` | 4 | The budget `gift.grant` uses when the operator names none |

@@ -259,4 +259,177 @@ describePostgres('beta spend limits', () => {
       client.release();
     }
   });
+
+  /**
+   * The operator values and the refusal record (migration 038), against real
+   * rows: the expiry and clearing filters, the table's own rules, and the
+   * counter row that lets many simultaneous refusals open one alert.
+   */
+  describe('operator values and refusal records', () => {
+    afterEach(async () => {
+      await (await import('../../src/services/dailyLimits.js')).settleDailyLimitReports();
+      await pool.query('DELETE FROM daily_limit_overrides');
+      await pool.query('DELETE FROM daily_limit_refusals');
+      await pool.query(`DELETE FROM commerce_operational_alerts WHERE alert_type = 'daily_limit_reached'`);
+      await pool.query('DELETE FROM daily_limit_defaults');
+    });
+
+    async function override(
+      limitKey: string,
+      value: number,
+      options: { userId?: string | null; expiresSql?: string; cleared?: boolean } = {}
+    ): Promise<void> {
+      await pool.query(
+        `INSERT INTO daily_limit_overrides (limit_key, user_id, value, expires_at, cleared_at, cleared_by_command_id)
+         VALUES ($1, $2, $3, ${options.expiresSql ?? 'NULL'},
+                 ${options.cleared ? 'NOW()' : 'NULL'}, ${options.cleared ? "'run-1'" : 'NULL'})`,
+        [limitKey, options.userId ?? null, value]
+      );
+    }
+
+    /**
+     * A refusal in an earlier test records itself without being awaited
+     * (reportDailyLimitReached). Wait for every such record to land, then
+     * clear it, so a test that counts refusals or alerts sees only its own.
+     */
+    async function settle(): Promise<void> {
+      await (await import('../../src/services/dailyLimits.js')).settleDailyLimitReports();
+      await pool.query('DELETE FROM daily_limit_refusals');
+      await pool.query(`DELETE FROM commerce_operational_alerts WHERE alert_type = 'daily_limit_reached'`);
+    }
+
+    async function withClient<T>(run: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+      const client = await pool.connect();
+      try {
+        return await run(client);
+      } finally {
+        client.release();
+      }
+    }
+
+    it("raises a limit for everyone, and lets one account's own value win", async () => {
+      process.env.LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP = '3';
+      await override('account_daily_mail', 5);
+      await override('account_daily_mail', 10, { userId: USER });
+      for (let i = 0; i < 9; i += 1) await seedLetter(USER, utcDayOffset(0));
+      for (let i = 0; i < 5; i += 1) await seedLetter(OTHER, utcDayOffset(0));
+
+      await withClient(async (client) => {
+        await expect(limits.assertMailWithinDailyCaps(client, USER, 1)).resolves.toBeUndefined();
+        await expect(limits.assertMailWithinDailyCaps(client, OTHER, 1)).rejects.toMatchObject({
+          code: 'ACCOUNT_DAILY_MAIL_CAP',
+          message: 'This account has reached its daily limit of 5 items. Please try again tomorrow.'
+        });
+      });
+    });
+
+    it('ignores an expired value and a cleared one', async () => {
+      process.env.LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP = '3';
+      await override('account_daily_mail', 50, { expiresSql: "NOW() - INTERVAL '1 minute'" });
+      await override('account_daily_mail', 60, { userId: USER, cleared: true });
+      for (let i = 0; i < 3; i += 1) await seedLetter(USER, utcDayOffset(0));
+      await withClient(async (client) => {
+        await expect(limits.assertMailWithinDailyCaps(client, USER, 1)).rejects.toMatchObject({
+          code: 'ACCOUNT_DAILY_MAIL_CAP'
+        });
+      });
+      // A value that has not yet expired is in force.
+      await pool.query('DELETE FROM daily_limit_overrides');
+      await override('account_daily_mail', 50, { expiresSql: "NOW() + INTERVAL '1 hour'" });
+      await withClient(async (client) => {
+        await expect(limits.assertMailWithinDailyCaps(client, USER, 1)).resolves.toBeUndefined();
+      });
+    });
+
+    it('raises the money limit for one account through the pool path', async () => {
+      process.env.LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS = '6000';
+      await override('account_daily_charge_cents', 20000, { userId: USER });
+      await expect(limits.assertChargeWithinDailyCap(USER, 9000)).resolves.toBeUndefined();
+      await expect(limits.assertChargeWithinDailyCap(OTHER, 9000)).rejects.toMatchObject({
+        code: 'CHARGE_ABOVE_DAILY_CAP'
+      });
+    });
+
+    it('keeps its own rules: no account on a limit for everyone, no negative value, one uncleared value each', async () => {
+      await expect(override('global_daily_mail', 5, { userId: USER })).rejects.toMatchObject({ code: '23514' });
+      await expect(override('account_daily_mail', -1)).rejects.toMatchObject({ code: '23514' });
+      await expect(override('unknown_limit', 5)).rejects.toMatchObject({ code: '23514' });
+      await override('account_daily_mail', 5);
+      await expect(override('account_daily_mail', 6)).rejects.toMatchObject({ code: '23505' });
+      await override('account_daily_mail', 7, { userId: USER });
+      await expect(override('account_daily_mail', 8, { userId: USER })).rejects.toMatchObject({ code: '23505' });
+      // Cleared rows are history, and do not count.
+      await override('account_daily_mail', 9, { cleared: true });
+    });
+
+    it('opens one alert for a burst of refusals, counts every one, and tells the operator once', async () => {
+      const { recordDailyLimitRefusal } = await import('../../src/services/dailyLimits.js');
+      const { transaction } = await import('../../src/db/index.js');
+      await settle();
+      let notices = 0;
+      const deps = {
+        transaction,
+        notify: async () => {
+          notices += 1;
+          return 'sent' as const;
+        }
+      };
+
+      const outcomes = await Promise.all(
+        Array.from({ length: 6 }, () => recordDailyLimitRefusal('global_daily_mail', USER, 100, deps))
+      );
+
+      expect(outcomes.filter((outcome) => outcome.opened)).toHaveLength(1);
+      expect(notices).toBe(1);
+      const counter = await pool.query<{ refusals: number; today: boolean }>(
+        `SELECT refusals, utc_day = (NOW() AT TIME ZONE 'UTC')::date AS today FROM daily_limit_refusals WHERE limit_key = 'global_daily_mail'`
+      );
+      expect(counter.rows).toEqual([{ refusals: 6, today: true }]);
+      const alerts = await pool.query<{ severity: string; status: string; details: Record<string, unknown> }>(
+        `SELECT severity, status, details FROM commerce_operational_alerts WHERE alert_type = 'daily_limit_reached'`
+      );
+      expect(alerts.rows).toHaveLength(1);
+      expect(alerts.rows[0].severity).toBe('warning');
+      expect(alerts.rows[0].status).toBe('open');
+      // A limit for everyone names no account.
+      expect(alerts.rows[0].details).toEqual({
+        limitKey: 'global_daily_mail',
+        utcDay: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        value: 100
+      });
+    });
+
+    it('names the first account on a per-account limit, and opens a separate alert per limit', async () => {
+      const { recordDailyLimitRefusal } = await import('../../src/services/dailyLimits.js');
+      const { transaction } = await import('../../src/db/index.js');
+      const deps = { transaction, notify: async () => 'sent' as const };
+      await settle();
+      await recordDailyLimitRefusal('account_daily_mail', USER, 25, deps);
+      await recordDailyLimitRefusal('account_daily_mail', OTHER, 25, deps);
+      await recordDailyLimitRefusal('account_daily_charge_cents', OTHER, 20000, deps);
+      const alerts = await pool.query<{ key: string; user_id: string }>(
+        `SELECT details->>'limitKey' AS key, details->>'userId' AS user_id FROM commerce_operational_alerts
+          WHERE alert_type = 'daily_limit_reached' ORDER BY created_at`
+      );
+      expect(alerts.rows).toEqual([
+        { key: 'account_daily_mail', user_id: USER },
+        { key: 'account_daily_charge_cents', user_id: OTHER }
+      ]);
+    });
+
+    it('writes the configured values, and rewrites them on the next start', async () => {
+      const { reportDailyLimitDefaults } = await import('../../src/services/dailyLimits.js');
+      expect(await reportDailyLimitDefaults({ LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP: '25' })).toBe(true);
+      expect(await reportDailyLimitDefaults({ LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP: '30' })).toBe(true);
+      const rows = await pool.query<{ limit_key: string; value: number }>(
+        `SELECT limit_key, value FROM daily_limit_defaults ORDER BY limit_key`
+      );
+      expect(rows.rows).toEqual([
+        { limit_key: 'account_daily_charge_cents', value: 6000 },
+        { limit_key: 'account_daily_mail', value: 30 },
+        { limit_key: 'gift_daily_send', value: 20 },
+        { limit_key: 'global_daily_mail', value: 25 }
+      ]);
+    });
+  });
 });

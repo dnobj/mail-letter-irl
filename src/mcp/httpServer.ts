@@ -66,6 +66,7 @@ import { validatePublicServerAdminConfiguration } from "../admin/config.js";
 import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
 import { getReadiness } from "./readiness.js";
 import { kickPriceCatalog } from "../services/priceCatalog.js";
+import { reportDailyLimitDefaults } from "../services/dailyLimits.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 import { resolveCorsOriginFor } from "./corsOrigin.js";
 import { installProcessGuards, withRequestBoundary } from "./requestBoundary.js";
@@ -1044,6 +1045,9 @@ export async function startHttpServer() {
       // would answer was false (#278 review). Resolution is lazy at every
       // consuming path anyway; this only saves the first request the latency.
       kickPriceCatalog(undefined, "http_listen");
+      // The daily limits this process runs with, for the admin panel, which
+      // has its own environment (migration 038). Never throws.
+      void reportDailyLimitDefaults();
       console.log(`  MCP endpoint: http://${DEFAULT_HOST}:${DEFAULT_PORT}${MCP_PATH}`);
       console.log(`  SSE stream: http://${DEFAULT_HOST}:${DEFAULT_PORT}${SSE_PATH}`);
       console.log(

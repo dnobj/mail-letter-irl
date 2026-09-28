@@ -99,6 +99,11 @@ LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP=<letters per account per day>
 # At least the dearest pack's price (the Power Pack, 9000): the default, 6000, is below it,
 # so no account could buy that pack (2026-09-28).
 LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS=<spend per account per day, in cents; default 6000>
+# The four daily limits can also be set, for everyone or one account, in the admin panel's Limits page
+# (migration 038), with no redeploy; these variables are the values in force when none is set there.
+# Where the operator is told a daily limit refused someone: an https URL that takes a plain-text POST,
+# such as a healthchecks.io check's /fail URL. A capability: treat it as a secret. API service only.
+LETTER_IRL_OPERATOR_ALERT_URL=<https URL, or unset for the admin panel's alert alone>
 # Gift letters (docs/gift-letters.md): off unless explicitly true. API service only.
 LETTER_IRL_GIFT_LETTERS_ENABLED=<true to turn the programme on; unset keeps it off>
 LETTER_IRL_GIFT_DAILY_SEND_CAP=<gift sends per UTC day, all accounts; default 20; 0 stops them>

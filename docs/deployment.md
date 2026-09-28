@@ -247,6 +247,7 @@ at `src/db/index.ts:32-37`. A `?sslmode=require` URL satisfies all three rules.
 | Rule | Severity | Raised when | Fix |
 |---|---|---|---|
 | `maintenance.heartbeat_url_invalid` | warning | `MAINTENANCE_HEARTBEAT_URL` is set but is not an https URL | Set the monitor's https ping URL, or unset it. The maintenance service prints it at every run (#408) |
+| `limits.operator_alert_url_invalid` | warning | `LETTER_IRL_OPERATOR_ALERT_URL` is set but is not an https URL | Set the https URL the notice is posted to (for example a healthchecks.io check's `/fail` URL), or unset it. The daily-limit alert still opens in the admin panel ([admin-panel-guide.md](admin-panel-guide.md)) |
 
 ### Mail dispatch
 
@@ -346,6 +347,10 @@ The pre-deploy command runs the migration while the **old** image is still
 serving, and only then starts the new one. So between the migration committing
 and the new image accepting traffic, the previous code runs against the new
 schema.
+
+The reverse must not happen: the new image must never serve on a database behind its migrations.
+Since 038 every send and checkout reads `daily_limit_overrides` first, and on a database without it
+they all refuse (failing closed, logged as `database_error`) until the migration is applied.
 
 Every migration therefore has to be backward-compatible with the deployed
 version of the code:

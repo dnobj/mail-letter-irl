@@ -23,9 +23,14 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  *
  * 037 adds personal_access_tokens.scopes, which neither role is granted (the
  * column list below is explicit), so again nothing to re-run.
+ *
+ * 038 adds the daily limits' three tables: both roles read them, and the
+ * operator writes daily_limit_overrides through limit.set and limit.clear.
+ * Provisioning MUST be re-run after it, or the Limits page and both commands
+ * fail with permission denied.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "037_personal_access_token_scopes.sql";
+  "038_daily_limits.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";
@@ -71,6 +76,11 @@ export const ADMIN_READER_TABLES = [
   // bearer value like a promo code, which this list already includes.
   "gift_letters",
   "gift_codes",
+  // The daily limits (038): values, refusal counts and the API's configured
+  // values. Limit keys, numbers, dates and account ids only.
+  "daily_limit_overrides",
+  "daily_limit_refusals",
+  "daily_limit_defaults",
   "admin_environment_marker",
   "admin_audit_events",
   "admin_command_runs",
@@ -325,6 +335,12 @@ export const ADMIN_OPERATOR_WRITE_GRANTS: Readonly<
   // gift.void_code, the dispute path and the failed-send return void codes.
   gift_codes: { update: ["status", "voided_at", "void_reason", "updated_at"] },
   promo_campaigns: { insert: "table", update: "table", delete: true },
+  // limit.set inserts a value and clears the one it replaces; limit.clear
+  // clears. Never deleted: clearing stamps the row, which keeps the history.
+  daily_limit_overrides: {
+    insert: "table",
+    update: ["cleared_at", "cleared_by_command_id", "updated_at"],
+  },
   provider_routing: { update: "table" },
   admin_operations: { insert: "table" },
   // stripe_webhook_events held a table-level UPDATE until the security review.
