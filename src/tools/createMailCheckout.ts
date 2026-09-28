@@ -3,6 +3,7 @@ import { formatAmountForCurrency } from '../config/products.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { createMailCheckoutInputSchema, createMailCheckoutOutputSchema } from '../schemas.js';
 import { createJitCheckout } from '../services/commerceService.js';
+import { SpendLimitError } from '../services/betaSpendLimits.js';
 import {
   DuplicateMailError,
   duplicateMailMessage,
@@ -27,6 +28,14 @@ interface CreateMailCheckoutOutput {
 }
 
 export function friendlyCheckoutError(error: unknown): Error {
+  // A daily limit (betaSpendLimits): Pay & Send checks the day's mail and
+  // the day's spending before it creates anything. The sentence is fixed and
+  // ours, and it says when to come back, so it is passed on as it is, as the
+  // send and pack tools do. Before this it fell to the default below, "Please
+  // try again", which cannot work until the next day (#511's follow-up).
+  if (error instanceof SpendLimitError) {
+    return Object.assign(new Error(error.message), { code: error.code });
+  }
   // #412: server-authored, and the model needs this tool's own retry advice.
   if (isDuplicateMailError(error)) {
     return new DuplicateMailError(
