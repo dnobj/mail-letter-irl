@@ -91,7 +91,9 @@ ChatGPT's would be false there. The app's profile (`src/auth/clientProfiles.ts`)
     twice names only the send tools, or, under the send rule, the confirmation page.
 - **Tool descriptions.** `get_started`, `get_account_balance` and `list_letter_packs` promise a
   purchase in the conversation only where the app takes purchases; elsewhere they say letters are
-  bought on the website. `generate_image_for_mail` names ChatGPT only to ChatGPT.
+  bought on the website. `generate_image_for_mail` names ChatGPT only to ChatGPT. Under the send
+  rule, the four preview tools end with how the person sends: the card's Send in an app with
+  `rendersCards`, `request_send`'s link elsewhere (#516).
 - **Tool results.**
   - Where the app takes no purchases, `get_started`, `get_account_balance` and `list_letter_packs`
     give the letter packs page and ask the model to pass the link on.
