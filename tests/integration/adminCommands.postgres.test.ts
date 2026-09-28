@@ -613,6 +613,109 @@ describePostgres('admin commands through the operator role', () => {
     await expect(confirmation('routing.update', 'postcard', { provider: 'lob', enabled: 'on' })).rejects.toMatchObject({ code: 'ADMIN_INVALID_REQUEST' });
   }, 60_000);
 
+  it('sets a daily limit until midnight UTC and for one account, replaces it, and clears it, as the operator role', async () => {
+    const { effectiveDailyLimits } = await import('../../src/services/dailyLimits.js');
+
+    // For everyone, for the rest of the UTC day.
+    const today = await confirmation('limit.set', 'account_daily_mail', {
+      limit: 'account_daily_mail',
+      amount: '40',
+      account: '',
+      duration: 'today'
+    });
+    expect(today.fields.get('phrase')).toBe('CONFIRM account_daily_mail');
+    const first = await runner.runAdminCommand(deps(), today.command, 'account_daily_mail', today.fields);
+    expect(first).toMatchObject({ status: 'succeeded', result: { limitKey: 'account_daily_mail', value: 40 } });
+    const written = await owner.query<{ user_id: string | null; value: number; at_midnight: boolean; created_by_command_id: string }>(
+      `SELECT user_id, value, created_by_command_id,
+              expires_at = (date_trunc('day', NOW() AT TIME ZONE 'UTC') + INTERVAL '1 day') AT TIME ZONE 'UTC' AS at_midnight
+         FROM daily_limit_overrides WHERE cleared_at IS NULL AND limit_key = 'account_daily_mail'`
+    );
+    expect(written.rows).toHaveLength(1);
+    expect(written.rows[0]).toMatchObject({ user_id: null, value: 40, at_midnight: true, created_by_command_id: first.commandId });
+
+    // Setting it again replaces it: the first row is cleared by the second run, and kept.
+    const again = await confirmation('limit.set', 'account_daily_mail', {
+      limit: 'account_daily_mail',
+      amount: '50',
+      account: '',
+      duration: 'until_cleared'
+    });
+    const second = await runner.runAdminCommand(deps(), again.command, 'account_daily_mail', again.fields);
+    expect(second).toMatchObject({ status: 'succeeded', result: { value: 50, expiresAt: null } });
+    const history = await owner.query<{ value: number; cleared_by_command_id: string | null }>(
+      `SELECT value, cleared_by_command_id FROM daily_limit_overrides WHERE limit_key = 'account_daily_mail' ORDER BY created_at`
+    );
+    expect(history.rows).toEqual([
+      { value: 40, cleared_by_command_id: second.commandId },
+      { value: 50, cleared_by_command_id: null }
+    ]);
+
+    // For one account, in whole dollars for the money limit.
+    const one = await confirmation('limit.set', 'account_daily_charge_cents', {
+      limit: 'account_daily_charge_cents',
+      amount: '500',
+      account: userId,
+      duration: 'until_cleared'
+    });
+    expect(await runner.runAdminCommand(deps(), one.command, 'account_daily_charge_cents', one.fields)).toMatchObject({
+      status: 'succeeded',
+      result: { value: 50000 }
+    });
+
+    // The API's check reads exactly what the panel wrote.
+    expect(await effectiveDailyLimits(owner, ['account_daily_mail', 'account_daily_charge_cents'], userId, {})).toEqual({
+      account_daily_mail: 50,
+      account_daily_charge_cents: 50000
+    });
+    expect(await effectiveDailyLimits(owner, ['account_daily_charge_cents'], `auth0|${randomUUID()}`, {})).toEqual({
+      account_daily_charge_cents: 6000
+    });
+
+    // A limit for everyone takes no account; an unknown account is refused.
+    await expect(
+      confirmation('limit.set', 'global_daily_mail', { limit: 'global_daily_mail', amount: '5', account: userId, duration: 'today' })
+    ).rejects.toMatchObject({ code: 'ADMIN_INVALID_REQUEST' });
+    await expect(
+      confirmation('limit.set', 'account_daily_mail', {
+        limit: 'account_daily_mail',
+        amount: '5',
+        account: `auth0|${randomUUID()}`,
+        duration: 'today'
+      })
+    ).rejects.toMatchObject({ code: 'ADMIN_NOT_FOUND' });
+
+    // Clearing stamps the row; it is kept, and cannot be cleared twice.
+    const overrideId = (
+      await owner.query<{ override_id: string }>(
+        `SELECT override_id FROM daily_limit_overrides WHERE cleared_at IS NULL AND user_id = $1`,
+        [userId]
+      )
+    ).rows[0].override_id;
+    const clear = await confirmation('limit.clear', overrideId, {});
+    expect(await runner.runAdminCommand(deps(), clear.command, overrideId, clear.fields)).toMatchObject({
+      status: 'succeeded',
+      result: { overrideId, cleared: true }
+    });
+    const cleared = await owner.query<{ cleared: boolean }>(
+      `SELECT cleared_at IS NOT NULL AS cleared FROM daily_limit_overrides WHERE override_id = $1`,
+      [overrideId]
+    );
+    expect(cleared.rows).toEqual([{ cleared: true }]);
+    await expect(confirmation('limit.clear', overrideId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
+    expect(await effectiveDailyLimits(owner, ['account_daily_charge_cents'], userId, {})).toEqual({
+      account_daily_charge_cents: 6000
+    });
+
+    // The operator role clears; it never deletes.
+    await expect(operator.query(`DELETE FROM daily_limit_overrides`)).rejects.toMatchObject({ code: '42501' });
+    await expect(operator.query(`UPDATE daily_limit_overrides SET value = 1`)).rejects.toMatchObject({ code: '42501' });
+    // The page's reads work as the reader.
+    for (const table of ['daily_limit_overrides', 'daily_limit_refusals', 'daily_limit_defaults']) {
+      await expect(reader.query(`SELECT * FROM ${table} LIMIT 1`), table).resolves.toBeTruthy();
+    }
+  }, 60_000);
+
   it('lets the operator role perform exactly the granted writes', async () => {
     await expect(operator.query(`DELETE FROM letters WHERE letter_id = $1`, [heldLetterId])).rejects.toMatchObject({ code: '42501' });
     await expect(operator.query(`UPDATE admin_audit_events SET reason = 'x'`)).rejects.toMatchObject({ code: '42501' });

@@ -23,6 +23,7 @@ migration 021 as its immediate predecessor.
 | Feedback | `feature_requests` |
 | System | `migrations`, `personal_access_tokens` |
 | Operations | `commerce_operational_alerts`, `commerce_operator_audit_events`, `maintenance_tasks`, `provider_routing` |
+| Daily limits | `daily_limit_overrides`, `daily_limit_refusals`, `daily_limit_defaults` |
 | Images | `image_entitlements`, `image_generation_reservations`, `recent_uploads` |
 | Gift letters | `gift_letters`, `gift_codes` |
 | Retention | `redacted_content_quarantine` |
@@ -508,7 +509,9 @@ operator's typed reason lives in `admin_audit_events` alone (#394).
 The operator alert queue: dispute created or closed, ambiguous mail-provider outcome, refunded mail
 already dispatched, unmatched money event, and the steps an account erasure leaves an operator to do by
 hand (`account_erasure_followup`, migration 036, #453). That last one has no order or source event; its
-`details` hold the account id and nothing else. Each alert has a severity and a three-state lifecycle
+`details` hold the account id and nothing else. A daily limit's first refusal of a UTC day opens
+`daily_limit_reached` (migration 038, warning): its `details` hold the limit key, the UTC day, the value
+in force and, for the per-account limits, the first account's id. Each alert has a severity and a three-state lifecycle
 (`open`, `acknowledged`, `resolved`) whose timestamps and resolution code the constraints keep
 consistent, and the acknowledging or resolving actor is stored as a hash. One alert per source event
 and type. The panel's acknowledge and resolve commands are the only writers besides the sweeps and the
@@ -583,6 +586,26 @@ One row per scheduled maintenance task (`task_name` is the key) with its last st
 lock, status and error class (a class since migration 032, never the driver's message). The panel's
 maintenance page shows whether a task has an error, never the
 text. The maintenance runner claims a task by its `locked_at` so two instances cannot run it at once.
+
+### daily_limit_overrides
+
+An operator's value for one of the four daily limits (`global_daily_mail`, `account_daily_mail`,
+`account_daily_charge_cents`, `gift_daily_send`), for everyone (`user_id` NULL) or, for the two
+per-account limits only, one account, until `expires_at` (NULL: until cleared). Written only by the
+panel's `limit.set` and `limit.clear`, which record their command ids. Rows are never deleted:
+clearing sets `cleared_at`, and a unique index allows one uncleared row per limit and account. The
+API's checks read it on every send and checkout (`src/services/dailyLimits.ts`, migration 038).
+
+### daily_limit_refusals
+
+How many times each daily limit refused someone, per UTC day (`limit_key`, `utc_day` is the key). The
+insert of a day's first row is what opens that day's `daily_limit_reached` alert, so simultaneous
+refusals open one. No account ids.
+
+### daily_limit_defaults
+
+The value of each daily limit in the API process's environment, written when the API starts, so the
+admin panel (a separate service with its own environment) can show it.
 
 ### provider_routing
 
@@ -665,7 +688,8 @@ database marker, rejects privileged roles, and reapplies the grant set in `src/a
   `users`, `letters` and `letter_drafts` (the domain services select whole rows), **column-scoped**
   `INSERT`/`UPDATE` on exactly the columns the enabled commands write (so an operator can adjust
   `users.credits` but not `users.email` or `letters.content`), `INSERT` and a column-limited `UPDATE`
-  on the command and operation tables, and sequence usage. `DELETE` exists only on `promo_campaigns`.
+  on the command and operation tables, `INSERT` and a column-limited `UPDATE` (the clearing columns)
+  on `daily_limit_overrides`, and sequence usage. `DELETE` exists only on `promo_campaigns`.
 - Both: `UPDATE`, `DELETE` and `TRUNCATE` on `admin_audit_events` are revoked; the trigger refuses
   them regardless.
 
@@ -715,6 +739,7 @@ Production provisioning and the first production connection remain separate owne
 | 35 | 035_account_erasure.sql | Account erasure: `users.erased_at`, and the `users_erased_tombstone` CHECK that holds an erased row to its placeholder email and no return address (#289) |
 | 36 | 036_account_erasure_followup_alert.sql | The `account_erasure_followup` alert type, which an erasure opens for the steps done by hand (#453) |
 | 37 | 037_personal_access_token_scopes.sql | `personal_access_tokens.scopes`: every token reads and drafts, and none sends (#470) |
+| 38 | 038_daily_limits.sql | The daily limits' operator values, refusal counts and the API's configured values, and the `daily_limit_reached` alert type. Re-run admin provisioning after it |
 
 ---
 

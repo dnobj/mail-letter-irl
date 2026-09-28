@@ -146,6 +146,10 @@ vi.mock('../../../src/db/index.js', () => ({
   query: (sql: string, params?: unknown[]) => {
     const duplicate = dupState.answer(sql, params);
     if (duplicate) return duplicate;
+    // The limits' operator values (038): none set, so the environment's apply.
+    if (typeof sql === 'string' && sql.includes('FROM daily_limit_overrides')) {
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    }
     if (typeof sql === 'string' && sql.includes('SUM(amount_cents)')) {
       return Promise.resolve({
         rows: [{ total: String(capState.chargedTodayCents) }],

@@ -2,6 +2,7 @@ import { createAccountCommands } from "./accounts.js";
 import { alertTransitionCommand } from "./alerts.js";
 import { createGiftCommands } from "./gifts.js";
 import { createImageCommands } from "./images.js";
+import { createLimitCommands } from "./limits.js";
 import { jobResolveCommand, jobRetryCommand } from "./jobs.js";
 import { createOpsCommands } from "./ops.js";
 import { createPromoCommands } from "./promos.js";
@@ -16,6 +17,7 @@ const images = createImageCommands();
 const ops = createOpsCommands();
 const gifts = createGiftCommands();
 const retention = createRetentionCommands();
+const limits = createLimitCommands();
 
 /** Every command the panel can run, keyed by route name. */
 export const ADMIN_COMMANDS: ReadonlyArray<CommandDefinition<any>> = [
@@ -39,6 +41,8 @@ export const ADMIN_COMMANDS: ReadonlyArray<CommandDefinition<any>> = [
   ops.setTier,
   ops.routing,
   ops.statusSync,
+  limits.set,
+  limits.clear,
 ];
 
 export function findAdminCommand(name: string): CommandDefinition<any> | undefined {
