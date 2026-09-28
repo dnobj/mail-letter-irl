@@ -70,7 +70,8 @@
  * r18: launch text for the Plugin Directory. Under the send rule Pay & Send
  *     (create_mail_checkout) is card-only in every app (#475): Codex reaches
  *     us through ChatGPT's connection with no card, so no model may start a
- *     checkout that sends. ChatGPT's preview text names the card's Pay & Send,
+ *     checkout that sends. ChatGPT's preview text names the card's Pay & Send
+ *     when the card offers it,
  *     its instructions no longer ask the model to repeat a checkout, and the
  *     pack checkout's description points to the card. The image text no
  *     longer says "Never refuse an image request" or that purchases include
