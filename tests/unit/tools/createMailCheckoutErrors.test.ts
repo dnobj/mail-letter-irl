@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { friendlyCheckoutError } from '../../../src/tools/createMailCheckout.js';
+import { SpendLimitError } from '../../../src/services/betaSpendLimits.js';
 import { friendlyDraftError as letterDraftError } from '../../../src/tools/sendLetter.js';
 import { friendlyDraftError as postcardDraftError } from '../../../src/tools/sendPostcard.js';
 
@@ -115,5 +116,24 @@ describe('account-blocked wording on the send surface (#278)', () => {
     });
 
     expect(friendlyDraftError(upstream, 'draft-1').message).not.toBe('raw upstream text');
+  });
+});
+
+/**
+ * A daily limit on Pay & Send (#511's follow-up). Pay & Send checks the day's
+ * mail count and the day's spending before it creates anything, and both
+ * refusals say when the account can go again. The default branch used to
+ * replace them with "Please try again", which cannot work until the next day.
+ */
+describe('friendlyCheckoutError and the daily limits', () => {
+  it.each([
+    ['ACCOUNT_DAILY_MAIL_CAP', 'This account has reached its daily limit of 3 items. Please try again tomorrow.'],
+    ['ACCOUNT_DAILY_CHARGE_CAP', 'This account has reached its daily purchase limit. Please try again tomorrow.'],
+    ['CHARGE_ABOVE_DAILY_CAP', 'This purchase is more than one account can spend in a day, so it cannot be bought. Please choose a smaller pack.']
+  ])('passes on the %s sentence as it is', (code, sentence) => {
+    const friendly = friendlyCheckoutError(new SpendLimitError(code, sentence));
+    expect(friendly.message).toBe(sentence);
+    expect((friendly as Error & { code?: string }).code).toBe(code);
+    expect(friendly.message).not.toBe('Unable to create Pay & Send checkout. Please try again.');
   });
 });
