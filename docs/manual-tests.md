@@ -636,7 +636,10 @@ clicks Claude's prompts.
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
-**Status:** Steps 1 to 3 run in development on 2026-09-26 (Claude Code 2.1.282, Windows).
+**Status:** Steps 1 to 3 run in development on 2026-09-26 (Claude Code 2.1.282, Windows). The
+preview, the send by the link and the model's tool list followed on 2026-09-28 (Claude Code
+2.1.283, on 8f994f3), in a fresh non-interactive session (`claude -p`) allowed only this server's
+tools. The account was testlirl02. The refusals on other accounts and the disconnect are not run.
 
 - [x] Add the server: `claude mcp add --transport http --scope user letter-irl-dev-cli
       <development /mcp>`. `claude mcp get` should say it needs authentication.
@@ -644,7 +647,21 @@ clicks Claude's prompts.
       (The browser page said "Authentication successful". Claude Code used its published document
       and called back on a random port, `localhost:45364`. The log shows `client=claude_code`.)
 - [x] Ask for the balance. (A `get_account_balance` call as `client=claude_code` succeeded.)
-- [ ] Preview, send by the link, refusals, disconnect. (Not run.)
+- [x] The model's tools include no way to send or pay. (19 tools, with no `send_letter`,
+      `send_postcard`, checkout or image generation tool.)
+- [x] Preview a letter, then ask to send it. The model should call `request_send` and give the
+      link, and nothing should be sent. (`quote_and_preview_letter` and `request_send` logged as
+      `client=claude_code` at 16:42 UTC. The model followed the send rule from the server
+      instructions: it never saw the preview's narration, only its `structuredContent` (#516).)
+- [x] Open the link, signed in to the development website as the same account, and press **Send
+      this letter**. ("Sent. We'll print your letter and mail it.", 4 letters to 3;
+      `send.confirmed_on_website outcome=sent` at 16:44, PostGrid in test mode.)
+- [ ] The refusals: no letters, an unconfirmed address, an erased account. (Not run.)
+- [ ] Disconnect: `claude mcp remove letter-irl-dev-cli -s user`. (Not run: it removes the owner's
+      server entry.)
+
+The preview tools' descriptions still end "Send later with send_letter", a tool Claude Code doesn't
+list (#516).
 
 A Claude Code session signed in to a Claude account also gets that account's connectors. There,
 our tools arrive through Claude's own connection and log as `client=claude` (checked the same day).
@@ -1260,6 +1277,23 @@ from the card.
 - [x] If time allows, repeat the lost-call steps for a postcard. It also waits 45 seconds. (With
       the front image given as a URL: `tools/call quote_and_preview_postcard` from the card, and
       the card drew the front image with **Send Postcard**.)
+
+**Attempted again on 2026-09-28** in development, on 8f994f3 with widget v44, in the Claude app's
+built-in browser as testlirl02, with **Instant** selected (the first step of the composer's power
+control). The lost call did not reproduce, so the recovery was not exercised on v44:
+- Both calls approved with **Allow once** went through: a text-only preview (`tools/call` at
+  16:47:49 UTC, and the card filled in), and an enclosed-image letter using an image generated in
+  the chat (16:54:40).
+- The generated image reached the server as a file it could open: it was processed and an
+  `inline_image` draft was made. So #414's case, a sandbox path the card cannot pass back, did not
+  arise, and **Choose from library** and **Upload the image** were not exercised. **Upload the
+  image** opens a system file dialog, which the browser pane cannot drive.
+- **Deny** is no stand-in for a lost call: ChatGPT drew no card, and the model said the preview was
+  denied.
+- A letter sent from its card that morning, in a reopened chat, read **With the printer** with its
+  order id and "This letter was sent to the printer from this card. Ask for its status in the
+  chat.", and had no buttons. That is the state the send step above expects, though for a card that
+  had not needed recovery.
 
 ### DUPLICATE-01 — The same letter twice (issue #412)
 
