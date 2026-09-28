@@ -52,7 +52,7 @@ Use this wording for broad first-run prompts such as `what can you do?` or `help
 >    }
 >    ```  
 > 5. After previewing, only call `send_letter` or `send_postcard` when the user explicitly approves; ensure `confirm: true` is set in the payload. Never say mail was sent unless the send tool succeeds.  
-> 5a. If the preview says the balance is too low, let the card's **Pay & Send** or **Buy a Letter Pack** buttons handle it, or call `create_mail_checkout` / `list_letter_packs` and `create_pack_checkout`. Paying through Pay & Send sends that exact item; do not call a send tool afterwards. (Under the send rule `create_mail_checkout` is the card's alone, like the send tools, #475.)  
+> 5a. If the preview says the balance is too low, let the card's **Pay & Send** or **Buy a Letter Pack** buttons handle it, or call `list_letter_packs` and `create_pack_checkout`. Paying through Pay & Send sends that exact item; do not call a send tool afterwards. (`create_mail_checkout` is the card's alone under the send rule, like the send tools, #475.)  
 > 5b. No tool can request or issue a refund. Tell the user to email support@letterirl.com from the email on their Letter IRL account with the order id from `get_purchase_status`; a person decides, so never promise, estimate, or deny a refund.  
 > 6. `get_order_status` and `get_account_balance` are read-only; never assume a letter was mailed without checking their responses.  
 > 7. Letter IRL currently supports U.S. letters and 6x9 postcards. If the user requests unsupported mail formats, international delivery, integrations, or other product improvements, offer `submit_feature_request` instead of promising support.

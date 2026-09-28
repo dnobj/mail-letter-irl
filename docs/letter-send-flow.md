@@ -31,7 +31,7 @@ send. The model can't, in any app. There are three ways to send:
   - There the person, signed in, sees the preview and the cost, and presses Send.
   - Nothing is sent by the tool. It is read-only and needs only `mail:draft`.
   - Its link text says nothing is sent until the person presses Send.
-- **The card's Pay & Send button, in ChatGPT only.** `create_mail_checkout` is card-only too (#475): the person sees the card, and the mail is sent when they pay. It was model-callable in ChatGPT until launch. But Codex also reaches Letter IRL through ChatGPT's own connection, where the server sees ChatGPT and no card shows the preview, and the server cannot tell the two apart. In an app that may not take a purchase (the profile's `inAppPurchases`), it gets the link instead, even from its card, so the person pays and sends from the page, which shows them the preview.
+- **The card's Pay & Send button, in ChatGPT only.** `create_mail_checkout` is card-only too (#475): the person sees the card, and the mail is sent when they pay. It was model-callable in ChatGPT until launch. But Codex also reaches Letter IRL through ChatGPT's own connection, where the server sees ChatGPT and no card shows the preview, and the server cannot tell the two apart. It is listed only for an app that takes purchases (the profile's `inAppPurchases`, ChatGPT today), where the card is its only caller. The server also answers it with the link, not a checkout, from any app that takes no purchases, shows no card, or can't keep card-only tools from its model. No app reaches that answer today: it guards a future profile.
 
 **Where the rule is enforced.** Hiding a tool is the app's side of the rule. The
 server enforces its own side by the calling app's profile
@@ -51,8 +51,9 @@ server enforces its own side by the calling app's profile
 
 **Model-facing text.** While the rule is on:
 - every preview's text ends with how the person sends it, including the draft
-  id. Where our card shows, it points to the card's Send button, and in ChatGPT
-  to its Pay & Send button as well; elsewhere, to `request_send`;
+  id. Where our card shows, it points to the card's Send button, or in ChatGPT
+  to its Pay & Send button when the card offers that instead (the balance
+  can't pay and Pay & Send is on); elsewhere, to `request_send`;
 - the server instructions say the model cannot send, and that the card or the
   page offers another copy of mail sent recently. They name no checkout to
   repeat, since the model cannot start Pay & Send;

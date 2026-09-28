@@ -85,9 +85,10 @@ last 24 hours is refused unless `sendAnotherCopy` is true
 
 While the send rule is on, the tool is card-only like the send tools (#475):
 the preview card's **Pay & Send** button calls it, and no app shows it to its
-model. From a caller that can't be trusted to keep it from the model, or an
-app that may not take a purchase, it answers with the confirmation link
-instead ([letter-send-flow.md](letter-send-flow.md#who-can-send-the-send-rule-470)).
+model. It is listed only for an app that takes purchases (ChatGPT today). As
+a guard for a future app, a call from one that takes no purchases, shows no
+card, or can't keep card-only tools from its model answers with the
+confirmation link instead ([letter-send-flow.md](letter-send-flow.md#who-can-send-the-send-rule-470)).
 
 ### `get_purchase_status`
 

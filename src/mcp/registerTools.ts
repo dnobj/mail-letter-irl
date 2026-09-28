@@ -1110,7 +1110,11 @@ export async function registerLetterTools(
         let summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>, client);
         const draftId = (result as Record<string, unknown>).draftId;
         if (sendRule && PREVIEW_TOOLS.has(tool.name) && typeof draftId === "string") {
-          summaryText += ` ${howToSendText(draftId, client)}`;
+          summaryText += ` ${howToSendText(
+            draftId,
+            client,
+            cardOffersPayAndSend(result as Record<string, unknown>)
+          )}`;
         }
 
         // Per OpenAI docs, response has three sibling payloads:
@@ -1253,13 +1257,14 @@ export function buildSendByLinkToolResult(
  * Appended to a preview's narration while the send rule is on (#470). It
  * carries the draft id for an app that shows the model only the text. Where
  * our card shows, the card's Send button is the way, and the link is for a
- * card that did not appear; elsewhere the link is the only way. Where the app
- * takes purchases the card's Pay & Send is named too, because the model
- * cannot start one (#475).
+ * card that did not appear; elsewhere the link is the only way. When the card
+ * offers Pay & Send, it is named instead, because the model cannot start one
+ * (#475).
  */
 export function howToSendText(
   draftId: string,
-  client: Pick<ClientProfile, "rendersCards" | "inAppPurchases">
+  client: Pick<ClientProfile, "rendersCards" | "inAppPurchases">,
+  cardOffersPayAndSend = false
 ): string {
   if (!client.rendersCards) {
     return (
@@ -1267,10 +1272,22 @@ export function howToSendText(
       `where they check it and send it themselves.`
     );
   }
-  const how = client.inAppPurchases
-    ? "The person sends it from the preview card, with Send, or with Pay & Send to pay for just this one; point them to the card when they ask you to send it or pay for it. "
-    : "The person sends it with Send on the preview card; point them to it when they ask you to send. ";
+  const how =
+    client.inAppPurchases && cardOffersPayAndSend
+      ? "The person pays for it and sends it with Pay & Send on the preview card; point them to it when they ask you to send it or pay for it. "
+      : "The person sends it with Send on the preview card; point them to it when they ask you to send. ";
   return `Nothing has been sent. ${how}Only if the card is not showing, call request_send with draftId ${draftId} and give them its link.`;
+}
+
+/**
+ * Whether a preview's card shows Pay & Send: as the card decides it, only
+ * when the server offers it and the balance cannot pay (widgets'
+ * payAndSendAvailable). With letters in hand, for a gift, or with Pay & Send
+ * switched off, the card shows no such button, so the text must not name one.
+ */
+export function cardOffersPayAndSend(result: Record<string, unknown>): boolean {
+  const eligibility = result.sendEligibility as { payAndSend?: { available?: unknown } } | undefined;
+  return eligibility?.payAndSend?.available === true && result.canSendNow !== true;
 }
 
 const PREVIEW_TOOLS: ReadonlySet<string> = new Set([

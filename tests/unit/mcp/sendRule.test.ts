@@ -368,20 +368,54 @@ describe("the send rule in the MCP server (#470)", () => {
     });
 
     it.each([
-      ["ChatGPT", chatgpt(), "chatgpt", "from the preview card, with Send, or with Pay & Send to pay for just this one"],
-      ["Claude", claude(), "claude", "with Send on the preview card"]
-    ] as const)("points %s at the card, and at the link only if the card is missing", async (_label, authInfo, app, how) => {
+      ["ChatGPT", chatgpt(), "chatgpt"],
+      ["Claude", claude(), "claude"]
+    ] as const)("points %s at the card's Send button, and at the link only if the card is missing", async (_label, authInfo, app) => {
       const { callbacks } = await register(authInfo);
       const preview = await callbacks.get("quote_and_preview_letter")!({}, {});
       expect(preview.content[0].text.endsWith(` ${howToSendText(DRAFT_ID, clientProfileNamed(app))}`)).toBe(true);
-      expect(preview.content[0].text).toContain(how);
+      expect(preview.content[0].text).toContain("with Send on the preview card");
+      expect(preview.content[0].text).not.toContain("Pay & Send");
       expect(preview.content[0].text).toContain(`Only if the card is not showing, call request_send with draftId ${DRAFT_ID}`);
     });
 
+    // The card shows Pay & Send only when the server offers it and the
+    // balance cannot pay; the text follows the card (#475).
+    const PAY_AND_SEND_OFFERED = {
+      draftId: DRAFT_ID,
+      lettersRequired: 1,
+      canSendNow: false,
+      sendEligibility: { payAndSend: { available: true }, letterPack: { available: true } }
+    };
+
+    it("points ChatGPT at the card's Pay & Send when the card offers it", async () => {
+      const { callbacks, execute } = await register(chatgpt());
+      execute.mockResolvedValueOnce({ result: PAY_AND_SEND_OFFERED, meta: {} } as any);
+      const preview = await callbacks.get("quote_and_preview_letter")!({}, {});
+      expect(preview.content[0].text.endsWith(` ${howToSendText(DRAFT_ID, clientProfileNamed("chatgpt"), true)}`)).toBe(true);
+      expect(preview.content[0].text).toContain("pays for it and sends it with Pay & Send on the preview card");
+    });
+
+    it.each([
+      ["with letters in hand", chatgpt(), { ...PAY_AND_SEND_OFFERED, canSendNow: true }],
+      ["when the server does not offer it", chatgpt(), {
+        ...PAY_AND_SEND_OFFERED,
+        sendEligibility: { payAndSend: { available: false }, letterPack: { available: true } }
+      }],
+      ["in an app that takes no purchases", claude(), PAY_AND_SEND_OFFERED]
+    ])("names no Pay & Send %s, where the card shows none", async (_label, authInfo, result) => {
+      const { callbacks, execute } = await register(authInfo);
+      execute.mockResolvedValueOnce({ result, meta: {} } as any);
+      const preview = await callbacks.get("quote_and_preview_letter")!({}, {});
+      expect(preview.content[0].text).not.toContain("Pay & Send");
+      expect(preview.content[0].text).toContain("with Send on the preview card");
+    });
+
     it("names the card's Pay & Send only to an app that takes purchases, since no model can start one (#475)", () => {
-      expect(howToSendText(DRAFT_ID, clientProfileNamed("chatgpt"))).toContain("Pay & Send");
-      expect(howToSendText(DRAFT_ID, clientProfileNamed("claude"))).not.toContain("Pay & Send");
-      expect(howToSendText(DRAFT_ID, clientProfileNamed("vscode"))).not.toContain("Pay & Send");
+      expect(howToSendText(DRAFT_ID, clientProfileNamed("chatgpt"), true)).toContain("Pay & Send");
+      expect(howToSendText(DRAFT_ID, clientProfileNamed("chatgpt"), false)).not.toContain("Pay & Send");
+      expect(howToSendText(DRAFT_ID, clientProfileNamed("claude"), true)).not.toContain("Pay & Send");
+      expect(howToSendText(DRAFT_ID, clientProfileNamed("vscode"), true)).not.toContain("Pay & Send");
     });
 
     it("adds nothing to a preview that carries no draft id", async () => {
