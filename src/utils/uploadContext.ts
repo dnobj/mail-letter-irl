@@ -13,11 +13,14 @@ export type UploadContext = 'postcard' | 'header_image' | 'inline_image';
 
 export function normalizeUploadContext(raw: unknown): UploadContext | undefined {
   if (typeof raw !== 'string') return undefined;
-  // The three names read as themselves, each by its own word. A postcard has
-  // no header, so a description naming both is a postcard.
+  // The three names read as themselves, each by its own word. Text naming
+  // more than one ("a postcard-sized photo for my letter's header") reads as
+  // none: a wrong context keeps the upload from its preview, where none
+  // matches any preview.
   const text = raw.toLowerCase();
-  if (text.includes('postcard')) return 'postcard';
-  if (text.includes('header')) return 'header_image';
-  if (text.includes('inline') || text.includes('enclos')) return 'inline_image';
-  return undefined;
+  const named: UploadContext[] = [];
+  if (text.includes('postcard')) named.push('postcard');
+  if (text.includes('header')) named.push('header_image');
+  if (text.includes('inline') || text.includes('enclos')) named.push('inline_image');
+  return named.length === 1 ? named[0] : undefined;
 }

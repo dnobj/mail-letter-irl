@@ -918,7 +918,7 @@ export const uploadImageOutputSchema: JsonSchema = {
     },
     context: {
       type: "string",
-      description: "Usage context passed through from input: 'postcard', 'header_image', 'inline_image', or empty string"
+      description: "What the photo is for, as the server read it: 'postcard', 'header_image', 'inline_image', or empty string"
     },
     debugEnabled: {
       type: "boolean",

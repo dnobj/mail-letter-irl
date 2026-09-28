@@ -24,8 +24,12 @@ describe('normalizeUploadContext', () => {
     expect(normalizeUploadContext('header image for a letter to Mom')).toBe('header_image');
     expect(normalizeUploadContext('photo enclosed in the letter')).toBe('inline_image');
     expect(normalizeUploadContext('inline image')).toBe('inline_image');
-    // A postcard has no header.
-    expect(normalizeUploadContext('postcard header photo')).toBe('postcard');
+  });
+
+  it('reads text naming more than one kind as none, since a wrong context is worse than none', () => {
+    expect(normalizeUploadContext("a postcard-sized photo for my letter's header")).toBeUndefined();
+    expect(normalizeUploadContext('postcard or an enclosed photo')).toBeUndefined();
+    expect(normalizeUploadContext('header image, or inline')).toBeUndefined();
   });
 
   it('reads anything else as no context at all', () => {
