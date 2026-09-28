@@ -212,7 +212,7 @@ export function renderGiftCardLetterPage(
     <div class="gift-card">
       <p class="gift-eyebrow">Sent with Letter IRL</p>
       <h1 class="gift-title">This letter began as a conversation</h1>
-      <p class="gift-lede">${sender} wrote it with Letter IRL, which turns a conversation in ChatGPT into a real letter, printed and mailed.</p>
+      <p class="gift-lede">${sender} wrote it with Letter IRL, which turns a conversation with an AI assistant into a real letter, printed and mailed.</p>
       <div class="gift-claim">
         <div class="gift-qr">${qr}</div>
         <div class="gift-steps">
@@ -241,7 +241,7 @@ export function renderGiftCardLetterPage(
           <p class="gift-code">${escapeHtml(printedCode(card))}</p>
         </div>
       </div>
-      <p class="gift-fine">${escapeHtml(redeemByText(card))}${usesText(card, 'letter')} You write your letter with Letter IRL in ChatGPT, and we print and mail it.</p>
+      <p class="gift-fine">${escapeHtml(redeemByText(card))}${usesText(card, 'letter')} You write your letter with your AI assistant, and we print and mail it.</p>
     </div>
   </section>`
   };
@@ -275,7 +275,7 @@ export function renderGiftCardPostcardBlock(
       html: `
       <div class="gift-block">
         <div class="gift-block-qr">${qr}</div>
-        <div class="gift-block-text"><strong>Sent with Letter IRL</strong><br>A conversation in ChatGPT, printed and mailed.<br>${escapeHtml(card.displayUrl)}</div>
+        <div class="gift-block-text"><strong>Sent with Letter IRL</strong><br>A conversation with an AI assistant, printed and mailed.<br>${escapeHtml(card.displayUrl)}</div>
       </div>`
     };
   }
