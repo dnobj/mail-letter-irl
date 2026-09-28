@@ -65,7 +65,7 @@ The setup itself:
 > **How it works:**
 > 1. Tell ChatGPT what you want to send and to whom
 > 2. Review the preview (free, no commitment)
-> 3. Confirm to send — we print and mail it
+> 3. Press Send on the preview — we print and mail it. Only you send it: ChatGPT never mails anything on its own
 >
 > Sending needs payment: prepaid letters from a Letter Pack, or Pay & Send for a single letter. Both
 > are paid on Stripe's hosted checkout. US addresses only.
@@ -80,7 +80,9 @@ reviewer's test cases below.
 1. "Write a thank-you letter to my grandmother and mail it to her."
 2. "Turn this photo into a postcard for my friend in Seattle."
 3. "Send a letter to my brother with this picture from our trip."
-4. "How many letters do I have left?"
+
+The portal takes at most three, of 128 characters or fewer (#476). "How many letters do I have
+left?" was cut as the least representative; swap it back in for one of these if preferred.
 
 ---
 
@@ -96,8 +98,8 @@ used for at all.
 |---|--------|----------|
 | P1 | "What can Letter IRL do?" | `get_started` shows the getting-started card: what Letter IRL mails, how to pay (a letter pack, or Pay & Send for one letter), and example prompts. Nothing is drafted. |
 | P2 | "Write a short thank-you note to [the controlled address] and show me a preview." | `quote_and_preview_letter` validates both addresses, creates a draft and shows the letter preview card. The card has both addresses and the cost in letters. Nothing is mailed. |
-| P3 | After P2: "Send it." | ChatGPT asks to confirm, because the tool is marked destructive. On confirmation, `send_letter` sends that draft from the prepaid balance. Its timeline reads "Order placed", "Letter deducted from balance", "Accepted by print provider". There is no carrier tracking (`trackingSupport: estimated_only`). The balance drops by the letters the preview named. |
-| P4 | "Make a postcard for [the controlled address] with a photo of a lighthouse." | An image comes from ChatGPT's own generation, from `generate_image_for_mail` while the account has Letter IRL generations left, or from an upload. `quote_and_preview_postcard` then shows the front and the message side. Nothing is mailed until a separate send is confirmed. |
+| P3 | After P2: "Send it." Then press **Send** on the preview card. | Only the person sends (the send rule, #470). Asked in chat, ChatGPT does not send: it points to the card's **Send** button. Pressing it sends that draft from the prepaid balance through `send_letter`, which only the card can call. The card then shows the order: "Order placed", "Letter deducted from balance", "Accepted by print provider". There is no carrier tracking (`trackingSupport: estimated_only`). The balance drops by the letters the preview named. |
+| P4 | "Make a postcard for [the controlled address] with a photo of a lighthouse." | The image comes from ChatGPT's own image generation, or from an upload. Letter IRL makes no images at launch. `quote_and_preview_postcard` then shows the front and the message side. Nothing is mailed until the person presses **Send** on the card. |
 | P5 | "How many letters do I have left, and what happened to my last letter?" | `get_account_balance`, and `list_orders` or `get_order_status`, answer read-only: letters remaining, then the last order's status and timeline. No confirmation is asked, because nothing changes. |
 
 ### Negative
@@ -125,10 +127,9 @@ pass (see [owner-checklist.md](./owner-checklist.md)). Reviewers may run the one
 | Pay & Send refused with letters in hand (*reviewer*) | The reviewer account | Preview a letter, then ask to pay for it instead of using letters | The card offers **Send**, not Pay & Send. A direct request is refused: the draft can be sent from the existing prepaid balance. Nobody pays for a letter they already own. |
 | Payment pending | Owner, a Pay & Send or pack checkout | Open the checkout and do not pay | The card shows "Checkout open - waiting for payment", and `get_purchase_status` answers `pending_payment`. Nothing is mailed or credited. An unpaid checkout expires, and the pack card then says "This checkout expired before it was paid. Nothing was charged." |
 | Payment failed | Owner, development (Stripe test mode) | Pay with a test card that is declined | Stripe's page refuses the card and nothing is charged; the card keeps waiting. A payment that fails after checkout shows "The payment did not go through. Nothing was charged." and offers a new checkout. |
-| Duplicate confirmation, in chat (*reviewer*) | After P3 | Ask for a preview of the same note to the same address again, then "Send it." | The send is refused as a possible duplicate of mail sent in the last 24 hours: the reply begins "Possible duplicate:" and nothing is mailed. Asking for another copy on purpose then sends it (#412). Sending P3's own draft again instead returns its existing order. |
-| Duplicate confirmation, on the card (*reviewer*) | After P3 | On that new preview's card, press **Send** | The card says the same letter went out a few minutes ago, or, when the host drops the refusal's details, "This same letter was sent or paid for recently. Send another copy only if you want two." Its button becomes **Send another copy**, which sends only on that second, explicit press. |
-| Image generations used up | An account with no Letter IRL image generations left | "Generate an image of a lighthouse for my postcard." | `generate_image_for_mail` does not generate. It says "This account has no Letter IRL image generations left. Letter packs and letter purchases include in-turn generations." and points to ChatGPT's own image generation, which the postcard then uses. |
-| Image generation available (*reviewer*) | An account with generations left | The same prompt | The image is generated. The answer says one generation was used and how many remain. |
+| Send asked in chat (*reviewer*) | After a preview | "Send it." | Nothing is mailed. ChatGPT points to the preview card's **Send** button, because only the person sends (#470): the send tools are card-only and hidden from the model. |
+| Duplicate confirmation, on the card (*reviewer*) | After P3 | Ask for a preview of the same note to the same address again, then press **Send** on its card | The card says the same letter went out a few minutes ago, or, when the host drops the refusal's details, "This same letter was sent or paid for recently. Send another copy only if you want two." Its button becomes **Send another copy**, which sends only on that second, explicit press (#412). |
+| Image request (*reviewer*) | Any account | "Generate an image of a lighthouse for my postcard." | ChatGPT makes the image with its own image generation, and the postcard preview uses it. Letter IRL makes no images at launch (`LETTER_IRL_IMAGE_GEN_MODE=off`), so `generate_image_for_mail` is not listed. |
 | Image upload fallback (*reviewer*) | ChatGPT on mobile, or an image ChatGPT cannot pass to the app | Ask for a postcard of a photo from the device | `upload_image` shows the upload card. Choosing a file uploads it through ChatGPT's file bridge, and `confirm_uploaded_image` hands the link to the postcard preview. |
 
 ---
@@ -164,7 +165,7 @@ and stays out when it should not (precision).
 **Expected Behavior**
 - Tool: `quote_and_preview_letter` creates a draft
 - Widget: the letter preview with addresses and the cost in letters
-- The user confirms, then `send_letter` sends that draft
+- The person presses **Send** on the card, which calls `send_letter` for that draft
 - Response: a timeline ending "Accepted by print provider". There is no carrier tracking.
 
 ### Use Case 2: Send a Letter with Photo
@@ -309,8 +310,40 @@ and stays out when it should not (precision).
 | `submit_feature_request` | - | - | - | - |
 | `get_started` | ✅ | - | - | - |
 | `upload_image` | - | - | - | - |
-| `generate_image_for_mail` | - | ✅ | - | - |
 | `confirm_uploaded_image` | - | - | ✅ | - |
+| `request_send` | ✅ | - | - | - |
+| `get_draft_status` | ✅ | - | - | - |
+| `generate_image_for_mail` (not listed while image generation is off, as at launch) | - | ✅ | - | - |
+| `upload_photo_chunk` (listed only while card upload is on, off at launch) | - | - | ✅ | - |
+
+### Justifications for the portal
+
+The portal asks for a written justification of the three hints on every tool. `send_letter`,
+`send_postcard` and `get_draft_status` are card-only: listed, but hidden from the model and called by
+the card when the person presses its button (#470, #474).
+
+| Tool | Read-only | Destructive | Open world |
+|------|-----------|-------------|------------|
+| `get_started` | Yes: shows the guide and the account's state; changes nothing. | No: changes nothing. | No: reads only Letter IRL's own records. |
+| `get_account_balance`, `get_profile`, `list_orders`, `get_order_status`, `get_purchase_status`, `get_return_address`, `list_letter_packs` | Yes: each reads the calling account's own records, or the fixed pack list. | No: none changes anything. | No: each reads only Letter IRL's own records. |
+| `request_send` | Yes: reads a draft and returns the page where the person checks it and sends it themselves; nothing is sent or changed. | No: it sends nothing; the person sends on the page. | No: reads only Letter IRL's own records. |
+| `get_draft_status` | Yes: says whether a draft is ready, sent or expired. | No: changes nothing. | No: reads only Letter IRL's own records. |
+| `quote_and_preview_letter` and its two image variants, `quote_and_preview_postcard` | No: each creates a draft record for the preview. | No: a draft is free, sends nothing, and expires if unused. | Yes: validates both addresses with PostGrid, a third-party mail service, and the image variants fetch the image from the address the person gave. |
+| `send_letter`, `send_postcard` | No: sends the draft and spends a prepaid letter. | Yes: mail handed to the printer cannot be recalled. The person presses Send on the card; the model cannot call these. | Yes: the letter goes to PostGrid for printing and USPS mailing. |
+| `create_mail_checkout` | No: creates an order and a checkout. | Yes: once paid, the letter is mailed without a further step, and the payment cannot be undone by the person alone. | Yes: creates a Stripe Checkout session. |
+| `create_pack_checkout` | No: creates an order and a checkout. | Yes: starts a payment the person cannot undo alone. | Yes: creates a Stripe Checkout session. |
+| `set_return_address` | No: saves an address. | Yes: overwrites the saved return address in place. | Yes: validates the address with PostGrid. |
+| `clear_return_address` | No: deletes the saved return address. | Yes: the address is removed. | No: changes only Letter IRL's own record. |
+| `redeem_promo_code` | No: adds letters to the balance. | No: it only adds, and a spent code is refused if used again. | No: checks only Letter IRL's own records. |
+| `submit_feature_request` | No: records a request. | No: adding a request removes nothing. | No: writes only to Letter IRL's own records. |
+| `upload_image` | No: opens the upload card, through which the person uploads a photo. | No: it removes nothing. | No: the upload goes through the host's own file store. |
+| `confirm_uploaded_image` | No: records the uploaded image as the account's latest upload. | No: it replaces only the pointer to the previous upload. | No: records only Letter IRL's own state. |
+
+The open-world hint now means reaching the public internet or open-ended entities, and a bounded
+service may be marked `false` (#476). It stays `true` for the tools that reach PostGrid, Stripe or an
+image address the person gave: each reaches a system outside Letter IRL, with effects in the world
+(mail or payment), so declaring it is the conservative choice. The owner may re-decide this at
+submission; `buildAnnotations()` in `src/mcp/registerTools.ts` is the one place to change it.
 
 This mirrors `buildAnnotations()` in `src/mcp/registerTools.ts`, which is authoritative. The
 preview tools are **not** read-only: each call creates a draft record, and each validates addresses
