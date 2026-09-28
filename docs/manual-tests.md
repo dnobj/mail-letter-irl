@@ -1445,6 +1445,11 @@ Test promotional code redemption.
 that #431 fixes. Step 4 was checked on screen rather than on paper, and its iPhone scan is still open.
 Gates switching `LETTER_IRL_GIFT_LETTERS_ENABLED` on in production ([gift-letters.md](gift-letters.md)).
 
+**#487 changed the printed words (2026-09-28).** The card no longer names ChatGPT, since a letter
+can now be written in any connected app: "a conversation with an AI assistant", and "You write your
+letter with your AI assistant". Steps 4 and 8 need printing again on the new copy, the letter page
+and the postcard strip, to check that it still fits.
+
 Development, with `LETTER_IRL_GIFT_LETTERS_ENABLED=true`,
 `LETTER_IRL_GIFT_LANDING_BASE_URL` set to the development website, and the DEV connector refreshed
 after deploy (widget v36).
