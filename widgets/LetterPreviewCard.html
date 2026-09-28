@@ -207,7 +207,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t28</p>
+      <p class="rev">letter t29</p>
     </div>
 
     <!-- letter-irl:host -->
@@ -1044,6 +1044,20 @@
           .replace(/'/g, "&#039;");
       }
 
+      // The letter's text arrives inside the server's preview HTML, escaped
+      // by previewService's escapeHtml. Read it back to text before drawing,
+      // or escapeHtml above escapes it a second time and the card shows
+      // "Let&#039;s" for "Let's". &amp; goes last, so an escaped "&lt;"
+      // the customer typed stays the text "&lt;".
+      function unescapeHtml(text) {
+        return text
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"')
+          .replace(/&#0*39;/g, "'")
+          .replace(/&amp;/g, "&");
+      }
+
       function truncateText(text, maxLength) {
         if (!text || text.length <= maxLength) return text;
         return text.substring(0, maxLength) + "...";
@@ -1135,7 +1149,7 @@
             /<div class="letter-body">([\s\S]*?)<\/div>/,
           );
           if (bodyMatch) {
-            bodyText = bodyMatch[1].replace(/<[^>]+>/g, "").trim();
+            bodyText = unescapeHtml(bodyMatch[1].replace(/<[^>]+>/g, "")).trim();
           }
 
           // Try to extract sign-off
@@ -1143,7 +1157,7 @@
             /<div class="sign-off">([\s\S]*?)<\/div>/,
           );
           if (signOffMatch) {
-            signOff = signOffMatch[1].replace(/<[^>]+>/g, "").trim();
+            signOff = unescapeHtml(signOffMatch[1].replace(/<[^>]+>/g, "")).trim();
           }
         }
 
