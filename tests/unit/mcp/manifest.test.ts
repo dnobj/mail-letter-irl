@@ -76,6 +76,8 @@ describe("Compatibility manifest", () => {
     // to built-in generation. Both halves must stay stated.
     expect(tool?.description).toContain("Letter IRL image generations");
     expect(tool?.description).toContain("built-in image generation");
-    expect(tool?.description).toContain("Never refuse an image request");
+    // No order to the model, and no claim that a purchase includes images
+    // (#476, the Plugin Directory).
+    expect(tool?.description).not.toMatch(/Never refuse|letter packs|letter purchases/);
   });
 });
