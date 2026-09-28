@@ -365,6 +365,8 @@ Commands available:
 | Set / clear tier override | an account | `setTierOverride` (the daily calculation skips overridden accounts; the API's tier cache lasts five minutes) |
 | Change provider routing | `provider_routing` by mail type | validated against the runtime provider registry, versioned on `updated_at`; production never accepts `dummy` |
 | Provider status sync | letters of the last N days | `syncLetterStatuses` (dry run by default; apply updates statuses and history) |
+| Set a daily limit | a daily limit, for everyone or (the two per-account limits) one account | writes a `daily_limit_overrides` row and clears the one it replaces; for the rest of the UTC day or until cleared; letters, or whole dollars for spending. The API reads it on the next send or checkout, with no redeploy (see **Limits**, below) |
+| Clear a daily limit's value | a `daily_limit_overrides` row not yet cleared | stamps it cleared (kept as history); the limit returns to the value for everyone, or the configured one |
 
 Read-only pages beyond the P0 set: **Gifts** (unsent gift letters, gift sends today, outstanding and
 redeemed chain codes, the newest codes with a void action; an account page adds that account's gift
@@ -381,6 +383,21 @@ in either mode; it reads Stripe, writes only a `stripe.reconcile` audit row (cou
 Stripe identifiers), and offers the repair preview for `missing_credit` findings in full mode. Manual
 cases: `ADMIN-STRIPE-01` and `ADMIN-STRIPE-02`; the account, promo and image cases are `ADMIN-ACCT-01` to
 `ADMIN-ACCT-04`.
+
+The **Limits** page (migration 038) shows the four daily limits: letters per account and across every
+account, spending per account, and gift letters. For each: the value the API is configured with (the API
+writes it to `daily_limit_defaults` when it starts, since the panel runs with its own environment), the
+value in force, today's use and today's refusals; then every value set here, each with a clear button, and
+the form for **Set a daily limit**. The value in force is an account's own value, then the one for
+everyone, then the configured one. Values are never deleted: clearing stamps the row.
+
+When a daily limit refuses someone, the first refusal of the UTC day for that limit opens a
+`daily_limit_reached` alert (warning), naming the first account for the per-account limits; later refusals
+that day only add to the count on the Limits page. The API also posts a one-line notice to
+`LETTER_IRL_OPERATOR_ALERT_URL` when that variable is set on the API service: a healthchecks.io check's
+`/fail` URL emails it, and ntfy or a similar service pushes it to a phone. Review the alert, then raise the
+limit here if everything looks right, or leave it. Resolve the alert with a code such as
+`limit_reviewed` or `limit_raised`.
 
 Accounts without an email address (issue #319) cannot be listed until `users.email` becomes nullable or a
 provisioning-failure record exists; the panel shows only rows that exist.

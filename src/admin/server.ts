@@ -10,6 +10,7 @@ import { clientScriptPath, createAdminRequestListener, type RouteHandler } from 
 import { AdminRouter } from "./http/router.js";
 import { registerAccountRoutes } from "./http/accountRoutes.js";
 import { registerCommandRoutes } from "./http/commandRoutes.js";
+import { registerLimitRoutes } from "./http/limitRoutes.js";
 import { registerOpsRoutes } from "./http/opsRoutes.js";
 import { registerStripeRoutes } from "./http/stripeRoutes.js";
 import { join } from "./ui/html.js";
@@ -215,6 +216,7 @@ export async function main(): Promise<void> {
   const stripeExtensions = registerStripeRoutes(router);
   const accountExtensions = registerAccountRoutes(router);
   registerOpsRoutes(router);
+  registerLimitRoutes(router);
   registerReadRoutes(router, clientScript, {
     ...extensions,
     accountActions: accountExtensions.accountActions,

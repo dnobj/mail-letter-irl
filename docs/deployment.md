@@ -247,6 +247,7 @@ at `src/db/index.ts:32-37`. A `?sslmode=require` URL satisfies all three rules.
 | Rule | Severity | Raised when | Fix |
 |---|---|---|---|
 | `maintenance.heartbeat_url_invalid` | warning | `MAINTENANCE_HEARTBEAT_URL` is set but is not an https URL | Set the monitor's https ping URL, or unset it. The maintenance service prints it at every run (#408) |
+| `limits.operator_alert_url_invalid` | warning | `LETTER_IRL_OPERATOR_ALERT_URL` is set but is not an https URL | Set the https URL the notice is posted to (for example a healthchecks.io check's `/fail` URL), or unset it. The daily-limit alert still opens in the admin panel ([admin-panel-guide.md](admin-panel-guide.md)) |
 
 ### Mail dispatch
 

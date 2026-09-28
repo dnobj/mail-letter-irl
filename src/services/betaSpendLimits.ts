@@ -1,13 +1,8 @@
 import type pg from 'pg';
 import { query } from '../db/index.js';
-import {
-  accountDailyChargeCents,
-  accountDailyMailCap,
-  globalDailyMailCeiling,
-  isMailSendingEnabled
-} from '../auth/betaAccess.js';
-import { giftDailySendCap } from '../config/giftLetters.js';
+import { isMailSendingEnabled } from '../auth/betaAccess.js';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
+import { effectiveDailyLimits, reportDailyLimitReached } from './dailyLimits.js';
 
 /**
  * Daily spend ceilings for the limited beta (#179).
@@ -135,13 +130,18 @@ export async function assertMailWithinDailyCaps(
     );
   }
 
+  // The values in force: an operator's, from the admin panel, or the
+  // environment's (src/services/dailyLimits.ts).
+  const limits = await effectiveDailyLimits(client, ['account_daily_mail', 'global_daily_mail'], userId);
+
   const perAccount = await client.query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM letters
      WHERE user_id = $1 AND created_at >= ${UTC_DAY_START}`,
     [userId]
   );
-  const accountCap = accountDailyMailCap();
+  const accountCap = limits.account_daily_mail;
   if (countOf(perAccount.rows) + inFlight > accountCap) {
+    reportDailyLimitReached('account_daily_mail', userId, accountCap);
     throw new SpendLimitError(
       'ACCOUNT_DAILY_MAIL_CAP',
       `This account has reached its daily limit of ${accountCap} items. Please try again tomorrow.`
@@ -151,7 +151,8 @@ export async function assertMailWithinDailyCaps(
   const global = await client.query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM letters WHERE created_at >= ${UTC_DAY_START}`
   );
-  if (countOf(global.rows) + inFlight > globalDailyMailCeiling()) {
+  if (countOf(global.rows) + inFlight > limits.global_daily_mail) {
+    reportDailyLimitReached('global_daily_mail', userId, limits.global_daily_mail);
     // Deliberately does NOT name the global number: it is our operating
     // posture, not the customer's business, and they cannot act on it.
     throw new SpendLimitError(
@@ -181,18 +182,22 @@ export async function assertChargeWithinDailyCap(
   userId: string,
   additionalCents: number
 ): Promise<void> {
-  const cap = accountDailyChargeCents();
+  const cap = (await effectiveDailyLimits({ query }, ['account_daily_charge_cents'], userId))
+    .account_daily_charge_cents;
   // One purchase above the whole day's limit can never be made, today or
   // tomorrow, so it gets its own answer rather than "try again tomorrow". It
   // means the limit sits below a price we sell: with the default of $60 the
   // $90 Power Pack could not be bought at all (2026-09-28). Logged, because
   // only the operator can fix it, by raising
-  // LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS.
+  // LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS or setting the limit in the
+  // admin panel. Decided before the day's total is read: spending cannot
+  // change the answer.
   if (additionalCents > cap) {
     writeDiagnostic('error', 'commerce.purchase_above_daily_charge_cap', {
       amountCents: additionalCents,
       capCents: cap
     });
+    reportDailyLimitReached('account_daily_charge_cents', userId, cap);
     throw new SpendLimitError(
       'CHARGE_ABOVE_DAILY_CAP',
       'This purchase is more than one account can spend in a day, so it cannot be bought. Please choose a smaller pack.'
@@ -211,6 +216,7 @@ export async function assertChargeWithinDailyCap(
     );
   }
   if (spent + additionalCents > cap) {
+    reportDailyLimitReached('account_daily_charge_cents', userId, cap);
     throw new SpendLimitError(
       'ACCOUNT_DAILY_CHARGE_CAP',
       'This account has reached its daily purchase limit. Please try again tomorrow.'
@@ -229,11 +235,13 @@ export async function assertChargeWithinDailyCap(
  * refuses every gift send.
  */
 export async function assertGiftSendWithinDailyCap(client: SpendLimitQueryable): Promise<void> {
+  const cap = (await effectiveDailyLimits(client, ['gift_daily_send'], null)).gift_daily_send;
   const sent = await client.query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM letters
      WHERE funding_type = 'gift_letter' AND created_at >= ${UTC_DAY_START}`
   );
-  if (countOf(sent.rows) > giftDailySendCap()) {
+  if (countOf(sent.rows) > cap) {
+    reportDailyLimitReached('gift_daily_send', null, cap);
     throw new SpendLimitError(
       'GIFT_DAILY_SEND_CAP',
       'Gift letters have reached their limit for today. Preview the letter again to send it from your balance, or try again tomorrow.'

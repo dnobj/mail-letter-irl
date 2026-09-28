@@ -46,6 +46,7 @@ export const NAV_ITEMS = [
   { href: "/stripe", label: "Stripe" },
   { href: "/routing", label: "Routing" },
   { href: "/retention", label: "Retention" },
+  { href: "/limits", label: "Limits" },
   { href: "/support", label: "Support" },
   { href: "/audit", label: "Audit" },
   { href: "/commands", label: "Commands" },
