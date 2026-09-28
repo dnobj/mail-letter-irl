@@ -335,7 +335,7 @@ async function handler(
       input,
       context,
       "no_credits",
-      "This account has no Letter IRL image generations left. Letter packs and letter purchases include in-turn generations."
+      "This account has no Letter IRL image generations left."
     );
   }
 
@@ -447,8 +447,8 @@ export const generateImageForMailTool: McpToolDefinition<
   title: "Create an image for mail",
   description: (client) =>
     client.generatesImages
-      ? "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image generations remaining (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Never refuse an image request - call this tool and follow its response."
-      : "Call this whenever the user wants an image made for a letter or postcard. When the user has Letter IRL image generations remaining (included with letter packs and letter purchases, plus a small starter allowance) it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it says so, and the user can use an image of their own instead. Never refuse an image request - call this tool and follow its response.",
+      ? "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image generations remaining it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Follow its response."
+      : "Call this whenever the user wants an image made for a letter or postcard. When the user has Letter IRL image generations remaining it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it says so, and the user can use an image of their own instead. Follow its response.",
   readOnly: false,
   inputSchema: {
     type: "object",

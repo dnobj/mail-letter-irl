@@ -28,6 +28,7 @@ vi.mock('../../../src/services/userService.js', () => ({
 }));
 
 import { createPackCheckoutTool } from '../../../src/tools/createPackCheckout.js';
+import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 import { PACK_PRODUCTS } from '../../../src/config/products.js';
 
 const context = {
@@ -221,6 +222,13 @@ describe('create_pack_checkout', () => {
     const customerFacing = [result.message, result.productDescription].join(' ');
 
     expect(customerFacing).not.toMatch(/credit/i);
-    expect(createPackCheckoutTool.description).not.toMatch(/credit/i);
+    // Its description differs with the send rule (#475): check both.
+    const { description } = createPackCheckoutTool;
+    for (const rule of ['false', 'true']) {
+      vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', rule);
+      const text = typeof description === 'function' ? description(clientProfileNamed('chatgpt')) : description;
+      expect(text, rule).not.toMatch(/credit/i);
+    }
+    vi.unstubAllEnvs();
   });
 });
