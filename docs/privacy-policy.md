@@ -1,13 +1,13 @@
 # Privacy Policy
 
 **Effective Date:** December 2025
-**Last Updated:** September 15, 2026
+**Last Updated:** September 27, 2026
 
 ---
 
 ## Overview
 
-Letter IRL ("we," "our," or "us") provides a service that lets you send physical letters through AI assistants like ChatGPT. This Privacy Policy explains what data we collect, how we use it, and your rights.
+Letter IRL is operated by Objective Works ("we," "our," or "us"). It is a service that lets you send physical letters through AI assistants like ChatGPT. This Privacy Policy explains what data we collect, how we use it, and your rights.
 
 By using Letter IRL, you agree to this policy.
 
@@ -165,6 +165,7 @@ We may update this Privacy Policy from time to time. We'll notify you of signifi
 
 Questions about this Privacy Policy? Contact us at:
 
+**Operator:** Objective Works, doing business as Letter IRL
 **Email:** policy-team@letterirl.com
 **Website:** https://letterirl.com
 

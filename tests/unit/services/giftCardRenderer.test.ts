@@ -140,6 +140,17 @@ describe('gift card markup', () => {
     expect(page.html).not.toMatch(/free letter|a letter for you to send/i);
   });
 
+  it('names no AI app, since the letter may have been written in any of them (#487)', () => {
+    for (const card of [funded, unfunded]) {
+      for (const fragment of [giftLetterPageSvg(card, 'Sarah'), giftPostcardBlockSvg(card, 'Sarah')]) {
+        expect(fragment.html, card.state).not.toMatch(/ChatGPT|Claude|Codex/);
+      }
+    }
+    expect(giftLetterPageSvg(unfunded, 'Sarah').html).toContain('a conversation with an AI assistant into a real letter');
+    expect(giftLetterPageSvg(funded, 'Sarah').html).toContain('You write your letter with your AI assistant');
+    expect(giftPostcardBlockSvg(unfunded, 'Sarah').html).toContain('A conversation with an AI assistant, printed and mailed.');
+  });
+
   it('escapes the sender name, which is customer input', () => {
     const page = giftLetterPageSvg(funded, '<img src=x onerror=alert(1)>');
     expect(page.html).not.toContain('<img src=x');

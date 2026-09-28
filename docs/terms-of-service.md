@@ -1,13 +1,13 @@
 # Terms of Service
 
 **Effective Date:** December 2025
-**Last Updated:** September 6, 2026
+**Last Updated:** September 27, 2026
 
 ---
 
 ## What is Letter IRL?
 
-Letter IRL is a service that lets you send physical letters through the mail using AI assistants like ChatGPT. You compose your letter in conversation, we print it, and mail it via USPS.
+Letter IRL is a service, operated by Objective Works ("we," "our," or "us"), that lets you send physical letters through the mail using AI assistants like ChatGPT. You compose your letter in conversation, we print it, and mail it via USPS.
 
 By using Letter IRL, you agree to these terms.
 
@@ -17,7 +17,7 @@ By using Letter IRL, you agree to these terms.
 
 ### Account
 
-- You sign in through Auth0 using Google, Microsoft, GitHub, Apple, or email/password
+- You sign in through Auth0 using Google, Microsoft, GitHub, or email/password
 - Your account is personal to you - don't share your login credentials
 - You're responsible for all activity under your account
 
@@ -189,6 +189,7 @@ We may update these terms at any time. Your continued use of the Service after c
 
 Questions about these terms? Contact us at:
 
+**Operator:** Objective Works, doing business as Letter IRL
 **Email (questions about these terms):** policy-team@letterirl.com
 **Email (support and refund requests):** support@letterirl.com
 **Website:** https://letterirl.com
