@@ -21,6 +21,7 @@ import {
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
+import { previewSendStep } from "./previewSendStep.js";
 
 // ============================================================================
 // Types
@@ -102,8 +103,10 @@ export const quoteAndPreviewLetterTextOnlyTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter",
   title: "Preview a letter",
-  description:
-    "Preview a text-only physical letter draft. This does not send mail. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. Send later with send_letter.",
+  // The last sentence follows the send rule and the app (#516).
+  description: (client) =>
+    "Preview a text-only physical letter draft. This does not send mail. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. " +
+    previewSendStep("send_letter", client),
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale
   readOnly: false,

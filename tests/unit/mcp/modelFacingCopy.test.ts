@@ -384,3 +384,77 @@ describe('image generation switched off', () => {
     }
   });
 });
+
+/**
+ * How a preview is sent, per app (#516). Under the send rule no model sends
+ * mail: Claude Code's model sees neither send_letter nor send_postcard, and
+ * ChatGPT keeps them for the card alone. The preview tools' descriptions still ended
+ * "Send later with send_letter", which pointed the model at a tool it may not
+ * call. Claude Code's model reads the descriptions but never the preview's own
+ * text, so the description is where it learns how the person sends.
+ */
+describe('how a preview is sent, in every app', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  const PREVIEWS = [
+    'quote_and_preview_letter',
+    'quote_and_preview_letter_with_header_image',
+    'quote_and_preview_letter_with_image',
+    'quote_and_preview_postcard'
+  ];
+  const previewsFor = (name: (typeof CLIENT_PROFILE_NAMES)[number]) =>
+    new LetterIrlServer().listTools(clientProfileNamed(name)).filter(tool => PREVIEWS.includes(tool.name));
+  const withCards = CLIENT_PROFILE_NAMES.filter(name => clientProfileNamed(name).rendersCards);
+  const withoutCards = CLIENT_PROFILE_NAMES.filter(name => !clientProfileNamed(name).rendersCards);
+
+  it('covers both kinds of app and all four previews', () => {
+    expect(withCards).toEqual(expect.arrayContaining(['chatgpt', 'claude']));
+    expect(withoutCards).toContain('claude_code');
+    for (const sendRule of ['false', 'true']) {
+      vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', sendRule);
+      for (const name of CLIENT_PROFILE_NAMES) {
+        expect(previewsFor(name).map(tool => tool.name).sort(), name).toEqual([...PREVIEWS].sort());
+      }
+    }
+  });
+
+  it('names no send tool under the send rule, in any app', () => {
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+    for (const name of CLIENT_PROFILE_NAMES) {
+      for (const tool of previewsFor(name)) {
+        expect(tool.description, `${name} ${tool.name}`).not.toMatch(/send_letter|send_postcard|Send later/);
+        expect(tool.description, `${name} ${tool.name}`).toMatch(/Nothing is sent from here: .*request_send/);
+      }
+    }
+  });
+
+  it("points to the card's Send where the app shows our card, and to the link elsewhere", () => {
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+    for (const name of withCards) {
+      for (const tool of previewsFor(name)) {
+        expect(tool.description, `${name} ${tool.name}`).toMatch(
+          /the person sends it with Send on the preview card, or, if no card shows, on the page request_send links to\.$/
+        );
+      }
+    }
+    for (const name of withoutCards) {
+      for (const tool of previewsFor(name)) {
+        expect(tool.description, `${name} ${tool.name}`).not.toContain('preview card');
+        expect(tool.description, `${name} ${tool.name}`).toMatch(
+          /to send it, call request_send and give the person its link\.$/
+        );
+      }
+    }
+  });
+
+  it('keeps naming the send tool while the rule is off', () => {
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'false');
+    for (const name of CLIENT_PROFILE_NAMES) {
+      for (const tool of previewsFor(name)) {
+        const sendTool = tool.name === 'quote_and_preview_postcard' ? 'send_postcard' : 'send_letter';
+        expect(tool.description, `${name} ${tool.name}`).toMatch(new RegExp(` Send later with ${sendTool}\\.$`));
+        expect(tool.description, `${name} ${tool.name}`).not.toContain('request_send');
+      }
+    }
+  });
+});

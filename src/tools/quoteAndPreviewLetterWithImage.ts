@@ -21,6 +21,7 @@ import {
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
+import { previewSendStep } from "./previewSendStep.js";
 import { downloadAndProcessLetterImageWithPreview, ImageProcessingError } from "../services/imageService.js";
 import type { ImageFileParam } from "../services/types.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
@@ -219,8 +220,10 @@ export const quoteAndPreviewLetterWithImageTool: McpToolDefinition<
 > = {
   name: "quote_and_preview_letter_with_image",
   title: "Preview a letter with an enclosed image",
-  description:
-    "Preview a physical letter draft with an enclosed image after the signature. This does not send mail. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. Send later with send_letter.",
+  // The last sentence follows the send rule and the app (#516).
+  description: (client) =>
+    "Preview a physical letter draft with an enclosed image after the signature. This does not send mail. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. " +
+    previewSendStep("send_letter", client),
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale
   readOnly: false,

@@ -76,5 +76,10 @@
  *     pack checkout's description points to the card. The image text no
  *     longer says "Never refuse an image request" or that purchases include
  *     image generations (#476).
+ * r19: the preview tools' descriptions no longer end "Send later with
+ *     send_letter" (or send_postcard) under the send rule (#516). Claude Code's
+ *     model sees neither tool, and it reads the descriptions but not the
+ *     preview's text. They now name the card's Send where the app shows our
+ *     card, and request_send's link elsewhere.
  */
-export const STEERING_COPY_REV = 18;
+export const STEERING_COPY_REV = 19;
