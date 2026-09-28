@@ -191,6 +191,20 @@ describe("resolveClientProfile (#473)", () => {
     expect(callingApp({})).toBe(clientProfileNamed("generic"));
     expect(callingApp({ client: clientProfileNamed("claude") })).toBe(clientProfileNamed("claude"));
   });
+
+  it("keeps card-only tools from the model in every app that shows our cards (#516)", () => {
+    // Three texts tell an app with rendersCards that the person sends with
+    // Send on the preview card: the preview tools' descriptions
+    // (previewSendStep), the preview's own text (howToSendText) and the send
+    // instruction (SEND_BY_PERSON in serverInstructions.ts). That holds only
+    // where the card's Send really sends, which needs honorsCardOnlyTools;
+    // elsewhere the card's Send is answered with the link. Revisit all three
+    // before letting a profile show cards without it.
+    for (const name of CLIENT_PROFILE_NAMES) {
+      const profile = clientProfileNamed(name);
+      expect(!profile.rendersCards || profile.honorsCardOnlyTools, name).toBe(true);
+    }
+  });
 });
 
 describe("clientLogFields (#473)", () => {

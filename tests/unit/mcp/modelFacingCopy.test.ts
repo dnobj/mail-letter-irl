@@ -387,8 +387,8 @@ describe('image generation switched off', () => {
 
 /**
  * How a preview is sent, per app (#516). Under the send rule no model sends
- * mail: Claude Code lists neither send_letter nor send_postcard, and ChatGPT
- * keeps them for the card alone. The preview tools' descriptions still ended
+ * mail: Claude Code's model sees neither send_letter nor send_postcard, and
+ * ChatGPT keeps them for the card alone. The preview tools' descriptions still ended
  * "Send later with send_letter", which pointed the model at a tool it may not
  * call. Claude Code's model reads the descriptions but never the preview's own
  * text, so the description is where it learns how the person sends.

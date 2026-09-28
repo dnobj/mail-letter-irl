@@ -56,8 +56,10 @@ server enforces its own side by the calling app's profile
   can't pay and Pay & Send is on); elsewhere, to `request_send`;
 - the four preview tools' descriptions end the same way, without the draft id:
   the card's Send where our card shows, `request_send`'s link elsewhere. They no
-  longer name `send_letter` or `send_postcard`. Claude Code lists neither, and
-  its model reads the descriptions but not the preview's text (#516);
+  longer name `send_letter` or `send_postcard`. Claude Code's model sees
+  neither: it hides card-only tools, and the server still registers both and
+  answers a call with the link. That model reads the descriptions but not the
+  preview's text (#516);
 - the server instructions say the model cannot send, and that the card or the
   page offers another copy of mail sent recently. They name no checkout to
   repeat, since the model cannot start Pay & Send;
