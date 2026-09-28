@@ -77,10 +77,20 @@ Remaining:
 ### Submission Assets
 
 - [ ] Confirm final app name: `Letter IRL`.
-- [ ] Confirm final app icon/logo URL: `https://letterirl.com/logo.jpg`.
-- [ ] Screenshots and demo videos are optional in the current review guide. Capture them if they
-      help reviewers follow a flow, against `docs/app-submission/demo-scenarios.md`, and link them
-      here; they do not block submission.
+- [ ] Confirm final app icon/logo URL: `https://letterirl.com/icon-512.png`. The Plugin Directory
+      needs a square logo of 48 to 4,096 px (#476); `logo.jpg` is 242x156.
+- [ ] **Record the demo (owner).** The Plugin Directory requires a demo recording URL covering the
+      main use cases and tools on the supported platforms (#476). Record it against
+      `docs/app-submission/demo-scenarios.md`, with the send rule on (the person presses Send on
+      the card), and link it here.
+- [ ] **Short description, 30 characters or fewer.** Proposed: `Mail real letters & postcards`
+      (29). The long description stays within 4,000 characters.
+- [ ] **Category.** Proposed: Communication.
+- [ ] **Support URL.** The listing needs an HTTPS support page, not only an email. `/support` on
+      letterirl.com does not exist yet (a website page, #476).
+- [ ] **Developer Identity.** The portal checks the verified developer, Objective Works, against the
+      name, website, support, privacy and terms pages. Name Objective Works as the operator on the
+      privacy and terms pages (website, #476; the owner's wording).
 - [ ] Confirm app description and short metadata match `docs/chatgpt-app-submission.md`.
 - [ ] Confirm localization fields, if required by the submission portal.
 
@@ -135,7 +145,11 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
       that `curl -si https://api.letterirl.com/.well-known/openai-apps-challenge`
       answers 200 with the token as the whole body. Then press Verify. The path answers 404 while the
       variable is unset.
-- [ ] **Scan Tools.** The portal discovers all 23 tools with their annotations. Record any warning.
+- [ ] **Scan Tools.** The portal discovers the tools production serves. At launch that is 24: the 23
+      without `generate_image_for_mail` (image generation off), plus `request_send` (the send rule
+      on), with the card-only `send_letter`, `send_postcard` and `get_draft_status` among them.
+      Other switch settings change the count. Record any warning, and give each tool's three hint
+      justifications from [Justifications for the portal](./openai-test-cases.md#justifications-for-the-portal).
 - [ ] **Starter prompts.** The listing's prompts for customers, from
       [Starter Prompts](./openai-test-cases.md#starter-prompts); not the reviewer's test cases.
 - [ ] **Test cases.** Five positive and three negative, from `openai-test-cases.md` (#406).
