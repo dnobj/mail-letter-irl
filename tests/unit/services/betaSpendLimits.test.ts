@@ -8,6 +8,7 @@ import {
   assertMailWithinDailyCaps,
   SpendLimitError
 } from '../../../src/services/betaSpendLimits.js';
+import * as diagnostics from '../../../src/utils/diagnosticLog.js';
 
 /**
  * The daily ceilings (#179).
@@ -205,5 +206,34 @@ describe('the per-account charge cap', () => {
     vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS', '100');
     spent(100);
     await expect(assertChargeWithinDailyCap('u1', 1)).rejects.toBeInstanceOf(SpendLimitError);
+  });
+
+  it('refuses a purchase above the whole day, and says tomorrow will not help', async () => {
+    // The $90 Power Pack under the default $60 limit (2026-09-28): no account
+    // could ever buy it, and "try again tomorrow" was untrue.
+    const writeSpy = vi.spyOn(diagnostics, 'writeDiagnostic').mockImplementation(() => {});
+    try {
+      spent(0);
+      const refusal = assertChargeWithinDailyCap('u1', 9000);
+      await expect(refusal).rejects.toBeInstanceOf(SpendLimitError);
+      await expect(refusal).rejects.toMatchObject({ code: 'CHARGE_ABOVE_DAILY_CAP' });
+      await expect(refusal).rejects.toThrow('more than one account can spend in a day');
+      await expect(refusal).rejects.not.toThrow(/tomorrow/);
+      // Decided before any query: today's spending cannot change the answer.
+      expect(mocks.query).not.toHaveBeenCalled();
+      // Only the operator can fix it, so it is logged with both figures.
+      expect(writeSpy).toHaveBeenCalledWith('error', 'commerce.purchase_above_daily_charge_cap', {
+        amountCents: 9000,
+        capCents: 6000
+      });
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
+
+  it('still allows a purchase of exactly the whole day', async () => {
+    vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS', '9000');
+    spent(0);
+    await expect(assertChargeWithinDailyCap('u1', 9000)).resolves.toBeUndefined();
   });
 });
