@@ -18,16 +18,11 @@ function anotherCopyLine(sendRule: boolean, client: ClientProfile): string {
       : "send_letter or send_postcard says the same mail was already sent";
     return `If ${tools}, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy.`;
   }
-  // Under the send rule the model cannot repeat a send; the card and the page
-  // ask the person about another copy themselves (#412).
+  // Under the send rule the model can neither send nor start Pay & Send
+  // (#475); the card and the page ask the person about another copy
+  // themselves (#412).
   const where = client.rendersCards ? "the preview card or the confirmation page" : "the confirmation page";
-  if (!client.inAppPurchases) {
-    return `If the same mail was sent recently, ${where} says so and offers another copy itself.`;
-  }
-  return (
-    "If create_mail_checkout says the same mail was already sent, paid for, or is awaiting payment, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy. " +
-    `For a send, ${where} offers another copy itself.`
-  );
+  return `If the same mail was sent recently, ${where} says so and offers another copy itself.`;
 }
 
 // A call that returns nothing (#411). The Create my preview button is on our
@@ -49,9 +44,9 @@ function noResultLine(client: ClientProfile): string {
 // generate_image_for_mail is the only way to make one, and ChatGPT is not
 // named (#484).
 const IMAGES_WITH_APP_GENERATION =
-  "For an image request addressed to Letter IRL, call generate_image_for_mail and follow its response exactly: it either generates the image in-turn using the user's remaining Letter IRL image generations, or returns routing guidance with a copy-ready prompt. Never refuse an image request. For image requests not addressed to Letter IRL, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly.";
+  "For an image request addressed to Letter IRL, call generate_image_for_mail and follow its response exactly: it either generates the image in-turn using the user's remaining Letter IRL image generations, or returns routing guidance with a copy-ready prompt. For image requests not addressed to Letter IRL, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly.";
 const IMAGES_FROM_LETTER_IRL_ONLY =
-  "When the user wants an image made for their mail, call generate_image_for_mail rather than refusing, and follow its response exactly: it either generates the image using the user's remaining Letter IRL image generations, or says why it cannot, and the user can use an image of their own instead.";
+  "When the user wants an image made for their mail, call generate_image_for_mail and follow its response exactly: it either generates the image using the user's remaining Letter IRL image generations, or says why it cannot, and the user can use an image of their own instead.";
 
 // Where Letter IRL makes no images at all: Claude, whose directory takes no
 // connector that generates images with AI (#467), and every app once the

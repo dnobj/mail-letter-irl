@@ -448,14 +448,24 @@ export function buildToolSecuritySchemes(
 
 /**
  * The tools that send, which the send rule (#470) makes card-only: the card's
- * Send button can call them, the model cannot.
+ * Send and Pay & Send buttons can call them, the model cannot.
+ *
+ * Pay & Send joined them for launch (#475). Codex also reaches Letter IRL
+ * through ChatGPT's own connection, where the server sees ChatGPT but no card
+ * shows the preview, so a checkout the model started there would take payment
+ * for mail nobody saw. The server cannot tell the two apart, and every card
+ * that offers Pay & Send calls it itself, so no model starts it.
  */
-export const CARD_ONLY_SEND_TOOLS: ReadonlySet<string> = new Set(["send_letter", "send_postcard"]);
+export const CARD_ONLY_SEND_TOOLS: ReadonlySet<string> = new Set([
+  "send_letter",
+  "send_postcard",
+  "create_mail_checkout"
+]);
 
 /**
- * Pay & Send: the person pays for the previewed mail and payment sends it. Not
- * card-only - in ChatGPT the model may start it, and the person sees the card
- * and pays - but an app that may not take a purchase gets the link instead.
+ * Pay & Send: the person pays for the previewed mail and payment sends it.
+ * Card-only like the sends, and one step further: an app that may not take a
+ * purchase gets the link instead, even from its card.
  */
 export const PAY_AND_SEND_TOOL = "create_mail_checkout";
 
@@ -1013,9 +1023,9 @@ export async function registerLetterTools(
     // error, which is the point of read-and-draft tokens.
     //
     // Pay & Send too (round 1 of #480): payment sends the mail, and Stripe's
-    // page never shows the preview. So the model may start it only where the
-    // app takes purchases AND shows our card, which is where the person saw
-    // the preview; anywhere else the person pays and sends from the page.
+    // page never shows the preview. So it runs only where the app takes
+    // purchases AND shows our card, which is where the person saw the
+    // preview; anywhere else the person pays and sends from the page.
     const sendsByLinkOnly =
       sendRule &&
       ((CARD_ONLY_SEND_TOOLS.has(tool.name) && !client.honorsCardOnlyTools) ||
@@ -1100,7 +1110,11 @@ export async function registerLetterTools(
         let summaryText = summarizeToolResult(tool.name, result as Record<string, unknown>, client);
         const draftId = (result as Record<string, unknown>).draftId;
         if (sendRule && PREVIEW_TOOLS.has(tool.name) && typeof draftId === "string") {
-          summaryText += ` ${howToSendText(draftId, client.rendersCards)}`;
+          summaryText += ` ${howToSendText(
+            draftId,
+            client,
+            cardOffersPayAndSend(result as Record<string, unknown>)
+          )}`;
         }
 
         // Per OpenAI docs, response has three sibling payloads:
@@ -1243,14 +1257,37 @@ export function buildSendByLinkToolResult(
  * Appended to a preview's narration while the send rule is on (#470). It
  * carries the draft id for an app that shows the model only the text. Where
  * our card shows, the card's Send button is the way, and the link is for a
- * card that did not appear; elsewhere the link is the only way.
+ * card that did not appear; elsewhere the link is the only way. When the card
+ * offers Pay & Send, it is named instead, because the model cannot start one
+ * (#475).
  */
-export function howToSendText(draftId: string, rendersCards: boolean): string {
-  return rendersCards
-    ? `Nothing has been sent. The person sends it with Send on the preview card; point them to it when they ask you to send. ` +
-        `Only if the card is not showing, call request_send with draftId ${draftId} and give them its link.`
-    : `Nothing has been sent. To send it, call request_send with draftId ${draftId} and give the person its link, ` +
-        `where they check it and send it themselves.`;
+export function howToSendText(
+  draftId: string,
+  client: Pick<ClientProfile, "rendersCards" | "inAppPurchases">,
+  cardOffersPayAndSend = false
+): string {
+  if (!client.rendersCards) {
+    return (
+      `Nothing has been sent. To send it, call request_send with draftId ${draftId} and give the person its link, ` +
+      `where they check it and send it themselves.`
+    );
+  }
+  const how =
+    client.inAppPurchases && cardOffersPayAndSend
+      ? "The person pays for it and sends it with Pay & Send on the preview card; point them to it when they ask you to send it or pay for it. "
+      : "The person sends it with Send on the preview card; point them to it when they ask you to send. ";
+  return `Nothing has been sent. ${how}Only if the card is not showing, call request_send with draftId ${draftId} and give them its link.`;
+}
+
+/**
+ * Whether a preview's card shows Pay & Send: as the card decides it, only
+ * when the server offers it and the balance cannot pay (widgets'
+ * payAndSendAvailable). With letters in hand, for a gift, or with Pay & Send
+ * switched off, the card shows no such button, so the text must not name one.
+ */
+export function cardOffersPayAndSend(result: Record<string, unknown>): boolean {
+  const eligibility = result.sendEligibility as { payAndSend?: { available?: unknown } } | undefined;
+  return eligibility?.payAndSend?.available === true && result.canSendNow !== true;
 }
 
 const PREVIEW_TOOLS: ReadonlySet<string> = new Set([
