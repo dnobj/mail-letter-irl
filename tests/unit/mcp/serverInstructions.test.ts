@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildServerInstructions,
   LETTER_IRL_SERVER_INSTRUCTIONS
@@ -164,5 +164,51 @@ describe('server instructions in an app other than ChatGPT', () => {
 
   it('keep the refund line word for word', () => {
     expect(line(/refund/i)).toBe(LETTER_IRL_SERVER_INSTRUCTIONS.split('\n').find(entry => /refund/i.test(entry)));
+  });
+});
+
+/**
+ * A photo the upload card sends itself (#474, phase 3). In an app with no
+ * file store for cards (Claude), the card sends the photo to Letter IRL and
+ * leaves no imageUrl, so the model must call the preview with no image. Said
+ * only there, and only while the switch is on.
+ */
+describe('server instructions: a photo the card sends itself', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const uploadLine = (name: 'chatgpt' | 'claude' | 'claude_code') =>
+    buildServerInstructions(false, clientProfileNamed(name))
+      .split('\n')
+      .find(entry => /^If a specific image fails to hand off/.test(entry));
+  const CARD_STEP =
+    'The card sends the photo to Letter IRL and then asks for the preview in the conversation: call the preview tool with no image and no imageUrl, and Letter IRL uses the photo just uploaded.';
+
+  it('tells Claude to call the preview with no image, once the switch is on', () => {
+    expect(uploadLine('claude')).not.toContain(CARD_STEP);
+    vi.stubEnv('LETTER_IRL_CARD_UPLOAD_ENABLED', 'true');
+    expect(uploadLine('claude')).toBe(
+      `If a specific image fails to hand off to a preview tool, open upload_image so the user can upload it - that preserves the exact image they approved. ${CARD_STEP}`
+    );
+  });
+
+  it('offers Claude the upload card for an image that is not at a link, once the switch is on', () => {
+    const imageLine = () =>
+      buildServerInstructions(false, clientProfileNamed('claude'))
+        .split('\n')
+        .find(entry => /make images/.test(entry));
+    const off = imageLine();
+    vi.stubEnv('LETTER_IRL_CARD_UPLOAD_ENABLED', 'true');
+    expect(imageLine()).toBe(
+      `${off} If the image is on their device or attached in the chat, rather than at a link, open upload_image so they can upload it.`
+    );
+  });
+
+  it("says nothing of it to ChatGPT, whose card hands on a link, or to an app that shows no card", () => {
+    vi.stubEnv('LETTER_IRL_CARD_UPLOAD_ENABLED', 'true');
+    // ChatGPT's instructions stay word for word.
+    expect(buildServerInstructions(false, clientProfileNamed('chatgpt'))).toBe(LETTER_IRL_SERVER_INSTRUCTIONS);
+    const claudeCode = buildServerInstructions(false, clientProfileNamed('claude_code'));
+    expect(claudeCode).not.toContain(CARD_STEP);
+    expect(claudeCode).not.toContain('attached in the chat');
+    expect(uploadLine('claude_code')).toBeDefined();
   });
 });

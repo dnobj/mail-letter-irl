@@ -11,9 +11,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({ transaction: vi.fn(), query: vi.fn() }));
 vi.mock("../../../src/db/index.js", () => db);
+// The photo an account uploaded through our card lives in the image store (#474).
+const store = vi.hoisted(() => ({ deleteUploadedPhoto: vi.fn(async (_userId: string) => undefined) }));
+vi.mock("../../../src/services/tempImageStore.js", () => store);
 
 import {
   MAX_ERASURE_ATTEMPTS,
+  UPLOADED_PHOTO_DELETE_TIMEOUT_MS,
   erasureBlocked,
   processAccountErasures
 } from "../../../src/services/accountErasureService.js";
@@ -309,5 +313,80 @@ describe("what a failure costs (#446 review)", () => {
     db.query.mockRejectedValueOnce(new Error("connection terminated"));
 
     await expect(processAccountErasures()).resolves.toEqual({ erased: 0, refused: 0, retrying: 1, failed: 0 });
+  });
+});
+
+describe("the photo an account uploaded through our card (#474)", () => {
+  // A block, not an expression: a function returned from beforeEach is run as its teardown.
+  beforeEach(() => {
+    store.deleteUploadedPhoto.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("is deleted with the account", async () => {
+    scriptedClient({ queue: [OPERATION()] });
+    expect(await processAccountErasures()).toEqual({ erased: 1, refused: 0, retrying: 0, failed: 0 });
+    expect(store.deleteUploadedPhoto).toHaveBeenCalledWith("auth0|gone");
+  });
+
+  it("is deleted only once the erasure has committed, outside its transaction", async () => {
+    const events: string[] = [];
+    const client = scriptedClient({ queue: [OPERATION()] });
+    db.transaction.mockImplementation(async (callback: (c: typeof client) => Promise<unknown>) => {
+      events.push("begin");
+      const result = await callback(client);
+      events.push("commit");
+      return result;
+    });
+    store.deleteUploadedPhoto.mockImplementation(async () => {
+      events.push("delete");
+    });
+    await processAccountErasures();
+    expect(events.filter((event) => event === "delete")).toHaveLength(1);
+    expect(events.at(-1)).toBe("delete");
+    expect(events.lastIndexOf("commit")).toBeLessThan(events.indexOf("delete"));
+  });
+
+  it("does not hold up the erasure when it cannot be deleted, since it expires in minutes", async () => {
+    store.deleteUploadedPhoto.mockRejectedValue(new Error("bucket unreachable"));
+    scriptedClient({ queue: [OPERATION()] });
+    expect(await processAccountErasures()).toEqual({ erased: 1, refused: 0, retrying: 0, failed: 0 });
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("account_erasure.uploaded_photo_delete_failed"));
+  });
+
+  it("leaves no timer running once the photo is deleted, so the run can exit", async () => {
+    vi.useFakeTimers();
+    try {
+      scriptedClient({ queue: [OPERATION()] });
+      await processAccountErasures();
+      expect(store.deleteUploadedPhoto).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("moves on after ten seconds when the store does not answer", async () => {
+    vi.useFakeTimers();
+    try {
+      store.deleteUploadedPhoto.mockImplementation(() => new Promise<undefined>(() => undefined));
+      scriptedClient({ queue: [OPERATION()] });
+      let settled = false;
+      const run = processAccountErasures().finally(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(UPLOADED_PHOTO_DELETE_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(run).resolves.toEqual({ erased: 1, refused: 0, retrying: 0, failed: 0 });
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining('"errorClass":"ETIMEDOUT"'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("is left alone when the erasure is refused", async () => {
+    scriptedClient({ queue: [OPERATION()], blockers: { orders_in_flight: 1 } });
+    await processAccountErasures();
+    expect(store.deleteUploadedPhoto).not.toHaveBeenCalled();
   });
 });

@@ -10,6 +10,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import { uploadImageTool } from "../../../src/tools/uploadImage.js";
+import { describeTool } from "../../../src/server.js";
+import { clientProfileNamed } from "../../../src/auth/clientProfiles.js";
 import type { ToolContext } from "../../../src/contracts/types.js";
 
 const createMockContext = (): ToolContext => ({
@@ -152,10 +154,13 @@ describe("upload_image tool", () => {
       expect(uploadImageTool.name).toBe("upload_image");
     });
 
-    it("should describe the widget as a fallback-only path", () => {
-      expect(uploadImageTool.description).toContain("only as a fallback");
-      expect(uploadImageTool.description).toContain("Do not use this");
-      expect(uploadImageTool.description).toContain("generated imageUrl");
+    it("should describe the widget as a fallback-only path, in every app", () => {
+      for (const name of ["chatgpt", "claude"] as const) {
+        const description = describeTool(uploadImageTool, clientProfileNamed(name));
+        expect(description).toContain("only as a fallback");
+        expect(description).toContain("Do not use this");
+        expect(description).toContain("generated imageUrl");
+      }
     });
 
     it("should not be readOnly", () => {

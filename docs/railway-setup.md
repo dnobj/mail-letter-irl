@@ -101,6 +101,10 @@ LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS=<spend per account per day, in cents>
 LETTER_IRL_GIFT_LETTERS_ENABLED=<true to turn the programme on; unset keeps it off>
 LETTER_IRL_GIFT_DAILY_SEND_CAP=<gift sends per UTC day, all accounts; default 20; 0 stops them>
 LETTER_IRL_GIFT_LANDING_BASE_URL=<the website the printed QR opens; default https://letterirl.com>
+# Photo upload through the card in apps with no file store (#474, docs/deployment.md): off unless
+# explicitly true. API service only.
+LETTER_IRL_CARD_UPLOAD_ENABLED=<true to let the upload card send photos in Claude; unset keeps it off>
+LETTER_IRL_PHOTO_UPLOADS_PER_DAY=<uploads an account may start in 24 hours; default 20>
 STRIPE_PRICE_REGULAR=<price_ id>
 STRIPE_PRICE_POWER=<price_ id>
 STRIPE_CURRENCY=usd

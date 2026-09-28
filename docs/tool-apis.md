@@ -5,7 +5,7 @@
 
 The runtime MCP registry is the source of truth. The checked-in `manifest.json` is generated from that registry with `npm run manifest:generate`, and submission-facing tests verify that the manifest, widget list, and runtime tool registry stay aligned.
 
-Letter IRL currently exposes **24 tools** and **6 widgets**, and a 25th, `request_send`, while the send rule is on:
+Letter IRL currently exposes **24 tools** and **6 widgets**. Two more are listed only while their switch is on: `request_send` while the send rule is on, and `upload_photo_chunk` while card upload is on. The tools are:
 
 ## Onboarding
 
@@ -52,8 +52,16 @@ omitted, a gift letter is used only when the balance cannot pay. A gift preview 
 ## Images
 
 - `generate_image_for_mail`: Uses `ui://widgets/ImageRoutingCard.html@v<N>`. Hybrid image tool for requests addressed to Letter IRL. With Letter IRL image generations remaining (pack/JIT grants plus a one-time starter allowance) it generates in-turn via the OpenAI Images API and returns an imageUrl for previews; with none left, or past the global daily ceiling, it returns a redirect card with a copy-ready prompt for free built-in generation. Never hard-fails. See docs/learnings/generate-image-removal-decision.md Addendum 3.
-- `upload_image`: Open the image upload widget as a fallback when direct attachment or `imageUrl` handoff does not work. Uses `ui://widgets/ImageUploadCard.html@v<N>`.
+- `upload_image`: Open the image upload widget as a fallback when direct attachment or `imageUrl` handoff does not work. Uses `ui://widgets/ImageUploadCard.html@v<N>`. Its `cardUploadAvailable` tells the card whether it may send the photo itself in an app with no file store (#474), which is true only while `LETTER_IRL_CARD_UPLOAD_ENABLED` is on.
 - `confirm_uploaded_image`: Internal widget relay that confirms an uploaded image and returns the `imageUrl` plus next-step guidance.
+- `upload_photo_chunk` (#474, phase 3): the upload card's way to send a photo in an app with no file store, such as Claude.
+  - **Who sees it:** listed and callable only while `LETTER_IRL_CARD_UPLOAD_ENABLED` is on. Off, it is not registered, so a call gets the MCP SDK's "not found" error, and a card drawn before the switch went off says upload is not available. Card-only, like `get_draft_status`: hidden from the model, and called by the card with no prompt. It needs the drafting scope (`mail:draft`), and the photo is always the caller's own.
+  - **Input:** `uploadId` (a UUID the card makes), `index`, `total` (at most 24), `data` (base64, at most 512 Ki characters, a multiple of 4), and optionally `context` (`postcard`, `header_image` or `inline_image`).
+  - **Order:** chunks go in order. The first chunk of a new upload replaces any the account left unfinished. A chunk sent again is answered as before and starts nothing. That holds for the chunk just received, and for any chunk of an upload being finished or just finished, which waits for that upload's answer. While the account's last photo is still being saved, a new upload is refused with "Your last photo is still being saved. Please try again in a moment.", so the last upload started is the photo held. The card waits for each answer, so it meets this only when an answer was lost and the person starts another photo while the last is still being saved; the sentence tells them what to do. A chunk out of order drops the upload with "That upload was interrupted. Choose the photo again."
+  - **Answer:** `{uploadId, received, total, done}`, plus the photo's `width` and `height` once `done`.
+  - **The photo:** on the last chunk the server checks the photo by its own bytes (an image of a kind it takes, big enough to print, within the decode limits). It then stores it privately, as the account's **only** uploaded photo, replacing the one before. It records `letterirl-upload:latest` as the account's recent upload, so the next preview with no image uses the photo. The image service resolves that reference only to the photo of the account the preview is for. It is never served at an address, and it is kept 15 minutes.
+  - **Limits per account:** one upload in progress or being saved; at most 8 MiB of photo; ten minutes to send it; `LETTER_IRL_PHOTO_UPLOADS_PER_DAY` uploads started in a rolling 24 hours (default 20; a chunk sent again does not count). Across the process, at most 64 MiB of chunks and photos being kept are held at once ("Photo uploads are busy right now. Please try again in a minute."). The chunks are held in the API process's memory, so a restart mid-upload means choosing the photo again.
+  - **Errors:** every refusal is a sentence the card shows as it is. So is the image service's, for a photo it will not take. Any other failure, such as the image store being down, is logged by its class and answered "The photo could not be kept just now. Please try again."
 
 ## Feedback
 

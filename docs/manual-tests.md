@@ -596,6 +596,31 @@ likely from an approval click in step 12 that landed on the wrong button as the 
 was set back to **Needs approval** before this step. Check the connector page after a run that
 clicks Claude's prompts.
 
+14. A photo uploaded through the card in Claude (#474, phase 3), once it is deployed to development
+    and `LETTER_IRL_CARD_UPLOAD_ENABLED=true` is set on the development API. Refresh the tool list
+    first; the log should show `tools/list` at `widgetTemplateVersion=42`, and the connector page
+    should list **Upload a photo** under **App-only tools**. The limits and refusals are covered by
+    unit tests; this checks the path end to end.
+- [ ] Ask Claude for a postcard to a test address with a photo you will upload. Claude calls
+      `upload_image`, and the card, revision t16, shows **Select Photo** and "Max 25 MB".
+- [ ] Choose a photo larger than 2400 px, a phone JPEG of a few MB. The card shows "Sending your
+      photo…" with a percentage, then the photo and "Uploaded. Your request for the preview is in
+      the conversation." The message "Make the postcard with the photo I just uploaded." appears in
+      the conversation, and Claude makes the preview with no image argument. The development log
+      shows `upload_photo_chunk` as `client=claude`, then `photo_upload.finished` with width or
+      height 2400, then `quote.postcard.image_from_recent_upload`.
+- [ ] The postcard card shows the uploaded photo on the front.
+- [ ] Upload a different photo in the same conversation and ask for a new preview. It uses the new
+      photo: the account holds one.
+- [ ] After more than 15 minutes, ask for another preview with "the photo I uploaded". Claude says
+      the upload has expired and asks for it again.
+- [ ] Unset the switch on the development API. After a refresh the connector page no longer lists
+      **Upload a photo**, and a new upload card says photo upload isn't available in this app yet.
+- [ ] In ChatGPT (DEV connector, after **Refresh tools**) the upload card works as before:
+      **Select Photo** with "Max 10 MB", the photo goes to ChatGPT's files, and the preview uses its
+      link. **Choose from Library** appears where ChatGPT offers it.
+- [ ] Repeat the upload in Claude Desktop and the Claude app on Android.
+
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
 **Status:** Steps 1 to 3 run in development on 2026-09-26 (Claude Code 2.1.282, Windows).

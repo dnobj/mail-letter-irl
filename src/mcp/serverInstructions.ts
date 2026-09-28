@@ -1,4 +1,5 @@
 import { clientProfileNamed, type ClientProfile } from "../auth/clientProfiles.js";
+import { uploadsThroughCard } from "../config/cardUpload.js";
 import { offersImageGeneration } from "../config/imageGeneration.js";
 
 const SEND_BY_MODEL =
@@ -63,16 +64,27 @@ const NO_IMAGE_GENERATION =
 const IMAGES_FROM_THE_APP_ONLY =
   "Letter IRL does not make images. For an image, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly. If it is not available in a message that mentions Letter IRL, ask the user to request the image in a message that does not mention Letter IRL.";
 
+// Where the card sends the photo itself (#474), an image needs no link: the
+// model cannot pass on one attached in the chat, but the card can upload it.
+const IMAGES_BY_CARD =
+  " If the image is on their device or attached in the chat, rather than at a link, open upload_image so they can upload it.";
+
 function imageLine(client: ClientProfile): string {
-  if (!offersImageGeneration(client)) {
-    return client.generatesImages ? IMAGES_FROM_THE_APP_ONLY : NO_IMAGE_GENERATION;
-  }
-  return client.generatesImages ? IMAGES_WITH_APP_GENERATION : IMAGES_FROM_LETTER_IRL_ONLY;
+  const line = !offersImageGeneration(client)
+    ? client.generatesImages ? IMAGES_FROM_THE_APP_ONLY : NO_IMAGE_GENERATION
+    : client.generatesImages ? IMAGES_WITH_APP_GENERATION : IMAGES_FROM_LETTER_IRL_ONLY;
+  return uploadsThroughCard(client) ? line + IMAGES_BY_CARD : line;
 }
+
+// Where the card sends the photo itself (#474) there is no imageUrl to pass
+// on: the server uses the photo the person just uploaded.
+const CARD_UPLOAD_NEXT_STEP =
+  " The card sends the photo to Letter IRL and then asks for the preview in the conversation: call the preview tool with no image and no imageUrl, and Letter IRL uses the photo just uploaded.";
 
 function uploadLine(client: ClientProfile): string {
   const choose = client.generatesImages ? "pick it from their ChatGPT library or upload it" : "upload it";
-  return `If a specific image fails to hand off to a preview tool, open upload_image so the user can ${choose} - that preserves the exact image they approved.`;
+  const line = `If a specific image fails to hand off to a preview tool, open upload_image so the user can ${choose} - that preserves the exact image they approved.`;
+  return uploadsThroughCard(client) ? line + CARD_UPLOAD_NEXT_STEP : line;
 }
 
 function instructionLines(sendRule: boolean, client: ClientProfile): string[] {

@@ -136,6 +136,14 @@ export const toolInputSchemas = {
   get_draft_status: z.object({
     draftId: z.string()
   }),
+  // One chunk of a photo from the upload card (#474, phase 3)
+  upload_photo_chunk: z.object({
+    uploadId: z.string(),
+    index: z.number(),
+    total: z.number(),
+    data: z.string(),
+    context: z.enum(["postcard", "header_image", "inline_image"]).optional()
+  }),
   // Feedback tools
   submit_feature_request: z.object({
     title: z.string(),

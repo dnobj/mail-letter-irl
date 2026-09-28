@@ -141,6 +141,20 @@ describe('the bridge in ChatGPT', () => {
     expect(calls).toEqual([['uploadFile', file], ['selectFiles'], ['getFileDownloadUrl', { fileId: 'file_2' }]]);
   });
 
+  it('asks window.openai afresh each time, so what ChatGPT adds or sets after the page loads is there', async () => {
+    const { window, openai } = mountInChatGpt();
+    const host = window.letterIrlHost;
+    expect(host.selectFiles).toBeUndefined();
+    openai.selectFiles = async () => [{ fileId: 'file_3' }];
+    await expect(host.selectFiles()).resolves.toEqual([{ fileId: 'file_3' }]);
+    openai.toolOutput = { b: 3 };
+    expect(host.toolOutput()).toEqual({ b: 3 });
+    // Even a window.openai replaced whole.
+    window.openai = { ...openai, theme: 'light', toolOutput: { b: 4 } };
+    expect(host.theme()).toBe('light');
+    expect(host.toolOutput()).toEqual({ b: 4 });
+  });
+
   it('tells the card when ChatGPT sets new globals', () => {
     const { window } = mountInChatGpt();
     let changes = 0;

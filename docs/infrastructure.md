@@ -93,7 +93,7 @@ operator if the provider may have it, or failed and refunded if it never reached
 attempt. While letters are waiting, the run withholds its heartbeat, so the external monitor alerts until
 the outbox is switched back on.
 
-Generated images are stored in a private Railway bucket for 15 minutes. Production must not fall back to process memory. Development may use memory only for local execution; deployed development uses the bucket so restart behavior matches production.
+Generated images are stored in a private Railway bucket for 15 minutes, and so is a photo uploaded through the card in an app with no file store (#474, one per account under `uploaded-photos/`, never served at an address). Production must not fall back to process memory. Development may use memory only for local execution; deployed development uses the bucket so restart behavior matches production.
 
 ## Database Connectivity
 

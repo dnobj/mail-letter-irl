@@ -40,42 +40,41 @@
 
   // ChatGPT: window.openai is there before the page runs.
   if (window.openai) {
-    var openai = window.openai;
+    // Read at the moment of use, as the cards always read it: ChatGPT sets
+    // globals, and can add a plan-gated call such as selectFiles, after the
+    // page has loaded.
+    var openai = function () { return window.openai || {}; };
     // Values come back exactly as ChatGPT gives them, null or undefined
     // included, so a card can still tell "no result yet" from an empty one.
-    // Each capability exists here only where window.openai has it, so a
-    // card's "can this host do X?" check keeps its meaning.
     var chatgpt = {
       kind: "chatgpt",
-      theme: function () { return openai.theme || "light"; },
-      toolInput: function () { return openai.toolInput; },
-      toolOutput: function () { return openai.toolOutput; },
-      toolMeta: function () { return openai.toolResponseMetadata; },
-      widgetState: function () { return openai.widgetState; },
+      theme: function () { return openai().theme || "light"; },
+      toolInput: function () { return openai().toolInput; },
+      toolOutput: function () { return openai().toolOutput; },
+      toolMeta: function () { return openai().toolResponseMetadata; },
+      widgetState: function () { return openai().widgetState; },
       onChange: onChange
     };
-    if (typeof openai.callTool === "function") {
-      chatgpt.callTool = function (name, args) { return openai.callTool(name, args || {}); };
-    }
-    if (typeof openai.openExternal === "function") {
-      chatgpt.openLink = function (url) { return openai.openExternal({ href: url }); };
-    }
-    if (typeof openai.sendFollowUpMessage === "function") {
-      chatgpt.sendMessage = function (text) { return openai.sendFollowUpMessage({ prompt: text }); };
-    }
-    if (typeof openai.setWidgetState === "function") {
-      chatgpt.setWidgetState = function (value) { return openai.setWidgetState(value); };
-    }
+    // Each capability exists only while window.openai has it, so a card's
+    // "can this host do X?" check keeps its meaning, asked afresh each time.
+    var capability = function (name, method, call) {
+      Object.defineProperty(chatgpt, name, {
+        enumerable: true,
+        get: function () {
+          var api = openai();
+          if (typeof api[method] !== "function") return undefined;
+          return function (a, b) { return call(api, a, b); };
+        }
+      });
+    };
+    capability("callTool", "callTool", function (api, name, args) { return api.callTool(name, args || {}); });
+    capability("openLink", "openExternal", function (api, url) { return api.openExternal({ href: url }); });
+    capability("sendMessage", "sendFollowUpMessage", function (api, text) { return api.sendFollowUpMessage({ prompt: text }); });
+    capability("setWidgetState", "setWidgetState", function (api, value) { return api.setWidgetState(value); });
     // ChatGPT's file store: no MCP Apps equivalent (#474).
-    if (typeof openai.uploadFile === "function") {
-      chatgpt.uploadFile = function (file) { return openai.uploadFile(file); };
-    }
-    if (typeof openai.selectFiles === "function") {
-      chatgpt.selectFiles = function () { return openai.selectFiles(); };
-    }
-    if (typeof openai.getFileDownloadUrl === "function") {
-      chatgpt.getFileDownloadUrl = function (request) { return openai.getFileDownloadUrl(request); };
-    }
+    capability("uploadFile", "uploadFile", function (api, file) { return api.uploadFile(file); });
+    capability("selectFiles", "selectFiles", function (api) { return api.selectFiles(); });
+    capability("getFileDownloadUrl", "getFileDownloadUrl", function (api, request) { return api.getFileDownloadUrl(request); });
     window.letterIrlHost = chatgpt;
     window.addEventListener("openai:set_globals", changed);
     return;

@@ -28,7 +28,11 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import sharp, { type Metadata, type Sharp } from 'sharp';
 import type { ImageFileParam, ProcessedImage, PostcardSize, LetterImageType } from './types.js';
-import { getImage as getTempImage } from './tempImageStore.js';
+import {
+  getImage as getTempImage,
+  getUploadedPhoto,
+  UPLOADED_PHOTO_REFERENCE,
+} from './tempImageStore.js';
 import { ConcurrencyGateError, createConcurrencyGate, type ConcurrencyGate } from '../utils/concurrencyGate.js';
 
 // ============================================================================
@@ -739,6 +743,8 @@ async function downloadLetterImage(
   imageType: LetterImageType,
   options: ImageProcessingOptions
 ): Promise<Buffer> {
+  const ownPhoto = await tryGetUploadedPhoto(url, options);
+  if (ownPhoto) return ownPhoto;
   const localBuffer = await tryGetFromTempStore(url);
   if (localBuffer) return localBuffer;
 
@@ -773,10 +779,46 @@ async function tryGetFromTempStore(url: string): Promise<Buffer | null> {
   return Buffer.from(base64Data, 'base64');
 }
 
+const UPLOADED_PHOTO_EXPIRED_MESSAGE =
+  'That uploaded photo has expired: uploads are kept for 15 minutes. Please upload it again.';
+
+/**
+ * The caller's own photo, sent through our upload card (#474, phase 3), when
+ * the request names UPLOADED_PHOTO_REFERENCE; otherwise null. Read for the
+ * account the image is processed for and no other, so the reference cannot
+ * reach anyone else's photo.
+ */
+async function tryGetUploadedPhoto(url: string, options: ImageProcessingOptions): Promise<Buffer | null> {
+  if (url !== UPLOADED_PHOTO_REFERENCE) return null;
+  const photo = options.actorId ? await getUploadedPhoto(options.actorId) : null;
+  if (!photo) {
+    throw new ImageProcessingError('DOWNLOAD_FAILED', UPLOADED_PHOTO_EXPIRED_MESSAGE);
+  }
+  return photo;
+}
+
+/**
+ * Check a photo sent through our upload card before it is kept: a PNG, JPEG
+ * or WebP by its own bytes, within the pixel ceiling and the decode budget,
+ * and big enough to print. Reads the header only, under the decode gate.
+ */
+export async function inspectUploadedPhoto(
+  buffer: Buffer,
+  actorId: string
+): Promise<{ width: number; height: number; format: string }> {
+  return runGated(decodeGate, async () => {
+    const metadata = await getImageMetadata(buffer);
+    validateDimensions(metadata.width, metadata.height);
+    return metadata;
+  }, actorId);
+}
+
 /**
  * Download image from URL with validation
  */
 async function downloadImage(url: string, options: ImageProcessingOptions): Promise<Buffer> {
+  const ownPhoto = await tryGetUploadedPhoto(url, options);
+  if (ownPhoto) return ownPhoto;
   const localBuffer = await tryGetFromTempStore(url);
   if (localBuffer) return localBuffer;
 

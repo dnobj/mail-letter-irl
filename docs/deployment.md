@@ -753,3 +753,44 @@ the copy-ready prompt,
 The temp-image store (TEMP_IMAGE_* vars) is a hard dependency of the
 generated path and is preflighted before any credit is reserved.
 
+### Photo upload through the card (#474, phase 3)
+
+In an app with no file store for cards (Claude), the upload card sends the
+photo itself through the card-only `upload_photo_chunk`
+([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)). API service
+only:
+
+- `LETTER_IRL_CARD_UPLOAD_ENABLED`: off unless set to an explicit yes (`true`,
+  `1`, `yes`, `on` or `enabled`); anything else, a typo included, leaves it
+  off. Off, the tool is not listed, a call is refused, and `upload_image`
+  tells the card to offer no upload, so the card asks for a link to the photo
+  instead. On, Claude's instructions also offer the upload card for an image
+  that is not at a link. ChatGPT is unaffected either way: it keeps its own
+  file store.
+- `LETTER_IRL_PHOTO_UPLOADS_PER_DAY`: uploads an account may start in a
+  rolling 24 hours; default 20, from 1 to 1000.
+
+The finished photo goes to the same private bucket as generated images, under
+`uploaded-photos/` and a key made from a hash of the account id. It is never
+served at an address. There is one per account, so a new upload replaces the
+one before. It is readable for 15 minutes: a read after that deletes it, and
+otherwise the hourly maintenance run's `cleanupExpiredImages` does. Account
+erasure deletes it once the run's database work is done, allowing ten seconds
+(`account_erasure.uploaded_photo_delete_failed` if that fails, since it
+expires anyway). Unfinished uploads are held in the API process's memory and
+never reach storage.
+
+A chunk is at most 512 Ki base64 characters, so `LETTER_IRL_MCP_BODY_LIMIT_BYTES`
+must stay above about 600 KiB for uploads to work; its default is 1 MiB.
+
+Every bucket request, for generated images as well as uploaded photos, has
+time limits (`BUCKET_REQUEST_LIMITS` in `src/services/tempImageStore.ts`). An
+attempt gives up after 5 seconds without a connection, 30 seconds without a
+response, or 30 seconds of silence while a response is read. The SDK retries a
+timed-out attempt up to three times, so a request that hangs every time is
+given up after about a minute and a half. The SDK's default is to wait
+indefinitely, which would leave an account's upload unable to finish, and the
+account unable to start another, until a restart. Bodies are sent at once,
+without waiting for "100 Continue" (`expectContinueHeader: false`), so a store
+that never sends it cannot hold a large upload until it times out.
+

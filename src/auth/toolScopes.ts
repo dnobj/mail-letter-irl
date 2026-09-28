@@ -49,7 +49,10 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   request_send: "mail:draft",
   // The preview card asks what became of its draft (#474): a read of the
   // caller's own draft, so it gates on the lightest product scope.
-  get_draft_status: "mail:read"
+  get_draft_status: "mail:read",
+  // Keeps a photo for the account's next preview (#474, phase 3): the upload
+  // card's part of drafting, so it sits with the drafting tools.
+  upload_photo_chunk: "mail:draft"
 };
 
 export function getRequiredToolScopes(toolName: string): ProductScope[] {
