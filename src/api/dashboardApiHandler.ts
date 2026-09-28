@@ -9,6 +9,7 @@
 import http from 'node:http';
 import { verifyWebhookSignature } from '../services/stripeService.js';
 import { createPackCheckout, processStripeWebhookEvent } from '../services/commerceService.js';
+import { SpendLimitError } from '../services/betaSpendLimits.js';
 import { PACK_PRODUCTS } from '../config/products.js';
 import { authenticateHttpRequest } from './middleware/auth.js';
 import { rateLimitAccount } from './middleware/rateLimit.js';
@@ -139,6 +140,16 @@ export async function handleCreateCheckoutSession(
       sessionUrl: result.sessionUrl
     });
   } catch (error: unknown) {
+    // A daily limit refused the purchase (betaSpendLimits). Its message is a
+    // fixed sentence of ours, so the page shows it as it is. Before this it
+    // fell through to "Unable to create checkout session" and the log's
+    // database_error default, as the $90 Power Pack did on 2026-09-28.
+    if (error instanceof SpendLimitError) {
+      writeDiagnostic('info', 'credits.checkout_refused_by_limit', { reason: error.code });
+      res.statusCode = 429;
+      res.json({ error: 'limit', message: error.message });
+      return;
+    }
     // Prefer a class the failing layer already resolved. createPackCheckout
     // carries the Stripe error's own class (e.g. resource_missing) here, which
     // is what #213 needed: without it a Stripe misconfiguration reached this

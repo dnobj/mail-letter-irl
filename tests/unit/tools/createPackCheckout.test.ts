@@ -30,6 +30,7 @@ vi.mock('../../../src/services/userService.js', () => ({
 import { createPackCheckoutTool } from '../../../src/tools/createPackCheckout.js';
 import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 import { PACK_PRODUCTS } from '../../../src/config/products.js';
+import { SpendLimitError } from '../../../src/services/betaSpendLimits.js';
 
 const context = {
   user: { userId: 'user-1', creditsRemaining: 0, orders: [] },
@@ -206,6 +207,22 @@ describe('create_pack_checkout', () => {
       expect(terminal.message).toMatch(/not configured/i);
       expect(transient.message).toMatch(/temporarily unavailable/i);
       expect(terminal.message).not.toBe(transient.message);
+    });
+
+    it("passes on a daily limit's own sentence, never 'try again' (2026-09-28)", async () => {
+      // A pack above the day's limit is refused every day, so the default
+      // "Please try again" sent the customer round in a circle.
+      const sentence =
+        'This purchase is more than one account can spend in a day, so it cannot be bought. Please choose a smaller pack.';
+      mocks.createPackCheckout.mockRejectedValueOnce(new SpendLimitError('CHARGE_ABOVE_DAILY_CAP', sentence));
+      const error = await createPackCheckoutTool.handler({ pack: 'power' } as never, context).then(
+        () => {
+          throw new Error('expected a rejection');
+        },
+        (rejected: Error) => rejected
+      );
+      expect(error.message).toBe(sentence);
+      expect((error as Error & { code?: string }).code).toBe('CHARGE_ABOVE_DAILY_CAP');
     });
 
     it('says something useful for an unrecognised code', async () => {

@@ -7,6 +7,7 @@ import {
   isMailSendingEnabled
 } from '../auth/betaAccess.js';
 import { giftDailySendCap } from '../config/giftLetters.js';
+import { writeDiagnostic } from '../utils/diagnosticLog.js';
 
 /**
  * Daily spend ceilings for the limited beta (#179).
@@ -181,6 +182,22 @@ export async function assertChargeWithinDailyCap(
   additionalCents: number
 ): Promise<void> {
   const cap = accountDailyChargeCents();
+  // One purchase above the whole day's limit can never be made, today or
+  // tomorrow, so it gets its own answer rather than "try again tomorrow". It
+  // means the limit sits below a price we sell: with the default of $60 the
+  // $90 Power Pack could not be bought at all (2026-09-28). Logged, because
+  // only the operator can fix it, by raising
+  // LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS.
+  if (additionalCents > cap) {
+    writeDiagnostic('error', 'commerce.purchase_above_daily_charge_cap', {
+      amountCents: additionalCents,
+      capCents: cap
+    });
+    throw new SpendLimitError(
+      'CHARGE_ABOVE_DAILY_CAP',
+      'This purchase is more than one account can spend in a day, so it cannot be bought. Please choose a smaller pack.'
+    );
+  }
   const result = await query<{ total: string }>(
     `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM orders
      WHERE user_id = $1 AND created_at >= ${UTC_DAY_START}`,

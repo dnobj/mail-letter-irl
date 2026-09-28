@@ -96,7 +96,9 @@ LETTER_IRL_WEBSITE_BASE_URL=<https://letterirl.com, or the development website's
 LETTER_IRL_BETA_GATE_ENABLED=<true to restrict access to the invited cohort>
 LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING=<global letters per day>
 LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP=<letters per account per day>
-LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS=<spend per account per day, in cents>
+# At least the dearest pack's price (the Power Pack, 9000): the default, 6000, is below it,
+# so no account could buy that pack (2026-09-28).
+LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS=<spend per account per day, in cents; default 6000>
 # Gift letters (docs/gift-letters.md): off unless explicitly true. API service only.
 LETTER_IRL_GIFT_LETTERS_ENABLED=<true to turn the programme on; unset keeps it off>
 LETTER_IRL_GIFT_DAILY_SEND_CAP=<gift sends per UTC day, all accounts; default 20; 0 stops them>
