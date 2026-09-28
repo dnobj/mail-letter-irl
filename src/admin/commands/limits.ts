@@ -188,7 +188,10 @@ export function createLimitCommands() {
       if ((cleared.rows[0]?.override_id ?? null) !== signedCurrent) {
         throw new AdminFoundationError("ADMIN_STALE_PREVIEW");
       }
-      const inserted = await execution.client.query<{ override_id: string; expires_at: Date | null }>(
+      // Another operator's value written since the preview trips the unique
+      // index: stale, like any other change under the operator's feet.
+      const inserted = await execution.client
+        .query<{ override_id: string; expires_at: Date | null }>(
         `INSERT INTO daily_limit_overrides (limit_key, user_id, value, expires_at, created_by_command_id)
          VALUES ($1::text, $2::text, $3::int,
                  CASE WHEN $4::text = 'today'
@@ -197,7 +200,13 @@ export function createLimitCommands() {
                  $5::text)
          RETURNING override_id, expires_at`,
         [key, input.userId, storedValue(key, input.amount), input.duration, execution.commandId],
-      );
+        )
+        .catch((error: unknown) => {
+          if ((error as { code?: unknown } | null)?.code === "23505") {
+            throw new AdminFoundationError("ADMIN_STALE_PREVIEW");
+          }
+          throw error;
+        });
       const row = inserted.rows[0];
       if (!row) throw new AdminFoundationError("ADMIN_INTERNAL_ERROR");
       return {

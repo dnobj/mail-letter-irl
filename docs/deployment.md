@@ -348,6 +348,10 @@ serving, and only then starts the new one. So between the migration committing
 and the new image accepting traffic, the previous code runs against the new
 schema.
 
+The reverse must not happen: the new image must never serve on a database behind its migrations.
+Since 038 every send and checkout reads `daily_limit_overrides` first, and on a database without it
+they all refuse (failing closed, logged as `database_error`) until the migration is applied.
+
 Every migration therefore has to be backward-compatible with the deployed
 version of the code:
 

@@ -267,6 +267,7 @@ describePostgres('beta spend limits', () => {
    */
   describe('operator values and refusal records', () => {
     afterEach(async () => {
+      await (await import('../../src/services/dailyLimits.js')).settleDailyLimitReports();
       await pool.query('DELETE FROM daily_limit_overrides');
       await pool.query('DELETE FROM daily_limit_refusals');
       await pool.query(`DELETE FROM commerce_operational_alerts WHERE alert_type = 'daily_limit_reached'`);
@@ -288,11 +289,11 @@ describePostgres('beta spend limits', () => {
 
     /**
      * A refusal in an earlier test records itself without being awaited
-     * (reportDailyLimitReached). Let any such record land, then clear it, so
-     * a test that counts refusals or alerts sees only its own.
+     * (reportDailyLimitReached). Wait for every such record to land, then
+     * clear it, so a test that counts refusals or alerts sees only its own.
      */
     async function settle(): Promise<void> {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await (await import('../../src/services/dailyLimits.js')).settleDailyLimitReports();
       await pool.query('DELETE FROM daily_limit_refusals');
       await pool.query(`DELETE FROM commerce_operational_alerts WHERE alert_type = 'daily_limit_reached'`);
     }

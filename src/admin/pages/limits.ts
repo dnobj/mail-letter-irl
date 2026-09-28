@@ -30,9 +30,20 @@ function everyoneOverride(overrides: LimitOverrideView[], key: DailyLimitKey): L
 
 function inForce(key: DailyLimitKey, data: LimitsPageData): SafeHtml {
   const override = everyoneOverride(data.overrides, key);
-  if (override) return html`<strong>${formatLimitValue(key, override.value)}</strong> <span class="muted">(set)</span>`;
   const configured = data.defaults.get(key);
-  return configured ? html`${formatLimitValue(key, configured.value)}` : html`<span class="muted">not reported</span>`;
+  const value = override
+    ? html`<strong>${formatLimitValue(key, override.value)}</strong> <span class="muted">(set)</span>`
+    : configured
+      ? html`${formatLimitValue(key, configured.value)}`
+      : html`<span class="muted">not reported</span>`;
+  if (!ACCOUNT_DAILY_LIMIT_KEYS.has(key)) return value;
+  // A per-account limit: this is everyone's value; some accounts may have their own.
+  const own = data.overrides.filter(
+    (row) => row.limitKey === key && row.userId !== null && !row.expired,
+  ).length;
+  return own > 0
+    ? html`${value}<br><span class="muted">${own} ${own === 1 ? "account has" : "accounts have"} their own value</span>`
+    : value;
 }
 
 function usedToday(key: DailyLimitKey, data: LimitsPageData): SafeHtml {
@@ -64,7 +75,7 @@ export function renderLimits(data: LimitsPageData): SafeHtml {
 <p class="muted">The safety stops on letters and spending, counted per UTC day. The value in force is one set here, for an account and then for everyone, or else the API's configured value. A change takes effect on the next send or checkout. When a limit refuses someone, the first refusal of the day opens an alert.</p>
 ${table(
   "Limits",
-  ["Limit", "Configured on the API", "In force", "Used today", "Refused today"],
+  ["Limit", "Configured on the API", "In force for everyone", "Used today", "Refused today"],
   DAILY_LIMIT_KEYS.map((key) => {
     const configured = data.defaults.get(key);
     return [

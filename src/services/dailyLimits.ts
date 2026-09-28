@@ -253,12 +253,31 @@ export async function recordDailyLimitRefusal(
  * is logged by class.
  */
 export function reportDailyLimitReached(key: DailyLimitKey, userId: string | null, value: number): void {
-  void recordDailyLimitRefusal(key, userId, value).catch((error) => {
-    writeDiagnostic('error', 'limits.refusal_record_failed', {
-      limit: key,
-      errorClass: classifyDiagnosticError(error, 'database_error')
-    });
-  });
+  const pending: Promise<void> = recordDailyLimitRefusal(key, userId, value).then(
+    () => undefined,
+    (error) => {
+      writeDiagnostic('error', 'limits.refusal_record_failed', {
+        limit: key,
+        errorClass: classifyDiagnosticError(error, 'database_error')
+      });
+    }
+  );
+  inFlightReports.add(pending);
+  void pending.finally(() => inFlightReports.delete(pending));
+}
+
+/** The records started and not yet finished; each settles, never rejects. */
+const inFlightReports = new Set<Promise<void>>();
+
+/**
+ * Waits for every refusal record started so far, including any started while
+ * waiting. For tests, which must not count another test's refusals, and for
+ * a shutdown that wants its records written.
+ */
+export async function settleDailyLimitReports(): Promise<void> {
+  while (inFlightReports.size > 0) {
+    await Promise.allSettled([...inFlightReports]);
+  }
 }
 
 /**

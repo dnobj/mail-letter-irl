@@ -214,6 +214,25 @@ describe("limit.set execute", () => {
     expect(insert![1]).toEqual(["account_daily_charge_cents", "auth0|u1", 25000, "until_cleared", "22222222-2222-4222-8222-222222222222"]);
   });
 
+  it("refuses as stale when another operator's value was written meanwhile", async () => {
+    const client = scripted();
+    client.query.mockImplementation(async (text: string) => {
+      if (text.includes("INSERT INTO daily_limit_overrides")) {
+        throw Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
+      }
+      return { rows: [] };
+    });
+    await refused(set.execute(execution(client), "account_daily_mail", input, { summary: { current: null } } as never), "ADMIN_STALE_PREVIEW");
+    // Any other failure is not dressed up as stale.
+    client.query.mockImplementation(async (text: string) => {
+      if (text.includes("INSERT INTO daily_limit_overrides")) throw Object.assign(new Error("boom"), { code: "08006" });
+      return { rows: [] };
+    });
+    await expect(set.execute(execution(client), "account_daily_mail", input, { summary: { current: null } } as never)).rejects.toMatchObject({
+      code: "08006",
+    });
+  });
+
   it("needs the operator's transaction", async () => {
     await refused(set.execute(execution(null), "account_daily_mail", input, { summary: { current: null } } as never), "ADMIN_INTERNAL_ERROR");
   });
@@ -304,6 +323,9 @@ describe("the Limits page", () => {
       }),
     );
     expect(page).toContain("<strong>200 letters</strong>");
+    expect(page).toContain("In force for everyone");
+    // The per-account limit says an account has its own value.
+    expect(page).toContain("1 account has their own value");
     expect(page).toContain("$500.00");
     expect(page).toContain(`value="${OVERRIDE_ID}"`);
     expect(page).toContain('action="/commands/limit.clear/preview"');

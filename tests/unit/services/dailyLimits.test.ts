@@ -44,9 +44,8 @@ describe('configured values', () => {
 });
 
 describe('effectiveDailyLimits', () => {
-  const rows = (list: Array<{ limit_key: string; user_id: string | null; value: number | string }>) => ({
-    query: vi.fn(async () => ({ rows: list }))
-  });
+  const rows = (list: Array<{ limit_key: string; user_id: string | null; value: number | string }>) =>
+    ({ query: vi.fn(async () => ({ rows: list })) }) as never;
 
   it('keeps the configured value when nothing is set', async () => {
     const values = await effectiveDailyLimits(rows([]), ['account_daily_mail'], 'u1', { LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP: '4' });
@@ -93,7 +92,7 @@ describe('effectiveDailyLimits', () => {
 /** A transaction whose client answers the counter's upsert as given. */
 function recorderClient(opened: boolean) {
   const client = {
-    query: vi.fn(async (sql: string) => {
+    query: vi.fn(async (sql: string, _params?: unknown[]) => {
       if (sql.includes('INSERT INTO daily_limit_refusals')) return { rows: [{ opened, utc_day: '2026-09-28' }] };
       return { rows: [] };
     })
@@ -152,7 +151,7 @@ describe('recordDailyLimitRefusal', () => {
     });
   });
 
-  it('counts per limit and UTC day, as the gate', async () => {
+  it("upserts one counter row per limit and UTC day (the SQL's shape; the PostgreSQL suite proves the gate)", async () => {
     vi.spyOn(diagnostics, 'writeDiagnostic').mockImplementation(() => {});
     const { client, transaction } = recorderClient(false);
     await recordDailyLimitRefusal('gift_daily_send', null, 20, { transaction: transaction as never, notify: vi.fn() });
@@ -188,11 +187,38 @@ describe('reportDailyLimitReached', () => {
     );
   });
 
-  it('runs on the pool, never on a caller\'s transaction', async () => {
+  it("records through the pool's own transaction", async () => {
     vi.spyOn(diagnostics, 'writeDiagnostic').mockImplementation(() => {});
     mocks.transaction.mockResolvedValue(false);
     reportDailyLimitReached('account_daily_mail', 'u1', 25);
     await vi.waitFor(() => expect(mocks.transaction).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('settleDailyLimitReports', () => {
+  it('waits for every record started, so a test counts only its own', async () => {
+    vi.spyOn(diagnostics, 'writeDiagnostic').mockImplementation(() => {});
+    const { settleDailyLimitReports } = await import('../../../src/services/dailyLimits.js');
+    let finish!: () => void;
+    mocks.transaction.mockImplementation(() => new Promise((resolve) => (finish = () => resolve(false))));
+    reportDailyLimitReached('global_daily_mail', null, 100);
+    let settled = false;
+    const settling = settleDailyLimitReports().then(() => (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    finish();
+    await settling;
+    expect(settled).toBe(true);
+    // Nothing left: settling again returns at once.
+    await settleDailyLimitReports();
+  });
+
+  it('settles a record that failed as well', async () => {
+    vi.spyOn(diagnostics, 'writeDiagnostic').mockImplementation(() => {});
+    const { settleDailyLimitReports } = await import('../../../src/services/dailyLimits.js');
+    mocks.transaction.mockRejectedValue(new Error('down'));
+    reportDailyLimitReached('global_daily_mail', null, 100);
+    await expect(settleDailyLimitReports()).resolves.toBeUndefined();
   });
 });
 
