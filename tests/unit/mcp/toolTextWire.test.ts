@@ -65,6 +65,20 @@ describe("tool text on the wire (#484)", () => {
     expect(client.getInstructions()).toBe(buildServerInstructions(false, clientProfileNamed(app)));
   });
 
+  it("says what an upload's context takes, in every app (#474, r17)", async () => {
+    for (const app of ["chatgpt", "claude"] as const) {
+      const { client } = await connect(app);
+      const { tools } = await client.listTools();
+      for (const name of ["upload_image", "confirm_uploaded_image"]) {
+        const context = (tools.find((tool) => tool.name === name)?.inputSchema.properties as Record<string, { description?: string }>)
+          ?.context;
+        expect(context?.description, `${app} ${name}`).toBe(
+          "What the photo is for: 'postcard', 'header_image' or 'inline_image'."
+        );
+      }
+    }
+  });
+
   it("gives every tool its short title, in every app", async () => {
     for (const app of ["chatgpt", "claude"] as const) {
       const listed = new LetterIrlServer().listTools(clientProfileNamed(app));

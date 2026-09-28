@@ -19,6 +19,7 @@ import {
 } from "../schemas.js";
 import { isDebugEnabled } from "../utils/debug.js";
 import { isCardUploadEnabled, uploadsThroughCard } from "../config/cardUpload.js";
+import { normalizeUploadContext } from "../utils/uploadContext.js";
 
 interface UploadImageInput {
   context?: string;
@@ -60,7 +61,9 @@ async function handler(
   input: UploadImageInput,
   context: ToolContext
 ): Promise<UploadImageOutput> {
-  const hint = input.context || "";
+  // One of the three, or none: the card passes it on to the upload and the
+  // recent upload, which know only these (#474).
+  const hint = normalizeUploadContext(input.context) ?? "";
   const guidanceMessage =
     CONTEXT_MESSAGES[hint] ||
     "Select a photo to use in your letter or postcard.";

@@ -62,5 +62,10 @@
  *     instructions offer upload_image for an image not at a link, and they,
  *     upload_image's description and its result say to call the preview with
  *     no image once the card asks for it.
+ * r17: upload_image's and confirm_uploaded_image's `context` parameter says
+ *     what it takes ('postcard', 'header_image' or 'inline_image'). The
+ *     served schema had no description, and in CLIENT-01 step 14 Claude
+ *     filled it with a sentence, which upload_photo_chunk refused. The server
+ *     now also reads a context in other words as one of the three, or none.
  */
-export const STEERING_COPY_REV = 16;
+export const STEERING_COPY_REV = 17;

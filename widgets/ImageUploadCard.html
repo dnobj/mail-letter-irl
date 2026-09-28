@@ -98,7 +98,7 @@
         <p class="hint">Ask again in the conversation to retry.</p>
       </div>
 
-      <p class="rev">upload t16</p>
+      <p class="rev">upload t17</p>
     </div>
 
     <!-- letter-irl:host -->
@@ -173,6 +173,7 @@
 
         // --- Read context from tool output ---
         var uploadContext = "";
+        var KNOWN_CONTEXTS = ["postcard", "header_image", "inline_image"];
         // Whether this card may send the photo itself (upload_image says so,
         // #474); read with the rest of the tool output below.
         var cardUploadAvailable = false;
@@ -181,7 +182,10 @@
             var output = host.toolOutput();
             if (output) {
               if (output.context) {
-                uploadContext = output.context;
+                // Only one of the three the upload and the recent upload know:
+                // a result from before the server read it (#474) may carry the
+                // model's own words, which upload_photo_chunk would refuse.
+                uploadContext = KNOWN_CONTEXTS.indexOf(output.context) !== -1 ? output.context : "";
               }
               if (output.message) {
                 guidanceText.textContent = output.message;
