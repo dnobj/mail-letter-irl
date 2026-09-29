@@ -51,7 +51,7 @@ The MCP surface is 24 tools and 6 widgets. Two more are listed only while their 
 ([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)). Each app gets its own words and tool
 list from its profile, which the server reads from the sign-in token (#473, #484, #475).
 Tool names and schemas are treated as stable compatibility contracts. Widget template URIs are
-versioned (`WIDGET_TEMPLATE_VERSION`, 42 on `dev`). Since v38 every card talks to its host through
+versioned (`WIDGET_TEMPLATE_VERSION` in `src/mcp/widgetUris.ts`). Since v38 every card talks to its host through
 one bridge (`widgets/shared/host.js`), which speaks MCP Apps outside ChatGPT, so Claude draws them.
 Since v40 a card's Send sends in Claude, and since v41 a reopened card there asks the server what
 became of its draft (#474). Since v32 the two image letter tools each have
