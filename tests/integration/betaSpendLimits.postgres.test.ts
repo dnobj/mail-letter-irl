@@ -318,7 +318,7 @@ describePostgres('beta spend limits', () => {
         await expect(limits.assertMailWithinDailyCaps(client, USER, 1)).resolves.toBeUndefined();
         await expect(limits.assertMailWithinDailyCaps(client, OTHER, 1)).rejects.toMatchObject({
           code: 'ACCOUNT_DAILY_MAIL_CAP',
-          message: 'This account has reached its daily limit of 5 items. Please try again tomorrow.'
+          message: 'This account has reached its daily limit of 5 letters and postcards. Please try again tomorrow.'
         });
       });
     });

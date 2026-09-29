@@ -942,8 +942,9 @@ export async function startHttpServer() {
         return; // Rate limited
       }
 
-      // Cached once: the registry is static for the process lifetime.
-      cachedToolNames ??= new Set(letterServer.listTools().map((tool) => tool.name));
+      // Cached once: the registry is static for the process lifetime. Every
+      // tool, not one app's list, or a checkout call logs as "other" (#520).
+      cachedToolNames ??= new Set(letterServer.toolNames());
 
       // No Origin header means a non-browser client, which is what every MCP
       // backend is. The transport's DNS-rebinding check only validates an Origin

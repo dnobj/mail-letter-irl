@@ -533,3 +533,44 @@ describe('how a preview is sent, in every app', () => {
     }
   });
 });
+
+/**
+ * The names the request log records for a call (#520). It used the list for an
+ * app that takes no purchases, so every checkout call logged as "other".
+ */
+describe('every tool name, for the request log', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('names the tools that one app or a switch leaves out of its list', () => {
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'false');
+    vi.stubEnv('LETTER_IRL_CARD_UPLOAD_ENABLED', 'false');
+    vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', 'off');
+    const names = new LetterIrlServer().toolNames();
+    for (const name of [
+      'create_pack_checkout',
+      'create_mail_checkout',
+      'generate_image_for_mail',
+      'request_send',
+      'upload_photo_chunk',
+      'send_letter'
+    ]) {
+      expect(names, name).toContain(name);
+    }
+    // The case #520 saw: the list without an app has no checkout.
+    expect(new LetterIrlServer().listTools().map(tool => tool.name)).not.toContain('create_pack_checkout');
+  });
+
+  it('holds every name any app is offered, with the switches either way', () => {
+    const names = new Set(new LetterIrlServer().toolNames());
+    for (const on of ['true', 'false']) {
+      vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', on);
+      vi.stubEnv('LETTER_IRL_CARD_UPLOAD_ENABLED', on);
+      vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', on === 'true' ? 'on' : 'off');
+      for (const app of CLIENT_PROFILE_NAMES) {
+        for (const tool of new LetterIrlServer().listTools(clientProfileNamed(app))) {
+          expect(names.has(tool.name), `${app} ${tool.name}`).toBe(true);
+        }
+      }
+    }
+  });
+});

@@ -250,5 +250,10 @@ describe("clientLogFields (#473)", () => {
     expect(httpServer).toMatch(
       /logMcpClientRequests\(\s*parsedBody,\s*req\.headers\["user-agent"\],\s*cachedToolNames \?\? new Set\(\),\s*clientFields\.client\s*\);/
     );
+    // Every tool's name, not one app's list: from the list without an app a
+    // checkout call logged as "other" (#520). toolNames() itself is covered in
+    // modelFacingCopy.test.ts.
+    expect(httpServer).toMatch(/cachedToolNames \?\?= new Set\(letterServer\.toolNames\(\)\);/);
+    expect(httpServer).not.toMatch(/cachedToolNames \?\?= new Set\(letterServer\.listTools\(/);
   });
 });

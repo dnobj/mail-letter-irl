@@ -28,7 +28,9 @@ const read = (relative: string): string =>
   fs.readFileSync(path.join(ROOT, relative), 'utf-8');
 
 describe('docs/tool-apis.md covers the tools that exist', () => {
-  const toolNames = new LetterIrlServer().listTools().map(tool => tool.name);
+  // Every tool, not one app's list: that drops the checkouts and the
+  // switched-off tools (#520).
+  const toolNames = new LetterIrlServer().toolNames();
   const doc = read('docs/tool-apis.md');
 
   it('has tools to check', () => {

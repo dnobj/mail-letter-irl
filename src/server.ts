@@ -270,6 +270,16 @@ export class LetterIrlServer {
   }
 
   /**
+   * Every tool's name, whatever the app and the switches: the names a log may
+   * record for a call (src/mcp/clientRequestLog.ts). listTools() without an
+   * app drops the checkouts (#475), so a log built from it named every
+   * checkout call "other" (#520).
+   */
+  toolNames(): string[] {
+    return tools.map((tool) => tool.name);
+  }
+
+  /**
    * The tools as one app sees them: each description in that app's words
    * (#484), the checkouts only where it takes purchases (#475), and image
    * generation only where it is allowed (#467). Without an app, the list for
