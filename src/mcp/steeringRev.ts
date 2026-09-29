@@ -81,5 +81,11 @@
  *     model sees neither tool, and it reads the descriptions but not the
  *     preview's text. They now name the card's Send where the app shows our
  *     card, and request_send's link elsewhere.
+ * r20: send_letter's and send_postcard's descriptions under the send rule, in
+ *     an app that shows card-only tools to its model (VS Code, Hermes, Codex
+ *     connecting directly, a token, an unknown app). A call there answers
+ *     with the confirmation link, so they say the call sends nothing and name
+ *     request_send, where they said "Send a physical letter" (#516). ChatGPT
+ *     and Claude keep them from the model, and their text is unchanged.
  */
-export const STEERING_COPY_REV = 19;
+export const STEERING_COPY_REV = 20;

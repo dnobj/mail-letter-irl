@@ -700,6 +700,8 @@ our tools arrive through Claude's own connection and log as `client=claude` (che
       found the metadata by itself, waited for the sign-in, and discovered 24 tools. The log shows
       `client=vscode`.)
 - [ ] A tool call from Copilot Chat, a preview, send by the link, refusals, disconnect. (Not run.)
+      Asked to send, the model should give `request_send`'s link. Since steering r20, `send_letter`
+      and `send_postcard` tell VS Code's model that a call sends nothing there (#516).
 - VS Code keeps a stream open on `/mcp`. When it dropped that stream, the API looped in its close
   handler until the stack overflowed (#485).
 

@@ -9,6 +9,7 @@ import { asPostcardDraft, createMailOrderFromDraft } from '../services/mailSendS
 import { hasReturnAddress } from '../services/returnAddressService.js';
 import type { LetterStatus } from '../services/types.js';
 import { friendlyDraftError as sharedDraftError } from './draftErrors.js';
+import { sendToolDescription } from './previewSendStep.js';
 
 interface SendPostcardInput {
   draftId: string;
@@ -170,8 +171,12 @@ async function handler(
 export const sendPostcardTool: McpToolDefinition<SendPostcardInput, SendPostcardOutput> = {
   name: 'send_postcard',
   title: 'Send a postcard',
-  description:
-    'Send a physical postcard using a draft from quote_and_preview_postcard. Requires a draftId and confirm: true. Safe retries return the existing order instead of charging twice, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.',
+  description: (client) =>
+    sendToolDescription(
+      'Send a physical postcard using a draft from quote_and_preview_postcard. Requires a draftId and confirm: true. Safe retries return the existing order instead of charging twice, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.',
+      'postcard',
+      client
+    ),
   readOnly: false,
   inputSchema: sendPostcardInputSchema,
   outputSchema: sendPostcardOutputSchema,
