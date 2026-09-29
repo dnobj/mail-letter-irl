@@ -127,7 +127,7 @@ describe('account-blocked wording on the send surface (#278)', () => {
  */
 describe('friendlyCheckoutError and the daily limits', () => {
   it.each([
-    ['ACCOUNT_DAILY_MAIL_CAP', 'This account has reached its daily limit of 3 items. Please try again tomorrow.'],
+    ['ACCOUNT_DAILY_MAIL_CAP', 'This account has reached its daily limit of 3 letters and postcards. Please try again tomorrow.'],
     ['ACCOUNT_DAILY_CHARGE_CAP', 'This account has reached its daily purchase limit. Please try again tomorrow.'],
     ['CHARGE_ABOVE_DAILY_CAP', 'This purchase is more than one account can spend in a day, so it cannot be bought. Please choose a smaller pack.']
   ])('passes on the %s sentence as it is', (code, sentence) => {

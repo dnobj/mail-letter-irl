@@ -1774,9 +1774,9 @@ describe.each([LETTER, POSTCARD])("$file shows a refused call's sentence, not th
   // rejection's message wraps the result's text in a Python-style repr. This
   // is the message GIFT-01 step 9 showed whole under "Send Gift Letter" on
   // development (2026-09-23).
-  const DAILY_CAP = 'This account has reached its daily limit of 3 items. Please try again tomorrow.';
+  const DAILY_CAP = 'This account has reached its daily limit of 3 letters and postcards. Please try again tomorrow.';
   const GIFT01_REJECTION =
-    "Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: [TextContent(type='text', text='This account has reached its daily limit of 3 items. Please try again tomorrow.', annotations=None, meta=None)]";
+    "Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: [TextContent(type='text', text='This account has reached its daily limit of 3 letters and postcards. Please try again tomorrow.', annotations=None, meta=None)]";
   /** The same rejection around another text, quoted as Python quoted it. */
   const rejection = (quoted: string) =>
     new Error(

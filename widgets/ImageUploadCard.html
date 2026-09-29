@@ -98,7 +98,7 @@
         <p class="hint">Ask again in the conversation to retry.</p>
       </div>
 
-      <p class="rev">upload t17</p>
+      <p class="rev">upload t18</p>
     </div>
 
     <!-- letter-irl:host -->
@@ -610,8 +610,11 @@
               asked = false;
             }
           }
+          // A host that takes the message may still leave it in the message
+          // box for the person to send: Claude web does, under a caution
+          // banner (2026-09-29, #520). The card cannot tell which it did.
           doneNote.textContent = asked
-            ? "Uploaded. Your request for the preview is in the conversation."
+            ? "Uploaded. Your request for the preview is in the conversation. If it is waiting in your message box, send it."
             : "Uploaded. Now send this in the conversation: \u201c" + prompt + "\u201d";
         }
 

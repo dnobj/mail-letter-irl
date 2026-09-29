@@ -142,9 +142,12 @@ export async function assertMailWithinDailyCaps(
   const accountCap = limits.account_daily_mail;
   if (countOf(perAccount.rows) + inFlight > accountCap) {
     reportDailyLimitReached('account_daily_mail', userId, accountCap);
+    // The count is every row in letters, postcards included, so the sentence
+    // names both; "items" read as a mystery unit on the page (#520).
+    const counted = accountCap === 1 ? 'letter or postcard' : 'letters and postcards';
     throw new SpendLimitError(
       'ACCOUNT_DAILY_MAIL_CAP',
-      `This account has reached its daily limit of ${accountCap} items. Please try again tomorrow.`
+      `This account has reached its daily limit of ${accountCap} ${counted}. Please try again tomorrow.`
     );
   }
 
