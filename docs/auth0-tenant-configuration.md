@@ -96,6 +96,26 @@ Use this table to verify each application has the correct settings:
 | Apple Connection | Connections | `is_domain_connection: true` |
 | GitHub Connection | Connections | `is_domain_connection: true` |
 | Username-Password | Connections | `is_domain_connection: true` |
+| Consent screen shows the scope descriptions | No dashboard page. Tenant flag `use_scope_descriptions_for_consent`, set through the Management API | `true`. Development set on 2026-09-28; production at the launch promotion (#267) |
+
+**The consent flag, #267.** Without it, Auth0's consent screen builds labels from the scope names,
+so `mail:read` reads "mail your read". With it, the screen shows each scope's description from the
+API's Permissions tab. The flag changes that wording only, on the consent screen of every app on
+the tenant that shows one; the website is first-party and shows none. To set it:
+1. Install the Auth0 CLI (`scoop install auth0`).
+2. Sign in with `auth0 login --scopes "read:tenant_settings,update:tenant_settings"`. This is a
+   device login: the person confirms the code in the browser and picks the tenant. It creates no
+   application, which matters at the 10-app cap.
+3. Save `auth0 api get "tenants/settings"`.
+4. Run `auth0 api patch "tenants/settings" --data @file`, with
+   `{"flags":{"use_scope_descriptions_for_consent":true}}` in the file. A file avoids PowerShell's
+   quoting.
+5. Read the settings again and compare: on 2026-09-28 only this flag changed.
+
+A consent screen for OpenClaw's client then listed "Read Letter IRL account, balance, order, and
+mail status data" and the other two descriptions. **Decline** on that screen shows Auth0's own error
+page (`access_denied: User did not authorize the request`), because OpenClaw's callback was not
+listening. Whether a real app's decline returns to the app has not been checked.
 
 ### Branding Checklist
 

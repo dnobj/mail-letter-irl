@@ -614,24 +614,47 @@ clicks Claude's prompts.
     - but it filled `upload_image`'s `context` with a sentence, which the card would have passed on
       and `upload_photo_chunk` refused. The follow-up fix reads such a context as one of the three
       names (steering r17, v43), and the run starts again once it is deployed.
-- [ ] Ask Claude for a postcard to a test address with a photo you will upload. Claude calls
-      `upload_image`, and the card, revision t17, shows **Select Photo** and "Max 25 MB".
-- [ ] Choose a photo larger than 2400 px, a phone JPEG of a few MB. The card shows "Sending your
+
+    Second run, 2026-09-29 (UTC), on 8a169db, in Claude web in the owner's Chrome, driven through
+    Claude in Chrome, as testlirl02. The owner picked each photo in the file dialog.
+    - **Refresh.** **Refresh tools list** logged `tools/list` at `steeringRev=19` and
+      `widgetTemplateVersion=44`, and the connector page lists **Upload a photo** under
+      **App-only tools**.
+    - **Claude no longer sends the card's message itself.** It puts "Make the postcard with the photo
+      I just uploaded." in the message box under a red banner: "Use caution before running this
+      prompt. Malicious content could trick Claude into attempting harmful actions or sharing your
+      data." The person presses send.
+    - **The card's wording.** Its line "Your request for the preview is in the conversation" should
+      point Claude users to the message box.
+- [x] Ask Claude for a postcard to a test address with a photo you will upload. Claude calls
+      `upload_image`, and the card, revision t17, shows **Select Photo** and "Max 25 MB". (Claude
+      passed `context: "postcard"`, and **Allow once** was clicked.)
+- [x] Choose a photo larger than 2400 px, a phone JPEG of a few MB. The card shows "Sending your
       photo…" with a percentage, then the photo and "Uploaded. Your request for the preview is in
       the conversation." The message "Make the postcard with the photo I just uploaded." appears in
       the conversation, and Claude makes the preview with no image argument. The development log
       shows `upload_photo_chunk` as `client=claude`, then `photo_upload.finished` with width or
-      height 2400, then `quote.postcard.image_from_recent_upload`.
-- [ ] The postcard card shows the uploaded photo on the front.
-- [ ] Upload a different photo in the same conversation and ask for a new preview. It uses the new
-      photo: the account holds one.
+      height 2400, then `quote.postcard.image_from_recent_upload`. (`photo-a.jpg`: three chunks,
+      then `photo_upload.finished width=2400 height=1800` at 04:36:20Z. The message came through the
+      message box, as noted above. The preview request carried no image, and the recent-upload line
+      logged `imageAgeMs=121110 unresolvedReference=false`. The image was fitted from 2400x1800 to
+      2700x1800.)
+- [x] The postcard card shows the uploaded photo on the front. Claude's reply said nothing was sent
+      and that it goes out only when the person presses Send on the card.
+- [x] Upload a different photo in the same conversation and ask for a new preview. It uses the new
+      photo: the account holds one. (`photo-b.jpg`, portrait: `width=1800 height=2400` at
+      04:40:16Z, and the preview used it 30 seconds later, fitted to 2700x1800.)
 - [ ] After more than 15 minutes, ask for another preview with "the photo I uploaded". Claude says
-      the upload has expired and asks for it again.
+      the upload has expired and asks for it again. (Not cleanly run on 2026-09-29. At 04:56Z, 16 minutes after Photo B, the preview found an upload only 10 minutes old: the ChatGPT upload of `photo-small.jpg` at 04:46, on the same account, had replaced Photo B, since the account holds one photo from any app. Its ChatGPT file link had lapsed, so the download failed with `DOWNLOAD_FAILED`. Claude said the photo could not be downloaded and might have expired, and offered the upload card again. Repeat with no other upload in between to see the 15-minute lifetime itself.)
 - [ ] Unset the switch on the development API. After a refresh the connector page no longer lists
       **Upload a photo**, and a new upload card says photo upload isn't available in this app yet.
-- [ ] In ChatGPT (DEV connector, after **Refresh tools**) the upload card works as before:
+      (Not run: it takes two redeploys of development.)
+- [x] In ChatGPT (DEV connector, after **Refresh tools**) the upload card works as before:
       **Select Photo** with "Max 10 MB", the photo goes to ChatGPT's files, and the preview uses its
-      link. **Choose from Library** appears where ChatGPT offers it.
+      link. **Choose from Library** appears where ChatGPT offers it. (2026-09-29 in Chrome with
+      `photo-small.jpg`, card t17. The log showed `upload_image`, then `confirm_uploaded_image` with
+      `imageContext=postcard`, then the preview's `quote.postcard.image_from_url
+      imageSource=provided`, fitted from 1800x1200 to 2700x1800. The postcard card showed the photo.)
 - [ ] Repeat the upload in Claude Desktop and the Claude app on Android.
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
@@ -852,6 +875,17 @@ account balance as `get_account_balance` reports it.
 the same night. Passed on the payment path; the link step failed twice before it passed, and that
 failure is recorded on #322.
 
+**Re-run on development, 2026-09-28 (8a169db, cards v44), as testlirl02.** Passed, twice. Both
+runs asked for "the Starter Pack":
+- `create_pack_checkout` ran with no permission prompt. The pack card showed "Starter Pack - 2
+  Letters" and **Open secure checkout — USD 5.00**.
+- The owner paid with the Stripe test card, and `checkout.session.completed` arrived.
+- The balance went from 4 letters to 6 each time, with one more gift letter.
+
+In the development log the call reads `toolName=other` on `mcp.client_request`, because the
+request log's list of known names comes from the tool list of an app that takes no purchases (#475).
+`tool.invocation.start` names the tool.
+
 - [x] In ChatGPT, ask to buy the smallest letter pack (Starter Pack, 2 letters).
 - [x] `list_letter_packs` runs, then `create_pack_checkout`, and ChatGPT
       presents the checkout as a clickable link. Known gap: it may say the
@@ -933,7 +967,15 @@ the preview cards already buy packs.
 
 **Status:** Executed 2026-09-12 in development through the embedded browser; the owner paid with a
 Stripe test card. Passed: the card switched to the paid state two seconds after the webhook, with no
-click and before the owner had returned to the tab. **Repeated in production on 2026-09-13 (UTC):**
+click and before the owner had returned to the tab.
+
+**Re-run on the v44 cards, 2026-09-28, in the embedded browser: passed.** After payment the card
+read "Paid. 2 letters added to your account.", "2 of 2 from this pack are still unused.", the
+checkout button was gone, and the order id was unchanged. In the log the card read
+`get_purchase_status` at 20:22:18Z after the payment, and once more when the conversation was
+reopened.
+
+**Repeated in production on 2026-09-13 (UTC):**
 polls every 3-4 s for the first minute, then every 20 s, the last automatic poll at 00:27:46Z just
 past the ten-minute budget, then nothing for seventeen minutes while the owner was away; the webhook
 arrived at 00:44:50Z and the owner's return to the tab fired the visibility refresh in the same
@@ -998,8 +1040,22 @@ replaces the link with the outcome.
 
 ### PAY-05 — Back to the conversation after checkout (issue #372)
 
-**Status:** Passed on the web in development on 2026-09-14, with widget v31. Android not run.
+**Status:** Passed on the web in development on 2026-09-14, with widget v31, and again on
+2026-09-29 with v44 in the owner's Chrome. Android not run. **Run it in a real browser.** In the
+Claude app's embedded browser ChatGPT appends no `redirectUrl`, so the return page offers only
+**Back to ChatGPT**. That happened on 2026-09-13 and again on 2026-09-28 (`purchase.start
+hasRedirectUrl=false`).
 
+- **2026-09-29, v44, the owner's Chrome, driven through Claude in Chrome.**
+  - An automated click on the card's button did nothing, because clicks don't reach the card's
+    frame. The owner's own click opened the checkout.
+  - At 03:22:31Z `purchase.start` logged `hasRedirectUrl=true redirectHost=chatgpt.com
+    returnKept=true`. `checkout.session.completed` arrived at 03:23:31Z. `purchase.return` logged
+    `conversationKept=true linkOffered=conversation`.
+  - The page read "Payment received" with **Back to your conversation**, which opened the same
+    conversation in a new tab.
+  - Its card read **Paid**, "2 of 2 from this pack are still unused", offered only **Check
+    status**, and no second checkout.
 - **2026-09-13: the return link did not arrive.**
   - The owner clicked the card's link from the embedded browser; no safe-link modal was reported.
   - The owner paid with a test card, and the return page offered **Back to ChatGPT**, the fallback
@@ -1450,6 +1506,12 @@ Leave the rule on in development afterwards. (It is on.)
       2368/1600 characters and 38/26 lines. Please shorten your message.", and no draft was made.
       The sentence goes on to repeat the count and "Please shorten your message", and the model
       quoted all of it. 24 lines is the soft limit; the refusal is at 26.)
+- [x] A text-only letter right at the limit prints on one page (#77). (2026-09-28, PostGrid test
+      mode, sent from the confirmation page. Five 318-character paragraphs and "Test", 1,598
+      characters in 26 estimated lines: `pageCount` 1. Twenty-five 54-character lines and "Test",
+      26 estimated lines and the tallest shape: `pageCount` 1, one page in the PDF, ending with "Line
+      25" and "Test", with nothing cut off. The header-image and enclosed-image layouts are not
+      checked.)
 - [ ] Invalid address → suggestions returned
 - [x] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200) (2026-09-28 in ChatGPT, with Suite 3300: the draft was made, and the reply said USPS confirmed the building but not the suite, and that the letter goes out as entered)
 - [x] Same building with no unit given → draft IS created with an "add the unit if you have it" note
@@ -2096,18 +2158,27 @@ audit.
 
 ### ADMIN-ACCT-04 — Promo campaigns and ambiguous image reservations
 
-**Status:** Step 1 passed on development on 2026-09-23, after #431 (merged as 6ba1f99); steps 2 to
-4 not run. Until #431 step 1 failed: the create form sent no `target` and the preview refused it
-(found by GIFT-01 step 9, 2026-09-23). Running this step would have caught it when the panel
-shipped.
+**Status:** Step 1 passed on development on 2026-09-23, after #431 (merged as 6ba1f99). Steps 1
+to 3 passed on 2026-09-28 (8a169db), elevated by the owner, with a fresh campaign `ACCT04-0928`
+(1 letter, a cap of 1). Step 4 could not run: there was no ambiguous reservation, and image
+generation is off in development. Until #431 step 1 failed: the create form sent no `target` and
+the preview refused it (found by GIFT-01 step 9, 2026-09-23). Running this step would have caught
+it when the panel shipped.
 
 **Steps:**
 
-1. [ ] `/promos/new`: preview and create a draft campaign; verify it appears as `draft`.
-2. [ ] Preview `active`; before confirming, change the campaign on another tab (or in SQL); execute;
-   verify `409 ADMIN_STALE_PREVIEW`. Preview again and execute; verify `active`.
-3. [ ] Redeem the code with a test account (`redeem_promo_code`); verify the campaign page lists the
+1. [x] `/promos/new`: preview and create a draft campaign; verify it appears as `draft`.
+2. [x] Preview `active`; before confirming, change the campaign on another tab (or in SQL); execute;
+   verify `409 ADMIN_STALE_PREVIEW`. Preview again and execute; verify `active`. (A campaign page
+   offers only status changes. Activating it from another tab refused the held preview with
+   `409 ADMIN_INVALID_STATE`, because draft → active was no longer possible. The stale guard itself
+   showed with a change that leaves the transition possible: an "ended" preview held while the
+   campaign read 0 redemptions, then a redemption, then execute gave `409 ADMIN_STALE_PREVIEW`.
+   Both refusals are in `/audit` as `admin.request_failed`.)
+3. [x] Redeem the code with a test account (`redeem_promo_code`); verify the campaign page lists the
    redemption with a masked email and that "delete" is no longer offered. End the campaign.
+   (testlirl02 through Claude: the page read "1 of 1", listed `t***@davidnicholl.com` with its
+   lot, and said "Redeemed campaigns are ended, never deleted." A fresh preview ended it.)
 4. [ ] `/images`: with an ambiguous reservation (decision rules in
    [deployment.md](deployment.md#operator-recovery-through-the-admin-panel)), preview "release as
    compensation" and execute; verify the reservation is `released`, the quota is back, and `/audit` shows
@@ -2176,15 +2247,25 @@ What each step showed:
 
 ### ADMIN-OPS-01 — Retention report and quarantine listing
 
+**Status:** Partly run on development on 2026-09-28 (8a169db). The quarantine was empty, because
+RETENTION-01's rows had been purged, so nothing could be found by id. The comparison with
+`npm run maintenance` needs the development database credentials on the machine running it.
+
 **Steps:**
 
 1. [ ] Open `/retention`; verify the counts (redacted letters and drafts, quarantine rows, purge due) and
    the report of what the next enforcing run would touch, matching `npm run maintenance` in report mode.
+   (The page showed 4 letters redacted, no drafts, an empty quarantine. The next run would take 0
+   letters (90 past the window, all 90 held back) and 0 drafts (13 abandoned drafts held back).
+   `/maintenance` showed the daily sweep completed 5 hours before, with no error. Not compared
+   with a report run.)
 2. [ ] Verify the quarantine table shows source table, row id, account and dates only, with a restore
-   control per row and no content anywhere on the page.
+   control per row and no content anywhere on the page. (Empty on the day.)
 3. [ ] Search the quarantine by a letter id, then by the account it belongs to: verify each finds that
    letter's copy, and a search for an unknown id finds none. On the account page, verify the link to its
-   quarantined copies opens the same search.
+   quarantined copies opens the same search. (An unknown id found none: "no copy matches". The
+   account page links "its quarantined copies" to `/retention?q=<account>`. There was no copy to
+   find.)
 
 **Pass criteria:** Metadata only; any copy can be found, however old; a restore is a queued command
 (`RETENTION-01`).
@@ -2255,6 +2336,34 @@ put a copy back.
 
 **Pass criteria:** Routing changes are validated against the runtime registry and versioned; the sync is
 explicit about dry run versus apply.
+
+### ADMIN-LIMITS-01 — Set a daily limit, refuse once, one alert, clear (#514)
+
+**Status:** Passed on development on 2026-09-28 (8a169db), elevated by the owner. It came after
+`npm run admin:provision-access` was re-run for migration 038 (the owner pasted the connection
+string at a masked prompt, `C:\letter-irl-scripts\provision-dev-admin.ps1`).
+
+**Steps:**
+
+1. [x] `/limits` lists the four limits with the API's configured value ("reported N m ago"), the value
+   in force, today's use and today's refusals, and "Overrides: none". (100 letters overall, 25 per
+   account, $200.00 per account, 20 gift letters.)
+2. [x] Set **letters per account per day** for a test account to what it has already sent today, for
+   the rest of today. The preview says today's use already meets the new value, so the next send is
+   refused, and that the value lapses at midnight UTC. (testlirl02 had sent 2. Override `83192852…`,
+   expires 2026-09-29T00:00Z.)
+3. [x] Send one more letter from that account. It is refused, and nothing is charged. (On the website
+   confirmation page: "This account has reached its daily limit of 2 items. Please try again
+   tomorrow." The balance stayed at 3 letters.)
+4. [x] `/alerts` shows one open `daily_limit_reached` alert (warning) naming the account. Its details
+   hold the limit key, the UTC day, the value and the account.
+5. [x] A second refusal the same day adds to **Refused today** on `/limits` and opens no second alert.
+   (It read "2, last 4s ago", with still one alert.)
+6. [x] Clear the override: `/limits` says the account is back on the value for everyone. Then resolve
+   the test alert.
+7. [x] `/audit` lists `limit.set` and `limit.clear` with the reasons typed.
+
+Wording to consider: the refusal says "items" where the limit is on letters.
 
 ### ADMIN-LEGACY-01 — Public denial unchanged after the legacy removal
 
