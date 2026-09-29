@@ -24,6 +24,7 @@ vi.mock('../../../src/services/returnAddressService.js', () => ({
 import { sendLetterTool } from '../../../src/tools/sendLetter.js';
 import { sendPostcardTool } from '../../../src/tools/sendPostcard.js';
 import { DuplicateMailError } from '../../../src/services/duplicateMailService.js';
+import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 
 const context = {
   user: { userId: 'user-1', creditsRemaining: 0, orders: [] },
@@ -76,7 +77,10 @@ describe.each(tools)('%s', (name, tool, mailType) => {
     });
   });
 
-  it('describes the flag in its description', () => {
-    expect(tool.description).toContain('sendAnotherCopy: true only after the user asks for another copy');
+  it('describes the flag in its description where the tool sends', () => {
+    // ChatGPT: its card presses Send, so the tool keeps its own words (#516).
+    const description = tool.description;
+    const text = typeof description === 'function' ? description(clientProfileNamed('chatgpt')) : description;
+    expect(text).toContain('sendAnotherCopy: true only after the user asks for another copy');
   });
 });

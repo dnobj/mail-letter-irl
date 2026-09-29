@@ -22,10 +22,11 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LetterIrlServer } from '../../../src/server.js';
-import { summarizeToolResult } from '../../../src/mcp/registerTools.js';
+import { CARD_ONLY_SEND_TOOLS, summarizeToolResult } from '../../../src/mcp/registerTools.js';
 import { buildManifest } from '../../../src/mcp/manifest.js';
 import { buildServerInstructions } from '../../../src/mcp/serverInstructions.js';
 import { CLIENT_PROFILE_NAMES, clientProfileNamed } from '../../../src/auth/clientProfiles.js';
+import { sendToolDescription } from '../../../src/tools/previewSendStep.js';
 
 // ChatGPT's list is the full one: an app that takes no purchases is not
 // offered the checkouts (#475). The other apps' text has its own suite below.
@@ -382,6 +383,80 @@ describe('image generation switched off', () => {
         expect(instructions, name).not.toMatch(/ChatGPT|image_gen/);
       }
     }
+  });
+});
+
+/**
+ * What the send tools say, per app (#516). Under the send rule a send tool
+ * sends only in an app that keeps card-only tools from its model, where only
+ * the card's Send can call it. Anywhere else a call answers with the
+ * confirmation link (sendsByLinkOnly, src/mcp/registerTools.ts), and the model
+ * there read "Send a physical letter" and promised a send the call refused.
+ */
+describe('what the send tools say, in every app', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  type AppName = (typeof CLIENT_PROFILE_NAMES)[number];
+  const SENDS = { send_letter: 'letter', send_postcard: 'postcard' } as const;
+  const mailOf = (tool: string) => SENDS[tool as keyof typeof SENDS];
+  const sendsFor = (name: AppName) =>
+    new LetterIrlServer().listTools(clientProfileNamed(name)).filter(tool => tool.name in SENDS);
+  const cardOnly = CLIENT_PROFILE_NAMES.filter(name => clientProfileNamed(name).honorsCardOnlyTools);
+  const shown = CLIENT_PROFILE_NAMES.filter(name => !clientProfileNamed(name).honorsCardOnlyTools);
+  const expectSendWords = (name: AppName) => {
+    for (const tool of sendsFor(name)) {
+      expect(tool.description, `${name} ${tool.name}`).toMatch(
+        new RegExp(`^Send a physical ${mailOf(tool.name)} using a draft`)
+      );
+      expect(tool.description, `${name} ${tool.name}`).not.toContain('request_send');
+    }
+  };
+
+  it('covers both kinds of app, and both tools are card-only sends in all of them', () => {
+    expect(cardOnly).toEqual(expect.arrayContaining(['chatgpt', 'claude']));
+    expect(shown).toEqual(expect.arrayContaining(['codex', 'vscode', 'hermes', 'token', 'generic']));
+    for (const tool of Object.keys(SENDS)) expect(CARD_ONLY_SEND_TOOLS.has(tool), tool).toBe(true);
+    for (const sendRule of ['false', 'true']) {
+      vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', sendRule);
+      for (const name of CLIENT_PROFILE_NAMES) {
+        expect(sendsFor(name).map(tool => tool.name).sort(), name).toEqual(Object.keys(SENDS).sort());
+      }
+    }
+  });
+
+  it('says a call sends nothing, and names request_send, where the model sees the tool', () => {
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+    for (const name of shown) {
+      for (const tool of sendsFor(name)) {
+        const mail = mailOf(tool.name);
+        expect(tool.description, `${name} ${tool.name}`).toBe(
+          `Does not send the ${mail} in this app: Letter IRL sends mail only when the person sends it. ` +
+            `A call answers with the link to the page where they check the ${mail} and send it. ` +
+            'Call request_send instead and give the person its link.'
+        );
+      }
+    }
+  });
+
+  it("keeps the send's own words where only the card can call it", () => {
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+    for (const name of cardOnly) expectSendWords(name);
+  });
+
+  it('keeps them in every app while the rule is off', () => {
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'false');
+    for (const name of CLIENT_PROFILE_NAMES) expectSendWords(name);
+  });
+
+  it('decides on honorsCardOnlyTools, as the routing does, not on rendersCards', () => {
+    // The two flags agree in every profile today, so only a mixed profile
+    // tells them apart.
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+    const own = 'Send a physical letter using a draft from a preview tool.';
+    const cardsButShown = { ...clientProfileNamed('generic'), rendersCards: true };
+    const hiddenButNoCards = { ...clientProfileNamed('chatgpt'), rendersCards: false };
+    expect(sendToolDescription(own, 'letter', cardsButShown)).toMatch(/^Does not send the letter in this app: /);
+    expect(sendToolDescription(own, 'letter', hiddenButNoCards)).toBe(own);
   });
 });
 
