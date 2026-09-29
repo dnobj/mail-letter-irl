@@ -26,6 +26,7 @@ import { CARD_ONLY_SEND_TOOLS, summarizeToolResult } from '../../../src/mcp/regi
 import { buildManifest } from '../../../src/mcp/manifest.js';
 import { buildServerInstructions } from '../../../src/mcp/serverInstructions.js';
 import { CLIENT_PROFILE_NAMES, clientProfileNamed } from '../../../src/auth/clientProfiles.js';
+import { sendToolDescription } from '../../../src/tools/previewSendStep.js';
 
 // ChatGPT's list is the full one: an app that takes no purchases is not
 // offered the checkouts (#475). The other apps' text has its own suite below.
@@ -445,6 +446,17 @@ describe('what the send tools say, in every app', () => {
   it('keeps them in every app while the rule is off', () => {
     vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'false');
     for (const name of CLIENT_PROFILE_NAMES) expectSendWords(name);
+  });
+
+  it('decides on honorsCardOnlyTools, as the routing does, not on rendersCards', () => {
+    // The two flags agree in every profile today, so only a mixed profile
+    // tells them apart.
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+    const own = 'Send a physical letter using a draft from a preview tool.';
+    const cardsButShown = { ...clientProfileNamed('generic'), rendersCards: true };
+    const hiddenButNoCards = { ...clientProfileNamed('chatgpt'), rendersCards: false };
+    expect(sendToolDescription(own, 'letter', cardsButShown)).toMatch(/^Does not send the letter in this app: /);
+    expect(sendToolDescription(own, 'letter', hiddenButNoCards)).toBe(own);
   });
 });
 
