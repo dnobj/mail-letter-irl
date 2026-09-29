@@ -624,8 +624,9 @@ clicks Claude's prompts.
       I just uploaded." in the message box under a red banner: "Use caution before running this
       prompt. Malicious content could trick Claude into attempting harmful actions or sharing your
       data." The person presses send.
-    - **The card's wording.** Its line "Your request for the preview is in the conversation" should
-      point Claude users to the message box.
+    - **The card's wording.** Its line "Your request for the preview is in the conversation" did
+      not point Claude users to the message box. Since #520 (upload t18, widgets v45) it goes on: "If
+      it is waiting in your message box, send it."
 - [x] Ask Claude for a postcard to a test address with a photo you will upload. Claude calls
       `upload_image`, and the card, revision t17, shows **Select Photo** and "Max 25 MB". (Claude
       passed `context: "postcard"`, and **Allow once** was clicked.)
@@ -2363,7 +2364,8 @@ string at a masked prompt, `C:\letter-irl-scripts\provision-dev-admin.ps1`).
    the test alert.
 7. [x] `/audit` lists `limit.set` and `limit.clear` with the reasons typed.
 
-Wording to consider: the refusal says "items" where the limit is on letters.
+The refusal said "items". Since #520 it reads "… its daily limit of 2 letters and postcards", or
+"1 letter or postcard" for a limit of 1.
 
 ### ADMIN-LEGACY-01 — Public denial unchanged after the legacy removal
 

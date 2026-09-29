@@ -218,7 +218,11 @@ describe('the upload card in an MCP Apps host, as in Claude (#474)', () => {
     await card.answer('ui/message', { result: {} });
     expect(card.shown('state-done')).toBe(true);
     expect(card.shown('url-box')).toBe(false);
-    expect(card.text('done-note')).toBe('Uploaded. Your request for the preview is in the conversation.');
+    // Claude web may leave the message in the message box for the person to
+    // send, and the card cannot tell (#520), so the note covers both.
+    expect(card.text('done-note')).toBe(
+      'Uploaded. Your request for the preview is in the conversation. If it is waiting in your message box, send it.'
+    );
     expect((card.document.getElementById('done-img') as HTMLImageElement).src).toBe(`data:image/jpeg;base64,${jpeg}`);
   });
 

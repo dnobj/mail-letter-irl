@@ -276,7 +276,16 @@ describe('operator values', () => {
     await expect(assertMailWithinDailyCaps(withOverrides(everyone, { perAccount: 9 }), 'u1', 1)).resolves.toBeUndefined();
     await expect(assertMailWithinDailyCaps(withOverrides(everyone, { perAccount: 10 }), 'u1', 1)).rejects.toMatchObject({
       code: 'ACCOUNT_DAILY_MAIL_CAP',
-      message: 'This account has reached its daily limit of 10 items. Please try again tomorrow.'
+      message: 'This account has reached its daily limit of 10 letters and postcards. Please try again tomorrow.'
+    });
+  });
+
+  it('names a limit of one in the singular (#520)', async () => {
+    vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP', '3');
+    const one = [{ limit_key: 'account_daily_mail', user_id: 'u1', value: 1 }];
+    await expect(assertMailWithinDailyCaps(withOverrides(one, { perAccount: 1 }), 'u1', 1)).rejects.toMatchObject({
+      code: 'ACCOUNT_DAILY_MAIL_CAP',
+      message: 'This account has reached its daily limit of 1 letter or postcard. Please try again tomorrow.'
     });
   });
 
