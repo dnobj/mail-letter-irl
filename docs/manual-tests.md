@@ -1603,12 +1603,28 @@ Leave the rule on in development afterwards. (It is on.)
       - In ChatGPT on the web (Medium), asked for a birthday letter "with a couple of emoji", the
         model's first preview was refused. It told the person the printer can't print 🎉 and 🎂,
         retried in plain text, and the card drew, with no second approval prompt.
-- [ ] The coverage probe shows which unproven characters the print draws (#526). A text-only
+- [x] The coverage probe shows which unproven characters the print draws (#526). A text-only
       letter carries about 220 of them, one group per line (`C:\letter-irl-scripts\coverage-probe.mts`).
       Decoding its PDF glyph by glyph shows which printed, and which came out as boxes (glyph 0).
-      It was sent on 2026-09-30 as a gift letter from testlirl02, before #528 deployed, which would
-      refuse it: PostGrid created it at 14:04:56. **The decode is still to do**, and needs a
-      PostGrid sign-in. The results decide which ranges `src/services/printableText.ts` may widen.
+      It was sent on 2026-09-30 as a gift letter from testlirl02 (`letter_wAEPpwHccd9gKtrUkPjNRu`),
+      before #528 deployed, which would refuse it. It was decoded the same day with
+      `C:\letter-irl-scripts\decode-probe.js`, grouping glyphs into lines by baseline and reading the
+      Hebrew line right to left.
+      - **Printed:**
+        - ― ‗ ‛, ə, ẞ, ʼ and the spacing accents;
+        - ϑ ϖ, Cyrillic Ԁ ԁ, ₪ ₫, № ℓ ℮ ℅ ℠, ⅛ ⅜ ⅝, ∞ ≈ ≠ ≤ ≥ ∂ ∆ ∏ ∑ √ ∫, ◊, the ligatures ﬀ to ﬄ, and ⁿ ⁴ ₂.
+      - **Printed by decomposition:** a character the font lacks, drawn as its canonical parts. That
+        covered pinyin tone letters, letters with a dot above or below, ὰ, yod with hiriq, and the
+        Kelvin, angstrom and ohm signs.
+      - **Printed as a space:** the narrow no-break space and the medium mathematical space.
+      - **Boxes:**
+        - the hyphen and the non-breaking hyphen, and most of the other punctuation;
+        - Ə ʻ, the line-below letters;
+        - polytonic Greek's breathing marks;
+        - Ԛ to ԝ, geresh and gershayim;
+        - most currency signs, ⅓ ⅔;
+        - every arrow and dingbat except ◊.
+      - The full lists are on #526. The widening PR admits exactly what printed; its tests pin both lists.
 - [ ] Invalid address → suggestions returned
 - [x] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200) (2026-09-28 in ChatGPT, with Suite 3300: the draft was made, and the reply said USPS confirmed the building but not the suite, and that the letter goes out as entered)
 - [x] Same building with no unit given → draft IS created with an "add the unit if you have it" note

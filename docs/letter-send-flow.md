@@ -24,10 +24,15 @@ So the text and both addresses may hold:
 - common punctuation, € and ™.
 
 Emoji, every other script, and anything that neither a test print nor the shipped font's glyph
-list shows are refused. Examples are pinyin tone marks, arrows, the non-breaking hyphen and the
-narrow no-break space. The glyph list is `sources/OpenSans-glyphset.txt` in googlefonts/opensans,
+list shows are refused. Examples are arrows, stars, check marks, the hyphen and non-breaking hyphen,
+and polytonic Greek. The glyph list is `sources/OpenSans-glyphset.txt` in googlefonts/opensans,
 which its build subsets every shipped font to, not the larger design master.
-`src/services/printableText.ts` holds the ranges. Widen them only on that evidence.
+
+A character the font lacks still prints when its canonical decomposition is made of characters that
+print. The renderer draws the parts, so pinyin tone letters and the letters with a dot above or
+below are allowed. The narrow no-break space prints as a space. The coverage probe of 2026-09-30
+showed both (#526). `src/services/printableText.ts` holds the ranges. Widen them only on that
+evidence.
 
 The refusal names each character and where it is. Invisible characters get a name and code point,
 and a character that may look like one that prints gets its code point. It comes before PostGrid

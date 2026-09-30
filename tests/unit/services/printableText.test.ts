@@ -76,15 +76,20 @@ describe('characters printed mail can show (#526)', () => {
     expect(unprintableCharacters('©\uFE0F ™\uFE0E a\u200Db \uFEFF \u200F')).toEqual([]);
   });
 
-  it('refuses a canonical equivalent that no print has shown', () => {
-    // The angstrom and kelvin signs print only if the renderer substitutes Å and K.
-    expect(unprintableCharacters('5 Å, 300 K')).toEqual(['Å', 'K']);
+  it('prints a canonical equivalent as the character it stands for, as the coverage probe did', () => {
+    // The kelvin, angstrom and ohm signs, drawn as K, A with a ring, and omega.
+    const signs = String.fromCodePoint(0x212a, 0x212b, 0x2126);
+    expect(unprintableCharacters(`300 ${signs}`)).toEqual([]);
   });
 
-  it('refuses letters no print has shown: pinyin tones, Sanskrit dots, polytonic Greek', () => {
-    expect(unprintableCharacters('Nǐ hǎo')).toEqual(['ǐ', 'ǎ']);
-    expect(unprintableCharacters('Kṛṣṇa')).toEqual(['ṛ', 'ṣ', 'ṇ']);
-    expect(unprintableCharacters('γνῶθι')).toEqual(['ῶ']);
+  it('prints letters the renderer builds from a letter and a mark, and refuses the rest', () => {
+    // Pinyin tones and Sanskrit dots: a letter and a mark the font has.
+    expect(unprintableCharacters(String.fromCodePoint(0x4e, 0x1d0, 0x20, 0x68, 0x1ce, 0x6f))).toEqual([]);
+    expect(unprintableCharacters(String.fromCodePoint(0x4b, 0x1e5b, 0x1e63, 0x1e47, 0x61))).toEqual([]);
+    // Polytonic Greek needs a perispomeni, which the font lacks.
+    const perispomeni = String.fromCodePoint(0x1ff6);
+    const word = String.fromCodePoint(0x3b3, 0x3bd, 0x1ff6, 0x3b8, 0x3b9);
+    expect(unprintableCharacters(word)).toEqual([perispomeni]);
   });
 
   it('refuses controls, direction overrides and line separators', () => {
@@ -97,11 +102,11 @@ describe('characters printed mail can show (#526)', () => {
     expect(unprintableCharacters('→ ✓ ★ ♥ ‼ 1\u20122')).toEqual(['→', '✓', '★', '♥', '‼', '\u2012']);
   });
 
-  it('refuses the hyphens and the narrow no-break space the shipped font has no glyph for', () => {
-    expect(unprintableCharacters('A follow\u2011up at 7:00\u202FPM, well\u2010known.')).toEqual([
-      '\u2011',
-      '\u202F',
-      '\u2010'
+  it('refuses the hyphens, and keeps the narrow no-break space, which prints as a space', () => {
+    const [hyphen, nonBreaking, narrowSpace] = [0x2010, 0x2011, 0x202f].map(cp => String.fromCodePoint(cp));
+    expect(unprintableCharacters(`A follow${nonBreaking}up at 7:00${narrowSpace}PM, well${hyphen}known.`)).toEqual([
+      nonBreaking,
+      hyphen
     ]);
   });
 
@@ -123,7 +128,7 @@ describe('characters printed mail can show (#526)', () => {
     expect(isPrintableCodePoint(0x2011)).toBe(false); // non-breaking hyphen: no glyph in the shipped font
     expect(isPrintableCodePoint(0x2012)).toBe(false); // figure dash, not shown to print
     expect(isPrintableCodePoint(0x202e)).toBe(false); // right-to-left override
-    expect(isPrintableCodePoint(0x202f)).toBe(false); // narrow no-break space: no glyph either
+    expect(isPrintableCodePoint(0x202f)).toBe(true); // narrow no-break space: printed as a space
     expect(isPrintableCodePoint(0x200b)).toBe(true); // zero-width space, which the font has
     expect(isPrintableCodePoint(0x0304)).toBe(true); // combining macron
     expect(isPrintableCodePoint(0x0305)).toBe(false); // combining overline: no glyph
@@ -144,6 +149,52 @@ describe('characters printed mail can show (#526)', () => {
     expect(isPrintableCodePoint(0x20b9)).toBe(false); // ₹, not shown to print
     expect(isPrintableCodePoint(0x0008)).toBe(false); // backspace
     expect(isPrintableCodePoint(0x007f)).toBe(false); // delete
+    expect(isPrintableCodePoint(0x0513)).toBe(true); // the last Cyrillic Supplement letter the font has
+    expect(isPrintableCodePoint(0x0514)).toBe(false); // the next
+    expect(isPrintableCodePoint(0x215d)).toBe(true); // five eighths
+    expect(isPrintableCodePoint(0x215e)).toBe(false); // seven eighths, not printed
+    expect(isPrintableCodePoint(0xfb04)).toBe(true); // the last ligature printed
+    expect(isPrintableCodePoint(0xfb05)).toBe(false); // the next
+  });
+
+  // The coverage probe of 2026-09-30 (#526, letter_wAEPpwHccd9gKtrUkPjNRu):
+  // what it printed, and what came out as boxes (glyph 0).
+  const PROBE_PRINTED = [
+    0x2015, 0x2017, 0x201b, 0x2002, 0x2003, 0x2009, 0x200a, 0x202f, 0x205f,
+    0x01ce, 0x01d0, 0x01d2, 0x01d4, 0x01d6, 0x01d8, 0x01da, 0x01dc, 0x01cd, 0x01cf, 0x01d1, 0x01d3,
+    0x01fa, 0x01fb, 0x01fc, 0x01fd, 0x01fe, 0x01ff, 0x0259,
+    0x02bc, 0x02c6, 0x02c7, 0x02c9, 0x02d8, 0x02d9, 0x02da, 0x02db, 0x02dc, 0x02dd,
+    0x1e03, 0x1e0b, 0x1e1f, 0x1e41, 0x1e57, 0x1e61, 0x1e6b, 0x1e81, 0x1e83, 0x1e85, 0x1e9e,
+    0x1e25, 0x1e47, 0x1e5b, 0x1e63, 0x1e6d, 0x1e0d, 0x1e37, 0x1e43, 0x1e45,
+    0x1f70, 0x03d1, 0x03d6,
+    0x0500, 0x0501, 0x0481, 0x0482, 0x0460, 0x0461, 0x0462, 0x0463,
+    0x05bd, 0x05be, 0xfb1d,
+    0x20aa, 0x20ab,
+    0x2116, 0x2113, 0x212e, 0x2126, 0x2105, 0x2120, 0x215b, 0x215c, 0x215d,
+    0x221e, 0x2248, 0x2260, 0x2264, 0x2265, 0x2202, 0x2206, 0x220f, 0x2211, 0x221a, 0x222b,
+    0x25ca, 0xfb00, 0xfb01, 0xfb02, 0xfb03, 0xfb04, 0x212a, 0x212b, 0x207f, 0x2074, 0x2082, 0x00aa, 0x00ba
+  ];
+  const PROBE_BOXES = [
+    0x2010, 0x2011, 0x2012, 0x2016, 0x201f, 0x2023, 0x2024, 0x2025, 0x2027,
+    0x2031, 0x2034, 0x2035, 0x2036, 0x2037, 0x2038, 0x203b, 0x203d, 0x203e, 0x204a, 0x204e,
+    0x018f, 0x0250, 0x025b, 0x0254, 0x0283, 0x02bb, 0x1e49, 0x1e0f,
+    0x1f00, 0x1f01, 0x1f04, 0x1fb6, 0x1ff6, 0x1f66, 0x1fb3, 0x1fe5, 0x03d0, 0x03d5,
+    0x051a, 0x051b, 0x051c, 0x051d,
+    0x05f3, 0x05f4, 0x05c3, 0x05c6, 0xfb20, 0xfb21,
+    0x20b4, 0x20bd, 0x20b9, 0x20ba, 0x20bf, 0x20a9, 0x20a6, 0x20b1, 0x20b2, 0x20a1,
+    0x2117, 0x2153, 0x2154, 0x2213, 0x2219,
+    0x2190, 0x2191, 0x2192, 0x2193, 0x2194, 0x2195, 0x21d2, 0x21d0, 0x21d4, 0x21a9,
+    0x2605, 0x2606, 0x2665, 0x2661, 0x2713, 0x2714, 0x2717, 0x263a, 0x266a, 0x266b, 0x25cb, 0x25cf,
+    0x25a0, 0x25a1, 0x25aa, 0x25ab, 0x25b2, 0x25ba, 0x25bc, 0x25c4, 0x25c6, 0x25c7, 0x2610, 0x2611
+  ];
+  const hex = (cp: number) => `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
+
+  it('prints everything the coverage probe printed', () => {
+    expect(PROBE_PRINTED.filter(cp => !isPrintableCodePoint(cp)).map(hex)).toEqual([]);
+  });
+
+  it('refuses everything the coverage probe printed as a box', () => {
+    expect(PROBE_BOXES.filter(cp => isPrintableCodePoint(cp)).map(hex)).toEqual([]);
   });
 });
 
@@ -175,7 +226,7 @@ describe('the refusal', () => {
     ]);
     expect(unprintableRefusal('letter', found)).toContain(
       'in this letter: a word joiner (U+2060), a line separator (U+2028), \u2012 (U+2012), ' +
-        '→ (U+2192), ʻ (U+02BB), Ａ (U+FF21), a medium mathematical space (U+205F) in the text.'
+        '→ (U+2192), ʻ (U+02BB), Ａ (U+FF21) in the text.'
     );
   });
 
@@ -184,7 +235,7 @@ describe('the refusal', () => {
       // Emoji as they are: by default presentation, a flag, a sequence.
       { field: 'emoji', where: 'in A', text: '\u{1F389} \u{1F1FA}\u{1F1F8} ❤\uFE0F' },
       // A lone text symbol, and letters of the look-alike scripts, with code points.
-      { field: 'lookAlike', where: 'in B', text: '★ ‼ ῶ ԁ ׳ \u0000' },
+      { field: 'lookAlike', where: 'in B', text: '★ ‼ ῶ Ԛ ׳ \u0000' },
       // A symbol in text presentation, or with a mark, is no emoji: code points.
       { field: 'textSymbol', where: 'in B2', text: '✔\uFE0E ★\u0301' },
       // A lone mark (Inherited), with its code point.
@@ -198,14 +249,14 @@ describe('the refusal', () => {
     const refusal = unprintableRefusal('letter', found);
     expect(refusal).toContain(': \u{1F389}, \u{1F1FA}\u{1F1F8}, ❤\uFE0F in A;');
     expect(refusal).toContain(
-      '; ★ (U+2605), ‼ (U+203C), ῶ (U+1FF6), ԁ (U+0501), ׳ (U+05F3), ' +
+      '; ★ (U+2605), ‼ (U+203C), ῶ (U+1FF6), Ԛ (U+051A), ׳ (U+05F3), ' +
         'a control character (U+0000) in B;'
     );
     expect(refusal).toContain('; ✔\uFE0E (U+2714), ★\u0301 (U+2605) in B2;');
     expect(refusal).toContain('; \u034F (U+034F) in C;');
     expect(refusal).toContain(
       '; a paragraph separator (U+2029), a direction override (U+202E), a direction isolate (U+2066), ' +
-        'an invisible character (U+2062), a narrow no-break space (U+202F), an ideographic space (U+3000) in D;'
+        'an invisible character (U+2062), an ideographic space (U+3000) in D;'
     );
     expect(refusal).toContain(
       '; a private-use character (U+E000), \u0378\u0301 (U+0378), an unassigned character (U+FFFE), ' +

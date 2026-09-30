@@ -6,21 +6,26 @@
  * shows every character in the viewer's own fonts, so without this check a
  * letter could preview correctly, be paid for, and print boxes.
  *
- * PRINTABLE_RANGES admits only what printed in the print check of 2026-09-30
- * (#526, letter_gqVZqFrq4bTEy4Jn9N8AHK), or what the Open Sans that PostGrid
- * prints with has a glyph for. That font drew Hebrew, so it is the build in
- * googlefonts/opensans, whose build.sh subsets every shipped font to
- * sources/OpenSans-glyphset.txt (1,146 glyphs; PostGrid's glyph ids fit it).
- * That list is the one that counts, not the larger design master beside it.
- * Characters that print nothing (joiners, direction marks, variation
- * selectors) are admitted without glyphs. The check printed emoji, Chinese,
- * Japanese, Korean, Arabic, Hindi and Thai as boxes. A character left out here
- * is refused even if the font may have it: a refusal costs a rewrite, a box
- * costs a letter. Widen a range only after a test print or that list shows it.
+ * PRINTABLE_RANGES admits only what printed in two prints of 2026-09-30 (#526):
+ * the print check (letter_gqVZqFrq4bTEy4Jn9N8AHK) and the coverage probe
+ * (letter_wAEPpwHccd9gKtrUkPjNRu, about 220 characters decoded glyph by glyph),
+ * or what the Open Sans that PostGrid prints with has a glyph for. That font
+ * drew Hebrew, so it is the build in googlefonts/opensans, whose build.sh
+ * subsets every shipped font to sources/OpenSans-glyphset.txt (1,146 glyphs;
+ * PostGrid's glyph ids fit it). That list is the one that counts, not the
+ * larger design master beside it. Characters that print nothing (joiners,
+ * direction marks, variation selectors) are admitted without glyphs. The
+ * prints drew emoji, Chinese, Japanese, Korean, Arabic, Hindi and Thai, arrows,
+ * stars, check marks, the hyphen and the non-breaking hyphen as boxes. A
+ * character left out here is refused even if the font may have it: a refusal
+ * costs a rewrite, a box costs a letter. Widen a range only after a test print
+ * or that list shows it.
  *
- * The text is checked as it is stored and printed, not normalized: a
- * canonical equivalent (the angstrom sign for Å) prints only if the renderer
- * substitutes it, which no print has shown.
+ * A character outside the ranges still prints when its canonical decomposition
+ * is made of characters inside them: the renderer draws the parts. The probe
+ * drew ǎ as a and a caron, ṛ as r and a dot below, ὰ as alpha and a grave, the
+ * angstrom sign as Å, and yod with hiriq as its two parts. The text itself is
+ * checked as it is stored and printed, not normalized.
  */
 
 const PRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
@@ -32,6 +37,11 @@ const PRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x01a0, 0x01a1], // Ơ ơ (Vietnamese)
   [0x01af, 0x01b0], // Ư ư (Vietnamese)
   [0x0218, 0x021b], // Ș ș Ț ț (Romanian)
+  [0x0259, 0x0259], // ə (the probe printed it; the capital, U+018F, came out a box)
+  [0x02bc, 0x02bc], // ʼ, the modifier apostrophe (not ʻ, U+02BB: a box)
+  [0x02c6, 0x02c7], // spacing accents the probe printed:
+  [0x02c9, 0x02c9], //   ˆ ˇ ˉ
+  [0x02d8, 0x02dd], //   ˘ ˙ ˚ ˛ ˜ ˝
   [0x0300, 0x0304], // combining accents the shipped font has as marks: grave to macron,
   [0x0306, 0x030c], // breve to caron (not the overline),
   [0x0323, 0x0323], // dot below,
@@ -40,35 +50,71 @@ const PRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x038c, 0x038c],
   [0x038e, 0x03a1],
   [0x03a3, 0x03ce], // ...to ώ
+  [0x03d1, 0x03d1], // ϑ and
+  [0x03d6, 0x03d6], //   ϖ, which the probe printed (not ϐ or ϕ: boxes)
   [0x0400, 0x0486], // Cyrillic, without U+0487...
   [0x0488, 0x04ff],
+  [0x0500, 0x0513], // Cyrillic Supplement as far as the font has it (the probe printed Ԁ ԁ; Ԛ on, boxes)
   [0x05b0, 0x05be], // Hebrew points and maqaf,
   [0x05c1, 0x05c2], // shin and sin dots,
   [0x05c7, 0x05c7], // qamats qatan
   [0x05d0, 0x05ea], // Hebrew letters
+  [0x1e9e, 0x1e9e], // ẞ, the capital sharp s
   [0x1ea0, 0x1ef9], // Vietnamese letters
   [0x2000, 0x200b], // fixed-width spaces and the zero-width space, which the font has
   [0x200c, 0x200f], // joiners and direction marks, which print nothing
-  [0x2013, 0x2014], // en and em dash (not U+2010 or U+2011: the shipped font has no glyph for either)
-  [0x2018, 0x201a], // ‘ ’ ‚
-  [0x201c, 0x201e], // “ ” „
+  [0x2013, 0x2015], // en and em dash, horizontal bar (not U+2010 or U+2011: boxes)
+  [0x2017, 0x201e], // ‗, and the quotation marks ‘ ’ ‚ ‛ “ ” „ (not ‟: a box)
   [0x2020, 0x2022], // † ‡ •
-  [0x2026, 0x2026], // … (not U+202F, the narrow no-break space: no glyph either)
+  [0x2026, 0x2026], // …
+  [0x202f, 0x202f], // narrow no-break space: no glyph, but the print draws a space
   [0x2030, 0x2030], // ‰
   [0x2032, 0x2033], // ′ ″
   [0x2039, 0x203a], // ‹ ›
   [0x2044, 0x2044], // fraction slash
-  [0x20ac, 0x20ac], // €
+  [0x205f, 0x205f], // medium mathematical space: drawn as a space too
+  [0x2070, 0x2070], // superscript 0,
+  [0x2074, 0x2079], //   4 to 9,
+  [0x207f, 0x207f], //   and n
+  [0x2080, 0x2089], // subscript digits
+  [0x20aa, 0x20ac], // ₪ ₫ € (not ₴ ₽ ₹ ₺ ₿ ₩ ₦ ₱ ₲ ₡: boxes)
+  [0x2105, 0x2105], // ℅
+  [0x2113, 0x2113], // ℓ
+  [0x2116, 0x2116], // №
+  [0x2120, 0x2120], // ℠
   [0x2122, 0x2122], // ™
-  [0x2212, 0x2212], // minus sign
-  [0xfb01, 0xfb02], // ﬁ ﬂ: the print draws its own ﬁ
+  [0x212e, 0x212e], // ℮
+  [0x215b, 0x215d], // ⅛ ⅜ ⅝ (not ⅓ or ⅔: boxes)
+  [0x2202, 0x2202], // the math signs the probe printed: ∂
+  [0x2206, 0x2206], //   ∆
+  [0x220f, 0x220f], //   ∏
+  [0x2211, 0x2212], //   ∑ −
+  [0x221a, 0x221a], //   √
+  [0x221e, 0x221e], //   ∞
+  [0x222b, 0x222b], //   ∫
+  [0x2248, 0x2248], //   ≈
+  [0x2260, 0x2260], //   ≠
+  [0x2264, 0x2265], //   ≤ ≥
+  [0x25ca, 0x25ca], // ◊ (every other shape and arrow was a box)
+  [0xfb00, 0xfb04], // the ligatures ﬀ ﬁ ﬂ ﬃ ﬄ
   [0xfe00, 0xfe0f], // variation selectors: after ❤ the print drew nothing for one
   [0xfeff, 0xfeff], // zero-width no-break space
 ];
 
-/** Whether a code point prints as itself rather than as an empty box. */
-export function isPrintableCodePoint(codePoint: number): boolean {
+function inRanges(codePoint: number): boolean {
   return PRINTABLE_RANGES.some(([low, high]) => codePoint >= low && codePoint <= high);
+}
+
+/**
+ * Whether a code point prints rather than as an empty box: it is in the ranges,
+ * or its canonical decomposition is made of characters that are, which the
+ * renderer draws in its place.
+ */
+export function isPrintableCodePoint(codePoint: number): boolean {
+  if (inRanges(codePoint)) return true;
+  const character = String.fromCodePoint(codePoint);
+  const decomposed = character.normalize('NFD');
+  return decomposed !== character && [...decomposed].every(part => inRanges(part.codePointAt(0)!));
 }
 
 const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
@@ -128,8 +174,6 @@ const INVISIBLE_NAMES: ReadonlyArray<readonly [number, number, string]> = [
   [0x2028, 0x2028, 'a line separator'],
   [0x2029, 0x2029, 'a paragraph separator'],
   [0x202a, 0x202e, 'a direction override'],
-  [0x202f, 0x202f, 'a narrow no-break space'],
-  [0x205f, 0x205f, 'a medium mathematical space'],
   [0x2060, 0x2060, 'a word joiner'],
   [0x2066, 0x2069, 'a direction isolate'],
   [0x3000, 0x3000, 'an ideographic space'],
