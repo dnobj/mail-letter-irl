@@ -20,21 +20,29 @@ This log captures short notes discovered while connecting Letter IRL to the Chat
 
 When validating letter content, we use two tiers of limits:
 
-**Soft Limits (Guidance)**: What we tell ChatGPT to aim for in tool descriptions
+**Soft Limits (Guidance)**: the line counts the manifest's prose names (`src/schemas.ts`, which feeds
+`/manifest.json` only). The tool descriptions served in `tools/list` state no line counts; a model
+learns a limit from the refusal sentence, which names it.
 - `inline_image`: 12 lines
 - `header_image`: 17 lines
 - `text_only`: 24 lines
 
 **Hard Limits (Validation)**: What we actually enforce during validation
 - `inline_image`: 14 lines (+2 buffer)
-- `header_image`: 17 lines (no buffer)
+- `header_image`: 17 lines (no buffer: a 17-line body with a sign-off is refused and retried)
 - `text_only`: 26 lines (+2 buffer)
 
 **A buffer never passes the page.** Until 2026-09-29 the image layouts allowed 15 and 19 lines. A
-print check in PostGrid's test mode showed both printing a second page (#77): the header layout fits
-17 lines under its 2-inch image, and the inline layout printed a blank second page at 15. Past the
-page, a letter prints, and is billed, an extra sheet. `tests/unit/services/pageLineLimits.test.ts`
-now holds each limit to what printed on one page.
+print check in PostGrid's test mode printed a second page for both (#77):
+- at 19 lines the header layout put lines 18 and 19 on page 2, with 17 on page 1 under the
+  2-inch image;
+- the inline layout printed a blank second page at 15; one line under that leaves about a quarter
+  inch by the print CSS, not yet printed.
+
+Past the page, a letter prints, and is billed, an extra sheet. Lines are counted on
+`letterPrintText`, the text exactly as the provider prints it. The print used to keep a body's
+trailing blank lines, which the count dropped. `tests/unit/services/pageLineLimits.test.ts` holds
+each limit under what the check printed on one page.
 
 **Why the buffer?**
 Even when ChatGPT follows instructions perfectly, line counts can exceed soft limits due to:
@@ -52,8 +60,8 @@ Even when ChatGPT follows instructions perfectly, line counts can exceed soft li
 **Implementation**:
 - `LAYOUT_LINE_LIMITS_SOFT` - for documentation/reference
 - `LAYOUT_LINE_LIMITS` - used in actual validation
-- Tool descriptions mention soft limits to guide ChatGPT
-- Validation uses hard limits to avoid unnecessary retries
+- The manifest's prose mentions the soft limits; the served tool descriptions do not
+- Validation uses hard limits to avoid unnecessary retries, never past what prints on one page
 
 **Files**: `src/services/previewService.ts`
 

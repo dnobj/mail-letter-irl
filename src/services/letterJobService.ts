@@ -27,6 +27,7 @@ import { returnGiftLetterForFailedSendWithClient } from './giftLetterService.js'
 import { carriedDiagnosticClass, classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { summarizeProviderRejection } from './providerFailureSummary.js';
 import { enabledUnlessDisabled } from '../utils/envSettings.js';
+import { letterPrintText } from './previewService.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const STALE_LOCK_MINUTES = 15;
@@ -347,7 +348,8 @@ function letterParams(letter: Letter, job: LetterJob): LetterParams {
           country: normalizeCountryToUS(content.sender.country),
         }
       : undefined,
-    message: `${content.bodyText}\n${content.signOff || ''}`.trim(),
+    // The same text validation counted lines on (#77).
+    message: letterPrintText(content.bodyText, content.signOff),
     color: content.layoutType !== 'text_only' && Boolean(content.headerImageData || content.inlineImageData),
     doubleSided: false,
     layoutType: content.layoutType || 'text_only',

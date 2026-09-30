@@ -36,12 +36,14 @@ export const LAYOUT_LINE_LIMITS_SOFT: Record<LetterLayoutType, number> = {
 // HARD LIMITS: the most lines validation accepts. A buffer over the soft
 // limit spares a retry when the sign-off or wrapping adds a line, but a limit
 // must never pass what fits on one printed page: past it, the letter prints,
-// and is billed, a second page. Measured in PostGrid's test mode on 2026-09-29
-// (#77), with short lines that do not wrap:
-// - header_image: 17 lines fit under the 2" image; an 18th went to page 2.
+// and is billed, a second page. From the print check in PostGrid's test mode on
+// 2026-09-29 (#77), with short lines that do not wrap:
+// - header_image: at 19 lines, lines 18 and 19 printed on page 2 and 17 fit
+//   under the 2" image (18 alone was not printed).
 // - inline_image: at 15 lines the text and the 3" image fit, but a blank
-//   page 2 printed; 14 leaves a quarter inch.
+//   page 2 printed; by the print CSS, 14 leaves about a quarter inch.
 // - text_only: 26 lines printed on one page.
+// Lines are counted on letterPrintText, the text exactly as it prints.
 export const LAYOUT_LINE_LIMITS: Record<LetterLayoutType, number> = {
   text_only: 26,        // Soft limit 24 + 2 buffer
   header_image: 17,     // No buffer: 17 is what fits under a 2" header image
@@ -152,6 +154,19 @@ export function estimateLines(text: string, charsPerLine = CHARS_PER_LINE): numb
   return totalLines;
 }
 
+/**
+ * A letter's text as it prints: the body without trailing blank lines, then
+ * the sign-off on the next line. Validation counts lines on exactly this text
+ * and the provider prints exactly this text (letterJobService), so the count
+ * cannot fall short of the print. The print used to keep a body's trailing
+ * newlines, which validation dropped: a letter at the line limit could still
+ * print a line or two taller, onto a second page (#77).
+ */
+export function letterPrintText(bodyText: string, signOff?: string | null): string {
+  const body = bodyText.trimEnd();
+  return (signOff ? `${body}\n${signOff}` : body).trim();
+}
+
 // ============================================================================
 // Content Validation
 // ============================================================================
@@ -194,11 +209,8 @@ export function validateCharacterLimit(
   const charLimit = LAYOUT_CHARACTER_LIMITS[layoutType];
   const charsValid = totalChars <= charLimit;
 
-  // Estimate lines for combined content (body + sign-off with spacing)
-  // Trim trailing newlines from body to avoid stacking with the \n separator
-  const trimmedBody = bodyText.replace(/\n+$/, '');
-  const combinedText = signOff ? `${trimmedBody}\n${signOff}` : trimmedBody;
-  const totalLines = estimateLines(combinedText);
+  // Count the lines of the text exactly as it prints.
+  const totalLines = estimateLines(letterPrintText(bodyText, signOff));
   const lineLimit = LAYOUT_LINE_LIMITS[layoutType];
   const linesValid = totalLines <= lineLimit;
 
