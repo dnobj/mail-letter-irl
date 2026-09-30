@@ -186,7 +186,7 @@ A `pdf-1` gift send still prints on the HTML, until its gift page moves onto the
 **How a preview is drawn (#534).** With `LETTER_IRL_PRINT_RENDERER=pdf`, the three letter previews are drawn by `src/render`, from the layout the PDF prints from:
 - the page is laid out with the image that prints, and a letter that runs past it is refused with the count: "Letter is 2 lines too long for one page: it takes 28 lines and the page holds 26." A page holds 26 lines of text only, 16 under a full 2-inch header image, and 13 above a full 3-inch enclosed image;
 - the legacy character and line estimates, calibrated for Open Sans, give way to a cap of 10,000 characters, which only bounds the work;
-- the text is checked against Tinos, the font it prints in, which draws more than Open Sans (the non-breaking hyphen, for one) and refuses a letter carrying more than four marks. The addresses are still checked against Open Sans, which PostGrid stamps them in;
+- the text is checked against Tinos, the font it prints in, which draws more than Open Sans (the non-breaking hyphen, for one). A letter carrying more than four marks is refused, and so are controls, line and paragraph separators, private-use characters and any space Tinos would draw as a box, since the font maps some of them to a visible box. The addresses are still checked against Open Sans, which PostGrid stamps them in;
 - `preview_html` holds the page as SVG in a minimal HTML document, which the website's confirm page shows; the letter card still draws its own mockup from the text hidden in it;
 - the draft records `renderer_version = 'pdf-1'`, so the letter prints as it was previewed.
 

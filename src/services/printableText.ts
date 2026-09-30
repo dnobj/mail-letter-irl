@@ -160,12 +160,19 @@ export interface UnprintableField {
   field: string;
   where: string;
   characters: string[];
+  /** The font the text prints in, which the refusal names characters by; Open Sans unless given. */
+  prints?: PrintsGrapheme;
 }
 
 /** Each piece of text that holds characters the print cannot show. */
 export function findUnprintable(texts: PrintedText[]): UnprintableField[] {
   return texts
-    .map(({ field, where, text, prints }) => ({ field, where, characters: unprintableCharacters(text ?? '', prints) }))
+    .map(({ field, where, text, prints }) => ({
+      field,
+      where,
+      characters: unprintableCharacters(text ?? '', prints),
+      ...(prints ? { prints } : {})
+    }))
     .filter(({ characters }) => characters.length > 0);
 }
 
@@ -223,23 +230,25 @@ function invisibleName(character: string): string {
  * How the refusal shows a character: invisible ones by name and code point,
  * emoji and other scripts as they are, and a character that may look like one
  * that prints (a non-breaking hyphen is not a hyphen) with the code points
- * that do not print.
+ * that do not print in the text's font. A cluster whose every character
+ * prints, refused only as a whole, carries too many marks (#534).
  */
-function shown(grapheme: string): string {
+function shown(grapheme: string, prints: PrintsGrapheme): string {
   const characters = [...grapheme];
-  const refused = characters.filter(character => !isPrintableCodePoint(character.codePointAt(0)!));
-  if (INVISIBLE.test(grapheme)) return refused.map(invisibleName).join(', ');
+  const refused = characters.filter(character => !prints(character));
+  if (INVISIBLE.test(grapheme)) return (refused.length > 0 ? refused : characters).map(invisibleName).join(', ');
   const emoji =
     EMOJI.test(grapheme) ||
     (characters.length > 1 &&
       PICTOGRAPHIC.test(grapheme) &&
       characters.every(character => EMOJI_JOINERS.has(character) || EMOJI_SEQUENCE_PART.test(character)));
   if (emoji || !(LOOK_ALIKE.test(grapheme) || INVISIBLE_START.test(grapheme))) return grapheme;
+  if (refused.length === 0) return `${grapheme} (too many marks on one letter)`;
   return `${grapheme} (${refused.map(codePoint).join(' ')})`;
 }
 
-function listed(characters: string[]): string {
-  const list = characters.slice(0, MOST_LISTED).map(shown).join(', ');
+function listed(characters: string[], prints: PrintsGrapheme = printsInOpenSans): string {
+  const list = characters.slice(0, MOST_LISTED).map(grapheme => shown(grapheme, prints)).join(', ');
   const more = characters.length - MOST_LISTED;
   return more > 0 ? `${list} and ${more} more` : list;
 }
@@ -249,7 +258,7 @@ function listed(characters: string[]): string {
  * as a box and where it is.
  */
 export function unprintableRefusal(mail: 'letter' | 'postcard', found: UnprintableField[]): string {
-  const where = found.map(({ where, characters }) => `${listed(characters)} ${where}`).join('; ');
+  const where = found.map(({ where, characters, prints }) => `${listed(characters, prints)} ${where}`).join('; ');
   return (
     `Letter IRL can't print some characters in this ${mail}: ${where}. ` +
     `Printed mail shows Latin letters with common accents, modern Greek, Cyrillic, Hebrew ` +

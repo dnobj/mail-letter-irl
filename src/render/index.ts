@@ -10,5 +10,4 @@ export { renderPdf, RENDERER_VERSION, PRINTABLE_RENDERER_VERSIONS } from './pdf.
 export { renderPreviewSvg } from './preview.js';
 export { readImage, readImageDataUri } from './images.js';
 export type { RenderImage } from './images.js';
-export { missingCharacters } from './fonts.js';
 export { visualOrder } from './bidi.js';

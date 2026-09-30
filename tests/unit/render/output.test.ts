@@ -11,7 +11,6 @@ import { layoutLetter, type TextRun } from '../../../src/render/layout.js';
 import { placeGlyphs } from '../../../src/render/glyphs.js';
 import { renderPdf, RENDERER_VERSION } from '../../../src/render/pdf.js';
 import { renderPreviewSvg } from '../../../src/render/preview.js';
-import { missingCharacters } from '../../../src/render/fonts.js';
 import { readImage, readImageDataUri, type RenderImage } from '../../../src/render/images.js';
 
 /** A valid 8-bit grayscale PNG of the given size, built rather than hand-written. */
@@ -251,18 +250,4 @@ describe('images and fonts (#534)', () => {
     expect(() => readImage(Buffer.from('not an image'))).toThrow();
   });
 
-  it('knows which characters Tinos cannot draw', () => {
-    const party = String.fromCodePoint(0x1f389);
-    const wang = String.fromCodePoint(0x738b);
-    expect(missingCharacters('Tinos-Regular', `Café ${party} ${wang} ${party}`)).toEqual([party, wang]);
-    const hebrew = String.fromCodePoint(0x05e9, 0x05dc, 0x05d5, 0x05dd);
-    expect(missingCharacters('Tinos-Regular', `Kalimera ${String.fromCodePoint(0x03ba, 0x03b1)} ${hebrew} ${String.fromCodePoint(0x2011, 0x202f)}`)).toEqual([]);
-  });
-
-  it('does not count what the renderer handles itself as missing (review round 1)', () => {
-    // Line breaks start new lines, tabs become spaces, and characters that
-    // print nothing are dropped.
-    const text = `a\nb\r\nc\td${String.fromCodePoint(0xfe0f)}e${String.fromCodePoint(0x061c)}f`;
-    expect(missingCharacters('Tinos-Regular', text)).toEqual([]);
-  });
 });

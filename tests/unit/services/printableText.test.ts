@@ -308,6 +308,24 @@ describe('text printed in another font (#534)', () => {
     expect(unprintableCharacters('abc Def', onlyLowercase)).toEqual(['D']);
   });
 
+  it("names what the text's own font refuses, even a character Open Sans prints", () => {
+    // U+205F prints as a space in Open Sans; a font that refuses it must
+    // still have it named, not listed as nothing.
+    const mediumSpace = String.fromCodePoint(0x205f);
+    const found = findUnprintable([
+      { field: 'bodyText', where: 'in the text', text: `a${mediumSpace}b`, prints: grapheme => grapheme !== mediumSpace }
+    ]);
+    expect(unprintableRefusal('letter', found)).toContain(': a special space (U+205F) in the text.');
+  });
+
+  it('says a letter carries too many marks when only the whole cluster is refused', () => {
+    const acute = String.fromCodePoint(0x301);
+    const found = findUnprintable([
+      { field: 'bodyText', where: 'in the text', text: `Caf${'e' + acute.repeat(5)}`, prints: grapheme => [...grapheme].length < 6 }
+    ]);
+    expect(unprintableRefusal('letter', found)).toContain(`: ${'e' + acute.repeat(5)} (too many marks on one letter) in the text.`);
+  });
+
   it('keeps Open Sans for a text that names no font', () => {
     const nonBreakingHyphen = String.fromCodePoint(0x2011);
     expect(

@@ -192,13 +192,18 @@ describe('draftService', () => {
       await createDraft(draft);
 
       const [sql, rendered] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
-      const columns = sql.slice(sql.indexOf('(') + 1, sql.indexOf(')')).split(',').map(column => column.trim());
+      const list = (from: number) => sql.slice(sql.indexOf('(', from) + 1, sql.indexOf(')', from)).split(',').map(item => item.trim());
+      const columns = list(0);
+      const values = list(sql.indexOf('VALUES'));
+      expect(values).toHaveLength(columns.length);
       const position = columns.indexOf('renderer_version');
       expect(position).toBeGreaterThan(-1);
-      // Its placeholder is the parameter at the column's position.
-      expect(sql).toContain(`$${position + 1},`);
-      expect(rendered[position]).toBe('pdf-1');
-      expect((vi.mocked(db.query).mock.calls[1][1] as unknown[])[position]).toBeNull();
+      // The column's value is a placeholder, and that parameter is the version.
+      const placeholder = /^\$(\d+)$/.exec(values[position]);
+      expect(placeholder).not.toBeNull();
+      const parameter = Number(placeholder![1]) - 1;
+      expect(rendered[parameter]).toBe('pdf-1');
+      expect((vi.mocked(db.query).mock.calls[1][1] as unknown[])[parameter]).toBeNull();
     });
   });
 

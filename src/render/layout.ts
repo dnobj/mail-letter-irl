@@ -81,11 +81,23 @@ const BODY_FONT: FontName = 'Tinos-Regular';
 const MAX_MARKS_PER_LETTER = 4;
 
 /**
+ * Characters never drawn, whatever the font maps them to: controls other than
+ * line breaks and tabs, format characters that are not dropped as invisible,
+ * line and paragraph separators, private use, surrogates and unassigned code
+ * points. Tinos maps some of them to a visible "control picture" box (U+2028,
+ * U+2029, and private-use U+F001-U+F00E), and U+0000 to an empty glyph that
+ * PostgreSQL then refuses to store (#540 review round 1).
+ */
+const NEVER_DRAWN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\p{Cs}]/u;
+const SPACE = /\p{Zs}/u;
+
+/**
  * Whether the renderer draws a grapheme cluster as written: each character
  * is a line break, a tab, a character that prints nothing, or one the
- * letter's font has a glyph for, and the cluster carries at most
- * MAX_MARKS_PER_LETTER combining marks. A preview refuses text holding a
- * cluster that fails, rather than printing a box or dropping a mark.
+ * letter's font has a glyph for (a space's glyph drawing nothing: Tinos draws
+ * U+205F as a box), and the cluster carries at most MAX_MARKS_PER_LETTER
+ * combining marks. A preview refuses text holding a cluster that fails,
+ * rather than printing a box or dropping a mark.
  */
 export function drawsGrapheme(grapheme: string): boolean {
   const font = loadFont(BODY_FONT);
@@ -93,7 +105,10 @@ export function drawsGrapheme(grapheme: string): boolean {
   for (const character of grapheme) {
     if (MARK.test(character) && ++marks > MAX_MARKS_PER_LETTER) return false;
     if (character === '\n' || character === '\r' || character === '\t' || isInvisible(character)) continue;
-    if (!font.hasGlyphForCodePoint(character.codePointAt(0)!)) return false;
+    if (NEVER_DRAWN.test(character)) return false;
+    const codePoint = character.codePointAt(0)!;
+    if (!font.hasGlyphForCodePoint(codePoint)) return false;
+    if (SPACE.test(character) && font.glyphForCodePoint(codePoint).path.commands.length > 0) return false;
   }
   return true;
 }

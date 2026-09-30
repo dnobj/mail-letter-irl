@@ -4,7 +4,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { layoutLetter, wrapParagraph, type Layout, type TextRun } from '../../../src/render/layout.js';
+import { drawsGrapheme, layoutLetter, wrapParagraph, type Layout, type TextRun } from '../../../src/render/layout.js';
+import { isInvisible } from '../../../src/render/bidi.js';
 
 // shape() is spied on, so a test can see what layoutLetter shapes; it still
 // does the real work.
@@ -269,30 +270,61 @@ describe('laying out a letter (#534)', () => {
 });
 
 describe('what the renderer draws as written (#534)', () => {
-  const at = (codePoint: number) => String.fromCodePoint(codePoint);
+  const at = (...codePoints: number[]) => String.fromCodePoint(...codePoints);
 
-  it('draws what the font has a glyph for', async () => {
-    const { drawsGrapheme } = await import('../../../src/render/layout.js');
-    // Latin, Hebrew, the non-breaking hyphen, and the shekel sign.
-    for (const grapheme of ['a', 'Z', at(0x5e9), at(0x2011), at(0x20aa)]) expect(drawsGrapheme(grapheme)).toBe(true);
+  it('draws what the font has a glyph for', () => {
+    // Latin with an accent, Greek, Hebrew, the non-breaking hyphen, the
+    // narrow no-break space, and the shekel sign.
+    for (const grapheme of ['a', 'Z', at(0xe9), at(0x3ba), at(0x5e9), at(0x2011), at(0x202f), at(0x20aa)]) {
+      expect(drawsGrapheme(grapheme)).toBe(true);
+    }
   });
 
-  it('counts line breaks, tabs and characters that print nothing as drawn', async () => {
-    const { drawsGrapheme } = await import('../../../src/render/layout.js');
-    // A line break, a tab, a zero-width joiner and a variation selector.
-    for (const grapheme of ['\n', '\r\n', '\t', at(0x200d), `a${at(0xfe0f)}`]) expect(drawsGrapheme(grapheme)).toBe(true);
+  it('counts what the renderer handles itself as drawn: line breaks, tabs, and characters that print nothing', () => {
+    // Line breaks start new lines, a tab becomes spaces, and a zero-width
+    // joiner, a variation selector and the Arabic letter mark are dropped.
+    for (const grapheme of [at(0x0a), at(0x0d, 0x0a), at(0x09), at(0x200d), at(0x61, 0xfe0f), at(0x61c)]) {
+      expect(drawsGrapheme(grapheme)).toBe(true);
+    }
   });
 
-  it('refuses a character the font has no glyph for', async () => {
-    const { drawsGrapheme } = await import('../../../src/render/layout.js');
+  it('refuses a character the font has no glyph for', () => {
     // An emoji, a CJK character, and an Arabic letter.
     for (const grapheme of [at(0x1f389), at(0x738b), at(0x633)]) expect(drawsGrapheme(grapheme)).toBe(false);
   });
 
-  it('draws four marks on a letter and refuses a fifth, which the layout would drop', async () => {
-    const { drawsGrapheme } = await import('../../../src/render/layout.js');
+  it('refuses characters that are never drawn, whatever glyph the font maps them to (#540 review round 1)', () => {
+    // Tinos draws U+2028, U+2029, U+205F and private-use U+F001 as a box, and
+    // maps U+0000 to an empty glyph PostgreSQL will not store. Also: a C1
+    // control, a deprecated format character, private use without a glyph,
+    // and a lone surrogate.
+    for (const codePoint of [0x2028, 0x2029, 0x205f, 0xf001, 0x0000, 0x0085, 0x206a, 0xe000]) {
+      expect(drawsGrapheme(at(codePoint)), codePoint.toString(16)).toBe(false);
+    }
+    expect(drawsGrapheme(String.fromCharCode(0xd800))).toBe(false);
+  });
+
+  it('accepts no control, format, separator or space character that would draw something', () => {
+    // Every such character the font maps: accepted only if it draws nothing.
+    // Line breaks and tabs never reach the shaper, and invisible characters
+    // are removed before it.
+    const special = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}\p{Co}]/u;
+    const drawn: string[] = [];
+    let checked = 0;
+    for (const codePoint of font.characterSet) {
+      const character = at(codePoint);
+      if (!special.test(character) || [0x09, 0x0a, 0x0d].includes(codePoint) || isInvisible(character)) continue;
+      checked += 1;
+      if (!drawsGrapheme(character)) continue;
+      if (shape(font, character).glyphs.some(glyph => glyph.path.commands.length > 0)) drawn.push(codePoint.toString(16));
+    }
+    expect(checked).toBeGreaterThan(10);
+    expect(drawn).toEqual([]);
+  });
+
+  it('draws four marks on a letter and refuses a fifth, which the layout would drop', () => {
     const acute = at(0x301);
-    expect(drawsGrapheme(`e${acute.repeat(4)}`)).toBe(true);
-    expect(drawsGrapheme(`e${acute.repeat(5)}`)).toBe(false);
+    expect(drawsGrapheme(at(0x65) + acute.repeat(4))).toBe(true);
+    expect(drawsGrapheme(at(0x65) + acute.repeat(5))).toBe(false);
   });
 });

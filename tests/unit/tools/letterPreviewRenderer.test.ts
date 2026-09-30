@@ -304,8 +304,21 @@ describe('what the renderer can print', () => {
   it('refuses a letter carrying more than four marks, rather than dropping one', async () => {
     await expect(run('text_only', { bodyText: `Caf${'e' + ACUTE.repeat(4)}` })).resolves.toMatchObject({ draftId: 'draft-1' });
     await expect(run('text_only', { bodyText: `Caf${'e' + ACUTE.repeat(5)}` })).rejects.toThrow(
-      "can't print some characters"
+      `${'e' + ACUTE.repeat(5)} (too many marks on one letter) in the text.`
     );
+  });
+
+  it('refuses a line separator, which the font draws as a box, and names it (review round 1)', async () => {
+    // Apple Notes and Pages store a soft line break as U+2028.
+    const lineSeparator = String.fromCodePoint(0x2028);
+    await expect(run('text_only', { bodyText: `Dear Sam,${lineSeparator}See you soon.` })).rejects.toThrow(
+      "can't print some characters in this letter: a line separator (U+2028) in the text."
+    );
+    // And a nul, which PostgreSQL would refuse to store, before the draft.
+    await expect(run('text_only', { bodyText: `Dear Sam,${String.fromCodePoint(0)}` })).rejects.toThrow(
+      'a control character (U+0000) in the text.'
+    );
+    expect(createDraft).not.toHaveBeenCalled();
   });
 });
 
