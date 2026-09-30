@@ -163,11 +163,13 @@ export function estimateLines(text: string, charsPerLine = CHARS_PER_LINE): numb
  * newlines, which validation dropped: a letter at the line limit could still
  * print a line or two taller, onto a second page (#77).
  */
-export function letterPrintText(bodyText: string, signOff?: string | null): string {
+export function letterPrintText(bodyText: string | null | undefined, signOff?: string | null): string {
   // The print's HTML parser reads \r\n and a lone \r as one line break each;
   // as \n they are counted the same way.
   const unix = (text: string) => text.replace(/\r\n?/g, '\n');
-  const body = unix(bodyText).trimEnd();
+  // A letter row without body text (a malformed or scrubbed one) must not
+  // throw in the outbox: it would fail the job before dispatch.
+  const body = unix(bodyText ?? '').trimEnd();
   return (signOff ? `${body}\n${unix(signOff)}` : body).trim();
 }
 
