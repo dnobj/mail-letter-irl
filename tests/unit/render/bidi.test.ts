@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { visualOrder, withoutInvisible } from '../../../src/render/bidi.js';
+import { paragraphBidi, visualOrder, withoutInvisible } from '../../../src/render/bidi.js';
 
 const cp = (...codePoints: number[]) => String.fromCodePoint(...codePoints);
 const SHALOM = cp(0x05e9, 0x05dc, 0x05d5, 0x05dd);
@@ -39,6 +39,25 @@ describe('visual order for drawing (#534)', () => {
     // silently mirrors nothing and the brackets face the wrong way.
     const [alef, bet] = [cp(0x05d0), cp(0x05d1)];
     expect(visualOrder(`${alef}(${bet})`)).toBe(`(${bet})${alef}`);
+  });
+
+  it('never prints a letter twice when a joiner sits at another level (review round 1)', () => {
+    // ZWNJ and ZWJ join the letter before them in one grapheme cluster, but
+    // bidi gives them the paragraph's level: the cluster's units come out
+    // apart in visual order, and each must be emitted once.
+    const [bet, zwnj, zwj, alef, acute] = [cp(0x05d1), cp(0x200c), cp(0x200d), cp(0x05d0), cp(0x0301)];
+    expect(visualOrder(bet + bet + zwnj)).toBe(bet + bet);
+    expect(visualOrder(`${bet}1${zwnj}`)).toBe(`1${bet}`);
+    expect(visualOrder(`${alef}${acute}${zwj}1`)).toBe(`1${alef}${acute}`);
+  });
+
+  it('resolves a wrapped line within its paragraph, not alone', () => {
+    // UAX #9 resolves the paragraph, then reorders each line: a hyphen that
+    // starts a line between two Hebrew words belongs to the Hebrew run.
+    const paragraph = `${SHALOM} - ${OLAM}`;
+    const lineStart = paragraph.indexOf('-');
+    expect(paragraphBidi(paragraph).lineVisual(lineStart, paragraph.length)).toBe(`${reversed(OLAM)} -`);
+    expect(visualOrder(paragraph.slice(lineStart))).toBe(`- ${reversed(OLAM)}`);
   });
 
   it('removes characters that print nothing, before and after reordering', () => {

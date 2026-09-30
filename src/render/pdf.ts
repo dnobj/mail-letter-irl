@@ -16,7 +16,7 @@ export const RENDERER_VERSION = 'pdf-1';
  * a 300 dpi image anyway (#534 Phase 0), so outlines print exactly as text
  * would, with nothing left to embed.
  */
-export function renderPdf(layout: Layout): Promise<Buffer> {
+export async function renderPdf(layout: Layout): Promise<Buffer> {
   const doc = new PDFDocument({
     size: [layout.width, layout.height],
     margin: 0,
@@ -34,7 +34,12 @@ export function renderPdf(layout: Layout): Promise<Buffer> {
     doc.addPage({ size: [layout.width, layout.height], margin: 0 });
     for (const item of page.items) {
       if (item.kind === 'image') {
-        doc.image(item.image.bytes, item.x, item.top, { width: item.width, height: item.height });
+        // The layout sized the box from the pixels as stored; pdfkit would
+        // otherwise rotate by EXIF orientation and draw outside it. Images
+        // reach the renderer re-encoded without EXIF (imageService), and this
+        // keeps that assumption from mattering.
+        const options = { width: item.width, height: item.height, ignoreOrientation: true } as PDFKit.Mixins.ImageOption;
+        doc.image(item.image.bytes, item.x, item.top, options);
         continue;
       }
       for (const glyph of placeGlyphs(item)) {

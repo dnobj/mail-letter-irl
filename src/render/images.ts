@@ -11,10 +11,20 @@ export interface RenderImage {
 /** JPEG start-of-frame markers that carry the image size (not DHT, JPG or DAC). */
 const START_OF_FRAME = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
 
+/** The image pipeline's own ceiling (MAX_INPUT_PIXELS in imageService.ts): 50 megapixels. */
+const MAX_PIXELS = 50_000_000;
+
+function sized(image: RenderImage): RenderImage {
+  if (image.width < 1 || image.height < 1 || image.width * image.height > MAX_PIXELS) {
+    throw new Error(`The image's size, ${image.width}x${image.height}, is empty or over ${MAX_PIXELS / 1_000_000} megapixels.`);
+  }
+  return image;
+}
+
 /** Reads a JPEG's or PNG's pixel size from its header, or throws. */
 export function readImage(bytes: Buffer): RenderImage {
   if (bytes.length > 24 && bytes.readUInt32BE(0) === 0x89504e47 && bytes.toString('latin1', 12, 16) === 'IHDR') {
-    return { bytes, mime: 'image/png', width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+    return sized({ bytes, mime: 'image/png', width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
   }
   if (bytes.length > 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
     let offset = 2;
@@ -24,7 +34,7 @@ export function readImage(bytes: Buffer): RenderImage {
       if (marker === 0xff) { offset += 1; continue; }
       const length = bytes.readUInt16BE(offset + 2);
       if (START_OF_FRAME.has(marker)) {
-        return { bytes, mime: 'image/jpeg', height: bytes.readUInt16BE(offset + 5), width: bytes.readUInt16BE(offset + 7) };
+        return sized({ bytes, mime: 'image/jpeg', height: bytes.readUInt16BE(offset + 5), width: bytes.readUInt16BE(offset + 7) });
       }
       offset += 2 + length;
     }

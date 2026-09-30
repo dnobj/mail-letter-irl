@@ -4,7 +4,7 @@
  * disagree; these tests hold them to that.
  */
 
-import { deflateSync } from 'node:zlib';
+import { deflateSync, inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { layoutLetter, type TextRun } from '../../../src/render/layout.js';
@@ -47,6 +47,35 @@ function makePng(width: number, height: number): Buffer {
 }
 
 const PNG = makePng(2, 1);
+
+/**
+ * A JPEG header pdfkit accepts without decoding: SOI, an Exif APP1 with the
+ * given orientation, a baseline SOF, EOI. pdfkit reads EXIF orientation from
+ * the APP1 segment and never decodes the pixels.
+ */
+function jpegWithOrientation(width: number, height: number, orientation: number): Buffer {
+  const u16 = (value: number) => Buffer.from([value >> 8, value & 0xff]);
+  const tiff = Buffer.from([0x4d, 0x4d, 0x00, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, orientation, 0, 0, 0, 0, 0, 0]);
+  const exif = Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), tiff]);
+  const frame = Buffer.from([0xff, 0xc0, 0x00, 0x11, 0x08, ...u16(height), ...u16(width), 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+  return Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe1]), u16(exif.length + 2), exif, frame, Buffer.from([0xff, 0xd9])]);
+}
+
+/** The PDF's Flate-compressed streams (page content), inflated. */
+function contentStreams(pdf: Buffer): string[] {
+  const text = pdf.toString('latin1');
+  const streams: string[] = [];
+  for (const match of text.matchAll(/stream\r?\n/g)) {
+    const start = match.index! + match[0].length;
+    const end = text.indexOf('endstream', start);
+    try {
+      streams.push(inflateSync(pdf.subarray(start, end).subarray(0, text.slice(start, end).trimEnd().length)).toString('latin1'));
+    } catch {
+      // not a Flate stream: an image or metadata
+    }
+  }
+  return streams;
+}
 const LETTER = 'Dear Sam,\n\nThis is a test of the renderer.\n\nWarmly,\nTest';
 
 async function openPdf(bytes: Buffer) {
@@ -93,6 +122,52 @@ describe('the PDF (#534)', () => {
       expect(args[4]).toBeCloseTo(glyphs[index].x, 3);
       expect(args[5]).toBeCloseTo(glyphs[index].y, 3);
     });
+  });
+
+  it('draws curves as exact cubics: no v or y operators, and outlines of M, L, C and Z only (review round 1)', async () => {
+    // pdfkit writes an SVG Q as the PDF v operator, which is not the same
+    // curve; outlines are converted to cubics so the PDF and SVG agree.
+    const layout = layoutLetter({ text: 'Round letters: ooo QQQ Ôb 8&@', layoutType: 'text_only' });
+    for (const glyph of layout.pages[0].items.flatMap(item => (item.kind === 'text' ? placeGlyphs(item) : []))) {
+      expect(glyph.outline).toMatch(/^[MLCZ0-9 .-]+$/);
+    }
+    const tokens = contentStreams(await renderPdf(layout)).join('\n').split(/\s+/);
+    expect(tokens.filter(token => token === 'c').length).toBeGreaterThan(100);
+    expect(tokens.filter(token => token === 'v' || token === 'y')).toEqual([]);
+  });
+
+  it('turns a quadratic into the exact cubic', async () => {
+    const { cubicOutline } = await import('../../../src/render/glyphs.js');
+    const path = { commands: [
+      { command: 'moveTo', args: [0, 0] },
+      { command: 'quadraticCurveTo', args: [3, 6, 6, 0] },
+      { command: 'closePath', args: [] }
+    ] } as unknown as Parameters<typeof cubicOutline>[0];
+    // Controls two thirds of the way from each end to the quadratic's control point.
+    expect(cubicOutline(path)).toBe('M0 0C2 4 4 4 6 0Z');
+  });
+
+  it('draws an image in its box whatever its EXIF orientation says', async () => {
+    const image = readImage(jpegWithOrientation(400, 200, 6));
+    const layout = layoutLetter({ text: LETTER, layoutType: 'header_image', image });
+    const [box] = layout.pages[0].items.filter(item => item.kind === 'image');
+    if (box.kind !== 'image') throw new Error('no image');
+    const content = contentStreams(await renderPdf(layout)).join('\n');
+    const matrices = [...content.matchAll(/([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+) cm\s+\/\S+ Do/g)];
+    expect(matrices).toHaveLength(1);
+    const [, a, b, c, d, e, f] = matrices[0].map(Number);
+    expect([a, b, c]).toEqual([box.width, 0, 0]);
+    expect(d).toBeCloseTo(-box.height, 3);
+    expect(e).toBeCloseTo(box.x, 3);
+    expect(f).toBeCloseTo(box.top + box.height, 3);
+    // No rotation anywhere before it.
+    expect(content).not.toMatch(/\b0 1 -1 0 [-\d.]+ [-\d.]+ cm/);
+  });
+
+  it('rejects, rather than throwing, when an image cannot be drawn', async () => {
+    const broken: RenderImage = { bytes: Buffer.from('not an image at all'), mime: 'image/png', width: 10, height: 10 };
+    const layout = layoutLetter({ text: LETTER, layoutType: 'header_image', image: broken });
+    await expect(renderPdf(layout)).rejects.toBeDefined();
   });
 
   it('paints the header image in its box', async () => {
@@ -156,6 +231,15 @@ describe('images and fonts (#534)', () => {
     expect(readImage(Buffer.concat([jpeg, Buffer.alloc(16)]))).toMatchObject({ mime: 'image/jpeg', width: 5, height: 3 });
   });
 
+  it('refuses an empty image or one over 50 megapixels', () => {
+    expect(() => readImage(makePng(0, 3))).toThrow(/empty or over/);
+    expect(() => readImage(Buffer.concat([Buffer.from('ffd8ffc0001108000300000301220002110103110100', 'hex'), Buffer.alloc(16)]))).toThrow(/empty or over/);
+    const huge = makePng(1, 1);
+    huge.writeUInt32BE(10000, 16);
+    huge.writeUInt32BE(5001, 20);
+    expect(() => readImage(huge)).toThrow(/empty or over/);
+  });
+
   it('reads a data URI, and refuses anything that is not a JPEG or PNG', () => {
     const image: RenderImage = readImageDataUri(`data:image/png;base64,${PNG.toString('base64')}`);
     expect(image.width).toBe(2);
@@ -169,5 +253,12 @@ describe('images and fonts (#534)', () => {
     expect(missingCharacters('Tinos-Regular', `Café ${party} ${wang} ${party}`)).toEqual([party, wang]);
     const hebrew = String.fromCodePoint(0x05e9, 0x05dc, 0x05d5, 0x05dd);
     expect(missingCharacters('Tinos-Regular', `Kalimera ${String.fromCodePoint(0x03ba, 0x03b1)} ${hebrew} ${String.fromCodePoint(0x2011, 0x202f)}`)).toEqual([]);
+  });
+
+  it('does not count what the renderer handles itself as missing (review round 1)', () => {
+    // Line breaks start new lines, tabs become spaces, and characters that
+    // print nothing are dropped.
+    const text = `a\nb\r\nc\td${String.fromCodePoint(0xfe0f)}e${String.fromCodePoint(0x061c)}f`;
+    expect(missingCharacters('Tinos-Regular', text)).toEqual([]);
   });
 });

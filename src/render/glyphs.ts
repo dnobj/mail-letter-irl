@@ -1,4 +1,4 @@
-import type { Font, GlyphRun } from 'fontkit';
+import type { Font, GlyphRun, Path } from 'fontkit';
 import { loadFont } from './fonts.js';
 import type { TextRun } from './layout.js';
 
@@ -28,6 +28,45 @@ export interface PlacedGlyph {
 /** Short, stable codes for the font part of glyph keys. */
 const FONT_CODES: Record<string, string> = { 'Tinos-Regular': 'tr' };
 
+const fixed = (value: number): string => String(Math.round(value * 100) / 100);
+
+/**
+ * SVG path data for an outline, using only M, L, C and Z.
+ *
+ * TrueType outlines are quadratic. pdfkit draws an SVG `Q` with the PDF `v`
+ * operator, a cubic whose first control point is the current point, which is
+ * not the same curve: up to 0.16pt off on round letters. Each quadratic is
+ * written as the exact cubic instead (controls two thirds of the way to the
+ * quadratic's control point), so the PDF and the SVG draw the same curves.
+ */
+export function cubicOutline(path: Path): string {
+  let d = '';
+  let [x, y, startX, startY] = [0, 0, 0, 0];
+  for (const { command, args } of path.commands) {
+    if (command === 'moveTo') {
+      [x, y] = args;
+      [startX, startY] = [x, y];
+      d += `M${fixed(x)} ${fixed(y)}`;
+    } else if (command === 'lineTo') {
+      [x, y] = args;
+      d += `L${fixed(x)} ${fixed(y)}`;
+    } else if (command === 'quadraticCurveTo') {
+      const [qx, qy, endX, endY] = args;
+      const c1 = [x + (2 / 3) * (qx - x), y + (2 / 3) * (qy - y)];
+      const c2 = [endX + (2 / 3) * (qx - endX), endY + (2 / 3) * (qy - endY)];
+      d += `C${[...c1, ...c2, endX, endY].map(fixed).join(' ')}`;
+      [x, y] = [endX, endY];
+    } else if (command === 'bezierCurveTo') {
+      d += `C${args.map(fixed).join(' ')}`;
+      [x, y] = [args[4], args[5]];
+    } else if (command === 'closePath') {
+      d += 'Z';
+      [x, y] = [startX, startY];
+    }
+  }
+  return d;
+}
+
 const outlineCache = new Map<string, string>();
 
 /**
@@ -45,7 +84,7 @@ export function placeGlyphs(run: TextRun): PlacedGlyph[] {
     const key = `${FONT_CODES[run.font] ?? run.font}${run.size}-${glyph.id}`;
     let outline = outlineCache.get(key);
     if (outline === undefined) {
-      outline = glyph.path.scale(scale, -scale).toSVG();
+      outline = cubicOutline(glyph.path.scale(scale, -scale));
       outlineCache.set(key, outline);
     }
     if (outline) {

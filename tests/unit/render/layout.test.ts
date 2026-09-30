@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { layoutLetter, wrapParagraph, type Layout, type TextRun } from '../../../src/render/layout.js';
-import { placeGlyphs, shape } from '../../../src/render/glyphs.js';
+import { placeGlyphs, shape, type PlacedGlyph } from '../../../src/render/glyphs.js';
 import { loadFont } from '../../../src/render/fonts.js';
 import {
   ADDRESS_ZONE, BODY_BOTTOM, BODY_TOP, CONTENT_WIDTH, EDGE_CLEARANCE, IMAGE_GAP, LINE_PITCH, PAGE_HEIGHT,
@@ -15,15 +15,27 @@ import type { RenderImage } from '../../../src/render/images.js';
 
 const font = loadFont('Tinos-Regular');
 const width = (text: string) => shape(font, text).advanceWidth * 12 / font.unitsPerEm;
+/** Wraps with plain measuring, and returns the lines as strings. */
+const wrap = (paragraph: string, lineWidth: number, fitLimit?: (start: number) => number) =>
+  wrapParagraph(paragraph, lineWidth, (start, end) => width(paragraph.slice(start, end)), fitLimit)
+    .map(({ start, end }) => paragraph.slice(start, end));
 const runs = (layout: Layout) => layout.pages[0].items.filter((item): item is TextRun => item.kind === 'text');
 const image = (pixelWidth: number, pixelHeight: number): RenderImage =>
   ({ bytes: Buffer.alloc(0), mime: 'image/jpeg', width: pixelWidth, height: pixelHeight });
 const PARAGRAPH = 'This letter was laid out by our own renderer, and every line should wrap exactly where the preview wraps it, ' +
   'because both are drawn from one layout. '.repeat(3);
 
+/** A placed glyph's real ink box, from its outline's points. */
+function inkBox(glyph: PlacedGlyph) {
+  const numbers = [...glyph.outline.matchAll(/-?\d+(?:\.\d+)?/g)].map(match => Number(match[0]));
+  const xs = numbers.filter((_, index) => index % 2 === 0).map(value => value + glyph.x);
+  const ys = numbers.filter((_, index) => index % 2 === 1).map(value => value + glyph.y);
+  return { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) };
+}
+
 describe('wrapping paragraphs (#534)', () => {
   it('breaks between words, never past the content width', () => {
-    const lines = wrapParagraph(PARAGRAPH.trim(), CONTENT_WIDTH, width);
+    const lines = wrap(PARAGRAPH.trim(), CONTENT_WIDTH);
     expect(lines.length).toBeGreaterThan(2);
     for (const line of lines) {
       expect(width(line)).toBeLessThanOrEqual(CONTENT_WIDTH);
@@ -33,7 +45,7 @@ describe('wrapping paragraphs (#534)', () => {
   });
 
   it('fills each line greedily: the next word would not have fit', () => {
-    const lines = wrapParagraph(PARAGRAPH.trim(), CONTENT_WIDTH, width);
+    const lines = wrap(PARAGRAPH.trim(), CONTENT_WIDTH);
     for (let index = 0; index < lines.length - 1; index++) {
       const nextWord = lines[index + 1].split(' ')[0];
       expect(width(`${lines[index]} ${nextWord}`)).toBeGreaterThan(CONTENT_WIDTH);
@@ -42,22 +54,54 @@ describe('wrapping paragraphs (#534)', () => {
 
   it('breaks a word longer than the line between letters, and loses nothing', () => {
     const word = 'Averyveryvery'.repeat(12);
-    const lines = wrapParagraph(word, CONTENT_WIDTH, width);
+    const lines = wrap(word, CONTENT_WIDTH);
     expect(lines.length).toBeGreaterThan(1);
     expect(lines.join('')).toBe(word);
     for (const line of lines) expect(width(line)).toBeLessThanOrEqual(CONTENT_WIDTH);
+    // Greedy between letters too: one more letter would not have fit.
+    expect(width(lines[0] + lines[1][0])).toBeGreaterThan(CONTENT_WIDTH);
   });
 
   it('measures a line without the space it breaks after', () => {
     // A line exactly as wide as "aaa" still holds "aaa": the space before the
     // break hangs and is not counted.
-    expect(wrapParagraph('aaa aaa', width('aaa'), width)).toEqual(['aaa', 'aaa']);
+    expect(wrap('aaa aaa', width('aaa'))).toEqual(['aaa', 'aaa']);
   });
 
   it('keeps leading spaces, and an empty paragraph as one blank line', () => {
-    expect(wrapParagraph('    indented', CONTENT_WIDTH, width)).toEqual(['    indented']);
-    expect(wrapParagraph('', CONTENT_WIDTH, width)).toEqual(['']);
-    expect(wrapParagraph('   ', CONTENT_WIDTH, width)).toEqual(['']);
+    expect(wrap('    indented', CONTENT_WIDTH)).toEqual(['    indented']);
+    expect(wrap('', CONTENT_WIDTH)).toEqual(['']);
+    expect(wrap('   ', CONTENT_WIDTH)).toEqual(['']);
+  });
+
+  it('makes no blank line of spaces that hang past a break (review round 1)', () => {
+    expect(wrap(`${' '.repeat(500)}world`, CONTENT_WIDTH)).toEqual(['world']);
+    // Non-breaking spaces at the end of a letter-broken line are trimmed too.
+    const nbsp = String.fromCodePoint(0xa0);
+    for (const line of wrap(`${'x'.repeat(200)}${nbsp.repeat(3)}${'y'.repeat(200)}`, CONTENT_WIDTH)) {
+      expect(line).toBe(line.trimEnd());
+    }
+  });
+
+  it('never shapes past its fit limit, so a long unbroken run stays cheap (review round 1)', () => {
+    const paragraph = 'i'.repeat(5000);
+    const measured: number[] = [];
+    const limit = (start: number) => Math.min(paragraph.length, start + 300);
+    const lines = wrapParagraph(paragraph, CONTENT_WIDTH, (start, end) => {
+      measured.push(end - start);
+      return width(paragraph.slice(start, end));
+    }, limit).map(({ start, end }) => paragraph.slice(start, end));
+    expect(lines.join('')).toBe(paragraph);
+    expect(Math.max(...measured)).toBeLessThanOrEqual(300);
+    // A binary search per line, not a shaping per letter.
+    expect(measured.length).toBeLessThan(lines.length * 12);
+  });
+
+  it('lays out a 10,000-letter unbroken run in well under a second', () => {
+    const started = performance.now();
+    const layout = layoutLetter({ text: 'i'.repeat(10000), layoutType: 'text_only' });
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(runs(layout).map(run => run.source).join('')).toBe('i'.repeat(10000));
   });
 });
 
@@ -91,11 +135,21 @@ describe('laying out a letter (#534)', () => {
     expect(run.text).toBe('a    b');
   });
 
+  it('keeps at most four combining marks on a letter, so accents cannot stack into the address boxes', () => {
+    const acute = String.fromCodePoint(0x0301);
+    const [zalgo] = runs(layoutLetter({ text: `Z${acute.repeat(8)} and more`, layoutType: 'text_only' }));
+    expect(zalgo.text).toBe(`Z${acute.repeat(4)} and more`);
+    // Hebrew's four (dagesh, shin dot, vowel, meteg) all stay.
+    const shin = String.fromCodePoint(0x05e9, 0x05bc, 0x05c1, 0x05b8, 0x05bd);
+    const [hebrew] = runs(layoutLetter({ text: shin, layoutType: 'text_only' }));
+    expect(hebrew.source).toBe(shin);
+  });
+
   it('puts a header image above the text, centred, capped at 2in and its intrinsic size', () => {
     const layout = layoutLetter({ text: 'Hello', layoutType: 'header_image', image: image(1800, 1200) });
     const [box] = layout.pages[0].items.filter(item => item.kind === 'image');
-    expect(box.kind === 'image' && box.top).toBe(BODY_TOP);
     if (box.kind !== 'image') throw new Error('no image');
+    expect(box.top).toBe(BODY_TOP);
     expect(box.height).toBeCloseTo(144, 6);
     expect(box.width).toBeCloseTo(216, 6);
     expect(box.x + box.width / 2).toBeCloseTo(PAGE_WIDTH / 2, 6);
@@ -126,14 +180,16 @@ describe('laying out a letter (#534)', () => {
     expect(layout.pages[0].items.every(item => item.kind === 'text')).toBe(true);
   });
 
-  it('draws nothing under the address boxes or near the edge, in every layout', () => {
-    const text = `${PARAGRAPH}\n${'Averyverylongword'.repeat(8)}\n\nWarmly,\nTest`;
+  it('draws no ink under the address boxes or near the edge, in every layout', () => {
+    const acute = String.fromCodePoint(0x0301);
+    const ringAcute = String.fromCodePoint(0x01fa);
+    const text = `${ringAcute}Z${acute.repeat(8)} tall capitals first\n${PARAGRAPH}\n${'Averyverylongword'.repeat(8)}\n\nWarmly,\nTest`;
     for (const layoutType of ['text_only', 'header_image', 'inline_image'] as const) {
       const layout = layoutLetter({ text, layoutType, image: image(1800, 1200) });
       for (const item of layout.pages[0].items) {
         const boxes = item.kind === 'image'
           ? [{ left: item.x, top: item.top, right: item.x + item.width, bottom: item.top + item.height }]
-          : placeGlyphs(item).map(glyph => ({ left: glyph.x, top: glyph.y - 12, right: glyph.x + 12, bottom: glyph.y + 4 }));
+          : placeGlyphs(item).map(inkBox);
         for (const box of boxes) {
           const overlapsZone = box.left < ADDRESS_ZONE.right && box.right > ADDRESS_ZONE.left &&
             box.top < ADDRESS_ZONE.bottom && box.bottom > ADDRESS_ZONE.top;

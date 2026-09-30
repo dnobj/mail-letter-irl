@@ -2,7 +2,12 @@
 // Only what src/render uses is declared.
 
 declare module 'fontkit' {
+  export interface PathCommand {
+    command: 'moveTo' | 'lineTo' | 'quadraticCurveTo' | 'bezierCurveTo' | 'closePath';
+    args: number[];
+  }
   export interface Path {
+    commands: PathCommand[];
     toSVG(): string;
     scale(scaleX: number, scaleY?: number): Path;
   }
@@ -30,6 +35,7 @@ declare module 'fontkit' {
     descent: number;
     characterSet: number[];
     hasGlyphForCodePoint(codePoint: number): boolean;
+    glyphForCodePoint(codePoint: number): Glyph;
     layout(
       text: string,
       features?: string[] | Record<string, boolean>,

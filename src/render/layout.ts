@@ -1,5 +1,5 @@
 import LineBreaker from 'linebreak';
-import { visualOrder } from './bidi.js';
+import { isInvisible, paragraphBidi } from './bidi.js';
 import { loadFont, type FontName } from './fonts.js';
 import { shape } from './glyphs.js';
 import {
@@ -53,13 +53,42 @@ export interface Layout {
   overflowLines: number;
 }
 
+/** A line of a paragraph: code units [start, end), trailing spaces excluded. */
+export interface LineRange {
+  start: number;
+  end: number;
+}
+
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const MARK = /\p{M}/u;
+const WHITESPACE = /\s/u;
 
 /** The legacy HTML showed an image at most at its intrinsic CSS size: 96 px per inch. */
 const POINTS_PER_CSS_PIXEL = 72 / 96;
 
 /** Tabs have no glyph in Tinos; a tab becomes four spaces. */
 const TAB = '    ';
+
+/**
+ * Combining marks kept on one letter. Hebrew can carry four (a dagesh, a shin
+ * dot, a vowel and a meteg); more stack upward, 2.6pt each on a capital, and
+ * the first line's would reach the address boxes. The character check that
+ * gates previews should refuse such text; this only keeps the layout's promise.
+ */
+const MAX_MARKS_PER_LETTER = 4;
+
+function clampMarks(text: string): string {
+  if (!MARK.test(text)) return text;
+  let clamped = '';
+  for (const { segment } of graphemes.segment(text)) {
+    let marks = 0;
+    for (const character of segment) {
+      if (MARK.test(character) && ++marks > MAX_MARKS_PER_LETTER) continue;
+      clamped += character;
+    }
+  }
+  return clamped;
+}
 
 function fitImage(image: RenderImage, maxHeight: number): { width: number; height: number } {
   const scale = Math.min(CONTENT_WIDTH / image.width, maxHeight / image.height, POINTS_PER_CSS_PIXEL);
@@ -70,43 +99,111 @@ function fitImage(image: RenderImage, maxHeight: number): { width: number; heigh
  * Breaks one paragraph (no newlines) into lines no wider than `width`, at
  * Unicode line-break opportunities, greedily, as CSS `white-space: pre-wrap`
  * with `word-wrap: break-word` does: spaces before a break hang and are not
- * drawn, leading spaces are kept, and a word wider than the line breaks
- * between grapheme clusters.
+ * drawn or counted, leading spaces are kept, and a piece wider than the line
+ * breaks between grapheme clusters.
+ *
+ * `measure(start, end)` is the drawn width of the paragraph's [start, end).
+ * `fitLimit(start)` is an index past which no line from `start` can fit, a
+ * cheap bound; longer candidates count as too wide without being shaped, so a
+ * long unbroken run costs a few shapings per line, not the whole remainder.
  */
-export function wrapParagraph(paragraph: string, width: number, measure: (text: string) => number): string[] {
-  if (paragraph.trim() === '') return [''];
+export function wrapParagraph(
+  paragraph: string,
+  width: number,
+  measure: (start: number, end: number) => number,
+  fitLimit: (start: number) => number = () => paragraph.length
+): LineRange[] {
+  if (paragraph.trim() === '') return [{ start: 0, end: 0 }];
+  const trimmedEnd = (start: number, end: number) => {
+    while (end > start && WHITESPACE.test(paragraph[end - 1])) end -= 1;
+    return end;
+  };
+  const fits = (start: number, end: number, limit: number) =>
+    end <= limit && measure(start, trimmedEnd(start, end)) <= width;
+
   const breaks: number[] = [];
   const breaker = new LineBreaker(paragraph);
   for (let next = breaker.nextBreak(); next; next = breaker.nextBreak()) breaks.push(next.position);
 
-  const lines: string[] = [];
+  const lines: LineRange[] = [];
+  // Spaces before a break hang: a stretch of only spaces is not a line.
+  const push = (start: number, end: number) => {
+    const trimmed = trimmedEnd(start, end);
+    if (trimmed > start) lines.push({ start, end: trimmed });
+  };
   let start = 0;
   let index = 0;
   while (start < paragraph.length) {
+    const limit = fitLimit(start);
     let fit = -1;
     for (; index < breaks.length; index++) {
       const end = breaks[index];
       if (end <= start) continue;
-      if (measure(paragraph.slice(start, end).trimEnd()) > width) break;
+      if (!fits(start, end, limit)) break;
       fit = end;
     }
-    if (fit === -1) {
-      // The next piece alone is wider than the line: take as many whole
-      // grapheme clusters as fit, and at least one.
-      const end = breaks[index] ?? paragraph.length;
-      let taken = 0;
-      for (const { segment } of graphemes.segment(paragraph.slice(start, end))) {
-        if (taken > 0 && measure(paragraph.slice(start, start + taken + segment.length)) > width) break;
-        taken += segment.length;
-      }
-      lines.push(paragraph.slice(start, start + taken));
-      start += taken;
+    if (fit !== -1) {
+      push(start, fit);
+      start = fit;
       continue;
     }
-    lines.push(paragraph.slice(start, fit).trimEnd());
-    start = fit;
+    // The next piece alone is wider than the line: take as many whole grapheme
+    // clusters as fit, and at least one, found by binary search.
+    const pieceEnd = breaks[index] ?? paragraph.length;
+    const stop = Math.min(pieceEnd, limit);
+    const ends: number[] = [];
+    for (const { segment, index: offset } of graphemes.segment(paragraph.slice(start, pieceEnd))) {
+      const end = start + offset + segment.length;
+      if (ends.length > 0 && end > stop) break;
+      ends.push(end);
+    }
+    let [low, high, best] = [1, ends.length - 1, 0];
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      if (fits(start, ends[middle], limit)) {
+        best = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    push(start, ends[best]);
+    start = ends[best];
   }
-  return lines;
+  return lines.length > 0 ? lines : [{ start: 0, end: 0 }];
+}
+
+const advanceCache = new Map<string, Map<number, number>>();
+
+/**
+ * An index past which no line from `start` can fit: where the sum of the
+ * characters' own advances, without kerning, passes half again the width.
+ * Kerning never takes back a third of a line, so nothing that fits is cut.
+ */
+function advanceLimit(fontName: FontName, paragraph: string, width: number, scale: number) {
+  const font = loadFont(fontName);
+  let advances = advanceCache.get(fontName);
+  if (!advances) advanceCache.set(fontName, (advances = new Map()));
+  const cache = advances;
+  const advanceOf = (codePoint: number) => {
+    let advance = cache.get(codePoint);
+    if (advance === undefined) {
+      advance = font.hasGlyphForCodePoint(codePoint) ? font.glyphForCodePoint(codePoint).advanceWidth * scale : 0;
+      cache.set(codePoint, advance);
+    }
+    return advance;
+  };
+  return (start: number): number => {
+    let total = 0;
+    for (let index = start; index < paragraph.length;) {
+      const codePoint = paragraph.codePointAt(index)!;
+      const character = String.fromCodePoint(codePoint);
+      if (!isInvisible(character) && !MARK.test(character)) total += advanceOf(codePoint);
+      index += character.length;
+      if (total > width * 1.5) return index;
+    }
+    return paragraph.length;
+  };
 }
 
 /**
@@ -121,7 +218,6 @@ export function layoutLetter(content: LetterContent): Layout {
   const font = loadFont(fontName);
   const size = BODY_FONT_SIZE;
   const scale = size / font.unitsPerEm;
-  const measure = (text: string) => shape(font, visualOrder(text)).advanceWidth * scale;
   // As CSS places a baseline inside a line box: half the leading, then the ascent.
   const baselineOffset = (LINE_PITCH - (font.ascent - font.descent) * scale) / 2 + font.ascent * scale;
 
@@ -138,16 +234,21 @@ export function layoutLetter(content: LetterContent): Layout {
   const inlineBox = image && content.layoutType === 'inline_image' ? fitImage(image, INLINE_IMAGE_MAX_HEIGHT) : undefined;
   if (inlineBox) reserved = IMAGE_GAP + inlineBox.height;
 
-  const lines = content.text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\t/g, TAB)
-    .split('\n')
-    .flatMap(paragraph => wrapParagraph(paragraph, CONTENT_WIDTH, measure));
+  const lines: Array<{ source: string; drawn: string }> = [];
+  const paragraphs = clampMarks(content.text).replace(/\r\n?/g, '\n').replace(/\t/g, TAB).split('\n');
+  for (const paragraph of paragraphs) {
+    // Bidi levels are resolved for the whole paragraph, and each line is
+    // measured exactly as it will be drawn.
+    const bidi = paragraphBidi(paragraph);
+    const measure = (start: number, end: number) => shape(font, bidi.lineVisual(start, end)).advanceWidth * scale;
+    for (const { start, end } of wrapParagraph(paragraph, CONTENT_WIDTH, measure, advanceLimit(fontName, paragraph, CONTENT_WIDTH, scale))) {
+      lines.push({ source: paragraph.slice(start, end), drawn: bidi.lineVisual(start, end) });
+    }
+  }
 
-  lines.forEach((source, index) => {
-    const text = visualOrder(source);
-    if (text.trim() === '') return;
-    items.push({ kind: 'text', font: fontName, size, x: SIDE_MARGIN, baseline: textTop + index * LINE_PITCH + baselineOffset, text, source });
+  lines.forEach(({ source, drawn }, index) => {
+    if (drawn.trim() === '') return;
+    items.push({ kind: 'text', font: fontName, size, x: SIDE_MARGIN, baseline: textTop + index * LINE_PITCH + baselineOffset, text: drawn, source });
   });
 
   const linesAvailable = Math.max(0, Math.floor((BODY_BOTTOM - textTop - reserved + 1e-6) / LINE_PITCH));
