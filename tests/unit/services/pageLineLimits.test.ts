@@ -22,9 +22,8 @@ import {
 
 type Layout = keyof typeof LAYOUT_LINE_LIMITS;
 
-// The most lines each layout may take. header_image and text_only are seen on
-// one page; inline_image is one line (about 0.27in) under the 15 that printed a
-// blank page (a print at 14 is still to do).
+// The most lines each layout may take, each seen printed on one page (text_only
+// on 2026-09-28; header_image and inline_image on 2026-09-30).
 const FITS_ONE_PAGE: Record<Layout, number> = { text_only: 26, header_image: 17, inline_image: 14 };
 
 // n short lines that never wrap: the tallest letter a line count allows.

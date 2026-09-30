@@ -361,6 +361,9 @@ after **Refresh tools** on the (DEV) app. The iPhone is not run yet.
       - With several accounts linked, ChatGPT first asked which one to use.
       - With a four-line address (a Suite line), the card draws the body's first line over the
         recipient's last line. The printed letter is fine; on the desktop the address just fits.
+        #525 lets the address window grow (letter t30, widgets v46). On ChatGPT on the web on
+        2026-09-30, after **Refresh tools**, a four-line Suite address sat inside the window, above
+        the dashed line. Not yet rechecked on Android.
 - [x] **ChatGPT's upload card on Android.** **Select Photo** ("Max 10 MB") opened the phone's
       picker. Then `confirm_uploaded_image`, and the preview used the photo, fitted from 4000x3000
       to 2700x1800. No **Choose from Library** button showed.
@@ -1563,16 +1566,33 @@ Leave the rule on in development afterwards. (It is on.)
       characters in 26 estimated lines: `pageCount` 1. Twenty-five 54-character lines and "Test",
       26 estimated lines and the tallest shape: `pageCount` 1, one page in the PDF, ending with "Line
       25" and "Test", with nothing cut off.)
-- [ ] The header-image and enclosed-image layouts, each at its line limit, print on one page (#77).
-      **Both failed on 2026-09-29**, in PostGrid test mode, sent from the confirmation page, with
-      short lines that do not wrap.
+- [x] The header-image and enclosed-image layouts, each at its line limit, print on one page (#77).
+      **Passed on 2026-09-30** at the limits #525 set, on development (22eada8), in PostGrid test
+      mode, sent from the confirmation page, with short lines that do not wrap:
+      - **Header image, 17 of 17 lines** (16 lines and "Test"): `pageCount` 1
+        (`letter_nDyHW2sLDJXnA6SE2FDcEw`).
+      - **Enclosed image, 14 of 14 lines** (13 lines and "Test"): `pageCount` 1
+        (`letter_g5N9vs1Hty5m56L2cGLXeN`).
+
+      **Both failed on 2026-09-29** at the old limits:
       - **Header image, 19 of 19 lines** (18 lines and "Test"): `pageCount` 2. Page 1 holds the
         header image and lines 1 to 17; line 18 and "Test" are on page 2.
       - **Enclosed image, 15 of 15 lines**: `pageCount` 2. Page 1 holds all the text and the image,
         and page 2 is blank.
-      - **Cause:** the hard limits (19 and 15, `LAYOUT_LINE_LIMITS`) add a buffer to the soft limits
-        (17 and 12) that the page has no room for.
-      - **Next:** the fix lowers them, and the check is repeated at the new limits.
+      - **Cause:** the hard limits (19 and 15, `LAYOUT_LINE_LIMITS`) added a buffer to the soft
+        limits (17 and 12) that the page has no room for. #525 lowered them to 17 and 14.
+- [x] One line over each image layout's limit is refused, and the limit itself is accepted (#525).
+      (2026-09-30 on development: 18/17 lines with a header image and 15/14 with an enclosed image
+      were refused; 17 and 14 made drafts.)
+- [x] Long paragraphs wrap within the line estimate (#77). (2026-09-30, text-only,
+      `letter_gqVZqFrq4bTEy4Jn9N8AHK`: 17 estimated lines printed on 16. A 233-character mixed-case
+      paragraph took 3 lines of 74 to 82 characters. A 230-character all-caps paragraph took 4 lines
+      of 66 to 70. The estimate counts 65 a line.)
+- [ ] Characters the print cannot draw are refused at preview (#526). **Not yet.** PostGrid prints
+      in Open Sans. In the same letter, emoji, Chinese, Japanese, Korean, Arabic, Hindi and Thai
+      printed as empty boxes, 56 in all. Latin with accents, Greek, Cyrillic, Hebrew and the common
+      symbols printed. The preview showed every character, and the send took a letter from the
+      balance.
 - [ ] Invalid address → suggestions returned
 - [x] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200) (2026-09-28 in ChatGPT, with Suite 3300: the draft was made, and the reply said USPS confirmed the building but not the suite, and that the letter goes out as entered)
 - [x] Same building with no unit given → draft IS created with an "add the unit if you have it" note

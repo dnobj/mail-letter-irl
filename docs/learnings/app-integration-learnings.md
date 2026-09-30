@@ -36,8 +36,10 @@ learns a limit from the refusal sentence, which names it.
 print check in PostGrid's test mode printed a second page for both (#77):
 - at 19 lines the header layout put lines 18 and 19 on page 2, with 17 on page 1 under the
   2-inch image;
-- the inline layout printed a blank second page at 15; 14 is one line (about 0.27in) under that,
-  and a print at 14 is still to do.
+- the inline layout printed a blank second page at 15.
+
+At the new limits, a header-image letter at 17 lines and an inline-image letter at 14 each printed
+on one page (2026-09-30).
 
 Past the page, a letter prints, and is billed, an extra sheet. Lines are counted on
 `letterPrintText`, the text exactly as the provider prints it. The print used to keep a body's
@@ -65,6 +67,30 @@ Even when ChatGPT follows instructions perfectly, line counts can exceed soft li
 - Validation uses hard limits to avoid unnecessary retries, never past what prints on one page
 
 **Files**: `src/services/previewService.ts`
+
+---
+
+## 2026-09-30 — PostGrid Prints in Open Sans
+
+Our print HTML names Times New Roman for letters, Georgia for postcards and the gift card, and
+Courier New for the gift code. PostGrid prints all of them in **Open Sans**, Regular or Bold; its
+PDFs embed no other font. The preview is serif, so the paper doesn't match it (#526).
+
+Open Sans draws Latin (with Vietnamese), Greek, Cyrillic and Hebrew, and common symbols (€ £ ¥ © ®
+™ — – “ ” ‘ ’ … •). Emoji, Chinese, Japanese, Korean, Arabic, Hindi and Thai print as empty boxes
+(the font's `.notdef` glyph). The preview shows them, and nothing warns the sender.
+
+For line counts, 12pt Open Sans across 6.5 inches holds 74 to 82 mixed-case characters a line, and
+66 to 70 capitals. `CHARS_PER_LINE` (65) holds for both.
+
+**Reading a printed letter:**
+- On a PostGrid letter's page, expand **Raw Data** for `pageCount`, and for the PDF's link as `url`.
+- Fetch the PDF from that page rather than copying the link out: the link is signed.
+- Font names are the PDF's `/BaseFont` entries, stored uncompressed.
+- A glyph id of 0 in the text is a `.notdef` box.
+- Some PDFs come back rewritten by Ghostscript, whose text layer (ToUnicode) is wrong for dashes,
+  quotes and some Greek and Hebrew letters. Check those glyphs by their widths in the font's `/W`
+  array: an em dash is 1000, an en dash 500, a digit 572.
 
 ---
 
