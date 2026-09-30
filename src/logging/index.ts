@@ -52,11 +52,29 @@ function shouldRedact(key: string): boolean {
   return REDACT_KEYS.some((token) => lower.includes(token));
 }
 
+// An event name or tool name is a code constant, never content, and every log
+// search keys on it. One that looks like an identifier is kept however long:
+// under the 32-character rule, quote.letter.header_image.from_recent_upload
+// and the tool quote_and_preview_letter_with_header_image logged as
+// [REDACTED]. A value that is not identifier-shaped is still redacted.
+const IDENTIFIER_KEYS = new Set(["event", "toolName"]);
+const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*(?:[.-][A-Za-z0-9_]+)*$/;
+const IDENTIFIER_MAX_LENGTH = 80;
+
+function isIdentifier(key: string, value: unknown): value is string {
+  return (
+    IDENTIFIER_KEYS.has(key) &&
+    typeof value === "string" &&
+    value.length <= IDENTIFIER_MAX_LENGTH &&
+    IDENTIFIER.test(value)
+  );
+}
+
 function redactEvent(event: LogEvent): LogEvent {
   const sanitized: LogEvent = { correlationId: event.correlationId };
   for (const [key, value] of Object.entries(event)) {
     if (key === "correlationId") continue;
-    sanitized[key] = redactValue(value);
+    sanitized[key] = isIdentifier(key, value) ? value : redactValue(value);
   }
   return sanitized;
 }
