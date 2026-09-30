@@ -363,7 +363,7 @@ after **Refresh tools** on the (DEV) app. The iPhone is not run yet.
         recipient's last line. The printed letter is fine; on the desktop the address just fits.
         #525 lets the address window grow (letter t30, widgets v46). On ChatGPT on the web on
         2026-09-30, after **Refresh tools**, a four-line Suite address sat inside the window, above
-        the dashed line. Not yet rechecked on Android.
+        the dashed line. The same day on Android, after a force-stop, it did too.
 - [x] **ChatGPT's upload card on Android.** **Select Photo** ("Max 10 MB") opened the phone's
       picker. Then `confirm_uploaded_image`, and the preview used the photo, fitted from 4000x3000
       to 2700x1800. No **Choose from Library** button showed.
@@ -1603,12 +1603,37 @@ Leave the rule on in development afterwards. (It is on.)
       - In ChatGPT on the web (Medium), asked for a birthday letter "with a couple of emoji", the
         model's first preview was refused. It told the person the printer can't print 🎉 and 🎂,
         retried in plain text, and the card drew, with no second approval prompt.
-- [ ] The coverage probe shows which unproven characters the print draws (#526). A text-only
+      - In ChatGPT on Android (High) the same request was refused at 15:57:37Z, and the log named
+        the event, `quote.letter.unprintable_characters`, now that #530 is deployed. ChatGPT said the
+        print doesn't support 🎉 and 🎂, and asked before retrying. Told to go ahead, it asked for
+        approval again; a **Deny** tapped by mistake made it say the authorization was declined and
+        no draft was made, and no call reached the server. On the next try the card drew.
+- [x] The coverage probe shows which unproven characters the print draws (#526). A text-only
       letter carries about 220 of them, one group per line (`C:\letter-irl-scripts\coverage-probe.mts`).
       Decoding its PDF glyph by glyph shows which printed, and which came out as boxes (glyph 0).
-      It was sent on 2026-09-30 as a gift letter from testlirl02, before #528 deployed, which would
-      refuse it: PostGrid created it at 14:04:56. **The decode is still to do**, and needs a
-      PostGrid sign-in. The results decide which ranges `src/services/printableText.ts` may widen.
+      It was sent on 2026-09-30 as a gift letter from testlirl02 (`letter_wAEPpwHccd9gKtrUkPjNRu`),
+      before #528 deployed, which would refuse it. It was decoded the same day with
+      `C:\letter-irl-scripts\decode-probe.js`, grouping glyphs into lines by baseline and reading the
+      Hebrew line right to left.
+      - **Printed:**
+        - ― ‗ ‛, Ǻ ǻ Ǽ ǽ Ǿ ǿ, ẁ ẃ ẅ, ə, ẞ, ʼ and the spacing accents;
+        - ϑ ϖ, Cyrillic Ԁ ԁ, ₪ ₫, № ℓ ℮ Ω ℅ ℠ (the ohm sign has a glyph of its own), ⅛ ⅜ ⅝,
+          ∞ ≈ ≠ ≤ ≥ ∂ ∆ ∏ ∑ √ ∫, ◊, the ligatures ﬀ to ﬄ, and ⁿ ⁴ ₂.
+      - **Printed by decomposition:** a character the font lacks, drawn as its canonical parts. That
+        covered pinyin tone letters, letters with a dot above or below, ὰ, yod with hiriq, and the
+        Kelvin and angstrom signs.
+      - **Printed as a space:** the narrow no-break space and the medium mathematical space.
+      - **Boxes:**
+        - the hyphen and the non-breaking hyphen, and most of the other punctuation;
+        - Ə ʻ, the line-below letters;
+        - polytonic Greek's breathings, circumflex and iota subscript;
+        - Ԛ to ԝ, geresh and gershayim;
+        - most currency signs, ⅓ ⅔;
+        - every arrow and dingbat except ◊.
+      - The full lists are on #526. The widening PR admits what printed, and the neighbours on the
+        font's glyph list: the other superscript and subscript digits, Cyrillic to U+0513, and ⅞. By
+        the decomposition rule it also admits any character whose canonical parts are admitted.
+        Its tests pin both lists.
 - [ ] Invalid address → suggestions returned
 - [x] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200) (2026-09-28 in ChatGPT, with Suite 3300: the draft was made, and the reply said USPS confirmed the building but not the suite, and that the letter goes out as entered)
 - [x] Same building with no unit given → draft IS created with an "add the unit if you have it" note
