@@ -1,6 +1,6 @@
 # Letter and Postcard Send Flow
 
-**Last Updated:** September 25, 2026
+**Last Updated:** September 30, 2026
 **Purpose:** Draft, payment, outbox, and provider workflow for letters and postcards
 
 This document describes the current draft, payment, outbox, and provider workflow for letters and postcards.
@@ -15,6 +15,23 @@ Preview tools validate the user's input, render the appropriate widget, and crea
 | `quote_and_preview_letter_with_header_image` | image at top | 1,100 characters / 17 lines |
 | `quote_and_preview_letter_with_image` | image after signature | 800 characters / 12 lines |
 | `quote_and_preview_postcard` | image front, message back | postcard-specific message limit |
+
+Every preview tool also refuses characters the print can't show (#526). PostGrid prints all our mail
+in Open Sans, whatever font the HTML names, and prints a character the font lacks as an empty box.
+So the text and both addresses may hold:
+- Latin letters with the accents of European languages and Vietnamese;
+- modern Greek, Cyrillic and Hebrew letters;
+- common punctuation, € and ™.
+
+Emoji, every other script, and anything that neither a test print nor the shipped font's glyph
+list shows are refused. Examples are pinyin tone marks, arrows, the non-breaking hyphen and the
+narrow no-break space. The glyph list is `sources/OpenSans-glyphset.txt` in googlefonts/opensans,
+which its build subsets every shipped font to, not the larger design master.
+`src/services/printableText.ts` holds the ranges. Widen them only on that evidence.
+
+The refusal names each character and where it is. Invisible characters get a name and code point,
+and a character that may look like one that prints gets its code point. It comes before PostGrid
+checks the addresses, before any picture is downloaded, and before a draft is made.
 
 The preview response includes a `draftId`. Sending is a separate, explicit tool call requiring `confirm: true`.
 

@@ -230,8 +230,8 @@ describe.each([
     download().mockRejectedValue(DOWNLOAD_STOPPED);
   });
 
-  // A sender in the request keeps the postcard handler, which checks the
-  // addresses before the picture, away from the saved-address lookup. Every
+  // Every handler checks the addresses before the picture (#526), so a sender
+  // in the request keeps each one away from the saved-address lookup. Every
   // download is stopped, so a handler that got as far as the picture fails
   // with its own download error.
   const run = (image: unknown) =>
