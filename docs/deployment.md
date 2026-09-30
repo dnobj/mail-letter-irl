@@ -642,6 +642,25 @@ re-dispatched: the panel's retry refuses it, and only a resolution with
 conclusive provider evidence can finish it. Each
 ambiguous outcome raises a durable `mail_provider_outcome_ambiguous` alert.
 
+**A hold whose class is `render_refused` never reached PostGrid (#534).** Our own renderer refused to
+draw the letter before any request was made. The reason is one of:
+- a renderer version this build cannot print;
+- an image it could not read;
+- a letter that no longer fits its page;
+- a drawing error.
+
+The log line `provider.postgrid.render_refused` names the reason and the letter id. Deploy a build that
+can print it, then resolve the letter with a retry (`provider_confirmed_rejected_retry`). A retry cannot
+print a second copy: PostGrid replays the first letter for a reused `Idempotency-Key`, whatever the body
+(probe P7, `docs/learnings/postgrid-pdf-rendering.md`). Resolve it as rejected, which refunds, only when
+it can never be printed and no earlier attempt reached PostGrid: every earlier hold of the letter was
+also `render_refused`.
+
+**Rolling back below migration 039.** Do not roll the API back to a build older than migration 039 while
+letters with `content.rendererVersion` are queued or held. An older build ignores the version and would
+send them as HTML: under the same idempotency key, so an accepted letter is replayed rather than
+duplicated, but printed from a different layout than the person previewed.
+
 `stripe_money_event_unmatched` covers two different situations, and they have
 different recovery paths.
 

@@ -182,10 +182,46 @@ describe('letters printed from our own PDF (#534)', () => {
     await provider().sendLetter({ ...base, rendererVersion: undefined });
 
     const init = (fetchMock.mock.calls[0] as [string, RequestInit])[1];
-    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
+    // Exactly today's headers, in no other shape.
+    expect(init.headers).toEqual({
+      'x-api-key': 'test-key',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'letter-stable-id'
+    });
     const body = JSON.parse(init.body as string);
+    expect(Object.keys(body)).toEqual(['to', 'from', 'html', 'description', 'color', 'doubleSided', 'addressPlacement']);
     expect(body.html).toContain('Happy birthday.');
     expect(body.addressPlacement).toBe('top_first_page');
+  });
+
+  it('treats a null version as the legacy HTML, never as an unknown renderer', async () => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(provider().sendLetter({ ...base, rendererVersion: null as unknown as string })).resolves
+      .toMatchObject({ success: true });
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string).html).toContain('Happy birthday.');
+  });
+
+  it('refuses an unreadable image before sending, and says why', async () => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+    diagnostics.written = [];
+
+    const result = await provider().sendLetter({
+      ...base,
+      layoutType: 'header_image',
+      headerImageData: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=',
+      metadata: { letterId: 'letter-1' }
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
+    expect(diagnostics.written).toContainEqual(expect.objectContaining({
+      level: 'error',
+      event: 'provider.postgrid.render_refused',
+      fields: expect.objectContaining({ reason: 'image', letterId: 'letter-1' })
+    }));
   });
 
   it('prints a gift send on the legacy HTML for now, so its card is never dropped', async () => {
@@ -218,13 +254,19 @@ describe('letters printed from our own PDF (#534)', () => {
     const fetchMock = accepted();
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await provider().sendLetter({ ...base, rendererVersion: 'pdf-9' });
+    diagnostics.written = [];
+    const result = await provider().sendLetter({ ...base, rendererVersion: 'pdf-9', metadata: { letterId: 'letter-9' } });
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.success).toBe(false);
     expect(result.error).toContain('pdf-9');
-    // Not an authoritative rejection, so nothing is refunded: held for an operator.
-    expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false });
+    // Not an authoritative rejection, so nothing is refunded: held for an
+    // operator, under a class that says no request left.
+    expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
+    expect(diagnostics.written).toContainEqual(expect.objectContaining({
+      event: 'provider.postgrid.render_refused',
+      fields: expect.objectContaining({ reason: 'unknown_version', letterId: 'letter-9' })
+    }));
   });
 
   it('holds a letter that no longer fits the page rather than printing it clipped', async () => {
@@ -232,11 +274,34 @@ describe('letters printed from our own PDF (#534)', () => {
     vi.stubGlobal('fetch', fetchMock);
     const tooLong = Array.from({ length: 40 }, (_, index) => `Line ${index + 1}`).join('\n');
 
+    diagnostics.written = [];
     const result = await provider().sendLetter({ ...base, message: tooLong });
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.success).toBe(false);
     expect(result.error).toContain('past the page');
-    expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous' });
+    expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
+    expect(diagnostics.written).toContainEqual(expect.objectContaining({
+      event: 'provider.postgrid.render_refused',
+      fields: expect.objectContaining({ reason: 'overflow' })
+    }));
+  });
+
+  it('can print every renderer version the database admits (migration CHECK)', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const { PRINTABLE_RENDERER_VERSIONS } = await import('../../../src/render/index.js');
+    const migrations = readdirSync('db/migrations').filter(name => name.endsWith('.sql')).sort();
+    const latest = migrations.filter(name => readFileSync(`db/migrations/${name}`, 'utf8').includes('letter_drafts_renderer_version_known')).at(-1)!;
+    const check = readFileSync(`db/migrations/${latest}`, 'utf8');
+    // `renderer_version = 'x'` today; a later migration may list them: IN ('x', 'y').
+    const admitted = [
+      ...[...check.matchAll(/renderer_version\s*=\s*'([^']+)'/g)].map(match => match[1]),
+      ...[...check.matchAll(/renderer_version\s+IN\s*\(([^)]*)\)/gi)]
+        .flatMap(match => [...match[1].matchAll(/'([^']+)'/g)].map(value => value[1]))
+    ];
+    expect(admitted.length).toBeGreaterThan(0);
+    for (const version of admitted) expect(PRINTABLE_RENDERER_VERSIONS.has(version)).toBe(true);
+    // And what previews will write is admitted.
+    expect(admitted).toContain(RENDERER_VERSION);
   });
 });

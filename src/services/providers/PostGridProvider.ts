@@ -34,7 +34,22 @@ import {
   type CardFragment
 } from '../giftCardRenderer.js';
 import { giftQrFormat } from '../../config/giftLetters.js';
-import { layoutLetter, readImageDataUri, renderPdf, RENDERER_VERSION, type Layout } from '../../render/index.js';
+import { layoutLetter, PRINTABLE_RENDERER_VERSIONS, readImageDataUri, renderPdf } from '../../render/index.js';
+
+/**
+ * Our own refusal to draw a letter, before anything is sent to PostGrid
+ * (#534). It is held like every failure that is not an explicit provider
+ * rejection (a retry after an ambiguous first attempt must never refund mail
+ * that may have printed), but it is logged with its reason and held with the
+ * class `render_refused`, so an operator can see that no request left and
+ * resolve it with a retry once a build that can print it is deployed.
+ */
+class RenderRefusal extends Error {
+  constructor(readonly reason: 'unknown_version' | 'image' | 'overflow' | 'render', message: string) {
+    super(message);
+    this.name = 'RenderRefusal';
+  }
+}
 
 /**
  * A PDF upload's budget (#534). Dispatch runs inside the person's request, so
@@ -328,13 +343,13 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       // authoritative provider rejection it holds the letter for an operator:
       // see the catch below.
       const renderer = params.rendererVersion;
-      if (renderer !== undefined && renderer !== RENDERER_VERSION) {
-        throw new Error(`This build cannot print renderer version "${renderer}".`);
+      if (renderer != null && !PRINTABLE_RENDERER_VERSIONS.has(renderer)) {
+        throw new RenderRefusal('unknown_version', `This build cannot print renderer version "${renderer}".`);
       }
       // Gift pages move onto the renderer in a later #534 PR. Until then a
       // gift send prints on the legacy HTML, so its card is never dropped.
-      const usePdf = renderer === RENDERER_VERSION && !params.giftCard;
-      if (renderer === RENDERER_VERSION && params.giftCard) {
+      const usePdf = renderer != null && !params.giftCard;
+      if (renderer != null && params.giftCard) {
         this.writeOperationDiagnostic('provider.postgrid.renderer_fallback', 'create_letter', { reason: 'gift_card' }, 'warn');
       }
 
@@ -350,7 +365,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
 
       let response: PostGridLetterResponse;
       if (usePdf) {
-        const pdf = await renderPdf(this.layoutForPrint(params));
+        const pdf = await this.renderForPrint(params);
         response = await this.apiRequest<PostGridLetterResponse>(
           'POST',
           '/letters',
@@ -420,8 +435,16 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       };
     } catch (error) {
       const errorMessage = this.extractErrorMessage(error);
+      const refused = error instanceof RenderRefusal;
 
-      if (this.options.verbose) {
+      if (refused) {
+        // Logged whatever the verbosity: the hold alone cannot say why.
+        const letterId = typeof params.metadata?.letterId === 'string' ? params.metadata.letterId : undefined;
+        this.writeOperationDiagnostic('provider.postgrid.render_refused', 'create_letter', {
+          reason: error.reason,
+          ...(letterId ? { letterId } : {})
+        }, 'error');
+      } else if (this.options.verbose) {
         this.writeOperationDiagnostic('provider.postgrid.operation_failed', 'create_letter', {
           errorClass: this.classifyRequestError(error)
         }, 'error');
@@ -435,13 +458,15 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           statusCode: error instanceof PostGridRequestError ? error.statusCode : undefined,
           retryable: error instanceof PostGridRequestError
             ? error.retryable
-            : /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
+            : !refused && /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
           // Only an authoritative provider rejection may compensate a paid
           // send. Everything else is held for reconciliation so a physically
           // mailed piece is never refunded or silently re-dispatched.
           submissionOutcome: error instanceof PostGridRequestError
             ? error.submissionOutcome
             : 'ambiguous',
+          // The hold's class: nothing was sent, so resolve with a retry.
+          ...(refused ? { errorClass: 'render_refused' } : {})
         }
       };
     }
@@ -754,24 +779,37 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   }
 
   /**
-   * The letter laid out as it was previewed (src/render, #534). The preview
+   * The letter drawn as it was previewed (src/render, #534). The preview
    * refused a letter longer than the page, so an overflow here means the text
-   * or the renderer changed since: an error, never a clipped letter.
+   * or the renderer changed since: a refusal, never a clipped letter. Every
+   * failure here happens before any request, and is a RenderRefusal.
    */
-  private layoutForPrint(params: LetterParams): Layout {
+  private async renderForPrint(params: LetterParams): Promise<Buffer> {
     const layoutType = params.layoutType ?? 'text_only';
     const imageData = layoutType === 'header_image'
       ? params.headerImageData
       : layoutType === 'inline_image' ? params.inlineImageData : undefined;
-    const layout = layoutLetter({
-      text: params.message,
-      layoutType,
-      image: imageData ? readImageDataUri(imageData) : undefined
-    });
-    if (layout.overflowLines > 0) {
-      throw new Error(`The letter runs ${layout.overflowLines} line(s) past the page.`);
+    const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
+    let image;
+    try {
+      image = imageData ? readImageDataUri(imageData) : undefined;
+    } catch (error) {
+      throw new RenderRefusal('image', `The letter's image could not be read: ${reason(error)}`);
     }
-    return layout;
+    let layout;
+    try {
+      layout = layoutLetter({ text: params.message, layoutType, image });
+    } catch (error) {
+      throw new RenderRefusal('render', `The letter could not be laid out: ${reason(error)}`);
+    }
+    if (layout.overflowLines > 0) {
+      throw new RenderRefusal('overflow', `The letter runs ${layout.overflowLines} line(s) past the page.`);
+    }
+    try {
+      return await renderPdf(layout);
+    } catch (error) {
+      throw new RenderRefusal('render', `The letter could not be drawn: ${reason(error)}`);
+    }
   }
 
   /**

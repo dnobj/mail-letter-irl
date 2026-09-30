@@ -567,6 +567,56 @@ describe('mail outbox retries', () => {
     );
   });
 
+  it.each([
+    ['render_refused', 'render_refused'],
+    ['provider message: 123 Main St', 'provider_error'],
+  ])('holds with the class the provider names only when it is safe: %s -> %s (#534)', async (reported, stored) => {
+    mockClaims();
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT jobs.letter_id')) {
+        return { rows: [{ letter_id: 'letter-1', funding_order_id: 'order-1' }] };
+      }
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      if (sql.startsWith('SELECT * FROM letter_jobs')) return { rows: [{ ...job }] };
+      if (sql.includes('SELECT funding_order_id FROM letters')) {
+        return { rows: [{ funding_order_id: 'order-1' }] };
+      }
+      if (sql.includes('SELECT status FROM orders')) {
+        return { rows: [{ status: 'fulfillment_pending' }] };
+      }
+      if (sql.includes('SELECT order_id FROM orders')) {
+        return { rows: [{ order_id: 'order-1' }] };
+      }
+      if (sql.includes('SELECT letter_id FROM letter_jobs')) {
+        return { rows: [{ letter_id: 'letter-1' }] };
+      }
+      return { rows: [] };
+    });
+    // Our renderer refused before any request: held, never refunded, and
+    // named so an operator resolves it with a retry.
+    sendLetter.mockResolvedValue({
+      success: false,
+      trackingId: '',
+      error: 'The letter runs 2 line(s) past the page.',
+      metadata: { retryable: false, submissionOutcome: 'ambiguous', errorClass: reported },
+    });
+
+    await processLetterJob('job-1', {});
+
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining("hold_reason = 'provider_outcome_ambiguous'"),
+      [expect.any(String), stored]
+    );
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining("'mail_provider_outcome_ambiguous'"),
+      ['order-1', JSON.stringify({ jobId: job.job_id, errorClass: stored })]
+    );
+    expect(clientQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'refund_pending'"),
+      expect.anything()
+    );
+  });
+
   it('recovers a due or stale job during a one-shot maintenance batch', async () => {
     mockClaims();
     const result = await processDueLetterJobs(25, {});

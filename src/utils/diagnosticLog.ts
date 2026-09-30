@@ -36,6 +36,11 @@ const SAFE_ERROR_CODES = new Set([
   // migrator holds the migration lock" instead of the useless generic
   // "database_error"; the code itself carries no user or secret data.
   "55P03",
+  // Our own renderer refused to draw a letter before any request to PostGrid
+  // (#534). That attempt submitted nothing, so the hold's usual resolution is
+  // a retry once a build that can print it is deployed (deployment.md);
+  // without this code the hold said only provider_error.
+  "render_refused",
   // Stripe's documented error-code taxonomy, same footing as the JOSE codes
   // above: a fixed public enum carrying no PII or secret. Surfaced so a failed
   // checkout says "resource_missing" (the Price ID does not exist in this

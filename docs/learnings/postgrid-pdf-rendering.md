@@ -19,6 +19,13 @@ Multipart needs no contact objects: `to[firstName]`, `to[addressLine1]` and the 
 - it upper-cased the address lines, as on the JSON path;
 - it stamped "JOSÉ MUÑOZ ÑANDÚ" in Open Sans.
 
+**A reused `Idempotency-Key` replays the first letter, whatever the body** (probe P7, test mode). Three requests under one key all returned HTTP 201 with the first letter's id and description:
+- a first PDF;
+- a different PDF;
+- then an HTML body.
+
+So a retry whose body differs, as every multipart body does (a random boundary, the PDF's creation date), neither creates a second letter nor draws a rejection.
+
 ## The address zone
 
 PostGrid fills two white boxes and stamps the addresses in them. The positions are from the top-left of the page:
