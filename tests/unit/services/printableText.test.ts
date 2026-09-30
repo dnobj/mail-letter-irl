@@ -97,8 +97,12 @@ describe('characters printed mail can show (#526)', () => {
     expect(unprintableCharacters('→ ✓ ★ ♥ ‼ 1‒2')).toEqual(['→', '✓', '★', '♥', '‼', '‒']);
   });
 
-  it('keeps the hyphens and the narrow no-break space assistants write, which the font has', () => {
-    expect(unprintableCharacters('A follow‑up at 7:00 PM, well‐known.')).toEqual([]);
+  it('refuses the hyphens and the narrow no-break space the shipped font has no glyph for', () => {
+    expect(unprintableCharacters('A follow‑up at 7:00 PM, well‐known.')).toEqual([
+      '‑',
+      ' ',
+      '‐'
+    ]);
   });
 
   it('lists each character once, in the order it first appears', () => {
@@ -116,10 +120,25 @@ describe('characters printed mail can show (#526)', () => {
     expect(isPrintableCodePoint(0x03cf)).toBe(false); // Ϗ
     expect(isPrintableCodePoint(0x05ea)).toBe(true); // ת
     expect(isPrintableCodePoint(0x05f3)).toBe(false); // geresh, not shown to print
-    expect(isPrintableCodePoint(0x2011)).toBe(true); // non-breaking hyphen
+    expect(isPrintableCodePoint(0x2011)).toBe(false); // non-breaking hyphen: no glyph in the shipped font
     expect(isPrintableCodePoint(0x2012)).toBe(false); // figure dash, not shown to print
     expect(isPrintableCodePoint(0x202e)).toBe(false); // right-to-left override
-    expect(isPrintableCodePoint(0x202f)).toBe(true); // narrow no-break space
+    expect(isPrintableCodePoint(0x202f)).toBe(false); // narrow no-break space: no glyph either
+    expect(isPrintableCodePoint(0x200b)).toBe(true); // zero-width space, which the font has
+    expect(isPrintableCodePoint(0x0304)).toBe(true); // combining macron
+    expect(isPrintableCodePoint(0x0305)).toBe(false); // combining overline: no glyph
+    expect(isPrintableCodePoint(0x0306)).toBe(true); // combining breve
+    expect(isPrintableCodePoint(0x031b)).toBe(false); // combining horn: no glyph
+    expect(isPrintableCodePoint(0x0486)).toBe(true); // Cyrillic psili pneumata
+    expect(isPrintableCodePoint(0x0487)).toBe(false); // Cyrillic pokrytie: no glyph
+    expect(isPrintableCodePoint(0x05be)).toBe(true); // maqaf
+    expect(isPrintableCodePoint(0x05bf)).toBe(false); // rafe: no glyph
+    expect(isPrintableCodePoint(0x05c0)).toBe(false); // paseq: no glyph
+    expect(isPrintableCodePoint(0x05c1)).toBe(true); // shin dot
+    expect(isPrintableCodePoint(0x05c2)).toBe(true); // sin dot
+    expect(isPrintableCodePoint(0x05c3)).toBe(false); // sof pasuq: no glyph
+    expect(isPrintableCodePoint(0x05c6)).toBe(false); // nun hafukha: no glyph
+    expect(isPrintableCodePoint(0x05c7)).toBe(true); // qamats qatan
     expect(isPrintableCodePoint(0x2212)).toBe(true); // minus sign
     expect(isPrintableCodePoint(0x20ac)).toBe(true); // €
     expect(isPrintableCodePoint(0x20b9)).toBe(false); // ₹, not shown to print
@@ -156,7 +175,36 @@ describe('the refusal', () => {
     ]);
     expect(unprintableRefusal('letter', found)).toContain(
       'in this letter: a word joiner (U+2060), a line separator (U+2028), ‒ (U+2012), ' +
-        '→ (U+2192), ʻ (U+02BB), Ａ (U+FF21), a special space (U+205F) in the text.'
+        '→ (U+2192), ʻ (U+02BB), Ａ (U+FF21), a medium mathematical space (U+205F) in the text.'
+    );
+  });
+
+  it('shows every kind of character in the way that lets a model find it', () => {
+    const found = findUnprintable([
+      // Emoji as they are: by default presentation, a flag, a sequence.
+      { field: 'emoji', where: 'in A', text: '\u{1F389} \u{1F1FA}\u{1F1F8} ❤️' },
+      // A lone text symbol, and letters of the look-alike scripts, with code points.
+      { field: 'lookAlike', where: 'in B', text: '★ ‼ ῶ ԁ ׳ \u0000' },
+      // A lone mark (Inherited), with its code point.
+      { field: 'mark', where: 'in C', text: '͏' },
+      // Invisible characters by name.
+      { field: 'invisible', where: 'in D', text: 'a b‮c⁦d⁢e f　g' },
+      // Private-use and unassigned, alone or with a mark; a joiner is not named.
+      { field: 'other', where: 'in E', text: '‍ ͸́' }
+    ]);
+    const refusal = unprintableRefusal('letter', found);
+    expect(refusal).toContain(': \u{1F389}, \u{1F1FA}\u{1F1F8}, ❤️ in A;');
+    expect(refusal).toContain(
+      '; ★ (U+2605), ‼ (U+203C), ῶ (U+1FF6), ԁ (U+0501), ׳ (U+05F3), ' +
+        'a control character (U+0000) in B;'
+    );
+    expect(refusal).toContain('; ͏ (U+034F) in C;');
+    expect(refusal).toContain(
+      '; a paragraph separator (U+2029), a direction override (U+202E), a direction isolate (U+2066), ' +
+        'an invisible character (U+2062), a narrow no-break space (U+202F), an ideographic space (U+3000) in D;'
+    );
+    expect(refusal).toContain(
+      '; a private-use character (U+E000), ͸́ (U+0378) in E.'
     );
   });
 

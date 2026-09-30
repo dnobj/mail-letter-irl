@@ -9,11 +9,14 @@
  * PRINTABLE_RANGES admits only what printed in the print check of 2026-09-30
  * (#526, letter_gqVZqFrq4bTEy4Jn9N8AHK), or what the Open Sans that PostGrid
  * prints with has a glyph for. That font drew Hebrew, so it is the build in
- * googlefonts/opensans, not the classic one without Hebrew; its sources list
- * its glyphs. The check printed emoji, Chinese, Japanese, Korean, Arabic, Hindi
- * and Thai as boxes. A character left out here is refused even if the font may
- * have it: a refusal costs a rewrite, a box costs a letter. Widen a range only
- * after a test print or the font's glyph list shows it.
+ * googlefonts/opensans, whose build.sh subsets every shipped font to
+ * sources/OpenSans-glyphset.txt (1,146 glyphs; PostGrid's glyph ids fit it).
+ * That list is the one that counts, not the larger design master beside it.
+ * Characters that print nothing (joiners, direction marks, variation
+ * selectors) are admitted without glyphs. The check printed emoji, Chinese,
+ * Japanese, Korean, Arabic, Hindi and Thai as boxes. A character left out here
+ * is refused even if the font may have it: a refusal costs a rewrite, a box
+ * costs a letter. Widen a range only after a test print or that list shows it.
  *
  * The text is checked as it is stored and printed, not normalized: a
  * canonical equivalent (the angstrom sign for Å) prints only if the renderer
@@ -29,27 +32,28 @@ const PRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x01a0, 0x01a1], // Ơ ơ (Vietnamese)
   [0x01af, 0x01b0], // Ư ư (Vietnamese)
   [0x0218, 0x021b], // Ș ș Ț ț (Romanian)
-  [0x0300, 0x030c], // combining accents the font has as marks, grave to caron,
-  [0x031b, 0x031b], // horn,
+  [0x0300, 0x0304], // combining accents the shipped font has as marks: grave to macron,
+  [0x0306, 0x030c], // breve to caron (not the overline),
   [0x0323, 0x0323], // dot below,
-  [0x0327, 0x0328], // cedilla and ogonek (not the comma below: ș ț come precomposed)
+  [0x0327, 0x0328], // cedilla and ogonek (not the horn or comma below: ơ ư ș ț come precomposed)
   [0x0384, 0x038a], // modern Greek, from the tonos...
   [0x038c, 0x038c],
   [0x038e, 0x03a1],
   [0x03a3, 0x03ce], // ...to ώ
-  [0x0400, 0x04ff], // Cyrillic
-  [0x05b0, 0x05c7], // Hebrew points and punctuation
+  [0x0400, 0x0486], // Cyrillic, without U+0487...
+  [0x0488, 0x04ff],
+  [0x05b0, 0x05be], // Hebrew points and maqaf,
+  [0x05c1, 0x05c2], // shin and sin dots,
+  [0x05c7, 0x05c7], // qamats qatan
   [0x05d0, 0x05ea], // Hebrew letters
   [0x1ea0, 0x1ef9], // Vietnamese letters
-  [0x2000, 0x200a], // fixed-width spaces, which the font has
-  [0x200b, 0x200f], // zero-width space, joiners and direction marks, which print nothing
-  [0x2010, 0x2011], // hyphen and non-breaking hyphen, which assistants write
-  [0x2013, 0x2014], // – —
+  [0x2000, 0x200b], // fixed-width spaces and the zero-width space, which the font has
+  [0x200c, 0x200f], // joiners and direction marks, which print nothing
+  [0x2013, 0x2014], // – — (not U+2010 or U+2011: the shipped font has no glyph for either)
   [0x2018, 0x201a], // ‘ ’ ‚
   [0x201c, 0x201e], // “ ” „
   [0x2020, 0x2022], // † ‡ •
-  [0x2026, 0x2026], // …
-  [0x202f, 0x202f], // narrow no-break space, which assistants put before AM and PM
+  [0x2026, 0x2026], // … (not U+202F, the narrow no-break space: no glyph either)
   [0x2030, 0x2030], // ‰
   [0x2032, 0x2033], // ′ ″
   [0x2039, 0x203a], // ‹ ›
@@ -112,23 +116,39 @@ export function findUnprintable(texts: PrintedText[]): UnprintableField[] {
 
 const MOST_LISTED = 8;
 
-// Spaces, controls and format characters show nothing, so the refusal names
-// them. The names are for the ones assistants and pasted text carry.
-const INVISIBLE = /^[\p{White_Space}\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]+$/u;
+// Spaces, controls, format, private-use and unassigned characters show
+// nothing a reader could name, so the refusal names them. The names are for
+// the ones assistants and pasted text carry.
+const INVISIBLE_CLASSES = '\\p{White_Space}\\p{Cc}\\p{Cf}\\p{Cs}\\p{Co}\\p{Cn}';
+const INVISIBLE = new RegExp(`^[${INVISIBLE_CLASSES}]+$`, 'u');
+const INVISIBLE_START = new RegExp(`^[${INVISIBLE_CLASSES}]`, 'u');
 const INVISIBLE_NAMES: ReadonlyArray<readonly [number, number, string]> = [
   [0x0000, 0x001f, 'a control character'],
   [0x007f, 0x009f, 'a control character'],
   [0x2028, 0x2028, 'a line separator'],
   [0x2029, 0x2029, 'a paragraph separator'],
   [0x202a, 0x202e, 'a direction override'],
+  [0x202f, 0x202f, 'a narrow no-break space'],
+  [0x205f, 0x205f, 'a medium mathematical space'],
   [0x2060, 0x2060, 'a word joiner'],
   [0x2066, 0x2069, 'a direction isolate'],
+  [0x3000, 0x3000, 'an ideographic space'],
 ];
-const EMOJI = /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u;
+const INVISIBLE_KINDS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\p{Cs}/u, 'a broken character'],
+  [/\p{Co}/u, 'a private-use character'],
+  [/\p{Cn}/u, 'an unassigned character'],
+  [/\p{White_Space}/u, 'a special space'],
+];
+// An emoji shows as itself: one drawn as an emoji by default, a flag, or a
+// sequence (❤️ is ❤ with a variation selector). A lone text symbol such as ★
+// or ‼ may look like characters that print, so it is listed as a look-alike.
+const EMOJI = /[\p{Emoji_Presentation}\p{Regional_Indicator}]/u;
+const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
 // Scripts whose characters can look like ones that print: a character from one
 // of them is listed with its code point, so the model can tell which it is.
 const LOOK_ALIKE =
-  /^[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{Script=Hebrew}\p{Script=Common}\p{Script=Inherited}]$/u;
+  /^[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{Script=Hebrew}\p{Script=Common}\p{Script=Inherited}]/u;
 
 function codePoint(character: string): string {
   return `U+${character.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`;
@@ -137,20 +157,23 @@ function codePoint(character: string): string {
 function invisibleName(character: string): string {
   const value = character.codePointAt(0)!;
   const named = INVISIBLE_NAMES.find(([low, high]) => value >= low && value <= high);
-  const name = named ? named[2] : /\p{White_Space}/u.test(character) ? 'a special space' : 'an invisible character';
+  const kind = INVISIBLE_KINDS.find(([pattern]) => pattern.test(character));
+  const name = named ? named[2] : kind ? kind[1] : 'an invisible character';
   return `${name} (${codePoint(character)})`;
 }
 
 /**
  * How the refusal shows a character: invisible ones by name and code point,
- * emoji as they are, and a character that may look like one that prints (a
- * non-breaking hyphen is not a hyphen) with the code points that do not print.
+ * emoji and other scripts as they are, and a character that may look like one
+ * that prints (a non-breaking hyphen is not a hyphen) with the code points
+ * that do not print.
  */
 function shown(grapheme: string): string {
   const characters = [...grapheme];
-  if (INVISIBLE.test(grapheme)) return characters.map(invisibleName).join(', ');
-  if (EMOJI.test(grapheme) || !LOOK_ALIKE.test(characters[0])) return grapheme;
   const refused = characters.filter(character => !isPrintableCodePoint(character.codePointAt(0)!));
+  if (INVISIBLE.test(grapheme)) return refused.map(invisibleName).join(', ');
+  const emoji = EMOJI.test(grapheme) || (characters.length > 1 && PICTOGRAPHIC.test(grapheme));
+  if (emoji || !(LOOK_ALIKE.test(grapheme) || INVISIBLE_START.test(grapheme))) return grapheme;
   return `${grapheme} (${refused.map(codePoint).join(' ')})`;
 }
 

@@ -23,8 +23,10 @@ So the text and both addresses may hold:
 - modern Greek, Cyrillic and Hebrew letters;
 - common punctuation, € and ™.
 
-Emoji, every other script, and anything that neither a test print nor Open Sans's glyph list shows
-are refused (for example pinyin tone marks, arrows, and the figure dash).
+Emoji, every other script, and anything that neither a test print nor the shipped font's glyph
+list shows are refused. Examples are pinyin tone marks, arrows, the non-breaking hyphen and the
+narrow no-break space. The glyph list is `sources/OpenSans-glyphset.txt` in googlefonts/opensans,
+which its build subsets every shipped font to, not the larger design master.
 `src/services/printableText.ts` holds the ranges. Widen them only on that evidence.
 
 The refusal names each character and where it is. Invisible characters get a name and code point,
