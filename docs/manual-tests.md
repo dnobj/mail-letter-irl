@@ -1630,8 +1630,9 @@ Leave the rule on in development afterwards. (It is on.)
         - Ԛ to ԝ, geresh and gershayim;
         - most currency signs, ⅓ ⅔;
         - every arrow and dingbat except ◊.
-      - The full lists are on #526. The widening PR admits what printed, plus the neighbours on the
-        font's glyph list: the other superscript and subscript digits, Cyrillic to U+0513, and ⅞.
+      - The full lists are on #526. The widening PR admits what printed, and the neighbours on the
+        font's glyph list: the other superscript and subscript digits, Cyrillic to U+0513, and ⅞. By
+        the decomposition rule it also admits any character whose canonical parts are admitted.
         Its tests pin both lists.
 - [ ] Invalid address → suggestions returned
 - [x] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200) (2026-09-28 in ChatGPT, with Suite 3300: the draft was made, and the reply said USPS confirmed the building but not the suite, and that the letter goes out as entered)
