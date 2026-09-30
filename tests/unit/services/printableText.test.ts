@@ -298,3 +298,23 @@ describe('the refusal', () => {
     ).toEqual([]);
   });
 });
+
+describe('text printed in another font (#534)', () => {
+  // A letter drawn by our renderer prints its text in the renderer's font:
+  // each text can name the font it prints in, and addresses keep Open Sans.
+  const onlyLowercase = (grapheme: string) => /^[a-z ]$/.test(grapheme);
+
+  it('judges each grapheme by the font the text names', () => {
+    expect(unprintableCharacters('abc Def', onlyLowercase)).toEqual(['D']);
+  });
+
+  it('keeps Open Sans for a text that names no font', () => {
+    const nonBreakingHyphen = String.fromCodePoint(0x2011);
+    expect(
+      findUnprintable([
+        { field: 'bodyText', where: 'in the text', text: `well${nonBreakingHyphen}known`, prints: () => true },
+        { field: 'recipient', where: "in the recipient's address", text: `Sam${nonBreakingHyphen}Rivera` }
+      ])
+    ).toEqual([{ field: 'recipient', where: "in the recipient's address", characters: [nonBreakingHyphen] }]);
+  });
+});

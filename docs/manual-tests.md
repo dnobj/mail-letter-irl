@@ -1642,6 +1642,26 @@ Leave the rule on in development afterwards. (It is on.)
   with `errorClass=unknown_error` (seen 2026-09-22 and 23): the class is a mislabel, so read the
   stage line logged just before it.
 
+### PRINT-02 — Letters drawn by our renderer print as previewed (#534)
+
+On development, with `LETTER_IRL_PRINT_RENDERER=pdf`, in PostGrid test mode. Decode each printed PDF
+with `C:\letter-irl-scripts\probe-534\decode-534.mjs`, and crop its page with `extract-raster.mjs`.
+- [ ] A text-only preview's draft records `renderer_version = 'pdf-1'`, and the log's
+      `draft.created` line says `renderer=pdf-1`. The website's confirm page shows the page in Tinos,
+      with the line breaks it prints with.
+- [ ] Each layout sends: text only, a header image, and an enclosed image. PostGrid accepts the
+      upload with `pageCount` 1. The flattened page shows the text where the preview put it, and
+      PostGrid's Open Sans addresses in their boxes.
+- [ ] At the limit: 26 lines of text only, 16 under a full 2-inch header image and 13 above a full
+      3-inch enclosed image make drafts and print on one page. One line more is refused with "Letter
+      is 1 line too long for one page".
+- [ ] A body with a non-breaking hyphen and a line of Hebrew previews and prints. The same hyphen in
+      the recipient's name is refused ("in the recipient's address").
+- [ ] A gift send previews and prints on the legacy HTML, with its card, and records no version.
+- [ ] A letter previewed before the flag was on prints on the legacy HTML after it.
+- [ ] The letter card still draws its mockup, from the text hidden in the new preview. The card
+      shows the page itself in #534 Phase 3.
+
 ### Send (US-LETTER-02)
 - [x] Use draft ID from preview
 - [x] Set `confirm: true`

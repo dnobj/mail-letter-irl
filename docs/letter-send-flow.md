@@ -181,7 +181,16 @@ provider acceptance. The PostGrid request uses the Letter IRL `letter_id` as `Id
 - without a version, as today's HTML;
 - with `pdf-1`, as our own PDF from `src/render`, uploaded as a multipart form with a 30-second budget.
 
-A `pdf-1` gift send still prints on the HTML, until its gift page moves onto the renderer. When our renderer refuses a letter before any request, it is held like any other failure that is not an explicit rejection, with the class `render_refused`. That happens for a version this build cannot print, an unreadable image, or a letter that no longer fits its page. Every version the database admits must be in `PRINTABLE_RENDERER_VERSIONS`, which a test checks, so a new renderer never strands letters waiting under an older one. Resolving such a hold is in [deployment.md](deployment.md). Nothing sets a version yet: previews start recording `pdf-1` behind `LETTER_IRL_PRINT_RENDERER` in the next #534 change.
+A `pdf-1` gift send still prints on the HTML, until its gift page moves onto the renderer. When our renderer refuses a letter before any request, it is held like any other failure that is not an explicit rejection, with the class `render_refused`. That happens for a version this build cannot print, an unreadable image, or a letter that no longer fits its page. Every version the database admits must be in `PRINTABLE_RENDERER_VERSIONS`, which a test checks, so a new renderer never strands letters waiting under an older one. Resolving such a hold is in [deployment.md](deployment.md).
+
+**How a preview is drawn (#534).** With `LETTER_IRL_PRINT_RENDERER=pdf`, the three letter previews are drawn by `src/render`, from the layout the PDF prints from:
+- the page is laid out with the image that prints, and a letter that runs past it is refused with the count: "Letter is 2 lines too long for one page: it takes 28 lines and the page holds 26." A page holds 26 lines of text only, 16 under a full 2-inch header image, and 13 above a full 3-inch enclosed image;
+- the legacy character and line estimates, calibrated for Open Sans, give way to a cap of 10,000 characters, which only bounds the work;
+- the text is checked against Tinos, the font it prints in, which draws more than Open Sans (the non-breaking hyphen, for one) and refuses a letter carrying more than four marks. The addresses are still checked against Open Sans, which PostGrid stamps them in;
+- `preview_html` holds the page as SVG in a minimal HTML document, which the website's confirm page shows; the letter card still draws its own mockup from the text hidden in it;
+- the draft records `renderer_version = 'pdf-1'`, so the letter prints as it was previewed.
+
+A gift send is previewed on the legacy HTML, held to the legacy limits and Open Sans, and records no version, until its gift page moves onto the renderer. Without the flag, previews are the legacy HTML. The flag is read only when a letter is previewed, so changing it never changes a letter already previewed or queued.
 
 A claimed job is submitted to the provider exactly once. A successful response records the provider order ID and marks the job completed. Any outcome that does not prove what happened — `5xx`, timeout, transport loss, an unreadable body — may mean the piece was accepted and physically mailed, so it is never resubmitted: the job is held with `provider_outcome = 'ambiguous'` for operator reconciliation. Only an explicit provider rejection, which proves no mail exists, is terminal.
 

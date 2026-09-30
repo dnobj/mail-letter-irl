@@ -54,7 +54,7 @@ minutes. Otherwise the tool returns routing guidance to ChatGPT's free built-in 
 (`ImageRoutingCard`). See [ui-widgets.md](ui-widgets.md) and
 [learnings/generate-image-removal-decision.md](learnings/generate-image-removal-decision.md).
 
-All images are validated, resized to print specifications (300 DPI), optimized for quality, and embedded as base64 in HTML templates sent to PostGrid.
+All images are validated, resized to print specifications (300 DPI), and optimized for quality. A legacy letter embeds them as base64 in the HTML sent to PostGrid. A letter drawn by our own renderer (#534, [letter-send-flow.md](letter-send-flow.md)) draws them into its PDF, and its preview shows the small copy in the printed image's box.
 
 ---
 

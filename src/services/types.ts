@@ -537,6 +537,8 @@ export interface CreateDraftParams {
   inlineImageUrl?: string;                // Original URL for debugging
   /** Funded by a gift letter and printed with its card (migration 033). */
   isGiftSend?: boolean;
+  /** The renderer that drew the preview, which the letter prints with (migration 039, #534); unset for the legacy HTML. */
+  rendererVersion?: string;
 }
 
 export interface CreateDraftResult {

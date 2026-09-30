@@ -267,3 +267,32 @@ describe('laying out a letter (#534)', () => {
     expect(run.text).toBe(`Hi ${[...shalom].reverse().join('')}`);
   });
 });
+
+describe('what the renderer draws as written (#534)', () => {
+  const at = (codePoint: number) => String.fromCodePoint(codePoint);
+
+  it('draws what the font has a glyph for', async () => {
+    const { drawsGrapheme } = await import('../../../src/render/layout.js');
+    // Latin, Hebrew, the non-breaking hyphen, and the shekel sign.
+    for (const grapheme of ['a', 'Z', at(0x5e9), at(0x2011), at(0x20aa)]) expect(drawsGrapheme(grapheme)).toBe(true);
+  });
+
+  it('counts line breaks, tabs and characters that print nothing as drawn', async () => {
+    const { drawsGrapheme } = await import('../../../src/render/layout.js');
+    // A line break, a tab, a zero-width joiner and a variation selector.
+    for (const grapheme of ['\n', '\r\n', '\t', at(0x200d), `a${at(0xfe0f)}`]) expect(drawsGrapheme(grapheme)).toBe(true);
+  });
+
+  it('refuses a character the font has no glyph for', async () => {
+    const { drawsGrapheme } = await import('../../../src/render/layout.js');
+    // An emoji, a CJK character, and an Arabic letter.
+    for (const grapheme of [at(0x1f389), at(0x738b), at(0x633)]) expect(drawsGrapheme(grapheme)).toBe(false);
+  });
+
+  it('draws four marks on a letter and refuses a fifth, which the layout would drop', async () => {
+    const { drawsGrapheme } = await import('../../../src/render/layout.js');
+    const acute = at(0x301);
+    expect(drawsGrapheme(`e${acute.repeat(4)}`)).toBe(true);
+    expect(drawsGrapheme(`e${acute.repeat(5)}`)).toBe(false);
+  });
+});

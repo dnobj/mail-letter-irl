@@ -1794,6 +1794,11 @@ This implementation uses a static client approach aligned with the spec directio
 - Inline image positioned after message content
 - CSS ensures proper sizing and positioning
 
+**Our own renderer (#534).** A letter previewed with `LETTER_IRL_PRINT_RENDERER=pdf` is laid out by
+`src/render` and prints from its PDF instead: the body starts at 3.0" (PostGrid's measured address
+boxes), the images keep the legacy boxes, and the fit is measured, not estimated
+([letter-send-flow.md](letter-send-flow.md)).
+
 ---
 
 ## Feedback (FEEDBACK)

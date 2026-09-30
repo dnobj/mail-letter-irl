@@ -26,6 +26,11 @@
  * drew ǎ as a and a caron, ṛ as r and a dot below, ὰ as alpha and a grave, the
  * angstrom sign as Å, and yod with hiriq as its two parts. The text itself is
  * checked as it is stored and printed, not normalized.
+ *
+ * A letter drawn by our own renderer (#534) prints its text in the renderer's
+ * font instead, so its text is checked against that font (drawsGrapheme in
+ * src/render/layout.ts). Its addresses are still stamped by PostGrid in Open
+ * Sans and are checked here.
  */
 
 const PRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
@@ -119,21 +124,23 @@ export function isPrintableCodePoint(codePoint: number): boolean {
 
 const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
 
+/** Whether a grapheme cluster prints as written, in one font. */
+export type PrintsGrapheme = (grapheme: string) => boolean;
+
+/** PostGrid's Open Sans: the legacy HTML letters, postcards and every address block. */
+export const printsInOpenSans: PrintsGrapheme = grapheme =>
+  [...grapheme].every(character => isPrintableCodePoint(character.codePointAt(0)!));
+
 /**
- * The characters in `text` that would print as boxes, each once, in the order
- * they first appear. A character is a whole grapheme, so an emoji sequence
- * (a family, a flag, a skin tone) is reported as the one symbol it shows.
+ * The characters in `text` that would not print as written, each once, in
+ * the order they first appear. A character is a whole grapheme, so an emoji
+ * sequence (a family, a flag, a skin tone) is reported as the one symbol it
+ * shows.
  */
-export function unprintableCharacters(text: string): string[] {
+export function unprintableCharacters(text: string, prints: PrintsGrapheme = printsInOpenSans): string[] {
   const found = new Set<string>();
   for (const { segment } of graphemes.segment(text)) {
-    if (found.has(segment)) continue;
-    for (const character of segment) {
-      if (!isPrintableCodePoint(character.codePointAt(0)!)) {
-        found.add(segment);
-        break;
-      }
-    }
+    if (!found.has(segment) && !prints(segment)) found.add(segment);
   }
   return [...found];
 }
@@ -145,6 +152,8 @@ export interface PrintedText {
   /** For the refusal: "in the text", "in the recipient's address". */
   where: string;
   text: string | null | undefined;
+  /** The font it prints in; Open Sans unless given. */
+  prints?: PrintsGrapheme;
 }
 
 export interface UnprintableField {
@@ -156,7 +165,7 @@ export interface UnprintableField {
 /** Each piece of text that holds characters the print cannot show. */
 export function findUnprintable(texts: PrintedText[]): UnprintableField[] {
   return texts
-    .map(({ field, where, text }) => ({ field, where, characters: unprintableCharacters(text ?? '') }))
+    .map(({ field, where, text, prints }) => ({ field, where, characters: unprintableCharacters(text ?? '', prints) }))
     .filter(({ characters }) => characters.length > 0);
 }
 

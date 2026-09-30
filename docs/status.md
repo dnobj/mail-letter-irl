@@ -23,6 +23,10 @@ ChatGPT, Claude and other MCP apps, and manage their account on letterirl.com.
   `LETTER_IRL_SEND_CONFIRMATION_ENABLED`, on in development), only the person sends: with our
   card's **Send**, or on the website's confirmation page, whose link `request_send` gives an app
   that shows no card ([letter-send-flow.md](letter-send-flow.md)).
+- **Printing:** PostGrid prints the legacy HTML in Open Sans (#526). Our own renderer (#534) lays
+  letters out in Tinos, previews the page as it prints, and uploads its own PDF. Letter previews
+  use it behind `LETTER_IRL_PRINT_RENDERER=pdf`, on in development. Gift pages and postcards are
+  still to move onto it.
 - **Paying:** prepaid letter packs (2, 5 or 50 letters), bought in the conversation
   (`create_pack_checkout`) or on the website; **Pay & Send**, which buys and sends one previewed item
   in a single Stripe-hosted checkout; and promo codes. Both checkouts are external Stripe Checkout,

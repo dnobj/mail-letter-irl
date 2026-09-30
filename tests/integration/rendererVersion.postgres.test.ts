@@ -9,6 +9,7 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  *
  *   a draft records no renderer by default (the legacy HTML), accepts 'pdf-1',
  *   and refuses any other value
+ *   createDraft stores the version a preview drew with, in its own column
  *   the send copies the version into letters.content, so the letter prints
  *   with it however long it waits; a legacy draft's letter gets none
  *
@@ -52,6 +53,7 @@ describePostgres('renderer version (migration 039, #534)', () => {
   let pool: pg.Pool;
   let schema: string;
   let mailSend: typeof import('../../src/services/mailSendService.js');
+  let drafts: typeof import('../../src/services/draftService.js');
   let closeServicePool: (() => Promise<void>) | undefined;
 
   const savedCaps = {
@@ -73,6 +75,7 @@ describePostgres('renderer version (migration 039, #534)', () => {
 
     process.env.DATABASE_URL = scoped;
     mailSend = await import('../../src/services/mailSendService.js');
+    drafts = await import('../../src/services/draftService.js');
     closeServicePool = (await import('../../src/db/index.js')).closePool;
   }, 180_000);
 
@@ -141,6 +144,29 @@ describePostgres('renderer version (migration 039, #534)', () => {
       code: '23514',
       constraint: 'letter_drafts_renderer_version_known'
     });
+  }, 60_000);
+
+  it("stores the version a preview's draft is created with, and none without one", async () => {
+    const userId = await seedUser();
+    const draft = {
+      userId,
+      sender: SENDER,
+      recipient: RECIPIENT,
+      signOff: 'Warmly, Test',
+      requiredCredits: 2,
+      previewHtml: '<svg></svg>',
+      layoutType: 'text_only' as const
+    };
+    const rendered = await drafts.createDraft({ ...draft, bodyText: `Hello ${randomUUID()}`, rendererVersion: 'pdf-1' });
+    const legacy = await drafts.createDraft({ ...draft, bodyText: `Hello ${randomUUID()}` });
+
+    const stored = await pool.query<{ draft_id: string; renderer_version: string | null; is_gift_send: boolean }>(
+      'SELECT draft_id, renderer_version, is_gift_send FROM letter_drafts WHERE draft_id = ANY($1)',
+      [[rendered.draftId, legacy.draftId]]
+    );
+    const byId = new Map(stored.rows.map(row => [row.draft_id, row]));
+    expect(byId.get(rendered.draftId)).toMatchObject({ renderer_version: 'pdf-1', is_gift_send: false });
+    expect(byId.get(legacy.draftId)).toMatchObject({ renderer_version: null, is_gift_send: false });
   }, 60_000);
 
   it('copies the version into the letter the send creates, and none for a legacy draft', async () => {

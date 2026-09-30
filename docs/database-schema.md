@@ -165,7 +165,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | body_text | TEXT | NO | - | Letter content (message for postcards) |
 | sign_off | TEXT | YES | - | Closing text (NULL for postcards) |
 | required_credits | INTEGER | NO | - | Credits needed (> 0) |
-| preview_html | TEXT | YES | - | Generated preview |
+| preview_html | TEXT | YES | - | Generated preview: the legacy HTML, or, when `renderer_version` is `pdf-1`, the page as SVG in a minimal HTML document (#534) |
 | sender_validation | JSONB | YES | - | Cached address validation |
 | recipient_validation | JSONB | YES | - | Cached address validation |
 | status | draft_status | NO | 'pending' | pending, consumed, expired, cancelled |
@@ -211,7 +211,7 @@ Sent letters with content and tracking.
 | recipient | JSONB | NO | - | Recipient address |
 | credits_cost | INTEGER | NO | - | Credits charged (> 0) |
 | status | VARCHAR(50) | NO | - | queued, processing, sent, failed, cancelled |
-| preview_html | TEXT | YES | - | HTML preview |
+| preview_html | TEXT | YES | - | The draft's preview, copied at send: legacy HTML, or the page as SVG for a `pdf-1` letter (#534) |
 | tracking_id | VARCHAR(255) | YES | - | Provider tracking ID (PostGrid) |
 | provider | VARCHAR(50) | YES | - | postgrid, dummy |
 | cost_cents | INTEGER | YES | - | Actual provider cost |

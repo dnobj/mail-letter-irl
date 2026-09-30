@@ -168,6 +168,38 @@ describe('draftService', () => {
       const queryCall = vi.mocked(db.query).mock.calls[0];
       expect(queryCall[1]).toContain('<html>Preview</html>');
     });
+
+    it('records the renderer that drew the preview (#534), and none for the legacy HTML', async () => {
+      const mockDraft = testDrafts.pending();
+      const inserted = {
+        rows: [{ draft_id: mockDraft.draft_id, expires_at: mockDraft.expires_at }],
+        rowCount: 1,
+        command: 'INSERT',
+        oid: 0,
+        fields: [],
+      };
+      vi.mocked(db.query).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted);
+      const draft = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender,
+        recipient: testAddresses.validRecipient,
+        bodyText: testLetterContent.shortLetter.bodyText,
+        signOff: testLetterContent.shortLetter.signOff,
+        requiredCredits: 2,
+      };
+
+      await createDraft({ ...draft, rendererVersion: 'pdf-1' });
+      await createDraft(draft);
+
+      const [sql, rendered] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
+      const columns = sql.slice(sql.indexOf('(') + 1, sql.indexOf(')')).split(',').map(column => column.trim());
+      const position = columns.indexOf('renderer_version');
+      expect(position).toBeGreaterThan(-1);
+      // Its placeholder is the parameter at the column's position.
+      expect(sql).toContain(`$${position + 1},`);
+      expect(rendered[position]).toBe('pdf-1');
+      expect((vi.mocked(db.query).mock.calls[1][1] as unknown[])[position]).toBeNull();
+    });
   });
 
   // ==========================================================================

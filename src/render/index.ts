@@ -1,9 +1,10 @@
 /**
  * Our own print renderer (#534): one layout drives both the PDF sent to the
  * printer and the preview the person sees. Pure functions, no I/O beyond
- * reading the bundled fonts. Not wired in yet: see #534 Phase 2.
+ * reading the bundled fonts. Letters previewed with it (LETTER_IRL_PRINT_RENDERER,
+ * src/config/printRenderer.ts) record RENDERER_VERSION and print from its PDF.
  */
-export { layoutLetter, wrapParagraph } from './layout.js';
+export { drawsGrapheme, layoutLetter, wrapParagraph } from './layout.js';
 export type { ImageBox, Layout, LayoutPage, LetterContent, TextRun } from './layout.js';
 export { renderPdf, RENDERER_VERSION, PRINTABLE_RENDERER_VERSIONS } from './pdf.js';
 export { renderPreviewSvg } from './preview.js';

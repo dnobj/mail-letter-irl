@@ -69,13 +69,34 @@ const POINTS_PER_CSS_PIXEL = 72 / 96;
 /** Tabs have no glyph in Tinos; a tab becomes four spaces. */
 const TAB = '    ';
 
+/** The letter's typeface. */
+const BODY_FONT: FontName = 'Tinos-Regular';
+
 /**
  * Combining marks kept on one letter. Hebrew can carry four (a dagesh, a shin
  * dot, a vowel and a meteg); more stack upward, 2.6pt each on a capital, and
- * the first line's would reach the address boxes. The character check that
- * gates previews should refuse such text; this only keeps the layout's promise.
+ * the first line's would reach the address boxes. Previews refuse such text
+ * (drawsGrapheme); clampMarks only keeps the layout's promise.
  */
 const MAX_MARKS_PER_LETTER = 4;
+
+/**
+ * Whether the renderer draws a grapheme cluster as written: each character
+ * is a line break, a tab, a character that prints nothing, or one the
+ * letter's font has a glyph for, and the cluster carries at most
+ * MAX_MARKS_PER_LETTER combining marks. A preview refuses text holding a
+ * cluster that fails, rather than printing a box or dropping a mark.
+ */
+export function drawsGrapheme(grapheme: string): boolean {
+  const font = loadFont(BODY_FONT);
+  let marks = 0;
+  for (const character of grapheme) {
+    if (MARK.test(character) && ++marks > MAX_MARKS_PER_LETTER) return false;
+    if (character === '\n' || character === '\r' || character === '\t' || isInvisible(character)) continue;
+    if (!font.hasGlyphForCodePoint(character.codePointAt(0)!)) return false;
+  }
+  return true;
+}
 
 function clampMarks(text: string): string {
   if (!MARK.test(text)) return text;
@@ -222,7 +243,7 @@ function advanceLimit(fontName: FontName, paragraph: string, width: number, scal
  * much a letter is too long.
  */
 export function layoutLetter(content: LetterContent): Layout {
-  const fontName: FontName = 'Tinos-Regular';
+  const fontName = BODY_FONT;
   const font = loadFont(fontName);
   const size = BODY_FONT_SIZE;
   const scale = size / font.unitsPerEm;

@@ -14,11 +14,22 @@ import { assessValidation } from "../services/addressVerificationPolicy.js";
 import type { AddressValidationInput, AddressValidationResult } from "../services/providers/types.js";
 import {
   estimateRequiredCredits,
+  letterPrintText,
   renderLayoutPreviewHtml,
+  renderLetterPreviewDocument,
   validateCharacterLimit,
 } from "../services/previewService.js";
 import { createDraft } from "../services/draftService.js";
 import { findUnprintable, unprintableRefusal, type PrintedText } from "../services/printableText.js";
+import { printRenderer } from "../config/printRenderer.js";
+import {
+  drawsGrapheme,
+  layoutLetter,
+  readImageDataUri,
+  renderPreviewSvg,
+  RENDERER_VERSION,
+  type Layout
+} from "../render/index.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 import type { MailType } from "../services/types.js";
 import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
@@ -439,12 +450,48 @@ export function outputValidationStatus(
 // Character Limit Validation
 // ============================================================================
 
+/**
+ * The most characters a letter drawn by our renderer may hold. Far more than
+ * a page holds even of fully pointed Hebrew; it only bounds the layout's
+ * work. The page itself is measured by layoutLetterForPreview.
+ */
+export const RENDERED_LETTER_CHARACTER_CAP = 10_000;
+
+/**
+ * Refuses a letter too long for its page, before anything else is checked.
+ * The legacy HTML's limits are estimates (previewService.ts). A letter drawn
+ * by our own renderer is measured once its image is known, so here it only
+ * meets a generous character cap.
+ */
 export function validateCharacterLimitForLayout(
   bodyText: string,
   signOff: string,
   layoutType: LetterLayoutType,
-  context: ToolContext
+  context: ToolContext,
+  renderer: 'html' | 'pdf' = printRenderer()
 ): void {
+  if (renderer === 'pdf') {
+    const totalChars = bodyText.length + signOff.length;
+    if (totalChars <= RENDERED_LETTER_CHARACTER_CAP) return;
+    context.logger.warn(
+      {
+        correlationId: context.correlationId,
+        event: "quote.letter.exceeds_character_cap",
+        layoutType,
+        totalChars,
+        charLimit: RENDERED_LETTER_CHARACTER_CAP
+      },
+      "Letter exceeds the character cap"
+    );
+    throw Object.assign(
+      new Error(
+        `Letter is far too long for one page: ${totalChars}/${RENDERED_LETTER_CHARACTER_CAP} characters. ` +
+        `Please shorten your message to fit on one page.`
+      ),
+      { diagnosticClass: "validation_error" }
+    );
+  }
+
   const charValidation = validateCharacterLimit(bodyText, signOff, layoutType);
   const isDebug = process.env.NODE_ENV === 'development' ||
                   process.env.RAILWAY_ENVIRONMENT === 'development' ||
@@ -476,6 +523,71 @@ export function validateCharacterLimitForLayout(
   }
 }
 
+const LAYOUT_LABELS: Record<LetterLayoutType, string> = {
+  text_only: "",
+  header_image: " with a header image",
+  inline_image: " with an enclosed image"
+};
+
+/**
+ * The letter laid out by our own renderer when previews use it (#534), or
+ * undefined for the legacy HTML. `imageData` is the image that prints, so the
+ * layout is the print's. A letter that runs past its page is refused, saying
+ * by how many lines, before the addresses are checked or a draft is made.
+ */
+export function layoutLetterForPreview(
+  letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string },
+  context: ToolContext,
+  renderer: 'html' | 'pdf' = printRenderer()
+): Layout | undefined {
+  if (renderer !== 'pdf') return undefined;
+  const { bodyText, signOff, layoutType, imageData } = letter;
+  const layout = layoutLetter({
+    text: letterPrintText(bodyText, signOff),
+    layoutType,
+    image: layoutType !== "text_only" && imageData ? readImageDataUri(imageData) : undefined
+  });
+  if (layout.overflowLines === 0) return layout;
+
+  const { linesUsed, linesAvailable } = layout.pages[0];
+  context.logger.warn(
+    {
+      correlationId: context.correlationId,
+      event: "quote.letter.exceeds_page",
+      layoutType,
+      linesUsed,
+      linesAvailable
+    },
+    "Letter runs past its page"
+  );
+  const over = layout.overflowLines;
+  throw Object.assign(
+    new Error(
+      `Letter is ${over} line${over === 1 ? "" : "s"} too long for one page${LAYOUT_LABELS[layoutType]}: ` +
+      `it takes ${linesUsed} lines and the page holds ${linesAvailable}. ` +
+      `Please shorten your message to fit on one page.`
+    ),
+    { diagnosticClass: "validation_error" }
+  );
+}
+
+/**
+ * The layout with its image drawn from the preview's small copy. The box is
+ * the printed image's, so the page is still the print's, but the preview
+ * carries a few kilobytes instead of the full image.
+ */
+function withDisplayImage(layout: Layout, previewDataUri: string | undefined): Layout {
+  if (!previewDataUri) return layout;
+  const image = readImageDataUri(previewDataUri);
+  return {
+    ...layout,
+    pages: layout.pages.map(page => ({
+      ...page,
+      items: page.items.map(item => (item.kind === "image" ? { ...item, image } : item))
+    }))
+  };
+}
+
 // ============================================================================
 // Printable Characters (#526)
 // ============================================================================
@@ -497,8 +609,8 @@ export interface PrintedAddresses {
 /**
  * Refuses mail whose text or addresses hold characters the print shows as
  * empty boxes (#526). It runs before the provider checks the addresses, and
- * before a draft is made. PostGrid prints the address block in the same font
- * as the text.
+ * before a draft is made. PostGrid stamps the address block in Open Sans,
+ * the font it prints the legacy HTML in; each text names its own font.
  */
 export function validatePrintableCharacters(
   mail: "letter" | "postcard",
@@ -530,16 +642,22 @@ export function validatePrintableCharacters(
   throw Object.assign(new Error(unprintableRefusal(mail, found)), { diagnosticClass: "validation_error" });
 }
 
-/** validatePrintableCharacters for the three letter tools. */
+/**
+ * validatePrintableCharacters for the three letter tools. A letter drawn by
+ * our own renderer prints its text in the renderer's font (#534); its
+ * addresses are stamped in Open Sans either way.
+ */
 export function validatePrintableLetter(
   letter: PrintedAddresses & { bodyText: string; signOff: string },
-  context: ToolContext
+  context: ToolContext,
+  renderer: 'html' | 'pdf' = printRenderer()
 ): void {
+  const prints = renderer === "pdf" ? drawsGrapheme : undefined;
   validatePrintableCharacters(
     "letter",
     [
-      { field: "bodyText", where: "in the text", text: letter.bodyText },
-      { field: "signOff", where: "in the sign-off", text: letter.signOff }
+      { field: "bodyText", where: "in the text", text: letter.bodyText, prints },
+      { field: "signOff", where: "in the sign-off", text: letter.signOff, prints }
     ],
     letter,
     context
@@ -569,6 +687,8 @@ export interface CreateLetterDraftParams {
   savedReturnAddressNote?: string;
   /** The caller's sendAsGift; undefined lets the balance decide. */
   sendAsGift?: boolean;
+  /** The letter as our renderer lays it out (layoutLetterForPreview), or undefined for the legacy HTML. */
+  printLayout?: Layout;
   context: ToolContext;
 }
 
@@ -647,6 +767,7 @@ export async function createLetterDraftAndBuildOutput(
     usedSavedReturnAddress,
     savedReturnAddressNote,
     sendAsGift,
+    printLayout,
     context
   } = params;
 
@@ -674,19 +795,37 @@ export async function createLetterDraftAndBuildOutput(
     "Computed preview requirements"
   );
 
+  // A gift send prints on the legacy HTML until the gift page moves onto our
+  // renderer (#534), so it is held to that print's limits and font, and
+  // previewed as it prints.
+  const layout = gift.isGift ? undefined : printLayout;
+  if (printLayout && gift.isGift) {
+    validateCharacterLimitForLayout(bodyText, signOff, layoutType, context, "html");
+    validatePrintableLetter(
+      { sender, recipient, bodyText, signOff, senderIsSaved: usedSavedReturnAddress },
+      context,
+      "html"
+    );
+  }
+
   // Generate preview HTML
   // Use preview images (compressed) for the HTML to reduce payload size
   // Full-quality images are stored separately in the draft for PostGrid
-  const previewHtml = renderLayoutPreviewHtml({
-    sender,
-    recipient,
-    bodyText,
-    signOff,
-    layoutType,
-    headerImageData: headerImagePreview || headerImageData,
-    inlineImageData: inlineImagePreview || inlineImageData,
-    giftCard: gift.card,
-  });
+  const previewHtml = layout
+    ? renderLetterPreviewDocument(
+        renderPreviewSvg(withDisplayImage(layout, layoutType === "header_image" ? headerImagePreview : inlineImagePreview)),
+        { bodyText, signOff }
+      )
+    : renderLayoutPreviewHtml({
+        sender,
+        recipient,
+        bodyText,
+        signOff,
+        layoutType,
+        headerImageData: headerImagePreview || headerImageData,
+        inlineImageData: inlineImagePreview || inlineImageData,
+        giftCard: gift.card,
+      });
 
   // Create draft
   const draftResult = await createDraft({
@@ -705,6 +844,8 @@ export async function createLetterDraftAndBuildOutput(
     inlineImageData,
     inlineImageUrl,
     isGiftSend: gift.isGift,
+    // The letter prints with the renderer its preview was drawn with.
+    rendererVersion: layout ? RENDERER_VERSION : undefined,
   });
 
   context.logger.info(
