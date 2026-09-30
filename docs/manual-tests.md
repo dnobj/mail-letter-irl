@@ -1588,11 +1588,27 @@ Leave the rule on in development afterwards. (It is on.)
       `letter_gqVZqFrq4bTEy4Jn9N8AHK`: 17 estimated lines printed on 16. A 233-character mixed-case
       paragraph took 3 lines of 74 to 82 characters. A 230-character all-caps paragraph took 4 lines
       of 66 to 70. The estimate counts 65 a line.)
-- [ ] Characters the print cannot draw are refused at preview (#526). **Not yet.** PostGrid prints
-      in Open Sans. In the same letter, emoji, Chinese, Japanese, Korean, Arabic, Hindi and Thai
-      printed as empty boxes, 56 in all. Latin with accents, Greek, Cyrillic, Hebrew and the common
-      symbols printed. The preview showed every character, and the send took a letter from the
-      balance.
+- [x] Characters the print cannot draw are refused at preview (#526, #528). PostGrid prints in Open
+      Sans. In the same letter, emoji, Chinese, Japanese, Korean, Arabic, Hindi and Thai printed as
+      empty boxes, 56 in all. Latin with accents, Greek, Cyrillic, Hebrew and the common symbols
+      printed. Before #528, the preview showed every character and the send took a letter.
+      **Passed on 2026-09-30** on development (d149f00), as testlirl02:
+      - A letter with 🎉 🎂 and a non-breaking hyphen was refused, naming "🎉, 🎂, ‑ (U+2011) in
+        the text".
+      - A recipient named 王小明 was refused, naming "王, 小, 明 in the recipient's address".
+      - A postcard with 🌊 was refused before its picture was fetched.
+      - A letter in German, French, Russian, Greek and Hebrew made a draft.
+      - The log records each refusal as `errorClass=validation_error`. Its own warn line logged as
+        `[REDACTED]`, because the event name is over 32 characters; #530 fixes that.
+      - In ChatGPT on the web (Medium), asked for a birthday letter "with a couple of emoji", the
+        model's first preview was refused. It told the person the printer can't print 🎉 and 🎂,
+        retried in plain text, and the card drew, with no second approval prompt.
+- [ ] The coverage probe shows which unproven characters the print draws (#526). A text-only
+      letter carries about 220 of them, one group per line (`C:\letter-irl-scripts\coverage-probe.mts`).
+      Decoding its PDF glyph by glyph shows which printed, and which came out as boxes (glyph 0).
+      It was sent on 2026-09-30 as a gift letter from testlirl02, before #528 deployed, which would
+      refuse it: PostGrid created it at 14:04:56. **The decode is still to do**, and needs a
+      PostGrid sign-in. The results decide which ranges `src/services/printableText.ts` may widen.
 - [ ] Invalid address → suggestions returned
 - [x] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200) (2026-09-28 in ChatGPT, with Suite 3300: the draft was made, and the reply said USPS confirmed the building but not the suite, and that the letter goes out as entered)
 - [x] Same building with no unit given → draft IS created with an "add the unit if you have it" note
