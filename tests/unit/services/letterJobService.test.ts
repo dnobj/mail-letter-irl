@@ -189,6 +189,23 @@ describe('mail outbox retries', () => {
     expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ giftCard, color: false }));
   });
 
+  it('hands the provider the renderer the letter was previewed with (#534)', async () => {
+    const rendered = { ...letter, content: { ...letter.content, rendererVersion: 'pdf-1' } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...rendered }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...rendered }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ rendererVersion: 'pdf-1' }));
+  });
+
   it('prints the text validation counted: no trailing blank lines before the sign-off (#77)', async () => {
     // The print used to keep a body's trailing newlines, which validation
     // dropped, so a letter at the line limit could print taller than counted.

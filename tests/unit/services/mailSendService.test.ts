@@ -189,6 +189,19 @@ describe('createMailOrderFromDraft', () => {
     expect(result.job?.idempotency_key).toBe(result.letter.letter_id);
   });
 
+  it('copies the renderer the preview was drawn with into the letter (#534)', async () => {
+    draft.renderer_version = 'pdf-1';
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content.rendererVersion).toBe('pdf-1');
+  });
+
+  it("leaves a legacy letter's content without a renderer version (#534)", async () => {
+    draft.renderer_version = null;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content).toBeDefined();
+    expect(savedLetter?.content).not.toHaveProperty('rendererVersion');
+  });
+
   it('serializes concurrent retries into one credit deduction and one letter', async () => {
     const [first, second] = await Promise.all([
       createMailOrderFromDraft({

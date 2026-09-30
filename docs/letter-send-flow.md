@@ -177,6 +177,12 @@ consumes the draft and inserts the letter and its outbox row in one transaction,
 it in that request. The next hourly maintenance run does, so a paid item can wait up to an hour for
 provider acceptance. The PostGrid request uses the Letter IRL `letter_id` as `Idempotency-Key`.
 
+**How a letter goes to PostGrid (#534).** A letter prints with the renderer its preview was drawn with, recorded on the draft (`renderer_version`, migration 039) and copied into `letters.content.rendererVersion` at send:
+- without a version, as today's HTML;
+- with `pdf-1`, as our own PDF from `src/render`, uploaded as a multipart form with a 30-second budget.
+
+A `pdf-1` gift send still prints on the HTML, until its gift page moves onto the renderer. A version this build does not know, or a letter that no longer fits its page, is held like any other failure that is not an explicit rejection. Nothing sets a version yet: previews start recording `pdf-1` behind `LETTER_IRL_PRINT_RENDERER` in the next #534 change.
+
 A claimed job is submitted to the provider exactly once. A successful response records the provider order ID and marks the job completed. Any outcome that does not prove what happened — `5xx`, timeout, transport loss, an unreadable body — may mean the piece was accepted and physically mailed, so it is never resubmitted: the job is held with `provider_outcome = 'ambiguous'` for operator reconciliation. Only an explicit provider rejection, which proves no mail exists, is terminal.
 
 The tool response reports one of:

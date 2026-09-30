@@ -176,6 +176,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | front_image_url | TEXT | YES | - | Original image URL for debugging |
 | postcard_size | VARCHAR(10) | YES | - | Postcard size: '6x9' (NULL for letters) |
 | is_gift_send | BOOLEAN | NO | false | Previewed as a gift send: funded by a gift letter and printed with its card (033) |
+| renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |
 | created_at | TIMESTAMPTZ | NO | NOW() | Draft creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
 
@@ -186,6 +187,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 - `postcard_requires_image`: Postcards must have front_image_data
 - `postcard_requires_size`: Postcards must have postcard_size
 - `valid_postcard_size`: postcard_size must be '6x4', '6x9', or '6x11'
+- `letter_drafts_renderer_version_known`: renderer_version must be NULL or 'pdf-1' (a new version extends it in its own migration)
 
 **Indexes:**
 - `idx_letter_drafts_user_pending` on (user_id, status) WHERE status='pending'

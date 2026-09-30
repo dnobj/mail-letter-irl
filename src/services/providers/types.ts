@@ -73,6 +73,12 @@ export interface LetterParams {
 
   /** A gift letter's card, printed as an extra page (docs/gift-letters.md). */
   giftCard?: GiftCardContent;
+
+  /**
+   * The renderer the letter was previewed with (letters.content.rendererVersion,
+   * #534): absent for the legacy HTML, 'pdf-1' for src/render's PDF.
+   */
+  rendererVersion?: string;
 }
 
 /**

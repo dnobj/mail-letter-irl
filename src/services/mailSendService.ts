@@ -69,7 +69,10 @@ function buildLetterContent(draft: MailDraftRow): Record<string, unknown> {
     headerImageData: draft.header_image_data,
     headerImageUrl: draft.header_image_url,
     inlineImageData: draft.inline_image_data,
-    inlineImageUrl: draft.inline_image_url
+    inlineImageUrl: draft.inline_image_url,
+    // The letter prints with the renderer its preview was drawn with (#534).
+    // Absent for the legacy HTML path, so those letters' content is unchanged.
+    ...(draft.renderer_version ? { rendererVersion: draft.renderer_version } : {})
   };
 }
 
