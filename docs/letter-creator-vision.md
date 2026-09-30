@@ -77,13 +77,13 @@ State at origin/dev 472454a (2026-09-30):
 | Area | Today |
 |------|-------|
 | Letter layouts | `text_only`, `header_image`, `inline_image`. One page only; a gift adds page 2 |
-| Letter limits | 1,600 / 1,100 / 800 characters; 26 / 17 / 14 lines; estimated at 65 characters a line (`src/services/previewService.ts:21-58`) |
-| Postcards | 6x9 only, one full-bleed layout, and the message uses the left half of the back. The 4x6 and 11x6 sizes have code paths, but the schema enum admits only `6x9` |
+| Letter limits | 1,600 / 1,100 / 800 characters; hard limits of 26 / 17 / 14 lines (soft 24 / 17 / 12); estimated at 65 characters a line (`src/services/previewService.ts:21-58`) |
+| Postcards | 6x9 only, one full-bleed layout, and the message uses the left half of the back. The 4x6 and 11x6 sizes have code paths (`'6x4'` and `'6x11'` in `PostcardSize`; PostGrid's `6x4` and `11x6`), but the schema enum admits only `6x9` |
 | Typeface | PostGrid prints all mail in **Open Sans**; the preview is serif (#526). Emoji and several scripts are refused at preview (#528, #533) |
-| Print vs preview | Two separate templates: print HTML in `PostGridProvider.ts:526-684`, preview HTML in `previewService.ts:280-398` |
+| Print vs preview | Two separate templates: print HTML in `src/services/providers/PostGridProvider.ts:526-684`, preview HTML in `src/services/previewService.ts:280-452` |
 | Preview card | Read-only. It shows a mockup rebuilt from `previewHtml`, and every edit goes back through the chat |
 | Delivery | "Mailed in 1-2 business days; usually arrives in 1-2 weeks" (`src/content/delivery.ts`). No scheduling and no cancel |
-| PostGrid options unused | `sendDate`, `pdf`, `doubleSided`, `perforatedPage`, `returnEnvelope`, mail classes (certified, express), `mergeVariables`/templates, premium paper, self-mailers |
+| PostGrid options unused | `sendDate`, `pdf`, `perforatedPage`, `returnEnvelope`, mail classes (certified, express), `mergeVariables`/templates, premium paper, self-mailers. `doubleSided` is sent, always `false` |
 | Unused design work | `example_layouts/` holds static prototypes (standard, modern, formal, personal, header-image and postcard variants) that `src` never references |
 
 ---
@@ -175,7 +175,7 @@ Each concept lists what PostGrid supports and how it reaches clients without car
 - **How:**
   - Controls call the preview tools, or a small `update_draft` tool, through the MCP Apps bridge, which works in ChatGPT, Claude and VS Code.
   - Choices reach the model with `ui/update-model-context` where the host supports it, and through server-side defaults everywhere (Principle 4).
-  - Claude shows a card no taller than about 700 px, so the tabbed layout matters.
+  - Tabs keep the card short, which matters wherever a host limits a card's height; measure Claude's limit before designing them.
 - **Stage:** its Delivery tab ships with #535 (Pre-launch); the Style tab follows #534 (Next); the Words tab is Next.
 
 #### 7. Side-panel editor
@@ -214,7 +214,7 @@ Each concept lists what PostGrid supports and how it reaches clients without car
 
 #### 11. Delivery moments
 - **What:** "Your letter to Ruth is out for delivery in Tucson today," back in the conversation, with an offer to send a follow-up.
-- **Platform:** PostGrid webhooks (`letter.updated`) and USPS barcode events, which arrive 5-7 days after handoff, relayed through DevDay 2026's **MCP Events**. That needs MCP protocol 2026-07-28 and signed webhooks (#477).
+- **Platform:** PostGrid webhooks (`letter.updated`) and USPS barcode events, which arrive 5-7 days after handoff, relayed through DevDay 2026's **MCP Events**. That needs MCP protocol 2026-07-28 (#477), and signed webhooks, which no issue covers yet.
 - **Stage:** Later.
 
 #### 12. Letter IRL home
@@ -233,8 +233,8 @@ Each concept lists what PostGrid supports and how it reaches clients without car
 | Client | Cards | Where the person sends | Notes |
 |--------|-------|------------------------|-------|
 | ChatGPT (web, mobile, desktop) | Yes, plus panels (concept 7) when available | The card's Send button | `widgetState` restores a reopened card (#389) |
-| Claude web | Yes, through the MCP Apps bridge (#474) | The card | Cards get `_meta`; app-only tools are hidden from the model and callable by the card. No `widgetState`; a card is at most about 700 px tall |
-| VS Code | Yes, inline | The card | `ui/message` fills the input without sending |
+| Claude web | Yes, through the MCP Apps bridge (#474) | The card | Cards get `_meta`; app-only tools are hidden from the model and callable by the card. No `widgetState` |
+| VS Code | Yes, inline | The card | `ui/message` should fill the input without sending; unverified, since the VS Code card step (CLIENT-03) hasn't run |
 | Claude Code, Codex, other agents, personal access tokens | No | The confirmation link (`request_send`) | The model reads `structuredContent`; everything goes through tool arguments and results |
 
 What keeps them equal: Principles 2-4. The renderer (#534) is server-side, so every client benefits from it equally. Uploads (signature capture, collages) are the one area where clients without ChatGPT's file APIs stay weaker. Image links are the portable path.
@@ -278,7 +278,7 @@ The send rule (#470) is right for launch. Its evolution is **standing permission
 - **a cancel window:** agent sends are held and announced, and can be cancelled free (the #535 machinery);
 - **per connection:** an audit log and revoke.
 
-The `mail:send` token scope already exists, and nothing grants it today.
+The `mail:send` scope already exists. OAuth clients (ChatGPT, Claude, the website) are granted it, and it gates the send and checkout tools (`src/auth/toolScopes.ts`). Personal access tokens never carry it today (#470). Standing permissions would let a person grant sending to an agent's token within these limits.
 
 ---
 

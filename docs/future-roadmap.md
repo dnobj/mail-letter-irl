@@ -1,6 +1,6 @@
 # Out-of-Scope and Future Enhancements
 
-**Last Updated:** September 16, 2026
+**Last Updated:** September 30, 2026
 **Purpose:** Features deliberately left out, and the plans for them
 
 ## Shipped Since v1
