@@ -13,6 +13,7 @@ import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
 import {
   previewSendEligibility,
   validateAddressesWithProvider,
+  validatePrintableCharacters,
   outputValidationStatus
 } from "./letterHelpers.js";
 import { callingApp } from "../auth/clientProfiles.js";
@@ -353,6 +354,14 @@ async function handler(
     );
     throw new Error(message);
   }
+
+  // Refuse characters the print shows as boxes (#526), before the picture is fetched
+  validatePrintableCharacters(
+    "postcard",
+    [{ field: "message", where: "in the message", text: input.message }],
+    { sender, recipient: input.recipient, senderIsSaved: usedSavedReturnAddress },
+    context
+  );
 
   context.logger.info(
     {
