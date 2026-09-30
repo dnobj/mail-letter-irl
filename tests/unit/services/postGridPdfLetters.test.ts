@@ -147,6 +147,34 @@ describe('letters printed from our own PDF (#534)', () => {
     expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: true });
   });
 
+  it('lets an upload run past the JSON budget: a slow upload is not cut off', async () => {
+    // The provider's configured budget here is 100ms; the upload's is 30s.
+    const slow = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(new Response(JSON.stringify({
+        id: 'letter_slow', status: 'ready', createdAt: '', updatedAt: '', url: 'https://example.test/slow'
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })), 250);
+      init.signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+      });
+    }));
+    vi.stubGlobal('fetch', slow);
+
+    await expect(provider().sendLetter(base)).resolves.toMatchObject({ success: true, trackingId: 'letter_slow' });
+  });
+
+  it('holds an upload whose success response lacks the order id', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'ready' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    })));
+
+    const result = await provider().sendLetter(base);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('missing required fields');
+    expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous' });
+  });
+
   it('keeps the legacy HTML for a letter with no renderer version', async () => {
     const fetchMock = accepted();
     vi.stubGlobal('fetch', fetchMock);
