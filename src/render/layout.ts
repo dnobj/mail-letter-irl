@@ -118,8 +118,11 @@ export function wrapParagraph(
     while (end > start && WHITESPACE.test(paragraph[end - 1])) end -= 1;
     return end;
   };
-  const fits = (start: number, end: number, limit: number) =>
-    end <= limit && measure(start, trimmedEnd(start, end)) <= width;
+  // Hanging spaces never count, so the limit applies to the trimmed end too.
+  const fits = (start: number, end: number, limit: number) => {
+    const trimmed = trimmedEnd(start, end);
+    return trimmed <= limit && measure(start, trimmed) <= width;
+  };
 
   const breaks: number[] = [];
   const breaker = new LineBreaker(paragraph);
@@ -173,12 +176,15 @@ export function wrapParagraph(
   return lines.length > 0 ? lines : [{ start: 0, end: 0 }];
 }
 
+/** Each character's own advance, in font units, per font. */
 const advanceCache = new Map<string, Map<number, number>>();
 
 /**
  * An index past which no line from `start` can fit: where the sum of the
  * characters' own advances, without kerning, passes half again the width.
- * Kerning never takes back a third of a line, so nothing that fits is cut.
+ * Kerning never takes back a third of a line (review round 2: the worst
+ * allow-listed line in Tinos sums to 1.28 times its shaped width), so nothing
+ * that fits is cut.
  */
 function advanceLimit(fontName: FontName, paragraph: string, width: number, scale: number) {
   const font = loadFont(fontName);
@@ -186,12 +192,12 @@ function advanceLimit(fontName: FontName, paragraph: string, width: number, scal
   if (!advances) advanceCache.set(fontName, (advances = new Map()));
   const cache = advances;
   const advanceOf = (codePoint: number) => {
-    let advance = cache.get(codePoint);
-    if (advance === undefined) {
-      advance = font.hasGlyphForCodePoint(codePoint) ? font.glyphForCodePoint(codePoint).advanceWidth * scale : 0;
-      cache.set(codePoint, advance);
+    let units = cache.get(codePoint);
+    if (units === undefined) {
+      units = font.hasGlyphForCodePoint(codePoint) ? font.glyphForCodePoint(codePoint).advanceWidth : 0;
+      cache.set(codePoint, units);
     }
-    return advance;
+    return units * scale;
   };
   return (start: number): number => {
     let total = 0;

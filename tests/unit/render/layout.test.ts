@@ -97,11 +97,18 @@ describe('wrapping paragraphs (#534)', () => {
     expect(measured.length).toBeLessThan(lines.length * 12);
   });
 
-  it('lays out a 10,000-letter unbroken run in well under a second', () => {
+  it('lays out a 20,000-letter unbroken run in seconds, not minutes', () => {
+    // About half a second with the fit limit; without it, each line shapes
+    // the whole remainder. The bound leaves ten times headroom for a slow runner.
     const started = performance.now();
-    const layout = layoutLetter({ text: 'i'.repeat(10000), layoutType: 'text_only' });
-    expect(performance.now() - started).toBeLessThan(1000);
-    expect(runs(layout).map(run => run.source).join('')).toBe('i'.repeat(10000));
+    const layout = layoutLetter({ text: 'i'.repeat(20000), layoutType: 'text_only' });
+    expect(performance.now() - started).toBeLessThan(5000);
+    expect(runs(layout).map(run => run.source).join('')).toBe('i'.repeat(20000));
+  });
+
+  it('lets a long run of spaces hang past a break, not indent the next line (review round 2)', () => {
+    const layout = layoutLetter({ text: `aaa${' '.repeat(240)}bbb`, layoutType: 'text_only' });
+    expect(runs(layout).map(run => run.source)).toEqual(['aaa', 'bbb']);
   });
 });
 

@@ -65,7 +65,8 @@ declare module 'bidi-js' {
   }
   interface Bidi {
     getEmbeddingLevels(text: string, explicitDirection?: 'ltr' | 'rtl'): EmbeddingLevels;
-    getReorderedIndices(text: string, embeddingLevels: EmbeddingLevels, start?: number, end?: number): number[];
+    /** [start, end] pairs, inclusive, to reverse in order; indices into the whole text. */
+    getReorderSegments(text: string, embeddingLevels: EmbeddingLevels, start?: number, end?: number): Array<[number, number]>;
     /** Takes the `levels` array itself: it indexes it, and mirrors nothing given the result object. */
     getMirroredCharactersMap(text: string, levels: Uint8Array, start?: number, end?: number): Map<number, string>;
   }

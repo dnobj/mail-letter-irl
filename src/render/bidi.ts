@@ -2,7 +2,7 @@ import bidiFactory from 'bidi-js';
 
 // The package's default export is a factory; its named exports are not
 // functions under Node's CommonJS interop.
-const { getEmbeddingLevels, getMirroredCharactersMap, getReorderedIndices } = bidiFactory();
+const { getEmbeddingLevels, getMirroredCharactersMap, getReorderSegments } = bidiFactory();
 
 /**
  * A regular expression character class built from code-point ranges, so the
@@ -115,9 +115,16 @@ export function paragraphBidi(paragraph: string): ParagraphBidi {
     lineVisual(start, end) {
       const [bidiStart, bidiEnd] = [keptBefore[start], keptBefore[end]];
       if (bidiEnd <= bidiStart) return '';
-      // bidi-js returns the indices of the whole text with only the line's
-      // range reordered; map them back to the paragraph's code units.
-      const order = getReorderedIndices(bidiText, levels, bidiStart, bidiEnd - 1).slice(bidiStart, bidiEnd).map(index => kept[index]);
+      // Apply the line's reversals to an array the length of the line, as
+      // bidi-js's getReorderedIndices does for the whole text, then map back
+      // to the paragraph's code units. Measuring calls this once per candidate
+      // line, so its cost must follow the line, not the paragraph.
+      const local = Array.from({ length: bidiEnd - bidiStart }, (_, offset) => bidiStart + offset);
+      for (const [segmentStart, segmentEnd] of getReorderSegments(bidiText, levels, bidiStart, bidiEnd - 1)) {
+        const [low, high] = [segmentStart - bidiStart, segmentEnd - bidiStart];
+        local.splice(low, high - low + 1, ...local.slice(low, high + 1).reverse());
+      }
+      const order = local.map(index => kept[index]);
       const emitted = new Set<number>();
       const drawn: string[] = [];
       for (const unit of order) {

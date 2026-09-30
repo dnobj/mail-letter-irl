@@ -67,9 +67,13 @@ function contentStreams(pdf: Buffer): string[] {
   const streams: string[] = [];
   for (const match of text.matchAll(/stream\r?\n/g)) {
     const start = match.index! + match[0].length;
-    const end = text.indexOf('endstream', start);
+    let end = text.indexOf('endstream', start);
+    // pdfkit ends the data with one line break before `endstream`; strip
+    // exactly that, never a data byte that happens to look like whitespace.
+    if (text[end - 1] === '\n') end -= 1;
+    if (text[end - 1] === '\r') end -= 1;
     try {
-      streams.push(inflateSync(pdf.subarray(start, end).subarray(0, text.slice(start, end).trimEnd().length)).toString('latin1'));
+      streams.push(inflateSync(pdf.subarray(start, end)).toString('latin1'));
     } catch {
       // not a Flate stream: an image or metadata
     }
