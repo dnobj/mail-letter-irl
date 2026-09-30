@@ -185,12 +185,15 @@ describe('the refusal', () => {
       { field: 'emoji', where: 'in A', text: '\u{1F389} \u{1F1FA}\u{1F1F8} ❤️' },
       // A lone text symbol, and letters of the look-alike scripts, with code points.
       { field: 'lookAlike', where: 'in B', text: '★ ‼ ῶ ԁ ׳ \u0000' },
+      // A symbol in text presentation, or with a mark, is no emoji: code points.
+      { field: 'textSymbol', where: 'in B2', text: '✔︎ ★́' },
       // A lone mark (Inherited), with its code point.
       { field: 'mark', where: 'in C', text: '͏' },
       // Invisible characters by name.
       { field: 'invisible', where: 'in D', text: 'a b‮c⁦d⁢e f　g' },
-      // Private-use and unassigned, alone or with a mark; a joiner is not named.
-      { field: 'other', where: 'in E', text: '‍ ͸́' }
+      // Private-use with a joiner (not named), unassigned with a mark, and alone:
+      // an unassigned character and a broken one (a lone surrogate).
+      { field: 'other', where: 'in E', text: '‍ ͸́ ￾ \uD83D' }
     ]);
     const refusal = unprintableRefusal('letter', found);
     expect(refusal).toContain(': \u{1F389}, \u{1F1FA}\u{1F1F8}, ❤️ in A;');
@@ -198,13 +201,15 @@ describe('the refusal', () => {
       '; ★ (U+2605), ‼ (U+203C), ῶ (U+1FF6), ԁ (U+0501), ׳ (U+05F3), ' +
         'a control character (U+0000) in B;'
     );
+    expect(refusal).toContain('; ✔︎ (U+2714), ★́ (U+2605) in B2;');
     expect(refusal).toContain('; ͏ (U+034F) in C;');
     expect(refusal).toContain(
       '; a paragraph separator (U+2029), a direction override (U+202E), a direction isolate (U+2066), ' +
         'an invisible character (U+2062), a narrow no-break space (U+202F), an ideographic space (U+3000) in D;'
     );
     expect(refusal).toContain(
-      '; a private-use character (U+E000), ͸́ (U+0378) in E.'
+      '; a private-use character (U+E000), ͸́ (U+0378), an unassigned character (U+FFFE), ' +
+        'a broken character (U+D83D) in E.'
     );
   });
 

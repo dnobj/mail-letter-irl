@@ -140,11 +140,15 @@ const INVISIBLE_KINDS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\p{Cn}/u, 'an unassigned character'],
   [/\p{White_Space}/u, 'a special space'],
 ];
-// An emoji shows as itself: one drawn as an emoji by default, a flag, or a
-// sequence (❤️ is ❤ with a variation selector). A lone text symbol such as ★
-// or ‼ may look like characters that print, so it is listed as a look-alike.
-const EMOJI = /[\p{Emoji_Presentation}\p{Regional_Indicator}]/u;
+// An emoji shows as itself: a character drawn as an emoji by default (a flag
+// is two of them), or a pictograph in an emoji sequence (❤️ is ❤ with the
+// emoji variation selector). A lone text symbol such as ★ or ‼, one in text
+// presentation (✔︎) or one with a mark may look like characters that print,
+// so it is listed as a look-alike.
+const EMOJI = /\p{Emoji_Presentation}/u;
 const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
+const EMOJI_SEQUENCE_PART = /^[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji_Modifier}\u{E0020}-\u{E007F}]$/u;
+const EMOJI_JOINERS = new Set(['️', '‍']);
 // Scripts whose characters can look like ones that print: a character from one
 // of them is listed with its code point, so the model can tell which it is.
 const LOOK_ALIKE =
@@ -172,7 +176,11 @@ function shown(grapheme: string): string {
   const characters = [...grapheme];
   const refused = characters.filter(character => !isPrintableCodePoint(character.codePointAt(0)!));
   if (INVISIBLE.test(grapheme)) return refused.map(invisibleName).join(', ');
-  const emoji = EMOJI.test(grapheme) || (characters.length > 1 && PICTOGRAPHIC.test(grapheme));
+  const emoji =
+    EMOJI.test(grapheme) ||
+    (characters.length > 1 &&
+      PICTOGRAPHIC.test(grapheme) &&
+      characters.every(character => EMOJI_JOINERS.has(character) || EMOJI_SEQUENCE_PART.test(character)));
   if (emoji || !(LOOK_ALIKE.test(grapheme) || INVISIBLE_START.test(grapheme))) return grapheme;
   return `${grapheme} (${refused.map(codePoint).join(' ')})`;
 }
