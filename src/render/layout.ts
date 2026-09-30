@@ -1,5 +1,5 @@
 import LineBreaker from 'linebreak';
-import { isInvisible, paragraphBidi } from './bidi.js';
+import { isInvisible, mirrorOf, paragraphBidi } from './bidi.js';
 import { loadFont, type FontName } from './fonts.js';
 import { shape } from './glyphs.js';
 import {
@@ -109,6 +109,10 @@ export function drawsGrapheme(grapheme: string): boolean {
     const codePoint = character.codePointAt(0)!;
     if (!font.hasGlyphForCodePoint(codePoint)) return false;
     if (SPACE.test(character) && font.glyphForCodePoint(codePoint).path.commands.length > 0) return false;
+    // In a right-to-left run the mirror is drawn instead (bidi.ts): Tinos has
+    // U+2215 and U+221F but not their mirrors (#540 review round 2).
+    const mirror = mirrorOf(character);
+    if (mirror && !font.hasGlyphForCodePoint(mirror.codePointAt(0)!)) return false;
   }
   return true;
 }

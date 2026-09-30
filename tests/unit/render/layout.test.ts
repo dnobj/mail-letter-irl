@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { drawsGrapheme, layoutLetter, wrapParagraph, type Layout, type TextRun } from '../../../src/render/layout.js';
-import { isInvisible } from '../../../src/render/bidi.js';
+import { isInvisible, mirrorOf } from '../../../src/render/bidi.js';
 
 // shape() is spied on, so a test can see what layoutLetter shapes; it still
 // does the real work.
@@ -320,6 +320,27 @@ describe('what the renderer draws as written (#534)', () => {
     }
     expect(checked).toBeGreaterThan(10);
     expect(drawn).toEqual([]);
+  });
+
+  it('refuses a character whose mirror the font lacks, since a right-to-left run draws the mirror (#540 review round 2)', () => {
+    // Tinos has U+2215 and U+221F, but not their mirrors U+29F5 and U+2BFE.
+    expect(mirrorOf(at(0x2215))).toBe(at(0x29f5));
+    expect(drawsGrapheme(at(0x2215))).toBe(false);
+    expect(drawsGrapheme(at(0x221f))).toBe(false);
+    // Every accepted character that mirrors, between Hebrew words, draws no
+    // .notdef box (glyph 0).
+    const shalom = at(0x5e9, 0x5dc, 0x5d5, 0x5dd);
+    const boxed: string[] = [];
+    let mirrored = 0;
+    for (const codePoint of font.characterSet) {
+      const character = at(codePoint);
+      if (!mirrorOf(character) || !drawsGrapheme(character)) continue;
+      mirrored += 1;
+      const [run] = runs(layoutLetter({ text: `${shalom} ${character} ${shalom}`, layoutType: 'text_only' }));
+      if (shape(font, run.text).glyphs.some(glyph => glyph.id === 0)) boxed.push(codePoint.toString(16));
+    }
+    expect(mirrored).toBeGreaterThan(10);
+    expect(boxed).toEqual([]);
   });
 
   it('draws four marks on a letter and refuses a fifth, which the layout would drop', () => {

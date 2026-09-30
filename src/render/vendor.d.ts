@@ -69,6 +69,8 @@ declare module 'bidi-js' {
     getReorderSegments(text: string, embeddingLevels: EmbeddingLevels, start?: number, end?: number): Array<[number, number]>;
     /** Takes the `levels` array itself: it indexes it, and mirrors nothing given the result object. */
     getMirroredCharactersMap(text: string, levels: Uint8Array, start?: number, end?: number): Map<number, string>;
+    /** The character drawn in its place in a right-to-left run, or null. */
+    getMirroredCharacter(character: string): string | null;
   }
   export default function bidiFactory(): Bidi;
 }
