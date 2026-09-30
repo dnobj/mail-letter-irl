@@ -41,9 +41,10 @@ export const LAYOUT_LINE_LIMITS_SOFT: Record<LetterLayoutType, number> = {
 // - header_image: at 19 lines, lines 18 and 19 printed on page 2 and 17 fit
 //   under the 2" image (18 alone was not printed).
 // - inline_image: at 15 lines the text and the 3" image fit, but a blank
-//   page 2 printed; 14 is one line (about 0.27in) under that. A print at 14
-//   is still to do.
+//   page 2 printed.
 // - text_only: 26 lines printed on one page.
+// At these limits, header_image 17 and inline_image 14 each printed on one
+// page (2026-09-30).
 // Lines are counted on letterPrintText, the text exactly as it prints.
 export const LAYOUT_LINE_LIMITS: Record<LetterLayoutType, number> = {
   text_only: 26,        // Soft limit 24 + 2 buffer
@@ -51,7 +52,9 @@ export const LAYOUT_LINE_LIMITS: Record<LetterLayoutType, number> = {
   inline_image: 14,     // Soft limit 12 + 2 buffer
 };
 
-// Characters per line (6.5" width at 12pt Times New Roman)
+// Characters per line, across 6.5" at 12pt. The print HTML names Times New
+// Roman, but PostGrid prints in Open Sans (#526): there a mixed-case line held
+// 74 to 82 characters, and an all-caps line 66 to 70 (2026-09-30).
 const CHARS_PER_LINE = 65;
 
 // ============================================================================
