@@ -34,6 +34,7 @@ maintenance job.
 - [Gift Letters](gift-letters.md) - free sends that print a card with a code for the recipient (built, off by default)
 - [Just-in-Time Purchase Plan](just-in-time-purchase-plan.md) - Pay & Send design record (shipped)
 - [Future Roadmap](future-roadmap.md) - out-of-scope features and plans
+- [Letter Creator Vision](letter-creator-vision.md) - the mail-studio goal: principles, 13 concepts, interactive demos, and the build order (#534, #535)
 
 ---
 
