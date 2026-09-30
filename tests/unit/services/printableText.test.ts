@@ -94,7 +94,11 @@ describe('characters printed mail can show (#526)', () => {
   });
 
   it('refuses symbols no print has shown', () => {
-    expect(unprintableCharacters('→ ✓ ★ ♥ ‼ follow‑up')).toEqual(['→', '✓', '★', '♥', '‼', '‑']);
+    expect(unprintableCharacters('→ ✓ ★ ♥ ‼ 1‒2')).toEqual(['→', '✓', '★', '♥', '‼', '‒']);
+  });
+
+  it('keeps the hyphens and the narrow no-break space assistants write, which the font has', () => {
+    expect(unprintableCharacters('A follow‑up at 7:00 PM, well‐known.')).toEqual([]);
   });
 
   it('lists each character once, in the order it first appears', () => {
@@ -112,7 +116,10 @@ describe('characters printed mail can show (#526)', () => {
     expect(isPrintableCodePoint(0x03cf)).toBe(false); // Ϗ
     expect(isPrintableCodePoint(0x05ea)).toBe(true); // ת
     expect(isPrintableCodePoint(0x05f3)).toBe(false); // geresh, not shown to print
-    expect(isPrintableCodePoint(0x2010)).toBe(false); // hyphen, not shown to print
+    expect(isPrintableCodePoint(0x2011)).toBe(true); // non-breaking hyphen
+    expect(isPrintableCodePoint(0x2012)).toBe(false); // figure dash, not shown to print
+    expect(isPrintableCodePoint(0x202e)).toBe(false); // right-to-left override
+    expect(isPrintableCodePoint(0x202f)).toBe(true); // narrow no-break space
     expect(isPrintableCodePoint(0x2212)).toBe(true); // minus sign
     expect(isPrintableCodePoint(0x20ac)).toBe(true); // €
     expect(isPrintableCodePoint(0x20b9)).toBe(false); // ₹, not shown to print
@@ -131,27 +138,39 @@ describe('the refusal', () => {
 
     expect(found.map(f => f.field)).toEqual(['bodyText', 'recipient']);
     expect(unprintableRefusal('letter', found)).toBe(
-      "Letter IRL can't print some characters in this letter: 🎉 🎂 in the text; " +
-        "王 小 明 in the recipient's address. " +
+      "Letter IRL can't print some characters in this letter: 🎉, 🎂 in the text; " +
+        "王, 小, 明 in the recipient's address. " +
         'Printed mail shows Latin letters with common accents, modern Greek, Cyrillic, Hebrew ' +
         'and common punctuation, and no emoji. ' +
         'Take those characters out or write them in plain letters, then preview again.'
     );
   });
 
-  it('names invisible characters and look-alikes by code point', () => {
+  it('names invisible characters, and gives look-alikes their code point', () => {
     const found = findUnprintable([
-      { field: 'bodyText', where: 'in the text', text: 'At 7:00 PM, a follow‑up → here.' }
+      {
+        field: 'bodyText',
+        where: 'in the text',
+        text: 'At 7:00⁠PM, a 1‒2 score → Hawaiʻi, Ａ .'
+      }
     ]);
     expect(unprintableRefusal('letter', found)).toContain(
-      'in this letter: U+202F ‑ (U+2011) → (U+2192) in the text.'
+      'in this letter: a word joiner (U+2060), a line separator (U+2028), ‒ (U+2012), ' +
+        '→ (U+2192), ʻ (U+02BB), Ａ (U+FF21), a special space (U+205F) in the text.'
     );
+  });
+
+  it('gives the refused code point of a mark on a printable letter, and none to other scripts', () => {
+    const found = findUnprintable([{ field: 'bodyText', where: 'in the text', text: 'a͏ and नमस्ते' }]);
+    const refusal = unprintableRefusal('letter', found);
+    expect(refusal).toContain('in this letter: a͏ (U+034F), न, म');
+    expect(refusal).not.toMatch(/U\+09[0-7]/);
   });
 
   it('lists at most eight characters of a field', () => {
     const found = findUnprintable([{ field: 'message', where: 'in the message', text: '一二三四五六七八九十' }]);
     expect(unprintableRefusal('postcard', found)).toContain(
-      'in this postcard: 一 二 三 四 五 六 七 八 and 2 more in the message.'
+      'in this postcard: 一, 二, 三, 四, 五, 六, 七, 八 and 2 more in the message.'
     );
   });
 

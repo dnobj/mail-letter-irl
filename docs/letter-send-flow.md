@@ -23,13 +23,13 @@ So the text and both addresses may hold:
 - modern Greek, Cyrillic and Hebrew letters;
 - common punctuation, € and ™.
 
-Emoji, every other script, and anything a test print has not shown are refused (for example pinyin
-tone marks, arrows, and the non-breaking hyphen). `src/services/printableText.ts` holds the ranges.
-Widen them only after a test print shows the characters.
+Emoji, every other script, and anything that neither a test print nor Open Sans's glyph list shows
+are refused (for example pinyin tone marks, arrows, and the figure dash).
+`src/services/printableText.ts` holds the ranges. Widen them only on that evidence.
 
-The refusal names each character and where it is. It names invisible characters, and punctuation
-that looks like a character that prints, by code point. It comes before PostGrid checks the
-addresses, before any picture is downloaded, and before a draft is made.
+The refusal names each character and where it is. Invisible characters get a name and code point,
+and a character that may look like one that prints gets its code point. It comes before PostGrid
+checks the addresses, before any picture is downloaded, and before a draft is made.
 
 The preview response includes a `draftId`. Sending is a separate, explicit tool call requiring `confirm: true`.
 

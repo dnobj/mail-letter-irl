@@ -149,7 +149,7 @@ describe.each(LETTER_TOOLS)('%s', (_name, tool, extras, hasPicture) => {
 
   it("refuses a name the address block can't print", async () => {
     await expect(run({ recipient: address({ name: '王小明' }) })).rejects.toThrow(
-      "王 小 明 in the recipient's address"
+      "王, 小, 明 in the recipient's address"
     );
     expectNothingDone();
   });
