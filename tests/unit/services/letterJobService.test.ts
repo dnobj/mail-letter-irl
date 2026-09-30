@@ -29,6 +29,7 @@ import {
   submitToProviderOnce,
 } from '../../../src/services/letterJobService.js';
 import { getProviderForMailType } from '../../../src/services/providers/index.js';
+import { estimateLines, validateCharacterLimit } from '../../../src/services/previewService.js';
 
 const job = {
   job_id: 'job-1',
@@ -186,6 +187,48 @@ describe('mail outbox retries', () => {
     await processLetterJob('job-1', {});
 
     expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ giftCard, color: false }));
+  });
+
+  it('prints the text validation counted: no trailing blank lines before the sign-off (#77)', async () => {
+    // The print used to keep a body's trailing newlines, which validation
+    // dropped, so a letter at the line limit could print taller than counted.
+    const bodyText = 'Line one\nLine two\n\n\n';
+    const trailing = { ...letter, content: { ...letter.content, bodyText } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...trailing }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...trailing }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    const message = sendLetter.mock.calls[0][0].message;
+    expect(message).toBe('Line one\nLine two\nRegards');
+    expect(estimateLines(message)).toBe(validateCharacterLimit(bodyText, 'Regards', 'text_only').totalLines);
+  });
+
+  it('still dispatches a letter whose content has no body text', async () => {
+    // The integration fixtures store content as { body: 'test' }. The print
+    // text must not throw on it, or the job fails before dispatch.
+    const bodiless = { ...letter, content: { body: 'test' } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...bodiless }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...bodiless }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    expect(sendLetter).toHaveBeenCalledTimes(1);
+    expect(sendLetter.mock.calls[0][0].message).toBe('');
   });
 
   it('hands no card for an ordinary letter', async () => {

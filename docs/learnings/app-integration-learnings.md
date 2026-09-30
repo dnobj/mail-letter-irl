@@ -20,34 +20,49 @@ This log captures short notes discovered while connecting Letter IRL to the Chat
 
 When validating letter content, we use two tiers of limits:
 
-**Soft Limits (Guidance)**: What we tell ChatGPT to aim for in tool descriptions
+**Soft Limits (Guidance)**: the line counts the manifest's prose names (`src/schemas.ts`, which feeds
+`/manifest.json` only). The tool descriptions served in `tools/list` state no line counts; a model
+learns a limit from the refusal sentence, which names it.
 - `inline_image`: 12 lines
 - `header_image`: 17 lines
 - `text_only`: 24 lines
 
 **Hard Limits (Validation)**: What we actually enforce during validation
-- `inline_image`: 15 lines (+3 buffer)
-- `header_image`: 19 lines (+2 buffer)
+- `inline_image`: 14 lines (+2 buffer)
+- `header_image`: 17 lines (no buffer: a 17-line body with a sign-off is refused and retried)
 - `text_only`: 26 lines (+2 buffer)
+
+**A buffer never passes the page.** Until 2026-09-29 the image layouts allowed 15 and 19 lines. A
+print check in PostGrid's test mode printed a second page for both (#77):
+- at 19 lines the header layout put lines 18 and 19 on page 2, with 17 on page 1 under the
+  2-inch image;
+- the inline layout printed a blank second page at 15; 14 is one line (about 0.27in) under that,
+  and a print at 14 is still to do.
+
+Past the page, a letter prints, and is billed, an extra sheet. Lines are counted on
+`letterPrintText`, the text exactly as the provider prints it. The print used to keep a body's
+trailing blank lines, which the count dropped. `tests/unit/services/pageLineLimits.test.ts` holds
+each limit under what the check printed on one page.
 
 **Why the buffer?**
 Even when ChatGPT follows instructions perfectly, line counts can exceed soft limits due to:
 1. **Sign-off formatting**: "With warm regards,\nDave" adds 2 lines, not 1
 2. **Character wrapping**: 612 chars ÷ 65 chars/line = 9.4 → rounds to 10 lines
-3. **Separator lines**: We add `\n\n` between body and sign-off (1 blank line)
+3. **The sign-off's own line**: it starts on the line after the body (a single `\n`, no blank line
+   since 2026-01-03), so a body at the soft limit plus a sign-off is over it
 
-**Example scenario** (actual failure before fix):
+**Example scenario** (the failure that introduced the buffer, 2025-12-29, recounted for today's join):
 - User content: 647 chars, 0 newlines in body (following instructions!)
 - Body: ~612 chars → 10 lines
-- `\n\n` separator → 1 blank line
 - Sign-off with `\n` → 2 lines
-- **Total: 13 lines** (over soft limit of 12, but under hard limit of 15)
+- **Total: 12 lines**: at the inline soft limit of 12, and under the hard limit of 14. (With the
+  blank separator line of the time, it was 13.)
 
 **Implementation**:
 - `LAYOUT_LINE_LIMITS_SOFT` - for documentation/reference
 - `LAYOUT_LINE_LIMITS` - used in actual validation
-- Tool descriptions mention soft limits to guide ChatGPT
-- Validation uses hard limits to avoid unnecessary retries
+- The manifest's prose mentions the soft limits; the served tool descriptions do not
+- Validation uses hard limits to avoid unnecessary retries, never past what prints on one page
 
 **Files**: `src/services/previewService.ts`
 
