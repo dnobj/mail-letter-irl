@@ -31,6 +31,7 @@ It also strokes a white frame 1/8 in inside the page edge. `src/render/geometry.
 
 - **Path P (our own PDF).** Whatever we draw prints, whatever fonts PostGrid has. The Open Sans allow-list (`src/services/printableText.ts`) still governs the addresses, which PostGrid stamps. The cost is that the print is a 300 px per inch grayscale image, not vector text. Path H, HTML with embedded fonts, also works (P1), but PostGrid decides its line breaks.
 - **Draw glyph outlines, not text.** pdfkit shapes text word by word, and fontkit guesses each word's direction from its script, so a Hebrew word that was already put in visual order gets reversed again (P4). `src/render/glyphs.ts` shapes each line once, left to right, and the PDF and the SVG preview both draw the same outlines at the same positions. The page is flattened anyway, so outlines print exactly as text would.
+- **Curves as exact cubics.** TrueType outlines are quadratic, and pdfkit draws an SVG `Q` with the PDF `v` operator, which is a different curve (up to 0.16 pt off on round letters). `glyphs.ts` writes each quadratic as the exact cubic, so the PDF and the SVG draw identical curves.
 - **Bidi before drawing.** `src/render/bidi.ts` reorders each line by grapheme cluster, so a Hebrew point stays after its letter. bidi-js's `getMirroredCharactersMap` needs the `levels` array: given the result object, it mirrors nothing.
 
 ## Open

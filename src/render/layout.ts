@@ -100,7 +100,9 @@ function fitImage(image: RenderImage, maxHeight: number): { width: number; heigh
  * Unicode line-break opportunities, greedily, as CSS `white-space: pre-wrap`
  * with `word-wrap: break-word` does: spaces before a break hang and are not
  * drawn or counted, leading spaces are kept, and a piece wider than the line
- * breaks between grapheme clusters.
+ * breaks between grapheme clusters. A run of spaces that ends at a break
+ * hangs too, even at a paragraph's start: an indent too wide to share a line
+ * with the first word is dropped, where a browser would leave a blank line.
  *
  * `measure(start, end)` is the drawn width of the paragraph's [start, end).
  * `fitLimit(start)` is an index past which no line from `start` can fit, a

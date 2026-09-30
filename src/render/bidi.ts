@@ -121,8 +121,11 @@ export function paragraphBidi(paragraph: string): ParagraphBidi {
       // line, so its cost must follow the line, not the paragraph.
       const local = Array.from({ length: bidiEnd - bidiStart }, (_, offset) => bidiStart + offset);
       for (const [segmentStart, segmentEnd] of getReorderSegments(bidiText, levels, bidiStart, bidiEnd - 1)) {
-        const [low, high] = [segmentStart - bidiStart, segmentEnd - bidiStart];
-        local.splice(low, high - low + 1, ...local.slice(low, high + 1).reverse());
+        // In place: spreading a long segment as arguments overflows the call
+        // stack (review round 3: about 130,000 zero-width marks do it).
+        for (let low = segmentStart - bidiStart, high = segmentEnd - bidiStart; low < high; low += 1, high -= 1) {
+          [local[low], local[high]] = [local[high], local[low]];
+        }
       }
       const order = local.map(index => kept[index]);
       const emitted = new Set<number>();

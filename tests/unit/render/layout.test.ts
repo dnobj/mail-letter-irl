@@ -3,8 +3,15 @@
  * line breaks, and nothing under PostGrid's address boxes.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { layoutLetter, wrapParagraph, type Layout, type TextRun } from '../../../src/render/layout.js';
+
+// shape() is spied on, so a test can see what layoutLetter shapes; it still
+// does the real work.
+vi.mock('../../../src/render/glyphs.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../../src/render/glyphs.js')>();
+  return { ...actual, shape: vi.fn(actual.shape) };
+});
 import { placeGlyphs, shape, type PlacedGlyph } from '../../../src/render/glyphs.js';
 import { loadFont } from '../../../src/render/fonts.js';
 import {
@@ -97,13 +104,23 @@ describe('wrapping paragraphs (#534)', () => {
     expect(measured.length).toBeLessThan(lines.length * 12);
   });
 
-  it('lays out a 20,000-letter unbroken run in seconds, not minutes', () => {
-    // About half a second with the fit limit; without it, each line shapes
-    // the whole remainder. The bound leaves ten times headroom for a slow runner.
-    const started = performance.now();
+  it('never shapes a candidate the fit limit rules out, on a 20,000-letter unbroken run (review round 3)', () => {
+    // shape() is spied on (vi.mock above): without the limit wired into
+    // layoutLetter, the first candidate would be the whole 20,000 letters.
+    vi.mocked(shape).mockClear();
     const layout = layoutLetter({ text: 'i'.repeat(20000), layoutType: 'text_only' });
-    expect(performance.now() - started).toBeLessThan(5000);
     expect(runs(layout).map(run => run.source).join('')).toBe('i'.repeat(20000));
+    const shaped = vi.mocked(shape).mock.calls.map(([, text]) => text.length);
+    expect(Math.max(...shaped)).toBeLessThan(400);
+    // A binary search per line, not a shaping per letter.
+    expect(shaped.length).toBeLessThan(layout.pages[0].linesUsed * 12);
+  });
+
+  it('survives a very long right-to-left segment without overflowing the stack (review round 3)', () => {
+    const rlm = String.fromCodePoint(0x200f);
+    const alef = String.fromCodePoint(0x05d0);
+    const layout = layoutLetter({ text: alef + rlm.repeat(140000), layoutType: 'text_only' });
+    expect(runs(layout).map(run => run.text)).toEqual([alef]);
   });
 
   it('lets a long run of spaces hang past a break, not indent the next line (review round 2)', () => {
