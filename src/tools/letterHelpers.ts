@@ -173,7 +173,9 @@ export function validateUSOnly(sender: Address, recipient: Address, context: Too
         senderCountry: sender.country,
         recipientCountry: recipient.country
       },
-      message
+      // Constant: a log message is never redacted, and a country is whatever
+      // the caller sent, which may be part of an address.
+      "Address outside the United States refused"
     );
     throw new Error(message);
   }

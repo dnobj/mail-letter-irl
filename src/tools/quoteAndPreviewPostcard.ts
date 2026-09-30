@@ -350,7 +350,9 @@ async function handler(
         senderCountry: sender.country,
         recipientCountry: input.recipient.country
       },
-      message
+      // Constant: a log message is never redacted, and a country is whatever
+      // the caller sent, which may be part of an address.
+      "Address outside the United States refused"
     );
     throw new Error(message);
   }
