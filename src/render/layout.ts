@@ -126,7 +126,8 @@ export function layoutLetter(content: LetterContent): Layout {
   const baselineOffset = (LINE_PITCH - (font.ascent - font.descent) * scale) / 2 + font.ascent * scale;
 
   const items: Array<TextRun | ImageBox> = [];
-  const image = content.layoutType === 'text_only' ? undefined : content.image;
+  // Each branch checks the layout, so a text-only letter never places an image.
+  const { image } = content;
   let textTop = BODY_TOP;
   let reserved = 0;
   if (image && content.layoutType === 'header_image') {

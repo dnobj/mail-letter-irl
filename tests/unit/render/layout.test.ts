@@ -48,6 +48,12 @@ describe('wrapping paragraphs (#534)', () => {
     for (const line of lines) expect(width(line)).toBeLessThanOrEqual(CONTENT_WIDTH);
   });
 
+  it('measures a line without the space it breaks after', () => {
+    // A line exactly as wide as "aaa" still holds "aaa": the space before the
+    // break hangs and is not counted.
+    expect(wrapParagraph('aaa aaa', width('aaa'), width)).toEqual(['aaa', 'aaa']);
+  });
+
   it('keeps leading spaces, and an empty paragraph as one blank line', () => {
     expect(wrapParagraph('    indented', CONTENT_WIDTH, width)).toEqual(['    indented']);
     expect(wrapParagraph('', CONTENT_WIDTH, width)).toEqual(['']);
@@ -138,6 +144,23 @@ describe('laying out a letter (#534)', () => {
         }
       }
     }
+  });
+
+  it('places no glyph for a space, and every placed glyph has an outline', () => {
+    const [run] = runs(layoutLetter({ text: 'a b', layoutType: 'text_only' }));
+    const glyphs = placeGlyphs(run);
+    expect(glyphs).toHaveLength(2);
+    for (const glyph of glyphs) expect(glyph.outline.length).toBeGreaterThan(0);
+  });
+
+  it('draws outlines upright: a capital H rises above its baseline', () => {
+    const [run] = runs(layoutLetter({ text: 'H', layoutType: 'text_only' }));
+    const [glyph] = placeGlyphs(run);
+    // Outlines use SVG's y-down space with the origin on the baseline, so a
+    // capital's points run from about -cap height up to 0.
+    const ys = [...glyph.outline.matchAll(/-?\d+(?:\.\d+)?/g)].map(match => Number(match[0])).filter((_, index) => index % 2 === 1);
+    expect(Math.min(...ys)).toBeLessThan(-7);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(0.01);
   });
 
   it('advances each glyph by its width: a line ends where it measures', () => {
