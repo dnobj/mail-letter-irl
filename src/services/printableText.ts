@@ -84,7 +84,7 @@ const PRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x2120, 0x2120], // ℠
   [0x2122, 0x2122], // ™
   [0x212e, 0x212e], // ℮
-  [0x215b, 0x215d], // ⅛ ⅜ ⅝ (not ⅓ or ⅔: boxes)
+  [0x215b, 0x215e], // ⅛ ⅜ ⅝ printed, and ⅞ is on the font's list (not ⅓ or ⅔: boxes)
   [0x2202, 0x2202], // the math signs the probe printed: ∂
   [0x2206, 0x2206], //   ∆
   [0x220f, 0x220f], //   ∏

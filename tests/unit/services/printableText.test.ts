@@ -77,7 +77,8 @@ describe('characters printed mail can show (#526)', () => {
   });
 
   it('prints a canonical equivalent as the character it stands for, as the coverage probe did', () => {
-    // The kelvin, angstrom and ohm signs, drawn as K, A with a ring, and omega.
+    // The kelvin and angstrom signs, drawn as K and A with a ring; the ohm sign
+    // has its own glyph.
     const signs = String.fromCodePoint(0x212a, 0x212b, 0x2126);
     expect(unprintableCharacters(`300 ${signs}`)).toEqual([]);
   });
@@ -151,8 +152,17 @@ describe('characters printed mail can show (#526)', () => {
     expect(isPrintableCodePoint(0x007f)).toBe(false); // delete
     expect(isPrintableCodePoint(0x0513)).toBe(true); // the last Cyrillic Supplement letter the font has
     expect(isPrintableCodePoint(0x0514)).toBe(false); // the next
-    expect(isPrintableCodePoint(0x215d)).toBe(true); // five eighths
-    expect(isPrintableCodePoint(0x215e)).toBe(false); // seven eighths, not printed
+    expect(isPrintableCodePoint(0x215e)).toBe(true); // seven eighths, on the font's list
+    expect(isPrintableCodePoint(0x215f)).toBe(false); // the fraction numerator one, not on it
+    // The glyph-less neighbours of the one-off ranges stay refused.
+    expect(isPrintableCodePoint(0x02c8)).toBe(false); // IPA stress mark
+    expect(isPrintableCodePoint(0x02ca)).toBe(false); // modifier acute
+    expect(isPrintableCodePoint(0x02de)).toBe(false); // rhotic hook
+    expect(isPrintableCodePoint(0x2071)).toBe(false); // superscript i
+    expect(isPrintableCodePoint(0x20ad)).toBe(false); // kip sign
+    expect(isPrintableCodePoint(0x2261)).toBe(false); // identical to
+    expect(isPrintableCodePoint(0x25c9)).toBe(false); // fisheye
+    expect(isPrintableCodePoint(0x215a)).toBe(false); // five sixths
     expect(isPrintableCodePoint(0xfb04)).toBe(true); // the last ligature printed
     expect(isPrintableCodePoint(0xfb05)).toBe(false); // the next
   });
