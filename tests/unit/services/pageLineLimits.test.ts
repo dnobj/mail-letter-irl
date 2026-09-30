@@ -23,8 +23,8 @@ import {
 type Layout = keyof typeof LAYOUT_LINE_LIMITS;
 
 // The most lines each layout may take. header_image and text_only are seen on
-// one page; inline_image is one under the 15 that printed a blank page, which
-// by the print CSS leaves about a quarter inch (a print at 14 is still to do).
+// one page; inline_image is one line (about 0.27in) under the 15 that printed a
+// blank page (a print at 14 is still to do).
 const FITS_ONE_PAGE: Record<Layout, number> = { text_only: 26, header_image: 17, inline_image: 14 };
 
 // n short lines that never wrap: the tallest letter a line count allows.
@@ -32,7 +32,7 @@ const shortLines = (n: number) =>
   Array.from({ length: n }, (_, i) => `Line ${String(i + 1).padStart(2, '0')}: one short line of a poem.`).join('\n');
 
 describe('line limits that fit one printed page (#77)', () => {
-  it('never accept more lines than printed on one page', () => {
+  it('never accept more lines than fit one page', () => {
     for (const layout of Object.keys(FITS_ONE_PAGE) as Layout[]) {
       expect(LAYOUT_LINE_LIMITS[layout], layout).toBeLessThanOrEqual(FITS_ONE_PAGE[layout]);
     }
@@ -66,6 +66,7 @@ describe('line limits that fit one printed page (#77)', () => {
     const shapes: Array<[string, string]> = [
       [`${shortLines(13)}\n\n\n`, 'Test'],
       [`${shortLines(13)}\r\n\r\n`, 'Test'],
+      [`${shortLines(12).replace(/\n/g, '\r')}\r`, 'With love,\rDave'],
       [`${shortLines(13)}  \n \n`, 'Test'],
       [`\n\n${shortLines(13)}`, 'Test'],
       [shortLines(14), ''],

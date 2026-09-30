@@ -36,8 +36,8 @@ learns a limit from the refusal sentence, which names it.
 print check in PostGrid's test mode printed a second page for both (#77):
 - at 19 lines the header layout put lines 18 and 19 on page 2, with 17 on page 1 under the
   2-inch image;
-- the inline layout printed a blank second page at 15; one line under that leaves about a quarter
-  inch by the print CSS, not yet printed.
+- the inline layout printed a blank second page at 15; 14 is one line (about 0.27in) under that,
+  and a print at 14 is still to do.
 
 Past the page, a letter prints, and is billed, an extra sheet. Lines are counted on
 `letterPrintText`, the text exactly as the provider prints it. The print used to keep a body's
@@ -48,14 +48,15 @@ each limit under what the check printed on one page.
 Even when ChatGPT follows instructions perfectly, line counts can exceed soft limits due to:
 1. **Sign-off formatting**: "With warm regards,\nDave" adds 2 lines, not 1
 2. **Character wrapping**: 612 chars ÷ 65 chars/line = 9.4 → rounds to 10 lines
-3. **Separator lines**: We add `\n\n` between body and sign-off (1 blank line)
+3. **The sign-off's own line**: it starts on the line after the body (a single `\n`, no blank line
+   since 2026-01-03), so a body at the soft limit plus a sign-off is over it
 
-**Example scenario** (actual failure before fix):
+**Example scenario** (the failure that introduced the buffer, 2025-12-29, recounted for today's join):
 - User content: 647 chars, 0 newlines in body (following instructions!)
 - Body: ~612 chars → 10 lines
-- `\n\n` separator → 1 blank line
 - Sign-off with `\n` → 2 lines
-- **Total: 13 lines** (over soft limit of 12, but under hard limit of 15)
+- **Total: 12 lines**: at the inline soft limit of 12, and under the hard limit of 14. (With the
+  blank separator line of the time, it was 13.)
 
 **Implementation**:
 - `LAYOUT_LINE_LIMITS_SOFT` - for documentation/reference

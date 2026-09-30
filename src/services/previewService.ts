@@ -25,8 +25,8 @@ export const LAYOUT_CHARACTER_LIMITS: Record<LetterLayoutType, number> = {
 };
 
 // Line limits by layout type
-// SOFT LIMITS: Guidance for ChatGPT (what we tell it to aim for)
-// These appear in tool descriptions to guide content generation
+// SOFT LIMITS: guidance, named only in the manifest's prose (src/schemas.ts).
+// The served tool descriptions state no line counts; the refusal sentence does.
 export const LAYOUT_LINE_LIMITS_SOFT: Record<LetterLayoutType, number> = {
   text_only: 24,        // Full page of text
   header_image: 17,     // Reduced for 2" header image
@@ -41,7 +41,8 @@ export const LAYOUT_LINE_LIMITS_SOFT: Record<LetterLayoutType, number> = {
 // - header_image: at 19 lines, lines 18 and 19 printed on page 2 and 17 fit
 //   under the 2" image (18 alone was not printed).
 // - inline_image: at 15 lines the text and the 3" image fit, but a blank
-//   page 2 printed; by the print CSS, 14 leaves about a quarter inch.
+//   page 2 printed; 14 is one line (about 0.27in) under that. A print at 14
+//   is still to do.
 // - text_only: 26 lines printed on one page.
 // Lines are counted on letterPrintText, the text exactly as it prints.
 export const LAYOUT_LINE_LIMITS: Record<LetterLayoutType, number> = {
@@ -163,8 +164,11 @@ export function estimateLines(text: string, charsPerLine = CHARS_PER_LINE): numb
  * print a line or two taller, onto a second page (#77).
  */
 export function letterPrintText(bodyText: string, signOff?: string | null): string {
-  const body = bodyText.trimEnd();
-  return (signOff ? `${body}\n${signOff}` : body).trim();
+  // The print's HTML parser reads \r\n and a lone \r as one line break each;
+  // as \n they are counted the same way.
+  const unix = (text: string) => text.replace(/\r\n?/g, '\n');
+  const body = unix(bodyText).trimEnd();
+  return (signOff ? `${body}\n${unix(signOff)}` : body).trim();
 }
 
 // ============================================================================
