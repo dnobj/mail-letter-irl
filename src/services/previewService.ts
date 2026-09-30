@@ -33,13 +33,19 @@ export const LAYOUT_LINE_LIMITS_SOFT: Record<LetterLayoutType, number> = {
   inline_image: 12,     // Reduced for 3" inline image
 };
 
-// HARD LIMITS: Actual validation limits (with buffer for edge cases)
-// These are enforced during validation to avoid unnecessary retries
-// Buffer accounts for: sign-off formatting, character wrapping variations
+// HARD LIMITS: the most lines validation accepts. A buffer over the soft
+// limit spares a retry when the sign-off or wrapping adds a line, but a limit
+// must never pass what fits on one printed page: past it, the letter prints,
+// and is billed, a second page. Measured in PostGrid's test mode on 2026-09-29
+// (#77), with short lines that do not wrap:
+// - header_image: 17 lines fit under the 2" image; an 18th went to page 2.
+// - inline_image: at 15 lines the text and the 3" image fit, but a blank
+//   page 2 printed; 14 leaves a quarter inch.
+// - text_only: 26 lines printed on one page.
 export const LAYOUT_LINE_LIMITS: Record<LetterLayoutType, number> = {
   text_only: 26,        // Soft limit 24 + 2 buffer
-  header_image: 19,     // Soft limit 17 + 2 buffer
-  inline_image: 15,     // Soft limit 12 + 3 buffer
+  header_image: 17,     // No buffer: 17 is what fits under a 2" header image
+  inline_image: 14,     // Soft limit 12 + 2 buffer
 };
 
 // Characters per line (6.5" width at 12pt Times New Roman)

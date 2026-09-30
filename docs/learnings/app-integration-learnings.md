@@ -26,9 +26,15 @@ When validating letter content, we use two tiers of limits:
 - `text_only`: 24 lines
 
 **Hard Limits (Validation)**: What we actually enforce during validation
-- `inline_image`: 15 lines (+3 buffer)
-- `header_image`: 19 lines (+2 buffer)
+- `inline_image`: 14 lines (+2 buffer)
+- `header_image`: 17 lines (no buffer)
 - `text_only`: 26 lines (+2 buffer)
+
+**A buffer never passes the page.** Until 2026-09-29 the image layouts allowed 15 and 19 lines. A
+print check in PostGrid's test mode showed both printing a second page (#77): the header layout fits
+17 lines under its 2-inch image, and the inline layout printed a blank second page at 15. Past the
+page, a letter prints, and is billed, an extra sheet. `tests/unit/services/pageLineLimits.test.ts`
+now holds each limit to what printed on one page.
 
 **Why the buffer?**
 Even when ChatGPT follows instructions perfectly, line counts can exceed soft limits due to:
