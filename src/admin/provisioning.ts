@@ -29,8 +29,10 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * Provisioning MUST be re-run after it, or the Limits page and both commands
  * fail with permission denied.
  *
- * 039 adds letter_drafts.renderer_version (#534), which neither role is
- * granted (the column list below is explicit), so nothing to re-run.
+ * 039 adds letter_drafts.renderer_version (#534). The reader role's column
+ * list below leaves it out, and the operator role reads it through its
+ * table-wide SELECT on letter_drafts, which covers new columns, so nothing
+ * to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
   "039_renderer_version.sql";

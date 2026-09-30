@@ -269,6 +269,18 @@ describe('letters printed from our own PDF (#534)', () => {
     }));
   });
 
+  it('never marks a refusal retryable, even when its message reads like a transport failure', async () => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+
+    // The refusal's message names the version, which here says "timeout".
+    const result = await provider().sendLetter({ ...base, rendererVersion: 'network-timeout' });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.error).toContain('network-timeout');
+    expect(result.metadata).toMatchObject({ retryable: false, errorClass: 'render_refused' });
+  });
+
   it('holds a letter that no longer fits the page rather than printing it clipped', async () => {
     const fetchMock = accepted();
     vi.stubGlobal('fetch', fetchMock);
@@ -291,7 +303,8 @@ describe('letters printed from our own PDF (#534)', () => {
     const { readdirSync, readFileSync } = await import('node:fs');
     const { PRINTABLE_RENDERER_VERSIONS } = await import('../../../src/render/index.js');
     const migrations = readdirSync('db/migrations').filter(name => name.endsWith('.sql')).sort();
-    const latest = migrations.filter(name => readFileSync(`db/migrations/${name}`, 'utf8').includes('letter_drafts_renderer_version_known')).at(-1)!;
+    // The newest CHECK on renderer_version, whatever its constraint is named.
+    const latest = migrations.filter(name => /CHECK\s*\(\s*renderer_version\b/i.test(readFileSync(`db/migrations/${name}`, 'utf8'))).at(-1)!;
     const check = readFileSync(`db/migrations/${latest}`, 'utf8');
     // `renderer_version = 'x'` today; a later migration may list them: IN ('x', 'y').
     const admitted = [
