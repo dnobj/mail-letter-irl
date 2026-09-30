@@ -350,6 +350,32 @@ the call JWT-authenticated and successful.
 - [ ] Letter preview widget shows formatted letter
 - [ ] Widgets respect dark/light mode
 
+### DEVICES-01 — ChatGPT's apps beyond the web (launch check)
+
+**Status:** Run on development on 2026-09-29, on e65c5b1 (steering r20, widgets v45), as testlirl02,
+after **Refresh tools** on the (DEV) app. The iPhone is not run yet.
+
+- [x] **ChatGPT on Android** (Galaxy S26 Ultra, driven over USB). Force-stop and reopen the app,
+      then preview a letter with **@Letter IRL (DEV)**. The letter card (t29) renders with **Send
+      Letter**, and the approved call ran at once.
+      - With several accounts linked, ChatGPT first asked which one to use.
+      - With a four-line address (a Suite line), the card draws the body's first line over the
+        recipient's last line. The printed letter is fine; on the desktop the address just fits.
+- [x] **ChatGPT's upload card on Android.** **Select Photo** ("Max 10 MB") opened the phone's
+      picker. Then `confirm_uploaded_image`, and the preview used the photo, fitted from 4000x3000
+      to 2700x1800. No **Choose from Library** button showed.
+- [ ] **ChatGPT on iPhone** with the v45 cards. (Not run: no iPhone at hand.)
+- [x] **The ChatGPT desktop app** (Windows; the app that includes Codex), in **Chat** and in
+      **Work**. Work is where Codex runs, with local projects. It logs as `client=chatgpt` in both
+      modes and **draws no card**: the log shows no `resources/read`, and the preview came back as
+      text with the draft id.
+      - "Send it." gave `request_send`'s link in both modes, as the preview text says to when no
+        card shows.
+      - Chat mode called the preview tool twice, four seconds apart, making two drafts.
+      - Work mode, on **Full access**, ran the tools without an approval prompt.
+      - Not checked: how an account with no letters pays there. Pay & Send is card-only, and no
+        card shows.
+
 ---
 
 ## Claude Desktop Integration
@@ -482,9 +508,10 @@ link as a button.
       The log shows `tools/list` at `widgetTemplateVersion=38`, then `resources/read` of the v38
       card and `tools/call get_started`, all as `client=claude`. Claude's reply gave the link
       this time.)
-- [ ] The same on Claude Desktop (Windows) and in the Android app. Claude Desktop on Windows has a
+- [x] The same on Claude Desktop (Windows) and in the Android app. Claude Desktop on Windows has a
       reported bug that shows remote-connector cards as text only (anthropics/claude-ai-mcp#987).
-      (Not run: needs the owner's devices.)
+      (2026-09-29: both drew our cards, the upload card and the postcard card of step 14 rather
+      than the getting-started card. Claude Desktop did not show the text-only bug.)
 - [x] In ChatGPT (DEV connector, after **Refresh tools**) the getting-started card looks and works
       as before. (Yes: revision t16, with ChatGPT's own purchase step. ChatGPT read the v38 cards
       on the refresh.)
@@ -645,8 +672,20 @@ clicks Claude's prompts.
 - [x] Upload a different photo in the same conversation and ask for a new preview. It uses the new
       photo: the account holds one. (`photo-b.jpg`, portrait: `width=1800 height=2400` at
       04:40:16Z, and the preview used it 30 seconds later, fitted to 2700x1800.)
-- [ ] After more than 15 minutes, ask for another preview with "the photo I uploaded". Claude says
-      the upload has expired and asks for it again. (Not cleanly run on 2026-09-29. At 04:56Z, 16 minutes after Photo B, the preview found an upload only 10 minutes old: the ChatGPT upload of `photo-small.jpg` at 04:46, on the same account, had replaced Photo B, since the account holds one photo from any app. Its ChatGPT file link had lapsed, so the download failed with `DOWNLOAD_FAILED`. Claude said the photo could not be downloaded and might have expired, and offered the upload card again. Repeat with no other upload in between to see the 15-minute lifetime itself.)
+- [x] After more than 15 minutes, ask for another preview with "the photo I uploaded". Claude says
+      the upload has expired and asks for it again.
+      - **Passed later on 2026-09-29**, in the Claude app on Android, with no other upload in
+        between. The Claude Desktop photo was uploaded at 21:00:56Z.
+      - At 21:17:16Z the preview found the upload record 16 minutes old
+        (`imageAgeMs=981384`), but the photo itself had gone. It logged `DOWNLOAD_FAILED`, as
+        `errorClass=unknown_error`.
+      - Claude said "The photo you uploaded earlier has expired, since Letter IRL only keeps
+        uploads for 15 minutes", and offered the upload card again.
+      - The record outlives the photo: `LETTER_IRL_RECENT_UPLOAD_TTL_MS` defaults to an hour,
+        while an uploaded photo expires 15 minutes after upload, and reading it does not extend
+        that.
+
+      (The first attempt was not clean. At 04:56Z, 16 minutes after Photo B, the preview found an upload only 10 minutes old: the ChatGPT upload of `photo-small.jpg` at 04:46, on the same account, had replaced Photo B, since the account holds one photo from any app. Its ChatGPT file link had lapsed, so the download failed with `DOWNLOAD_FAILED`. Claude said the photo could not be downloaded and might have expired, and offered the upload card again. The run above therefore kept every other upload off the account.)
 - [ ] Unset the switch on the development API. After a refresh the connector page no longer lists
       **Upload a photo**, and a new upload card says photo upload isn't available in this app yet.
       (Not run: it takes two redeploys of development.)
@@ -656,7 +695,17 @@ clicks Claude's prompts.
       `photo-small.jpg`, card t17. The log showed `upload_image`, then `confirm_uploaded_image` with
       `imageContext=postcard`, then the preview's `quote.postcard.image_from_url
       imageSource=provided`, fitted from 1800x1200 to 2700x1800. The postcard card showed the photo.)
-- [ ] Repeat the upload in Claude Desktop and the Claude app on Android.
+- [x] Repeat the upload in Claude Desktop and the Claude app on Android. (2026-09-29, both
+      passed.)
+      - **Claude Desktop (Windows).** The card (t18) uploaded a 1024x1024 photo in one chunk
+        at 21:00:56Z. The request waited in the message box under the caution banner, as on the
+        web. The preview used the photo, 2.4 minutes old.
+      - **Claude Desktop, sender and send.** The first preview was refused with
+        `no_sender_address`, and Claude then supplied a sender itself. **Send Postcard** on the
+        card sent it at 21:03:48Z, in PostGrid test mode.
+      - **Claude on Android.** The card uploaded a camera photo in two chunks, resized to
+        2400x1800 at 21:20:16Z. The request again waited in the message box under the banner.
+        The preview used the photo (`imageAgeMs=219735`), and the postcard card drew it.
 
 ### CLIENT-02 — Claude Code (launch gate, #471)
 
@@ -1513,8 +1562,17 @@ Leave the rule on in development afterwards. (It is on.)
       mode, sent from the confirmation page. Five 318-character paragraphs and "Test", 1,598
       characters in 26 estimated lines: `pageCount` 1. Twenty-five 54-character lines and "Test",
       26 estimated lines and the tallest shape: `pageCount` 1, one page in the PDF, ending with "Line
-      25" and "Test", with nothing cut off. The header-image and enclosed-image layouts are not
-      checked.)
+      25" and "Test", with nothing cut off.)
+- [ ] The header-image and enclosed-image layouts, each at its line limit, print on one page (#77).
+      **Both failed on 2026-09-29**, in PostGrid test mode, sent from the confirmation page, with
+      short lines that do not wrap.
+      - **Header image, 19 of 19 lines** (18 lines and "Test"): `pageCount` 2. Page 1 holds the
+        header image and lines 1 to 17; line 18 and "Test" are on page 2.
+      - **Enclosed image, 15 of 15 lines**: `pageCount` 2. Page 1 holds all the text and the image,
+        and page 2 is blank.
+      - **Cause:** the hard limits (19 and 15, `LAYOUT_LINE_LIMITS`) add a buffer to the soft limits
+        (17 and 12) that the page has no room for.
+      - **Next:** the fix lowers them, and the check is repeated at the new limits.
 - [ ] Invalid address → suggestions returned
 - [x] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200) (2026-09-28 in ChatGPT, with Suite 3300: the draft was made, and the reply said USPS confirmed the building but not the suite, and that the letter goes out as entered)
 - [x] Same building with no unit given → draft IS created with an "add the unit if you have it" note
@@ -1618,13 +1676,14 @@ Test promotional code redemption.
 ### GIFT-01 — Gift letter end to end, and the test print
 
 **Status:** Run on development on 2026-09-22 and 23. Steps 1 to 9 passed, step 9 with two workarounds
-that #431 fixes. Step 4 was checked on screen rather than on paper, and its iPhone scan is still open.
-Gates switching `LETTER_IRL_GIFT_LETTERS_ENABLED` on in production ([gift-letters.md](gift-letters.md)).
+that #431 fixes. Steps 2 to 4 and 8 were run again on 2026-09-29 on the #487 wording and printed on
+paper. The prints fit, and the QR codes scanned on an S26 Ultra; the iPhone scan is still open. Gates switching
+`LETTER_IRL_GIFT_LETTERS_ENABLED` on in production ([gift-letters.md](gift-letters.md)).
 
 **#487 changed the printed words (2026-09-28).** The card no longer names ChatGPT, since a letter
 can now be written in any connected app: "a conversation with an AI assistant", and "You write your
-letter with your AI assistant". Steps 4 and 8 need printing again on the new copy, the letter page
-and the postcard strip, to check that it still fits.
+letter with your AI assistant". Steps 4 and 8 were printed again on the new copy on 2026-09-29,
+and both still fit.
 
 Development, with `LETTER_IRL_GIFT_LETTERS_ENABLED=true`,
 `LETTER_IRL_GIFT_LANDING_BASE_URL` set to the development website, and the DEV connector refreshed
@@ -1639,7 +1698,8 @@ after deploy (widget v36).
        - [x] page 2 holds the card in its upper half, clear of PostGrid's integrity QR and
              sequence ids at the bottom left;
        - [ ] the QR scans on an iPhone and on the S25 Ultra, in ordinary indoor light, and opens
-             `<website>/g/<code>`;
+             `<website>/g/<code>`; (the Android phone passed on paper on 2026-09-29; the iPhone is
+             still to do);
        - [x] the printed code, typed at `<website>/g`, is accepted;
        - [x] the QR rendered at all. If it is missing or blurred, set
              `LETTER_IRL_GIFT_QR_FORMAT=png` and repeat from step 2;
@@ -1652,6 +1712,15 @@ after deploy (widget v36).
        without its hyphen, which the claim page accepts. On the S25 the claim page showed **Claim
        my letter** for a code already used and refused it only after sign-in. On the desktop the
        check before sign-in shows its notice (checked on a used-up seed code). Not investigated.
+
+       **2026-09-29, reprinted on paper with the #487 wording, passed.** The account was the one
+       from LINK-02 (Google, with a password linked); two Starter packs gave it two gift letters.
+       - The gift letter (`letter_2fLwcvNQt1frh8NWLgMR1h`) printed at 100%: page 2 carries the card
+         in its upper half, with "You write your letter with your AI assistant" and the code
+         314M-5VXS.
+       - Its QR, scanned from paper on the S26 Ultra, opened the claim page. The iPhone was not at
+         hand.
+       - Neither code was claimed, so 314M-5VXS stayed fresh for LINK-01 step 9.
 5. [x] On a second Auth0 account, redeem the code (`redeem_promo_code`, or the website). It
        reports one gift letter; the admin page shows the code redeemed.
 
@@ -1676,6 +1745,12 @@ after deploy (widget v36).
        claim address and the redeem-by date, and its QR matched the encoder's output for
        `<website>/g/<code>` byte for byte. PostGrid prints the back in one sans-serif face,
        though the card preview shows a serif.
+
+       **2026-09-29, reprinted on paper with the #487 wording, passed.** The gift postcard is
+       `postcard_ujEGCkSNzVFFLcSN6u3BCA`, with the site icon on the front. Its strip sits at the foot
+       of the message half, under a rule, clear of the bottom edge and the address side: "A gift from
+       Test Sender: a letter of your own, printed and mailed free", with the code 5B7D-883K. Its QR
+       scanned from paper on the S26 Ultra. The over-long message was not tried again.
 9. [x] Create a seed campaign (credits 0, budget 1, cap 2, new accounts only), activate it, grant
        an account one gift letter bound to it, send, and confirm the card prints the campaign
        code. Claim it from two accounts; the third claim is refused at the cap.
@@ -2445,12 +2520,28 @@ no way back. The procedure, and the hand-written SQL that is today's only
 remedy when a pair does not match, are in
 [auth0-tenant-configuration.md](auth0-tenant-configuration.md).
 
-1. [ ] Sign in to the website with Google. Note the balance and the letter
+1. [x] Sign in to the website with Google. Note the balance and the letter
        count.
-2. [ ] Sign out, then sign in with a password on the same confirmed address.
-3. [ ] The dashboard shows **one** account: the same balance, the same letters.
-4. [ ] Auth0 -> User Management shows one user with two identities, and the
+2. [x] Sign out, then sign in with a password on the same confirmed address.
+3. [x] The dashboard shows **one** account: the same balance, the same letters.
+4. [x] Auth0 -> User Management shows one user with two identities, and the
        Action logs show the link.
+
+   **Steps 1 to 4 passed on development on 2026-09-29/30**, with a Google account new to the
+   tenant (LINK-02).
+   - **Google (21:39Z).** The first sign-in opened an empty account (`identity.user_created`).
+   - **Password sign-up (23:06Z).** A sign-up with a password on the same Gmail address was
+     refused until confirmed, and confirmed at 23:07:01Z.
+   - **The next sign-in.** At 23:07:57Z Auth0 logged "Link a User Account", then the login. The
+     dashboard showed the Google account's name, balance and letters. The API logged no
+     `identity.user_created`: the token carried the Google subject, whose row already existed.
+   - **Auth0's view.** The user list shows the address once, as the Google user; no separate
+     password user remains.
+   - **Not seen.** The user page itself would not load that night, so the two identities were not
+     seen on it.
+   - **A trap.** A sign-up with an address that already has a password account shows only "Something
+     went wrong, please try again later". The log says "The user already exists", but the person
+     learns nothing.
 5. [x] A brand-new password sign-up gets one confirmation email and is refused
        until its address is confirmed, with "We've sent a confirmation link to
        your email address - check your spam folder if it's not in your inbox.
@@ -2478,7 +2569,7 @@ remedy when a pair does not match, are in
        Action worded it differently and sent another email on every refused
        attempt.
 6. [ ] An Apple sign-in with **Hide My Email** on is a separate account, as
-       documented.
+       documented. (Not run: Apple is not in the launch, #437.)
 7. [x] In ChatGPT, connect Letter IRL on an address that already has an account
        through another method. It connects rather than answering "We couldn't
        connect this account".
@@ -2516,13 +2607,19 @@ remedy when a pair does not match, are in
        provider.
 
        **Passed 2026-09-22 on development:** "Account: <address>", and no provider.
-9. [ ] Gift rules still hold across the linked methods: a code printed on your
+9. [x] Gift rules still hold across the linked methods: a code printed on your
        own letter is refused whichever method you sign in with.
 
        **2026-09-23, development:** passed for the Google sign-in. Not yet run for the password
        sign-in, and it needs a fresh, unused code: a used code is refused to everyone before the
        own-code rule runs. The own-code rule also matches the issuer's normalised address, so any
        sign-in on the same address is refused, linked or not.
+
+       **2026-09-30, development: passed for the password sign-in.** The linked account from steps 1
+       to 4 sent a gift letter (GIFT-01, code 314M-5VXS). Signed in with the password, **Claim my
+       letter** at `/g/314M5VXS` returned to the dashboard with "This gift code was printed on a
+       letter you sent, so it is for your recipient to use." (`promo.redeem` 400). The code stays
+       unused.
 10. [ ] A token with no confirmed address gets the sentence, not a broken
        account. Simulate on development by taking the claim Action out of the
        trigger flow and signing in with a fresh subject: both surfaces then
@@ -2543,7 +2640,23 @@ remedy when a pair does not match, are in
 
 ### LINK-02 — Every launch sign-in method yields a confirmed address
 
-**Status:** Not run.
+**Status:** Run on development on 2026-09-29, on e65c5b1. Three methods passed and **Microsoft
+failed**. Production is not run.
+
+**Findings from the development run:**
+- **Microsoft.** Auth0 answered "OAuth2Strategy requires a clientID option" before Microsoft's page
+  appeared. The connection has no client id, and Auth0 no longer lends its development keys for
+  Microsoft. The website showed its "Something went wrong" page.
+- **GitHub.** The connection runs on Auth0's development keys: GitHub asked to "Authorize FDR Social
+  Dev Keys V2 - US", with a button labelled "Authorize iam-login". Auth0 logs a warning on every
+  such sign-in.
+- **Google.** The account chooser said "to continue to auth0.com", because the sign-in returns to
+  the tenant's own domain.
+- **Production.** Each social connection needs its own OAuth app named Letter IRL, and a custom
+  Auth0 domain would put letterirl.com on these screens and in the confirmation email's link
+  (#459). The production tenant is not checked yet.
+- **ChatGPT's step.** The (DEV) plugin's **Connect another account** links each identity beside the
+  existing ones, without disconnecting. ChatGPT then asks which account to use.
 
 The owner kept the refusal of a sign-in that carries no confirmed address (#429, 2026-09-23). In
 ChatGPT that refusal surfaces only as "We couldn't connect this account", so a launch sign-in method
@@ -2574,10 +2687,10 @@ Run on development, then on production before launch. The sign-ins are the owner
 
 | Method | Development | Production |
 |--------|-------------|------------|
-| Google | | |
-| GitHub | | |
-| Microsoft | | |
-| Email and password | | |
+| Google | Passed 2026-09-29: new account, verified, ChatGPT linked, balance answered | |
+| GitHub | Passed 2026-09-29, on Auth0's development keys | |
+| Microsoft | **Failed 2026-09-29**: the connection has no client id | |
+| Email and password | Passed 2026-09-29: refused until confirmed, the email in the inbox, then a new account | |
 
 **Pass criteria:** every launch method gives `email_verified: true` on a first sign-in and opens an
 account in both environments. Any method that does not is disabled before launch and recorded on #158.
