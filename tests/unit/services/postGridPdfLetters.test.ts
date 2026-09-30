@@ -9,6 +9,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PostGridProvider } from '../../../src/services/providers/PostGridProvider.js';
 import { RENDERER_VERSION } from '../../../src/render/index.js';
 
+const diagnostics = vi.hoisted(() => ({ written: [] as Array<{ level: string; event: string; fields: Record<string, unknown> }> }));
+vi.mock('../../../src/utils/diagnosticLog.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/utils/diagnosticLog.js')>()),
+  writeDiagnostic: (level: string, event: string, fields: Record<string, unknown> = {}) => {
+    diagnostics.written.push({ level, event, fields });
+  }
+}));
+
 function provider() {
   return new PostGridProvider(
     { name: 'postgrid', displayName: 'PostGrid', enabled: true },
@@ -117,6 +125,17 @@ describe('letters printed from our own PDF (#534)', () => {
     expect(bytes).toMatch(/\/Subtype\s*\/Image/);
   });
 
+  it('draws the enclosed image of an inline-image letter into the PDF', async () => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await provider().sendLetter({ ...base, layoutType: 'inline_image', inlineImageData: pngDataUri(20, 40) });
+
+    const form = (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as FormData;
+    const bytes = Buffer.from(await (form.get('pdf') as File).arrayBuffer()).toString('latin1');
+    expect(bytes).toMatch(/\/Subtype\s*\/Image/);
+  });
+
   it('gives an upload thirty seconds, not the JSON budget, before calling it ambiguous', async () => {
     const aborted = Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(aborted));
@@ -152,8 +171,15 @@ describe('letters printed from our own PDF (#534)', () => {
       redeemBy: '2026-12-16',
     };
 
+    diagnostics.written = [];
     await expect(provider().sendLetter({ ...base, giftCard })).resolves.toMatchObject({ success: true });
 
+    // The fallback is logged whether or not the provider is verbose.
+    expect(diagnostics.written).toContainEqual(expect.objectContaining({
+      level: 'warn',
+      event: 'provider.postgrid.renderer_fallback',
+      fields: expect.objectContaining({ reason: 'gift_card', operation: 'create_letter' })
+    }));
     const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
     // The gift page, with its code printed in groups (postGridGiftCard.test.ts).
     expect(body.html).toContain('page-break-before: always');
