@@ -117,6 +117,7 @@ Debugging notes and decision records.
 - [Widget CSP Enforcement](learnings/widget-csp-enforcement.md) - widget Content Security Policy evidence
 - [Widget Debugging Notes](learnings/widget-debugging-notes.md) - widget lifecycle and bridge debugging
 - [Suite Address Verification](learnings/suite-address-verification.md) - USPS secondary-unit handling
+- [PostGrid PDF Rendering](learnings/postgrid-pdf-rendering.md) - PostGrid flattens our PDFs at 300 dpi; the address zone it stamps (#534)
 - [Tool Annotation Decision](learnings/tool-annotation-decision.md) - MCP tool annotation correctness
 - [Layout Options Research](learnings/layout-options-research.md) - letter layout research
 
