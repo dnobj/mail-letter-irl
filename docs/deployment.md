@@ -642,6 +642,32 @@ re-dispatched: the panel's retry refuses it, and only a resolution with
 conclusive provider evidence can finish it. Each
 ambiguous outcome raises a durable `mail_provider_outcome_ambiguous` alert.
 
+**A hold whose class is `render_refused` never reached PostGrid (#534).** Our own renderer refused to
+draw the letter before any request was made. The reason is one of:
+- a renderer version this build cannot print;
+- an image it could not read;
+- a letter that no longer fits its page;
+- a drawing error.
+
+The log line `provider.postgrid.render_refused` names the reason and the letter id. Deploy a build that
+can print it, then resolve the letter with a retry (`provider_confirmed_rejected_retry`).
+
+Resolve it as rejected, which refunds, only when it can never be printed and no earlier attempt of the
+letter reached PostGrid, that is, every earlier hold was also `render_refused`. Check the earlier holds
+before refunding: the job page shows only the latest class, because a retry clears `last_error`.
+- Each hold's class is also in its `mail_provider_outcome_ambiguous` alert.
+- Open `/alerts?filter=all` and read the alerts whose details name the job's id. A prepaid letter's alerts
+  carry no order id, so they are not listed under its order.
+- If any earlier hold was not `render_refused`, treat the letter like any other ambiguous hold.
+
+A retry of a letter whose earlier attempt did reach PostGrid reuses that attempt's `Idempotency-Key`.
+Probe P7 showed PostGrid replaying the first letter for a reused key whatever the body, for requests
+seconds apart. How long PostGrid keeps a key is not documented (`docs/learnings/postgrid-pdf-rendering.md`).
+
+**Rolling back below migration 039.** Do not roll the API back to a build older than migration 039 while
+letters with `content.rendererVersion` are queued or held. An older build ignores the version and sends
+them as HTML, printed from a different layout than the person previewed.
+
 `stripe_money_event_unmatched` covers two different situations, and they have
 different recovery paths.
 

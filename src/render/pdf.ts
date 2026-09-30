@@ -9,6 +9,15 @@ import type { Layout } from './layout.js';
 export const RENDERER_VERSION = 'pdf-1';
 
 /**
+ * Every renderer version this build can print. A letter keeps the version its
+ * preview was drawn with however long it waits (arrive-by, #535), so a new
+ * version is added here, beside the old version's renderer, never in its
+ * place. A test holds this set to every value migration 039's CHECK (or its
+ * successor) admits.
+ */
+export const PRINTABLE_RENDERER_VERSIONS: ReadonlySet<string> = new Set([RENDERER_VERSION]);
+
+/**
  * Draws a layout as a PDF: images as given, and every glyph filled as its
  * outline at the position glyphs.ts gives it, the same positions the SVG
  * preview uses. No text is handed to pdfkit, which would re-shape it word by

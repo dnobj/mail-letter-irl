@@ -14,7 +14,17 @@ PostGrid prints every HTML letter in Open Sans, whatever font the HTML names (#5
 | P2 | A pdfkit PDF (Tinos subset, a JPEG) by multipart, `addressPlacement: top_first_page`, `color: false` | Accepted, `pageCount` 1. **The page is flattened** into one 2550x3300 grayscale image (300 px per inch). No font of ours survives. The addresses are stamped on top as vector Open Sans, 9 pt |
 | P4, P5 | PDFs from `src/render` | P4 printed Hebrew with each word's letters reversed. P5, with glyphs drawn as outlines, printed it correctly |
 
-Multipart needs no contact objects: `to[firstName]`, `to[addressLine1]` and the other fields work as form fields beside the `pdf` file.
+Multipart needs no contact objects: `to[firstName]`, `to[addressLine1]` and the other fields work as form fields beside the `pdf` file. They are read as UTF-8. Probe P6 (`letter_pypQkUM56Cc5s7vDRU6qe6`) sent "José Muñoz Ñandú" and "Zoë Brontë":
+- PostGrid stored the names intact;
+- it upper-cased the address lines, as on the JSON path;
+- it stamped "JOSÉ MUÑOZ ÑANDÚ" in Open Sans.
+
+**A reused `Idempotency-Key` replays the first letter, whatever the body** (probe P7, test mode). Three requests under one key, sent seconds apart by one script, all returned HTTP 201 with the first letter's id and description:
+- a first PDF;
+- a different PDF;
+- then an HTML body.
+
+So a retry whose body differs, as every multipart body does (a random boundary, the PDF's creation date), neither creates a second letter nor draws a rejection, at least within seconds. How long PostGrid keeps a key is neither documented nor probed.
 
 ## The address zone
 

@@ -28,9 +28,14 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * operator writes daily_limit_overrides through limit.set and limit.clear.
  * Provisioning MUST be re-run after it, or the Limits page and both commands
  * fail with permission denied.
+ *
+ * 039 adds letter_drafts.renderer_version (#534). The reader role's column
+ * list below leaves it out, and the operator role reads it through its
+ * table-wide SELECT on letter_drafts, which covers new columns, so nothing
+ * to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "038_daily_limits.sql";
+  "039_renderer_version.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

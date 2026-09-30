@@ -356,6 +356,7 @@ function letterParams(letter: Letter, job: LetterJob): LetterParams {
     headerImageData: content.headerImageData,
     inlineImageData: content.inlineImageData,
     giftCard: content.giftCard,
+    rendererVersion: content.rendererVersion,
     metadata: {
       letterId: letter.letter_id,
       userId: letter.user_id,
@@ -647,7 +648,11 @@ async function failOrRescheduleJob(
   // is therefore safe to compensate with a refund. Ambiguous failures retain
   // durable outbox work and stable idempotency until reconciliation succeeds.
   if (ambiguous) {
-    await holdAmbiguousDispatch(job, new Error(error));
+    // A class the provider names (render_refused: our renderer refused before
+    // any request) marks the hold and its alert; anything else is held as
+    // provider_error, since classifyDiagnosticError keeps only safe codes.
+    const errorClass = result.metadata?.errorClass;
+    await holdAmbiguousDispatch(job, Object.assign(new Error(error), typeof errorClass === 'string' ? { code: errorClass } : {}));
     return false;
   }
   const terminal = true;

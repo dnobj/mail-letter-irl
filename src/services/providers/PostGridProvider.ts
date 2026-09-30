@@ -34,6 +34,57 @@ import {
   type CardFragment
 } from '../giftCardRenderer.js';
 import { giftQrFormat } from '../../config/giftLetters.js';
+import { layoutLetter, PRINTABLE_RENDERER_VERSIONS, readImageDataUri, renderPdf } from '../../render/index.js';
+
+/**
+ * Our own refusal to draw a letter, before anything is sent to PostGrid
+ * (#534). It is held like every failure that is not an explicit provider
+ * rejection (a retry after an ambiguous first attempt must never refund mail
+ * that may have printed), but it is logged with its reason and held with the
+ * class `render_refused`, so an operator can see that no request left and
+ * resolve it with a retry once a build that can print it is deployed.
+ */
+class RenderRefusal extends Error {
+  constructor(readonly reason: 'unknown_version' | 'image' | 'overflow' | 'render', message: string) {
+    super(message);
+    this.name = 'RenderRefusal';
+  }
+}
+
+/**
+ * A PDF upload's budget (#534). Dispatch runs inside the person's request, so
+ * it cannot wait long; but a timeout is classed as ambiguous and holds the
+ * letter, so the JSON budget, sized for a small HTML body, would strand
+ * letters on a slow upload. Three times the default.
+ */
+const PDF_UPLOAD_TIMEOUT_MS = 30_000;
+
+/**
+ * A letter as PostGrid's multipart form: the contacts as bracketed fields
+ * beside our PDF, which PostGrid prints with the addresses stamped on the
+ * first page (#534 Phase 0, docs/learnings/postgrid-pdf-rendering.md).
+ */
+function letterForm(fields: {
+  to: PostGridContact;
+  from: PostGridContact;
+  description: string;
+  color: boolean;
+  doubleSided: boolean;
+  pdf: Buffer;
+}): FormData {
+  const form = new FormData();
+  for (const [prefix, contact] of [['to', fields.to], ['from', fields.from]] as const) {
+    for (const [key, value] of Object.entries(contact)) {
+      if (value !== undefined && value !== '') form.append(`${prefix}[${key}]`, String(value));
+    }
+  }
+  form.append('description', fields.description);
+  form.append('color', String(fields.color));
+  form.append('doubleSided', String(fields.doubleSided));
+  form.append('addressPlacement', 'top_first_page');
+  form.append('pdf', new Blob([new Uint8Array(fields.pdf)], { type: 'application/pdf' }), 'letter.pdf');
+  return form;
+}
 
 type PostGridOperation =
   | 'create_letter'
@@ -286,41 +337,75 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     }
 
     try {
-      // A gift letter's card (docs/gift-letters.md). Built here, from the code
-      // the send transaction wrote into the letter, never from a stored image.
-      const giftPage = params.giftCard
-        ? await buildGiftLetterPage(params.giftCard, params.senderName || '', giftQrFormat())
-        : undefined;
+      // The renderer the letter was previewed with decides how it prints
+      // (#534). A version this build cannot draw (previewed by a newer deploy,
+      // then rolled back) is an error, and like every failure that is not an
+      // authoritative provider rejection it holds the letter for an operator:
+      // see the catch below.
+      const renderer = params.rendererVersion;
+      if (renderer != null && !PRINTABLE_RENDERER_VERSIONS.has(renderer)) {
+        throw new RenderRefusal('unknown_version', `This build cannot print renderer version "${renderer}".`);
+      }
+      // Gift pages move onto the renderer in a later #534 PR. Until then a
+      // gift send prints on the legacy HTML, so its card is never dropped.
+      const usePdf = renderer != null && !params.giftCard;
+      if (renderer != null && params.giftCard) {
+        this.writeOperationDiagnostic('provider.postgrid.renderer_fallback', 'create_letter', { reason: 'gift_card' }, 'warn');
+      }
 
-      // Build request payload
-      const request: PostGridLetterRequest = {
-        to: this.buildContact(params.recipientName, params.recipientAddress),
-        from: this.buildContact(
-          params.senderName || 'Letter IRL',
-          params.senderAddress || this.getDefaultSenderAddress()
-        ),
-        html: this.generateHTML(params.message, {
-          layoutType: params.layoutType,
-          headerImageData: params.headerImageData,
-          inlineImageData: params.inlineImageData,
-          giftPage,
-        }),
-        description: `Letter to ${params.recipientName}`,
-        // Enable color printing for layouts with images
-        color: params.color ?? (params.layoutType !== 'text_only' && (!!params.headerImageData || !!params.inlineImageData)),
-        doubleSided: params.doubleSided ?? false,
-        addressPlacement: 'top_first_page'
-      };
-
-      // Make API request
-      const response = await this.apiRequest<PostGridLetterResponse>(
-        'POST',
-        '/letters',
-        'create_letter',
-        request,
-        params.idempotencyKey,
-        isUsableSubmissionResponse
+      const to = this.buildContact(params.recipientName, params.recipientAddress);
+      const from = this.buildContact(
+        params.senderName || 'Letter IRL',
+        params.senderAddress || this.getDefaultSenderAddress()
       );
+      const description = `Letter to ${params.recipientName}`;
+      // Enable color printing for layouts with images
+      const color = params.color ?? (params.layoutType !== 'text_only' && (!!params.headerImageData || !!params.inlineImageData));
+      const doubleSided = params.doubleSided ?? false;
+
+      let response: PostGridLetterResponse;
+      if (usePdf) {
+        const pdf = await this.renderForPrint(params);
+        response = await this.apiRequest<PostGridLetterResponse>(
+          'POST',
+          '/letters',
+          'create_letter',
+          letterForm({ to, from, description, color, doubleSided, pdf }),
+          params.idempotencyKey,
+          isUsableSubmissionResponse,
+          PDF_UPLOAD_TIMEOUT_MS
+        );
+      } else {
+        // A gift letter's card (docs/gift-letters.md). Built here, from the code
+        // the send transaction wrote into the letter, never from a stored image.
+        const giftPage = params.giftCard
+          ? await buildGiftLetterPage(params.giftCard, params.senderName || '', giftQrFormat())
+          : undefined;
+
+        const request: PostGridLetterRequest = {
+          to,
+          from,
+          html: this.generateHTML(params.message, {
+            layoutType: params.layoutType,
+            headerImageData: params.headerImageData,
+            inlineImageData: params.inlineImageData,
+            giftPage,
+          }),
+          description,
+          color,
+          doubleSided,
+          addressPlacement: 'top_first_page'
+        };
+
+        response = await this.apiRequest<PostGridLetterResponse>(
+          'POST',
+          '/letters',
+          'create_letter',
+          request,
+          params.idempotencyKey,
+          isUsableSubmissionResponse
+        );
+      }
 
       if (this.options.verbose) {
         this.writeOperationDiagnostic('provider.postgrid.operation_succeeded', 'create_letter', {
@@ -350,8 +435,16 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       };
     } catch (error) {
       const errorMessage = this.extractErrorMessage(error);
+      const refused = error instanceof RenderRefusal;
 
-      if (this.options.verbose) {
+      if (refused) {
+        // Logged whatever the verbosity: the hold alone cannot say why.
+        const letterId = typeof params.metadata?.letterId === 'string' ? params.metadata.letterId : undefined;
+        this.writeOperationDiagnostic('provider.postgrid.render_refused', 'create_letter', {
+          reason: error.reason,
+          ...(letterId ? { letterId } : {})
+        }, 'error');
+      } else if (this.options.verbose) {
         this.writeOperationDiagnostic('provider.postgrid.operation_failed', 'create_letter', {
           errorClass: this.classifyRequestError(error)
         }, 'error');
@@ -365,13 +458,15 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           statusCode: error instanceof PostGridRequestError ? error.statusCode : undefined,
           retryable: error instanceof PostGridRequestError
             ? error.retryable
-            : /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
+            : !refused && /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
           // Only an authoritative provider rejection may compensate a paid
           // send. Everything else is held for reconciliation so a physically
           // mailed piece is never refunded or silently re-dispatched.
           submissionOutcome: error instanceof PostGridRequestError
             ? error.submissionOutcome
             : 'ambiguous',
+          // The hold's class: nothing was sent, so resolve with a retry.
+          ...(refused ? { errorClass: 'render_refused' } : {})
         }
       };
     }
@@ -684,7 +779,43 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   }
 
   /**
-   * Make API request to PostGrid
+   * The letter drawn as it was previewed (src/render, #534). The preview
+   * refused a letter longer than the page, so an overflow here means the text
+   * or the renderer changed since: a refusal, never a clipped letter. Every
+   * failure here happens before any request, and is a RenderRefusal.
+   */
+  private async renderForPrint(params: LetterParams): Promise<Buffer> {
+    const layoutType = params.layoutType ?? 'text_only';
+    const imageData = layoutType === 'header_image'
+      ? params.headerImageData
+      : layoutType === 'inline_image' ? params.inlineImageData : undefined;
+    const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
+    let image;
+    try {
+      image = imageData ? readImageDataUri(imageData) : undefined;
+    } catch (error) {
+      throw new RenderRefusal('image', `The letter's image could not be read: ${reason(error)}`);
+    }
+    let layout;
+    try {
+      layout = layoutLetter({ text: params.message, layoutType, image });
+    } catch (error) {
+      throw new RenderRefusal('render', `The letter could not be laid out: ${reason(error)}`);
+    }
+    if (layout.overflowLines > 0) {
+      throw new RenderRefusal('overflow', `The letter runs ${layout.overflowLines} line(s) past the page.`);
+    }
+    try {
+      return await renderPdf(layout);
+    } catch (error) {
+      throw new RenderRefusal('render', `The letter could not be drawn: ${reason(error)}`);
+    }
+  }
+
+  /**
+   * Make API request to PostGrid. A FormData body goes as multipart, with its
+   * own boundary header; anything else as JSON. `timeoutMs` overrides the
+   * configured budget for one call (PDF uploads).
    */
   private async apiRequest<T>(
     method: 'GET' | 'POST' | 'DELETE',
@@ -692,14 +823,19 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     operation: PostGridOperation,
     body?: any,
     idempotencyKey?: string,
-    validate?: (payload: unknown) => boolean
+    validate?: (payload: unknown) => boolean,
+    timeoutMs: number = this.options.timeoutMs
   ): Promise<T> {
     const url = `${this.options.baseUrl}${endpoint}`;
+    const multipart = body instanceof FormData;
 
     const headers: Record<string, string> = {
-      'x-api-key': this.options.apiKey,
-      'Content-Type': 'application/json'
+      'x-api-key': this.options.apiKey
     };
+    // fetch writes the multipart boundary itself; a JSON content type would break it.
+    if (!multipart) {
+      headers['Content-Type'] = 'application/json';
+    }
     if (idempotencyKey) {
       headers['Idempotency-Key'] = idempotencyKey;
     }
@@ -708,14 +844,14 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     // One budget covers the whole exchange, headers and body. Arming a second
     // full timer after headers arrive would let a provider that stalls its body
     // occupy an outbox worker for nearly twice the configured timeout.
-    const deadline = Date.now() + this.options.timeoutMs;
-    const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
+    const deadline = Date.now() + timeoutMs;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     const requestOptions: RequestInit = {
       method,
       headers,
       signal: controller.signal,
-      ...(body && { body: JSON.stringify(body) })
+      ...(body && { body: multipart ? body : JSON.stringify(body) })
     };
 
     if (this.options.verbose) {
@@ -773,7 +909,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       if (error instanceof PostGridRequestError) throw error;
       if (error instanceof Error && error.name === 'AbortError') {
         throw new PostGridRequestError(
-          `PostGrid request timed out after ${this.options.timeoutMs}ms`,
+          `PostGrid request timed out after ${timeoutMs}ms`,
           undefined,
           true
         );

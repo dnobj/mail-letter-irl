@@ -508,6 +508,12 @@ export interface LetterDraft {
   consumed_letter_id?: string;
   /** Sent as a gift letter (migration 033): funded by one, and prints its card. */
   is_gift_send?: boolean;
+  /**
+   * The renderer that drew the preview (migration 039, #534): NULL for the
+   * legacy HTML, 'pdf-1' for src/render. The send copies it into
+   * letters.content, and dispatch prints with it.
+   */
+  renderer_version?: string | null;
   created_at: Date;
   updated_at: Date;
 }
