@@ -742,6 +742,7 @@ Production provisioning and the first production connection remain separate owne
 | 36 | 036_account_erasure_followup_alert.sql | The `account_erasure_followup` alert type, which an erasure opens for the steps done by hand (#453) |
 | 37 | 037_personal_access_token_scopes.sql | `personal_access_tokens.scopes`: every token reads and drafts, and none sends (#470) |
 | 38 | 038_daily_limits.sql | The daily limits' operator values, refusal counts and the API's configured values, and the `daily_limit_reached` alert type. Re-run admin provisioning after it |
+| 39 | 039_renderer_version.sql | `letter_drafts.renderer_version`: the renderer that drew a draft's preview, NULL or `pdf-1` (#534). The admin roles are not granted it; no provisioning re-run |
 
 ---
 
