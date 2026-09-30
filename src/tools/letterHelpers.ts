@@ -18,6 +18,7 @@ import {
   validateCharacterLimit,
 } from "../services/previewService.js";
 import { createDraft } from "../services/draftService.js";
+import { findUnprintable, unprintableRefusal, type PrintedText } from "../services/printableText.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 import type { MailType } from "../services/types.js";
 import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
@@ -471,6 +472,69 @@ export function validateCharacterLimitForLayout(
       `Please shorten your message to fit on one page.`
     );
   }
+}
+
+// ============================================================================
+// Printable Characters (#526)
+// ============================================================================
+
+/** The address as PostGrid prints it in the address block. */
+function printedAddress(address: Address): string {
+  return [address.name, address.addressLine1, address.addressLine2, address.city, address.state, address.postalCode]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * Refuses mail whose text or addresses hold characters the print shows as
+ * empty boxes (#526). It runs before the provider checks the addresses, and
+ * before a draft is made. PostGrid prints the address block in the same font
+ * as the text.
+ */
+export function validatePrintableCharacters(
+  mail: "letter" | "postcard",
+  texts: PrintedText[],
+  sender: Address,
+  recipient: Address,
+  context: ToolContext
+): void {
+  const found = findUnprintable([
+    ...texts,
+    { field: "sender", where: "in the sender's address", text: printedAddress(sender) },
+    { field: "recipient", where: "in the recipient's address", text: printedAddress(recipient) }
+  ]);
+  if (found.length === 0) return;
+
+  // Counts only: the characters are the mail's content.
+  context.logger.warn(
+    {
+      correlationId: context.correlationId,
+      event: `quote.${mail}.unprintable_characters`,
+      fields: found.map(({ field, characters }) => ({ field, count: characters.length }))
+    },
+    "Mail holds characters the print cannot show"
+  );
+  throw new Error(unprintableRefusal(mail, found));
+}
+
+/** validatePrintableCharacters for the three letter tools. */
+export function validatePrintableLetter(
+  sender: Address,
+  recipient: Address,
+  bodyText: string,
+  signOff: string,
+  context: ToolContext
+): void {
+  validatePrintableCharacters(
+    "letter",
+    [
+      { field: "bodyText", where: "in the text", text: bodyText },
+      { field: "signOff", where: "in the sign-off", text: signOff }
+    ],
+    sender,
+    recipient,
+    context
+  );
 }
 
 // ============================================================================

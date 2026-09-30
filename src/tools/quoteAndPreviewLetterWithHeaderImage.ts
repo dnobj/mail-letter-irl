@@ -18,6 +18,7 @@ import {
   validateAddresses,
   validateAddressesWithProvider,
   validateCharacterLimitForLayout,
+  validatePrintableLetter,
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
@@ -182,6 +183,9 @@ async function handler(
 
   // Validate character limit (reduced for header image layout)
   validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context);
+
+  // Refuse characters the print shows as boxes (#526)
+  validatePrintableLetter(sender, input.recipient, input.bodyText, input.signOff, context);
 
   // Validate with PostGrid provider
   const { senderValidation, recipientValidation, addressWarnings } = await validateAddressesWithProvider(

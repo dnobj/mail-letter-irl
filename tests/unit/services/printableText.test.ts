@@ -1,0 +1,146 @@
+/**
+ * What printed mail can show (#526).
+ *
+ * PostGrid prints all our mail in Open Sans, and a character the font lacks
+ * prints as an empty box. The print check of 2026-09-30 (docs/manual-tests.md,
+ * Validation Errors; letter_gqVZqFrq4bTEy4Jn9N8AHK) printed every line of
+ * PRINTED, and printed every character of BOXES as a box.
+ */
+
+import { describe, expect, it } from 'vitest';
+import {
+  findUnprintable,
+  isPrintableCodePoint,
+  unprintableCharacters,
+  unprintableRefusal
+} from '../../../src/services/printableText.js';
+
+const PRINTED = [
+  'Print check for fonts and wrapping (#77).',
+  'This paragraph is ordinary prose in mixed case, written to measure how many characters fit.',
+  'THIS PARAGRAPH IS THE SAME KIND OF PROSE IN CAPITAL LETTERS, BECAUSE SOME PEOPLE WRITE THAT WAY.',
+  'Accents: café, naïve, jalapeño, Zoë, Nguyễn, façade',
+  'Greek and Cyrillic: Γειά σου κόσμε / Привет, мир',
+  'Hebrew: שלום עולם',
+  'Symbols: € £ ¥ © ® ™ — – “double” ‘single’ … •',
+  'Test'
+];
+
+const BOXES: Array<[string, string]> = [
+  ['emoji', '🎉 🎂 ❤️ 👍 😊'],
+  ['Chinese', '你好，世界'],
+  ['Japanese', 'こんにちは'],
+  ['Korean', '안녕하세요'],
+  ['Arabic', 'مرحبا بالعالم'],
+  ['Hindi', 'नमस्ते दुनिया'],
+  ['Thai', 'สวัสดีชาวโลก']
+];
+
+const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
+
+/** Each grapheme of the text but its spaces, once, in order. */
+function distinctGraphemes(text: string): string[] {
+  const out: string[] = [];
+  for (const { segment } of segmenter.segment(text)) {
+    if (segment.trim() !== '' && !out.includes(segment)) out.push(segment);
+  }
+  return out;
+}
+
+describe('characters printed mail can show (#526)', () => {
+  it('prints every line the print check printed', () => {
+    for (const line of PRINTED) {
+      expect(unprintableCharacters(line), line).toEqual([]);
+    }
+  });
+
+  it.each(BOXES)('refuses every %s character, which printed as a box', (_script, text) => {
+    const expected = distinctGraphemes(text);
+    expect(expected.length).toBeGreaterThan(0);
+    expect(unprintableCharacters(text)).toEqual(expected);
+  });
+
+  it('reports an emoji sequence as the one symbol it shows', () => {
+    const family = '\u{1F469}‍\u{1F469}‍\u{1F467}';
+    const flag = '\u{1F1FA}\u{1F1F8}';
+    const thumb = '\u{1F44D}\u{1F3FD}';
+    expect(unprintableCharacters(`A ${family}, a ${flag} and a ${thumb}.`)).toEqual([family, flag, thumb]);
+  });
+
+  it('keeps line breaks, tabs, and accents written as combining marks', () => {
+    expect(unprintableCharacters('Line one\r\nLine two\tend\n')).toEqual([]);
+    expect(unprintableCharacters('café naïve Nguyễn')).toEqual([]);
+  });
+
+  it('reads a character as its canonical equivalent, as the print does', () => {
+    // The angstrom and kelvin signs are drawn as the letters Å and K.
+    expect(unprintableCharacters('5 Å, 300 K')).toEqual([]);
+  });
+
+  it('keeps invisible joiners and variation selectors on printable characters', () => {
+    expect(unprintableCharacters('©️ ™︎ a‍b ﻿')).toEqual([]);
+  });
+
+  it('refuses control characters, and the double exclamation marks that are emoji', () => {
+    expect(unprintableCharacters('bell\u0007')).toEqual(['\u0007']);
+    expect(unprintableCharacters('What‼ Really⁉')).toEqual(['‼', '⁉']);
+  });
+
+  it('refuses symbols Open Sans is not known to have', () => {
+    expect(unprintableCharacters('→ ✓ ★ ♥')).toEqual(['→', '✓', '★', '♥']);
+  });
+
+  it('lists each character once, in the order it first appears', () => {
+    expect(unprintableCharacters('🎉 a 🎂 b 🎉 c 🎂')).toEqual(['🎉', '🎂']);
+  });
+
+  it('draws its ranges at the edges it names', () => {
+    expect(isPrintableCodePoint(0x024f)).toBe(true); // ɏ, the last of Latin Extended-B
+    expect(isPrintableCodePoint(0x0250)).toBe(false); // ɐ, IPA
+    expect(isPrintableCodePoint(0x203b)).toBe(true); // ※
+    expect(isPrintableCodePoint(0x203c)).toBe(false); // ‼
+    expect(isPrintableCodePoint(0x203d)).toBe(true); // ‽
+    expect(isPrintableCodePoint(0x2049)).toBe(false); // ⁉
+    expect(isPrintableCodePoint(0x1f00)).toBe(true); // ἀ, Greek Extended
+    expect(isPrintableCodePoint(0x0500)).toBe(true); // Ԁ, Cyrillic Supplement
+    expect(isPrintableCodePoint(0x20ac)).toBe(true); // €
+    expect(isPrintableCodePoint(0x20b9)).toBe(false); // ₹, not shown to print
+    expect(isPrintableCodePoint(0x0008)).toBe(false); // backspace
+    expect(isPrintableCodePoint(0x007f)).toBe(false); // delete
+  });
+});
+
+describe('the refusal', () => {
+  it('names each character and where it is', () => {
+    const found = findUnprintable([
+      { field: 'bodyText', where: 'in the text', text: 'Happy birthday! 🎉🎂' },
+      { field: 'signOff', where: 'in the sign-off', text: 'Love, Mom' },
+      { field: 'recipient', where: "in the recipient's address", text: '王小明\n350 Fifth Ave' }
+    ]);
+
+    expect(found.map(f => f.field)).toEqual(['bodyText', 'recipient']);
+    expect(unprintableRefusal('letter', found)).toBe(
+      "Letter IRL can't print some characters in this letter: 🎉 🎂 in the text; " +
+        "王 小 明 in the recipient's address. " +
+        'Printed mail shows Latin, Greek, Cyrillic and Hebrew letters and common punctuation, and no emoji. ' +
+        'Take those characters out or put them in words, then preview again.'
+    );
+  });
+
+  it('lists at most eight characters of a field', () => {
+    const found = findUnprintable([{ field: 'message', where: 'in the message', text: '一二三四五六七八九十' }]);
+    expect(unprintableRefusal('postcard', found)).toContain(
+      'in this postcard: 一 二 三 四 五 六 七 八 and 2 more in the message.'
+    );
+  });
+
+  it('finds nothing in printable text or a missing field', () => {
+    expect(
+      findUnprintable([
+        { field: 'bodyText', where: 'in the text', text: 'Dear Zoë, see you in Kraków.' },
+        { field: 'signOff', where: 'in the sign-off', text: undefined },
+        { field: 'sender', where: "in the sender's address", text: null }
+      ])
+    ).toEqual([]);
+  });
+});

@@ -1,6 +1,6 @@
 # Letter and Postcard Send Flow
 
-**Last Updated:** September 25, 2026
+**Last Updated:** September 30, 2026
 **Purpose:** Draft, payment, outbox, and provider workflow for letters and postcards
 
 This document describes the current draft, payment, outbox, and provider workflow for letters and postcards.
@@ -15,6 +15,17 @@ Preview tools validate the user's input, render the appropriate widget, and crea
 | `quote_and_preview_letter_with_header_image` | image at top | 1,100 characters / 17 lines |
 | `quote_and_preview_letter_with_image` | image after signature | 800 characters / 12 lines |
 | `quote_and_preview_postcard` | image front, message back | postcard-specific message limit |
+
+Every preview tool also refuses characters the print can't show (#526). PostGrid prints all our mail
+in Open Sans, whatever font the HTML names, and prints a character the font lacks as an empty box.
+So the text and both addresses may hold:
+- Latin letters, including Vietnamese;
+- Greek, Cyrillic and Hebrew letters;
+- common punctuation and symbols.
+
+Emoji and every other script are refused. The refusal names each character and where it is. It
+comes before PostGrid checks the addresses, and before a postcard's picture is fetched.
+`src/services/printableText.ts` holds the ranges.
 
 The preview response includes a `draftId`. Sending is a separate, explicit tool call requiring `confirm: true`.
 
