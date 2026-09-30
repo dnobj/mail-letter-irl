@@ -52,12 +52,13 @@ function shouldRedact(key: string): boolean {
   return REDACT_KEYS.some((token) => lower.includes(token));
 }
 
-// An event name or tool name is a code constant, never content, and every log
-// search keys on it. One that looks like an identifier is kept however long:
-// under the 32-character rule, quote.letter.header_image.from_recent_upload
-// and the tool quote_and_preview_letter_with_header_image logged as
-// [REDACTED]. A value that is not identifier-shaped is still redacted.
-const IDENTIFIER_KEYS = new Set(["event", "toolName"]);
+// An event name, tool name or error class is a code constant, never content,
+// and every log search keys on it. One that looks like an identifier is kept
+// however long: under the 32-character rule, the event
+// quote.letter.header_image.from_recent_upload and the tool
+// quote_and_preview_letter_with_header_image logged as [REDACTED]. A value that
+// is not identifier-shaped is still redacted.
+const IDENTIFIER_KEYS = new Set(["event", "toolName", "errorClass"]);
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*(?:[.-][A-Za-z0-9_]+)*$/;
 const IDENTIFIER_MAX_LENGTH = 80;
 

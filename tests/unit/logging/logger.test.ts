@@ -52,10 +52,20 @@ describe('tool log redaction', () => {
     expect(events[0].toolName).toBe('[REDACTED]');
   });
 
-  it('still redacts an identifier over 80 characters', () => {
+  it('keeps an identifier of 80 characters and redacts one of 81', () => {
     const { logger, events } = capture();
-    logger.info({ correlationId: 'c1', event: `quote.${'a'.repeat(80)}` });
-    expect(events[0].event).toBe('[REDACTED]');
+    const eighty = `quote.${'a'.repeat(74)}`;
+    logger.info({ correlationId: 'c1', event: eighty });
+    logger.info({ correlationId: 'c1', event: `${eighty}b` });
+    expect(eighty).toHaveLength(80);
+    expect(events[0].event).toBe(eighty);
+    expect(events[1].event).toBe('[REDACTED]');
+  });
+
+  it('keeps a long error class, which is a code constant too', () => {
+    const { logger, events } = capture();
+    logger.error({ correlationId: 'c1', event: 'tool.invocation.failure', errorClass: 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED' });
+    expect(events[0].errorClass).toBe('ERR_JWS_SIGNATURE_VERIFICATION_FAILED');
   });
 
   it('still redacts every other string over 32 characters, identifier or not', () => {
